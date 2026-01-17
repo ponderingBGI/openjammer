@@ -41,3 +41,25 @@ export {
   debugExecutionPlan,
   toDotGraph,
 } from './DependencyGraph';
+
+// Operation Fusion
+export {
+  extractOperation,
+  getOperationType,
+  fuseOperationList,
+  canFuse,
+  fuseOperations,
+  isIdentityOperation,
+  generateDistortionCurve,
+  calculateBiquadCoefficients,
+  createBiquadOperation,
+  debugOperation,
+  debugFusionResult,
+} from './OperationFuser';
+
+// Compiler
+export {
+  PipelineCompiler,
+  batchCompile,
+  debugCompiledProgram,
+} from './Compiler';
