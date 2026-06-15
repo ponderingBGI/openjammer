@@ -101,7 +101,11 @@ pub struct MeterBank {
 impl MeterBank {
     /// A bank with `n` node meters, metering disabled.
     pub fn with_nodes(n: usize) -> Self {
-        Self { nodes: vec![Meter::new(); n], master: Meter::new(), enabled: false }
+        Self {
+            nodes: vec![Meter::new(); n],
+            master: Meter::new(),
+            enabled: false,
+        }
     }
 
     /// Resize to `n` node meters (off-RT; called when a new program installs).
@@ -144,7 +148,11 @@ pub mod return_frame {
     /// Wire size of a `Beat` frame: tag + bar(u32) + beat(u32) + phase(f32).
     pub const BEAT_LEN: usize = 1 + 4 + 4 + 4;
     /// The largest frame the ring will ever carry (for fixed out-buffers).
-    pub const MAX_LEN: usize = if METER_LEN > BEAT_LEN { METER_LEN } else { BEAT_LEN };
+    pub const MAX_LEN: usize = if METER_LEN > BEAT_LEN {
+        METER_LEN
+    } else {
+        BEAT_LEN
+    };
 
     /// Encode a `Meter` frame into `buf`, returning the written length.
     #[inline]
@@ -220,7 +228,11 @@ mod tests {
         }
         m.accumulate(&buf);
         let expected = 1.0 / core::f32::consts::SQRT_2;
-        assert!((m.rms() - expected).abs() < 1e-3, "rms {}, expected {expected}", m.rms());
+        assert!(
+            (m.rms() - expected).abs() < 1e-3,
+            "rms {}, expected {expected}",
+            m.rms()
+        );
         assert!((m.peak() - 1.0).abs() < 1e-2, "peak {}", m.peak());
     }
 

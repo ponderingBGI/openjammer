@@ -217,12 +217,7 @@ pub fn compile_repair(
     budget: RepairBudget,
     author: impl FnMut(&str, &FaustError) -> Repair,
 ) -> Result<CompiledFaust, FaustError> {
-    compile_repair_with(
-        |src| compiler.compile(src),
-        initial_source,
-        budget,
-        author,
-    )
+    compile_repair_with(|src| compiler.compile(src), initial_source, budget, author)
 }
 
 /// Backend-agnostic core of [`compile_repair`], parameterized over the compile
@@ -304,7 +299,10 @@ mod tests {
             },
         );
         assert_eq!(res, Err(FaustError::Unavailable));
-        assert!(!called, "author must not be consulted when backend is absent");
+        assert!(
+            !called,
+            "author must not be consulted when backend is absent"
+        );
     }
 
     #[test]
@@ -386,6 +384,9 @@ mod tests {
     #[test]
     fn error_display_is_actionable() {
         let s = FaustError::Unavailable.to_string();
-        assert!(s.contains("libfaust"), "should point at the feature/install");
+        assert!(
+            s.contains("libfaust"),
+            "should point at the feature/install"
+        );
     }
 }

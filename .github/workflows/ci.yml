@@ -1,0 +1,65 @@
+name: CI
+
+# Merge gate for OpenJammer (ojcore rewrite). Must be green for a reliable
+# merge to main: the Rust engine workspace (native + no_std + wasm legs) and the
+# TypeScript control plane (typecheck + tests + production build).
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  engine:
+    name: Engine (Rust workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: System deps (ALSA for cpal)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Rust stable (fmt, clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Rust nightly (wasm leg)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy (-D warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      - name: no_std core builds (wasm-friendly)
+        run: cargo build -p ojcore --no-default-features
+      - name: wasm32 build
+        run: cargo +nightly build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
+
+  web:
+    name: Web (control plane)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bunx tsc --noEmit -p tsconfig.app.json
+      - name: Lint (non-blocking; pre-existing debt being retired with the rewrite)
+        run: bun run lint
+        continue-on-error: true
+      - name: Test
+        run: bun run test:run
+      - name: Build
+        run: bun run build

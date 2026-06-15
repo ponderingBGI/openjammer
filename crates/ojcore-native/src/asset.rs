@@ -116,7 +116,12 @@ impl AssetStore {
         }
 
         let mut format = symphonia::default::get_probe()
-            .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
+            .probe(
+                &hint,
+                mss,
+                FormatOptions::default(),
+                MetadataOptions::default(),
+            )
             .map_err(|e| AssetError::Decode(e.to_string()))?;
 
         let track = format
@@ -141,7 +146,7 @@ impl AssetStore {
         loop {
             let packet = match format.next_packet() {
                 Ok(Some(p)) => p,
-                Ok(None) => break, // end of stream
+                Ok(None) => break,                        // end of stream
                 Err(SymphoniaError::IoError(_)) => break, // treat EOF-ish io as done
                 Err(e) => return Err(AssetError::Decode(e.to_string())),
             };
@@ -161,7 +166,11 @@ impl AssetStore {
             }
         }
 
-        Ok(Pcm { samples, channels, sample_rate })
+        Ok(Pcm {
+            samples,
+            channels,
+            sample_rate,
+        })
     }
 
     /// Write interleaved f32 [`Pcm`] to a WAV file as 32-bit float samples.
@@ -189,9 +198,11 @@ impl AssetStore {
         let mut wav =
             hound::WavWriter::new(writer, spec).map_err(|e| AssetError::Encode(e.to_string()))?;
         for &s in &pcm.samples {
-            wav.write_sample(s).map_err(|e| AssetError::Encode(e.to_string()))?;
+            wav.write_sample(s)
+                .map_err(|e| AssetError::Encode(e.to_string()))?;
         }
-        wav.finalize().map_err(|e| AssetError::Encode(e.to_string()))?;
+        wav.finalize()
+            .map_err(|e| AssetError::Encode(e.to_string()))?;
         Ok(())
     }
 }
@@ -209,7 +220,11 @@ mod tests {
                 (phase * std::f32::consts::TAU).sin() * 0.5
             })
             .collect();
-        Pcm { samples, channels: 1, sample_rate: 48_000 }
+        Pcm {
+            samples,
+            channels: 1,
+            sample_rate: 48_000,
+        }
     }
 
     #[test]
@@ -233,7 +248,12 @@ mod tests {
 
         // 32-bit float WAV is lossless: samples come back bit-for-bit (within
         // a tiny epsilon for any format-conversion rounding).
-        for (i, (&a, &b)) in original.samples.iter().zip(decoded.samples.iter()).enumerate() {
+        for (i, (&a, &b)) in original
+            .samples
+            .iter()
+            .zip(decoded.samples.iter())
+            .enumerate()
+        {
             assert!((a - b).abs() < 1e-6, "frame {i}: {a} != {b}");
         }
     }
@@ -248,7 +268,11 @@ mod tests {
             samples.push(0.25);
             samples.push(-0.25);
         }
-        let original = Pcm { samples, channels: 2, sample_rate: 44_100 };
+        let original = Pcm {
+            samples,
+            channels: 2,
+            sample_rate: 44_100,
+        };
 
         let bytes = store.encode_wav_bytes(&original).expect("encode");
         let decoded = store.decode_wav_bytes(bytes).expect("decode");
@@ -272,7 +296,11 @@ mod tests {
 
     #[test]
     fn pcm_frames_handles_zero_channels() {
-        let p = Pcm { samples: vec![], channels: 0, sample_rate: 48_000 };
+        let p = Pcm {
+            samples: vec![],
+            channels: 0,
+            sample_rate: 48_000,
+        };
         assert_eq!(p.frames(), 0);
         assert!(p.is_empty());
     }

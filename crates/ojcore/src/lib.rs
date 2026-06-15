@@ -120,7 +120,11 @@ mod tests {
         {
             let ins: [&[f32]; 1] = [&input];
             let mut outs: [&mut [f32]; 1] = [&mut out];
-            let mut ctx = ProcessCtx { inputs: &ins, outputs: &mut outs, nframes: BLOCK };
+            let mut ctx = ProcessCtx {
+                inputs: &ins,
+                outputs: &mut outs,
+                nframes: BLOCK,
+            };
             node.process(&mut ctx);
         }
 
@@ -144,11 +148,16 @@ mod tests {
         node.activate(SR, BLOCK);
         node.set_param(GAIN_PARAM, 1.0);
 
-        let input: alloc::vec::Vec<f32> = (0..BLOCK).map(|i| ((i % 8) as f32 - 4.0) * 0.1).collect();
+        let input: alloc::vec::Vec<f32> =
+            (0..BLOCK).map(|i| ((i % 8) as f32 - 4.0) * 0.1).collect();
         let mut out = vec![0.0f32; BLOCK];
         let ins: [&[f32]; 1] = [&input];
         let mut outs: [&mut [f32]; 1] = [&mut out];
-        let mut ctx = ProcessCtx { inputs: &ins, outputs: &mut outs, nframes: BLOCK };
+        let mut ctx = ProcessCtx {
+            inputs: &ins,
+            outputs: &mut outs,
+            nframes: BLOCK,
+        };
         node.process(&mut ctx);
 
         for (i, &x) in input.iter().enumerate() {
@@ -163,7 +172,11 @@ mod tests {
         node.activate(SR, BLOCK);
         let ins: [&[f32]; 0] = [];
         let mut outs: [&mut [f32]; 0] = [];
-        let mut ctx = ProcessCtx { inputs: &ins, outputs: &mut outs, nframes: 0 };
+        let mut ctx = ProcessCtx {
+            inputs: &ins,
+            outputs: &mut outs,
+            nframes: 0,
+        };
         node.process(&mut ctx);
     }
 

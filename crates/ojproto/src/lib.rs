@@ -135,13 +135,29 @@ impl OjGraph {
 /// Transport is flattened (no nested enum) to keep the size tiny.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum RtCommand {
-    SetParam { node: NodeIdx, param: u16, value: f32 },
-    NoteOn { node: NodeIdx, note: u8, vel: u8 },
-    NoteOff { node: NodeIdx, note: u8 },
-    Bypass { node: NodeIdx, on: bool },
+    SetParam {
+        node: NodeIdx,
+        param: u16,
+        value: f32,
+    },
+    NoteOn {
+        node: NodeIdx,
+        note: u8,
+        vel: u8,
+    },
+    NoteOff {
+        node: NodeIdx,
+        note: u8,
+    },
+    Bypass {
+        node: NodeIdx,
+        on: bool,
+    },
     TransportPlay,
     TransportPause,
-    Seek { samples: u64 },
+    Seek {
+        samples: u64,
+    },
 }
 
 // `RtCommand` MUST stay small and heap-free so it can live in a fixed-size
@@ -215,7 +231,11 @@ mod tests {
 
     #[test]
     fn param_patch_roundtrips() {
-        let p = ParamPatch { node: 4321, param: 7, value: -0.5 };
+        let p = ParamPatch {
+            node: 4321,
+            param: 7,
+            value: -0.5,
+        };
         assert_eq!(p.to_bytes().len(), ParamPatch::BYTES);
         assert_eq!(ParamPatch::from_bytes(p.to_bytes()), p);
     }
@@ -241,7 +261,10 @@ mod tests {
             id: NodeIdx(1),
             manifest_id: String::from("builtin.biquad"),
             kind: PrimitiveKind::Biquad,
-            params: vec![Param { id: 0, value: 1000.0 }],
+            params: vec![Param {
+                id: 0,
+                value: 1000.0,
+            }],
             assets: vec![],
             n_in: 1,
             n_out: 1,

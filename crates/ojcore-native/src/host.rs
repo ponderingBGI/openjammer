@@ -102,7 +102,12 @@ pub struct StreamRequest {
 
 impl Default for StreamRequest {
     fn default() -> Self {
-        Self { sample_rate: 48_000, buffer_frames: 64, channels: 2, duplex_input: false }
+        Self {
+            sample_rate: 48_000,
+            buffer_frames: 64,
+            channels: 2,
+            duplex_input: false,
+        }
     }
 }
 
@@ -207,7 +212,9 @@ impl AudioHost {
         mut rx: CommandConsumer,
     ) -> Result<Self, HostError> {
         let host = cpal::default_host();
-        let device = host.default_output_device().ok_or(HostError::NoOutputDevice)?;
+        let device = host
+            .default_output_device()
+            .ok_or(HostError::NoOutputDevice)?;
 
         // Probe the device default for sample format + channel fallback.
         let default_cfg = device
@@ -219,7 +226,11 @@ impl AudioHost {
             return Err(HostError::UnsupportedFormat(format!("{sample_format:?}")));
         }
 
-        let channels = if req.channels == 0 { default_cfg.channels() } else { req.channels };
+        let channels = if req.channels == 0 {
+            default_cfg.channels()
+        } else {
+            req.channels
+        };
         let config = StreamConfig {
             channels,
             sample_rate: req.sample_rate,
@@ -280,14 +291,20 @@ impl AudioHost {
             s.play().map_err(|e| map_cpal(e, HostError::Stream))?;
         }
 
-        Ok(Self { _output: output, _input: input, config })
+        Ok(Self {
+            _output: output,
+            _input: input,
+            config,
+        })
     }
 
     /// Build the duplex input (capture) stream. For U7 this is a minimal,
     /// no-op-consuming capture that proves the duplex path opens; the live
     /// loopback harness on real hardware swaps in a capturing callback.
     fn build_input(host: &cpal::Host, out_config: &StreamConfig) -> Result<Stream, HostError> {
-        let in_device = host.default_input_device().ok_or(HostError::NoInputDevice)?;
+        let in_device = host
+            .default_input_device()
+            .ok_or(HostError::NoInputDevice)?;
 
         let in_default = in_device.default_input_config().map_err(|e| {
             if is_device_absent(&e) {
@@ -354,7 +371,12 @@ mod tests {
 
     impl MockProcessor {
         fn new(fill: f32) -> Self {
-            Self { drained: Vec::new(), fill, last_nframes: 0, renders: 0 }
+            Self {
+                drained: Vec::new(),
+                fill,
+                last_nframes: 0,
+                renders: 0,
+            }
         }
     }
 
@@ -378,7 +400,12 @@ mod tests {
         let (mut tx, rx) = ojcore::CommandQueue::split(8);
         // Queue two commands the callback must drain before rendering.
         tx.push(RtCommand::TransportPlay).unwrap();
-        tx.push(RtCommand::SetParam { node: NodeIdx(3), param: 0, value: 0.7 }).unwrap();
+        tx.push(RtCommand::SetParam {
+            node: NodeIdx(3),
+            param: 0,
+            value: 0.7,
+        })
+        .unwrap();
 
         let mut rx = rx;
         let mut proc = MockProcessor::new(0.5);
@@ -508,7 +535,12 @@ mod tests {
         let engine = Engine::new(prog);
         let (_tx, rx) = ojcore::CommandQueue::split(64);
         let host = AudioHost::start(
-            StreamRequest { sample_rate: 48_000, buffer_frames: 64, channels: 2, duplex_input: false },
+            StreamRequest {
+                sample_rate: 48_000,
+                buffer_frames: 64,
+                channels: 2,
+                duplex_input: false,
+            },
             engine,
             rx,
         )

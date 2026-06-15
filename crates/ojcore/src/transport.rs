@@ -64,7 +64,10 @@ impl Default for Transport {
 impl Transport {
     /// A transport at `sample_rate`, 120 BPM, 4/4, stopped at sample 0.
     pub fn new(sample_rate: f32) -> Self {
-        Self { sample_rate, ..Self::default() }
+        Self {
+            sample_rate,
+            ..Self::default()
+        }
     }
 
     /// Samples per beat at the current tempo (a quarter-note). Guards against a
@@ -72,8 +75,16 @@ impl Transport {
     /// zero on the audio thread.
     #[inline]
     pub fn samples_per_beat(&self) -> f64 {
-        let bpm = if self.tempo_bpm > 0.0 { self.tempo_bpm } else { 120.0 };
-        let sr = if self.sample_rate > 0.0 { self.sample_rate } else { 48_000.0 };
+        let bpm = if self.tempo_bpm > 0.0 {
+            self.tempo_bpm
+        } else {
+            120.0
+        };
+        let sr = if self.sample_rate > 0.0 {
+            self.sample_rate
+        } else {
+            48_000.0
+        };
         (sr as f64) * 60.0 / (bpm as f64)
     }
 

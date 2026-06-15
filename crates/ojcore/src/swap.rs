@@ -56,7 +56,11 @@ impl ProgramSwap {
     pub fn new() -> Self {
         let collector = Collector::new();
         let handle = collector.handle();
-        Self { pending: ArcSwapOption::empty(), collector, handle }
+        Self {
+            pending: ArcSwapOption::empty(),
+            collector,
+            handle,
+        }
     }
 
     /// Publish `program` as the newest pending program (call off the audio

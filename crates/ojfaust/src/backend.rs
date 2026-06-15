@@ -20,10 +20,7 @@ pub(crate) fn compile(
 }
 
 #[cfg(feature = "libfaust")]
-pub(crate) fn compile(
-    cfg: &CompilerConfig,
-    dsp_source: &str,
-) -> Result<CompiledFaust, FaustError> {
+pub(crate) fn compile(cfg: &CompilerConfig, dsp_source: &str) -> Result<CompiledFaust, FaustError> {
     native::compile(cfg, dsp_source)
 }
 

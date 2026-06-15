@@ -68,7 +68,8 @@ fn main() -> ExitCode {
 
     // The theoretical buffering floor is pure math — always reportable, even
     // with no device. Live driver/converter latency lands on top of this.
-    let floor = LatencyEstimate::from_frames(buffer_frames, buffer_frames, buffer_frames, sample_rate);
+    let floor =
+        LatencyEstimate::from_frames(buffer_frames, buffer_frames, buffer_frames, sample_rate);
     println!(
         "buffering floor (in+block+out): {:.3} ms  ({:.3} + {:.3} + {:.3})",
         floor.round_trip_ms, floor.input_ms, floor.block_ms, floor.output_ms
@@ -90,7 +91,12 @@ fn main() -> ExitCode {
 
     // Try to open a duplex stream. NO panic on a missing device — the whole
     // point of this branch is the clean headless message.
-    let req = StreamRequest { sample_rate, buffer_frames, channels: 2, duplex_input: true };
+    let req = StreamRequest {
+        sample_rate,
+        buffer_frames,
+        channels: 2,
+        duplex_input: true,
+    };
     match AudioHost::start(req, engine, rx) {
         Ok(host) => {
             let cfg = host.config();
@@ -104,7 +110,9 @@ fn main() -> ExitCode {
             );
             println!("rendering for 2 s; feed output -> input to measure the live round trip...");
             std::thread::sleep(Duration::from_secs(2));
-            println!("done. (live impulse measurement runs with a loopback cable on real hardware)");
+            println!(
+                "done. (live impulse measurement runs with a loopback cable on real hardware)"
+            );
             ExitCode::SUCCESS
         }
         Err(HostError::NoOutputDevice) | Err(HostError::NoInputDevice) => {

@@ -42,7 +42,12 @@ impl StructuralLoader {
                 dsp: DspKind::None,
                 ui: UiKind::Auto,
                 params: vec![],
-                ports: PortDecl { audio_in, audio_out, control_in: 0, control_out: 0 },
+                ports: PortDecl {
+                    audio_in,
+                    audio_out,
+                    control_in: 0,
+                    control_out: 0,
+                },
             },
         }
     }
@@ -50,7 +55,13 @@ impl StructuralLoader {
     /// The host's master speaker-output sink: one audio in, no audio out. Its
     /// resolved input becomes the engine's mono master output.
     pub fn speaker_out() -> Self {
-        Self::new(SPEAKER_OUT_ID, "Speaker Out", PrimitiveKind::SpeakerOut, 1, 0)
+        Self::new(
+            SPEAKER_OUT_ID,
+            "Speaker Out",
+            PrimitiveKind::SpeakerOut,
+            1,
+            0,
+        )
     }
 }
 
@@ -154,7 +165,10 @@ mod tests {
                     id: NodeIdx(1),
                     manifest_id: String::from(ojcore::GAIN_ID),
                     kind: PrimitiveKind::Gain,
-                    params: vec![ojproto::Param { id: ojcore::GAIN_PARAM, value: 2.0 }],
+                    params: vec![ojproto::Param {
+                        id: ojcore::GAIN_PARAM,
+                        value: 2.0,
+                    }],
                     assets: vec![],
                     n_in: 1,
                     n_out: 1,

@@ -202,7 +202,9 @@ pub fn compile(
     let mut routing: Vec<NodeRouting> = graph
         .nodes
         .iter()
-        .map(|node| NodeRouting { inputs: vec![Vec::new(); node.n_in as usize] })
+        .map(|node| NodeRouting {
+            inputs: vec![Vec::new(); node.n_in as usize],
+        })
         .collect();
     for edge in &graph.edges {
         if edge.kind != ConnectionType::Audio {
@@ -221,7 +223,10 @@ pub fn compile(
         if (edge.from_port as usize) >= out_bufs[from].len() {
             return Err(CompileError::PortOutOfRange);
         }
-        routing[to].inputs[port].push(Source { node: from, port: edge.from_port });
+        routing[to].inputs[port].push(Source {
+            node: from,
+            port: edge.from_port,
+        });
     }
 
     // --- Kahn topological sort over audio edges; HARD-ERROR on cycle -------
@@ -245,8 +250,18 @@ pub fn compile(
     // Pre-size the hot-path scratch: one mix row per input port of the widest
     // node, and channel-pointer arrays as wide as the widest port count. Sized
     // here so `process_block` never grows or allocates them.
-    let max_in = graph.nodes.iter().map(|nd| nd.n_in as usize).max().unwrap_or(0);
-    let max_out = graph.nodes.iter().map(|nd| nd.n_out as usize).max().unwrap_or(0);
+    let max_in = graph
+        .nodes
+        .iter()
+        .map(|nd| nd.n_in as usize)
+        .max()
+        .unwrap_or(0);
+    let max_out = graph
+        .nodes
+        .iter()
+        .map(|nd| nd.n_out as usize)
+        .max()
+        .unwrap_or(0);
     let in_scratch = (0..max_in).map(|_| vec![0.0f32; block_size]).collect();
 
     // No reorder of the by-slot tables is needed: the RT loop walks `schedule`

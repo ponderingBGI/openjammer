@@ -43,11 +43,23 @@ pub struct BiquadCoeffs {
 
 impl BiquadCoeffs {
     pub const fn identity() -> Self {
-        Self { b0: 1.0, b1: 0.0, b2: 0.0, a1: 0.0, a2: 0.0 }
+        Self {
+            b0: 1.0,
+            b1: 0.0,
+            b2: 0.0,
+            a1: 0.0,
+            a2: 0.0,
+        }
     }
 
     /// Port of `calculateBiquadCoefficients` (RBJ cookbook).
-    pub fn design(kind: FilterType, frequency: f32, q: f32, gain_db: f32, sample_rate: f32) -> Self {
+    pub fn design(
+        kind: FilterType,
+        frequency: f32,
+        q: f32,
+        gain_db: f32,
+        sample_rate: f32,
+    ) -> Self {
         let w0 = 2.0 * PI * frequency / sample_rate;
         let cos_w0 = libm::cosf(w0);
         let sin_w0 = libm::sinf(w0);
@@ -73,7 +85,14 @@ impl BiquadCoeffs {
                 1.0 - alpha,
             ),
             FilterType::Bandpass => (alpha, 0.0, -alpha, 1.0 + alpha, -2.0 * cos_w0, 1.0 - alpha),
-            FilterType::Notch => (1.0, -2.0 * cos_w0, 1.0, 1.0 + alpha, -2.0 * cos_w0, 1.0 - alpha),
+            FilterType::Notch => (
+                1.0,
+                -2.0 * cos_w0,
+                1.0,
+                1.0 + alpha,
+                -2.0 * cos_w0,
+                1.0 - alpha,
+            ),
             FilterType::Peaking => (
                 1.0 + alpha * a,
                 -2.0 * cos_w0,
@@ -114,7 +133,13 @@ impl BiquadCoeffs {
             ),
         };
 
-        Self { b0: b0 / a0, b1: b1 / a0, b2: b2 / a0, a1: a1 / a0, a2: a2 / a0 }
+        Self {
+            b0: b0 / a0,
+            b1: b1 / a0,
+            b2: b2 / a0,
+            a1: a1 / a0,
+            a2: a2 / a0,
+        }
     }
 }
 
@@ -128,7 +153,11 @@ pub struct Biquad {
 
 impl Biquad {
     pub fn new(c: BiquadCoeffs) -> Self {
-        Self { c, z1: 0.0, z2: 0.0 }
+        Self {
+            c,
+            z1: 0.0,
+            z2: 0.0,
+        }
     }
 
     pub fn set_coeffs(&mut self, c: BiquadCoeffs) {
@@ -178,7 +207,9 @@ pub struct Waveshaper {
 
 impl Waveshaper {
     pub fn new(amount: f32, samples: usize) -> Self {
-        Self { curve: generate_distortion_curve(amount, samples) }
+        Self {
+            curve: generate_distortion_curve(amount, samples),
+        }
     }
 
     #[inline]
@@ -211,7 +242,12 @@ pub struct DelayLine {
 
 impl DelayLine {
     pub fn new(max_samples: usize) -> Self {
-        Self { buf: vec![0.0; max_samples.max(1)], write: 0, feedback: 0.0, wet: 0.5 }
+        Self {
+            buf: vec![0.0; max_samples.max(1)],
+            write: 0,
+            feedback: 0.0,
+            wet: 0.5,
+        }
     }
 
     pub fn set(&mut self, feedback: f32, wet: f32) {
@@ -245,7 +281,11 @@ pub struct OnePole {
 
 impl OnePole {
     pub fn new(initial: f32) -> Self {
-        Self { current: initial, target: initial, coeff: 0.0 }
+        Self {
+            current: initial,
+            target: initial,
+            coeff: 0.0,
+        }
     }
 
     /// Set the smoothing time constant (seconds). `0` = instant.
@@ -321,7 +361,12 @@ pub struct KarplusString {
 
 impl KarplusString {
     pub fn new(max_len: usize) -> Self {
-        Self { buf: vec![0.0; max_len.max(2)], idx: 0, len: 2, damp: 0.996 }
+        Self {
+            buf: vec![0.0; max_len.max(2)],
+            idx: 0,
+            len: 2,
+            damp: 0.996,
+        }
     }
 
     /// Excite the string for a given pitch.
@@ -363,7 +408,13 @@ mod tests {
 
     #[test]
     fn lowpass_passes_dc() {
-        let mut bq = Biquad::new(BiquadCoeffs::design(FilterType::Lowpass, 1_000.0, 0.707, 0.0, SR));
+        let mut bq = Biquad::new(BiquadCoeffs::design(
+            FilterType::Lowpass,
+            1_000.0,
+            0.707,
+            0.0,
+            SR,
+        ));
         let mut y = 0.0;
         for _ in 0..4000 {
             y = bq.process(1.0);
@@ -374,7 +425,13 @@ mod tests {
 
     #[test]
     fn lowpass_attenuates_nyquist() {
-        let mut bq = Biquad::new(BiquadCoeffs::design(FilterType::Lowpass, 1_000.0, 0.707, 0.0, SR));
+        let mut bq = Biquad::new(BiquadCoeffs::design(
+            FilterType::Lowpass,
+            1_000.0,
+            0.707,
+            0.0,
+            SR,
+        ));
         let mut last = 0.0;
         for i in 0..4000 {
             let x = if i % 2 == 0 { 1.0 } else { -1.0 };
@@ -385,7 +442,13 @@ mod tests {
 
     #[test]
     fn biquad_is_stable() {
-        let mut bq = Biquad::new(BiquadCoeffs::design(FilterType::Peaking, 800.0, 1.5, 6.0, SR));
+        let mut bq = Biquad::new(BiquadCoeffs::design(
+            FilterType::Peaking,
+            800.0,
+            1.5,
+            6.0,
+            SR,
+        ));
         let mut max = 0.0f32;
         for i in 0..8000 {
             let x = libm::sinf(i as f32 * 0.1);
@@ -456,6 +519,9 @@ mod tests {
         k.pluck(220.0, SR);
         let early: f32 = (0..200).map(|_| k.tick().abs()).sum();
         let late: f32 = (0..200).map(|_| k.tick().abs()).sum();
-        assert!(late < early, "string did not decay: early={early} late={late}");
+        assert!(
+            late < early,
+            "string did not decay: early={early} late={late}"
+        );
     }
 }

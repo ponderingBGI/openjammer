@@ -123,11 +123,7 @@ impl<const N: usize> ByteRing<N> {
         unsafe {
             core::ptr::copy_nonoverlapping(src.as_ptr(), cell.add(start), first);
             if first < src.len() {
-                core::ptr::copy_nonoverlapping(
-                    src.as_ptr().add(first),
-                    cell,
-                    src.len() - first,
-                );
+                core::ptr::copy_nonoverlapping(src.as_ptr().add(first), cell, src.len() - first);
             }
         }
     }
@@ -302,7 +298,10 @@ mod tests {
         // whose total size does not evenly divide N, forcing split copies.
         for i in 0..1000u32 {
             let payload = [(i & 0xff) as u8, ((i >> 8) & 0xff) as u8, 0xAB];
-            assert!(r.push(&payload), "push {i} should fit (ring is drained each iter)");
+            assert!(
+                r.push(&payload),
+                "push {i} should fit (ring is drained each iter)"
+            );
             let n = r.pop(&mut out).expect("frame present");
             assert_eq!(n, 3);
             assert_eq!(&out[..3], &payload);

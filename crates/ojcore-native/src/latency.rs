@@ -166,7 +166,7 @@ mod tests {
     fn round_trip_frames_is_onset_minus_emit() {
         let mut buf = vec![0.0f32; 512];
         buf[200] = -0.8; // negative-going click, abs() still crosses
-        // Emitted at frame 8; detected at 200 => 192-frame round trip.
+                         // Emitted at frame 8; detected at 200 => 192-frame round trip.
         assert_eq!(measure_round_trip_frames(&buf, 8, 0.5), Some(192));
     }
 

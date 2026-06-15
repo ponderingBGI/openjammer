@@ -18,9 +18,7 @@ use ojcore::{
     compile, CommandQueue, CompileError, Engine, GainLoader, PluginRegistry, ProgramSwap, GAIN_ID,
     GAIN_PARAM,
 };
-use ojproto::{
-    ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, Param, PrimitiveKind, RtCommand,
-};
+use ojproto::{ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, Param, PrimitiveKind, RtCommand};
 
 // In debug builds this allocator aborts on any allocation inside an
 // `assert_no_alloc(..)` scope, turning the no-alloc invariant into a hard gate.
@@ -70,7 +68,10 @@ fn graphin_gain_speaker(gain: f32) -> OjGraph {
     let mut g = OjGraph::empty(SR, BLOCK);
     let input = node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1);
     let mut amp = node(2, GAIN_ID, PrimitiveKind::Gain, 1, 1);
-    amp.params.push(Param { id: GAIN_PARAM, value: gain });
+    amp.params.push(Param {
+        id: GAIN_PARAM,
+        value: gain,
+    });
     let speaker = node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0);
     g.nodes.push(input);
     g.nodes.push(amp);
@@ -106,7 +107,10 @@ fn gain_to_speaker_scales_known_input() {
     // so output == input * G from the first frame within tolerance.
     for (i, (&x, &y)) in input.iter().zip(out.iter()).enumerate() {
         let expected = x * G;
-        assert!((y - expected).abs() < 1e-3, "frame {i}: got {y}, expected {expected}");
+        assert!(
+            (y - expected).abs() < 1e-3,
+            "frame {i}: got {y}, expected {expected}"
+        );
     }
 }
 
@@ -128,7 +132,12 @@ fn setparam_changes_gain_next_block() {
 
     // SetParam -> gain = 2.0 via the command ring.
     let (mut tx, mut rx) = CommandQueue::split(8);
-    tx.push(RtCommand::SetParam { node: NodeIdx(2), param: GAIN_PARAM, value: 2.0 }).unwrap();
+    tx.push(RtCommand::SetParam {
+        node: NodeIdx(2),
+        param: GAIN_PARAM,
+        value: 2.0,
+    })
+    .unwrap();
     engine.drain(&mut rx);
 
     // Let the ~5ms smoother settle over several blocks, then assert out == 2x.
@@ -151,7 +160,8 @@ fn cycle_is_rejected() {
     let mut g = OjGraph::empty(SR, BLOCK);
     g.nodes.push(node(1, GAIN_ID, PrimitiveKind::Gain, 1, 1));
     g.nodes.push(node(2, GAIN_ID, PrimitiveKind::Gain, 1, 1));
-    g.nodes.push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.nodes
+        .push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
     g.edges.push(audio_edge(1, 0, 2, 0)); // a -> b
     g.edges.push(audio_edge(2, 0, 1, 0)); // b -> a  (feedback cycle!)
     g.edges.push(audio_edge(2, 0, 3, 0)); // b -> speaker
@@ -162,8 +172,10 @@ fn cycle_is_rejected() {
 fn unknown_manifest_is_rejected() {
     let reg = gain_registry();
     let mut g = OjGraph::empty(SR, BLOCK);
-    g.nodes.push(node(1, "does.not.exist", PrimitiveKind::Gain, 1, 1));
-    g.nodes.push(node(2, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.nodes
+        .push(node(1, "does.not.exist", PrimitiveKind::Gain, 1, 1));
+    g.nodes
+        .push(node(2, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
     g.edges.push(audio_edge(1, 0, 2, 0));
     match compile(&g, &reg).err() {
         Some(CompileError::UnknownManifest(id)) => assert_eq!(id, "does.not.exist"),
@@ -178,9 +190,13 @@ fn out_of_range_source_port_is_rejected() {
     let reg = gain_registry();
     let mut g = OjGraph::empty(SR, BLOCK);
     g.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1)); // one output port
-    g.nodes.push(node(2, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.nodes
+        .push(node(2, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
     g.edges.push(audio_edge(1, 5, 2, 0)); // from_port 5 exceeds the single output
-    assert!(matches!(compile(&g, &reg).err(), Some(CompileError::PortOutOfRange)));
+    assert!(matches!(
+        compile(&g, &reg).err(),
+        Some(CompileError::PortOutOfRange)
+    ));
 }
 
 #[test]
@@ -188,16 +204,24 @@ fn missing_master_output_is_rejected() {
     let reg = gain_registry();
     let mut g = OjGraph::empty(SR, BLOCK);
     g.nodes.push(node(1, GAIN_ID, PrimitiveKind::Gain, 1, 1));
-    assert!(matches!(compile(&g, &reg).err(), Some(CompileError::NoMasterOutput)));
+    assert!(matches!(
+        compile(&g, &reg).err(),
+        Some(CompileError::NoMasterOutput)
+    ));
 }
 
 #[test]
 fn multiple_master_outputs_rejected() {
     let reg = gain_registry();
     let mut g = OjGraph::empty(SR, BLOCK);
-    g.nodes.push(node(1, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
-    g.nodes.push(node(2, GAIN_ID, PrimitiveKind::GraphOut, 1, 0));
-    assert!(matches!(compile(&g, &reg).err(), Some(CompileError::MultipleMasterOutputs)));
+    g.nodes
+        .push(node(1, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.nodes
+        .push(node(2, GAIN_ID, PrimitiveKind::GraphOut, 1, 0));
+    assert!(matches!(
+        compile(&g, &reg).err(),
+        Some(CompileError::MultipleMasterOutputs)
+    ));
 }
 
 #[test]
@@ -227,8 +251,17 @@ fn command_drain_and_process_are_alloc_free() {
     let mut engine = Engine::new(prog);
     let (mut tx, mut rx) = CommandQueue::split(16);
 
-    tx.push(RtCommand::SetParam { node: NodeIdx(2), param: GAIN_PARAM, value: 3.0 }).unwrap();
-    tx.push(RtCommand::Bypass { node: NodeIdx(2), on: true }).unwrap();
+    tx.push(RtCommand::SetParam {
+        node: NodeIdx(2),
+        param: GAIN_PARAM,
+        value: 3.0,
+    })
+    .unwrap();
+    tx.push(RtCommand::Bypass {
+        node: NodeIdx(2),
+        on: true,
+    })
+    .unwrap();
     tx.push(RtCommand::TransportPlay).unwrap();
     tx.push(RtCommand::Seek { samples: 4096 }).unwrap();
 
@@ -243,7 +276,10 @@ fn command_drain_and_process_are_alloc_free() {
     assert!(engine.is_playing());
     assert_eq!(engine.sample_pos(), 4096 + BLOCK as u64);
     let amp_slot = engine.program().slot_of_id(NodeIdx(2)).unwrap();
-    assert!(engine.program().bypassed[amp_slot], "bypass flag set by command");
+    assert!(
+        engine.program().bypassed[amp_slot],
+        "bypass flag set by command"
+    );
 }
 
 #[test]
@@ -260,7 +296,10 @@ fn bypass_passes_signal_through() {
     inject(&mut engine, &input);
     engine.process_block(&mut out, NB);
     for (&x, &y) in input.iter().zip(out.iter()) {
-        assert!((y - x).abs() < 1e-4, "bypassed gain must pass signal unchanged");
+        assert!(
+            (y - x).abs() < 1e-4,
+            "bypassed gain must pass signal unchanged"
+        );
     }
 }
 
@@ -277,10 +316,18 @@ fn swap_publishes_and_engine_reads_new_program() {
 
     // Publish a different 4-node program off the "control" thread.
     let mut graph_b = OjGraph::empty(SR, BLOCK);
-    graph_b.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
-    graph_b.nodes.push(node(2, GAIN_ID, PrimitiveKind::Gain, 1, 1));
-    graph_b.nodes.push(node(3, GAIN_ID, PrimitiveKind::Gain, 1, 1));
-    graph_b.nodes.push(node(4, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    graph_b
+        .nodes
+        .push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
+    graph_b
+        .nodes
+        .push(node(2, GAIN_ID, PrimitiveKind::Gain, 1, 1));
+    graph_b
+        .nodes
+        .push(node(3, GAIN_ID, PrimitiveKind::Gain, 1, 1));
+    graph_b
+        .nodes
+        .push(node(4, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
     graph_b.edges.push(audio_edge(1, 0, 2, 0));
     graph_b.edges.push(audio_edge(2, 0, 3, 0));
     graph_b.edges.push(audio_edge(3, 0, 4, 0));
@@ -291,13 +338,23 @@ fn swap_publishes_and_engine_reads_new_program() {
     // The "audio" thread adopts it; the old program is enqueued for deferred
     // (RT-safe) drop, NOT freed inline.
     assert!(swap.install_into(&mut engine));
-    assert_eq!(engine.program().len(), 4, "engine reads the published program");
+    assert_eq!(
+        engine.program().len(),
+        4,
+        "engine reads the published program"
+    );
     assert!(!swap.has_pending());
-    assert!(swap.alloc_count() >= 1, "old program enqueued for deferred drop");
+    assert!(
+        swap.alloc_count() >= 1,
+        "old program enqueued for deferred drop"
+    );
 
     // Off-RT cleanup actually runs the displaced program's destructors.
     let mut swap = swap;
-    assert!(swap.collect() >= 1, "deferred drop reclaimed the old program");
+    assert!(
+        swap.collect() >= 1,
+        "deferred drop reclaimed the old program"
+    );
 
     // A second install with nothing pending is a no-op.
     assert!(!swap.install_into(&mut engine));
@@ -313,9 +370,9 @@ fn swap_publishes_and_engine_reads_new_program() {
 // U12 transport + U15 metering + U16 resilience integration tests.
 // ===========================================================================
 
-use ojcore::{Meter, MeterRing, Watchdog};
-use ojcore::{DspInstance, PluginLoader, ProcessCtx};
 use ojcore::manifest::{DspKind, PluginManifest, PortDecl, UiKind};
+use ojcore::{DspInstance, PluginLoader, ProcessCtx};
+use ojcore::{Meter, MeterRing, Watchdog};
 use std::sync::Arc;
 
 /// U12: tempo + time signature drive bar/beat correctly through the engine.
@@ -344,7 +401,11 @@ fn engine_transport_advances_bar_and_beat() {
     let pos = engine.transport_pos();
     assert_eq!(pos.bar, 1, "after 120000 samples => bar 1");
     assert_eq!(pos.beat, 1, "=> beat 1 of bar 1");
-    assert!(pos.phase < 1e-3, "on the beat boundary, phase ~0 (got {})", pos.phase);
+    assert!(
+        pos.phase < 1e-3,
+        "on the beat boundary, phase ~0 (got {})",
+        pos.phase
+    );
 
     // Half a beat further: phase advances to ~0.5 within the same beat.
     let mut out = vec![0.0f32; NB];
@@ -359,7 +420,11 @@ fn engine_transport_advances_bar_and_beat() {
     let pos = engine.transport_pos();
     assert_eq!(pos.bar, 1);
     assert_eq!(pos.beat, 1);
-    assert!(pos.phase > 0.3 && pos.phase < 0.7, "mid-beat phase (got {})", pos.phase);
+    assert!(
+        pos.phase > 0.3 && pos.phase < 0.7,
+        "mid-beat phase (got {})",
+        pos.phase
+    );
 }
 
 /// U15: master + per-node RMS matches a known constant signal.
@@ -382,8 +447,16 @@ fn engine_meter_rms_matches_known_signal() {
     // Master meter.
     let master_slot = engine.program().slot_of_id(NodeIdx(3)).unwrap();
     let master: &Meter = &engine.meters().master;
-    assert!((master.rms() - 0.5).abs() < 1e-3, "master rms {}", master.rms());
-    assert!((master.peak() - 0.5).abs() < 1e-3, "master peak {}", master.peak());
+    assert!(
+        (master.rms() - 0.5).abs() < 1e-3,
+        "master rms {}",
+        master.rms()
+    );
+    assert!(
+        (master.peak() - 0.5).abs() < 1e-3,
+        "master peak {}",
+        master.peak()
+    );
 
     // Gain node (slot for NodeIdx 2) meter.
     let gain_slot = engine.program().slot_of_id(NodeIdx(2)).unwrap();
@@ -435,7 +508,10 @@ fn engine_publishes_meter_and_beat_frames() {
     }
     assert!(meters >= 1, "expected meter frames, got {meters}");
     assert_eq!(beats, 1, "exactly one beat frame per block");
-    assert!(saw_master_level, "a meter frame carried the 0.5 RMS master level");
+    assert!(
+        saw_master_level,
+        "a meter frame carried the 0.5 RMS master level"
+    );
 }
 
 // --- A node that emits NaN, to prove the U16 guard silences + flags it. ----
@@ -456,7 +532,12 @@ impl NanLoader {
                 dsp: DspKind::Builtin,
                 ui: UiKind::Auto,
                 params: Vec::new(),
-                ports: PortDecl { audio_in: 1, audio_out: 1, control_in: 0, control_out: 0 },
+                ports: PortDecl {
+                    audio_in: 1,
+                    audio_out: 1,
+                    control_in: 0,
+                    control_out: 0,
+                },
             },
         }
     }
@@ -496,7 +577,8 @@ fn engine_silences_and_flags_nan_node() {
     let mut g = OjGraph::empty(SR, BLOCK);
     g.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
     g.nodes.push(node(2, NAN_ID, PrimitiveKind::Gain, 1, 1));
-    g.nodes.push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.nodes
+        .push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
     g.edges.push(audio_edge(1, 0, 2, 0));
     g.edges.push(audio_edge(2, 0, 3, 0));
 
@@ -515,7 +597,10 @@ fn engine_silences_and_flags_nan_node() {
     }
     // The offending node is flagged.
     let nan_slot = engine.program().slot_of_id(NodeIdx(2)).unwrap();
-    assert!(engine.budget().non_finite[nan_slot], "NaN node flagged non_finite");
+    assert!(
+        engine.budget().non_finite[nan_slot],
+        "NaN node flagged non_finite"
+    );
     assert!(engine.budget().any_flagged());
 }
 
@@ -536,7 +621,10 @@ fn engine_watchdog_auto_bypasses_over_budget_node() {
 
     // The gain node was flagged over-budget and auto-bypassed.
     let gain_slot = engine.program().slot_of_id(NodeIdx(2)).unwrap();
-    assert!(engine.budget().over_budget[gain_slot], "gain flagged over budget");
+    assert!(
+        engine.budget().over_budget[gain_slot],
+        "gain flagged over budget"
+    );
     assert!(engine.program().bypassed[gain_slot], "gain auto-bypassed");
 }
 

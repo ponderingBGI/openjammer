@@ -76,7 +76,10 @@ fn node_idx_and_asset_id_are_bare_numbers() {
 fn param_and_asset_ref_shapes() {
     assert_json(&Param { id: 3, value: 0.5 }, r#"{"id":3,"value":0.5}"#);
     assert_json(
-        &AssetRef { slot: 1, asset: AssetId(9) },
+        &AssetRef {
+            slot: 1,
+            asset: AssetId(9),
+        },
         r#"{"slot":1,"asset":9}"#,
     );
 }
@@ -91,8 +94,14 @@ fn ojgraph_with_one_node_and_edge() {
             id: NodeIdx(0),
             manifest_id: "builtin.osc".into(),
             kind: PrimitiveKind::Osc,
-            params: vec![Param { id: 0, value: 440.0 }],
-            assets: vec![AssetRef { slot: 0, asset: AssetId(7) }],
+            params: vec![Param {
+                id: 0,
+                value: 440.0,
+            }],
+            assets: vec![AssetRef {
+                slot: 0,
+                asset: AssetId(7),
+            }],
             n_in: 0,
             n_out: 1,
         }],
@@ -132,19 +141,33 @@ fn empty_graph_shape() {
 fn rt_command_external_tagging() {
     // Struct variants => { "<Variant>": { ..fields.. } }
     assert_json(
-        &RtCommand::SetParam { node: NodeIdx(3), param: 5, value: 0.25 },
+        &RtCommand::SetParam {
+            node: NodeIdx(3),
+            param: 5,
+            value: 0.25,
+        },
         r#"{"SetParam":{"node":3,"param":5,"value":0.25}}"#,
     );
     assert_json(
-        &RtCommand::NoteOn { node: NodeIdx(3), note: 60, vel: 100 },
+        &RtCommand::NoteOn {
+            node: NodeIdx(3),
+            note: 60,
+            vel: 100,
+        },
         r#"{"NoteOn":{"node":3,"note":60,"vel":100}}"#,
     );
     assert_json(
-        &RtCommand::NoteOff { node: NodeIdx(3), note: 60 },
+        &RtCommand::NoteOff {
+            node: NodeIdx(3),
+            note: 60,
+        },
         r#"{"NoteOff":{"node":3,"note":60}}"#,
     );
     assert_json(
-        &RtCommand::Bypass { node: NodeIdx(3), on: true },
+        &RtCommand::Bypass {
+            node: NodeIdx(3),
+            on: true,
+        },
         r#"{"Bypass":{"node":3,"on":true}}"#,
     );
     // Unit variants => bare string.
@@ -169,19 +192,33 @@ fn engine_frame_external_tagging() {
         r#"{"EngineState":{"running":true,"sample_rate":48000,"block_size":128,"xruns":2}}"#,
     );
     assert_json(
-        &EngineFrame::Meter { node: NodeIdx(3), rms: 0.1, peak: 0.9 },
+        &EngineFrame::Meter {
+            node: NodeIdx(3),
+            rms: 0.1,
+            peak: 0.9,
+        },
         r#"{"Meter":{"node":3,"rms":0.1,"peak":0.9}}"#,
     );
     assert_json(
-        &EngineFrame::IrAck { ir_version: 1, ok: true },
+        &EngineFrame::IrAck {
+            ir_version: 1,
+            ok: true,
+        },
         r#"{"IrAck":{"ir_version":1,"ok":true}}"#,
     );
     assert_json(
-        &EngineFrame::Beat { bar: 2, beat: 3, phase: 0.5 },
+        &EngineFrame::Beat {
+            bar: 2,
+            beat: 3,
+            phase: 0.5,
+        },
         r#"{"Beat":{"bar":2,"beat":3,"phase":0.5}}"#,
     );
     assert_json(
-        &EngineFrame::Error { code: 42, message: "boom".into() },
+        &EngineFrame::Error {
+            code: 42,
+            message: "boom".into(),
+        },
         r#"{"Error":{"code":42,"message":"boom"}}"#,
     );
 }
@@ -190,7 +227,11 @@ fn engine_frame_external_tagging() {
 fn round_trips_back_to_rust() {
     // Deserialization must accept the exact same shape we assert above, so the
     // contract is symmetric (the TS side both produces and consumes these).
-    let cmd = RtCommand::SetParam { node: NodeIdx(3), param: 5, value: 0.25 };
+    let cmd = RtCommand::SetParam {
+        node: NodeIdx(3),
+        param: 5,
+        value: 0.25,
+    };
     let json = serde_json::to_string(&cmd).unwrap();
     let back: RtCommand = serde_json::from_str(&json).unwrap();
     assert_eq!(cmd, back);
@@ -198,7 +239,10 @@ fn round_trips_back_to_rust() {
     let play: RtCommand = serde_json::from_str("\"TransportPlay\"").unwrap();
     assert_eq!(play, RtCommand::TransportPlay);
 
-    let frame = EngineFrame::Error { code: 42, message: "boom".into() };
+    let frame = EngineFrame::Error {
+        code: 42,
+        message: "boom".into(),
+    };
     let json = serde_json::to_string(&frame).unwrap();
     let back: EngineFrame = serde_json::from_str(&json).unwrap();
     assert_eq!(frame, back);

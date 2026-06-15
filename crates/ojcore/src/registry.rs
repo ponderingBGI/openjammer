@@ -22,7 +22,9 @@ pub struct PluginRegistry {
 impl PluginRegistry {
     /// A fresh, empty registry.
     pub fn new() -> Self {
-        Self { loaders: BTreeMap::new() }
+        Self {
+            loaders: BTreeMap::new(),
+        }
     }
 
     /// Register a loader under its own `manifest().id`. Returns the previously

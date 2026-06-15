@@ -37,7 +37,12 @@ fn gain_manifest() -> PluginManifest {
             max: 4.0,
             default: 1.0,
         }],
-        ports: PortDecl { audio_in: 1, audio_out: 1, control_in: 0, control_out: 0 },
+        ports: PortDecl {
+            audio_in: 1,
+            audio_out: 1,
+            control_in: 0,
+            control_out: 0,
+        },
     }
 }
 
@@ -48,7 +53,9 @@ pub struct GainLoader {
 
 impl Default for GainLoader {
     fn default() -> Self {
-        Self { manifest: gain_manifest() }
+        Self {
+            manifest: gain_manifest(),
+        }
     }
 }
 
@@ -85,7 +92,10 @@ impl Default for GainNode {
 impl GainNode {
     pub fn new() -> Self {
         // Start at unity; `activate` sets the smoothing time once we know SR.
-        Self { gain: OnePole::new(1.0), target: 1.0 }
+        Self {
+            gain: OnePole::new(1.0),
+            target: 1.0,
+        }
     }
 }
 

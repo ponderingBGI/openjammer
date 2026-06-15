@@ -251,7 +251,11 @@ impl Engine {
     /// is unknown.
     pub fn input_mut(&mut self, node: NodeIdx, port: usize) -> Option<&mut [f32]> {
         let slot = self.program.slot_of_id(node)?;
-        self.program.out_bufs.get_mut(slot)?.get_mut(port).map(|b| b.as_mut_slice())
+        self.program
+            .out_bufs
+            .get_mut(slot)?
+            .get_mut(port)
+            .map(|b| b.as_mut_slice())
     }
 
     /// Replace the running program, returning the old one so the caller can
@@ -354,7 +358,12 @@ impl Engine {
             *o = 0.0;
         }
         let master = self.program.master_out;
-        if let Some(port0) = self.program.routing.get(master).and_then(|r| r.inputs.first()) {
+        if let Some(port0) = self
+            .program
+            .routing
+            .get(master)
+            .and_then(|r| r.inputs.first())
+        {
             // Borrow split: read sources from `out_bufs`, write `out` (caller's
             // buffer, disjoint). No allocation.
             for k in 0..port0.len() {

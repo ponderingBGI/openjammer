@@ -227,7 +227,12 @@ pub fn process(nframes: u32) {
 #[inline]
 fn drain_commands(host: &mut Host) {
     // Split the borrow so the engine and the ring/scratch are disjoint.
-    let Host { engine, cmd_ring, cmd_scratch, .. } = host;
+    let Host {
+        engine,
+        cmd_ring,
+        cmd_scratch,
+        ..
+    } = host;
     loop {
         match cmd_ring.pop(cmd_scratch) {
             None => break,
@@ -369,7 +374,11 @@ pub fn ring_data_offset() -> u32 {
 /// producer would `push` into the [`cmd_ring`](Host::cmd_ring).
 #[wasm_bindgen]
 pub fn encode_command_setparam(node: u32, param: u16, value: f32) -> Vec<u8> {
-    let cmd = RtCommand::SetParam { node: ojproto::NodeIdx(node), param, value };
+    let cmd = RtCommand::SetParam {
+        node: ojproto::NodeIdx(node),
+        param,
+        value,
+    };
     // Off the RT path: this is a convenience encoder, allocation is fine here.
     serde_json::to_vec(&cmd).unwrap_or_default()
 }
@@ -394,8 +403,18 @@ mod tests {
     fn setparam_json_frame_roundtrips() {
         let bytes = encode_command_setparam(7, 0, 1.5);
         let cmd: RtCommand = serde_json::from_slice(&bytes).expect("decode");
-        assert_eq!(cmd, RtCommand::SetParam { node: NodeIdx(7), param: 0, value: 1.5 });
-        assert!(bytes.len() <= CMD_FRAME_MAX, "frame must fit the RT scratch");
+        assert_eq!(
+            cmd,
+            RtCommand::SetParam {
+                node: NodeIdx(7),
+                param: 0,
+                value: 1.5
+            }
+        );
+        assert!(
+            bytes.len() <= CMD_FRAME_MAX,
+            "frame must fit the RT scratch"
+        );
     }
 
     /// Pushing a JSON command frame into a `CmdRing` and popping it back yields
@@ -409,7 +428,14 @@ mod tests {
         let mut scratch = [0u8; CMD_FRAME_MAX];
         let len = ring.pop(&mut scratch).expect("frame present");
         let cmd: RtCommand = serde_json::from_slice(&scratch[..len]).expect("decode");
-        assert_eq!(cmd, RtCommand::SetParam { node: NodeIdx(3), param: 2, value: -0.25 });
+        assert_eq!(
+            cmd,
+            RtCommand::SetParam {
+                node: NodeIdx(3),
+                param: 2,
+                value: -0.25
+            }
+        );
     }
 
     /// Every variant's JSON frame fits the fixed RT-path scratch, so the drain
@@ -417,17 +443,34 @@ mod tests {
     #[test]
     fn all_command_frames_fit_scratch() {
         let cmds = [
-            RtCommand::SetParam { node: NodeIdx(u32::MAX), param: u16::MAX, value: f32::MIN },
-            RtCommand::NoteOn { node: NodeIdx(u32::MAX), note: 127, vel: 127 },
-            RtCommand::NoteOff { node: NodeIdx(u32::MAX), note: 127 },
-            RtCommand::Bypass { node: NodeIdx(u32::MAX), on: true },
+            RtCommand::SetParam {
+                node: NodeIdx(u32::MAX),
+                param: u16::MAX,
+                value: f32::MIN,
+            },
+            RtCommand::NoteOn {
+                node: NodeIdx(u32::MAX),
+                note: 127,
+                vel: 127,
+            },
+            RtCommand::NoteOff {
+                node: NodeIdx(u32::MAX),
+                note: 127,
+            },
+            RtCommand::Bypass {
+                node: NodeIdx(u32::MAX),
+                on: true,
+            },
             RtCommand::TransportPlay,
             RtCommand::TransportPause,
             RtCommand::Seek { samples: u64::MAX },
         ];
         for c in cmds {
             let n = serde_json::to_vec(&c).unwrap().len();
-            assert!(n <= CMD_FRAME_MAX, "{c:?} frame is {n} B, exceeds {CMD_FRAME_MAX}");
+            assert!(
+                n <= CMD_FRAME_MAX,
+                "{c:?} frame is {n} B, exceeds {CMD_FRAME_MAX}"
+            );
         }
     }
 
