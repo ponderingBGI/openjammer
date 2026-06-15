@@ -172,6 +172,18 @@ fn unknown_manifest_is_rejected() {
 }
 
 #[test]
+fn out_of_range_source_port_is_rejected() {
+    // A from_port beyond the source node's declared outputs must be rejected at
+    // compile time (else it would index-panic on the audio thread).
+    let reg = gain_registry();
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1)); // one output port
+    g.nodes.push(node(2, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 5, 2, 0)); // from_port 5 exceeds the single output
+    assert!(matches!(compile(&g, &reg).err(), Some(CompileError::PortOutOfRange)));
+}
+
+#[test]
 fn missing_master_output_is_rejected() {
     let reg = gain_registry();
     let mut g = OjGraph::empty(SR, BLOCK);

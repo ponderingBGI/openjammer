@@ -119,6 +119,9 @@ pub enum CompileError {
     MultipleMasterOutputs,
     /// An edge referenced a node id absent from `nodes`.
     DanglingEdge,
+    /// An edge referenced an output/input port beyond a node's declared count.
+    /// Rejected at compile time so it can never index-panic on the audio thread.
+    PortOutOfRange,
 }
 
 impl core::fmt::Display for CompileError {
@@ -129,6 +132,7 @@ impl core::fmt::Display for CompileError {
             CompileError::NoMasterOutput => write!(f, "no SpeakerOut/GraphOut master node"),
             CompileError::MultipleMasterOutputs => write!(f, "multiple master output nodes"),
             CompileError::DanglingEdge => write!(f, "edge references an unknown node id"),
+            CompileError::PortOutOfRange => write!(f, "edge references an out-of-range port"),
         }
     }
 }
@@ -207,10 +211,15 @@ pub fn compile(
         let from = slot_of(edge.from_node).ok_or(CompileError::DanglingEdge)?;
         let to = slot_of(edge.to_node).ok_or(CompileError::DanglingEdge)?;
         let port = edge.to_port as usize;
-        // Tolerate over-wide IR (clamp to declared input ports) rather than
-        // panic at run time: an out-of-range input port has nowhere to land.
+        // Reject out-of-range ports at COMPILE time: an unchecked port would
+        // index-panic in `mix_input`/the render step on the audio thread, which
+        // the RT-safety contract forbids. Validate BOTH the destination input
+        // port and the source output port the run-time loop will dereference.
         if port >= routing[to].inputs.len() {
-            return Err(CompileError::DanglingEdge);
+            return Err(CompileError::PortOutOfRange);
+        }
+        if (edge.from_port as usize) >= out_bufs[from].len() {
+            return Err(CompileError::PortOutOfRange);
         }
         routing[to].inputs[port].push(Source { node: from, port: edge.from_port });
     }
