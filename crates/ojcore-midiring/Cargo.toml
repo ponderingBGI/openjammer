@@ -1,8 +1,8 @@
 [package]
 name = "ojcore-midiring"
-version = "0.1.0"
-edition = "2021"
-license = "AGPL-3.0-only"
 description = "Lock-free SPSC byte ring with a frozen #[repr(C)] layout for the JS<->wasm SharedArrayBuffer boundary."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
 
 [dependencies]

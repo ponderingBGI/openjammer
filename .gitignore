@@ -31,3 +31,6 @@ dist-ssr
 
 # Rust / Cargo (ojcore workspace)
 /target
+
+# Claude Code agent worktrees (transient)
+.claude/worktrees/
