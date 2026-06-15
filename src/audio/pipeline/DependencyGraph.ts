@@ -331,9 +331,12 @@ export function estimateExecutionTime(
  */
 export function optimizeExecutionPlan(
   plan: ExecutionPlan,
-  _segments: Segment[],
-  _segmentCosts: Map<string, number>
+  segments: Segment[],
+  segmentCosts: Map<string, number>
 ): ExecutionPlan {
+  void segments;
+  void segmentCosts;
+
   // For now, return the original plan
   // TODO: Implement load balancing optimization
 

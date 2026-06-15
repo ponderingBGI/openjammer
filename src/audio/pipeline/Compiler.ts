@@ -51,8 +51,9 @@ export class PipelineCompiler {
 
   constructor(
     nodes: Map<string, GraphNode>,
-    _connections: Map<string, Connection>
+    connections: Map<string, Connection>
   ) {
+    void connections;
     this.nodes = nodes;
   }
 
@@ -61,8 +62,9 @@ export class PipelineCompiler {
    */
   updateGraph(
     nodes: Map<string, GraphNode>,
-    _connections: Map<string, Connection>
+    connections: Map<string, Connection>
   ): void {
+    void connections;
     this.nodes = nodes;
   }
 
