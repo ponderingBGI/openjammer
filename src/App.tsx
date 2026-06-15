@@ -9,6 +9,7 @@ import { Toolbar } from './components/Toolbar/Toolbar';
 import { Breadcrumbs } from './components/Toolbar/Breadcrumbs';
 import { HelpPanel } from './components/Toolbar/HelpPanel';
 import { SettingsPanel } from './components/Settings/SettingsPanel';
+import { CommandBar } from './components/CommandBar/CommandBar';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
 import { initAudioContext, isAudioReady, getLatencyMetrics } from './audio/AudioEngine';
@@ -378,6 +379,9 @@ function App() {
 
       {/* Settings Panel */}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+
+      {/* Command Bar (Ctrl/Cmd+K) - owns its own toggle + open state (U19) */}
+      <CommandBar />
 
       {/* Help Panel */}
       <HelpPanel />
