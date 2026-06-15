@@ -8,6 +8,9 @@
 //!   duplex input), and inside the realtime-promoted audio callback drains the
 //!   UI->RT [`ojcore::CommandQueue`] then runs [`ojcore::Engine::process_block`].
 //! * [`AssetStore`] — off-RT WAV decode (symphonia) and write/capture (hound).
+//! * [`AssetCatalog`] — content-addressed, deduplicating, eviction-free in-memory
+//!   store of decoded [`Pcm`] keyed by [`ojproto::AssetId`]: the off-RT side the
+//!   engine's `AssetId` handles point at. See [`store`] for the fetch protocol.
 //! * [`latency`] — the Phase-1 loopback round-trip latency math + impulse
 //!   onset detection, plus the `loopback` harness (this lib + `src/bin/loopback.rs`).
 //!
@@ -18,12 +21,14 @@
 pub mod asset;
 pub mod host;
 pub mod latency;
+pub mod store;
 
 pub use asset::{AssetError, AssetStore, Pcm};
 pub use host::{render_block, AudioHost, BlockProcessor, HostError, StreamRequest, DEFAULT_RUN};
 pub use latency::{
     detect_onset, frames_to_ms, measure_round_trip_frames, ms_to_frames, LatencyEstimate,
 };
+pub use store::{content_address, AssetCatalog};
 
 /// The amplitude threshold used to detect the loopback impulse in the captured
 /// buffer. Well above any realistic noise floor, well below a full-scale click.
