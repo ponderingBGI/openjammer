@@ -80,6 +80,79 @@ describe('graphStore', () => {
                 }
             }
         });
+
+        it('should migrate old looper sample-out ports and connections', () => {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                state: {
+                    nodes: [
+                        ['looper-1', {
+                            id: 'looper-1',
+                            type: 'looper',
+                            category: 'routing',
+                            position: { x: 0, y: 0 },
+                            data: { duration: 10, isRecording: false, loops: [], currentTime: 0 },
+                            ports: [
+                                { id: 'audio-in', name: 'Audio In', type: 'audio', direction: 'input', position: { x: 0, y: 0.5 } },
+                                { id: 'audio-out', name: 'Audio Out', type: 'audio', direction: 'output', position: { x: 1, y: 0.35 } },
+                                { id: 'sample-out', name: 'Sample', type: 'audio', direction: 'output', position: { x: 1, y: 0.65 } }
+                            ],
+                            parentId: null,
+                            childIds: [],
+                            specialNodes: []
+                        }],
+                        ['speaker-1', {
+                            id: 'speaker-1',
+                            type: 'speaker',
+                            category: 'output',
+                            position: { x: 300, y: 0 },
+                            data: { isMuted: false, volume: 1 },
+                            ports: [
+                                { id: 'audio-in', name: 'Audio In', type: 'audio', direction: 'input', position: { x: 0, y: 0.5 } }
+                            ],
+                            parentId: null,
+                            childIds: [],
+                            specialNodes: []
+                        }]
+                    ],
+                    connections: [
+                        ['stale-conn', {
+                            id: 'stale-conn',
+                            sourceNodeId: 'looper-1',
+                            sourcePortId: 'sample-out',
+                            targetNodeId: 'speaker-1',
+                            targetPortId: 'audio-in',
+                            type: 'audio'
+                        }],
+                        ['valid-conn', {
+                            id: 'valid-conn',
+                            sourceNodeId: 'looper-1',
+                            sourcePortId: 'audio-out',
+                            targetNodeId: 'speaker-1',
+                            targetPortId: 'audio-in',
+                            type: 'audio'
+                        }]
+                    ],
+                    selectedConnectionIds: ['stale-conn', 'valid-conn']
+                }
+            }));
+
+            const storage = (useGraphStore as unknown as { persist: { getOptions: () => { storage: { getItem: (name: string) => unknown } } } }).persist?.getOptions?.()?.storage;
+
+            if (storage) {
+                const result = storage.getItem(STORAGE_KEY) as {
+                    state: {
+                        nodes: Map<string, { ports: { id: string }[] }>;
+                        connections: Map<string, unknown>;
+                        selectedConnectionIds: Set<string>;
+                    }
+                } | null;
+
+                expect(result?.state.nodes.get('looper-1')?.ports.map(port => port.id)).toEqual(['audio-in', 'audio-out']);
+                expect(result?.state.connections.has('stale-conn')).toBe(false);
+                expect(result?.state.connections.has('valid-conn')).toBe(true);
+                expect(result?.state.selectedConnectionIds.has('stale-conn')).toBe(false);
+            }
+        });
     });
 
     describe('node operations', () => {
@@ -94,6 +167,16 @@ describe('graphStore', () => {
             const rootNodes = useGraphStore.getState().getRootNodes();
             expect(rootNodes.length).toBe(1);
             expect(rootNodes[0].type).toBe('piano');
+        });
+
+        it('should add loopers with a single output port', () => {
+            useGraphStore.getState().addNode('looper', { x: 0, y: 0 });
+
+            const looper = Array.from(useGraphStore.getState().nodes.values())
+                .find(node => node.type === 'looper');
+
+            expect(looper?.ports.map(port => port.id)).toEqual(['audio-in', 'audio-out']);
+            expect(looper?.ports.filter(port => port.direction === 'output')).toHaveLength(1);
         });
 
         it('should generate unique node IDs', () => {

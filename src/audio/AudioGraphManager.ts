@@ -1649,7 +1649,7 @@ class AudioGraphManager {
     }
 
     /**
-     * Send an AudioBuffer from a source node (Library, Looper) to connected Samplers
+     * Send an AudioBuffer from a Library source node to connected Samplers
      * via the sample-out port
      */
     sendSampleBuffer(sourceNodeId: string, buffer: AudioBuffer): void {

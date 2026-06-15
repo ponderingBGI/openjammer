@@ -475,8 +475,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Record and loop audio with auto-detection',
         defaultPorts: [
             { ...audioInput, position: { x: 0, y: 0.5 } },
-            { ...audioOutput, position: { x: 1, y: 0.35 } },
-            { id: 'sample-out', name: 'Sample', type: 'audio', direction: 'output', position: { x: 1, y: 0.65 } }
+            { ...audioOutput, position: { x: 1, y: 0.5 } }
         ],
         defaultData: {
             duration: 10,

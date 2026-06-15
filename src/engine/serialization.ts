@@ -97,16 +97,27 @@ export function importWorkflow(
             specialNodes: []
         };
     });
+    const nodesById = new Map(nodes.map(node => [node.id, node]));
 
     // Reconstruct connections
-    const connections: Connection[] = workflow.connections.map((serialized) => ({
-        id: serialized.id,
-        sourceNodeId: serialized.sourceNodeId,
-        sourcePortId: serialized.sourcePortId,
-        targetNodeId: serialized.targetNodeId,
-        targetPortId: serialized.targetPortId,
-        type: serialized.type
-    }));
+    const connections: Connection[] = workflow.connections
+        .filter((serialized) => {
+            const sourceNode = nodesById.get(serialized.sourceNodeId);
+            const targetNode = nodesById.get(serialized.targetNodeId);
+
+            return Boolean(
+                sourceNode?.ports.some(port => port.id === serialized.sourcePortId) &&
+                targetNode?.ports.some(port => port.id === serialized.targetPortId)
+            );
+        })
+        .map((serialized) => ({
+            id: serialized.id,
+            sourceNodeId: serialized.sourceNodeId,
+            sourcePortId: serialized.sourcePortId,
+            targetNodeId: serialized.targetNodeId,
+            targetPortId: serialized.targetPortId,
+            type: serialized.type
+        }));
 
     return { nodes, connections };
 }

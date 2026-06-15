@@ -916,6 +916,7 @@ export function NodeCanvas() {
     // Cache for port positions - invalidated when pan/zoom/nodes change
     // This prevents expensive DOM queries on every render for every connection
     const portPositionCache = useRef<Map<string, Position>>(new Map());
+    const [portLayoutVersion, setPortLayoutVersion] = useState(0);
     const lastPanZoom = useRef({ pan, zoom });
 
     // Invalidate cache when pan/zoom changes
@@ -932,6 +933,17 @@ export function NodeCanvas() {
     useEffect(() => {
         portPositionCache.current.clear();
     }, [allNodes]);
+
+    // Connections render before nodes, so the first pass can only use fallback
+    // math. Re-render once after the node DOM paints so cables anchor to dots.
+    useEffect(() => {
+        const frame = window.requestAnimationFrame(() => {
+            portPositionCache.current.clear();
+            setPortLayoutVersion(version => version + 1);
+        });
+
+        return () => window.cancelAnimationFrame(frame);
+    }, [nodes, connections.size]);
 
     // Get port position for connection rendering
     // Uses cached positions or DOM query for accurate positions, falls back to math calculation
@@ -969,11 +981,7 @@ export function NodeCanvas() {
         // Fall back to math-based calculation
         const node = allNodes.get(nodeId);
         if (!node) return null;
-        const position = calculatePortPosition(node, portId);
-        if (position) {
-            portPositionCache.current.set(cacheKey, position);
-        }
-        return position;
+        return calculatePortPosition(node, portId);
     }, [allNodes, pan, zoom]);
 
     // Render connection path using memoized component
@@ -1015,7 +1023,7 @@ export function NodeCanvas() {
                 onSelect={selectConnection}
             />
         );
-    }, [getPortPosition, selectedConnectionIds, selectConnection, allNodes, allConnections, signalLevels]);
+    }, [getPortPosition, selectedConnectionIds, selectConnection, allNodes, allConnections, signalLevels, portLayoutVersion]);
 
     // Render temporary connection while dragging
     const renderTempConnection = useCallback(() => {
@@ -1051,7 +1059,7 @@ export function NodeCanvas() {
                 })}
             </>
         );
-    }, [isConnecting, connectingFrom, getPortPosition, screenToCanvas, mousePos]);
+    }, [isConnecting, connectingFrom, getPortPosition, screenToCanvas, mousePos, portLayoutVersion]);
 
     // Calculate bounds for current level's nodes (not root)
     const getCurrentLevelBounds = useCallback((): NodeBounds | null => {

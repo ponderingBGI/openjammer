@@ -55,6 +55,31 @@ function generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 }
 
+function migrateNodePorts(node: GraphNode): GraphNode {
+    if (!Array.isArray(node.ports)) {
+        return node;
+    }
+
+    node.ports = node.ports
+        .filter(port => !(node.type === 'looper' && port.id === 'sample-out'))
+        .map(port => ({
+            ...port,
+            type: (port.type as string) === 'technical' ? 'control' : port.type
+        }));
+
+    return node;
+}
+
+function connectionPortsExist(conn: Connection, nodes: Map<string, GraphNode>): boolean {
+    const sourceNode = nodes.get(conn.sourceNodeId);
+    const targetNode = nodes.get(conn.targetNodeId);
+
+    return Boolean(
+        sourceNode?.ports.some(port => port.id === conn.sourcePortId) &&
+        targetNode?.ports.some(port => port.id === conn.targetPortId)
+    );
+}
+
 /**
  * Get approximate dimensions for a node based on its type
  */
@@ -1788,26 +1813,21 @@ export const useGraphStore = create<GraphStore>()(
                                 if (!Array.isArray(node.childIds)) node.childIds = [];
                                 if (!Array.isArray(node.specialNodes)) node.specialNodes = [];
 
-                                // MIGRATION: Rename 'technical' port types to 'control'
-                                if (Array.isArray(node.ports)) {
-                                    node.ports = node.ports.map(port => ({
-                                        ...port,
-                                        type: (port.type as string) === 'technical' ? 'control' : port.type
-                                    }));
-                                }
-
-                                return [id, node] as [string, GraphNode];
+                                return [id, migrateNodePorts(node)] as [string, GraphNode];
                             })
                         );
 
                         // MIGRATION: Rename 'technical' connection types to 'control'
+                        // and drop connections attached to ports removed by migrations.
                         const connectionsArray = Array.isArray(parsed.state.connections) ? parsed.state.connections : [];
-                        const migratedConnections = connectionsArray.map(([id, conn]: [string, Connection]) => {
-                            if ((conn.type as string) === 'technical') {
-                                conn.type = 'control';
-                            }
-                            return [id, conn] as [string, Connection];
-                        });
+                        const migratedConnections = connectionsArray
+                            .map(([id, conn]: [string, Connection]) => {
+                                if ((conn.type as string) === 'technical') {
+                                    conn.type = 'control';
+                                }
+                                return [id, conn] as [string, Connection];
+                            })
+                            .filter((entry: [string, Connection]) => connectionPortsExist(entry[1], nodes));
 
                         // Deserialize rootNodeIds (or compute from nodes if missing)
                         let rootNodeIds = parsed.state.rootNodeIds;
@@ -1819,6 +1839,11 @@ export const useGraphStore = create<GraphStore>()(
                         }
 
                         const connections = new Map<string, Connection>(migratedConnections);
+                        const selectedConnectionIds = new Set(
+                            Array.isArray(parsed.state.selectedConnectionIds)
+                                ? parsed.state.selectedConnectionIds.filter((id: string) => connections.has(id))
+                                : []
+                        );
                         return {
                             state: {
                                 ...parsed.state,
@@ -1827,7 +1852,7 @@ export const useGraphStore = create<GraphStore>()(
                                 connectionsByNode: rebuildConnectionIndex(connections),
                                 rootNodeIds,
                                 selectedNodeIds: new Set(Array.isArray(parsed.state.selectedNodeIds) ? parsed.state.selectedNodeIds : []),
-                                selectedConnectionIds: new Set(Array.isArray(parsed.state.selectedConnectionIds) ? parsed.state.selectedConnectionIds : []),
+                                selectedConnectionIds,
                                 history: Array.isArray(parsed.state.history) ? parsed.state.history : [],
                                 historyIndex: typeof parsed.state.historyIndex === 'number' ? parsed.state.historyIndex : -1
                             }

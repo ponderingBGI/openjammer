@@ -111,11 +111,9 @@ export const LooperNode = memo(function LooperNode({
 
     // Get port IDs from node.ports
     const inputPort = node.ports.find(p => p.direction === 'input' && p.type === 'audio');
-    const outputPort = node.ports.find(p => p.direction === 'output' && p.type === 'audio' && p.id !== 'sample-out');
-    const sampleOutPort = node.ports.find(p => p.id === 'sample-out');
+    const outputPort = node.ports.find(p => p.direction === 'output' && p.type === 'audio');
     const inputPortId = inputPort?.id || 'audio-in';
     const outputPortId = outputPort?.id || 'audio-out';
-    const sampleOutPortId = sampleOutPort?.id || 'sample-out';
 
     // Get the Looper instance from AudioGraphManager
     const getLooper = useCallback(() => {
@@ -147,10 +145,7 @@ export const LooperNode = memo(function LooperNode({
                 setWaveformHistory([]);
                 setPlayheadPosition(0);
 
-                // Send the loop's audio buffer to connected samplers via sample-out port
                 if (audioLoop.buffer) {
-                    audioGraphManager.sendSampleBuffer(node.id, audioLoop.buffer);
-
                     // Auto-save to project library with "loop" tag
                     // Use ref to get latest function without causing effect re-runs
                     try {
@@ -652,25 +647,6 @@ export const LooperNode = memo(function LooperNode({
                 />
             </div>
 
-            {/* Sample-out port - positioned on right side below audio-out */}
-            {sampleOutPort && (
-                <div
-                    className={`looper-sample-out-port ${hasConnection(sampleOutPortId) ? 'connected' : ''}`}
-                    style={{
-                        position: 'absolute',
-                        right: '-8px',
-                        top: `${(sampleOutPort.position?.y || 0.65) * 100}%`,
-                        transform: 'translateY(-50%)'
-                    }}
-                    onMouseDown={(e) => handlePortMouseDown?.(sampleOutPortId, e)}
-                    onMouseUp={(e) => handlePortMouseUp?.(sampleOutPortId, e)}
-                    onMouseEnter={() => handlePortMouseEnter?.(sampleOutPortId)}
-                    onMouseLeave={handlePortMouseLeave}
-                    data-node-id={node.id}
-                    data-port-id={sampleOutPortId}
-                    title="Sample buffer output - connect to Sampler"
-                />
-            )}
         </div>
     );
 });

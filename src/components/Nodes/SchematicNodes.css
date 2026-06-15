@@ -1233,17 +1233,20 @@
     max-width: 260px;
 }
 
-/* Main row with inline ports and duration */
+/* Main row with side ports and duration */
 .looper-main-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: var(--space-sm) var(--space-md);
+    justify-content: center;
+    padding: var(--space-sm) var(--space-lg);
     gap: var(--space-sm);
+    position: relative;
 }
 
 .looper-input-port,
 .looper-output-port {
+    position: absolute;
+    top: 50%;
     width: 14px;
     height: 14px;
     border: var(--border-sketch-width) solid var(--sketch-black);
@@ -1254,10 +1257,14 @@
 }
 
 .looper-input-port {
+    left: 0;
+    transform: translate(-50%, -50%);
     background: var(--audio-input);
 }
 
 .looper-output-port {
+    right: 0;
+    transform: translate(50%, -50%);
     background: var(--audio-output);
 }
 
@@ -1267,30 +1274,12 @@
     box-shadow: 0 0 6px var(--audio-connected);
 }
 
-.looper-input-port:hover,
+.looper-input-port:hover {
+    transform: translate(-50%, -50%) scale(1.2);
+}
+
 .looper-output-port:hover {
-    transform: scale(1.2);
-}
-
-/* Sample-out port - for sending buffer to sampler */
-.looper-sample-out-port {
-    width: 14px;
-    height: 14px;
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: 50%;
-    cursor: crosshair;
-    transition: all var(--transition-fast);
-    background: linear-gradient(135deg, var(--audio-output), var(--accent-primary));
-}
-
-.looper-sample-out-port:hover {
-    transform: scale(1.2);
-    box-shadow: 0 0 8px var(--accent-primary);
-}
-
-.looper-sample-out-port.connected {
-    background: var(--accent-primary);
-    box-shadow: 0 0 8px var(--accent-primary);
+    transform: translate(50%, -50%) scale(1.2);
 }
 
 /* Duration container - centered with fixed height */
