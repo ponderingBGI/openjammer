@@ -118,11 +118,9 @@ export class RecordingWorklet {
         }
 
         if (this.isRecording) {
-            console.warn('[RecordingWorklet] Already recording - skipping start');
             return;
         }
 
-        console.log('[RecordingWorklet] start() - setting up new recording cycle');
         this.buffers = [];
         this.totalBufferBytes = 0;
         this.hasWarnedMemory = false;
@@ -141,11 +139,9 @@ export class RecordingWorklet {
      */
     stop(): void {
         if (!this.workletNode || !this.isRecording) {
-            console.log('[RecordingWorklet] stop() called but not recording or no worklet');
             return;
         }
 
-        console.log('[RecordingWorklet] stop() - sending stop command, buffers collected:', this.buffers.length);
         this.isRecording = false;
         this.workletNode.port.postMessage({ command: 'stop' });
     }
@@ -200,20 +196,15 @@ export class RecordingWorklet {
      * Assemble all received buffers into a single AudioBuffer
      */
     private assembleBuffer(): void {
-        console.log('[RecordingWorklet] assembleBuffer called, buffers:', this.buffers.length);
-
         if (this.buffers.length === 0) {
-            console.warn('[RecordingWorklet] No audio data recorded');
             this.onComplete?.(this.context.createBuffer(1, 1, this.context.sampleRate));
             return;
         }
 
         // Calculate total length
         const totalLength = this.buffers.reduce((sum, b) => sum + b.length, 0);
-        console.log('[RecordingWorklet] Total samples:', totalLength, 'duration:', (totalLength / this.context.sampleRate).toFixed(2) + 's');
 
         if (totalLength === 0) {
-            console.warn('[RecordingWorklet] Empty recording');
             this.onComplete?.(this.context.createBuffer(1, 1, this.context.sampleRate));
             return;
         }
@@ -240,11 +231,10 @@ export class RecordingWorklet {
 
         // Invoke callback
         if (this.onComplete) {
-            console.log('[RecordingWorklet] Invoking onComplete callback');
             this.onComplete(audioBuffer);
             this.onComplete = null;
         } else {
-            console.error('[RecordingWorklet] ERROR: onComplete is null! Buffer will be lost.');
+            console.error('[RecordingWorklet] onComplete is null - buffer will be lost');
         }
     }
 

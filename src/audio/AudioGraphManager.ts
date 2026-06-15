@@ -1384,9 +1384,8 @@ class AudioGraphManager {
 
             // Create analyser for signal visualization (connects in parallel)
             this.createConnectionAnalyser(connectionKey, sourceAudioNode.outputNode);
-        } catch (e) {
+        } catch {
             // Connection may already exist, that's fine
-            console.debug('Connection already exists or failed:', e);
         }
     }
 
@@ -1920,7 +1919,6 @@ class AudioGraphManager {
                 // Get the sampler adapter
                 const sampler = this.getSamplerAdapter(targetNodeId);
                 if (!sampler) {
-                    console.warn('[AudioGraphManager] Sampler adapter not found for node:', targetNodeId);
                     continue;
                 }
 
