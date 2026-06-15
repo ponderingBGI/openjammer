@@ -5,7 +5,23 @@ edition.workspace = true
 version.workspace = true
 license.workspace = true
 
+[features]
+# `std` pulls in the host-side RT plumbing (command ring + graph hot-swap) that
+# needs OS threads/atomics beyond bare `alloc`. The compile/exec engine core and
+# the ABI stay `no_std` so they compile unchanged for the `wasm32` AudioWorklet:
+#   cargo build -p ojcore --no-default-features  ->  no_std core only.
+default = ["std"]
+std = ["dep:rtrb", "dep:basedrop", "dep:arc-swap"]
+
 [dependencies]
 ojproto = { path = "../ojproto" }
 ojcore-dsp = { path = "../ojcore-dsp" }
 serde = { workspace = true }
+
+# std-only RT host plumbing (versions pinned from a fresh `cargo add` resolve).
+rtrb = { version = "0.3.4", optional = true }       # wait-free SPSC ring (command queue)
+basedrop = { version = "0.1.3", optional = true }   # deferred, RT-safe drop of the old program
+arc-swap = { version = "1.9.1", optional = true }   # lock-free atomic program publish/read
+
+[dev-dependencies]
+assert_no_alloc = "1.1.2"                            # proves the hot loop allocates zero bytes

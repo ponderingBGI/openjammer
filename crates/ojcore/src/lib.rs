@@ -28,17 +28,35 @@ pub mod loader;
 pub mod manifest;
 pub mod registry;
 
-// --- U4 will extend here (compile / exec / command / swap) ---
+// --- U4 engine core ---------------------------------------------------------
+// `compile` + `exec` are the engine proper and stay `no_std` (alloc only) so
+// they compile unchanged for the `wasm32` AudioWorklet. `command` (rtrb ring)
+// and `swap` (basedrop + arc-swap graph hot-swap) need host atomics/threads and
+// sit behind the `std` feature.
+pub mod compile;
+pub mod exec;
+
+#[cfg(feature = "std")]
+pub mod command;
+#[cfg(feature = "std")]
+pub mod swap;
 
 // Re-export the CLOSED primitive set so downstream code lowers against a single
 // path and never has to depend on `ojproto` directly just for `PrimitiveKind`.
 pub use ojproto::PrimitiveKind;
 
 pub use builtin::{GainLoader, GainNode, GAIN_ID, GAIN_PARAM};
+pub use compile::{compile, CompileError, CompiledProgram, NodeRouting, Source};
 pub use dsp::{DspInstance, ProcessCtx};
+pub use exec::Engine;
 pub use loader::PluginLoader;
 pub use manifest::{DspKind, ParamDecl, PluginManifest, PortDecl, UiKind};
 pub use registry::PluginRegistry;
+
+#[cfg(feature = "std")]
+pub use command::{CommandConsumer, CommandProducer, CommandQueue};
+#[cfg(feature = "std")]
+pub use swap::ProgramSwap;
 
 #[cfg(test)]
 mod tests {
