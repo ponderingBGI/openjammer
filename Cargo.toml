@@ -1,0 +1,19 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+version = "0.0.0"
+license = "AGPL-3.0-only"
+
+# Pinned from a fresh cargo at scaffold time (governing principle #9).
+[workspace.dependencies]
+serde = { version = "1.0.228", default-features = false, features = ["derive", "alloc"] }
+libm = "0.2"
+
+# Keep release builds tight + deny accidental panics-as-control-flow later.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

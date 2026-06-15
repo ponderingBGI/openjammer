@@ -1,0 +1,9 @@
+[package]
+name = "ojproto"
+description = "OpenJammer UI<->engine wire protocol and OjGraph IR. Control-rate ONLY: no audio sample buffers ever cross this boundary."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
