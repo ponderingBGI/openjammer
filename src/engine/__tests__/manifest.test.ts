@@ -1,0 +1,181 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+import { nodeDefinitions } from '../registry';
+import {
+    allManifests,
+    manifestFor,
+    manifestFromDefinition,
+    type PluginManifest,
+} from '../manifest';
+import type { NodeType } from '../types';
+
+// Load the frozen v1 schema from the real file (single source of truth — the
+// same schema the Rust PluginManifest mirrors). vitest runs from the repo root.
+const SCHEMA_PATH = resolve(process.cwd(), 'schemas/oj-plugin-v1.json');
+const schema = JSON.parse(readFileSync(SCHEMA_PATH, 'utf8')) as JsonSchema;
+
+// ---------------------------------------------------------------------------
+// A small JSON-Schema validator covering exactly the features oj-plugin-v1.json
+// uses (object/array/string/number/integer, required, enum, minLength,
+// minimum/maximum, additionalProperties:false, items). No external deps.
+// ---------------------------------------------------------------------------
+
+interface JsonSchema {
+    type?: string;
+    required?: string[];
+    enum?: unknown[];
+    properties?: Record<string, JsonSchema>;
+    items?: JsonSchema;
+    additionalProperties?: boolean;
+    minLength?: number;
+    minimum?: number;
+    maximum?: number;
+}
+
+function validate(value: unknown, s: JsonSchema, path: string, errors: string[]): void {
+    if (s.enum) {
+        if (!s.enum.includes(value as never)) {
+            errors.push(`${path}: ${JSON.stringify(value)} not in enum ${JSON.stringify(s.enum)}`);
+        }
+        return;
+    }
+
+    switch (s.type) {
+        case 'object': {
+            if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+                errors.push(`${path}: expected object`);
+                return;
+            }
+            const obj = value as Record<string, unknown>;
+            for (const key of s.required ?? []) {
+                if (!(key in obj)) errors.push(`${path}: missing required "${key}"`);
+            }
+            if (s.additionalProperties === false) {
+                for (const key of Object.keys(obj)) {
+                    if (!(s.properties && key in s.properties)) {
+                        errors.push(`${path}: additional property "${key}" not allowed`);
+                    }
+                }
+            }
+            for (const [key, sub] of Object.entries(s.properties ?? {})) {
+                if (key in obj) validate(obj[key], sub, `${path}.${key}`, errors);
+            }
+            return;
+        }
+        case 'array': {
+            if (!Array.isArray(value)) {
+                errors.push(`${path}: expected array`);
+                return;
+            }
+            if (s.items) value.forEach((v, i) => validate(v, s.items as JsonSchema, `${path}[${i}]`, errors));
+            return;
+        }
+        case 'string': {
+            if (typeof value !== 'string') {
+                errors.push(`${path}: expected string`);
+                return;
+            }
+            if (s.minLength !== undefined && value.length < s.minLength) {
+                errors.push(`${path}: shorter than minLength ${s.minLength}`);
+            }
+            return;
+        }
+        case 'integer':
+        case 'number': {
+            if (typeof value !== 'number' || !Number.isFinite(value)) {
+                errors.push(`${path}: expected number`);
+                return;
+            }
+            if (s.type === 'integer' && !Number.isInteger(value)) {
+                errors.push(`${path}: expected integer`);
+            }
+            if (s.minimum !== undefined && value < s.minimum) errors.push(`${path}: below minimum ${s.minimum}`);
+            if (s.maximum !== undefined && value > s.maximum) errors.push(`${path}: above maximum ${s.maximum}`);
+            return;
+        }
+        default:
+            // No `type` constraint (e.g. the `kind` property declared only via
+            // its enum) — nothing further to check here.
+            return;
+    }
+}
+
+function schemaErrors(manifest: PluginManifest): string[] {
+    const errors: string[] = [];
+    validate(manifest, schema, manifest.id, errors);
+    return errors;
+}
+
+describe('PluginManifest derivation', () => {
+    it('derives a schema-valid manifest for every nodeDefinition', () => {
+        const types = Object.keys(nodeDefinitions) as NodeType[];
+        expect(types.length).toBeGreaterThan(0);
+
+        for (const type of types) {
+            const manifest = manifestFor(type);
+            const errors = schemaErrors(manifest);
+            expect(errors, `manifest for "${type}" must be schema-valid`).toEqual([]);
+        }
+    });
+
+    it('covers every nodeDefinition exactly once', () => {
+        const manifests = allManifests();
+        const ids = manifests.map((m) => m.id);
+        expect(ids.length).toBe(Object.keys(nodeDefinitions).length);
+        expect(new Set(ids).size).toBe(ids.length); // unique
+    });
+
+    it('is a pure mapping from nodeDefinitions (no hand-duplicated lists)', () => {
+        for (const def of Object.values(nodeDefinitions)) {
+            const manifest = manifestFromDefinition(def);
+            expect(manifest.id).toBe(`builtin.${def.type}`);
+            expect(manifest.name).toBe(def.name);
+        }
+    });
+
+    it('marks visual/routing nodes dsp:none and audio nodes dsp:builtin', () => {
+        expect(manifestFor('amplifier').dsp).toBe('builtin');
+        expect(manifestFor('amplifier').kind).toBe('Gain');
+        expect(manifestFor('speaker').dsp).toBe('builtin');
+        expect(manifestFor('sampler').dsp).toBe('builtin');
+        // Purely-visual / routing nodes have no audio kernel.
+        expect(manifestFor('canvas-input').dsp).toBe('none');
+        expect(manifestFor('container').dsp).toBe('none');
+        expect(manifestFor('keyboard-visual').dsp).toBe('none');
+    });
+
+    it('routes rich bespoke nodes to ui:react and the rest to ui:auto', () => {
+        // The ~12 rich bespoke surfaces.
+        expect(manifestFor('looper').ui).toBe('react');
+        expect(manifestFor('amplifier').ui).toBe('react');
+        expect(manifestFor('sampler').ui).toBe('react');
+        expect(manifestFor('effect').ui).toBe('react');
+        // Simple nodes get the free AutoParamPanel.
+        expect(manifestFor('container').ui).toBe('auto');
+        expect(manifestFor('piano').ui).toBe('auto');
+
+        // Exactly the documented "~12 rich ones" are ui:react.
+        const reactCount = allManifests().filter((m) => m.ui === 'react').length;
+        expect(reactCount).toBe(12);
+    });
+
+    it('counts ports from defaultPorts', () => {
+        // amplifier: audio-in + gain-in (control) -> audio-out
+        const amp = manifestFor('amplifier');
+        expect(amp.ports).toEqual({ audio_in: 1, audio_out: 1, control_in: 1, control_out: 0 });
+    });
+
+    it('derives numeric params from defaultData', () => {
+        const sampler = manifestFor('sampler');
+        const names = sampler.params.map((p) => p.name);
+        expect(names).toContain('gain');
+        expect(names).toContain('attack');
+        // ids are stable, contiguous, and >= 0
+        sampler.params.forEach((p, i) => expect(p.id).toBe(i));
+        for (const p of sampler.params) {
+            expect(p.default).toBeGreaterThanOrEqual(p.min);
+            expect(p.default).toBeLessThanOrEqual(p.max);
+        }
+    });
+});
