@@ -37,10 +37,10 @@ impl Engine {
     /// of work, no allocation, no locking.
     ///
     /// * `SetParam`  -> resolve node slot, call `set_param(param, value)`.
-    /// * `NoteOn`/`NoteOff` -> resolve node slot (proves routing); the current
-    ///   [`crate::DspInstance`] trait exposes no note entry point, so the event
-    ///   is dropped at the instance seam (a dedicated event port is a later
-    ///   unit). Documented as such rather than faked through `set_param`.
+    /// * `NoteOn`/`NoteOff` -> resolve node slot, drive the target instance's
+    ///   [`crate::DspInstance::note_on`] / [`crate::DspInstance::note_off`].
+    ///   Effect-only nodes inherit the trait's default no-op, so the event is
+    ///   harmlessly ignored there; instrument/voice nodes consume it.
     /// * `Bypass`    -> toggle the node's bypass flag.
     /// * `Transport*`/`Seek` -> drive the minimal sample-counting clock.
     pub fn apply(&mut self, cmd: RtCommand) {
@@ -50,9 +50,15 @@ impl Engine {
                     self.program_mut().instances[slot].set_param(param, value);
                 }
             }
-            RtCommand::NoteOn { node, .. } | RtCommand::NoteOff { node, .. } => {
-                // Resolve only; no instance-level note sink exists yet.
-                let _ = self.program().slot_of_id(node);
+            RtCommand::NoteOn { node, note, vel } => {
+                if let Some(slot) = self.program().slot_of_id(node) {
+                    self.program_mut().instances[slot].note_on(note, vel);
+                }
+            }
+            RtCommand::NoteOff { node, note } => {
+                if let Some(slot) = self.program().slot_of_id(node) {
+                    self.program_mut().instances[slot].note_off(note);
+                }
             }
             RtCommand::Bypass { node, on } => {
                 if let Some(slot) = self.program().slot_of_id(node) {

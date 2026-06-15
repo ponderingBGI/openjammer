@@ -53,6 +53,16 @@ pub trait DspInstance: Send {
     /// is invoked from the same thread as `process` for the smoothed hot path.
     fn set_param(&mut self, id: u16, value: f32);
 
+    /// RT-thread note-on for instrument/voice nodes (MIDI note 0..=127,
+    /// velocity 0..=127). Default no-op so pure-effect nodes (e.g.
+    /// [`crate::GainNode`]) are unaffected. RT-safe: invoked from the same
+    /// thread as `process`; implementors MUST NOT allocate.
+    fn note_on(&mut self, _note: u8, _vel: u8) {}
+
+    /// RT-thread note-off for instrument/voice nodes. Default no-op. RT-safe:
+    /// invoked from the same thread as `process`; implementors MUST NOT allocate.
+    fn note_off(&mut self, _note: u8) {}
+
     /// Clear internal state (filter memory, delay lines, phase). Default no-op.
     fn reset(&mut self) {}
 }
