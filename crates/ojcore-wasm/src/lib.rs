@@ -1,0 +1,463 @@
+//! wasm32 AudioWorklet host for `ojcore`.
+//!
+//! This crate is the wasm half of OpenJammer's engine: a thin `wasm-bindgen`
+//! shell wrapping `ojcore`'s **no_std** compile/exec core. The std-only host
+//! plumbing (`rtrb` command queue, `basedrop` deferred drop, `arc-swap` graph
+//! swap) is NOT available on `wasm32`, so we depend on `ojcore` with
+//! `default-features = false` and bring our own [`ojcore_midiring`]
+//! `SharedArrayBuffer` rings for the UI -> engine command path and the
+//! worker -> worklet MIDI path.
+//!
+//! # JS surface (wasm-bindgen)
+//!   * [`init`] — allocate the host once: registry + an empty [`Engine`] +
+//!     the command/MIDI rings. Everything that allocates happens here, off the
+//!     render path.
+//!   * [`process`] — the AudioWorklet calls this each render quantum. It drains
+//!     the command ring into [`ojproto::RtCommand`]s, applies them to the
+//!     engine, then renders one block into a wasm-memory output buffer. **No
+//!     allocation, no locking, no panicking on this path.**
+//!   * [`load_graph`] — push a serialized [`ojproto::OjGraph`] (the same serde
+//!     JSON the rest of the protocol uses); it is compiled OFF the render path
+//!     and installed at the next block boundary.
+//!   * pointer/offset getters ([`output_ptr`], [`cmd_ring_ptr`],
+//!     [`midi_ring_ptr`], the `*_offset` family) so JS can build SAB / typed-
+//!     array views directly over wasm linear memory without copying.
+//!
+//! # Single-thread contract
+//! An AudioWorklet runs its processor on ONE thread. The whole host lives in a
+//! single `static mut` cell touched only from that thread, so no interior-
+//! mutability lock is needed. The rings themselves are the SPSC boundary to the
+//! *other* threads (UI / MIDI worker) and carry their own wait-free
+//! synchronization (see [`ojcore_midiring`]).
+#![cfg_attr(not(test), no_std)]
+
+extern crate alloc;
+
+mod nodes;
+
+use alloc::boxed::Box;
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
+
+use ojcore::{compile, Engine, GainLoader, PluginRegistry};
+use ojcore_midiring::{header_offsets, CmdRing, MidiRing};
+use ojproto::{IrNode, NodeIdx, OjGraph, PrimitiveKind, RtCommand, SCHEMA_VERSION};
+
+use nodes::{StructuralLoader, SPEAKER_OUT_ID};
+
+use wasm_bindgen::prelude::*;
+
+/// Largest RtCommand JSON frame we will ever pop, bytes. `RtCommand` is a tiny
+/// flat enum; its longest serde-JSON form (`{"SetParam":{"node":4294967295,
+/// "param":65535,"value":-1.0000000}}` ~ 60 B) fits comfortably. Sized with
+/// generous headroom so the drain scratch never needs to grow on the RT path.
+const CMD_FRAME_MAX: usize = 128;
+
+/// The whole engine host, allocated once by [`init`] and owned by the worklet
+/// thread. Boxed so its address (and the rings' addresses inside it) are stable
+/// for the lifetime of the audio context — JS keeps SAB views over them.
+struct Host {
+    /// The open plugin registry (built-ins registered at [`init`]).
+    registry: PluginRegistry,
+    /// The real-time engine. Starts as an empty (zero-node) program and is
+    /// re-`install`ed whenever [`load_graph`] compiles a new one.
+    engine: Engine,
+    /// UI -> engine command ring (JSON [`RtCommand`] frames). Boxed so JS can
+    /// view it in the `SharedArrayBuffer` at a stable address.
+    cmd_ring: Box<CmdRing>,
+    /// Worker -> worklet MIDI byte ring. Boxed for the same reason. Reserved for
+    /// the MIDI input path; exposed to JS now so the SAB layout is fixed.
+    midi_ring: Box<MidiRing>,
+    /// Mono master output the worklet copies to its render quantum. Pre-sized to
+    /// `block_size`; written in place by [`process`], never reallocated there.
+    out_buf: Vec<f32>,
+    /// Scratch popped command frame bytes (reused; never grows on the RT path).
+    cmd_scratch: Vec<u8>,
+    /// Render quantum the worklet uses (frames per [`process`] call).
+    block_size: usize,
+    /// Sample rate the engine compiles graphs against.
+    sample_rate: u32,
+}
+
+/// The single host instance. SOUND because an AudioWorklet processor runs on
+/// exactly one thread, and every accessor below is reached only from that
+/// thread's `process`/control callbacks. Not shared across threads — the rings
+/// are the only cross-thread surface and they are internally synchronized.
+static mut HOST: Option<Host> = None;
+
+/// Borrow the host mutably. Returns `None` before [`init`] has run.
+///
+/// # Safety
+/// Callers must be on the single worklet thread (the wasm execution model for
+/// an AudioWorklet guarantees this for the exported entry points).
+#[inline]
+#[allow(static_mut_refs)]
+fn host_mut() -> Option<&'static mut Host> {
+    // SAFETY: single-threaded worklet; no aliasing `&mut` can exist because
+    // every entry point takes and drops this borrow within one synchronous call.
+    unsafe { HOST.as_mut() }
+}
+
+/// Borrow the host immutably (for pointer/offset getters).
+#[inline]
+#[allow(static_mut_refs)]
+fn host_ref() -> Option<&'static Host> {
+    // SAFETY: as above; getters do not mutate.
+    unsafe { HOST.as_ref() }
+}
+
+/// The lone-`SpeakerOut` graph the engine starts on (silence) before any real
+/// graph is loaded. Kept tiny: one master sink, no edges.
+fn bootstrap_graph(sample_rate: u32, block_size: u32) -> OjGraph {
+    OjGraph {
+        ir_version: SCHEMA_VERSION,
+        sample_rate,
+        block_size,
+        nodes: vec![IrNode {
+            id: NodeIdx(0),
+            manifest_id: String::from(SPEAKER_OUT_ID),
+            kind: PrimitiveKind::SpeakerOut,
+            params: vec![],
+            assets: vec![],
+            n_in: 1,
+            n_out: 0,
+        }],
+        edges: vec![],
+        schedule: vec![],
+    }
+}
+
+/// Initialize the engine host. Call ONCE from the AudioWorklet constructor,
+/// before any [`process`] call.
+///
+/// Allocates everything up front: the registry (with built-ins), an empty
+/// engine, the command/MIDI rings, and the `block_size`-long output buffer. A
+/// second call re-initializes from scratch (the previous host is dropped here,
+/// off the render path).
+///
+/// `block_size` must be the worklet's render quantum (typically 128).
+#[wasm_bindgen]
+pub fn init(sample_rate: u32, block_size: u32) {
+    let block_size = block_size as usize;
+
+    let mut registry = PluginRegistry::new();
+    registry.register(Box::new(GainLoader::new()));
+    registry.register(Box::new(StructuralLoader::speaker_out()));
+
+    // `compile` requires exactly one master-output node, so the bootstrap graph
+    // is a LONE host `SpeakerOut` (no sources). It renders as silence until
+    // `load_graph` installs a real program — but it makes the engine valid from
+    // the very first `process` call.
+    let boot = bootstrap_graph(sample_rate, block_size as u32);
+    let program = compile(&boot, &registry).expect("master-only graph always compiles");
+    let engine = Engine::new(program);
+
+    let host = Host {
+        registry,
+        engine,
+        cmd_ring: Box::new(CmdRing::new()),
+        midi_ring: Box::new(MidiRing::new()),
+        out_buf: vec![0.0f32; block_size],
+        cmd_scratch: vec![0u8; CMD_FRAME_MAX],
+        block_size,
+        sample_rate,
+    };
+
+    // SAFETY: single-threaded worklet init; no other reference is live.
+    unsafe {
+        HOST = Some(host);
+    }
+}
+
+/// Compile and install a serialized [`OjGraph`] (serde JSON `bytes`).
+///
+/// Runs OFF the render path: compilation allocates (instances, routing, scratch
+/// buffers), then [`Engine::install`] swaps the new program in. The old program
+/// is returned by `install` and dropped here — never on the audio thread.
+///
+/// Returns `true` on success. On a malformed payload or a compile error it
+/// leaves the running program untouched and returns `false`, so a bad graph can
+/// never silence or crash a live engine.
+#[wasm_bindgen]
+pub fn load_graph(bytes: &[u8]) -> bool {
+    let Some(host) = host_mut() else { return false };
+
+    let graph: OjGraph = match serde_json::from_slice(bytes) {
+        Ok(g) => g,
+        Err(_) => return false,
+    };
+    // Honour the host's configured rate/quantum so buffer sizes match `process`.
+    let mut graph = graph;
+    graph.sample_rate = host.sample_rate;
+    graph.block_size = host.block_size as u32;
+
+    let program = match compile(&graph, &host.registry) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+    // `install` hands back the old program; dropping it here keeps the RT path
+    // allocation/free-free.
+    let _old = host.engine.install(program);
+    true
+}
+
+/// Render one block. The AudioWorklet calls this every render quantum.
+///
+/// Steps, all allocation-free:
+///   1. drain the command ring, applying each [`RtCommand`] to the engine;
+///   2. render `nframes` into the pre-sized output buffer.
+///
+/// `nframes` is clamped to the configured block size. Read the result from
+/// [`output_ptr`] (`nframes` f32s of mono master output).
+#[wasm_bindgen]
+pub fn process(nframes: u32) {
+    let Some(host) = host_mut() else { return };
+    let nframes = (nframes as usize).min(host.block_size);
+
+    drain_commands(host);
+
+    let out = &mut host.out_buf[..nframes];
+    host.engine.process_block(out, nframes);
+}
+
+/// Drain every pending command frame from the ring and apply it. Wait-free and
+/// allocation-free: `pop` reads into the reused `cmd_scratch`, and each frame is
+/// decoded into a `Copy` [`RtCommand`] applied in place.
+#[inline]
+fn drain_commands(host: &mut Host) {
+    // Split the borrow so the engine and the ring/scratch are disjoint.
+    let Host { engine, cmd_ring, cmd_scratch, .. } = host;
+    loop {
+        match cmd_ring.pop(cmd_scratch) {
+            None => break,
+            Some(len) => {
+                if len > cmd_scratch.len() {
+                    // Oversized frame (should never happen given CMD_FRAME_MAX);
+                    // the ring left it queued. Skipping the rest avoids spinning.
+                    break;
+                }
+                if let Ok(cmd) = serde_json::from_slice::<RtCommand>(&cmd_scratch[..len]) {
+                    apply_command(engine, cmd);
+                }
+            }
+        }
+    }
+}
+
+/// Apply one [`RtCommand`] to the engine through `ojcore`'s **no_std** public
+/// surface (allocation-free, no locks). This mirrors `ojcore`'s std-only
+/// `Engine::apply`, but reached via `program_mut()` because that convenience
+/// method lives behind the `std` feature we deliberately do NOT enable on wasm.
+///
+///   * `SetParam` -> resolve slot, `set_param(param, value)` on the instance.
+///   * `Bypass`   -> toggle the slot's bypass flag.
+///   * `NoteOn`/`NoteOff` -> resolved only; the [`ojcore::DspInstance`] trait
+///     exposes no note entry point yet (dropped at the instance seam, exactly as
+///     native `Engine::apply` documents).
+///   * `Transport*`/`Seek` -> the engine's transport clock (`playing` /
+///     `sample_pos`) is `pub(crate)` and only settable through the std-gated
+///     `Engine::apply`; with `std` off there is no no_std setter, so these are
+///     dropped here until `ojcore` exposes a no_std transport surface. The wasm
+///     worklet's transport is driven host-side (JS render-quantum clock) in the
+///     meantime, so this is not a functional gap on the boundary.
+#[inline]
+fn apply_command(engine: &mut Engine, cmd: RtCommand) {
+    match cmd {
+        RtCommand::SetParam { node, param, value } => {
+            if let Some(slot) = engine.program().slot_of_id(node) {
+                engine.program_mut().instances[slot].set_param(param, value);
+            }
+        }
+        RtCommand::Bypass { node, on } => {
+            if let Some(slot) = engine.program().slot_of_id(node) {
+                engine.program_mut().bypassed[slot] = on;
+            }
+        }
+        RtCommand::NoteOn { node, .. } | RtCommand::NoteOff { node, .. } => {
+            // Resolve only; no instance-level note sink exists yet.
+            let _ = engine.program().slot_of_id(node);
+        }
+        RtCommand::TransportPlay | RtCommand::TransportPause | RtCommand::Seek { .. } => {
+            // No no_std transport setter on `Engine` (see fn docs). Dropped.
+        }
+    }
+}
+
+// --- Memory / layout getters: let JS build SAB + typed-array views directly
+// over wasm linear memory, with zero copying across the boundary. ------------
+
+/// Pointer (byte offset into wasm linear memory) of the mono output buffer.
+/// JS reads `nframes` little-endian f32s starting here after each [`process`].
+#[wasm_bindgen]
+pub fn output_ptr() -> *const f32 {
+    host_ref().map_or(core::ptr::null(), |h| h.out_buf.as_ptr())
+}
+
+/// Configured render quantum (frames per [`process`] call / `output` length).
+#[wasm_bindgen]
+pub fn block_size() -> u32 {
+    host_ref().map_or(0, |h| h.block_size as u32)
+}
+
+/// Configured sample rate.
+#[wasm_bindgen]
+pub fn sample_rate() -> u32 {
+    host_ref().map_or(0, |h| h.sample_rate)
+}
+
+/// Base pointer of the command ring inside wasm linear memory. JS lays a
+/// `SharedArrayBuffer` view over `[cmd_ring_ptr, cmd_ring_ptr + cmd_ring_len)`
+/// and uses the `*_offset` getters below to find the header fields and data.
+#[wasm_bindgen]
+pub fn cmd_ring_ptr() -> *const u8 {
+    host_ref().map_or(core::ptr::null(), |h| {
+        (h.cmd_ring.as_ref() as *const CmdRing) as *const u8
+    })
+}
+
+/// Total byte length of the command ring struct (header + data region).
+#[wasm_bindgen]
+pub fn cmd_ring_len() -> u32 {
+    core::mem::size_of::<CmdRing>() as u32
+}
+
+/// Base pointer of the MIDI ring inside wasm linear memory (worker -> worklet).
+#[wasm_bindgen]
+pub fn midi_ring_ptr() -> *const u8 {
+    host_ref().map_or(core::ptr::null(), |h| {
+        (h.midi_ring.as_ref() as *const MidiRing) as *const u8
+    })
+}
+
+/// Total byte length of the MIDI ring struct (header + data region).
+#[wasm_bindgen]
+pub fn midi_ring_len() -> u32 {
+    core::mem::size_of::<MidiRing>() as u32
+}
+
+// The ring header offsets are identical for every `ByteRing<N>` (the `#[repr(C)]`
+// layout is frozen), so one set of getters serves both rings. JS adds these to
+// `cmd_ring_ptr()` / `midi_ring_ptr()` to address the atomics and data region.
+
+/// Byte offset of the `write` atomic index within a ring (producer-owned).
+#[wasm_bindgen]
+pub fn ring_write_offset() -> u32 {
+    header_offsets().write as u32
+}
+
+/// Byte offset of the `read` atomic index within a ring (consumer-owned).
+#[wasm_bindgen]
+pub fn ring_read_offset() -> u32 {
+    header_offsets().read as u32
+}
+
+/// Byte offset of the `capacity` field within a ring.
+#[wasm_bindgen]
+pub fn ring_capacity_offset() -> u32 {
+    header_offsets().capacity as u32
+}
+
+/// Byte offset of the first data byte within a ring.
+#[wasm_bindgen]
+pub fn ring_data_offset() -> u32 {
+    header_offsets().data as u32
+}
+
+/// Encode an [`RtCommand`] as the JSON frame the command ring expects. Helper
+/// for tests / a JS-side mirror; not on the render path. Returns the bytes a
+/// producer would `push` into the [`cmd_ring`](Host::cmd_ring).
+#[wasm_bindgen]
+pub fn encode_command_setparam(node: u32, param: u16, value: f32) -> Vec<u8> {
+    let cmd = RtCommand::SetParam { node: ojproto::NodeIdx(node), param, value };
+    // Off the RT path: this is a convenience encoder, allocation is fine here.
+    serde_json::to_vec(&cmd).unwrap_or_default()
+}
+
+/// Number of compiled nodes in the engine's current program, as a coarse
+/// liveness probe for JS (`0` == not initialized; `1` == bootstrap silence; `>1`
+/// == a real graph is loaded).
+#[wasm_bindgen]
+pub fn node_count() -> u32 {
+    host_ref().map_or(0, |h| h.engine.program().len() as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ojcore_midiring::CmdRing;
+    use ojproto::{NodeIdx, RtCommand};
+
+    /// A `SetParam` command round-trips through the exact JSON frame format the
+    /// command ring carries, and decodes back to the same `RtCommand`.
+    #[test]
+    fn setparam_json_frame_roundtrips() {
+        let bytes = encode_command_setparam(7, 0, 1.5);
+        let cmd: RtCommand = serde_json::from_slice(&bytes).expect("decode");
+        assert_eq!(cmd, RtCommand::SetParam { node: NodeIdx(7), param: 0, value: 1.5 });
+        assert!(bytes.len() <= CMD_FRAME_MAX, "frame must fit the RT scratch");
+    }
+
+    /// Pushing a JSON command frame into a `CmdRing` and popping it back yields
+    /// the original command — this is precisely what `drain_commands` does.
+    #[test]
+    fn cmd_ring_carries_json_frames() {
+        let ring = CmdRing::new();
+        let frame = encode_command_setparam(3, 2, -0.25);
+        assert!(ring.push(&frame), "frame fits the ring");
+
+        let mut scratch = [0u8; CMD_FRAME_MAX];
+        let len = ring.pop(&mut scratch).expect("frame present");
+        let cmd: RtCommand = serde_json::from_slice(&scratch[..len]).expect("decode");
+        assert_eq!(cmd, RtCommand::SetParam { node: NodeIdx(3), param: 2, value: -0.25 });
+    }
+
+    /// Every variant's JSON frame fits the fixed RT-path scratch, so the drain
+    /// loop never has to grow `cmd_scratch` on the audio thread.
+    #[test]
+    fn all_command_frames_fit_scratch() {
+        let cmds = [
+            RtCommand::SetParam { node: NodeIdx(u32::MAX), param: u16::MAX, value: f32::MIN },
+            RtCommand::NoteOn { node: NodeIdx(u32::MAX), note: 127, vel: 127 },
+            RtCommand::NoteOff { node: NodeIdx(u32::MAX), note: 127 },
+            RtCommand::Bypass { node: NodeIdx(u32::MAX), on: true },
+            RtCommand::TransportPlay,
+            RtCommand::TransportPause,
+            RtCommand::Seek { samples: u64::MAX },
+        ];
+        for c in cmds {
+            let n = serde_json::to_vec(&c).unwrap().len();
+            assert!(n <= CMD_FRAME_MAX, "{c:?} frame is {n} B, exceeds {CMD_FRAME_MAX}");
+        }
+    }
+
+    /// The frozen ring header offsets are stable and what the getters report,
+    /// so the JS-side SAB views address the right atomics.
+    #[test]
+    fn ring_offset_getters_match_header() {
+        let o = ojcore_midiring::header_offsets();
+        assert_eq!(ring_write_offset() as usize, o.write);
+        assert_eq!(ring_read_offset() as usize, o.read);
+        assert_eq!(ring_capacity_offset() as usize, o.capacity);
+        assert_eq!(ring_data_offset() as usize, o.data);
+    }
+
+    /// A round-trip of the bootstrap graph through JSON + `compile` proves
+    /// `load_graph` will accept the same serde JSON payload `init` builds and the
+    /// protocol emits. Mirrors the registry setup `init` performs, without the
+    /// wasm `static`.
+    #[test]
+    fn graph_json_compiles_against_registry() {
+        let mut registry = PluginRegistry::new();
+        registry.register(Box::new(GainLoader::new()));
+        registry.register(Box::new(StructuralLoader::speaker_out()));
+
+        let graph = bootstrap_graph(48_000, 128);
+        let json = serde_json::to_vec(&graph).unwrap();
+        let decoded: OjGraph = serde_json::from_slice(&json).unwrap();
+        let program = compile(&decoded, &registry).expect("bootstrap graph compiles");
+        let engine = Engine::new(program);
+        // One node: the lone master sink.
+        assert_eq!(engine.program().len(), 1);
+    }
+}

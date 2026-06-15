@@ -1,0 +1,26 @@
+[package]
+name = "ojcore-wasm"
+description = "wasm32 AudioWorklet host for ojcore: a wasm-bindgen entry wrapping ojcore's no_std compile/Engine core plus the ojcore-midiring SharedArrayBuffer command ring. Pre-allocated, zero-alloc on the render path."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# A cdylib so wasm-bindgen + the bundler can produce the .wasm the AudioWorklet
+# loads; rlib so the crate's tests build natively (see README for the build cmd).
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# The engine core, std-OFF: the std-only rtrb/basedrop/arc-swap plumbing is not
+# available on wasm32, so we drive the bare no_std compile/exec/Engine surface
+# and bring our own SharedArrayBuffer ring instead.
+ojcore = { path = "../ojcore", default-features = false }
+ojproto = { path = "../ojproto" }
+ojcore-midiring = { path = "../ojcore-midiring" }
+
+# JS<->wasm glue. Pinned (governing principle #9).
+wasm-bindgen = "=0.2.125"
+
+# no_std + alloc JSON: the OjGraph crosses the JS boundary as the SAME serde JSON
+# the rest of the protocol uses (see crates/ojproto/tests/wire_shapes.rs).
+serde_json = { version = "=1.0.150", default-features = false, features = ["alloc"] }
