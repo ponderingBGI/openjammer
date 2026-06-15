@@ -3,7 +3,7 @@
  */
 
 import { create } from 'zustand';
-import { audioGraphManager } from '../audio/AudioGraphManager';
+import { getExecutor } from '../audio/executor';
 import { resumeAudio } from '../audio/AudioEngine';
 import { getConnectionsForRow, getConnectionsForPedal } from '../utils/connectionActivity';
 
@@ -240,13 +240,14 @@ export const useAudioStore = create<AudioStore>((set, get) => ({
             activeKeys: new Set(state.activeKeys).add(keyId)
         }));
 
-        // Trigger note on connected instruments via AudioGraphManager with normalized velocity
+        // Trigger note on connected instruments via the executor with normalized velocity
         const velocity = get().defaultVelocity;
-        audioGraphManager.triggerKeyboardNote(keyboardId, row, keyIndex, velocity);
+        const executor = getExecutor();
+        executor.noteOn(keyboardId, row, keyIndex, velocity);
 
         // Activate visual feedback on connection cables
         const connectionIds = getConnectionsForRow(keyboardId, row);
-        connectionIds.forEach(id => audioGraphManager.activateControlSignal(id));
+        connectionIds.forEach(id => executor.activateControlSignal(id));
     },
 
     releaseKeyboardSignal: (keyboardId, row, keyIndex) => {
@@ -259,30 +260,33 @@ export const useAudioStore = create<AudioStore>((set, get) => ({
         });
 
         // Release note on connected instruments
-        audioGraphManager.releaseKeyboardNote(keyboardId, row, keyIndex);
+        const executor = getExecutor();
+        executor.noteOff(keyboardId, row, keyIndex);
 
         // Release visual feedback on connection cables (fades out over 120ms)
         const connectionIds = getConnectionsForRow(keyboardId, row);
-        connectionIds.forEach(id => audioGraphManager.releaseControlSignal(id));
+        connectionIds.forEach(id => executor.releaseControlSignal(id));
     },
 
     // Control signal emission (sustain pedal)
     emitControlDown: (keyboardId) => {
         set({ controlDown: true });
-        audioGraphManager.triggerControlDown(keyboardId);
+        const executor = getExecutor();
+        executor.controlDown(keyboardId);
 
         // Activate visual feedback on pedal connection cables
         const connectionIds = getConnectionsForPedal(keyboardId);
-        connectionIds.forEach(id => audioGraphManager.activateControlSignal(id));
+        connectionIds.forEach(id => executor.activateControlSignal(id));
     },
 
     emitControlUp: (keyboardId) => {
         set({ controlDown: false });
-        audioGraphManager.triggerControlUp(keyboardId);
+        const executor = getExecutor();
+        executor.controlUp(keyboardId);
 
         // Release visual feedback on pedal connection cables
         const connectionIds = getConnectionsForPedal(keyboardId);
-        connectionIds.forEach(id => audioGraphManager.releaseControlSignal(id));
+        connectionIds.forEach(id => executor.releaseControlSignal(id));
     },
 
     // Keyboard Number Management

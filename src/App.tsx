@@ -12,7 +12,7 @@ import { SettingsPanel } from './components/Settings/SettingsPanel';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
 import { initAudioContext, isAudioReady, getLatencyMetrics } from './audio/AudioEngine';
-import { audioGraphManager } from './audio/AudioGraphManager';
+import { getExecutor } from './audio/executor';
 import { InstrumentLoader } from './audio/samplers/InstrumentLoader';
 import { useAudioStore } from './store/audioStore';
 import { useGraphStore } from './store/graphStore';
@@ -81,7 +81,8 @@ function App() {
     const getNodes = useGraphStore.getState().getNodes;
     const getConnections = useGraphStore.getState().getConnections;
 
-    audioGraphManager.initialize(
+    const executor = getExecutor();
+    executor.initialize(
       subscribeToConnections,
       subscribeToNodes,
       getNodes,
@@ -108,7 +109,7 @@ function App() {
     }
 
     return () => {
-      audioGraphManager.dispose();
+      executor.dispose();
     };
   }, [isAudioContextReady]);
 

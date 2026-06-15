@@ -167,6 +167,72 @@ export type NodeType =
     | 'sampler'        // Pitch-shifting sampler instrument (outside view)
     | 'sampler-visual'; // Visual sampler with detailed controls (inside view)
 
+// ============================================================================
+// Plugin Identifiers (additive — see U10)
+// ============================================================================
+
+/**
+ * Branded identifier for a registered node/plugin definition.
+ *
+ * This is introduced ADDITIVELY alongside {@link NodeType}: every PluginId is a
+ * NodeType, but the brand lets call sites that have *validated* an id (via the
+ * registry) carry that proof in the type system. Plain `NodeType` usages keep
+ * compiling unchanged — `PluginId` is a structural subtype of `NodeType`.
+ */
+export type PluginId = NodeType & { readonly __brand: 'PluginId' };
+
+/**
+ * Canonical const-set of every known node/plugin id.
+ *
+ * Kept as a runtime array (not just a type) so the registry can validate
+ * arbitrary strings at import/deserialization boundaries. The element type is
+ * `NodeType`, so adding a value the union does not know about is a compile error.
+ */
+export const KNOWN_PLUGIN_IDS = [
+    'keyboard',
+    'keyboard-key',
+    'keyboard-visual',
+    'instrument-visual',
+    'microphone',
+    'midi',
+    'midi-visual',
+    'minilab-3',
+    'minilab3-visual',
+    'piano',
+    'cello',
+    'electricCello',
+    'violin',
+    'saxophone',
+    'strings',
+    'keys',
+    'winds',
+    'instrument',
+    'looper',
+    'effect',
+    'amplifier',
+    'speaker',
+    'recorder',
+    'canvas-input',
+    'canvas-output',
+    'output-panel',
+    'input-panel',
+    'container',
+    'add',
+    'subtract',
+    'library',
+    'sampler',
+    'sampler-visual'
+] as const satisfies readonly NodeType[];
+
+/**
+ * Narrow an arbitrary value to a {@link PluginId} (i.e. a known node type).
+ * Returns true only for strings present in {@link KNOWN_PLUGIN_IDS}.
+ */
+export function isPluginId(value: unknown): value is PluginId {
+    return typeof value === 'string' &&
+        (KNOWN_PLUGIN_IDS as readonly string[]).includes(value);
+}
+
 export interface Position {
     x: number;
     y: number;
@@ -448,6 +514,11 @@ export interface SerializedNode {
     category: NodeCategory;
     position: Position;
     data: NodeData;
+
+    // Per-instance ports (U10). Optional for backwards compatibility with
+    // workflows saved before this field existed — importers fall back to the
+    // registry's static defaultPorts when absent.
+    ports?: PortDefinition[];
 }
 
 export interface SerializedConnection {

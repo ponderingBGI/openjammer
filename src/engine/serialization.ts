@@ -7,9 +7,11 @@ import type {
     Connection,
     SerializedWorkflow,
     SerializedNode,
-    SerializedConnection
+    SerializedConnection,
+    PortDefinition
 } from './types';
-import { getNodeDefinition } from './registry';
+import { isPluginId } from './types';
+import { get as getNodeDefinition } from './registry';
 
 const WORKFLOW_VERSION = '1.0.0';
 
@@ -31,7 +33,11 @@ export function exportWorkflow(
             type: node.type,
             category: node.category,
             position: { ...node.position },
-            data: JSON.parse(JSON.stringify(node.data)) // Deep clone to handle nested objects
+            data: JSON.parse(JSON.stringify(node.data)), // Deep clone to handle nested objects
+            // Persist per-instance ports (U10) so dynamically-grown ports
+            // (e.g. bundle expansions, panel ports) survive a round-trip rather
+            // than being reset to the static defaultPorts on import.
+            ports: JSON.parse(JSON.stringify(node.ports)) as PortDefinition[]
         });
     });
 
@@ -80,23 +86,33 @@ export function importWorkflow(
         );
     }
 
-    // Reconstruct nodes with ports from registry
-    const nodes: GraphNode[] = workflow.nodes.map((serialized) => {
-        const definition = getNodeDefinition(serialized.type);
+    // Reconstruct nodes with ports.
+    // - Null-check (U10): drop nodes whose type is not a known plugin id rather
+    //   than constructing a node against an undefined definition.
+    // - Prefer persisted per-instance ports over the static defaultPorts, so
+    //   dynamically-grown ports survive a round-trip.
+    const nodes: GraphNode[] = workflow.nodes
+        .filter((serialized) => isPluginId(serialized.type))
+        .map((serialized) => {
+            const definition = getNodeDefinition(serialized.type);
+            const ports: PortDefinition[] =
+                serialized.ports && serialized.ports.length > 0
+                    ? serialized.ports.map((port) => ({ ...port }))
+                    : [...definition.defaultPorts];
 
-        return {
-            id: serialized.id,
-            type: serialized.type,
-            category: serialized.category,
-            position: serialized.position,
-            data: serialized.data,
-            ports: [...definition.defaultPorts],
-            // Flat structure fields - deserialized nodes are root-level by default
-            parentId: null,
-            childIds: [],
-            specialNodes: []
-        };
-    });
+            return {
+                id: serialized.id,
+                type: serialized.type,
+                category: serialized.category,
+                position: serialized.position,
+                data: serialized.data,
+                ports,
+                // Flat structure fields - deserialized nodes are root-level by default
+                parentId: null,
+                childIds: [],
+                specialNodes: []
+            };
+        });
     const nodesById = new Map(nodes.map(node => [node.id, node]));
 
     // Reconstruct connections
