@@ -1,0 +1,11 @@
+[package]
+name = "ojcore"
+description = "OpenJammer plugin/extensibility ABI: one PluginManifest + one CLAP-shaped DspInstance runtime trait that built-in DSP, Faust, AI-WASM, and hosted plugins all implement (\"everything is a plugin\"). no_std + alloc."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+ojproto = { path = "../ojproto" }
+ojcore-dsp = { path = "../ojcore-dsp" }
+serde = { workspace = true }
