@@ -22,6 +22,14 @@
 
 extern crate alloc;
 
+// The `std` feature pulls in host-side RT plumbing that needs real OS
+// facilities (`Instant` for the U16 watchdog, threads/atomics for the rings).
+// The crate is `no_std` by default, so link `std` explicitly when that feature
+// is on; the `not(test)` guard avoids a double-link warning under `cargo test`,
+// where `std` is already present.
+#[cfg(all(feature = "std", not(test)))]
+extern crate std;
+
 pub mod builtin;
 pub mod dsp;
 pub mod loader;
@@ -35,6 +43,16 @@ pub mod registry;
 // sit behind the `std` feature.
 pub mod compile;
 pub mod exec;
+
+// --- U12/U15/U16 engine extensions ------------------------------------------
+// `transport` (musical clock), `meter` (RMS/peak + return-frame codec), and
+// `resilience` (NaN guard / coalescing / budget flags) are ADDITIVE and stay
+// `no_std` (alloc only) so they compile for the `wasm32` worklet. The watchdog
+// (`resilience::Watchdog`) and the meter return RING (`meter::MeterRing`) are
+// the only `std`-gated pieces (they need `Instant` / host atomics).
+pub mod meter;
+pub mod resilience;
+pub mod transport;
 
 #[cfg(feature = "std")]
 pub mod command;
@@ -53,8 +71,17 @@ pub use loader::PluginLoader;
 pub use manifest::{DspKind, ParamDecl, PluginManifest, PortDecl, UiKind};
 pub use registry::PluginRegistry;
 
+// --- U12/U15/U16 additive surface ---
+pub use meter::{Meter, MeterBank};
+pub use resilience::{sanitize, CommandCoalescer, NodeBudget};
+pub use transport::{Transport, TransportPos};
+
 #[cfg(feature = "std")]
 pub use command::{CommandConsumer, CommandProducer, CommandQueue};
+#[cfg(feature = "std")]
+pub use meter::MeterRing;
+#[cfg(feature = "std")]
+pub use resilience::Watchdog;
 #[cfg(feature = "std")]
 pub use swap::ProgramSwap;
 

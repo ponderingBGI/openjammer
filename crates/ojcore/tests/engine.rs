@@ -308,3 +308,268 @@ fn swap_publishes_and_engine_reads_new_program() {
     inject(&mut engine, &input);
     engine.process_block(&mut out, NB);
 }
+
+// ===========================================================================
+// U12 transport + U15 metering + U16 resilience integration tests.
+// ===========================================================================
+
+use ojcore::{Meter, MeterRing, Watchdog};
+use ojcore::{DspInstance, PluginLoader, ProcessCtx};
+use ojcore::manifest::{DspKind, PluginManifest, PortDecl, UiKind};
+use std::sync::Arc;
+
+/// U12: tempo + time signature drive bar/beat correctly through the engine.
+///
+/// At 120 BPM / 4/4 / 48 kHz a beat is 24 000 samples and a bar is 96 000.
+/// We Seek the playhead and read the engine's musical position.
+#[test]
+fn engine_transport_advances_bar_and_beat() {
+    let reg = gain_registry();
+    let prog = compile(&graphin_gain_speaker(1.0), &reg).expect("compile");
+    let mut engine = Engine::new(prog);
+    engine.set_sample_rate(SR as f32);
+    engine.set_tempo(120.0);
+    engine.set_time_signature(4, 4);
+
+    // Start playing and process blocks until ~one bar + one beat has elapsed.
+    let (mut tx, mut rx) = CommandQueue::split(4);
+    tx.push(RtCommand::TransportPlay).unwrap();
+    engine.drain(&mut rx);
+
+    // Seek directly to exactly beat 1 of bar 1 (96000 + 24000 = 120000 samples).
+    let (mut tx2, mut rx2) = CommandQueue::split(4);
+    tx2.push(RtCommand::Seek { samples: 120_000 }).unwrap();
+    engine.drain(&mut rx2);
+
+    let pos = engine.transport_pos();
+    assert_eq!(pos.bar, 1, "after 120000 samples => bar 1");
+    assert_eq!(pos.beat, 1, "=> beat 1 of bar 1");
+    assert!(pos.phase < 1e-3, "on the beat boundary, phase ~0 (got {})", pos.phase);
+
+    // Half a beat further: phase advances to ~0.5 within the same beat.
+    let mut out = vec![0.0f32; NB];
+    let input = ramp();
+    let half_beat = 12_000u64;
+    let mut produced = 0u64;
+    while produced < half_beat {
+        inject(&mut engine, &input);
+        engine.process_block(&mut out, NB);
+        produced += BLOCK as u64;
+    }
+    let pos = engine.transport_pos();
+    assert_eq!(pos.bar, 1);
+    assert_eq!(pos.beat, 1);
+    assert!(pos.phase > 0.3 && pos.phase < 0.7, "mid-beat phase (got {})", pos.phase);
+}
+
+/// U15: master + per-node RMS matches a known constant signal.
+///
+/// A constant 0.5 signal through unity gain has RMS 0.5 and peak 0.5 at both the
+/// gain node's output and the master.
+#[test]
+fn engine_meter_rms_matches_known_signal() {
+    let reg = gain_registry();
+    let prog = compile(&graphin_gain_speaker(1.0), &reg).expect("compile");
+    let mut engine = Engine::new(prog);
+    engine.set_metering(true);
+    assert!(engine.metering_enabled());
+
+    let signal = vec![0.5f32; NB];
+    let mut out = vec![0.0f32; NB];
+    inject(&mut engine, &signal);
+    engine.process_block(&mut out, NB);
+
+    // Master meter.
+    let master_slot = engine.program().slot_of_id(NodeIdx(3)).unwrap();
+    let master: &Meter = &engine.meters().master;
+    assert!((master.rms() - 0.5).abs() < 1e-3, "master rms {}", master.rms());
+    assert!((master.peak() - 0.5).abs() < 1e-3, "master peak {}", master.peak());
+
+    // Gain node (slot for NodeIdx 2) meter.
+    let gain_slot = engine.program().slot_of_id(NodeIdx(2)).unwrap();
+    let gm: &Meter = &engine.meters().nodes[gain_slot];
+    assert!((gm.rms() - 0.5).abs() < 1e-3, "gain rms {}", gm.rms());
+
+    // Sanity: the master slot is a real slot index.
+    assert!(master_slot < engine.program().len());
+}
+
+/// U15: with a return ring attached, the engine publishes Meter + Beat frames at
+/// block end, decodable on the "control" thread.
+#[test]
+fn engine_publishes_meter_and_beat_frames() {
+    use ojcore::meter::return_frame;
+    use ojproto::EngineFrame;
+
+    let reg = gain_registry();
+    let prog = compile(&graphin_gain_speaker(1.0), &reg).expect("compile");
+    let mut engine = Engine::new(prog);
+    engine.set_sample_rate(SR as f32);
+    engine.set_metering(true);
+
+    let ring: Arc<MeterRing> = Arc::new(MeterRing::new());
+    engine.attach_meter_ring(Some(Arc::clone(&ring)));
+
+    let signal = vec![0.5f32; NB];
+    let mut out = vec![0.0f32; NB];
+    inject(&mut engine, &signal);
+    engine.process_block(&mut out, NB);
+
+    // Drain the ring on the "control" thread: expect at least one Meter (master)
+    // and exactly one Beat.
+    let mut buf = [0u8; return_frame::MAX_LEN];
+    let mut meters = 0;
+    let mut beats = 0;
+    let mut saw_master_level = false;
+    while let Some(n) = ring.pop(&mut buf) {
+        match return_frame::decode(&buf[..n]) {
+            Some(EngineFrame::Meter { rms, .. }) => {
+                meters += 1;
+                if (rms - 0.5).abs() < 1e-3 {
+                    saw_master_level = true;
+                }
+            }
+            Some(EngineFrame::Beat { .. }) => beats += 1,
+            other => panic!("unexpected frame: {other:?}"),
+        }
+    }
+    assert!(meters >= 1, "expected meter frames, got {meters}");
+    assert_eq!(beats, 1, "exactly one beat frame per block");
+    assert!(saw_master_level, "a meter frame carried the 0.5 RMS master level");
+}
+
+// --- A node that emits NaN, to prove the U16 guard silences + flags it. ----
+
+const NAN_ID: &str = "test.nan";
+
+struct NanLoader {
+    manifest: PluginManifest,
+}
+
+impl NanLoader {
+    fn new() -> Self {
+        Self {
+            manifest: PluginManifest {
+                id: NAN_ID.into(),
+                name: "NaN".into(),
+                kind: PrimitiveKind::Gain, // any processor kind works here
+                dsp: DspKind::Builtin,
+                ui: UiKind::Auto,
+                params: Vec::new(),
+                ports: PortDecl { audio_in: 1, audio_out: 1, control_in: 0, control_out: 0 },
+            },
+        }
+    }
+}
+
+impl PluginLoader for NanLoader {
+    fn manifest(&self) -> &PluginManifest {
+        &self.manifest
+    }
+    fn instantiate(&self, _sr: f32, _mb: usize) -> Box<dyn DspInstance> {
+        Box::new(NanNode)
+    }
+}
+
+struct NanNode;
+
+impl DspInstance for NanNode {
+    fn activate(&mut self, _sr: f32, _mb: usize) {}
+    fn process(&mut self, ctx: &mut ProcessCtx<'_, '_>) {
+        if let Some(out) = ctx.outputs.first_mut() {
+            for s in out.iter_mut().take(ctx.nframes) {
+                *s = f32::NAN; // deliberately emit garbage.
+            }
+        }
+    }
+    fn set_param(&mut self, _id: u16, _v: f32) {}
+}
+
+/// U16: a NaN-emitting node has its output flushed to silence AND raises the
+/// per-node non-finite flag; the garbage never reaches the master output.
+#[test]
+fn engine_silences_and_flags_nan_node() {
+    let mut reg = gain_registry();
+    reg.register(Box::new(NanLoader::new()));
+
+    // GraphIn(1) -> NaN(2) -> SpeakerOut(3).
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
+    g.nodes.push(node(2, NAN_ID, PrimitiveKind::Gain, 1, 1));
+    g.nodes.push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 0, 2, 0));
+    g.edges.push(audio_edge(2, 0, 3, 0));
+
+    let prog = compile(&g, &reg).expect("compile");
+    let mut engine = Engine::new(prog);
+
+    let input = ramp();
+    let mut out = vec![0.0f32; NB];
+    inject(&mut engine, &input);
+    engine.process_block(&mut out, NB);
+
+    // The master output is clean silence (the NaN was flushed at the node).
+    for (i, &y) in out.iter().enumerate() {
+        assert!(y.is_finite(), "frame {i} non-finite: {y}");
+        assert_eq!(y, 0.0, "frame {i} should be silenced, got {y}");
+    }
+    // The offending node is flagged.
+    let nan_slot = engine.program().slot_of_id(NodeIdx(2)).unwrap();
+    assert!(engine.budget().non_finite[nan_slot], "NaN node flagged non_finite");
+    assert!(engine.budget().any_flagged());
+}
+
+/// U16: the per-block CPU watchdog flags + auto-bypasses an over-budget node.
+#[test]
+fn engine_watchdog_auto_bypasses_over_budget_node() {
+    let reg = gain_registry();
+    let prog = compile(&graphin_gain_speaker(2.0), &reg).expect("compile");
+    let mut engine = Engine::new(prog);
+
+    // Zero-ns budget: every node "overruns"; auto-bypass on.
+    engine.set_watchdog(Some(Watchdog::new(0, true)));
+
+    let input = ramp();
+    let mut out = vec![0.0f32; NB];
+    inject(&mut engine, &input);
+    engine.process_block(&mut out, NB);
+
+    // The gain node was flagged over-budget and auto-bypassed.
+    let gain_slot = engine.program().slot_of_id(NodeIdx(2)).unwrap();
+    assert!(engine.budget().over_budget[gain_slot], "gain flagged over budget");
+    assert!(engine.program().bypassed[gain_slot], "gain auto-bypassed");
+}
+
+/// REQUIRED gate: `process_block` STILL allocates zero bytes with metering
+/// enabled (and the return ring attached + published every block).
+#[test]
+fn process_block_alloc_free_with_metering_enabled() {
+    let reg = gain_registry();
+    let prog = compile(&graphin_gain_speaker(1.5), &reg).expect("compile");
+    let mut engine = Engine::new(prog);
+    engine.set_metering(true);
+    engine.set_sample_rate(SR as f32);
+
+    let ring: Arc<MeterRing> = Arc::new(MeterRing::new());
+    engine.attach_meter_ring(Some(Arc::clone(&ring)));
+
+    // Also arm the watchdog so its per-node timing is inside the gate too.
+    engine.set_watchdog(Some(Watchdog::from_block(SR as f32, NB, 0.5)));
+
+    let input = ramp();
+    let mut out = vec![0.0f32; NB];
+
+    // Warm up once outside the gate.
+    inject(&mut engine, &input);
+    engine.process_block(&mut out, NB);
+
+    assert_no_alloc(|| {
+        for _ in 0..32 {
+            engine.process_block(&mut out, NB);
+            // Drain the ring inside the gate too (pop is alloc-free); otherwise
+            // it would fill and stop accepting — draining keeps the proof honest.
+            let mut buf = [0u8; ojcore::meter::return_frame::MAX_LEN];
+            while ring.pop(&mut buf).is_some() {}
+        }
+    });
+}

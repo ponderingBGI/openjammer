@@ -16,7 +16,9 @@ std = ["dep:rtrb", "dep:basedrop", "dep:arc-swap"]
 [dependencies]
 ojproto = { path = "../ojproto" }
 ojcore-dsp = { path = "../ojcore-dsp" }
+ojcore-midiring = { path = "../ojcore-midiring" }   # zero-dep no_std SPSC byte ring (meter return ring)
 serde = { workspace = true }
+libm = { workspace = true }                          # no_std sqrt for RMS metering
 
 # std-only RT host plumbing (versions pinned from a fresh `cargo add` resolve).
 rtrb = { version = "0.3.4", optional = true }       # wait-free SPSC ring (command queue)
