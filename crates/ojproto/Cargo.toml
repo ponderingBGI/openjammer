@@ -7,3 +7,9 @@ license.workspace = true
 
 [dependencies]
 serde = { workspace = true }
+
+[dev-dependencies]
+# Used ONLY by tests/wire_shapes.rs to pin the exact JSON wire format that the
+# hand-written TS mirror in packages/oj-protocol-ts depends on. Pulls in std
+# (fine: tests are built with std).
+serde_json = "1.0"
