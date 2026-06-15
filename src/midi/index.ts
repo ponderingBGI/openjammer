@@ -32,3 +32,22 @@ export {
   createCCLookupTable,
   createNoteLookupTable,
 } from './MIDIPortGenerator';
+
+// Voice Routing (U13) — control-side MIDI -> instrument note resolution
+export {
+  MIDIVoiceRouter,
+  initMidiVoiceRouting,
+  disposeMidiVoiceRouting,
+  createDefaultRoutingContext,
+  midiNoteToRowKey,
+  isRowKeyInRange,
+  DEFAULT_ROW_OCTAVES,
+} from './routing';
+export type {
+  RoutingContext,
+  GraphAccess,
+  VoiceExecutor,
+  MIDISource,
+  ResolvedVoice,
+  RowKey,
+} from './routing';

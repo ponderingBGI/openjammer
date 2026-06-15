@@ -14,6 +14,7 @@ import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
 import { initAudioContext, isAudioReady, getLatencyMetrics } from './audio/AudioEngine';
 import { getExecutor } from './audio/executor';
+import { initMidiVoiceRouting, disposeMidiVoiceRouting } from './midi';
 import { InstrumentLoader } from './audio/samplers/InstrumentLoader';
 import { useAudioStore } from './store/audioStore';
 import { useGraphStore } from './store/graphStore';
@@ -90,6 +91,11 @@ function App() {
       getConnections
     );
 
+    // Wire control-side MIDI -> voice routing (U13). Resolves incoming MIDI
+    // events against the live graph and drives the Executor note seam. Uses the
+    // default routing context (graph store + executor + MIDIManager).
+    initMidiVoiceRouting();
+
     // Preload common instruments during browser idle time
     // This reduces first-note latency when users create instrument nodes
     const preloadInstruments = () => {
@@ -110,6 +116,7 @@ function App() {
     }
 
     return () => {
+      disposeMidiVoiceRouting();
       executor.dispose();
     };
   }, [isAudioContextReady]);
