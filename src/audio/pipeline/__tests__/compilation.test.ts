@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { GraphNode, Connection } from '../../../engine/types';
-import type { Segment, GainParams, BiquadCascadeParams } from '../types';
+import type { Segment, GainParams, CompiledOperation } from '../types';
 import {
   extractOperation,
   fuseOperationList,
@@ -234,7 +234,7 @@ describe('Operation Fusion', () => {
     });
 
     it('should remove passthroughs', () => {
-      const ops = [
+      const ops: CompiledOperation[] = [
         { type: 'gain' as const, params: { value: 0.5 }, sourceNodeId: 'a' },
         { type: 'passthrough' as const, params: {}, sourceNodeId: 'b' },
         { type: 'gain' as const, params: { value: 0.5 }, sourceNodeId: 'c' },

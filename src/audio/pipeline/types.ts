@@ -8,7 +8,7 @@
  * - Hot parameter patching without recompilation
  */
 
-import type { GraphNode, Connection, NodeType, EffectNodeData, AmplifierNodeData } from '../../engine/types';
+import type { NodeType } from '../../engine/types';
 
 // ============================================================================
 // Segment Classification

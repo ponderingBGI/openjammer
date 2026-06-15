@@ -25,7 +25,6 @@ import type {
 import {
   extractOperation,
   fuseOperationList,
-  generateDistortionCurve,
   debugOperation,
 } from './OperationFuser';
 
@@ -45,21 +44,16 @@ function generateProgramId(): string {
 
 export class PipelineCompiler {
   private nodes: Map<string, GraphNode>;
-  private connections: Map<string, Connection>;
   private eventHandlers: PipelineEventHandler[] = [];
 
   /** Cached lookup tables (waveshaper curves) */
   private lookupTableCache: Map<string, Float32Array> = new Map();
 
-  /** Node versions at last compilation (for dirty tracking) */
-  private nodeVersions: Map<string, number> = new Map();
-
   constructor(
     nodes: Map<string, GraphNode>,
-    connections: Map<string, Connection>
+    _connections: Map<string, Connection>
   ) {
     this.nodes = nodes;
-    this.connections = connections;
   }
 
   /**
@@ -67,10 +61,9 @@ export class PipelineCompiler {
    */
   updateGraph(
     nodes: Map<string, GraphNode>,
-    connections: Map<string, Connection>
+    _connections: Map<string, Connection>
   ): void {
     this.nodes = nodes;
-    this.connections = connections;
   }
 
   /**

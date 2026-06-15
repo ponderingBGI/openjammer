@@ -2,7 +2,7 @@
  * Unit tests for Pipeline Segmentation
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import type { GraphNode, Connection } from '../../../engine/types';
 import {
   detectSegments,
@@ -17,7 +17,6 @@ import {
 import {
   buildExecutionPlan,
   getUpstreamSegments,
-  getDownstreamSegments,
   findCriticalPath,
   validateExecutionPlan,
 } from '../DependencyGraph';

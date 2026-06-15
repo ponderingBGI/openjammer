@@ -247,13 +247,14 @@ function traceSegment(
     }
 
     // 3. Find next node
-    const outgoing = analysis.outgoingConnections.get(currentId) ?? [];
+    const outgoing: Connection[] =
+      analysis.outgoingConnections.get(currentId) ?? [];
     if (outgoing.length !== 1) {
       // No outgoing or multiple outgoing (branch) - stop here
       break;
     }
 
-    const nextId = outgoing[0].targetNodeId;
+    const nextId: string = outgoing[0].targetNodeId;
     const nextNode = nodes.get(nextId);
     if (!nextNode) break;
 

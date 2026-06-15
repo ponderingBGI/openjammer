@@ -91,7 +91,7 @@ export function extractOperation(node: GraphNode): CompiledOperation | null {
       return {
         type: 'convolution',
         params: {
-          impulseResponseId: (effectData.params?.irId as string) ?? 'default',
+          impulseResponseId: String(effectData.params?.irId ?? 'default'),
           normalize: true,
         } as ConvolutionParams,
         sourceNodeId: node.id,

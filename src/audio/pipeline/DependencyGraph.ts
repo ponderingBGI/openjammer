@@ -8,8 +8,6 @@
 
 import type {
   Segment,
-  DependencyGraph,
-  DependencyEdge,
   ExecutionPlan,
 } from './types';
 
@@ -107,8 +105,8 @@ export function buildExecutionPlan(segments: Segment[]): ExecutionPlan {
  * More efficient than full rebuild for small changes
  */
 export function updateExecutionPlan(
-  existingPlan: ExecutionPlan,
-  changedSegmentIds: string[],
+  _existingPlan: ExecutionPlan,
+  _changedSegmentIds: string[],
   segments: Segment[]
 ): ExecutionPlan {
   // For now, just rebuild the entire plan
@@ -333,8 +331,8 @@ export function estimateExecutionTime(
  */
 export function optimizeExecutionPlan(
   plan: ExecutionPlan,
-  segments: Segment[],
-  segmentCosts: Map<string, number>
+  _segments: Segment[],
+  _segmentCosts: Map<string, number>
 ): ExecutionPlan {
   // For now, return the original plan
   // TODO: Implement load balancing optimization
