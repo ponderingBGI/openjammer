@@ -1,6 +1,8 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+# `crates/*` are the engine crates; `src-tauri` is the native desktop shell
+# (U22) — a workspace member so it shares the pinned deps + one Cargo.lock.
+members = ["crates/*", "src-tauri"]
 
 [workspace.package]
 edition = "2021"

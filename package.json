@@ -29,7 +29,8 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "create-node": "bun scripts/create-node.ts",
-    "validate-nodes": "bun scripts/validate-nodes.ts"
+    "validate-nodes": "bun scripts/validate-nodes.ts",
+    "tauri": "tauri"
   },
   "dependencies": {
     "cmdk": "1.1.1",
@@ -52,6 +53,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@tauri-apps/cli": "2.11.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@types/node": "^24.10.1",

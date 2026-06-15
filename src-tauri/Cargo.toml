@@ -1,0 +1,47 @@
+[package]
+name = "oj-tauri"
+description = "OpenJammer native desktop shell (Tauri v2). Hosts the existing Vite web UI as the frontend and the native <5ms ojcore engine (ojcore-native AudioHost) as the realtime backend. Control-rate Tauri commands bridge the UI to the RT command ring + graph hot-swap."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+# The desktop binary entry point lives in `src/main.rs`; the shared app wiring
+# lives in `src/lib.rs` (the Tauri convention, so a mobile leg could reuse it).
+# The library name is distinct from the binary so `cargo build -p oj-tauri`
+# compiles both without a name clash.
+[lib]
+name = "oj_tauri_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[[bin]]
+name = "openjammer"
+path = "src/main.rs"
+
+[build-dependencies]
+# Pinned from a fresh `cargo search` at scaffold time (governing principle #9).
+tauri-build = { version = "2.6.2", features = [] }
+
+[dependencies]
+# --- the native OpenJammer engine (this is the whole point of the unit) ------
+# `ojcore` (std) gives us compile/Engine/PluginRegistry/CommandQueue/ProgramSwap;
+# `ojcore-native` owns the cpal AudioHost; `ojinstrument` ships the Osc/Sampler/
+# Karplus loaders; `ojproto` is the control-rate IR/command wire type.
+ojcore = { path = "../crates/ojcore" }
+ojcore-native = { path = "../crates/ojcore-native" }
+ojinstrument = { path = "../crates/ojinstrument" }
+ojproto = { path = "../crates/ojproto" }
+
+# --- the Tauri v2 shell ------------------------------------------------------
+tauri = { version = "2.11.2", features = [] }
+tauri-plugin-opener = "2.5.4"
+
+# JSON (de)serialization for the control-rate IPC boundary (OjGraph / RtCommand
+# travel as JSON across `invoke`). Pin to the workspace serde + a fresh serde_json.
+serde = { workspace = true, features = ["std"] }
+serde_json = "1.0.150"
+
+[features]
+# This feature must be enabled when building the app in production, so the
+# webview loads the bundled frontend instead of the dev server. Tauri's CLI sets
+# it via `tauri build`; harmless in `cargo build`.
+custom-protocol = ["tauri/custom-protocol"]
