@@ -14,7 +14,10 @@
 
 mod engine;
 
+use std::path::PathBuf;
+
 use engine::BackendState;
+use ojhost::PluginDescriptor;
 use ojproto::{OjGraph, RtCommand};
 use tauri::Manager;
 
@@ -55,6 +58,28 @@ fn query_stream(state: tauri::State<'_, BackendState>) -> Result<engine::StreamI
         .stream_info())
 }
 
+/// Scan `dirs` for third-party plugins (VST3 / CLAP, + AU on macOS) and return
+/// the descriptors for the UI's plugin list. Each found plugin is also
+/// registered as a `host.plugin` node so it can be dropped into the graph.
+///
+/// `dirs` are UTF-8 filesystem paths from the UI. In the default build (no
+/// hosting backend compiled in) this returns an empty list — the UI degrades to
+/// "no plugins found" rather than erroring. See crates/ojhost/README.md for how
+/// to enable a real backend.
+#[tauri::command]
+fn scan_plugins(
+    dirs: Vec<String>,
+    state: tauri::State<'_, BackendState>,
+) -> Result<Vec<PluginDescriptor>, String> {
+    let paths: Vec<PathBuf> = dirs.into_iter().map(PathBuf::from).collect();
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .scan_plugins(&paths)
+        .map_err(|e| e.to_string())
+}
+
 /// Whether the native audio engine is currently running (false in a device-less
 /// environment, where the UI still runs and the engine starts when a device
 /// appears on the next `push_graph`).
@@ -85,7 +110,8 @@ pub fn run() {
             push_graph,
             send_command,
             query_stream,
-            engine_running
+            engine_running,
+            scan_plugins
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenJammer tauri application");

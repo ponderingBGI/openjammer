@@ -30,12 +30,14 @@
 //! sample buffer ever crosses the IPC boundary — only `OjGraph` / `RtCommand`
 //! JSON (governing principle #4).
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use ojcore::{
     compile, CommandProducer, CommandQueue, CompileError, Engine, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{AudioHost, HostError, StreamRequest};
+use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
 use ojinstrument::{register_all, RegisterOpts};
 use ojproto::{OjGraph, RtCommand};
 
@@ -67,6 +69,9 @@ pub enum BackendError {
     /// The UI->RT command ring was full; the command was dropped rather than
     /// blocking the control thread.
     RingFull,
+    /// Scanning a plugin directory failed (I/O / cache error). In the scaffold
+    /// build (no hosting backend) scanning never errors — it returns empty.
+    PluginScan(PluginHostError),
 }
 
 impl std::fmt::Display for BackendError {
@@ -75,6 +80,7 @@ impl std::fmt::Display for BackendError {
             BackendError::Compile(e) => write!(f, "graph compile failed: {e}"),
             BackendError::Host(e) => write!(f, "audio host: {e}"),
             BackendError::RingFull => write!(f, "command ring full; command dropped"),
+            BackendError::PluginScan(e) => write!(f, "plugin scan failed: {e}"),
         }
     }
 }
@@ -284,6 +290,24 @@ impl EngineBackend {
         self.producer.push(cmd).map_err(|_| BackendError::RingFull)
     }
 
+    /// Scan `dirs` for hostable third-party plugins (VST3 / CLAP, + AU on
+    /// macOS) and register each as a `host.plugin` node in the registry, so the
+    /// UI can drop a hosted plugin into the graph like any other node.
+    ///
+    /// Returns the descriptors found (for the UI's plugin list). In the default
+    /// (scaffold) build with no hosting backend compiled in, this is always an
+    /// empty list and never errors — the safe degraded path. Registration uses
+    /// the SAME `PluginRegistry` recompiles lower against, so a subsequent
+    /// `push_graph` referencing a hosted plugin compiles.
+    pub fn scan_plugins(
+        &mut self,
+        dirs: &[PathBuf],
+    ) -> Result<Vec<PluginDescriptor>, BackendError> {
+        let found = scan(dirs).map_err(BackendError::PluginScan)?;
+        register_scanned(&mut self.registry, &found);
+        Ok(found)
+    }
+
     /// Whether an audio stream is currently running.
     pub fn is_running(&self) -> bool {
         self.host.is_some()
@@ -385,6 +409,17 @@ mod tests {
         assert!(reg.contains(ojinstrument::KARPLUS_ID));
         // SF2 is native-only and on by default (the `sf2` feature).
         assert!(reg.contains(ojinstrument::SF2_ID));
+    }
+
+    /// `scan_plugins` is safe in the device-less / no-backend sandbox: an empty
+    /// or missing directory yields an empty list and never errors.
+    #[test]
+    fn scan_plugins_empty_is_safe() {
+        let mut be = EngineBackend::new();
+        let found = be
+            .scan_plugins(&[std::path::PathBuf::from("/no/such/plugin/dir")])
+            .expect("scan never errors in the scaffold build");
+        assert!(found.is_empty());
     }
 
     /// The starter graph lowers cleanly (exactly one master output, no cycle).

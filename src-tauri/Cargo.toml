@@ -31,6 +31,13 @@ ojcore-native = { path = "../crates/ojcore-native" }
 ojinstrument = { path = "../crates/ojinstrument" }
 ojproto = { path = "../crates/ojproto" }
 
+# --- third-party plugin host (U-JUCE) ----------------------------------------
+# Scans for and hosts VST3 / CLAP (+ AU on macOS) plugins as ojcore nodes.
+# NATIVE-ONLY. Default features = scaffold (scan returns empty, no native deps);
+# enable real hosting with `--features ojhost/clap-host` (pure-Rust CLAP) or
+# `--features ojhost/juce` (bundled C++ JUCE 8) — see crates/ojhost/README.md.
+ojhost = { path = "../crates/ojhost" }
+
 # --- the Tauri v2 shell ------------------------------------------------------
 tauri = { version = "2.11.2", features = [] }
 tauri-plugin-opener = "2.5.4"
