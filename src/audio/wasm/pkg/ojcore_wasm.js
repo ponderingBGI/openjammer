@@ -28,6 +28,23 @@ export function cmd_ring_ptr() {
 }
 
 /**
+ * Drain the current per-node + master meter windows as a FLAT `[node, peak, ...]`
+ * `f32` array (node ids are exact integers within `f32`'s safe range for any
+ * realistic node count). The master level is appended last under the master
+ * node's id. Resets each window (uses `Meter::take`), so calling once per block
+ * yields a fresh peak each time. Returns an empty vec when metering is off or
+ * the host is not initialized. Off the render path (the worklet calls it between
+ * `process` calls), so the `Vec` allocation here is fine.
+ * @returns {Float32Array}
+ */
+export function drain_meters() {
+    const ret = wasm.drain_meters();
+    var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
  * Encode an [`RtCommand`] as the JSON frame the command ring expects. Helper
  * for tests / a JS-side mirror; not on the render path. Returns the bytes a
  * producer would `push` into the [`cmd_ring`](Host::cmd_ring).
@@ -38,6 +55,22 @@ export function cmd_ring_ptr() {
  */
 export function encode_command_setparam(node, param, value) {
     const ret = wasm.encode_command_setparam(node, param, value);
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
+ * Encode a `Meter` [`EngineFrame`] to JSON — a convenience mirror for tests /
+ * JS so the wasm meter shape matches the native event payload. Not on the
+ * render path.
+ * @param {number} node
+ * @param {number} rms
+ * @param {number} peak
+ * @returns {Uint8Array}
+ */
+export function encode_meter_frame(node, rms, peak) {
+    const ret = wasm.encode_meter_frame(node, rms, peak);
     var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v1;
@@ -178,6 +211,17 @@ export function sample_rate() {
     const ret = wasm.sample_rate();
     return ret >>> 0;
 }
+
+/**
+ * Enable or disable per-node + master level metering on the wasm engine. Cheap
+ * (a single bool); when off the render loop skips all `accumulate` calls. The
+ * worklet enables this when the UI subscribes to signal levels and drains the
+ * levels each block via [`drain_meters`].
+ * @param {boolean} on
+ */
+export function set_metering(on) {
+    wasm.set_metering(on);
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -200,9 +244,22 @@ function __wbg_get_imports() {
     };
 }
 
+function getArrayF32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
+}
+
+let cachedFloat32ArrayMemory0 = null;
+function getFloat32ArrayMemory0() {
+    if (cachedFloat32ArrayMemory0 === null || cachedFloat32ArrayMemory0.byteLength === 0) {
+        cachedFloat32ArrayMemory0 = new Float32Array(wasm.memory.buffer);
+    }
+    return cachedFloat32ArrayMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -245,6 +302,7 @@ function __wbg_finalize_init(instance, module) {
     wasmInstance = instance;
     wasm = instance.exports;
     wasmModule = module;
+    cachedFloat32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

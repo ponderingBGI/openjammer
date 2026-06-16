@@ -13,9 +13,22 @@
  */
 
 import type { Connection, GraphNode } from '../../engine/types';
-import type { Looper } from '../Looper';
-import type { Recorder } from '../Recorder';
-import type { SamplerAdapter } from '../samplers/SamplerAdapter';
+import type {
+    LooperHandle,
+    RecorderHandle,
+    SamplerHandle,
+    SignalLevelsCallback,
+} from './capabilities';
+
+export type {
+    LooperHandle,
+    RecorderHandle,
+    SamplerHandle,
+    LoopLayer,
+    RecordingEntry,
+    SignalLevels,
+    SignalLevelsCallback,
+} from './capabilities';
 
 /** Callback invoked when the set of connections changes. */
 export type ConnectionChangeCallback = (connections: Map<string, Connection>) => void;
@@ -79,7 +92,7 @@ export interface Executor {
     // --- Signal level metering --------------------------------------------
 
     /** Subscribe to per-connection signal levels (0-1). Returns an unsubscribe. */
-    subscribeSignalLevels(callback: (levels: Map<string, number>) => void): Unsubscribe;
+    subscribeSignalLevels(callback: SignalLevelsCallback): Unsubscribe;
 
     // --- Microphone --------------------------------------------------------
 
@@ -97,16 +110,16 @@ export interface Executor {
     // --- Capability handles ------------------------------------------------
 
     /** Get the sampler adapter for a node, if one exists. */
-    getSamplerAdapter(nodeId: string): SamplerAdapter | null;
+    getSamplerAdapter(nodeId: string): SamplerHandle | null;
 
     /** Resolve the sampler adapter for a node once created (or null on timeout). */
-    waitForSamplerAdapter(nodeId: string, timeoutMs?: number): Promise<SamplerAdapter | null>;
+    waitForSamplerAdapter(nodeId: string, timeoutMs?: number): Promise<SamplerHandle | null>;
 
     /** Get the looper instance for a node, if one exists. */
-    getLooper(nodeId: string): Looper | null;
+    getLooper(nodeId: string): LooperHandle | null;
 
     /** Get the recorder instance for a node, if one exists. */
-    getRecorder(nodeId: string): Recorder | null;
+    getRecorder(nodeId: string): RecorderHandle | null;
 
     /** Forward a decoded sample buffer from a source node to connected samplers. */
     sendSampleBuffer(sourceNodeId: string, buffer: AudioBuffer): void;

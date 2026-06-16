@@ -19,7 +19,7 @@ use std::path::PathBuf;
 
 use engine::BackendState;
 use ojhost::PluginDescriptor;
-use ojproto::{OjGraph, RtCommand};
+use ojproto::{EngineFrame, NodeIdx, OjGraph, RtCommand};
 use tauri::Manager;
 
 /// Push a full graph from the UI: recompile it against the plugin registry and
@@ -107,6 +107,158 @@ fn ai_faust_compile(source: String) -> Result<Option<ai::FaustCompileResult>, St
     ai::compile_faust(&source)
 }
 
+// --- U-EXEC-PARITY: looper / sampler / recorder / metering / speaker / mic ---
+
+/// Drive a looper node's state machine: enqueue an `RtCommand::Looper` carrying
+/// `action` (one of the `ojproto::looper_action` codes). The control-rate seam
+/// the looper UI's record/stop/overdub/clear buttons reach the engine through.
+#[tauri::command]
+fn looper_cmd(node: u32, action: u8, state: tauri::State<'_, BackendState>) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .looper_cmd(NodeIdx(node), action)
+        .map_err(|e| e.to_string())
+}
+
+/// Enable the engine's level metering so per-node + master levels start flowing
+/// onto the meter return ring (drained by [`poll_meters`] for the UI's
+/// signal-level stream). The frontend calls this when a signal-level subscriber
+/// appears.
+#[tauri::command]
+fn subscribe_meters(state: tauri::State<'_, BackendState>) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .enable_metering(true);
+    Ok(())
+}
+
+/// Drain the engine's pending meter frames (control-rate poll). Returns a batch
+/// of `EngineFrame::Meter`s the UI maps to per-node levels. The frontend polls
+/// this on a timer (or wires it to the `meters` event); a poll-shaped command
+/// keeps the seam a plain request/response with no event-permission setup.
+#[tauri::command]
+fn poll_meters(state: tauri::State<'_, BackendState>) -> Result<Vec<EngineFrame>, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .drain_meters())
+}
+
+/// Load decoded mono PCM as the sample for `node`'s sampler (content-addressed
+/// into the asset catalog). `pcm` is f32 samples in `[-1, 1]` (control-rate asset
+/// load, never the audio thread). Returns the stored `AssetId`.
+#[tauri::command]
+fn load_sample(
+    node: u32,
+    pcm: Vec<f32>,
+    sample_rate: u32,
+    root_note: u8,
+    state: tauri::State<'_, BackendState>,
+) -> Result<u32, String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .load_sample(NodeIdx(node), pcm, sample_rate, root_note)
+        .map(|id| id.0)
+        .map_err(|e| e.to_string())
+}
+
+/// Arm a recorder capture of `node`'s output bus.
+#[tauri::command]
+fn recorder_start(node: u32, state: tauri::State<'_, BackendState>) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .recorder_start(NodeIdx(node));
+    Ok(())
+}
+
+/// PCM + rate returned by `recorder_stop` for the UI to encode to a WAV blob.
+#[derive(serde::Serialize)]
+struct RecorderStopResult {
+    pcm: Vec<f32>,
+    sample_rate: u32,
+}
+
+/// Stop a recorder capture and return its captured PCM + sample rate (or null
+/// when nothing was armed for `node`).
+#[tauri::command]
+fn recorder_stop(
+    node: u32,
+    state: tauri::State<'_, BackendState>,
+) -> Result<Option<RecorderStopResult>, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .recorder_stop(NodeIdx(node))
+        .map(|(pcm, sample_rate)| RecorderStopResult { pcm, sample_rate }))
+}
+
+/// Export a node's captured recording to a WAV file at `path`.
+#[tauri::command]
+fn recorder_export(
+    node: u32,
+    path: String,
+    state: tauri::State<'_, BackendState>,
+) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .recorder_export(NodeIdx(node), &path)
+        .map_err(|e| e.to_string())
+}
+
+/// Set a speaker node's master volume / mute.
+#[tauri::command]
+fn set_speaker_volume(
+    node: u32,
+    volume: f32,
+    muted: bool,
+    state: tauri::State<'_, BackendState>,
+) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .set_speaker_volume(NodeIdx(node), volume, muted);
+    Ok(())
+}
+
+/// Route a speaker node to an output device id.
+#[tauri::command]
+fn set_speaker_device(
+    node: u32,
+    device_id: String,
+    state: tauri::State<'_, BackendState>,
+) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .set_speaker_device(NodeIdx(node), &device_id);
+    Ok(())
+}
+
+/// Enable mic capture into `node`'s input bus.
+#[tauri::command]
+fn set_mic(node: u32, enabled: bool, state: tauri::State<'_, BackendState>) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .set_mic(NodeIdx(node), enabled);
+    Ok(())
+}
+
 /// Build and run the Tauri application. Shared between the desktop binary
 /// (`main.rs`) and any future mobile entry point (the Tauri convention).
 ///
@@ -128,7 +280,17 @@ pub fn run() {
             engine_running,
             scan_plugins,
             ai::ai_run,
-            ai_faust_compile
+            ai_faust_compile,
+            looper_cmd,
+            subscribe_meters,
+            poll_meters,
+            load_sample,
+            recorder_start,
+            recorder_stop,
+            recorder_export,
+            set_speaker_volume,
+            set_speaker_device,
+            set_mic
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenJammer tauri application");

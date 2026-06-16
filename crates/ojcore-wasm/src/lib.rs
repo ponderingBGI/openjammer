@@ -50,7 +50,7 @@ use alloc::vec::Vec;
 use ojcore::{compile, Engine, PluginRegistry, SPEAKER_OUT_ID};
 use ojcore_midiring::{header_offsets, CmdRing, MidiRing};
 use ojinstrument::{register_all, RegisterOpts};
-use ojproto::{IrNode, NodeIdx, OjGraph, PrimitiveKind, RtCommand, SCHEMA_VERSION};
+use ojproto::{EngineFrame, IrNode, NodeIdx, OjGraph, PrimitiveKind, RtCommand, SCHEMA_VERSION};
 
 use wasm_bindgen::prelude::*;
 
@@ -408,6 +408,65 @@ pub fn node_count() -> u32 {
     host_ref().map_or(0, |h| h.engine.program().len() as u32)
 }
 
+// --- Metering (U-EXEC-PARITY): per-node levels back to the UI -----------------
+
+/// Enable or disable per-node + master level metering on the wasm engine. Cheap
+/// (a single bool); when off the render loop skips all `accumulate` calls. The
+/// worklet enables this when the UI subscribes to signal levels and drains the
+/// levels each block via [`drain_meters`].
+#[wasm_bindgen]
+pub fn set_metering(on: bool) {
+    if let Some(host) = host_mut() {
+        host.engine.set_metering(on);
+    }
+}
+
+/// Drain the current per-node + master meter windows as a FLAT `[node, peak, ...]`
+/// `f32` array (node ids are exact integers within `f32`'s safe range for any
+/// realistic node count). The master level is appended last under the master
+/// node's id. Resets each window (uses `Meter::take`), so calling once per block
+/// yields a fresh peak each time. Returns an empty vec when metering is off or
+/// the host is not initialized. Off the render path (the worklet calls it between
+/// `process` calls), so the `Vec` allocation here is fine.
+#[wasm_bindgen]
+pub fn drain_meters() -> Vec<f32> {
+    let Some(host) = host_mut() else {
+        return Vec::new();
+    };
+    if !host.engine.metering_enabled() {
+        return Vec::new();
+    }
+    // Snapshot ids/master before borrowing meters mutably (disjoint borrows).
+    let ids = host.engine.program().ids.clone();
+    let master_slot = host.engine.program().master_out;
+    let meters = host.engine.meters_mut();
+    let mut out = Vec::with_capacity((meters.nodes.len() + 1) * 2);
+    for (slot, m) in meters.nodes.iter_mut().enumerate() {
+        let (_rms, peak) = m.take();
+        let id = ids.get(slot).map_or(0, |n| n.0);
+        out.push(id as f32);
+        out.push(peak);
+    }
+    let (_rms, master_peak) = meters.master.take();
+    let master_id = ids.get(master_slot).map_or(0, |n| n.0);
+    out.push(master_id as f32);
+    out.push(master_peak);
+    out
+}
+
+/// Encode a `Meter` [`EngineFrame`] to JSON — a convenience mirror for tests /
+/// JS so the wasm meter shape matches the native event payload. Not on the
+/// render path.
+#[wasm_bindgen]
+pub fn encode_meter_frame(node: u32, rms: f32, peak: f32) -> Vec<u8> {
+    let frame = EngineFrame::Meter {
+        node: NodeIdx(node),
+        rms,
+        peak,
+    };
+    serde_json::to_vec(&frame).unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -598,6 +657,119 @@ mod tests {
         assert_eq!(ring_read_offset() as usize, o.read);
         assert_eq!(ring_capacity_offset() as usize, o.capacity);
         assert_eq!(ring_data_offset() as usize, o.data);
+    }
+
+    /// `encode_meter_frame` emits the EXACT serde JSON `EngineFrame::Meter` shape
+    /// the native `meters` payload uses, so the wasm + native meter wire forms
+    /// match (the UI maps both identically).
+    #[test]
+    fn meter_frame_json_matches_engineframe() {
+        let bytes = encode_meter_frame(5, 0.1, 0.8);
+        let decoded: EngineFrame = serde_json::from_slice(&bytes).expect("decode");
+        assert_eq!(
+            decoded,
+            EngineFrame::Meter {
+                node: NodeIdx(5),
+                rms: 0.1,
+                peak: 0.8,
+            }
+        );
+    }
+
+    /// Metering drives a real per-node levels readout: enable it, render a block
+    /// of a graph whose source is non-silent, then `drain_meters` reports a flat
+    /// `[node, peak, ...]` array including the master, resetting each window.
+    #[test]
+    fn metering_drains_per_node_levels() {
+        use ojproto::{ConnectionType, IrEdge};
+        let mut reg = PluginRegistry::new();
+        register_all(&mut reg, RegisterOpts::wasm());
+        // GraphIn (we inject a constant) -> Gain -> SpeakerOut.
+        let graph = OjGraph {
+            ir_version: SCHEMA_VERSION,
+            sample_rate: 48_000,
+            block_size: 64,
+            nodes: vec![
+                IrNode {
+                    id: NodeIdx(0),
+                    manifest_id: String::from(ojcore::GRAPH_IN_ID),
+                    kind: PrimitiveKind::GraphIn,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 0,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(1),
+                    manifest_id: String::from(ojcore::GAIN_ID),
+                    kind: PrimitiveKind::Gain,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(2),
+                    manifest_id: String::from(SPEAKER_OUT_ID),
+                    kind: PrimitiveKind::SpeakerOut,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 0,
+                },
+            ],
+            edges: vec![
+                IrEdge {
+                    from_node: NodeIdx(0),
+                    from_port: 0,
+                    to_node: NodeIdx(1),
+                    to_port: 0,
+                    kind: ConnectionType::Audio,
+                },
+                IrEdge {
+                    from_node: NodeIdx(1),
+                    from_port: 0,
+                    to_node: NodeIdx(2),
+                    to_port: 0,
+                    kind: ConnectionType::Audio,
+                },
+            ],
+            schedule: vec![],
+        };
+        let program = compile(&graph, &reg).expect("graph compiles");
+        let mut engine = Engine::new(program);
+        engine.set_metering(true);
+        assert!(engine.metering_enabled());
+
+        // Inject a constant 0.5 into the GraphIn source and render a block.
+        if let Some(src) = engine.input_mut(NodeIdx(0), 0) {
+            for s in src.iter_mut() {
+                *s = 0.5;
+            }
+        }
+        let mut out = vec![0.0f32; 64];
+        engine.process_block(&mut out, 64);
+
+        // Drain mirrors the wasm export logic: per-node peaks + master, reset.
+        let ids = engine.program().ids.clone();
+        let master_slot = engine.program().master_out;
+        let meters = engine.meters_mut();
+        let mut flat = Vec::new();
+        for (slot, m) in meters.nodes.iter_mut().enumerate() {
+            let (_rms, peak) = m.take();
+            flat.push(ids.get(slot).map_or(0, |n| n.0) as f32);
+            flat.push(peak);
+        }
+        let (_rms, master_peak) = meters.master.take();
+        flat.push(ids.get(master_slot).map_or(0, |n| n.0) as f32);
+        flat.push(master_peak);
+
+        // Flat array is pairs, includes the master, and at least one node metered
+        // a non-zero peak from the 0.5 signal.
+        assert_eq!(flat.len() % 2, 0);
+        assert!(flat.len() >= 2);
+        let any_signal = flat.chunks(2).any(|p| p[1] > 0.0);
+        assert!(any_signal, "expected a non-zero metered peak");
     }
 
     /// A round-trip of the bootstrap graph through JSON + `compile` proves

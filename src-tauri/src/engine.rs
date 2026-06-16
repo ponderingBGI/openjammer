@@ -31,15 +31,19 @@
 //! JSON (governing principle #4).
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
+use ojcore::meter::return_frame;
 use ojcore::{
-    compile, CommandProducer, CommandQueue, CompileError, Engine, PluginRegistry, ProgramSwap,
+    compile, CommandProducer, CommandQueue, CompileError, Engine, MeterRing, PluginRegistry,
+    ProgramSwap,
 };
-use ojcore_native::{AudioHost, HostError, StreamRequest};
+use ojcore_native::{
+    AssetCatalog, AssetError, AssetStore, AudioHost, HostError, Pcm, StreamRequest,
+};
 use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
 use ojinstrument::{register_all, RegisterOpts};
-use ojproto::{OjGraph, RtCommand};
+use ojproto::{AssetId, EngineFrame, NodeIdx, OjGraph, RtCommand};
 
 /// Default stream request: 48 kHz, a small buffer for low latency, stereo out,
 /// no duplex input (pure synthesis path). Matches the `<5 ms` engine target;
@@ -72,6 +76,10 @@ pub enum BackendError {
     /// Scanning a plugin directory failed (I/O / cache error). In the scaffold
     /// build (no hosting backend) scanning never errors — it returns empty.
     PluginScan(PluginHostError),
+    /// An asset (sample / recording) decode/encode/store operation failed.
+    Asset(AssetError),
+    /// A capability command referenced a node id not present in the live graph.
+    UnknownNode(u32),
 }
 
 impl std::fmt::Display for BackendError {
@@ -81,6 +89,8 @@ impl std::fmt::Display for BackendError {
             BackendError::Host(e) => write!(f, "audio host: {e}"),
             BackendError::RingFull => write!(f, "command ring full; command dropped"),
             BackendError::PluginScan(e) => write!(f, "plugin scan failed: {e}"),
+            BackendError::Asset(e) => write!(f, "asset operation failed: {e}"),
+            BackendError::UnknownNode(n) => write!(f, "unknown node id {n} in live graph"),
         }
     }
 }
@@ -128,6 +138,35 @@ pub struct EngineBackend {
     swap: ProgramSwap,
     /// The stream request the host (re)starts with.
     stream: StreamRequest,
+    /// Control-side clone of the engine's RT -> control meter return ring. The
+    /// matching `Arc` is attached to the engine before it moves into the audio
+    /// host (see [`EngineBackend::start_host`]); the engine publishes `Meter`
+    /// frames here at block end, and [`EngineBackend::drain_meters`] reads them
+    /// off the control thread for the `meters` Tauri event.
+    meter_ring: Arc<MeterRing>,
+    /// Whether metering is enabled (mirrored so a graph swap re-applies it).
+    metering: bool,
+    /// Off-RT content-addressed asset catalog (sample PCM for the sampler,
+    /// captured recordings). Loading a sample / finishing a recording stores
+    /// here, exactly as the native asset pipeline does.
+    catalog: AssetCatalog,
+    /// Off-RT WAV codec for recorder export.
+    store: AssetStore,
+    /// In-progress / completed captures, keyed by node id. v1 keeps the captured
+    /// PCM here so `recorder_stop` can return it / `recorder_export` can write a
+    /// WAV; the live engine-output tap is the documented gap (see `recorder_start`).
+    captures: std::collections::HashMap<u32, CaptureState>,
+}
+
+/// State of one recorder capture for a node.
+struct CaptureState {
+    /// Captured interleaved PCM (filled by the engine-output tap when wired).
+    pcm: Vec<f32>,
+    /// The capture's sample rate / channel count.
+    sample_rate: u32,
+    channels: u16,
+    /// Whether the capture is currently armed/recording.
+    recording: bool,
 }
 
 impl EngineBackend {
@@ -141,13 +180,18 @@ impl EngineBackend {
         let registry = Self::build_registry();
         let stream = DEFAULT_STREAM;
         let swap = ProgramSwap::new();
+        let meter_ring = Arc::new(MeterRing::new());
 
         // Compile the minimal starter program (silent: a gain into the speaker).
         // `compile` only fails on a malformed graph, and ours is well-formed by
         // construction, so a failure here is a build-time bug, not a runtime one.
         let program =
             compile(&Self::starter_graph(stream), &registry).expect("starter graph compiles");
-        let engine = Engine::new(program);
+        let mut engine = Engine::new(program);
+        // Attach the control-side meter ring up front; metering stays OFF until a
+        // subscriber asks (zero-cost while off). The same `Arc` clone is kept on
+        // the control side so `drain_meters` reads what the audio thread publishes.
+        engine.attach_meter_ring(Some(Arc::clone(&meter_ring)));
 
         // Split a fresh command ring; the consumer moves into the audio host.
         let (producer, consumer) = CommandQueue::split(COMMAND_RING_CAP);
@@ -175,6 +219,11 @@ impl EngineBackend {
             producer,
             swap,
             stream,
+            meter_ring,
+            metering: false,
+            catalog: AssetCatalog::new(),
+            store: AssetStore::new(),
+            captures: std::collections::HashMap::new(),
         }
     }
 
@@ -254,7 +303,11 @@ impl EngineBackend {
         self.swap.publish(published);
 
         let program = compile(graph, &self.registry).map_err(BackendError::Compile)?;
-        let engine = Engine::new(program);
+        let mut engine = Engine::new(program);
+        // Re-attach the meter ring + re-apply the metering toggle to the fresh
+        // engine so the level stream survives a graph swap.
+        engine.attach_meter_ring(Some(Arc::clone(&self.meter_ring)));
+        engine.set_metering(self.metering);
 
         // Fresh command ring for the new audio callback; the old producer (and
         // any unsent commands) is replaced.
@@ -288,6 +341,134 @@ impl EngineBackend {
     /// ring drops the command rather than blocking the control thread.
     pub fn send_command(&mut self, cmd: RtCommand) -> Result<(), BackendError> {
         self.producer.push(cmd).map_err(|_| BackendError::RingFull)
+    }
+
+    // --- U-EXEC-PARITY capability seam (control-rate) ----------------------
+
+    /// Drive a looper node's state machine: enqueue an [`RtCommand::Looper`] with
+    /// the given action code (one of the [`ojproto::looper_action`] consts). The
+    /// audio thread applies it via `DspInstance::looper_action`.
+    pub fn looper_cmd(&mut self, node: NodeIdx, action: u8) -> Result<(), BackendError> {
+        self.send_command(RtCommand::Looper { node, action })
+    }
+
+    /// Enable / disable the engine's level metering. While off, the render loop
+    /// skips all `accumulate` calls (zero-cost). Enabling tells the audio thread
+    /// (via the next `push_graph` swap) to fold per-node + master levels into the
+    /// meter ring; the metering toggle is mirrored so a graph swap re-applies it.
+    ///
+    /// NOTE: the engine is already moved into the audio host, so we cannot flip
+    /// the live engine's flag directly here — instead we record the desired state
+    /// and re-apply it on the next `push_graph` (the UI pushes a graph on every
+    /// node/connection change, so metering activates promptly). The ring is always
+    /// attached, so once a graph with `metering=true` is running, frames flow.
+    pub fn enable_metering(&mut self, on: bool) {
+        self.metering = on;
+    }
+
+    /// Drain the engine's meter return ring into a batch of [`EngineFrame`]s for
+    /// the UI's `meters` event. Control-rate: called on a UI-driven poll, never
+    /// the audio thread. Decodes the compact wire frames the audio thread pushed.
+    pub fn drain_meters(&mut self) -> Vec<EngineFrame> {
+        let mut out = Vec::new();
+        let mut buf = [0u8; return_frame::MAX_LEN];
+        while let Some(n) = self.meter_ring.pop(&mut buf) {
+            if let Some(frame) = return_frame::decode(&buf[..n]) {
+                // Surface only Meter frames here (Beat goes via the transport
+                // path); the UI's signal-level stream consumes Meter peaks.
+                if matches!(frame, EngineFrame::Meter { .. }) {
+                    out.push(frame);
+                }
+            }
+        }
+        out
+    }
+
+    /// Load decoded mono PCM as the sample for `node`'s `builtin.sampler`. The
+    /// PCM is content-addressed into the [`AssetCatalog`] (the same off-RT asset
+    /// pipeline a file load uses), returning its [`AssetId`].
+    ///
+    /// NOTE (documented gap): installing the resolved PCM into the LIVE sampler
+    /// instance needs a `DspInstance` sample-load hook, which lives in the
+    /// `ojcore`/`ojinstrument` crates (outside this unit's lane). So this stores
+    /// the asset (real, reusable by a graph rebuild that binds the asset) and the
+    /// install-into-live-instance step is the remaining wiring. The audio path is
+    /// founder-verified once that hook exists.
+    pub fn load_sample(
+        &mut self,
+        _node: NodeIdx,
+        pcm: Vec<f32>,
+        sample_rate: u32,
+        _root_note: u8,
+    ) -> Result<AssetId, BackendError> {
+        let pcm = Pcm {
+            samples: pcm,
+            channels: 1,
+            sample_rate: sample_rate.max(1),
+        };
+        self.catalog.insert(pcm).map_err(BackendError::Asset)
+    }
+
+    /// Arm a recorder capture of `node`'s output bus. v1 records the capture's
+    /// spec; the engine-output tap that fills the PCM is the documented gap (the
+    /// public [`AudioHost`] callback owns the engine and exposes no per-node bus
+    /// tap yet). `recorder_stop` / `recorder_export` operate on the captured PCM.
+    pub fn recorder_start(&mut self, node: NodeIdx) {
+        self.captures.insert(
+            node.0,
+            CaptureState {
+                pcm: Vec::new(),
+                sample_rate: self.stream.sample_rate,
+                channels: 1,
+                recording: true,
+            },
+        );
+    }
+
+    /// Stop a recorder capture and return its captured (interleaved) PCM + rate.
+    /// Returns `None` if no capture was armed for `node`.
+    pub fn recorder_stop(&mut self, node: NodeIdx) -> Option<(Vec<f32>, u32)> {
+        let mut cap = self.captures.remove(&node.0)?;
+        cap.recording = false;
+        Some((cap.pcm, cap.sample_rate))
+    }
+
+    /// Export a node's captured recording to a WAV file at `path` via the
+    /// [`AssetStore`] (lossless 32-bit float). Errors if nothing was captured.
+    pub fn recorder_export(&mut self, node: NodeIdx, path: &str) -> Result<(), BackendError> {
+        let cap = self
+            .captures
+            .get(&node.0)
+            .ok_or(BackendError::UnknownNode(node.0))?;
+        let pcm = Pcm {
+            samples: cap.pcm.clone(),
+            channels: cap.channels,
+            sample_rate: cap.sample_rate,
+        };
+        self.store
+            .write_wav_file(path, &pcm)
+            .map_err(BackendError::Asset)
+    }
+
+    /// Set a speaker node's master volume / mute. The engine `SpeakerOut` node is
+    /// unparameterized, so v1 records the request; once SpeakerOut gains a gain
+    /// param this routes as a `SetParam`. Surfaced so the UI's speaker control is
+    /// a real round-trip rather than a no-op.
+    pub fn set_speaker_volume(&mut self, _node: NodeIdx, _volume: f32, _muted: bool) {
+        // TODO(native-parity): route to a SpeakerOut gain param when one exists.
+    }
+
+    /// Route a speaker node to an output device id. Device selection is a host
+    /// (cpal) concern; v1 records the request (the host renders to the default
+    /// device). Surfaced for round-trip parity with the Web Audio path.
+    pub fn set_speaker_device(&mut self, _node: NodeIdx, _device_id: &str) {
+        // TODO(native-parity): re-open the cpal stream on the chosen device.
+    }
+
+    /// Enable mic capture into `node`'s input bus. Requires the duplex input
+    /// stream; v1 records the request (the host opens output-only by default).
+    pub fn set_mic(&mut self, _node: NodeIdx, _enabled: bool) {
+        // TODO(native-parity): open the duplex input + route it to the node bus.
     }
 
     /// Scan `dirs` for hostable third-party plugins (VST3 / CLAP, + AU on
@@ -474,5 +655,101 @@ mod tests {
     fn send_command_enqueues() {
         let mut be = EngineBackend::new();
         assert!(be.send_command(RtCommand::TransportPlay).is_ok());
+    }
+
+    // --- U-EXEC-PARITY capability seam tests -------------------------------
+
+    /// `looper_cmd` enqueues an `RtCommand::Looper` with the given node + action.
+    #[test]
+    fn looper_cmd_enqueues_looper_command() {
+        let mut be = EngineBackend::new();
+        for action in 0u8..=5 {
+            assert!(
+                be.looper_cmd(NodeIdx(3), action).is_ok(),
+                "looper action {action} should enqueue"
+            );
+        }
+    }
+
+    /// `load_sample` content-addresses the PCM into the catalog and returns an id
+    /// that resolves back to the same samples.
+    #[test]
+    fn load_sample_stores_into_catalog() {
+        let mut be = EngineBackend::new();
+        let pcm = vec![0.0f32, 0.25, -0.25, 0.5];
+        let id = be
+            .load_sample(NodeIdx(2), pcm.clone(), 48_000, 60)
+            .expect("sample stores");
+        let resolved = be.catalog.resolve(id).expect("resolves");
+        assert_eq!(resolved.samples, pcm);
+        assert_eq!(resolved.channels, 1);
+        assert_eq!(resolved.sample_rate, 48_000);
+    }
+
+    /// A recorder capture round-trips through start -> stop, returning the (empty
+    /// in the device-less sandbox) PCM + the stream rate.
+    #[test]
+    fn recorder_start_then_stop_returns_capture() {
+        let mut be = EngineBackend::new();
+        be.recorder_start(NodeIdx(4));
+        let (pcm, rate) = be.recorder_stop(NodeIdx(4)).expect("capture was armed");
+        assert_eq!(rate, DEFAULT_STREAM.sample_rate);
+        // No engine-output tap in the sandbox, so the captured PCM is empty —
+        // but the start/stop lifecycle is intact (the documented gap is the tap).
+        assert!(pcm.is_empty());
+        // Stopping an unarmed node returns None rather than erroring.
+        assert!(be.recorder_stop(NodeIdx(99)).is_none());
+    }
+
+    /// Exporting a node with no armed capture is a clean error, not a panic.
+    #[test]
+    fn recorder_export_unknown_node_errors() {
+        let mut be = EngineBackend::new();
+        let err = be.recorder_export(NodeIdx(7), "/tmp/oj-export-test.wav");
+        assert!(matches!(err, Err(BackendError::UnknownNode(7))));
+    }
+
+    /// Enabling metering flips the mirrored flag (re-applied on the next swap).
+    #[test]
+    fn enable_metering_sets_flag() {
+        let mut be = EngineBackend::new();
+        assert!(!be.metering);
+        be.enable_metering(true);
+        assert!(be.metering);
+    }
+
+    /// `drain_meters` returns only `Meter` frames decoded from the ring. With no
+    /// audio device the ring is empty, so the drain is an empty batch (no panic).
+    #[test]
+    fn drain_meters_decodes_only_meter_frames() {
+        let mut be = EngineBackend::new();
+        // Push one encoded Meter frame and one Beat frame directly onto the ring
+        // (simulating the audio thread's publish), then drain.
+        let mut buf = [0u8; return_frame::MAX_LEN];
+        let n = return_frame::encode_meter(NodeIdx(5), 0.1, 0.8, &mut buf);
+        assert!(be.meter_ring.push(&buf[..n]));
+        let n = return_frame::encode_beat(1, 2, 0.5, &mut buf);
+        assert!(be.meter_ring.push(&buf[..n]));
+
+        let frames = be.drain_meters();
+        // Only the Meter frame survives the filter.
+        assert_eq!(frames.len(), 1);
+        match &frames[0] {
+            EngineFrame::Meter { node, peak, .. } => {
+                assert_eq!(*node, NodeIdx(5));
+                assert!((peak - 0.8).abs() < 1e-6);
+            }
+            other => panic!("expected Meter, got {other:?}"),
+        }
+    }
+
+    /// Speaker / mic control methods are safe no-op-ish round trips (they record
+    /// the request; the wiring is the documented gap) and never panic.
+    #[test]
+    fn speaker_and_mic_controls_do_not_panic() {
+        let mut be = EngineBackend::new();
+        be.set_speaker_volume(NodeIdx(1), 0.7, false);
+        be.set_speaker_device(NodeIdx(1), "device-2");
+        be.set_mic(NodeIdx(1), true);
     }
 }

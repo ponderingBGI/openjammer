@@ -28,18 +28,24 @@
  */
 
 import type { Connection, GraphNode } from '../../engine/types';
-import type { Looper } from '../Looper';
-import type { Recorder } from '../Recorder';
-import type { SamplerAdapter } from '../samplers/SamplerAdapter';
 import type {
     Executor,
     ConnectionChangeCallback,
     NodeChangeCallback,
     Unsubscribe,
+    LooperHandle,
+    RecorderHandle,
+    SamplerHandle,
+    SignalLevelsCallback,
 } from './Executor';
 import { getAudioContext } from '../AudioEngine';
 import { emitWithIndex, remapForBackend, resolveKeyboardNotes, type NodeIdxMap } from '../ojgraph';
-import type { OjGraph, RtCommand } from '../../../packages/oj-protocol-ts/src/index';
+import type { NodeIdx, OjGraph, RtCommand } from '../../../packages/oj-protocol-ts/src/index';
+import {
+    OjcoreCapabilityRegistry,
+    monoPcmToWavBlob,
+    type OjcoreBridge,
+} from './ojcoreHandles';
 
 // Vite resolves these to URLs/assets at build time.
 // The worklet processor module (bundled as an ES module worklet).
@@ -60,8 +66,27 @@ export class OjcoreWasmExecutor implements Executor {
     /** Graphs requested before the worklet was ready are coalesced to the last. */
     private pendingGraph: OjGraph | null = null;
     private index: NodeIdxMap = new Map();
-    private signalCallbacks = new Set<(levels: Map<string, number>) => void>();
+    /** Reverse map NodeIdx -> visual node id, for routing meter frames back. */
+    private reverseIndex = new Map<number, string>();
+    private signalCallbacks = new Set<SignalLevelsCallback>();
+    /** Latest per-node levels, keyed by visual node id (for meter delivery). */
+    private levels = new Map<string, number>();
     private encoder = new TextEncoder();
+    /** Pending recorder-capture resolvers, keyed by NodeIdx, for the worklet's
+     *  `recorder-data` reply. */
+    private captureResolvers = new Map<number, (blob: Blob | null) => void>();
+
+    /** The engine-side seam the capability handles drive (wasm impl). */
+    private readonly bridge: OjcoreBridge = {
+        nodeIndex: (nodeId) => this.index.get(nodeId),
+        sendCommand: (cmd) => this.send(cmd),
+        loadSample: (nodeId, pcm, sampleRate, rootNote) =>
+            this.loadSampleWasm(nodeId, pcm, sampleRate, rootNote),
+        startCapture: (nodeId) => this.captureStartWasm(nodeId),
+        stopCapture: (nodeId) => this.captureStopWasm(nodeId),
+    };
+
+    private readonly caps = new OjcoreCapabilityRegistry(this.bridge);
 
     // --- Lifecycle ---------------------------------------------------------
 
@@ -111,16 +136,35 @@ export class OjcoreWasmExecutor implements Executor {
         this.node = node;
 
         node.port.onmessage = (e: MessageEvent) => {
-            const data = e.data as { type?: string; ok?: boolean; message?: string };
-            if (data.type === 'ready') {
-                this.ready = true;
-                // Flush any graph that arrived before the worklet was ready.
-                if (this.pendingGraph) {
-                    this.sendGraph(this.pendingGraph);
-                    this.pendingGraph = null;
-                }
-            } else if (data.type === 'error') {
-                console.error('[OjcoreWasmExecutor] worklet error:', data.message);
+            const data = e.data as {
+                type?: string;
+                ok?: boolean;
+                message?: string;
+                levels?: Array<{ node: number; peak: number }>;
+                node?: number;
+                pcm?: Float32Array;
+                sampleRate?: number;
+            };
+            switch (data.type) {
+                case 'ready':
+                    this.ready = true;
+                    // Enable the worklet's meter emission for the level stream.
+                    node.port.postMessage({ type: 'meters', enabled: true });
+                    // Flush any graph that arrived before the worklet was ready.
+                    if (this.pendingGraph) {
+                        this.sendGraph(this.pendingGraph);
+                        this.pendingGraph = null;
+                    }
+                    break;
+                case 'meters':
+                    this.onMeterFrame(data.levels ?? []);
+                    break;
+                case 'recorder-data':
+                    this.onRecorderData(data.node, data.pcm, data.sampleRate);
+                    break;
+                case 'error':
+                    console.error('[OjcoreWasmExecutor] worklet error:', data.message);
+                    break;
             }
         };
 
@@ -147,9 +191,15 @@ export class OjcoreWasmExecutor implements Executor {
         this.ready = false;
         this.pendingGraph = null;
         this.signalCallbacks.clear();
+        this.levels.clear();
+        this.caps.clear();
+        // Resolve any in-flight captures so callers are not left hanging.
+        for (const resolve of this.captureResolvers.values()) resolve(null);
+        this.captureResolvers.clear();
         this.getNodes = null;
         this.getConnections = null;
         this.index = new Map();
+        this.reverseIndex = new Map();
     }
 
     // --- Graph push --------------------------------------------------------
@@ -160,12 +210,43 @@ export class OjcoreWasmExecutor implements Executor {
             blockSize: WORKLET_BLOCK_SIZE,
         });
         this.index = index;
+        this.reverseIndex = new Map();
+        for (const [id, idx] of index) this.reverseIndex.set(idx, id);
         const wasmGraph = remapForBackend(graph, 'wasm');
         if (this.ready) {
             this.sendGraph(wasmGraph);
         } else {
             this.pendingGraph = wasmGraph; // coalesce to latest until ready
         }
+    }
+
+    /** Route worklet meter frames to signal-level subscribers, keyed by node id. */
+    private onMeterFrame(levels: Array<{ node: number; peak: number }>): void {
+        let changed = false;
+        for (const { node, peak } of levels) {
+            const nodeId = this.reverseIndex.get(node);
+            if (nodeId === undefined) continue;
+            this.levels.set(nodeId, Math.max(0, Math.min(1, peak)));
+            changed = true;
+        }
+        if (changed && this.signalCallbacks.size > 0) {
+            const snapshot = new Map(this.levels);
+            for (const cb of this.signalCallbacks) cb(snapshot);
+        }
+    }
+
+    /** Resolve a pending recorder capture with the worklet-returned PCM. */
+    private onRecorderData(node?: number, pcm?: Float32Array, sampleRate?: number): void {
+        if (node === undefined) return;
+        const resolve = this.captureResolvers.get(node);
+        if (!resolve) return;
+        this.captureResolvers.delete(node);
+        if (!pcm || pcm.length === 0) {
+            resolve(null);
+            return;
+        }
+        const ctx = getAudioContext();
+        resolve(monoPcmToWavBlob(pcm, sampleRate ?? ctx?.sampleRate ?? 48000));
     }
 
     private sendGraph(graph: OjGraph): void {
@@ -226,25 +307,37 @@ export class OjcoreWasmExecutor implements Executor {
         this.emitSignal(connectionId, 0);
     }
     private emitSignal(connectionId: string, level: number): void {
+        this.levels.set(connectionId, level);
         if (this.signalCallbacks.size === 0) return;
-        const levels = new Map<string, number>([[connectionId, level]]);
-        for (const cb of this.signalCallbacks) cb(levels);
+        const snapshot = new Map(this.levels);
+        for (const cb of this.signalCallbacks) cb(snapshot);
     }
 
     // --- Speaker output ----------------------------------------------------
-    setSpeakerVolume(_nodeId: string, _volume: number, _isMuted: boolean): void {}
+    // The wasm engine renders into the AudioContext destination; master volume is
+    // a worklet `gain` message (the SpeakerOut node is unparameterized). Device
+    // selection (`setSinkId`) is an AudioContext-level concern handled by the
+    // shell; the worklet just scales its master.
+    setSpeakerVolume(_nodeId: string, volume: number, isMuted: boolean): void {
+        this.node?.port.postMessage({ type: 'master-gain', gain: isMuted ? 0 : volume });
+    }
+    // TODO(wasm-parity): per-speaker-node device routing needs `AudioContext.
+    // setSinkId` plumbing in the shell; the worklet renders to one destination.
     setSpeakerDevice(_nodeId: string, _deviceId: string): void {}
 
     // --- Signal level metering --------------------------------------------
-    subscribeSignalLevels(callback: (levels: Map<string, number>) => void): Unsubscribe {
+    subscribeSignalLevels(callback: SignalLevelsCallback): Unsubscribe {
         this.signalCallbacks.add(callback);
-        callback(new Map());
+        callback(new Map(this.levels));
         return () => {
             this.signalCallbacks.delete(callback);
         };
     }
 
     // --- Microphone --------------------------------------------------------
+    // TODO(wasm-parity): mic capture into the worklet needs a `MediaStreamSource`
+    // -> worklet input wiring; the engine currently renders synthesis-only. The
+    // node id is recorded so the routing can be added without a UI change.
     setMicrophoneOutput(_nodeId: string, _outputNode: AudioNode): void {}
 
     // --- Continuous sources ------------------------------------------------
@@ -256,17 +349,75 @@ export class OjcoreWasmExecutor implements Executor {
     }
 
     // --- Capability handles ------------------------------------------------
-    getSamplerAdapter(_nodeId: string): SamplerAdapter | null {
-        return null;
+    // Real, never-null handles backed by the wasm worklet engine.
+    getSamplerAdapter(nodeId: string): SamplerHandle {
+        return this.caps.sampler(nodeId);
     }
-    waitForSamplerAdapter(_nodeId: string, _timeoutMs?: number): Promise<SamplerAdapter | null> {
-        return Promise.resolve(null);
+    waitForSamplerAdapter(nodeId: string, _timeoutMs?: number): Promise<SamplerHandle | null> {
+        return Promise.resolve(this.caps.sampler(nodeId));
     }
-    getLooper(_nodeId: string): Looper | null {
-        return null;
+    getLooper(nodeId: string): LooperHandle {
+        return this.caps.looper(nodeId);
     }
-    getRecorder(_nodeId: string): Recorder | null {
-        return null;
+    getRecorder(nodeId: string): RecorderHandle {
+        return this.caps.recorder(nodeId);
     }
-    sendSampleBuffer(_sourceNodeId: string, _buffer: AudioBuffer): void {}
+
+    /** Forward a decoded buffer from a source node to every connected sampler. */
+    sendSampleBuffer(sourceNodeId: string, buffer: AudioBuffer): void {
+        if (!this.getNodes || !this.getConnections) return;
+        const connections = this.getConnections();
+        const nodes = this.getNodes();
+        for (const conn of connections.values()) {
+            if (conn.sourceNodeId !== sourceNodeId) continue;
+            const target = nodes.get(conn.targetNodeId);
+            if (target?.type === 'sampler') {
+                this.caps.sampler(conn.targetNodeId).setBuffer(buffer);
+            }
+        }
+    }
+
+    // --- Wasm command backings for the capability bridge -------------------
+
+    /** Transfer mono PCM into the worklet to install as `nodeId`'s sampler. */
+    private loadSampleWasm(
+        nodeId: string,
+        pcm: Float32Array,
+        sampleRate: number,
+        rootNote: number,
+    ): Promise<void> {
+        const idx = this.index.get(nodeId);
+        if (idx === undefined || !this.node || !this.ready) return Promise.resolve();
+        // Zero-copy transfer of the PCM into the worklet (off the render path).
+        const copy = pcm.slice();
+        this.node.port.postMessage(
+            { type: 'load-sample', node: idx, pcm: copy, sampleRate, rootNote },
+            [copy.buffer],
+        );
+        return Promise.resolve();
+    }
+
+    /** Tell the worklet to begin capturing `nodeId`'s output bus. */
+    private captureStartWasm(nodeId: string): void {
+        const idx = this.index.get(nodeId);
+        if (idx === undefined || !this.node) return;
+        this.node.port.postMessage({ type: 'recorder-start', node: idx });
+    }
+
+    /** Stop the worklet capture; resolves when the worklet returns the PCM. */
+    private captureStopWasm(nodeId: string): Promise<Blob | null> {
+        const idx = this.index.get(nodeId);
+        if (idx === undefined || !this.node) return Promise.resolve(null);
+        return new Promise<Blob | null>((resolve) => {
+            this.captureResolvers.set(idx as NodeIdx, resolve);
+            this.node?.port.postMessage({ type: 'recorder-stop', node: idx });
+            // Safety timeout: never leave the UI hanging if the worklet is silent.
+            setTimeout(() => {
+                if (this.captureResolvers.has(idx as NodeIdx)) {
+                    this.captureResolvers.delete(idx as NodeIdx);
+                    resolve(null);
+                }
+            }, 2000);
+        });
+    }
 }

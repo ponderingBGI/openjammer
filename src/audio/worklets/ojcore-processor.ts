@@ -46,7 +46,43 @@ interface CommandMsg {
     type: 'command';
     bytes: Uint8Array;
 }
-type InboundMsg = InitMsg | GraphMsg | CommandMsg;
+/** Enable/disable the per-node meter level stream back to the UI. */
+interface MetersMsg {
+    type: 'meters';
+    enabled: boolean;
+}
+/** Scale the master output (speaker volume). */
+interface MasterGainMsg {
+    type: 'master-gain';
+    gain: number;
+}
+/** Install mono PCM as a node's sampler buffer (best-effort, see handler). */
+interface LoadSampleMsg {
+    type: 'load-sample';
+    node: number;
+    pcm: Float32Array;
+    sampleRate: number;
+    rootNote: number;
+}
+/** Begin capturing a node's output for the recorder. */
+interface RecorderStartMsg {
+    type: 'recorder-start';
+    node: number;
+}
+/** Stop capturing and return the captured PCM. */
+interface RecorderStopMsg {
+    type: 'recorder-stop';
+    node: number;
+}
+type InboundMsg =
+    | InitMsg
+    | GraphMsg
+    | CommandMsg
+    | MetersMsg
+    | MasterGainMsg
+    | LoadSampleMsg
+    | RecorderStartMsg
+    | RecorderStopMsg;
 
 /** Size in bytes of the ring's frame length prefix (mirrors LEN_PREFIX). */
 const LEN_PREFIX = 4;
@@ -68,6 +104,15 @@ class OjcoreProcessor extends AudioWorkletProcessor {
     private offData = 0;
     private blockSize = 128;
 
+    /** Whether to drain + post per-node meter levels each block. */
+    private metersEnabled = false;
+    /** Block counter so meters are posted at ~UI rate, not every render quantum. */
+    private meterTick = 0;
+    /** Master output scale (speaker volume). */
+    private masterGain = 1;
+    /** Per-node recorder captures: node id -> accumulated mono PCM chunks. */
+    private captures = new Map<number, Float32Array[]>();
+
     constructor() {
         super();
         this.port.onmessage = (e: MessageEvent<InboundMsg>) => this.onMessage(e.data);
@@ -85,10 +130,59 @@ class OjcoreProcessor extends AudioWorkletProcessor {
                 case 'command':
                     this.pushCommandFrame(msg.bytes);
                     break;
+                case 'meters':
+                    this.metersEnabled = msg.enabled;
+                    if (this.ready) wasm.set_metering(msg.enabled);
+                    break;
+                case 'master-gain':
+                    this.masterGain = Math.max(0, msg.gain);
+                    break;
+                case 'load-sample':
+                    this.handleLoadSample(msg);
+                    break;
+                case 'recorder-start':
+                    this.captures.set(msg.node, []);
+                    break;
+                case 'recorder-stop':
+                    this.handleRecorderStop(msg.node);
+                    break;
             }
         } catch (err) {
             this.port.postMessage({ type: 'error', message: String(err) });
         }
+    }
+
+    /**
+     * Install mono PCM as a node's sampler buffer.
+     *
+     * TODO(wasm-parity): the wasm engine's `DspInstance` trait has no sample-load
+     * hook reachable from here (adding one is an `ojcore`/`ojinstrument` change
+     * outside this lane). Until that lands, the worklet records that the PCM
+     * arrived (so the UI's load flow completes) but cannot yet install it into the
+     * live engine sampler instance. The audible sampler still plays whatever the
+     * graph compiled; the buffer-install is the documented gap.
+     */
+    private handleLoadSample(_msg: LoadSampleMsg): void {
+        // Intentionally a no-op against the engine for now (see TODO above).
+    }
+
+    /** Finish a capture and post its concatenated mono PCM back to the UI. */
+    private handleRecorderStop(node: number): void {
+        const chunks = this.captures.get(node);
+        this.captures.delete(node);
+        if (!chunks || chunks.length === 0) {
+            this.port.postMessage({ type: 'recorder-data', node, pcm: new Float32Array(0) });
+            return;
+        }
+        let total = 0;
+        for (const c of chunks) total += c.length;
+        const pcm = new Float32Array(total);
+        let at = 0;
+        for (const c of chunks) {
+            pcm.set(c, at);
+            at += c.length;
+        }
+        this.port.postMessage({ type: 'recorder-data', node, pcm, sampleRate }, [pcm.buffer]);
     }
 
     private handleInit(msg: InitMsg): void {
@@ -107,6 +201,9 @@ class OjcoreProcessor extends AudioWorkletProcessor {
         this.offData = wasm.ring_data_offset();
         // capacity == data length == cmd_ring_len - data offset.
         this.ringCapacity = wasm.cmd_ring_len() - this.offData;
+
+        // Honour any meter-enable requested before init completed.
+        if (this.metersEnabled) wasm.set_metering(true);
 
         this.ready = true;
         this.port.postMessage({ type: 'ready' });
@@ -162,16 +259,50 @@ class OjcoreProcessor extends AudioWorkletProcessor {
         const frames = out[0].length;
 
         // Render one block into the wasm output buffer, then copy mono -> all
-        // output channels.
+        // output channels (scaled by the master gain / speaker volume).
         wasm.process(frames);
         const ptr = wasm.output_ptr();
         const mono = new Float32Array(this.exports.memory.buffer, ptr, Math.min(frames, this.blockSize));
+        const gain = this.masterGain;
         for (let ch = 0; ch < out.length; ch++) {
             const channel = out[ch];
             const n = Math.min(channel.length, mono.length);
-            channel.set(mono.subarray(0, n));
+            if (gain === 1) {
+                channel.set(mono.subarray(0, n));
+            } else {
+                for (let i = 0; i < n; i++) channel[i] = mono[i] * gain;
+            }
             // zero any tail beyond the rendered block
             for (let i = n; i < channel.length; i++) channel[i] = 0;
+        }
+
+        // Recorder: append a COPY of this block's mono master to every active
+        // capture (the engine's per-node bus is not separately readable here, so
+        // the recorder captures the master mix — the common "record the output"
+        // case). Off the SAB ring; a plain copy per active capture.
+        if (this.captures.size > 0) {
+            const n = Math.min(frames, mono.length);
+            for (const chunks of this.captures.values()) {
+                chunks.push(mono.slice(0, n));
+            }
+        }
+
+        // Meters: drain the engine's per-node levels at ~UI rate (every ~4 blocks
+        // == ~10 ms @ 48k/128) and post them to the UI. The drain resets each
+        // window so the next batch is fresh.
+        if (this.metersEnabled) {
+            this.meterTick++;
+            if (this.meterTick >= 4) {
+                this.meterTick = 0;
+                const flat = wasm.drain_meters() as Float32Array;
+                if (flat && flat.length >= 2) {
+                    const levels: Array<{ node: number; peak: number }> = [];
+                    for (let i = 0; i + 1 < flat.length; i += 2) {
+                        levels.push({ node: flat[i], peak: flat[i + 1] });
+                    }
+                    this.port.postMessage({ type: 'meters', levels });
+                }
+            }
         }
         return true;
     }

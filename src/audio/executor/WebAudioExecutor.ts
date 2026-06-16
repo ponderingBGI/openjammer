@@ -8,15 +8,16 @@
  */
 
 import { audioGraphManager } from '../AudioGraphManager';
-import type { Looper } from '../Looper';
-import type { Recorder } from '../Recorder';
-import type { SamplerAdapter } from '../samplers/SamplerAdapter';
 import type { Connection, GraphNode } from '../../engine/types';
 import type {
     Executor,
     ConnectionChangeCallback,
     NodeChangeCallback,
-    Unsubscribe
+    Unsubscribe,
+    LooperHandle,
+    RecorderHandle,
+    SamplerHandle,
+    SignalLevelsCallback,
 } from './Executor';
 
 export class WebAudioExecutor implements Executor {
@@ -78,7 +79,7 @@ export class WebAudioExecutor implements Executor {
 
     // --- Signal level metering --------------------------------------------
 
-    subscribeSignalLevels(callback: (levels: Map<string, number>) => void): Unsubscribe {
+    subscribeSignalLevels(callback: SignalLevelsCallback): Unsubscribe {
         return audioGraphManager.subscribeToSignalLevels(callback);
     }
 
@@ -100,19 +101,19 @@ export class WebAudioExecutor implements Executor {
 
     // --- Capability handles ------------------------------------------------
 
-    getSamplerAdapter(nodeId: string): SamplerAdapter | null {
+    getSamplerAdapter(nodeId: string): SamplerHandle | null {
         return audioGraphManager.getSamplerAdapter(nodeId);
     }
 
-    waitForSamplerAdapter(nodeId: string, timeoutMs?: number): Promise<SamplerAdapter | null> {
+    waitForSamplerAdapter(nodeId: string, timeoutMs?: number): Promise<SamplerHandle | null> {
         return audioGraphManager.waitForSamplerAdapter(nodeId, timeoutMs);
     }
 
-    getLooper(nodeId: string): Looper | null {
+    getLooper(nodeId: string): LooperHandle | null {
         return audioGraphManager.getLooper(nodeId);
     }
 
-    getRecorder(nodeId: string): Recorder | null {
+    getRecorder(nodeId: string): RecorderHandle | null {
         return audioGraphManager.getRecorder(nodeId);
     }
 
