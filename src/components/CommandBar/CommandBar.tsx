@@ -193,10 +193,11 @@ export function CommandBar() {
         if (!paletteCtx) return [];
         // Touch the registry tick + learning slices so the memo re-runs on change.
         void registryTick;
-        const candidates = queryActions(paletteCtx, {
-            surface: 'palette',
-            query: search,
-        });
+        // Surface/target filtering only — the fuzzy SUBSEQUENCE match + ranking is
+        // owned here. Do NOT pass `query`: queryActions' substring prefilter would
+        // drop genuine fzf matches (e.g. "adlp" → "Add Looper") before paletteScore
+        // ever runs, silently defeating subsequence search.
+        const candidates = queryActions(paletteCtx, { surface: 'palette' });
 
         const q = search.trim();
         const prefixWinner = q
@@ -212,11 +213,15 @@ export function CommandBar() {
             let combined = q === '' ? learned : fuzzy + learned;
             // Hard-boost a prefix win to the very top.
             if (prefixWinner && key === prefixWinner) combined += 100_000;
-            return { action, key, combined };
+            return { action, key, fuzzy, combined };
         });
 
-        scored.sort((a, b) => b.combined - a.combined);
-        return scored.slice(0, MAX_ROWS).map(({ action, key }) => ({ action, key }));
+        // With a query, keep only real subsequence matches (paletteScore > 0); an
+        // empty query keeps every candidate (ordered purely by learned frecency).
+        const matched = q === '' ? scored : scored.filter((s) => s.fuzzy > 0);
+
+        matched.sort((a, b) => b.combined - a.combined);
+        return matched.slice(0, MAX_ROWS).map(({ action, key }) => ({ action, key }));
         // `learning` is the store snapshot; scoreFor/prefixWins are read above and
         // re-rank whenever a pick mutates it.
     }, [paletteCtx, search, registryTick, learning]);

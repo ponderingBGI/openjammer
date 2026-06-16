@@ -174,6 +174,20 @@ describe('CommandBar (M2)', () => {
         expect(lowpassItem).toHaveAttribute('aria-selected', 'true');
     });
 
+    it('matches a non-contiguous subsequence query (fzf, not substring)', () => {
+        register(makeAction('node.add.looper', 'Add Looper'));
+        render(<CommandBar />);
+        openPalette();
+
+        const input = screen.getByPlaceholderText(/Search commands/i);
+        // 'adlp' is an in-order subsequence of "Add Looper" but NOT a substring.
+        // The old substring prefilter in queryActions dropped it; the fzf scorer
+        // must now surface it.
+        fireEvent.change(input, { target: { value: 'adlp' } });
+
+        expect(screen.getByText('Add Looper')).toBeInTheDocument();
+    });
+
     it('records a pick before running the action and then closes', () => {
         const run = vi.fn();
         register(makeAction('node.add.looper', 'Add Looper', run));
