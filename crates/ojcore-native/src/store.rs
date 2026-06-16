@@ -46,6 +46,7 @@
 
 use std::collections::HashMap;
 
+use ojcore::{AssetPcm, AssetResolver};
 use ojproto::AssetId;
 
 use crate::asset::{AssetError, AssetStore, Pcm};
@@ -171,6 +172,30 @@ impl AssetCatalog {
     /// going through the catalog — recordings are saved to disk, not addressed.
     pub fn codec(&self) -> &AssetStore {
         &self.codec
+    }
+}
+
+/// The catalog IS the engine's compile-time asset resolver: `ojcore::compile`
+/// (via [`ojcore::compile_with_assets`]) calls [`AssetResolver::resolve`] for
+/// each node's [`ojproto::AssetRef`] to install the decoded PCM into the node
+/// (Sampler -> `set_sample`, Convolution -> `set_ir`) off the RT thread, before
+/// the program goes live. This is the native end of the U6 sample-load seam.
+///
+/// MONO ONLY (v1): the sampler / convolution buffers are mono, and `AssetPcm`
+/// hands back a borrowed slice, so a multi-channel asset (which would need an
+/// owned downmix) resolves to `None` here rather than mis-feeding interleaved
+/// samples. The `load_sample` Tauri path always stores mono, so the live sampler
+/// path is mono throughout; stereo asset support is a documented follow-up.
+impl AssetResolver for AssetCatalog {
+    fn resolve(&self, id: AssetId) -> Option<AssetPcm<'_>> {
+        let pcm = self.by_id.get(&id)?;
+        if pcm.channels != 1 {
+            return None;
+        }
+        Some(AssetPcm {
+            pcm: &pcm.samples,
+            sample_rate: pcm.sample_rate as f32,
+        })
     }
 }
 

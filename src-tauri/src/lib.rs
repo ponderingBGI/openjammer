@@ -229,8 +229,8 @@ fn set_speaker_volume(
         .0
         .lock()
         .map_err(|_| "engine backend mutex poisoned".to_string())?
-        .set_speaker_volume(NodeIdx(node), volume, muted);
-    Ok(())
+        .set_speaker_volume(NodeIdx(node), volume, muted)
+        .map_err(|e| e.to_string())
 }
 
 /// Route a speaker node to an output device id.

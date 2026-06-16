@@ -35,15 +35,15 @@ use std::sync::{Arc, Mutex};
 
 use ojcore::meter::return_frame;
 use ojcore::{
-    compile, CommandProducer, CommandQueue, CompileError, Engine, MeterRing, PluginRegistry,
-    ProgramSwap,
+    compile, compile_with_assets, master_param, CommandProducer, CommandQueue, CompileError,
+    Engine, MeterRing, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{
     AssetCatalog, AssetError, AssetStore, AudioHost, HostError, Pcm, StreamRequest,
 };
 use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
 use ojinstrument::{register_all, RegisterOpts};
-use ojproto::{AssetId, EngineFrame, NodeIdx, OjGraph, RtCommand};
+use ojproto::{AssetId, AssetRef, EngineFrame, NodeIdx, OjGraph, RtCommand};
 
 /// Default stream request: 48 kHz, a small buffer for low latency, stereo out,
 /// no duplex input (pure synthesis path). Matches the `<5 ms` engine target;
@@ -156,6 +156,12 @@ pub struct EngineBackend {
     /// PCM here so `recorder_stop` can return it / `recorder_export` can write a
     /// WAV; the live engine-output tap is the documented gap (see `recorder_start`).
     captures: std::collections::HashMap<u32, CaptureState>,
+    /// The last graph adopted into the engine. Kept so a control command that
+    /// must alter the LIVE program without a fresh UI push — binding a freshly
+    /// loaded sample to a Sampler node — can re-resolve + recompile the same
+    /// graph against the updated [`AssetCatalog`]. `None` until the first
+    /// `push_graph` (the starter graph runs but is not stored).
+    last_graph: Option<OjGraph>,
 }
 
 /// State of one recorder capture for a node.
@@ -224,6 +230,7 @@ impl EngineBackend {
             catalog: AssetCatalog::new(),
             store: AssetStore::new(),
             captures: std::collections::HashMap::new(),
+            last_graph: None,
         }
     }
 
@@ -294,15 +301,36 @@ impl EngineBackend {
     ///
     /// This is control-rate (off the audio thread). The displaced host is
     /// dropped here, which stops the old stream cleanly off-RT.
+    ///
+    /// ASSET RESOLUTION. Compilation goes through [`compile_with_assets`] with the
+    /// backend's [`AssetCatalog`] as the resolver, so any node carrying an
+    /// [`AssetRef`] (a Sampler's sample, a Convolution's IR) has its decoded PCM
+    /// installed (Sampler `set_sample` / Convolution `set_ir`) BEFORE the program
+    /// goes live — the founder-verified seam that makes a serialized graph with a
+    /// bound sample actually play.
     pub fn push_graph(&mut self, graph: &OjGraph) -> Result<(), BackendError> {
+        self.adopt(graph)?;
+        // Remember the live graph so a later sample bind can re-resolve + recompile
+        // it against the updated catalog without a fresh UI push.
+        self.last_graph = Some(graph.clone());
+        Ok(())
+    }
+
+    /// Compile `graph` (resolving its assets through the catalog) and adopt the
+    /// fresh program into the running engine. Shared by [`push_graph`] and the
+    /// sample-bind path; does NOT itself store `last_graph` (the caller decides).
+    fn adopt(&mut self, graph: &OjGraph) -> Result<(), BackendError> {
         // Compile once; reuse the program for both the swap publish and the
         // fresh engine. `CompiledProgram` is not `Clone`, so we compile twice
         // from the same graph: one program to publish, one to run. Both are
-        // off-RT allocations.
-        let published = compile(graph, &self.registry).map_err(BackendError::Compile)?;
+        // off-RT allocations, and both resolve assets through the catalog so the
+        // staged and the running program are byte-for-byte the same.
+        let published = compile_with_assets(graph, &self.registry, &self.catalog)
+            .map_err(BackendError::Compile)?;
         self.swap.publish(published);
 
-        let program = compile(graph, &self.registry).map_err(BackendError::Compile)?;
+        let program = compile_with_assets(graph, &self.registry, &self.catalog)
+            .map_err(BackendError::Compile)?;
         let mut engine = Engine::new(program);
         // Re-attach the meter ring + re-apply the metering toggle to the fresh
         // engine so the level stream survives a graph swap.
@@ -384,29 +412,73 @@ impl EngineBackend {
         out
     }
 
-    /// Load decoded mono PCM as the sample for `node`'s `builtin.sampler`. The
-    /// PCM is content-addressed into the [`AssetCatalog`] (the same off-RT asset
-    /// pipeline a file load uses), returning its [`AssetId`].
+    /// Load decoded mono PCM as the sample for `node`'s `builtin.sampler` and
+    /// make it PLAY: content-address the PCM into the [`AssetCatalog`] (the same
+    /// off-RT asset pipeline a file load uses), bind the returned [`AssetId`] +
+    /// the `root_note` onto `node` in the live graph, then recompile so the
+    /// Sampler's `set_sample` (the U6 seam) fires through
+    /// [`compile_with_assets`]. Returns the stored [`AssetId`].
     ///
-    /// NOTE (documented gap): installing the resolved PCM into the LIVE sampler
-    /// instance needs a `DspInstance` sample-load hook, which lives in the
-    /// `ojcore`/`ojinstrument` crates (outside this unit's lane). So this stores
-    /// the asset (real, reusable by a graph rebuild that binds the asset) and the
-    /// install-into-live-instance step is the remaining wiring. The audio path is
-    /// founder-verified once that hook exists.
+    /// If no graph has been pushed yet (no `last_graph`), the asset is still
+    /// stored and returned — a subsequent `push_graph` that references it will
+    /// resolve it — but no live recompile happens (there is nothing to bind to).
     pub fn load_sample(
         &mut self,
-        _node: NodeIdx,
+        node: NodeIdx,
         pcm: Vec<f32>,
         sample_rate: u32,
-        _root_note: u8,
+        root_note: u8,
     ) -> Result<AssetId, BackendError> {
         let pcm = Pcm {
             samples: pcm,
             channels: 1,
             sample_rate: sample_rate.max(1),
         };
-        self.catalog.insert(pcm).map_err(BackendError::Asset)
+        let id = self.catalog.insert(pcm).map_err(BackendError::Asset)?;
+
+        // Bind the asset (and root note) to the node in the kept graph and adopt
+        // the recompiled program, so the LIVE sampler instance receives the PCM.
+        if let Some(mut graph) = self.last_graph.clone() {
+            if Self::bind_sample_to_node(&mut graph, node, id, root_note) {
+                self.adopt(&graph)?;
+                self.last_graph = Some(graph);
+            }
+        }
+        Ok(id)
+    }
+
+    /// Bind `asset` (and its `root_note`) onto `node` in `graph`: set the node's
+    /// `root_note` param and add/replace an [`AssetRef`] in slot 0. Returns
+    /// whether the node was found (and the graph thus mutated). Off-RT, pure data.
+    fn bind_sample_to_node(
+        graph: &mut OjGraph,
+        node: NodeIdx,
+        asset: AssetId,
+        root_note: u8,
+    ) -> bool {
+        let Some(ir) = graph.nodes.iter_mut().find(|n| n.id == node) else {
+            return false;
+        };
+        // Root note -> the sampler's root-note param (so the recorded pitch lands
+        // at unity at `root_note`); the compiler applies params before assets.
+        use ojinstrument::SAMPLER_PCM_PARAM;
+        use ojproto::Param;
+        if let Some(p) = ir.params.iter_mut().find(|p| p.id == SAMPLER_PCM_PARAM) {
+            p.value = root_note as f32;
+        } else {
+            ir.params.push(Param {
+                id: SAMPLER_PCM_PARAM,
+                value: root_note as f32,
+            });
+        }
+        // Bind the PCM asset in slot 0 (the sampler ignores the slot index — it
+        // has a single buffer); replace any prior binding on that slot.
+        if let Some(a) = ir.assets.iter_mut().find(|a| a.slot == 0) {
+            a.asset = asset;
+        } else {
+            ir.assets.push(AssetRef { slot: 0, asset });
+        }
+        true
     }
 
     /// Arm a recorder capture of `node`'s output bus. v1 records the capture's
@@ -450,12 +522,27 @@ impl EngineBackend {
             .map_err(BackendError::Asset)
     }
 
-    /// Set a speaker node's master volume / mute. The engine `SpeakerOut` node is
-    /// unparameterized, so v1 records the request; once SpeakerOut gains a gain
-    /// param this routes as a `SetParam`. Surfaced so the UI's speaker control is
-    /// a real round-trip rather than a no-op.
-    pub fn set_speaker_volume(&mut self, _node: NodeIdx, _volume: f32, _muted: bool) {
-        // TODO(native-parity): route to a SpeakerOut gain param when one exists.
+    /// Set a speaker node's master volume / mute. The SpeakerOut sink now carries
+    /// real `volume` / `mute` params ([`master_param`]); this routes both as
+    /// wait-free [`RtCommand::SetParam`]s to the live engine, which scales its
+    /// master mix by the result (see `ojcore::exec` / [`master_param`]). A real
+    /// round-trip, not a no-op: `setSpeakerVolume` audibly changes the output.
+    pub fn set_speaker_volume(
+        &mut self,
+        node: NodeIdx,
+        volume: f32,
+        muted: bool,
+    ) -> Result<(), BackendError> {
+        self.send_command(RtCommand::SetParam {
+            node,
+            param: master_param::VOLUME,
+            value: volume.max(0.0),
+        })?;
+        self.send_command(RtCommand::SetParam {
+            node,
+            param: master_param::MUTE,
+            value: if muted { 1.0 } else { 0.0 },
+        })
     }
 
     /// Route a speaker node to an output device id. Device selection is a host
@@ -743,13 +830,86 @@ mod tests {
         }
     }
 
-    /// Speaker / mic control methods are safe no-op-ish round trips (they record
-    /// the request; the wiring is the documented gap) and never panic.
+    /// Speaker / mic control methods are safe round trips and never panic.
+    /// `set_speaker_volume` now enqueues real `SetParam`s (volume + mute) onto the
+    /// live ring; device / mic remain documented host-side gaps.
     #[test]
     fn speaker_and_mic_controls_do_not_panic() {
         let mut be = EngineBackend::new();
-        be.set_speaker_volume(NodeIdx(1), 0.7, false);
+        // Two SetParams (volume, mute) enqueue cleanly on the live ring.
+        be.set_speaker_volume(NodeIdx(1), 0.7, false)
+            .expect("speaker volume enqueues");
         be.set_speaker_device(NodeIdx(1), "device-2");
         be.set_mic(NodeIdx(1), true);
+    }
+
+    /// `load_sample` with a previously pushed graph binds the asset to the
+    /// Sampler node and recompiles: the asset is stored AND the live graph now
+    /// carries the AssetRef + root-note param, so the sampler resolves it.
+    #[test]
+    fn load_sample_binds_asset_into_live_graph() {
+        use ojinstrument::{SAMPLER_ID, SAMPLER_PCM_PARAM};
+        use ojproto::{ConnectionType, IrEdge, IrNode, PrimitiveKind};
+
+        let mut be = EngineBackend::new();
+        // Sampler(1) -> SpeakerOut(2).
+        let graph = OjGraph {
+            ir_version: ojproto::SCHEMA_VERSION,
+            sample_rate: 48_000,
+            block_size: 64,
+            nodes: vec![
+                IrNode {
+                    id: NodeIdx(1),
+                    manifest_id: SAMPLER_ID.into(),
+                    kind: PrimitiveKind::Sampler,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 0,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(2),
+                    manifest_id: ojcore::SPEAKER_OUT_ID.into(),
+                    kind: PrimitiveKind::SpeakerOut,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 0,
+                },
+            ],
+            edges: vec![IrEdge {
+                from_node: NodeIdx(1),
+                from_port: 0,
+                to_node: NodeIdx(2),
+                to_port: 0,
+                kind: ConnectionType::Audio,
+            }],
+            schedule: vec![],
+        };
+        be.push_graph(&graph).expect("push graph");
+
+        let pcm = vec![0.0f32, 0.5, -0.5, 0.25, 0.1, -0.1];
+        let id = be
+            .load_sample(NodeIdx(1), pcm.clone(), 48_000, 60)
+            .expect("sample binds");
+
+        // The asset resolves back to the same PCM.
+        let resolved = be.catalog.resolve(id).expect("resolves");
+        assert_eq!(resolved.samples, pcm);
+
+        // The live graph now binds the asset + root note onto the sampler node.
+        let g = be.last_graph.as_ref().expect("graph kept");
+        let sampler = g.nodes.iter().find(|n| n.id == NodeIdx(1)).unwrap();
+        assert!(
+            sampler.assets.iter().any(|a| a.asset == id),
+            "asset not bound to sampler node"
+        );
+        assert!(
+            sampler
+                .params
+                .iter()
+                .any(|p| p.id == SAMPLER_PCM_PARAM && p.value == 60.0),
+            "root note not bound"
+        );
     }
 }

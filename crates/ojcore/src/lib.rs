@@ -82,7 +82,10 @@ pub mod swap;
 pub use ojproto::PrimitiveKind;
 
 pub use builtin::{GainLoader, GainNode, GAIN_ID, GAIN_PARAM};
-pub use compile::{compile, CompileError, CompiledProgram, NodeRouting, Source};
+pub use compile::{
+    compile, compile_with_assets, AssetPcm, AssetResolver, CompileError, CompiledProgram, NoAssets,
+    NodeRouting, Source,
+};
 pub use dsp::{DspInstance, ProcessCtx};
 pub use exec::Engine;
 pub use loader::PluginLoader;
@@ -100,8 +103,8 @@ pub use register::{register_builtins, BuiltinOpts};
 pub use looper::{LooperLoader, LooperNode, LooperState, LOOPER_ID, MAX_LOOP_SECS};
 
 pub use structural::{
-    StructuralLoader, StructuralNode, ADD_ID, GRAPH_IN_ID, GRAPH_OUT_ID, MIC_IN_ID, PASSTHROUGH_ID,
-    SPEAKER_OUT_ID,
+    master_param, StructuralLoader, StructuralNode, ADD_ID, GRAPH_IN_ID, GRAPH_OUT_ID, MIC_IN_ID,
+    PASSTHROUGH_ID, SPEAKER_OUT_ID,
 };
 
 // --- U12/U15/U16 additive surface ---

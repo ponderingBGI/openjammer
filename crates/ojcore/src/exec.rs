@@ -374,6 +374,17 @@ impl Engine {
                 }
             }
         }
+        // Master volume / mute: scale the resolved master mix by the master
+        // sink's `master_gain` (volume, or 0 when muted). Default is unity, so
+        // graphs whose SpeakerOut never set a volume are bit-identical to before.
+        // A single field read + per-sample multiply — RT-safe, no allocation.
+        let mg = self.program.instances[master].master_gain();
+        if mg != 1.0 {
+            for o in out.iter_mut().take(nframes) {
+                *o *= mg;
+            }
+        }
+
         // Zero any trailing frames beyond our valid range.
         for o in out.iter_mut().skip(nframes) {
             *o = 0.0;

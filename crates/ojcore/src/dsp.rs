@@ -70,6 +70,32 @@ pub trait DspInstance: Send {
     /// implementors MUST NOT allocate. Carried by [`ojproto::RtCommand::Looper`].
     fn looper_action(&mut self, _action: u8) {}
 
+    /// OFF-RT asset-resolution seam (the U6 sample / IR loading point).
+    ///
+    /// Called by [`crate::compile`] (or any host that resolves an
+    /// [`ojproto::AssetRef`]) AFTER `activate` + the baked-in `set_param`s, with
+    /// the already-decoded mono PCM behind the node's asset slot. `slot` is the
+    /// [`ojproto::AssetRef::slot`]; `pcm` is mono `f32` in `[-1, 1]`;
+    /// `sample_rate` is the PCM's own capture rate (for resampling correction).
+    ///
+    /// This runs off the audio thread (at compile / asset-bind time), so unlike
+    /// `process` it MAY allocate (e.g. the Sampler copies the PCM into a shared
+    /// `Arc`). The default is a no-op so pure-DSP nodes ignore any bound asset;
+    /// the Sampler installs it as its playback buffer and the Convolution node as
+    /// its impulse response. RT-safe is NOT required here.
+    fn load_asset(&mut self, _slot: u16, _pcm: &[f32], _sample_rate: f32) {}
+
+    /// Master-output gain this node contributes when it is the graph's master
+    /// sink (SpeakerOut / GraphOut). The executor multiplies the resolved master
+    /// mix by this just before it leaves the engine, so a host can give the
+    /// SpeakerOut node a real master volume / mute (set via
+    /// [`set_param`](DspInstance::set_param)). Default `1.0` (unity): only the
+    /// master sink's value is ever read, so every other node ignores it.
+    /// RT-safe: a single field read, no allocation.
+    fn master_gain(&self) -> f32 {
+        1.0
+    }
+
     /// Clear internal state (filter memory, delay lines, phase). Default no-op.
     fn reset(&mut self) {}
 }

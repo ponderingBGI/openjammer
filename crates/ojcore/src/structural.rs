@@ -25,7 +25,22 @@ use ojproto::PrimitiveKind;
 
 use crate::dsp::{DspInstance, ProcessCtx};
 use crate::loader::PluginLoader;
-use crate::manifest::{DspKind, PluginManifest, PortDecl, UiKind};
+use crate::manifest::{DspKind, ParamDecl, PluginManifest, PortDecl, UiKind};
+
+/// Master-output parameter ids carried by the [`PrimitiveKind::SpeakerOut`] /
+/// [`PrimitiveKind::GraphOut`] sink, so the host's "set speaker volume / mute"
+/// control is a real `(NodeIdx, id)` [`ojproto::RtCommand::SetParam`] round-trip
+/// rather than a no-op. The executor reads them back through
+/// [`DspInstance::master_gain`] and scales the engine's master mix by the
+/// result. Other structural kinds ignore these ids.
+pub mod master_param {
+    /// Master output volume, linear `0..`. Default `1.0` (unity). Clamped
+    /// non-negative; the executor scales the final master mix by this.
+    pub const VOLUME: u16 = 0;
+    /// Master mute toggle (`!= 0` => muted, forcing the master gain to `0`).
+    /// Carried as a float so it fits the one numeric param-addressing scheme.
+    pub const MUTE: u16 = 1;
+}
 
 /// Manifest id of the host's master speaker-output sink.
 pub const SPEAKER_OUT_ID: &str = "host.speaker_out";
@@ -49,8 +64,30 @@ pub struct StructuralLoader {
 
 impl StructuralLoader {
     /// Build a loader for `kind` registered under `id`, declaring `audio_in` /
-    /// `audio_out` ports. No params (structural nodes are not parameterized).
+    /// `audio_out` ports. Master-output kinds ([`PrimitiveKind::SpeakerOut`] /
+    /// [`PrimitiveKind::GraphOut`]) additionally declare the `volume` / `mute`
+    /// master params (see [`master_param`]); the other kinds carry no params.
     pub fn new(id: &str, name: &str, kind: PrimitiveKind, audio_in: u8, audio_out: u8) -> Self {
+        let params = if matches!(kind, PrimitiveKind::SpeakerOut | PrimitiveKind::GraphOut) {
+            vec![
+                ParamDecl {
+                    id: master_param::VOLUME,
+                    name: String::from("volume"),
+                    min: 0.0,
+                    max: 4.0,
+                    default: 1.0,
+                },
+                ParamDecl {
+                    id: master_param::MUTE,
+                    name: String::from("mute"),
+                    min: 0.0,
+                    max: 1.0,
+                    default: 0.0,
+                },
+            ]
+        } else {
+            vec![]
+        };
         Self {
             manifest: PluginManifest {
                 id: String::from(id),
@@ -58,7 +95,7 @@ impl StructuralLoader {
                 kind,
                 dsp: DspKind::None,
                 ui: UiKind::Auto,
-                params: vec![],
+                params,
                 ports: PortDecl {
                     audio_in,
                     audio_out,
@@ -120,14 +157,39 @@ impl PluginLoader for StructuralLoader {
     }
 
     fn instantiate(&self, _sample_rate: f32, _max_block: usize) -> Box<dyn DspInstance> {
-        Box::new(StructuralNode)
+        // Carry the kind so a master sink honours its volume / mute params; every
+        // other structural kind ignores them (their value is never read).
+        Box::new(StructuralNode::new(self.manifest.kind))
     }
 }
 
-/// A stateless no-op node. For the I/O kinds the executor handles specially this
-/// `process` is never reached; for `Add` / `Passthrough` it forwards input 0 to
-/// output 0. Allocation-free and panic-free on any channel arrangement.
-pub struct StructuralNode;
+/// A near-stateless routing node. For the I/O kinds the executor handles
+/// specially this `process` is never reached; for `Add` / `Passthrough` it
+/// forwards input 0 to output 0. Allocation-free and panic-free on any channel
+/// arrangement.
+///
+/// The only state it holds is the master sink's `volume` / `mute` (read by the
+/// executor via [`DspInstance::master_gain`] when this node is the graph
+/// master); for every other kind those fields sit at their unity defaults and
+/// are never read.
+pub struct StructuralNode {
+    kind: PrimitiveKind,
+    /// Master output volume (linear). Only meaningful on a master sink.
+    volume: f32,
+    /// Master mute flag. Only meaningful on a master sink.
+    muted: bool,
+}
+
+impl StructuralNode {
+    /// A node of the given primitive kind, with master volume at unity / unmuted.
+    pub fn new(kind: PrimitiveKind) -> Self {
+        Self {
+            kind,
+            volume: 1.0,
+            muted: false,
+        }
+    }
+}
 
 impl DspInstance for StructuralNode {
     fn activate(&mut self, _sample_rate: f32, _max_block: usize) {}
@@ -141,7 +203,29 @@ impl DspInstance for StructuralNode {
         }
     }
 
-    fn set_param(&mut self, _id: u16, _value: f32) {}
+    fn set_param(&mut self, id: u16, value: f32) {
+        // Only the master sinks expose params; ignore on every other kind so a
+        // stray SetParam can never alter routing behaviour.
+        if !matches!(
+            self.kind,
+            PrimitiveKind::SpeakerOut | PrimitiveKind::GraphOut
+        ) {
+            return;
+        }
+        match id {
+            master_param::VOLUME => self.volume = value.max(0.0),
+            master_param::MUTE => self.muted = value != 0.0,
+            _ => {}
+        }
+    }
+
+    fn master_gain(&self) -> f32 {
+        if self.muted {
+            0.0
+        } else {
+            self.volume
+        }
+    }
 }
 
 #[cfg(test)]
@@ -254,5 +338,35 @@ mod tests {
         for &s in out.iter() {
             assert!((s - 0.5).abs() < 1e-6, "passthrough should preserve input");
         }
+    }
+
+    /// A master sink honours its `volume` / `mute` params via `master_gain`; a
+    /// non-master kind ignores the same param ids (its gain stays unity).
+    #[test]
+    fn master_sink_volume_and_mute_drive_master_gain() {
+        let mut speaker = StructuralNode::new(PrimitiveKind::SpeakerOut);
+        assert_eq!(speaker.master_gain(), 1.0, "default master gain is unity");
+
+        speaker.set_param(master_param::VOLUME, 0.25);
+        assert!((speaker.master_gain() - 0.25).abs() < 1e-9);
+
+        speaker.set_param(master_param::MUTE, 1.0);
+        assert_eq!(speaker.master_gain(), 0.0, "mute forces gain to zero");
+
+        speaker.set_param(master_param::MUTE, 0.0);
+        assert!(
+            (speaker.master_gain() - 0.25).abs() < 1e-9,
+            "unmute restores the prior volume"
+        );
+
+        // A negative volume clamps to zero rather than inverting phase.
+        speaker.set_param(master_param::VOLUME, -1.0);
+        assert_eq!(speaker.master_gain(), 0.0);
+
+        // Non-master kinds ignore the master params entirely.
+        let mut add = StructuralNode::new(PrimitiveKind::Add);
+        add.set_param(master_param::VOLUME, 0.1);
+        add.set_param(master_param::MUTE, 1.0);
+        assert_eq!(add.master_gain(), 1.0, "non-master gain stays unity");
     }
 }

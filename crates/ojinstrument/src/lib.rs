@@ -39,7 +39,10 @@ mod sf2;
 pub use adsr::{Adsr, AdsrParams};
 pub use karplus::{KarplusInstrument, KarplusLoader, KARPLUS_ID};
 pub use osc::{OscInstrument, OscLoader, OSC_ID};
-pub use sampler::{SamplerInstrument, SamplerLoader, SamplerSample, SAMPLER_ID, SAMPLER_PCM_PARAM};
+pub use sampler::{
+    SamplerInstrument, SamplerLoader, SamplerSample, SAMPLER_DEFAULT_ROOT, SAMPLER_ID,
+    SAMPLER_PCM_PARAM,
+};
 
 #[cfg(feature = "sf2")]
 pub use sf2::{Sf2Instrument, Sf2Loader, SF2_ID};

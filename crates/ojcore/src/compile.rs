@@ -18,10 +18,43 @@ use alloc::boxed::Box;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use ojproto::{ConnectionType, NodeIdx, OjGraph, PrimitiveKind};
+use ojproto::{AssetId, ConnectionType, NodeIdx, OjGraph, PrimitiveKind};
 
 use crate::dsp::DspInstance;
 use crate::registry::PluginRegistry;
+
+/// A borrowed view of an already-decoded mono asset, handed back by an
+/// [`AssetResolver`] so [`compile_with_assets`] can install it into a node
+/// through [`DspInstance::load_asset`] WITHOUT this `no_std` crate ever owning
+/// the PCM (it lives in the host's `ojcore-native::AssetCatalog`).
+#[derive(Debug, Clone, Copy)]
+pub struct AssetPcm<'a> {
+    /// Mono PCM samples in `[-1, 1]`.
+    pub pcm: &'a [f32],
+    /// The PCM's own capture sample rate (Hz), for resampling correction.
+    pub sample_rate: f32,
+}
+
+/// Resolve an [`AssetId`] (baked into the IR via an [`ojproto::AssetRef`]) to its
+/// decoded PCM, or `None` if the host has no such asset. Called off the RT thread
+/// at compile time. The default resolver (used by [`compile`]) always returns
+/// `None`, so a node with an unresolvable asset simply starts empty (the Sampler
+/// renders silence until a sample is bound; the Convolution stays dry).
+pub trait AssetResolver {
+    /// Borrow the PCM for `id`, if present.
+    fn resolve(&self, id: AssetId) -> Option<AssetPcm<'_>>;
+}
+
+/// A resolver that knows no assets — the default for [`compile`]. Hosts that own
+/// decoded PCM pass their own (e.g. one backed by `ojcore-native::AssetCatalog`).
+pub struct NoAssets;
+
+impl AssetResolver for NoAssets {
+    #[inline]
+    fn resolve(&self, _id: AssetId) -> Option<AssetPcm<'_>> {
+        None
+    }
+}
 
 /// One source buffer feeding a node input port: `(node slot, output port)`.
 /// `node` is the *compiled* slot index (0..n_nodes), NOT the IR [`NodeIdx`].
@@ -148,6 +181,25 @@ pub fn compile(
     graph: &OjGraph,
     registry: &PluginRegistry,
 ) -> Result<CompiledProgram, CompileError> {
+    compile_with_assets(graph, registry, &NoAssets)
+}
+
+/// Lower an [`OjGraph`] into a runnable [`CompiledProgram`], RESOLVING each
+/// node's [`ojproto::AssetRef`]s through `assets` and installing the decoded PCM
+/// into the node via [`DspInstance::load_asset`] before the program goes live.
+///
+/// This is the asset-aware sibling of [`compile`]: a Sampler node that carries an
+/// `AssetRef` actually plays the bound sample (and a Convolution node loads its
+/// IR), because the host's [`AssetResolver`] (e.g. one backed by
+/// `ojcore-native::AssetCatalog`) hands back the PCM here, off the RT thread, at
+/// compile time. Assets are installed AFTER `activate` + the baked-in params, so
+/// a Sampler's `root_note` param is already in effect when its sample loads.
+/// Unresolvable assets are skipped (the node starts empty), never an error.
+pub fn compile_with_assets(
+    graph: &OjGraph,
+    registry: &PluginRegistry,
+    assets: &impl AssetResolver,
+) -> Result<CompiledProgram, CompileError> {
     let n = graph.nodes.len();
     let sample_rate = graph.sample_rate as f32;
     let block_size = graph.block_size as usize;
@@ -185,6 +237,14 @@ pub fn compile(
             inst.set_param(p.id, p.value);
         }
         inst.reset();
+        // Resolve + install any bound assets (sample PCM / impulse response).
+        // Off the RT thread, AFTER params so e.g. a Sampler's root note is set.
+        // Unresolvable assets are skipped — the node simply starts empty.
+        for asset in &node.assets {
+            if let Some(pcm) = assets.resolve(asset.asset) {
+                inst.load_asset(asset.slot, pcm.pcm, pcm.sample_rate);
+            }
+        }
         instances.push(inst);
         kinds.push(node.kind);
         ids.push(node.id);

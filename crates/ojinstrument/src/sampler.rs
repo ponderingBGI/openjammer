@@ -33,6 +33,11 @@ use crate::{param, velocity_to_amp, MAX_VOICES};
 /// Stable manifest id for the built-in sampler instrument.
 pub const SAMPLER_ID: &str = "builtin.sampler";
 
+/// Default root note (MIDI 60, middle C) for an asset bound via
+/// [`DspInstance::load_asset`] when the node carries no explicit `root_note`
+/// override param. The recorded pitch then plays at unity at middle C.
+pub const SAMPLER_DEFAULT_ROOT: u8 = 60;
+
 /// Param id selecting the sample's **root note** — the MIDI note at which the
 /// buffer plays back at its native rate (playback ratio 1.0). Distinct from the
 /// shared envelope param ids so the two never collide.
@@ -224,6 +229,18 @@ impl DspInstance for SamplerInstrument {
             }
             _ => {}
         }
+    }
+
+    /// OFF-RT asset bind: install the resolved PCM as this sampler's playback
+    /// buffer (the U6 seam reached from [`ojcore::compile_with_assets`]). The
+    /// root note is the node's `root_note` override param if set (applied before
+    /// assets at compile time), else [`SAMPLER_DEFAULT_ROOT`] (middle C). Slot is
+    /// ignored: the sampler has a single PCM buffer. May allocate (copies the
+    /// borrowed PCM into a shared `Arc`); never called on the audio thread.
+    fn load_asset(&mut self, _slot: u16, pcm: &[f32], sample_rate: f32) {
+        let root = self.root_override.unwrap_or(SAMPLER_DEFAULT_ROOT);
+        let sample = SamplerSample::new(pcm.to_vec(), sample_rate, root);
+        self.set_sample(Arc::new(sample));
     }
 
     fn reset(&mut self) {
