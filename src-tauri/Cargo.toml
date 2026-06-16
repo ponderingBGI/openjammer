@@ -26,7 +26,14 @@ tauri-build = { version = "2.6.2", features = [] }
 # `ojcore` (std) gives us compile/Engine/PluginRegistry/CommandQueue/ProgramSwap;
 # `ojcore-native` owns the cpal AudioHost; `ojinstrument` ships the Osc/Sampler/
 # Karplus loaders; `ojproto` is the control-rate IR/command wire type.
-ojcore = { path = "../crates/ojcore" }
+#
+# `devlog` is enabled unconditionally: it activates the engine's RT event-emit
+# sites (`attach_event_ring` + the per-node fault emits in `ojcore::exec`), which
+# the `poll_events` bridge below drains into the DevLog. The emit path is
+# allocation-free + fault-only (CI-gated by `cargo test -p ojcore --features
+# devlog`), so it is the right always-on default for the native shell — "when
+# anything goes wrong I need to know about it" (governing logging principle).
+ojcore = { path = "../crates/ojcore", features = ["devlog"] }
 ojcore-native = { path = "../crates/ojcore-native" }
 ojinstrument = { path = "../crates/ojinstrument" }
 ojproto = { path = "../crates/ojproto" }

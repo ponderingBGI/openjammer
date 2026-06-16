@@ -42,12 +42,14 @@ import type {
     OjGraph,
     RtCommand,
     EngineFrame,
+    Event as EngineEvent,
 } from '../../../packages/oj-protocol-ts/src/index';
 import {
     OjcoreCapabilityRegistry,
     monoPcmToWavBlob,
     type OjcoreBridge,
 } from './ojcoreHandles';
+import { useLogStore } from '../../store/logStore';
 
 /** Minimal shape of the Tauri global IPC bridge (`withGlobalTauri`). */
 interface TauriGlobal {
@@ -67,6 +69,14 @@ function getInvoke(): ((cmd: string, args?: Record<string, unknown>) => Promise<
 
 /** How often (ms) to poll the engine for fresh per-node meter levels. */
 const METER_POLL_MS = 50;
+
+/**
+ * How often (ms) to poll the engine for fault {@link EngineEvent}s. Slower than
+ * the meter poll: faults are RARE (`Xrun` / `NodeFault` / `RingFull`), so empty
+ * batches are the norm and a tighter loop would just burn IPC. The engine's
+ * event ring (16 KiB) absorbs a fault burst between polls without loss.
+ */
+const EVENT_POLL_MS = 250;
 
 /** True when running inside a Tauri webview (the native desktop shell). */
 export function isTauri(): boolean {
@@ -98,6 +108,8 @@ export class OjcoreNativeExecutor implements Executor {
     private levels = new Map<string, number>();
     /** Interval id for the meter poll loop (engine -> UI level stream). */
     private meterPollId: number | null = null;
+    /** Interval id for the fault-event poll loop (engine -> DevLog stream). */
+    private eventPollId: number | null = null;
 
     /** The engine-side seam the capability handles drive (native impl). */
     private readonly bridge: OjcoreBridge = {
@@ -141,6 +153,12 @@ export class OjcoreNativeExecutor implements Executor {
 
         // Begin the engine -> UI meter event stream (no-op without Tauri).
         this.startMeterStream();
+        // Begin the engine -> DevLog fault-event stream. Unlike meters this is NOT
+        // gated on a subscriber: we log every engine fault into the bounded
+        // logStore ring always (the "log everything" principle), so the DevLog and
+        // the one-click issue report have the history even if the panel was never
+        // opened. No-op without Tauri.
+        this.startEventStream();
     }
 
     dispose(): void {
@@ -149,6 +167,10 @@ export class OjcoreNativeExecutor implements Executor {
         if (this.meterPollId !== null) {
             clearInterval(this.meterPollId);
             this.meterPollId = null;
+        }
+        if (this.eventPollId !== null) {
+            clearInterval(this.eventPollId);
+            this.eventPollId = null;
         }
         this.signalCallbacks.clear();
         this.levels.clear();
@@ -196,6 +218,32 @@ export class OjcoreNativeExecutor implements Executor {
         if (changed) {
             const snapshot = new Map(this.levels);
             for (const cb of this.signalCallbacks) cb(snapshot);
+        }
+    }
+
+    /** Begin the engine -> DevLog fault-event poll loop. Idempotent (a single
+     *  loop). No-op without Tauri. */
+    private startEventStream(): void {
+        if (!this.invoke || this.eventPollId !== null) return;
+        this.eventPollId = window.setInterval(() => {
+            void this.pollEvents();
+        }, EVENT_POLL_MS);
+    }
+
+    /** Poll the engine for pending fault events and ingest each into the DevLog
+     *  log store. Faults are rare, so most polls return an empty batch. */
+    private async pollEvents(): Promise<void> {
+        if (!this.invoke) return;
+        let events: EngineEvent[];
+        try {
+            events = (await this.invoke('poll_events', {})) as EngineEvent[];
+        } catch {
+            return; // transient; next tick retries
+        }
+        if (!Array.isArray(events) || events.length === 0) return;
+        const ingest = useLogStore.getState().ingestEngineEvent;
+        for (const event of events) {
+            if (event && typeof event === 'object' && 'kind' in event) ingest(event);
         }
     }
 

@@ -115,7 +115,7 @@ pub use transport::{Transport, TransportPos};
 #[cfg(feature = "std")]
 pub use command::{CommandConsumer, CommandProducer, CommandQueue};
 #[cfg(feature = "std")]
-pub use meter::MeterRing;
+pub use meter::{EventRing, MeterRing};
 #[cfg(feature = "std")]
 pub use resilience::Watchdog;
 #[cfg(feature = "std")]

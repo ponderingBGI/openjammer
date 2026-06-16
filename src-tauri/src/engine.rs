@@ -33,17 +33,20 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use ojcore::meter::return_frame;
+use ojcore::meter::{event_frame, return_frame};
 use ojcore::{
     compile, compile_with_assets, master_param, CommandProducer, CommandQueue, CompileError,
-    Engine, MeterRing, PluginRegistry, ProgramSwap,
+    Engine, EventRing, MeterRing, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{
     AssetCatalog, AssetError, AssetStore, AudioHost, HostError, Pcm, StreamRequest,
 };
 use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
 use ojinstrument::{register_all, RegisterOpts};
-use ojproto::{AssetId, AssetRef, EngineFrame, NodeIdx, OjGraph, RtCommand};
+use ojproto::{
+    AssetId, AssetRef, EngineFrame, Event, EventKind, NodeIdx, OjGraph, RtCommand, RtEvent,
+    Severity, Source,
+};
 
 /// Default stream request: 48 kHz, a small buffer for low latency, stereo out,
 /// no duplex input (pure synthesis path). Matches the `<5 ms` engine target;
@@ -144,6 +147,17 @@ pub struct EngineBackend {
     /// frames here at block end, and [`EngineBackend::drain_meters`] reads them
     /// off the control thread for the `meters` Tauri event.
     meter_ring: Arc<MeterRing>,
+    /// Control-side clone of the engine's RT -> control EVENT return ring (a
+    /// SEPARATE ring from `meter_ring` so a fault storm never evicts meters). The
+    /// matching `Arc` is attached to the engine in [`EngineBackend::new`] /
+    /// re-attached in [`EngineBackend::adopt`]; the audio thread publishes compact
+    /// [`RtEvent`] frames here on a fault, and [`EngineBackend::drain_events`]
+    /// lifts them into full [`Event`] envelopes for the DevLog (`poll_events`).
+    event_ring: Arc<EventRing>,
+    /// Monotonic per-source sequence counter stamped onto each drained [`Event`].
+    /// The compact RT frame carries no seq (it is the `Copy` 16-byte subset), so
+    /// the control side owns the sequence — matching the `Event` envelope contract.
+    event_seq: u32,
     /// Whether metering is enabled (mirrored so a graph swap re-applies it).
     metering: bool,
     /// Off-RT content-addressed asset catalog (sample PCM for the sampler,
@@ -187,6 +201,7 @@ impl EngineBackend {
         let stream = DEFAULT_STREAM;
         let swap = ProgramSwap::new();
         let meter_ring = Arc::new(MeterRing::new());
+        let event_ring = Arc::new(EventRing::new());
 
         // Compile the minimal starter program (silent: a gain into the speaker).
         // `compile` only fails on a malformed graph, and ours is well-formed by
@@ -198,6 +213,11 @@ impl EngineBackend {
         // subscriber asks (zero-cost while off). The same `Arc` clone is kept on
         // the control side so `drain_meters` reads what the audio thread publishes.
         engine.attach_meter_ring(Some(Arc::clone(&meter_ring)));
+        // Attach the EVENT ring the same way. Unlike metering, event emission is
+        // always live (it is alloc-free + fault-only, gated by the `devlog`
+        // feature this crate enables on `ojcore`), so faults flow from the very
+        // first block; `drain_events` reads them off the control thread.
+        engine.attach_event_ring(Some(Arc::clone(&event_ring)));
 
         // Split a fresh command ring; the consumer moves into the audio host.
         let (producer, consumer) = CommandQueue::split(COMMAND_RING_CAP);
@@ -226,6 +246,8 @@ impl EngineBackend {
             swap,
             stream,
             meter_ring,
+            event_ring,
+            event_seq: 0,
             metering: false,
             catalog: AssetCatalog::new(),
             store: AssetStore::new(),
@@ -336,6 +358,9 @@ impl EngineBackend {
         // engine so the level stream survives a graph swap.
         engine.attach_meter_ring(Some(Arc::clone(&self.meter_ring)));
         engine.set_metering(self.metering);
+        // Re-attach the event ring too, so fault events keep flowing across the
+        // swap (events are always live — no per-subscriber toggle like metering).
+        engine.attach_event_ring(Some(Arc::clone(&self.event_ring)));
 
         // Fresh command ring for the new audio callback; the old producer (and
         // any unsent commands) is replaced.
@@ -409,6 +434,57 @@ impl EngineBackend {
                 }
             }
         }
+        out
+    }
+
+    /// Drain the engine's EVENT return ring into a batch of [`Event`] envelopes
+    /// for the UI's DevLog (`poll_events`). Control-rate: called on a UI-driven
+    /// poll, never the audio thread. The audio thread pushed compact, `Copy`
+    /// [`RtEvent`] frames (the 16-byte subset that fits the wait-free ring); here,
+    /// off-RT, each is LIFTED into the full [`Event`] envelope every L1/L3/L4
+    /// consumer reads — stamping the metadata the RT frame deliberately omits:
+    ///
+    /// * `seq` — a monotonic per-source counter owned by the control side
+    ///   ([`Self::event_seq`]);
+    /// * `severity` — a `NodeFault` is an `Error` (a node produced bad output or
+    ///   was bypassed); an `Xrun` / `RingFull` is a `Warn` (a recoverable glitch);
+    /// * `ts_us` — the control-side RECEIPT time (the RT frame carries no clock).
+    ///   Stamped ONCE per drain so a batch shares one poll-window timestamp; this
+    ///   is off-RT, so `SystemTime::now` is fine here (never on the audio thread).
+    /// * `source` — always [`Source::Engine`] (these come off the native engine);
+    /// * `corr_id` — `0` (no correlation id on RT faults yet).
+    pub fn drain_events(&mut self) -> Vec<Event> {
+        // Clone the `Arc` so the drain closure can mutate `self.event_seq` without
+        // also holding a `&self.event_ring` borrow (the ring lives behind the Arc).
+        let ring = Arc::clone(&self.event_ring);
+        let ts_us = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_micros() as u64)
+            .unwrap_or(0);
+        let mut seq = self.event_seq;
+        let mut out = Vec::new();
+        event_frame::drain_events(&ring, |rt| {
+            let kind = match rt {
+                RtEvent::Xrun { dropped } => EventKind::Xrun { dropped },
+                RtEvent::NodeFault { node, fault } => EventKind::NodeFault { node, fault },
+                RtEvent::RingFull => EventKind::RingFull,
+            };
+            let severity = match &kind {
+                EventKind::NodeFault { .. } => Severity::Error,
+                _ => Severity::Warn,
+            };
+            seq = seq.wrapping_add(1);
+            out.push(Event {
+                v: ojproto::SCHEMA_VERSION,
+                seq,
+                severity,
+                kind,
+                source: Source::Engine,
+                ts_us,
+                corr_id: 0,
+            });
+        });
+        self.event_seq = seq;
         out
     }
 
@@ -828,6 +904,58 @@ mod tests {
             }
             other => panic!("expected Meter, got {other:?}"),
         }
+    }
+
+    /// `drain_events` lifts each RT frame on the event ring into a full [`Event`]
+    /// envelope — stamping a monotonic `seq`, an `Engine` source, and a severity
+    /// that follows the fault taxonomy (`NodeFault` => `Error`; `Xrun` /
+    /// `RingFull` => `Warn`). With no audio device the ring is otherwise empty, so
+    /// what we push is exactly what we drain, in FIFO order.
+    #[test]
+    fn drain_events_lifts_rt_frames_into_envelopes() {
+        use ojproto::FaultKind;
+        let mut be = EngineBackend::new();
+        // Push one of each emittable variant directly onto the ring (simulating
+        // the audio thread's fault emits), then drain. Mirrors meter.rs's
+        // `drain_events_yields_pushed_sequence_fifo` push loop.
+        let node_fault = RtEvent::NodeFault {
+            node: NodeIdx(9),
+            fault: FaultKind::OverBudget,
+        };
+        let pushed = [RtEvent::Xrun { dropped: 4 }, node_fault, RtEvent::RingFull];
+        for &ev in &pushed {
+            assert!(event_frame::emit(&be.event_ring, ev));
+        }
+
+        let events = be.drain_events();
+        assert_eq!(events.len(), 3);
+
+        // FIFO order, monotonic seq, Engine source + current schema on every one.
+        assert_eq!((events[0].seq, events[1].seq, events[2].seq), (1, 2, 3));
+        for ev in &events {
+            assert_eq!(ev.source, Source::Engine);
+            assert_eq!(ev.v, ojproto::SCHEMA_VERSION);
+        }
+
+        // Xrun => Warn, carrying the coalesced dropped count.
+        assert_eq!(events[0].severity, Severity::Warn);
+        assert_eq!(events[0].kind, EventKind::Xrun { dropped: 4 });
+        // NodeFault => Error, carrying node + fault.
+        assert_eq!(events[1].severity, Severity::Error);
+        assert_eq!(
+            events[1].kind,
+            EventKind::NodeFault {
+                node: NodeIdx(9),
+                fault: FaultKind::OverBudget,
+            }
+        );
+        // RingFull => Warn.
+        assert_eq!(events[2].severity, Severity::Warn);
+        assert_eq!(events[2].kind, EventKind::RingFull);
+
+        // A second drain yields nothing (ring drained) and seq does not rewind.
+        assert!(be.drain_events().is_empty());
+        assert_eq!(be.event_seq, 3);
     }
 
     /// Speaker / mic control methods are safe round trips and never panic.

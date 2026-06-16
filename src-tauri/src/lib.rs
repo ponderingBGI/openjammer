@@ -149,6 +149,22 @@ fn poll_meters(state: tauri::State<'_, BackendState>) -> Result<Vec<EngineFrame>
         .drain_meters())
 }
 
+/// Drain the engine's pending fault [`Event`]s (control-rate poll). Returns a
+/// batch of fully-stamped envelopes (`Xrun` / `NodeFault` / `RingFull`) the UI's
+/// DevLog ingests via `ingestEngineEvent`. Mirrors [`poll_meters`] exactly — a
+/// poll-shaped command, no event-permission setup — but reads the SEPARATE event
+/// return ring so a fault storm never starves the meter stream. The frontend
+/// polls this on a slow timer (see `OjcoreNativeExecutor`); empty batches are the
+/// common case (faults are rare), so the poll is cheap.
+#[tauri::command]
+fn poll_events(state: tauri::State<'_, BackendState>) -> Result<Vec<ojproto::Event>, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .drain_events())
+}
+
 /// Load decoded mono PCM as the sample for `node`'s sampler (content-addressed
 /// into the asset catalog). `pcm` is f32 samples in `[-1, 1]` (control-rate asset
 /// load, never the audio thread). Returns the stored `AssetId`.
@@ -284,6 +300,7 @@ pub fn run() {
             looper_cmd,
             subscribe_meters,
             poll_meters,
+            poll_events,
             load_sample,
             recorder_start,
             recorder_stop,
