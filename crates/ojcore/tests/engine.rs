@@ -855,3 +855,82 @@ fn event_emit_is_allocation_free() {
     }
     assert_eq!(decoded, cases.len(), "every emitted frame was drained");
 }
+
+/// REQUIRED Phase-2 gate: the engine emits `NodeFault` events FROM THE RENDER
+/// LOOP, and that render+emit path is allocation-free.
+///
+/// Builds `GraphIn(1) -> Nan(2) -> SpeakerOut(3)` (reusing the `NanNode` that
+/// trips the U16 non-finite guard) with an `EventRing` attached, then renders
+/// several blocks INSIDE `assert_no_alloc`. Each block the NaN node's output is
+/// flushed in `sanitize_node`, which now `emit`s a `NodeFault { NonFinite }`
+/// onto the ring — all on the wired-in render path, proven heap-free by the
+/// global `AllocDisabler`. After the scope we drain the ring and assert at least
+/// one `NodeFault` arrived, proving emit fired from the loop (not just from the
+/// isolated `event_emit_is_allocation_free` probe above).
+#[cfg(feature = "devlog")]
+#[test]
+fn render_loop_emits_node_fault_alloc_free() {
+    use ojcore::meter::{event_frame, EventRing};
+    use ojproto::{FaultKind, RtEvent};
+
+    let mut reg = gain_registry();
+    reg.register(Box::new(NanLoader::new()));
+
+    // GraphIn(1) -> NaN(2) -> SpeakerOut(3): node 2 emits NaN every block.
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
+    g.nodes.push(node(2, NAN_ID, PrimitiveKind::Gain, 1, 1));
+    g.nodes
+        .push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 0, 2, 0));
+    g.edges.push(audio_edge(2, 0, 3, 0));
+
+    let prog = compile(&g, &reg).expect("compile");
+    let mut engine = Engine::new(prog);
+
+    let ring: Arc<EventRing> = Arc::new(EventRing::new());
+    engine.attach_event_ring(Some(Arc::clone(&ring)));
+
+    let input = ramp();
+    let mut out = vec![0.0f32; NB];
+
+    // Inject + warm up once outside the gate, then drain so only in-gate emits
+    // remain. The NaN node ignores its input, so one injection holds for the run.
+    inject(&mut engine, &input);
+    engine.process_block(&mut out, NB);
+    let mut buf = [0u8; event_frame::MAX_LEN];
+    while ring.pop(&mut buf).is_some() {}
+
+    // The REQUIRED gate: render+emit allocates zero bytes. The ring (16 KiB)
+    // trivially holds a handful of 7-byte NodeFault frames, so no drain is
+    // needed inside the scope to keep the emits accepted.
+    assert_no_alloc(|| {
+        for _ in 0..8 {
+            engine.process_block(&mut out, NB);
+        }
+    });
+
+    // The NaN node was flagged non-finite by the render loop.
+    let nan_slot = engine.program().slot_of_id(NodeIdx(2)).unwrap();
+    assert!(
+        engine.budget().non_finite[nan_slot],
+        "NaN node flagged non_finite by the render loop"
+    );
+
+    // OUTSIDE the gate: drain and assert >= 1 NodeFault { NonFinite } for node 2
+    // was emitted FROM the render loop (proving emit() fired on the hot path).
+    let want = RtEvent::NodeFault {
+        node: NodeIdx(2),
+        fault: FaultKind::NonFinite,
+    };
+    let mut node_faults = 0usize;
+    while let Some(n) = ring.pop(&mut buf) {
+        if event_frame::decode(&buf[..n]) == Some(want) {
+            node_faults += 1;
+        }
+    }
+    assert!(
+        node_faults >= 1,
+        "render loop emitted >= 1 NonFinite NodeFault for node 2, got {node_faults}"
+    );
+}
