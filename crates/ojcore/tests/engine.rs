@@ -787,3 +787,71 @@ fn looper_process_is_allocation_free() {
         }
     });
 }
+
+// ===========================================================================
+// Phase-2 RT event-emit no-alloc gate (`--features devlog`).
+//
+// Proves `event_frame::emit` honors the audio-thread no-alloc invariant: encode
+// into a stack buffer + one wait-free `ByteRing::push`, nothing else. Gated on
+// `devlog` so it is OFF in shipping builds and only runs in the dedicated CI
+// step `cargo test -p ojcore --features devlog`.
+// ===========================================================================
+
+/// The full set of `RtEvent` variants to exercise: `Xrun`, `NodeFault` for every
+/// `FaultKind`, and the unit `RingFull`. Sized so the ring (16 KiB) trivially
+/// holds them all, so every emit must be accepted (`true`).
+#[cfg(feature = "devlog")]
+fn rt_event_cases() -> [ojproto::RtEvent; 5] {
+    use ojproto::{FaultKind, RtEvent};
+    [
+        RtEvent::Xrun { dropped: 7 },
+        RtEvent::NodeFault {
+            node: NodeIdx(2),
+            fault: FaultKind::NonFinite,
+        },
+        RtEvent::NodeFault {
+            node: NodeIdx(5),
+            fault: FaultKind::OverBudget,
+        },
+        RtEvent::NodeFault {
+            node: NodeIdx(9),
+            fault: FaultKind::AutoBypassed,
+        },
+        RtEvent::RingFull,
+    ]
+}
+
+/// REQUIRED Phase-2 gate: `event_frame::emit` allocates zero bytes for every
+/// `RtEvent` variant, AND the frames it wrote decode back to the originals.
+///
+/// Inside the `assert_no_alloc` scope we only emit (encode-to-stack + one
+/// `push`); the global `AllocDisabler` aborts on any heap touch there. Outside
+/// the scope we drain the ring and assert the round trip, proving emit really
+/// published the frames (not silently dropped them).
+#[cfg(feature = "devlog")]
+#[test]
+fn event_emit_is_allocation_free() {
+    use ojcore::meter::{event_frame, EventRing};
+
+    let ring = EventRing::new();
+    let cases = rt_event_cases();
+
+    // The REQUIRED gate: zero heap allocation on the RT emit path. Every event
+    // must be accepted because the ring is freshly created and far from full.
+    assert_no_alloc(|| {
+        for &ev in &cases {
+            assert!(event_frame::emit(&ring, ev), "ring should accept emit");
+        }
+    });
+
+    // OUTSIDE the gate: drain and prove each frame decodes back, in FIFO order,
+    // to exactly the event that was emitted — so emit truly wrote them.
+    let mut buf = [0u8; event_frame::MAX_LEN];
+    let mut decoded = 0usize;
+    while let Some(n) = ring.pop(&mut buf) {
+        let got = event_frame::decode(&buf[..n]);
+        assert_eq!(got, Some(cases[decoded]), "frame {decoded} round trip");
+        decoded += 1;
+    }
+    assert_eq!(decoded, cases.len(), "every emitted frame was drained");
+}

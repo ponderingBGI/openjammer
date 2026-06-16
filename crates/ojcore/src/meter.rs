@@ -279,6 +279,27 @@ pub mod event_frame {
             _ => None,
         }
     }
+
+    /// RT-safe event emit: encode `ev` into a stack buffer and publish it with a
+    /// SINGLE wait-free [`ByteRing::push`](ojcore_midiring::ByteRing::push) onto
+    /// the [`EventRing`](super::EventRing). Returns whether the frame was accepted
+    /// (drop-on-full: `false` means the ring was full and the frame was dropped —
+    /// the caller coalesces that into an [`RtEvent::RingFull`]).
+    ///
+    /// Allocation-free + wait-free by construction: the only storage is the stack
+    /// `[u8; MAX_LEN]`, [`encode`] is pure byte ops, and `push` copies into the
+    /// ring's inline buffer behind atomics — NO `String`/`Vec`/`format!`, no heap,
+    /// no lock. Safe to call from the audio thread inside `assert_no_alloc`.
+    ///
+    /// `std`-gated like [`EventRing`](super::EventRing) so the `no_std` build is
+    /// unaffected.
+    #[cfg(feature = "std")]
+    #[inline]
+    pub fn emit(ring: &super::EventRing, ev: RtEvent) -> bool {
+        let mut buf = [0u8; MAX_LEN];
+        let n = encode(ev, &mut buf);
+        ring.push(&buf[..n])
+    }
 }
 
 /// The RT -> control return ring (host side). A reused [`ojcore_midiring::ByteRing`]

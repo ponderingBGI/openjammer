@@ -54,6 +54,11 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      - name: RT event-emit no-alloc gate (devlog)
+        # Dedicated assert_no_alloc proof that `event_frame::emit` never
+        # allocates on the audio thread. Gated behind the `devlog` feature so it
+        # is OFF in shipping builds and runs only in this explicit CI step.
+        run: cargo test -p ojcore --features devlog
       - name: no_std core builds (wasm-friendly)
         run: cargo build -p ojcore --no-default-features
       - name: wasm32 build
