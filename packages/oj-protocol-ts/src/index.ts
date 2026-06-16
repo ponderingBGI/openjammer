@@ -54,34 +54,41 @@ export type AssetId = number;
 /**
  * The closed primitive instruction set the RT kernel matches on.
  * Rust: `enum PrimitiveKind { ... }` — wire form: bare variant-name string.
- * This union lists EVERY variant, spelled exactly as serde emits it.
+ *
+ * Backed by the runtime {@link PRIMITIVE_KINDS} tuple (the type is DERIVED from
+ * it) so the set is checkable at runtime: the `ssot-set-equality` gate asserts
+ * `PRIMITIVE_KINDS` == the Rust enum (`schemas/primitive-kinds.json`) == the
+ * `kind` enum in `schemas/oj-plugin-v1.json`. Keep in serde declaration order.
  */
-export type PrimitiveKind =
+export const PRIMITIVE_KINDS = [
   // generators / instruments
-  | "Osc"
-  | "Sampler"
-  | "Sf2"
-  | "KarplusString"
+  "Osc",
+  "Sampler",
+  "Sf2",
+  "KarplusString",
   // processors
-  | "Gain"
-  | "Biquad"
-  | "Waveshaper"
-  | "Delay"
-  | "Convolution"
+  "Gain",
+  "Biquad",
+  "Waveshaper",
+  "Delay",
+  "Convolution",
   // host-bridged / extension
-  | "FaustHost"
-  | "WasmHost"
-  | "PluginHost"
+  "FaustHost",
+  "WasmHost",
+  "PluginHost",
   // routing / io
-  | "Add"
-  | "MicIn"
-  | "SpeakerOut"
-  | "GraphIn"
-  | "GraphOut"
-  | "Passthrough"
+  "Add",
+  "MicIn",
+  "SpeakerOut",
+  "GraphIn",
+  "GraphOut",
+  "Passthrough",
   // stateful (U-STATEFUL)
-  | "Looper"
-  | "Recorder";
+  "Looper",
+  "Recorder",
+] as const;
+
+export type PrimitiveKind = (typeof PRIMITIVE_KINDS)[number];
 
 /** Edge signal kind. Rust: `enum ConnectionType { Audio, Control }` — bare string. */
 export type ConnectionType = "Audio" | "Control";

@@ -1,0 +1,25 @@
+{
+  "$comment": "SSOT for the closed PrimitiveKind set (D1). The single flat list every other declaration of the kind set is checked against: the Rust enum `ojproto::PrimitiveKind` (crates/ojproto/tests/wire_shapes.rs), the TS `PRIMITIVE_KINDS` const (packages/oj-protocol-ts/src/index.ts), and the `kind` enum in schemas/oj-plugin-v1.json. The `ssot-set-equality` check (scripts/oj/checks + src/__tests__/primitive-kinds-parity.test.ts) fails CI if any of them drift. Keep in declaration order, matching the Rust enum.",
+  "kinds": [
+    "Osc",
+    "Sampler",
+    "Sf2",
+    "KarplusString",
+    "Gain",
+    "Biquad",
+    "Waveshaper",
+    "Delay",
+    "Convolution",
+    "FaustHost",
+    "WasmHost",
+    "PluginHost",
+    "Add",
+    "MicIn",
+    "SpeakerOut",
+    "GraphIn",
+    "GraphOut",
+    "Passthrough",
+    "Looper",
+    "Recorder"
+  ]
+}

@@ -62,6 +62,93 @@ fn primitive_kind_is_bare_variant_string() {
     }
 }
 
+/// Compile-time tripwire: a new `PrimitiveKind` variant breaks this match (it has
+/// no wildcard arm), forcing the `VARIANTS` list below — and, in lockstep,
+/// `schemas/primitive-kinds.json`, the TS `PRIMITIVE_KINDS` tuple, and the
+/// `kind` enum in `schemas/oj-plugin-v1.json` — to be updated together (D1).
+#[allow(dead_code)]
+fn primitive_kind_exhaustiveness(k: PrimitiveKind) {
+    match k {
+        PrimitiveKind::Osc
+        | PrimitiveKind::Sampler
+        | PrimitiveKind::Sf2
+        | PrimitiveKind::KarplusString
+        | PrimitiveKind::Gain
+        | PrimitiveKind::Biquad
+        | PrimitiveKind::Waveshaper
+        | PrimitiveKind::Delay
+        | PrimitiveKind::Convolution
+        | PrimitiveKind::FaustHost
+        | PrimitiveKind::WasmHost
+        | PrimitiveKind::PluginHost
+        | PrimitiveKind::Add
+        | PrimitiveKind::MicIn
+        | PrimitiveKind::SpeakerOut
+        | PrimitiveKind::GraphIn
+        | PrimitiveKind::GraphOut
+        | PrimitiveKind::Passthrough
+        | PrimitiveKind::Looper
+        | PrimitiveKind::Recorder => {}
+    }
+}
+
+/// The Rust leg of the D1 `ssot-set-equality` gate: the set of `PrimitiveKind`
+/// variant names MUST equal the canonical flat list in
+/// `schemas/primitive-kinds.json`. Drift in either direction fails here. (The TS
+/// `PRIMITIVE_KINDS` + schema `kind` enum are pinned to the same list by
+/// `src/engine/__tests__/primitive-kinds-parity.test.ts`, so all four agree.)
+#[test]
+fn primitive_kind_matches_ssot_list() {
+    const VARIANTS: [PrimitiveKind; 20] = [
+        PrimitiveKind::Osc,
+        PrimitiveKind::Sampler,
+        PrimitiveKind::Sf2,
+        PrimitiveKind::KarplusString,
+        PrimitiveKind::Gain,
+        PrimitiveKind::Biquad,
+        PrimitiveKind::Waveshaper,
+        PrimitiveKind::Delay,
+        PrimitiveKind::Convolution,
+        PrimitiveKind::FaustHost,
+        PrimitiveKind::WasmHost,
+        PrimitiveKind::PluginHost,
+        PrimitiveKind::Add,
+        PrimitiveKind::MicIn,
+        PrimitiveKind::SpeakerOut,
+        PrimitiveKind::GraphIn,
+        PrimitiveKind::GraphOut,
+        PrimitiveKind::Passthrough,
+        PrimitiveKind::Looper,
+        PrimitiveKind::Recorder,
+    ];
+
+    let ssot: serde_json::Value =
+        serde_json::from_str(include_str!("../../../schemas/primitive-kinds.json"))
+            .expect("schemas/primitive-kinds.json parses");
+    let listed: std::collections::BTreeSet<String> = ssot["kinds"]
+        .as_array()
+        .expect("`kinds` is a JSON array")
+        .iter()
+        .map(|v| v.as_str().expect("each kind is a string").to_string())
+        .collect();
+
+    let actual: std::collections::BTreeSet<String> = VARIANTS
+        .iter()
+        .map(|k| {
+            serde_json::to_value(k)
+                .expect("serialize")
+                .as_str()
+                .expect("PrimitiveKind serializes to a bare string")
+                .to_string()
+        })
+        .collect();
+
+    assert_eq!(
+        actual, listed,
+        "PrimitiveKind enum drifted from schemas/primitive-kinds.json"
+    );
+}
+
 #[test]
 fn connection_type_is_bare_variant_string() {
     assert_json(&ConnectionType::Audio, "\"Audio\"");
