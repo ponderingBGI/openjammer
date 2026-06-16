@@ -110,6 +110,8 @@ export class OjcoreNativeExecutor implements Executor {
     private meterPollId: number | null = null;
     /** Interval id for the fault-event poll loop (engine -> DevLog stream). */
     private eventPollId: number | null = null;
+    /** Guards against overlapping `poll_events` invokes (ordered DevLog ingest). */
+    private eventPollInFlight = false;
 
     /** The engine-side seam the capability handles drive (native impl). */
     private readonly bridge: OjcoreBridge = {
@@ -231,14 +233,24 @@ export class OjcoreNativeExecutor implements Executor {
     }
 
     /** Poll the engine for pending fault events and ingest each into the DevLog
-     *  log store. Faults are rare, so most polls return an empty batch. */
+     *  log store. Faults are rare, so most polls return an empty batch.
+     *
+     *  Overlap guard: `setInterval` fires on a fixed cadence regardless of
+     *  whether the previous invoke is still in flight. Under an IPC stall,
+     *  concurrent polls could resolve out of order and append older events after
+     *  newer ones — and unlike the order-insensitive meter snapshot, the DevLog
+     *  is an ordered append log. The `eventPollInFlight` latch keeps exactly one
+     *  poll outstanding, so ingestion order matches engine FIFO order. */
     private async pollEvents(): Promise<void> {
-        if (!this.invoke) return;
+        if (!this.invoke || this.eventPollInFlight) return;
+        this.eventPollInFlight = true;
         let events: EngineEvent[];
         try {
             events = (await this.invoke('poll_events', {})) as EngineEvent[];
         } catch {
             return; // transient; next tick retries
+        } finally {
+            this.eventPollInFlight = false;
         }
         if (!Array.isArray(events) || events.length === 0) return;
         const ingest = useLogStore.getState().ingestEngineEvent;

@@ -30,8 +30,11 @@
 //! sample buffer ever crosses the IPC boundary — only `OjGraph` / `RtCommand`
 //! JSON (governing principle #4).
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 
 use ojcore::meter::{event_frame, return_frame};
 use ojcore::{
@@ -62,6 +65,19 @@ pub const DEFAULT_STREAM: StreamRequest = StreamRequest {
 /// Capacity (in commands) of the UI->RT ring. Generous headroom for a burst of
 /// note/param events between two audio blocks; `RtCommand` is `Copy` and tiny.
 const COMMAND_RING_CAP: usize = 1024;
+
+/// Poll cadence (ms) of the dedicated off-RT event-drain thread. Faults arrive at
+/// block rate; ~1 ms keeps the 16 KiB event ring from overrunning between drains
+/// while staying a cheap default-priority loop (never RT-promoted). Decoupled
+/// from the 50 ms meter poll (meters tolerate lossy 20 Hz; faults do not).
+const EVENT_DRAIN_INTERVAL_MS: u64 = 1;
+
+/// Upper bound on the control-side `Event` hand-off buffer the drain thread fills
+/// and `drain_events` empties. Bounded by construction: if the UI stops polling
+/// (`poll_events`), the oldest events are dropped rather than growing without
+/// limit. Faults are rare, so this is reached only under a sustained storm with
+/// no UI consumer.
+const EVENT_BUF_CAP: usize = 8192;
 
 /// Why a backend control operation failed. Surfaces to the webview as a string
 /// (these are control-rate, off-RT errors — never raised on the audio thread).
@@ -151,13 +167,21 @@ pub struct EngineBackend {
     /// SEPARATE ring from `meter_ring` so a fault storm never evicts meters). The
     /// matching `Arc` is attached to the engine in [`EngineBackend::new`] /
     /// re-attached in [`EngineBackend::adopt`]; the audio thread publishes compact
-    /// [`RtEvent`] frames here on a fault, and [`EngineBackend::drain_events`]
-    /// lifts them into full [`Event`] envelopes for the DevLog (`poll_events`).
+    /// [`RtEvent`] frames here on a fault. The dedicated [`event_drain_loop`]
+    /// thread is the SOLE consumer — it pops this ring, projects each event into
+    /// `tracing` (L1) and pushes it onto [`Self::event_buf`] for the UI.
     event_ring: Arc<EventRing>,
-    /// Monotonic per-source sequence counter stamped onto each drained [`Event`].
-    /// The compact RT frame carries no seq (it is the `Copy` 16-byte subset), so
-    /// the control side owns the sequence — matching the `Event` envelope contract.
-    event_seq: u32,
+    /// Control-side hand-off buffer the drain thread fills with lifted [`Event`]
+    /// envelopes and [`EngineBackend::drain_events`] empties for the DevLog
+    /// (`poll_events`). Bounded at [`EVENT_BUF_CAP`] (drop-oldest). The drain
+    /// thread is the ONLY producer here and the UI poll the only consumer.
+    event_buf: Arc<Mutex<VecDeque<Event>>>,
+    /// Shutdown flag for the event-drain thread; set in [`Drop`], polled each
+    /// loop iteration so the thread exits promptly when the backend is torn down.
+    drain_stop: Arc<AtomicBool>,
+    /// Join handle for the event-drain thread, joined in [`Drop`]. `None` only if
+    /// the thread failed to spawn (logging degrades, the app still runs).
+    drain_handle: Option<JoinHandle<()>>,
     /// Whether metering is enabled (mirrored so a graph swap re-applies it).
     metering: bool,
     /// Off-RT content-addressed asset catalog (sample PCM for the sampler,
@@ -202,6 +226,8 @@ impl EngineBackend {
         let swap = ProgramSwap::new();
         let meter_ring = Arc::new(MeterRing::new());
         let event_ring = Arc::new(EventRing::new());
+        let event_buf: Arc<Mutex<VecDeque<Event>>> = Arc::new(Mutex::new(VecDeque::new()));
+        let drain_stop = Arc::new(AtomicBool::new(false));
 
         // Compile the minimal starter program (silent: a gain into the speaker).
         // `compile` only fails on a malformed graph, and ours is well-formed by
@@ -239,6 +265,23 @@ impl EngineBackend {
             }
         };
 
+        // Spawn the dedicated, default-priority event-drain thread (NEVER
+        // RT-promoted). It is the SOLE consumer of `event_ring`: it pops decoded
+        // faults at a ~1 ms cadence, projects each into the L1 `tracing` sink, and
+        // pushes the lifted [`Event`] onto `event_buf` for the DevLog poll. The
+        // ring + buffer + stop flag are stable for the backend's whole lifetime
+        // (a graph swap re-attaches the SAME `event_ring`), so this is spawned
+        // exactly once here and joined in [`Drop`].
+        let drain_handle = {
+            let ring = Arc::clone(&event_ring);
+            let buf = Arc::clone(&event_buf);
+            let stop = Arc::clone(&drain_stop);
+            std::thread::Builder::new()
+                .name("oj-event-drain".into())
+                .spawn(move || event_drain_loop(&ring, &buf, &stop))
+                .ok()
+        };
+
         Self {
             registry,
             host,
@@ -247,7 +290,9 @@ impl EngineBackend {
             stream,
             meter_ring,
             event_ring,
-            event_seq: 0,
+            event_buf,
+            drain_stop,
+            drain_handle,
             metering: false,
             catalog: AssetCatalog::new(),
             store: AssetStore::new(),
@@ -437,55 +482,19 @@ impl EngineBackend {
         out
     }
 
-    /// Drain the engine's EVENT return ring into a batch of [`Event`] envelopes
-    /// for the UI's DevLog (`poll_events`). Control-rate: called on a UI-driven
-    /// poll, never the audio thread. The audio thread pushed compact, `Copy`
-    /// [`RtEvent`] frames (the 16-byte subset that fits the wait-free ring); here,
-    /// off-RT, each is LIFTED into the full [`Event`] envelope every L1/L3/L4
-    /// consumer reads — stamping the metadata the RT frame deliberately omits:
-    ///
-    /// * `seq` — a monotonic per-source counter owned by the control side
-    ///   ([`Self::event_seq`]);
-    /// * `severity` — a `NodeFault` is an `Error` (a node produced bad output or
-    ///   was bypassed); an `Xrun` / `RingFull` is a `Warn` (a recoverable glitch);
-    /// * `ts_us` — the control-side RECEIPT time (the RT frame carries no clock).
-    ///   Stamped ONCE per drain so a batch shares one poll-window timestamp; this
-    ///   is off-RT, so `SystemTime::now` is fine here (never on the audio thread).
-    /// * `source` — always [`Source::Engine`] (these come off the native engine);
-    /// * `corr_id` — `0` (no correlation id on RT faults yet).
+    /// Drain the control-side [`Event`] hand-off buffer for the UI's DevLog
+    /// (`poll_events`). Control-rate: called on a UI-driven poll, never the audio
+    /// thread. The buffer is filled by the dedicated [`event_drain_loop`] thread
+    /// (which pops the ring, lifts each compact `RtEvent` into a full [`Event`]
+    /// envelope, and projects it into the L1 `tracing` sink); this just takes
+    /// whatever has accumulated since the last poll, in FIFO order, leaving the
+    /// buffer empty. A poisoned lock (the drain thread panicked) yields an empty
+    /// batch rather than propagating the panic to the IPC boundary.
     pub fn drain_events(&mut self) -> Vec<Event> {
-        // Clone the `Arc` so the drain closure can mutate `self.event_seq` without
-        // also holding a `&self.event_ring` borrow (the ring lives behind the Arc).
-        let ring = Arc::clone(&self.event_ring);
-        let ts_us = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_micros() as u64)
-            .unwrap_or(0);
-        let mut seq = self.event_seq;
-        let mut out = Vec::new();
-        event_frame::drain_events(&ring, |rt| {
-            let kind = match rt {
-                RtEvent::Xrun { dropped } => EventKind::Xrun { dropped },
-                RtEvent::NodeFault { node, fault } => EventKind::NodeFault { node, fault },
-                RtEvent::RingFull => EventKind::RingFull,
-            };
-            let severity = match &kind {
-                EventKind::NodeFault { .. } => Severity::Error,
-                _ => Severity::Warn,
-            };
-            seq = seq.wrapping_add(1);
-            out.push(Event {
-                v: ojproto::SCHEMA_VERSION,
-                seq,
-                severity,
-                kind,
-                source: Source::Engine,
-                ts_us,
-                corr_id: 0,
-            });
-        });
-        self.event_seq = seq;
-        out
+        match self.event_buf.lock() {
+            Ok(mut buf) => buf.drain(..).collect(),
+            Err(_) => Vec::new(),
+        }
     }
 
     /// Load decoded mono PCM as the sample for `node`'s `builtin.sampler` and
@@ -698,6 +707,115 @@ impl Default for EngineBackend {
     }
 }
 
+impl Drop for EngineBackend {
+    /// Stop and join the event-drain thread so it never outlives the backend
+    /// (and never touches a freed ring). Setting the flag wakes the loop within
+    /// one ~1 ms tick; the join is therefore near-instant. A panicked drain
+    /// thread surfaces as a join `Err`, which we ignore — teardown must not panic.
+    fn drop(&mut self) {
+        self.drain_stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.drain_handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+/// Control-side wall-clock timestamp in microseconds since the Unix epoch. Used
+/// to stamp the receipt time onto a lifted [`Event`] (the compact RT frame
+/// carries no clock). Off-RT only — `SystemTime::now` is never called on the
+/// audio thread.
+fn now_us() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros() as u64)
+        .unwrap_or(0)
+}
+
+/// Lift a compact, `Copy` [`RtEvent`] (the 16-byte subset that rides the ring)
+/// into the full off-RT [`Event`] envelope every L1/L3/L4 consumer reads,
+/// stamping the metadata the RT frame deliberately omits: a monotonic `seq`
+/// (owned by the drain thread), a severity following the fault taxonomy
+/// (`NodeFault` => `Error`; `Xrun` / `RingFull` => `Warn`), the control-side
+/// receipt `ts_us`, an [`Source::Engine`] origin, and `corr_id = 0` (no
+/// correlation id on RT faults yet). Pure — unit-tested directly.
+fn lift_event(rt: RtEvent, seq: u32, ts_us: u64) -> Event {
+    let kind = match rt {
+        RtEvent::Xrun { dropped } => EventKind::Xrun { dropped },
+        RtEvent::NodeFault { node, fault } => EventKind::NodeFault { node, fault },
+        RtEvent::RingFull => EventKind::RingFull,
+    };
+    let severity = match &kind {
+        EventKind::NodeFault { .. } => Severity::Error,
+        _ => Severity::Warn,
+    };
+    Event {
+        v: ojproto::SCHEMA_VERSION,
+        seq,
+        severity,
+        kind,
+        source: Source::Engine,
+        ts_us,
+        corr_id: 0,
+    }
+}
+
+/// Project a decoded [`Event`] into the L1 `tracing` sink (the rolling on-device
+/// NDJSON file + stderr). The `tracing` level mirrors the event's severity and
+/// the fields mirror the L2 schema — `tracing` is a *projection* of the event,
+/// never a second taxonomy. Off-RT only (the drain thread): `tracing` formats on
+/// the caller, so it must never run on the audio thread (foundation F-shared).
+fn emit_tracing(ev: &Event) {
+    // One field set, five levels: a local macro keeps the record identical across
+    // severities (the level itself must be a compile-time token for `tracing`).
+    // `kind`/`source` use the `?` (Debug) sigil so the full variant detail (node,
+    // fault, dropped count) lands in the structured record without a hand-rolled
+    // per-variant label.
+    macro_rules! record_at {
+        ($level:ident) => {
+            tracing::$level!(
+                target: "engine",
+                seq = ev.seq,
+                kind = ?ev.kind,
+                source = ?ev.source,
+                corr_id = ev.corr_id,
+                ts_us = ev.ts_us,
+                "engine event"
+            )
+        };
+    }
+    match ev.severity {
+        Severity::Trace => record_at!(trace),
+        Severity::Debug => record_at!(debug),
+        Severity::Info => record_at!(info),
+        Severity::Warn => record_at!(warn),
+        Severity::Error => record_at!(error),
+    }
+}
+
+/// The dedicated, default-priority event-drain loop (NEVER RT-promoted). The SOLE
+/// consumer of the engine's event ring: it pops decoded faults at a ~1 ms cadence
+/// ([`EVENT_DRAIN_INTERVAL_MS`]), lifts each into a full [`Event`] (monotonic
+/// `seq` owned here), projects it into the L1 `tracing` sink, and pushes it onto
+/// the bounded ([`EVENT_BUF_CAP`], drop-oldest) hand-off buffer the UI poll
+/// (`poll_events`) drains. Exits promptly when `stop` is set (checked each tick).
+fn event_drain_loop(ring: &EventRing, buf: &Mutex<VecDeque<Event>>, stop: &AtomicBool) {
+    let mut seq: u32 = 0;
+    while !stop.load(Ordering::Relaxed) {
+        event_frame::drain_events(ring, |rt| {
+            seq = seq.wrapping_add(1);
+            let ev = lift_event(rt, seq, now_us());
+            emit_tracing(&ev);
+            if let Ok(mut b) = buf.lock() {
+                if b.len() >= EVENT_BUF_CAP {
+                    b.pop_front();
+                }
+                b.push_back(ev);
+            }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(EVENT_DRAIN_INTERVAL_MS));
+    }
+}
+
 /// Tauri-managed wrapper: the backend behind a `Mutex` so the IPC command
 /// handlers (which run on Tauri's worker pool) get exclusive control-rate
 /// access. Never locked from the audio thread (that thread is inside `cpal`,
@@ -906,18 +1024,56 @@ mod tests {
         }
     }
 
-    /// `drain_events` lifts each RT frame on the event ring into a full [`Event`]
-    /// envelope — stamping a monotonic `seq`, an `Engine` source, and a severity
-    /// that follows the fault taxonomy (`NodeFault` => `Error`; `Xrun` /
-    /// `RingFull` => `Warn`). With no audio device the ring is otherwise empty, so
-    /// what we push is exactly what we drain, in FIFO order.
+    /// `lift_event` (pure) maps each `RtEvent` variant to a full [`Event`]
+    /// envelope: the right kind, the fault-taxonomy severity (`NodeFault` =>
+    /// `Error`; `Xrun` / `RingFull` => `Warn`), the passed-through `seq`/`ts_us`,
+    /// the current schema, an `Engine` source, and no correlation id.
     #[test]
-    fn drain_events_lifts_rt_frames_into_envelopes() {
+    fn lift_event_maps_kind_severity_and_metadata() {
+        use ojproto::FaultKind;
+
+        let xrun = lift_event(RtEvent::Xrun { dropped: 4 }, 1, 1_000);
+        assert_eq!(xrun.seq, 1);
+        assert_eq!(xrun.ts_us, 1_000);
+        assert_eq!(xrun.v, ojproto::SCHEMA_VERSION);
+        assert_eq!(xrun.source, Source::Engine);
+        assert_eq!(xrun.corr_id, 0);
+        assert_eq!(xrun.severity, Severity::Warn);
+        assert_eq!(xrun.kind, EventKind::Xrun { dropped: 4 });
+
+        let fault = lift_event(
+            RtEvent::NodeFault {
+                node: NodeIdx(9),
+                fault: FaultKind::OverBudget,
+            },
+            2,
+            2_000,
+        );
+        assert_eq!(fault.severity, Severity::Error);
+        assert_eq!(
+            fault.kind,
+            EventKind::NodeFault {
+                node: NodeIdx(9),
+                fault: FaultKind::OverBudget,
+            }
+        );
+
+        let ring_full = lift_event(RtEvent::RingFull, 3, 3_000);
+        assert_eq!(ring_full.severity, Severity::Warn);
+        assert_eq!(ring_full.kind, EventKind::RingFull);
+    }
+
+    /// End-to-end: events emitted onto the engine's event ring are picked up by
+    /// the dedicated drain thread and surface through `drain_events` as lifted
+    /// [`Event`] envelopes, in FIFO order with a monotonic `seq`. Exercises the
+    /// live thread (a bounded poll-wait absorbs its ~1 ms cadence on a slow CI
+    /// runner; it normally resolves on the first poll).
+    #[test]
+    fn drain_thread_surfaces_ring_events_in_order() {
         use ojproto::FaultKind;
         let mut be = EngineBackend::new();
-        // Push one of each emittable variant directly onto the ring (simulating
-        // the audio thread's fault emits), then drain. Mirrors meter.rs's
-        // `drain_events_yields_pushed_sequence_fifo` push loop.
+        // Emit one of each variant directly onto the ring (simulating the audio
+        // thread's fault emits). The drain thread is the sole consumer.
         let node_fault = RtEvent::NodeFault {
             node: NodeIdx(9),
             fault: FaultKind::OverBudget,
@@ -927,21 +1083,22 @@ mod tests {
             assert!(event_frame::emit(&be.event_ring, ev));
         }
 
-        let events = be.drain_events();
-        assert_eq!(events.len(), 3);
-
-        // FIFO order, monotonic seq, Engine source + current schema on every one.
-        assert_eq!((events[0].seq, events[1].seq, events[2].seq), (1, 2, 3));
-        for ev in &events {
-            assert_eq!(ev.source, Source::Engine);
-            assert_eq!(ev.v, ojproto::SCHEMA_VERSION);
+        // Collect across polls until the thread has delivered all three (or a
+        // generous cap elapses). The starter graph is silent + device-less, so
+        // the engine emits nothing of its own — these three are all we see.
+        let mut events: Vec<Event> = Vec::new();
+        for _ in 0..200 {
+            events.extend(be.drain_events());
+            if events.len() >= pushed.len() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
-        // Xrun => Warn, carrying the coalesced dropped count.
-        assert_eq!(events[0].severity, Severity::Warn);
+        assert_eq!(events.len(), 3, "drain thread delivered all three events");
+        assert_eq!((events[0].seq, events[1].seq, events[2].seq), (1, 2, 3));
         assert_eq!(events[0].kind, EventKind::Xrun { dropped: 4 });
-        // NodeFault => Error, carrying node + fault.
-        assert_eq!(events[1].severity, Severity::Error);
+        assert_eq!(events[0].severity, Severity::Warn);
         assert_eq!(
             events[1].kind,
             EventKind::NodeFault {
@@ -949,13 +1106,9 @@ mod tests {
                 fault: FaultKind::OverBudget,
             }
         );
-        // RingFull => Warn.
-        assert_eq!(events[2].severity, Severity::Warn);
+        assert_eq!(events[1].severity, Severity::Error);
         assert_eq!(events[2].kind, EventKind::RingFull);
-
-        // A second drain yields nothing (ring drained) and seq does not rewind.
-        assert!(be.drain_events().is_empty());
-        assert_eq!(be.event_seq, 3);
+        assert_eq!(events[2].severity, Severity::Warn);
     }
 
     /// Speaker / mic control methods are safe round trips and never panic.
