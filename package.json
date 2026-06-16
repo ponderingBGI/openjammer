@@ -19,6 +19,9 @@
   ],
   "private": true,
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "preinstall": "node -e \"if(!process.env.npm_execpath?.includes('bun')){console.error('\\x1b[31mError: Use bun to install dependencies.\\nRun: bun install\\x1b[0m');process.exit(1)}\"",
     "dev": "vite",
@@ -33,6 +36,7 @@
     "doctor": "bun run scripts/oj/index.ts doctor"
   },
   "dependencies": {
+    "@openjammer/oj-protocol": "workspace:*",
     "cmdk": "1.1.1",
     "idb-keyval": "^6.2.2",
     "loro-crdt": "1.13.3",

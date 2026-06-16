@@ -1,0 +1,308 @@
+/**
+ * DevLogPanel (L4, Layer 2) — the in-app developer log surface.
+ *
+ * A portal overlay (mirroring {@link import('../CommandBar/CommandBar')}'s
+ * `createPortal` pattern) toggled with Ctrl/Cmd+Shift+L and via the
+ * "Toggle DevLog" command in the Ctrl/Cmd+K palette. It tails the bounded
+ * {@link useLogStore} ring and offers:
+ *   • a header with a visible "N dropped" badge (ships day one — the ring drops
+ *     under load and without this the panel would silently lie), a Clear button
+ *     and a Close button;
+ *   • level facet chips and scope facet chips, each with a LIVE count, that
+ *     filter the list;
+ *   • a debounced case-insensitive search over message + scope;
+ *   • a scrollable log list; clicking a row that carries a `corr` id filters to
+ *     that correlation (click-to-correlate — the L4 cross-seam capability).
+ *
+ * PERF at high event rates: the filtered list is rendered as a WINDOWED slice —
+ * only the rows near the scroll position are mounted (fixed row height + a small
+ * overscan), so a full 5000-entry ring costs O(visible) DOM nodes, not O(5000).
+ * This is a lightweight manual windowing with zero new dependencies.
+ * TODO(perf): upgrade to `@tanstack/react-virtual` if variable-height rows or
+ * very large rings make manual windowing insufficient.
+ */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { useDebounce } from 'use-debounce';
+import type { Severity } from '@openjammer/oj-protocol';
+import {
+    useLogStore,
+    filterEntries,
+    levelCounts,
+    scopeCounts,
+    type LogEntry,
+    type LogView,
+} from '../../store/logStore';
+import './DevLogPanel.css';
+
+/** Severities in display order, for the level facet chips. */
+const LEVELS: readonly Severity[] = ['Trace', 'Debug', 'Info', 'Warn', 'Error'];
+
+/** Fixed row height (px) used by the windowing math. Must match the CSS row height. */
+const ROW_HEIGHT = 28;
+/** Extra rows rendered above/below the viewport to keep scrolling smooth. */
+const OVERSCAN = 8;
+
+/**
+ * Whether the DevLog is a dev/canary surface. Vite tree-shakes the panel out of
+ * a production PWA when this is false. If neither flag is set we still mount it
+ * (always-available, hidden-until-toggled) — a deliberate dev-friendly default.
+ */
+const DEVLOG_ENABLED =
+    import.meta.env.DEV || import.meta.env.VITE_OJ_CANARY === 'true' || import.meta.env.VITE_OJ_CANARY === '1';
+
+/** Format an entry timestamp as HH:MM:SS.mmm for the row time column. */
+function formatTime(ts: number): string {
+    const d = new Date(ts);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    const ms = String(d.getMilliseconds()).padStart(3, '0');
+    return `${hh}:${mm}:${ss}.${ms}`;
+}
+
+export function DevLogPanel() {
+    const [open, setOpen] = useState(false);
+
+    // Filter state.
+    const [activeLevels, setActiveLevels] = useState<ReadonlySet<Severity> | null>(null);
+    const [activeScope, setActiveScope] = useState<string | null>(null);
+    const [activeCorr, setActiveCorr] = useState<number | null>(null);
+    const [rawSearch, setRawSearch] = useState('');
+    const [search] = useDebounce(rawSearch, 150);
+
+    // The bounded ring + dropped counter.
+    const entries = useLogStore((s) => s.entries);
+    const droppedCount = useLogStore((s) => s.droppedCount);
+    const clear = useLogStore((s) => s.clear);
+
+    // Global Ctrl/Cmd+Shift+L toggle + the "Toggle DevLog" command bridge.
+    useEffect(() => {
+        const onKeyDown = (e: KeyboardEvent) => {
+            const isToggle = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'l';
+            if (!isToggle) return;
+            e.preventDefault();
+            setOpen((v) => !v);
+        };
+        const onCommand = () => setOpen((v) => !v);
+        window.addEventListener('keydown', onKeyDown);
+        window.addEventListener('openjammer:toggle-devlog', onCommand);
+        return () => {
+            window.removeEventListener('keydown', onKeyDown);
+            window.removeEventListener('openjammer:toggle-devlog', onCommand);
+        };
+    }, []);
+
+    // Live facet counts over the FULL ring (so a chip's count reflects reality,
+    // not the already-filtered view).
+    const levelTally = useMemo(() => levelCounts(entries), [entries]);
+    const scopeTally = useMemo(() => scopeCounts(entries), [entries]);
+
+    // The filtered view, recomputed when the ring or any filter changes.
+    const view: LogView = useMemo(
+        () => ({ levels: activeLevels, scope: activeScope, search, corr: activeCorr }),
+        [activeLevels, activeScope, search, activeCorr],
+    );
+    const filtered = useMemo(() => filterEntries(entries, view), [entries, view]);
+
+    const toggleLevel = useCallback((level: Severity) => {
+        setActiveLevels((prev) => {
+            const next = new Set(prev ?? []);
+            if (next.has(level)) next.delete(level);
+            else next.add(level);
+            // Empty selection == "all levels" (null), so chips never lock the list empty.
+            return next.size === 0 ? null : next;
+        });
+    }, []);
+
+    const toggleScope = useCallback((scope: string) => {
+        setActiveScope((prev) => (prev === scope ? null : scope));
+    }, []);
+
+    // Click-to-correlate: a row with a corr id pins the view to that corr.
+    const onRowClick = useCallback((entry: LogEntry) => {
+        if (entry.corr === undefined) return;
+        setActiveCorr((prev) => (prev === entry.corr ? null : (entry.corr as number)));
+    }, []);
+
+    const resetFilters = useCallback(() => {
+        setActiveLevels(null);
+        setActiveScope(null);
+        setActiveCorr(null);
+        setRawSearch('');
+    }, []);
+
+    if (!DEVLOG_ENABLED || !open) return null;
+
+    return createPortal(
+        <div className="devlog-overlay" onClick={() => setOpen(false)}>
+            <div className="devlog-panel" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Developer Log">
+                {/* ── Header ─────────────────────────────────────────────── */}
+                <header className="devlog-header">
+                    <span className="devlog-title">DevLog</span>
+                    <span className="devlog-count">
+                        {filtered.length}
+                        {filtered.length !== entries.length ? ` / ${entries.length}` : ''}
+                    </span>
+                    {droppedCount > 0 && (
+                        <span className="devlog-dropped" title="Entries evicted because the ring buffer was full">
+                            {droppedCount} dropped
+                        </span>
+                    )}
+                    <span className="devlog-spacer" />
+                    <button className="devlog-btn" onClick={clear} title="Clear all log entries">
+                        Clear
+                    </button>
+                    <button className="devlog-btn" onClick={() => setOpen(false)} title="Close (Ctrl/Cmd+Shift+L)">
+                        ✕
+                    </button>
+                </header>
+
+                {/* ── Facets + search ────────────────────────────────────── */}
+                <div className="devlog-facets">
+                    <div className="devlog-chips" role="group" aria-label="Filter by level">
+                        {LEVELS.map((level) => (
+                            <button
+                                key={level}
+                                className="devlog-chip"
+                                data-level={level}
+                                data-active={activeLevels?.has(level) ?? false}
+                                onClick={() => toggleLevel(level)}
+                            >
+                                {level}
+                                <span className="devlog-chip-count">{levelTally[level]}</span>
+                            </button>
+                        ))}
+                    </div>
+                    {scopeTally.size > 0 && (
+                        <div className="devlog-chips" role="group" aria-label="Filter by scope">
+                            {Array.from(scopeTally.entries()).map(([scope, count]) => (
+                                <button
+                                    key={scope}
+                                    className="devlog-chip devlog-chip-scope"
+                                    data-active={activeScope === scope}
+                                    onClick={() => toggleScope(scope)}
+                                >
+                                    {scope}
+                                    <span className="devlog-chip-count">{count}</span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                    <input
+                        className="devlog-search"
+                        type="text"
+                        placeholder="Search messages…"
+                        value={rawSearch}
+                        onChange={(e) => setRawSearch(e.target.value)}
+                    />
+                </div>
+
+                {/* Active correlation banner (click-to-correlate). */}
+                {activeCorr !== null && (
+                    <div className="devlog-corr-banner">
+                        Showing correlation #{activeCorr}
+                        <button className="devlog-btn devlog-btn-inline" onClick={() => setActiveCorr(null)}>
+                            clear
+                        </button>
+                    </div>
+                )}
+
+                {/* ── Windowed log list ──────────────────────────────────── */}
+                <LogList entries={filtered} onRowClick={onRowClick} onResetFilters={resetFilters} hasRing={entries.length > 0} />
+            </div>
+        </div>,
+        document.body,
+    );
+}
+
+/** The scrollable, windowed list of filtered entries. */
+function LogList({
+    entries,
+    onRowClick,
+    onResetFilters,
+    hasRing,
+}: {
+    entries: readonly LogEntry[];
+    onRowClick: (entry: LogEntry) => void;
+    onResetFilters: () => void;
+    hasRing: boolean;
+}) {
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const [scrollTop, setScrollTop] = useState(0);
+    const [viewportH, setViewportH] = useState(0);
+
+    // Measure the viewport once mounted and on resize so windowing maths are honest.
+    useEffect(() => {
+        const el = scrollRef.current;
+        if (!el) return;
+        const measure = () => setViewportH(el.clientHeight);
+        measure();
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+
+    const total = entries.length;
+    const firstVisible = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+    const visibleCount = Math.ceil(viewportH / ROW_HEIGHT) + OVERSCAN * 2;
+    const lastVisible = Math.min(total, firstVisible + visibleCount);
+    const slice = entries.slice(firstVisible, lastVisible);
+
+    if (total === 0) {
+        return (
+            <div className="devlog-list devlog-empty">
+                {hasRing ? (
+                    <>
+                        No entries match the current filters.{' '}
+                        <button className="devlog-btn devlog-btn-inline" onClick={onResetFilters}>
+                            reset
+                        </button>
+                    </>
+                ) : (
+                    'No log entries yet.'
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <div
+            className="devlog-list"
+            ref={scrollRef}
+            onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
+        >
+            {/* Spacer establishes the full scroll height; rows are absolutely placed. */}
+            <div className="devlog-rows" style={{ height: total * ROW_HEIGHT }}>
+                {slice.map((entry, i) => {
+                    const index = firstVisible + i;
+                    return (
+                        <div
+                            key={entry.id}
+                            className="devlog-row"
+                            data-level={entry.level}
+                            data-clickable={entry.corr !== undefined}
+                            style={{ top: index * ROW_HEIGHT }}
+                            onClick={() => onRowClick(entry)}
+                            title={entry.corr !== undefined ? `Click to correlate (#${entry.corr})` : undefined}
+                        >
+                            <span className="devlog-cell-ts">{formatTime(entry.ts)}</span>
+                            <span className="devlog-cell-level" data-level={entry.level}>
+                                {entry.level}
+                            </span>
+                            <span className="devlog-cell-scope">{entry.scope}</span>
+                            <span className="devlog-cell-msg">
+                                {entry.message}
+                                {entry.fields !== undefined && (
+                                    <span className="devlog-cell-fields">{JSON.stringify(entry.fields)}</span>
+                                )}
+                            </span>
+                            {entry.corr !== undefined && <span className="devlog-cell-corr">#{entry.corr}</span>}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
+    );
+}

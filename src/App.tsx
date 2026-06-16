@@ -10,6 +10,7 @@ import { Breadcrumbs } from './components/Toolbar/Breadcrumbs';
 import { HelpPanel } from './components/Toolbar/HelpPanel';
 import { SettingsPanel } from './components/Settings/SettingsPanel';
 import { CommandBar } from './components/CommandBar/CommandBar';
+import { DevLogPanel } from './components/DevLog/DevLogPanel';
 import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
@@ -371,6 +372,10 @@ function App() {
 
       {/* Command Bar (Ctrl/Cmd+K) - owns its own toggle + open state (U19) */}
       <CommandBar />
+
+      {/* DevLog panel (Ctrl/Cmd+Shift+L) - owns its own toggle + open state (L4).
+          Mounted always; gated to dev/canary and hidden until toggled. */}
+      <DevLogPanel />
 
       {/* Collaboration Share/Join control + peer list (U23 — collab state plane) */}
       <CollabControl />

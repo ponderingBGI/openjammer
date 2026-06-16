@@ -291,6 +291,39 @@ export type EventKind =
   | { Message: { code: number; text: string } };
 
 /**
+ * A single control-rate structured event — the off-RT decoded record every L1/
+ * L3/L4 consumer reads.
+ *
+ * FORWARD-DECLARED — NOT yet wire-verified. The Rust `struct Event { v, seq,
+ * severity, kind, source, ts_us, corr_id }` and its `wire_shapes.rs` byte-parity
+ * test land in the Phase-2 transport/decode wave (see docs/plans/02 + 09); the
+ * schema wave deliberately deferred the envelope. Until that Rust struct exists
+ * this is the app-side contract and MUST be kept in sync by hand — the parity
+ * gate will enforce it the moment the Rust side is added.
+ *
+ * Expected wire shape (plain struct → object, snake_case fields, declaration order):
+ *   { "v": 1, "seq": 12, "severity": "Warn",
+ *     "kind": { "NodeFault": { "node": 3, "fault": "OverBudget" } },
+ *     "source": "Engine", "ts_us": 123456, "corr_id": 0 }
+ */
+export interface Event {
+  /** Schema version. Mirrors `ojproto::SCHEMA_VERSION` (a `u16`). */
+  v: number;
+  /** Monotonic per-source sequence number (`u32`). */
+  seq: number;
+  /** Severity. */
+  severity: Severity;
+  /** The event taxonomy payload. */
+  kind: EventKind;
+  /** Which side emitted it. */
+  source: Source;
+  /** Engine-stamped timestamp in microseconds (`u64`). */
+  ts_us: number;
+  /** Correlation id for click-to-correlate; `0` = none (`u64`). */
+  corr_id: number;
+}
+
+/**
  * RT-safe `Copy` subset of `EventKind` that rides the ByteRing. Rust:
  * `enum RtEvent`, EXTERNALLY tagged. Heap-free; mirrors only the three
  * RT-emittable variants.

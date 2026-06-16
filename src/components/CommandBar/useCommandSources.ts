@@ -103,6 +103,13 @@ function buildAppCommands(): Command[] {
             keywords: ['new', 'project', 'create', 'file'],
             run: () => window.dispatchEvent(new CustomEvent('openjammer:new-project')),
         },
+        {
+            id: 'app.devlog.toggle',
+            title: 'Toggle DevLog',
+            group: 'App',
+            keywords: ['devlog', 'log', 'logs', 'debug', 'console', 'diagnostics', 'events'],
+            run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-devlog')),
+        },
     ];
 }
 
