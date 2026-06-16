@@ -12,7 +12,7 @@
 
 </div>
 
-> **⚙️ In active rewrite to a minimal, real-time-safe Rust core (`ojcore`)** that compiles to **native** (targeting sub-5ms MIDI→audio with VST3/AU/CLAP plugin hosting) **and** **WebAssembly** (the zero-install PWA), driven by one shared React control plane.
+> **⚙️ Powered by `ojcore` — one minimal, real-time-safe Rust audio core** that compiles to **native** (low-latency, with VST3/AU/CLAP plugin hosting via a JUCE/CLAP host) **and** **WebAssembly** (the zero-install PWA), driven by one shared React control plane. The legacy Web Audio engine has been fully retired — ojcore is the single engine.
 > See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the crate map, build/run/test commands, and the cross-platform release setup.
 
 ---
