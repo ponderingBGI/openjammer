@@ -2602,6 +2602,7 @@ version = "0.0.0"
 dependencies = [
  "ojcore",
  "ojcore-midiring",
+ "ojinstrument",
  "ojproto",
  "serde_json",
  "wasm-bindgen",
