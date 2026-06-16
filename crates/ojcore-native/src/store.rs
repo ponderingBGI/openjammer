@@ -302,8 +302,7 @@ mod tests {
             })
             .expect("insert stereo");
 
-        let mono =
-            AssetResolver::resolve(&cat, id).expect("stereo resolves (downmixed), not None");
+        let mono = AssetResolver::resolve(&cat, id).expect("stereo resolves (downmixed), not None");
         assert_eq!(mono.pcm.len(), frames, "one mono sample per frame");
         for &s in mono.pcm.iter() {
             assert!(s.abs() < 1e-6, "L(+1) + R(-1) averages to 0");

@@ -448,7 +448,10 @@ mod asset_pcm_tests {
     fn from_interleaved_passes_mono_through_without_copy() {
         let src = [0.1_f32, -0.2, 0.3];
         let a = AssetPcm::from_interleaved(&src, 1, 48_000.0);
-        assert!(matches!(a.pcm, Cow::Borrowed(_)), "1-channel must be borrowed");
+        assert!(
+            matches!(a.pcm, Cow::Borrowed(_)),
+            "1-channel must be borrowed"
+        );
         assert_eq!(a.pcm.as_ref(), &src);
     }
 
@@ -457,7 +460,10 @@ mod asset_pcm_tests {
         // Interleaved L/R frames: (1,3)->2, (-1,1)->0, (0.5,0.5)->0.5.
         let src = [1.0_f32, 3.0, -1.0, 1.0, 0.5, 0.5];
         let a = AssetPcm::from_interleaved(&src, 2, 44_100.0);
-        assert!(matches!(a.pcm, Cow::Owned(_)), "a true downmix owns its buffer");
+        assert!(
+            matches!(a.pcm, Cow::Owned(_)),
+            "a true downmix owns its buffer"
+        );
         assert_eq!(a.pcm.as_ref(), &[2.0_f32, 0.0, 0.5]);
         assert_eq!(a.sample_rate, 44_100.0);
     }
