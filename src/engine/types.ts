@@ -455,6 +455,19 @@ export interface GraphNode {
     id: string;
     type: NodeType;
     category: NodeCategory;
+
+    /**
+     * OPEN node identity (M5), carried ALONGSIDE the closed {@link NodeType}.
+     *
+     * When present, this is the id of a DYNAMIC plugin (e.g. an AI-authored DSP
+     * node, `"ai.dsp.<hash>"`) registered in the dynamic registry. The node's
+     * DISPLAY / params / canEnter then resolve from that dynamic definition
+     * (see `registry.resolveNodeDefinition`), while {@link type} stays a valid
+     * NodeType (typically `'effect'`) so EXECUTION and SERIALIZATION are
+     * unchanged. Absent for ordinary built-in nodes — their identity IS `type`.
+     */
+    pluginId?: string;
+
     position: Position;  // Position relative to parent's coordinate space
     data: NodeData;
     ports: PortDefinition[];
@@ -517,6 +530,15 @@ export interface SerializedNode {
     category: NodeCategory;
     position: Position;
     data: NodeData;
+
+    /**
+     * OPEN node identity (M5) — the persisted twin of {@link GraphNode.pluginId}.
+     * Optional for backwards compatibility with workflows saved before this field
+     * existed. When present and NOT yet in the dynamic registry, import RE-REGISTERS
+     * a dynamic definition from this node's serialized data so identity resolves
+     * after a fresh load (see `serialization.importWorkflow`).
+     */
+    pluginId?: string;
 
     // Per-instance ports (U10). Optional for backwards compatibility with
     // workflows saved before this field existed — importers fall back to the

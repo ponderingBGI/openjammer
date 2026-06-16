@@ -1,26 +1,35 @@
 # ojfaust
 
 Host-side **Faust** DSP compilation for OpenJammer: turn Faust source text into a
-loadable DSP node, driven by an **agentic compile -> error -> repair loop**.
+loadable DSP node (a `.wasm` module + a real manifest of ports/params), driven by
+an **agentic compile -> error -> repair loop**.
 
-This crate is a deliberately **feature-gated scaffold**. The default build
-(feature `libfaust` **off**) compiles with **zero native dependencies** and is a
-clear stub; the real Faust backend lives behind the `libfaust` feature, which is
-not built/verified in CI here because `libfaust` is not installed.
+The default build (feature `libfaust` **off**) needs **no native library**: it
+shells the `faust` BINARY (**Path B**, `crates/ojfaust/src/backend.rs`) to compile
+to `.wasm` and read the `-json` metadata. When `faust` is not on `PATH`, compiling
+returns `FaustError::Unavailable` so the crate still builds + behaves everywhere
+(CI has no faust installed). The optional `libfaust` feature swaps in the
+in-process JIT (Path A), which is a TODO-marked scaffold.
 
 ```
-cargo build  -p ojfaust                                  # stub, builds anywhere
+cargo build  -p ojfaust                                  # builds anywhere (CLI Path B)
 cargo clippy -p ojfaust --all-targets -- -D warnings     # clean
-cargo test   -p ojfaust                                  # API + repair-loop tests
+cargo test   -p ojfaust                                  # parser + repair-loop tests;
+                                                         # real-compile tests skip if no faust
 ```
 
-## What you get with the feature OFF (default)
+## What you get with the feature OFF (default = CLI Path B)
 
 | Item | Behaviour |
 | --- | --- |
-| `FaustCompiler::compile(&self, dsp_source: &str) -> Result<CompiledFaust, FaustError>` | always `Err(FaustError::Unavailable)` |
-| `compile_repair(compiler, source, budget, author)` | full control flow; bails immediately on `Unavailable` (the author closure is never consulted) |
-| `compile_repair_with(compile_once, source, budget, author)` | backend-agnostic core, used by the unit tests to prove the retry / budget / give-up / terminal logic with no backend |
+| `FaustCompiler::compile(&self, dsp_source: &str) -> Result<CompiledFaust, FaustError>` | `faust` on `PATH` → compiles to `.wasm` + parses name/ports/params; else `Err(FaustError::Unavailable)` |
+| `CompiledFaust { name, n_in, n_out, source, params, wasm }` | carries the wasm bytes + the parsed `FaustParam[]` (id/name/min/max/default) |
+| `compile_repair(compiler, source, budget, author)` | full control flow; a `Compile` diagnostic feeds the author closure; `Unavailable` bails immediately |
+| `compile_repair_with(compile_once, source, budget, author)` | backend-agnostic core, unit-testable with a fake compiler (retry / budget / give-up / terminal logic, no backend) |
+
+The `.wasm` ABI the host runs is documented in `docs/code-node-abi.md`. NOTE: the
+RT execution host (wasmtime / AudioWorklet) is **founder-gated** — ojfaust authors
++ validates the artifact now; nothing here runs the wasm on the audio thread.
 
 `FaustError` separates the **recoverable** `Compile { message }` (hand the
 diagnostic back to the author and retry) from the **terminal** `Unavailable`

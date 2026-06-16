@@ -13,21 +13,29 @@
  * {@link useAgentSessionStore}; this is the view layer over it.
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getAgentBackend } from '../../ai';
+import { getExecutor } from '../../audio/executor';
 import { useAgentSessionStore } from '../../store/agentSessionStore';
 import type { TranscriptEntry } from '../../store/agentSessionStore';
+import { useAuthStore } from '../../auth/authStore';
+import { AuthChooser } from './AuthChooser';
 
 interface AiPanelProps {
     /** Prompt carried over from the search input on the Tab handoff. */
     initialPrompt: string;
+    /**
+     * D6 (M7): force the AuthChooser even when a provider is already configured
+     * (the "Configure AI provider" action), so the user can re-pick a provider.
+     */
+    forceAuth?: boolean;
     /** Return to search mode (Esc / "Back"). */
     onBack: () => void;
     /** Close the whole palette. */
     onClose: () => void;
 }
 
-export function AiPanel({ initialPrompt, onBack, onClose }: AiPanelProps) {
+export function AiPanel({ initialPrompt, forceAuth = false, onBack, onClose }: AiPanelProps) {
     const phase = useAgentSessionStore((s) => s.phase);
     const transcript = useAgentSessionStore((s) => s.transcript);
     const error = useAgentSessionStore((s) => s.error);
@@ -39,7 +47,26 @@ export function AiPanel({ initialPrompt, onBack, onClose }: AiPanelProps) {
     const promptRef = useRef(initialPrompt);
 
     const backend = getAgentBackend();
-    const available = backend.available();
+    // Gate on the platform capability seam (M0), not the backend's own probe:
+    // 'none' (browser) shows the desktop-only state; otherwise the agent is offered.
+    const available = getExecutor().getCapabilities().agent !== 'none';
+
+    // D6 (M7): WHO PAYS must be configured before the agent input is usable. The
+    // full gate is `available && configured`; an unconfigured first Tab routes to
+    // the AuthChooser instead of the prompt.
+    const configured = useAuthStore((s) => s.configured);
+    const refreshStatus = useAuthStore((s) => s.refreshStatus);
+
+    // Show the chooser when nothing is configured OR when explicitly asked to
+    // re-configure (forceAuth). Local override clears once the chooser finishes.
+    const [authDismissed, setAuthDismissed] = useState(false);
+    const showAuth = available && (forceAuth ? !authDismissed : !configured);
+
+    // Re-derive auth status from native on mount (the key lives in the keychain,
+    // not this store, so a prior session's key makes us `configured` again).
+    useEffect(() => {
+        void refreshStatus();
+    }, [refreshStatus]);
 
     // Focus the AI input on mount; preserve the handed-over text as the value.
     useEffect(() => {
@@ -49,9 +76,9 @@ export function AiPanel({ initialPrompt, onBack, onClose }: AiPanelProps) {
 
     const runPrompt = useCallback(() => {
         const prompt = (inputRef.current?.value ?? '').trim();
-        if (!prompt || !available) return;
+        if (!prompt || !available || !configured) return;
         void start(backend, { prompt });
-    }, [available, backend, start]);
+    }, [available, configured, backend, start]);
 
     const running = phase === 'running';
     const awaitingApproval = phase === 'awaiting-approval';
@@ -73,6 +100,20 @@ export function AiPanel({ initialPrompt, onBack, onClose }: AiPanelProps) {
 
             {!available ? (
                 <DesktopOnly onClose={onClose} />
+            ) : showAuth ? (
+                // D6: WHO PAYS not yet set (or re-configuring) — route to onboarding.
+                <AuthChooser
+                    onConfigured={() => {
+                        setAuthDismissed(true);
+                        void refreshStatus();
+                    }}
+                    onBack={() => {
+                        // Forced re-configure: dismissing returns to the agent input;
+                        // a first-Tab unconfigured back returns to search.
+                        if (forceAuth) setAuthDismissed(true);
+                        else onBack();
+                    }}
+                />
             ) : (
                 <>
                     <input
@@ -143,6 +184,30 @@ function TranscriptLine({ entry }: { entry: TranscriptEntry }) {
         case 'thought':
             return <p className="command-bar-ai-thought">{event.text}</p>;
         case 'tool-call':
+            // A batch_apply renders as ONE grouped line summarizing N sub-calls,
+            // with a tasteful per-sub-call list underneath (M3).
+            if (entry.children) {
+                return (
+                    <div className="command-bar-ai-tool-group" data-ok={entry.applied !== false}>
+                        <p className="command-bar-ai-tool" data-ok={entry.applied !== false}>
+                            <code>{event.call.name}</code>
+                            {` — ${entry.children.length} step(s)`}
+                            {entry.appliedSummary ? `: ${entry.appliedSummary}` : ''}
+                        </p>
+                        <ul className="command-bar-ai-tool-children">
+                            {entry.children.map((child, i) => (
+                                <li
+                                    key={i}
+                                    className="command-bar-ai-tool-child"
+                                    data-ok={child.ok}
+                                >
+                                    ↳ <code>{child.name}</code> — {child.summary}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                );
+            }
             return (
                 <p
                     className="command-bar-ai-tool"
@@ -152,10 +217,23 @@ function TranscriptLine({ entry }: { entry: TranscriptEntry }) {
                     {entry.appliedSummary ? ` — ${entry.appliedSummary}` : ''}
                 </p>
             );
+        case 'tool-result':
+            // A subtle "↳ result" line so a read's relayed data is visible (M3).
+            return (
+                <p className="command-bar-ai-tool-result">
+                    ↳ result <code>{event.toolCallId}</code>
+                </p>
+            );
         case 'result':
             return <p className="command-bar-ai-result">{event.summary}</p>;
         case 'error':
             return <p className="command-bar-ai-error">{event.message}</p>;
+        case 'ui-request':
+            return (
+                <p className="command-bar-ai-thought">
+                    Pi requested input ({event.request.method}) — auto-dismissed.
+                </p>
+            );
     }
 }
 

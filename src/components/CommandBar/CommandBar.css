@@ -221,3 +221,72 @@
     font-size: var(--text-sm);
     line-height: 1.4;
 }
+
+/* AuthChooser (D6, M7) — the provider onboarding step. */
+.command-bar-auth {
+    display: flex;
+    flex-direction: column;
+}
+
+.command-bar-auth-intro {
+    margin: 0;
+    padding: var(--space-sm) var(--space-lg);
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    line-height: 1.4;
+}
+
+.command-bar-auth-item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    align-items: flex-start;
+}
+
+.command-bar-auth-item-title {
+    font-weight: 700;
+    font-size: var(--text-md);
+}
+
+.command-bar-auth-item-subtitle {
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+}
+
+.command-bar-auth-link {
+    align-self: flex-start;
+    margin: var(--space-sm) var(--space-lg) 0;
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--accent, var(--sketch-black));
+    font-family: var(--font-sketch);
+    font-size: var(--text-md);
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+/* The NON-DISMISSIBLE data-training notice (opencode Zen free period). */
+.command-bar-auth-notice {
+    margin: var(--space-sm) var(--space-lg);
+    padding: var(--space-sm);
+    border: var(--border-sketch-width) solid var(--color-danger, #c0392b);
+    border-radius: var(--radius-md, 6px);
+    color: var(--color-danger, #c0392b);
+    background: color-mix(in srgb, var(--color-danger, #c0392b) 8%, transparent);
+    font-size: var(--text-sm);
+    line-height: 1.4;
+}
+
+.command-bar-auth-hint {
+    margin: var(--space-sm) var(--space-lg);
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+}
+
+.command-bar-auth-input {
+    margin: var(--space-sm) var(--space-lg);
+    width: auto;
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-md, 6px);
+}

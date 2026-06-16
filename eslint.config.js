@@ -6,7 +6,9 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // `pi-openjammer-graph/` is a BUNDLED Pi resource (mounted into a Pi worktree,
+  // not the app build), so it is excluded from the app's tsc/vitest/eslint gates.
+  globalIgnores(['dist', 'pi-openjammer-graph']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

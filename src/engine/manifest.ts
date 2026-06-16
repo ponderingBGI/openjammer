@@ -15,6 +15,7 @@
 
 import type { NodeDefinition, NodeType } from './types';
 import { nodeDefinitions } from './registry';
+import { AI_MANIFEST_PARAMS_KEY } from './dynamicRegistry';
 
 // ============================================================================
 // Manifest types (mirror crates/ojcore/src/manifest.rs + oj-plugin-v1.json)
@@ -238,4 +239,30 @@ export function manifestFor(type: NodeType): PluginManifest {
 /** Every node's manifest, derived from {@link nodeDefinitions}. */
 export function allManifests(): PluginManifest[] {
     return (Object.keys(nodeDefinitions) as NodeType[]).map(manifestFor);
+}
+
+/**
+ * Build the {@link PluginManifest} for an AI-authored DYNAMIC plugin (M6).
+ *
+ * A code node's def is registered with `ui:'auto'` and carries its REAL compiled
+ * params stashed under `defaultData.aiManifestParams`
+ * ({@link AI_MANIFEST_PARAMS_KEY}); this lifts them into a manifest so
+ * {@link AutoParamPanel} renders the node's true controls. `id` is the open
+ * `ai.wasm.<hash>` / `ai.dsp.<hash>` registry key.
+ *
+ * The def's `type` stays `'effect'` (a valid closed NodeType) for execution, so
+ * we report the manifest's `kind`/`dsp` honestly as the wasm code-node lowering.
+ */
+export function manifestForDynamic(id: string, def: NodeDefinition): PluginManifest {
+    const stashed = (def.defaultData as Record<string, unknown>)[AI_MANIFEST_PARAMS_KEY];
+    const params: ParamDecl[] = Array.isArray(stashed) ? (stashed as ParamDecl[]) : [];
+    return {
+        id,
+        name: def.name,
+        kind: 'WasmHost',
+        dsp: 'wasm',
+        ui: 'auto',
+        params,
+        ports: portsFor(def),
+    };
 }

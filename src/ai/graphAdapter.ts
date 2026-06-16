@@ -13,6 +13,20 @@ import type { Connection, GraphNode, NodeType, Position } from '../engine/types'
 import { useGraphStore } from '../store/graphStore';
 import { useCanvasStore } from '../store/canvasStore';
 import { useCanvasNavigationStore } from '../store/canvasNavigationStore';
+import { nodeDefinitions, menuCategories } from '../engine/registry';
+
+/**
+ * One addable node type, as surfaced by `list_node_types` (M3): the registry id,
+ * its human name + description, and the menu category it lives in. Built from the
+ * registry's USER-FACING set (the {@link menuCategories} menu), so the agent only
+ * ever sees types a user could actually add — internal/visual nodes are excluded.
+ */
+export interface NodeTypeInfo {
+    type: NodeType;
+    name: string;
+    description: string;
+    category: string;
+}
 
 /**
  * A captured node plus the connections incident to it, enough to faithfully
@@ -55,6 +69,19 @@ export interface GraphStoreApi {
 
     /** Canvas position used when a tool call omits one (current viewport centre). */
     viewportCenter(): Position;
+
+    // --- READ-ONLY introspection (M3) ----------------------------------------
+    // These NEVER mutate; they back the side-effect-free read tools so the agent
+    // can ground its plan in the live graph + registry before mutating.
+
+    /** Every node in the graph (all hierarchy levels). */
+    listNodes(): GraphNode[];
+    /** Every connection in the graph (all levels). */
+    listConnections(): Connection[];
+    /** Nodes filtered to a single type (for `find_nodes`). */
+    findNodesByType(type: NodeType): GraphNode[];
+    /** The user-addable node types + descriptions (from the registry). */
+    listNodeTypes(): NodeTypeInfo[];
 }
 
 /**
@@ -114,7 +141,41 @@ export function createGraphStoreApi(): GraphStoreApi {
             };
             return useCanvasStore.getState().screenToCanvas(screenCenter);
         },
+
+        // --- READ-ONLY introspection (M3): pure reads, no store mutation. -----
+        listNodes: () => Array.from(graph().nodes.values()),
+        listConnections: () => Array.from(graph().connections.values()),
+        findNodesByType: (type) => graph().getNodesByType(type),
+        listNodeTypes: () => listAddableNodeTypes(),
     };
+}
+
+/**
+ * The USER-ADDABLE node types from the registry, deduped, in menu order. We walk
+ * {@link menuCategories} (the user-facing menu) rather than every key of
+ * {@link nodeDefinitions} so internal/visual nodes (e.g. `*-visual`,
+ * `canvas-input`) never leak into the agent's choices. Keeping this in the
+ * adapter preserves the rule that the adapter is the ONLY reach into
+ * graph/registry state.
+ */
+function listAddableNodeTypes(): NodeTypeInfo[] {
+    const seen = new Set<NodeType>();
+    const out: NodeTypeInfo[] = [];
+    for (const category of menuCategories) {
+        for (const type of category.items) {
+            if (seen.has(type)) continue;
+            seen.add(type);
+            const def = nodeDefinitions[type];
+            if (!def) continue;
+            out.push({
+                type,
+                name: def.name,
+                description: def.description,
+                category: category.name,
+            });
+        }
+    }
+    return out;
 }
 
 /** The canvas level the user is currently viewing (for default node placement). */

@@ -67,9 +67,6 @@ pub enum BackendError {
     /// The pushed graph could not be lowered (cycle / unknown manifest / no
     /// master output / dangling edge / out-of-range port).
     Compile(CompileError),
-    /// The audio host could not (re)start — typically no audio device in a
-    /// headless/CI sandbox, which is expected and non-fatal there.
-    Host(HostError),
     /// The UI->RT command ring was full; the command was dropped rather than
     /// blocking the control thread.
     RingFull,
@@ -86,7 +83,6 @@ impl std::fmt::Display for BackendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BackendError::Compile(e) => write!(f, "graph compile failed: {e}"),
-            BackendError::Host(e) => write!(f, "audio host: {e}"),
             BackendError::RingFull => write!(f, "command ring full; command dropped"),
             BackendError::PluginScan(e) => write!(f, "plugin scan failed: {e}"),
             BackendError::Asset(e) => write!(f, "asset operation failed: {e}"),
@@ -353,14 +349,20 @@ impl EngineBackend {
                 self.producer = producer;
                 Ok(())
             }
-            Err(HostError::NoOutputDevice) => {
-                // No device: keep the (compiled, published) program staged and
-                // the new producer live so commands still validate. Not an error
-                // the UI must surface — it just means "engine idle, no device".
+            // ANY host-(re)start failure is NON-FATAL here, matching
+            // [`EngineBackend::new`]: the freshly compiled program is already
+            // published to the swap mailbox and the new producer is live, so
+            // commands still validate and the next `push_graph` re-attempts the
+            // start. This covers both a device-less sandbox
+            // (`HostError::NoOutputDevice`) AND a present-but-incompatible device
+            // (e.g. a default output whose WASAPI shared-mode format rejects the
+            // requested rate/buffer). The UI keeps running with the engine idle
+            // instead of surfacing a hard error the user cannot act on.
+            Err(e) => {
+                eprintln!("ojcore: audio host failed to (re)start (non-fatal): {e}");
                 self.producer = producer;
                 Ok(())
             }
-            Err(e) => Err(BackendError::Host(e)),
         }
     }
 

@@ -12,6 +12,7 @@ export type {
     AgentTask,
     AgentToolCall,
     AgentToolName,
+    AgentUiRequest,
     AddNodeArgs,
     RemoveNodeArgs,
     UpdateNodeDataArgs,

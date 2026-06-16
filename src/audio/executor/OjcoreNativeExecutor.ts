@@ -25,6 +25,7 @@
  */
 
 import type { Connection, GraphNode } from '../../engine/types';
+import { DESKTOP_CAPABILITIES, type EngineCapabilities } from '../../engine/capabilities';
 import type {
     Executor,
     ConnectionChangeCallback,
@@ -141,6 +142,11 @@ export class OjcoreNativeExecutor implements Executor {
 
         // Begin the engine -> UI meter event stream (no-op without Tauri).
         this.startMeterStream();
+    }
+
+    /** The native (Tauri) capability row — the flagship. */
+    getCapabilities(): EngineCapabilities {
+        return DESKTOP_CAPABILITIES;
     }
 
     dispose(): void {

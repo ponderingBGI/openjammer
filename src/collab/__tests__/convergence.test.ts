@@ -313,6 +313,116 @@ function mkNode(id: string): GraphNode {
 }
 
 // ----------------------------------------------------------------------------
+// G2 — AI-frame guard (M3): batch an optimistic AI run into ONE commit / discard
+// ----------------------------------------------------------------------------
+
+/** Add a node to a bridge-shaped store via a version-bumping "verb". */
+function addNodeVerb(store: ReturnType<typeof makeGraphStore>, id: string): void {
+    store.setState((s) => {
+        const nodes = new Map(s.nodes);
+        nodes.set(id, mkNode(id));
+        return { nodes, version: s.version + 1 };
+    });
+}
+
+/** Remove a node from a bridge-shaped store via a version-bumping "verb". */
+function removeNodeVerb(store: ReturnType<typeof makeGraphStore>, id: string): void {
+    store.setState((s) => {
+        const nodes = new Map(s.nodes);
+        nodes.delete(id);
+        return { nodes, version: s.version + 1 };
+    });
+}
+
+describe('GraphStoreBridge AI frame (G2)', () => {
+    it('suppresses store->CRDT diffing while the frame is open', () => {
+        const store = makeGraphStore();
+        const proj = new CrdtGraphProjection();
+        proj.setPeerId(1);
+        const bridge = new GraphStoreBridge(store, proj);
+        bridge.start(true); // seed from empty store
+
+        const baseline = proj.snapshot().nodes.length;
+
+        // Open the AI frame, then run several optimistic verbs.
+        bridge.beginAiFrame();
+        addNodeVerb(store, 'ai-1');
+        addNodeVerb(store, 'ai-2');
+
+        // The projection must NOT have changed — the delta accumulates locally.
+        expect(proj.snapshot().nodes.length).toBe(baseline);
+
+        bridge.stop();
+        proj.destroy();
+    });
+
+    it('commitAiFrame emits exactly ONE commit carrying the net delta', () => {
+        const store = makeGraphStore();
+        const proj = new CrdtGraphProjection();
+        proj.setPeerId(1);
+        const bridge = new GraphStoreBridge(store, proj);
+        bridge.start(true);
+
+        // Count local commits the projection broadcasts.
+        let commits = 0;
+        const unsub = proj.subscribeLocalUpdates(() => {
+            commits += 1;
+        });
+
+        bridge.beginAiFrame();
+        addNodeVerb(store, 'ai-1');
+        addNodeVerb(store, 'ai-2');
+        expect(commits).toBe(0); // nothing emitted while suppressed
+
+        bridge.commitAiFrame();
+
+        // Exactly one commit, carrying BOTH nodes (the net delta).
+        expect(commits).toBe(1);
+        const ids = proj.snapshot().nodes.map((n) => n.id).sort();
+        expect(ids).toEqual(['ai-1', 'ai-2']);
+
+        unsub();
+        bridge.stop();
+        proj.destroy();
+    });
+
+    it('begin -> verbs -> undo verbs -> discard emits NOTHING', () => {
+        const store = makeGraphStore();
+        const proj = new CrdtGraphProjection();
+        proj.setPeerId(1);
+        const bridge = new GraphStoreBridge(store, proj);
+        bridge.start(true);
+
+        const baseline = proj.snapshot().nodes.length;
+        let commits = 0;
+        const unsub = proj.subscribeLocalUpdates(() => {
+            commits += 1;
+        });
+
+        bridge.beginAiFrame();
+        // Apply then fully UNDO the verbs (simulating an optimistic run + Reject).
+        addNodeVerb(store, 'ai-1');
+        addNodeVerb(store, 'ai-2');
+        removeNodeVerb(store, 'ai-2');
+        removeNodeVerb(store, 'ai-1');
+        bridge.discardAiFrame();
+
+        // Store is back to pre-run (== CRDT): discard pushes nothing.
+        expect(commits).toBe(0);
+        expect(proj.snapshot().nodes.length).toBe(baseline);
+
+        // And a subsequent normal verb still diffs cleanly (high-water mark synced).
+        addNodeVerb(store, 'normal-1');
+        expect(commits).toBe(1);
+        expect(proj.snapshot().nodes.map((n) => n.id)).toContain('normal-1');
+
+        unsub();
+        bridge.stop();
+        proj.destroy();
+    });
+});
+
+// ----------------------------------------------------------------------------
 // Presence
 // ----------------------------------------------------------------------------
 

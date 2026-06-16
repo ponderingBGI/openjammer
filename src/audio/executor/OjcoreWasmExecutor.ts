@@ -28,6 +28,7 @@
  */
 
 import type { Connection, GraphNode } from '../../engine/types';
+import { BROWSER_CAPABILITIES, type EngineCapabilities } from '../../engine/capabilities';
 import type {
     Executor,
     ConnectionChangeCallback,
@@ -201,6 +202,11 @@ export class OjcoreWasmExecutor implements Executor {
 
         // Route the engine output into the speakers (speaker-terminated).
         node.connect(ctx.destination);
+    }
+
+    /** The browser (wasm/PWA) capability row — the honest degrading subset. */
+    getCapabilities(): EngineCapabilities {
+        return BROWSER_CAPABILITIES;
     }
 
     dispose(): void {

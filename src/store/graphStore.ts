@@ -181,6 +181,12 @@ interface GraphStore {
     updateNodeData: <T extends object>(nodeId: string, data: Partial<T>) => void;
     updateNodePorts: (nodeId: string, ports: import('../engine/types').PortDefinition[]) => void;
     updateNodeType: (nodeId: string, type: NodeType) => void;
+    /**
+     * Stamp a node's OPEN identity (M5) — the dynamic plugin id carried alongside
+     * the closed `type`. Pass undefined to clear it. `type` is left unchanged so
+     * execution/serialization stay on the existing path.
+     */
+    setNodePluginId: (nodeId: string, pluginId: string | undefined) => void;
 
     // Instrument Row Actions
     updateInstrumentRow: (nodeId: string, rowId: string, updates: Partial<InstrumentRow>) => void;
@@ -675,6 +681,19 @@ export const useGraphStore = create<GraphStore>()(
                         type,
                         category: definition.category
                     });
+                    return { nodes: newNodes, version: state.version + 1 };
+                });
+            },
+
+            setNodePluginId: (nodeId, pluginId) => {
+                set((state) => {
+                    const node = state.nodes.get(nodeId);
+                    if (!node) return state;
+
+                    const newNodes = new Map(state.nodes);
+                    // type/category are intentionally unchanged — the open identity
+                    // is additive (M5); execution stays on the closed-type path.
+                    newNodes.set(nodeId, { ...node, pluginId });
                     return { nodes: newNodes, version: state.version + 1 };
                 });
             },

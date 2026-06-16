@@ -13,6 +13,7 @@
 //! `manage` it as Tauri state. The commands below are the UI->RT seam.
 
 mod ai;
+mod auth;
 mod engine;
 
 use std::path::PathBuf;
@@ -106,6 +107,12 @@ fn engine_running(state: tauri::State<'_, BackendState>) -> Result<bool, String>
 fn ai_faust_compile(source: String) -> Result<Option<ai::FaustCompileResult>, String> {
     ai::compile_faust(&source)
 }
+
+// `ai::author_wasm_node` (M6) is itself a `#[tauri::command]`; it is registered
+// directly in the invoke_handler below (like `ai::ai_run`). It compiles DSP source
+// via the ojfaust CLI Path B to a `.wasm` + real manifest, validates host-side
+// fail-closed, and NEVER runs the wasm (the RT host is founder-gated; see
+// `docs/code-node-abi.md`).
 
 // --- U-EXEC-PARITY: looper / sampler / recorder / metering / speaker / mic ---
 
@@ -281,6 +288,13 @@ pub fn run() {
             scan_plugins,
             ai::ai_run,
             ai_faust_compile,
+            ai::author_wasm_node,
+            auth::auth_status,
+            auth::auth_store_key,
+            auth::auth_get_key,
+            auth::auth_clear,
+            auth::auth_begin_oauth,
+            auth::auth_validate_key,
             looper_cmd,
             subscribe_meters,
             poll_meters,

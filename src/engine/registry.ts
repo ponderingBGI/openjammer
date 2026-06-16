@@ -4,6 +4,7 @@
 
 import type { NodeDefinition, NodeType, PortDefinition } from './types';
 import { isPluginId } from './types';
+import { getDynamicPlugin, hasDynamicPlugin } from './dynamicRegistry';
 import { MINILAB3_CONFIG, generatePortsFromConfig } from '../components/controls/MIDIDeviceConfig';
 
 // ============================================================================
@@ -815,22 +816,49 @@ const MISSING_DEFINITION: NodeDefinition = {
 };
 
 /**
- * Resolve a node definition by type, with a guaranteed non-undefined result.
+ * Whether `value` resolves to a registered node definition — either a CLOSED
+ * built-in plugin id ({@link isPluginId}) OR a registered OPEN dynamic plugin id
+ * (M5). This is the validity check serialization uses so a node whose identity
+ * resolves dynamically is NOT discarded on import.
+ */
+export function isRegisteredPluginId(value: unknown): boolean {
+    return isPluginId(value) || (typeof value === 'string' && hasDynamicPlugin(value));
+}
+
+/**
+ * Resolve a node definition by id, with a guaranteed non-undefined result.
  *
- * Unlike a raw `nodeDefinitions[type]` index, this validates the id against the
- * known plugin set and returns {@link MISSING_DEFINITION} for anything unknown,
- * giving callers (and serialization import) a safe fallback. (U10)
+ * Looks up the CLOSED built-in registry first; if `type` is not a known plugin
+ * id, falls back to the OPEN dynamic registry (M5); failing both, returns
+ * {@link MISSING_DEFINITION}. (U10 + M5)
  */
 export function get(type: NodeType): NodeDefinition {
-    if (!isPluginId(type)) {
-        return MISSING_DEFINITION;
+    if (isPluginId(type)) {
+        // `type` is a PluginId (a branded NodeType); widen to NodeType to index.
+        return nodeDefinitions[type as NodeType] ?? MISSING_DEFINITION;
     }
-    // `type` is now a PluginId (a branded NodeType); widen to NodeType to index.
-    return nodeDefinitions[type as NodeType] ?? MISSING_DEFINITION;
+    // Not a built-in id: an OPEN dynamic id may still resolve (M5).
+    return getDynamicPlugin(type) ?? MISSING_DEFINITION;
 }
 
 export function getNodeDefinition(type: NodeType): NodeDefinition {
     return get(type);
+}
+
+/**
+ * Resolve the definition a node should DISPLAY with (M5).
+ *
+ * PREFERS the node's OPEN identity: when `node.pluginId` is set AND registered in
+ * the dynamic registry, returns that dynamic def (so an AI-authored node shows
+ * its own name/description/params/canEnter). Otherwise falls back to {@link get}
+ * on the closed `node.type` — the unchanged path for ordinary built-in nodes.
+ */
+export function resolveNodeDefinition(node: { type: NodeType; pluginId?: string }): NodeDefinition {
+    if (node.pluginId !== undefined) {
+        const dynamic = getDynamicPlugin(node.pluginId);
+        if (dynamic) return dynamic;
+    }
+    return get(node.type);
 }
 
 export function canConnect(

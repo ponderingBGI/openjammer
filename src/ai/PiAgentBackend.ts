@@ -27,6 +27,7 @@ import type {
     AgentEvent,
     AgentTask,
     AgentToolCall,
+    AgentUiRequest,
 } from './types';
 
 /**
@@ -36,13 +37,15 @@ import type {
  * serialization in `src-tauri/src/ai.rs`.
  */
 export interface PiStreamLine {
-    kind: 'thought' | 'tool-call' | 'result' | 'error';
+    kind: 'thought' | 'tool-call' | 'result' | 'error' | 'ui-request';
     /** Present for `thought` / `result` / `error`. */
     text?: string;
     /** Present for `tool-call`: the proposed call. */
     call?: AgentToolCall;
-    /** Present for `tool-call`: a stable id for this call within the run. */
+    /** Present for `tool-call` (the call id) / `ui-request` (the request id). */
     id?: string;
+    /** Present for `ui-request`: the raw extension UI request payload. */
+    request?: AgentUiRequest;
 }
 
 let runCounter = 0;
@@ -66,6 +69,12 @@ function toAgentEvent(line: PiStreamLine): AgentEvent {
             return { kind: 'result', summary: line.text ?? 'Done.' };
         case 'error':
             return { kind: 'error', message: line.text ?? 'Unknown agent error.' };
+        case 'ui-request':
+            return {
+                kind: 'ui-request',
+                request: line.request ?? { method: 'unknown' },
+                id: line.id ?? '',
+            };
         case 'thought':
         default:
             return { kind: 'thought', text: line.text ?? '' };

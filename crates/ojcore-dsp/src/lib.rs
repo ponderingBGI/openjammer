@@ -15,6 +15,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::f32::consts::PI;
 
+pub mod guards;
+
 // ===========================================================================
 // Biquad (RBJ Audio EQ Cookbook), transposed Direct Form II
 // ===========================================================================

@@ -10,27 +10,32 @@
 //!
 //! [Faust]: https://faust.grame.fr/
 //!
-//! # This is a FEATURE-GATED SCAFFOLD
+//! # Backends (default = CLI Path B)
 //!
-//! Building Faust DSP at runtime requires `libfaust` (a sizeable native C++
-//! library) which is **not** assumed to be present. So the real backend lives
-//! behind the off-by-default [`libfaust`](#feature-libfaust) Cargo feature, and
-//! the crate's *default* build is a clear, dependency-free stub:
+//! The DEFAULT build needs no native library. It shells the `faust` BINARY
+//! ([`backend`] Path B) to compile source to `.wasm` and read the `-json`
+//! metadata — pure `std::process` + a `serde_json` parse, no `build.rs`, no
+//! `libfaust` link. When `faust` is NOT on `PATH`, [`FaustCompiler::compile`]
+//! returns [`FaustError::Unavailable`] (terminal: the repair loop bails). The
+//! off-by-default `libfaust` feature swaps in the in-process JIT backend.
 //!
 //! ```
 //! use ojfaust::{FaustCompiler, FaustError};
 //!
 //! let c = FaustCompiler::new();
-//! // Default build (feature `libfaust` OFF): compilation is unavailable, but
-//! // the API shape and the agentic loop are fully exercised.
-//! assert!(matches!(c.compile("process = _;"), Err(FaustError::Unavailable)));
+//! // With no `faust` binary on PATH, compilation is Unavailable; with one
+//! // present the CLI Path B compiles. Either way the API shape + the agentic
+//! // loop are identical — only the backend behind `compile` differs.
+//! match c.compile("process = _;") {
+//!     Ok(compiled) => assert_eq!(compiled.n_in, compiled.n_out), // `_` is 1->1
+//!     Err(FaustError::Unavailable) => {}                         // no faust binary
+//!     Err(other) => panic!("unexpected: {other}"),
+//! }
 //! ```
 //!
 //! The control-flow surface — [`FaustCompiler`], [`CompiledFaust`],
-//! [`FaustError`], and [`compile_repair`] — is identical whether or not the
-//! backend is compiled in. Enabling the feature only swaps the *backend* that
-//! [`FaustCompiler::compile`] dispatches to. See `README.md` for exactly what to
-//! install to turn the feature on and how U20 wires this in.
+//! [`FaustError`], and [`compile_repair`] — is identical whichever backend is
+//! active. See `README.md` for install details and how U20 wires this in.
 #![forbid(unsafe_op_in_unsafe_fn)]
 
 use std::error::Error;
@@ -87,21 +92,42 @@ impl fmt::Display for FaustError {
 
 impl Error for FaustError {}
 
+/// One numeric parameter Faust reports in the `-json` UI tree.
+///
+/// Mirrors a single horizontal/vertical slider, numentry, or button: an `id`
+/// (the index the host addresses it by at runtime), a display `name`, and the
+/// `[min,max]` range plus `default`. M6 maps these straight onto the v1
+/// `ParamDecl` so an AI-authored node's REAL params render in `AutoParamPanel`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaustParam {
+    /// Stable parameter index the host addresses (assigned in UI declaration
+    /// order — the same order `oj_param(idx, val)` uses; see the ABI doc).
+    pub id: u16,
+    /// Human-readable label (the Faust UI element's name).
+    pub name: String,
+    /// Minimum value the parameter accepts.
+    pub min: f32,
+    /// Maximum value the parameter accepts.
+    pub max: f32,
+    /// The parameter's initial value.
+    pub default: f32,
+}
+
 /// The product of a successful Faust compile.
 ///
-/// In the default scaffold this value is **never constructed** (compilation
-/// always errors), so it only needs to model the *shape* of the artifact the
-/// real backend will return. The fields below are the minimum the rest of
-/// OpenJammer needs to register the result as a node:
+/// In the default *stub* (no faust binary, `libfaust` off) this value is never
+/// constructed (compilation errors with [`FaustError::Unavailable`]). The
+/// default **Path B** CLI backend DOES construct it when `faust` is on `PATH`,
+/// carrying everything the host needs to register + (later) run the node:
 ///
-/// * a stable `name` (Faust's `process` definition / declared `name`), used as
-///   the [`ojcore`] manifest id segment, and
-/// * port counts so the graph compiler can wire it.
-///
-/// A working backend will extend this with the loadable artifact itself
-/// (the JIT'd factory handle, or the path to an AOT-compiled `.so`/`.wasm`);
-/// that field is intentionally absent here because its type depends on which
-/// backend is chosen (see [`backend`] TODOs).
+/// * a stable `name` (Faust's `declare name` or a caller default), used as the
+///   manifest id segment;
+/// * `n_in` / `n_out` port counts so the graph compiler can wire it;
+/// * the parsed `params` (id/name/min/max/default) for the manifest +
+///   `AutoParamPanel`;
+/// * the compiled `wasm` bytes, when the backend produced them (`faust -lang
+///   wasm`). This is `None` for backends that don't emit wasm (e.g. a future
+///   libfaust JIT path) but always `Some` for the CLI Path B.
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompiledFaust {
     /// Faust DSP name (from `declare name` or a caller-supplied default).
@@ -113,6 +139,11 @@ pub struct CompiledFaust {
     /// The exact source that produced this artifact (kept for caching /
     /// reproducibility and so the AI flow can persist the *working* revision).
     pub source: String,
+    /// The parsed numeric parameters (from the `faust -json` UI tree).
+    pub params: Vec<FaustParam>,
+    /// The compiled `.wasm` module bytes, when the backend emits wasm (the CLI
+    /// Path B always does). `None` for non-wasm backends.
+    pub wasm: Option<Vec<u8>>,
 }
 
 /// Compiles Faust source into a loadable [`CompiledFaust`].
@@ -152,8 +183,13 @@ impl FaustCompiler {
 
     /// Compiles a single Faust DSP source string.
     ///
-    /// * Default build (`libfaust` OFF): always `Err(`[`FaustError::Unavailable`]`)`.
-    /// * `libfaust` ON: dispatches to the real backend (see [`backend`]).
+    /// Backend selection (default build, `libfaust` OFF):
+    /// * if the `faust` binary is on `PATH`, the **CLI Path B** compiles to
+    ///   `.wasm` + parses the `-json` metadata (name/ports/params);
+    /// * otherwise [`FaustError::Unavailable`] — no toolchain, so retrying is
+    ///   futile and the repair loop bails immediately.
+    ///
+    /// With `libfaust` ON, dispatches to the native backend (see [`backend`]).
     ///
     /// This performs exactly one compile attempt; the iterative
     /// author-in-the-loop behaviour lives in [`compile_repair`].
@@ -279,15 +315,37 @@ pub fn compile_repair_with(
 mod tests {
     use super::*;
 
+    /// Whether a real `faust` binary is callable in this environment. The
+    /// CLI-path tests below SKIP gracefully when it is not, so CI without faust
+    /// installed never hard-fails (the M6 brief's gating requirement).
+    fn faust_on_path() -> bool {
+        std::process::Command::new("faust")
+            .arg("--version")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+
     #[test]
-    fn stub_compile_is_unavailable() {
+    fn compile_is_unavailable_without_faust() {
+        // Default CLI Path B: no `faust` binary -> terminal Unavailable. When
+        // faust IS installed this case doesn't apply, so skip it.
+        if faust_on_path() {
+            return;
+        }
         let c = FaustCompiler::new();
         assert_eq!(c.compile("process = _;"), Err(FaustError::Unavailable));
     }
 
     #[test]
     fn repair_bails_immediately_on_unavailable() {
-        // The real default backend: Unavailable -> author never called.
+        // With no faust binary the default backend is Unavailable -> author never
+        // called. (Skip when faust is present: there the first compile succeeds.)
+        if faust_on_path() {
+            return;
+        }
         let mut called = false;
         let res = compile_repair(
             &FaustCompiler::new(),
@@ -306,6 +364,46 @@ mod tests {
     }
 
     #[test]
+    fn real_faust_compiles_to_wasm_and_parses_params() {
+        // GATED on a real faust binary: skip silently when absent so CI stays
+        // green without the toolchain (M6 brief). When present, prove the CLI
+        // Path B emits wasm bytes + parses the declared params from -json.
+        if !faust_on_path() {
+            return;
+        }
+        let src = "import(\"stdfaust.lib\");\n\
+                   freq = hslider(\"freq\", 440, 20, 2000, 1);\n\
+                   process = os.osc(freq);";
+        let compiled = FaustCompiler::new()
+            .compile(src)
+            .expect("a valid faust program should compile with faust on PATH");
+        assert_eq!(compiled.n_out, 1, "an oscillator has one output");
+        let wasm = compiled.wasm.expect("CLI Path B must emit wasm bytes");
+        // A real wasm module starts with the `\0asm` magic.
+        assert!(wasm.starts_with(b"\0asm"), "not a wasm module");
+        assert!(
+            compiled.params.iter().any(|p| p.name == "freq"),
+            "the declared `freq` slider should be parsed as a param"
+        );
+    }
+
+    #[test]
+    fn real_faust_rejects_broken_source_recoverably() {
+        // GATED: a syntactically broken program yields a RECOVERABLE Compile
+        // error (the diagnostic the repair loop feeds back), never Unavailable.
+        if !faust_on_path() {
+            return;
+        }
+        let err = FaustCompiler::new()
+            .compile("process = this is not faust;")
+            .unwrap_err();
+        assert!(
+            matches!(err, FaustError::Compile { .. }),
+            "broken source must be a recoverable Compile error, got {err:?}"
+        );
+    }
+
+    #[test]
     fn repair_loop_recovers_after_feedback() {
         // Inject a fake compiler: fail once, succeed once the author "fixes" it.
         let res = compile_repair_with(
@@ -316,6 +414,8 @@ mod tests {
                         n_in: 1,
                         n_out: 1,
                         source: src.to_string(),
+                        params: Vec::new(),
+                        wasm: None,
                     })
                 } else {
                     Err(FaustError::Compile {
