@@ -1,0 +1,48 @@
+[package]
+name = "ojcore-native"
+description = "Native cpal audio host for OpenJammer: opens a small-buffer output (and optional duplex input) stream, drains an ojcore CommandQueue then runs Engine::process_block in a realtime-promoted callback. Plus a minimal WAV AssetStore (symphonia decode / hound write) and a Phase-1 loopback round-trip latency harness (lib + bin)."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "loopback"
+path = "src/bin/loopback.rs"
+
+# Offline demo render (Osc -> effects -> WAV). Needs the instrument loaders, so
+# it is gated behind the `demo` feature to keep the host crate's default deps lean.
+[[bin]]
+name = "render"
+path = "src/bin/render.rs"
+required-features = ["demo"]
+
+[features]
+demo = ["dep:ojinstrument"]
+
+[dependencies]
+# Engine core (std feature on: we need CommandQueue/CommandConsumer + Engine).
+ojcore = { path = "../ojcore" }
+ojproto = { path = "../ojproto" }
+# Built-in instruments — only for the `demo` render bin (optional, feature-gated).
+ojinstrument = { path = "../ojinstrument", optional = true }
+
+# Wait-free SPSC ring for the off-RT Recorder capture path (U-STATEFUL): the
+# audio callback writes f32 frames in, the control thread drains them out. Same
+# crate (and pinned version) the engine's CommandQueue uses, so no new resolve.
+rtrb = "0.3.4"
+
+# Native audio I/O. `realtime` enables cpal's own RT-priority hint on the
+# callback thread; we additionally promote via `audio_thread_priority`.
+# Versions pinned from a fresh `cargo add` resolve (governing principle #9).
+cpal = { version = "0.18.1", features = ["realtime"] }
+
+# WAV decode for the AssetStore. Only the `wav` container + `pcm` codec are
+# needed; default features (every codec/container) are off to keep builds tight.
+symphonia = { version = "0.6.0", default-features = false, features = ["wav", "pcm"] }
+
+# WAV write/capture for the AssetStore.
+hound = "3.5.1"
+
+# Promote the audio callback thread to realtime scheduling priority. `dbus` is
+# off: we use the direct pthread/SCHED_FIFO path, not the desktop RT portal.
+audio_thread_priority = { version = "0.35.1", default-features = false }

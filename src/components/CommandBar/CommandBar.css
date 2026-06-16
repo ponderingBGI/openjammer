@@ -1,0 +1,223 @@
+/* CommandBar (U19) — Ctrl/Cmd+K palette. Reuses the repo's design tokens and
+   overlay conventions (cf. .minimal-settings-overlay in SchematicNodes.css). */
+
+.command-bar-overlay {
+    position: fixed;
+    inset: 0;
+    background: color-mix(in srgb, var(--sketch-black) 30%, transparent);
+    backdrop-filter: blur(4px);
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding-top: 14vh;
+    z-index: 3000; /* above settings (2000) — palette is the topmost surface */
+}
+
+.command-bar-container {
+    width: 560px;
+    max-width: calc(100vw - var(--space-xl, 32px));
+    background: var(--bg-node);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-menu);
+    color: var(--text-primary);
+    overflow: hidden;
+}
+
+.command-bar-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: var(--space-lg);
+    border: none;
+    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
+    background: transparent;
+    color: var(--text-primary);
+    font-family: var(--font-sketch);
+    font-size: var(--text-lg);
+    outline: none;
+}
+
+.command-bar-input::placeholder {
+    color: var(--text-muted);
+}
+
+.command-bar-list {
+    max-height: 50vh;
+    overflow-y: auto;
+    padding: var(--space-xs) 0;
+}
+
+.command-bar-empty {
+    padding: var(--space-lg);
+    text-align: center;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+}
+
+.command-bar-group {
+    padding: var(--space-xs) 0;
+}
+
+.command-bar-group [cmdk-group-heading] {
+    padding: var(--space-xs) var(--space-lg);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+}
+
+.command-bar-item {
+    padding: var(--space-sm) var(--space-lg);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+    cursor: pointer;
+    user-select: none;
+}
+
+.command-bar-item[data-selected='true'] {
+    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 14%, transparent);
+}
+
+.command-bar-item-ai {
+    font-weight: 600;
+}
+
+/* ── AI half (U20) ───────────────────────────────────────────────────────── */
+
+.command-bar-ai {
+    display: flex;
+    flex-direction: column;
+    max-height: 60vh;
+}
+
+.command-bar-ai-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-sm) var(--space-lg);
+    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
+}
+
+.command-bar-ai-back {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    padding: 0;
+}
+
+.command-bar-ai-back:hover {
+    color: var(--text-primary);
+}
+
+.command-bar-ai-badge {
+    font-size: var(--text-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    border: var(--border-sketch-width) solid var(--text-muted);
+    border-radius: var(--radius-sm, 4px);
+    padding: 1px var(--space-xs);
+}
+
+.command-bar-ai-input {
+    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
+}
+
+.command-bar-ai-transcript {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-md) var(--space-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+}
+
+.command-bar-ai-thought {
+    color: var(--text-muted);
+    font-style: italic;
+    margin: 0;
+}
+
+.command-bar-ai-tool {
+    margin: 0;
+}
+
+.command-bar-ai-tool code {
+    font-family: var(--font-mono, monospace);
+    font-size: var(--text-xs);
+    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 10%, transparent);
+    padding: 1px 4px;
+    border-radius: var(--radius-sm, 4px);
+}
+
+.command-bar-ai-tool[data-ok='false'] {
+    color: var(--color-danger, #c0392b);
+}
+
+.command-bar-ai-result {
+    margin: 0;
+    font-weight: 600;
+}
+
+.command-bar-ai-status {
+    margin: 0;
+    color: var(--text-muted);
+}
+
+.command-bar-ai-error {
+    margin: 0;
+    color: var(--color-danger, #c0392b);
+}
+
+.command-bar-ai-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+    padding: var(--space-md) var(--space-lg);
+    border-top: var(--border-sketch-width) solid var(--sketch-black);
+}
+
+.command-bar-ai-approve,
+.command-bar-ai-reject {
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    padding: var(--space-xs) var(--space-md);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-md, 6px);
+    cursor: pointer;
+    background: var(--bg-node);
+    color: var(--text-primary);
+}
+
+.command-bar-ai-approve {
+    background: var(--accent, var(--sketch-black));
+    color: var(--bg-node);
+}
+
+.command-bar-ai-desktop-only {
+    padding: var(--space-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    align-items: flex-start;
+}
+
+.command-bar-ai-desktop-title {
+    margin: 0;
+    font-weight: 700;
+    font-size: var(--text-md);
+}
+
+.command-bar-ai-desktop-body {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+    line-height: 1.4;
+}

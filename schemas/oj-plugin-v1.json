@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openjammer.dev/schemas/oj-plugin-v1.json",
+  "title": "OpenJammer PluginManifest v1",
+  "description": "The ONE manifest every node type (built-in DSP, Faust, AI-WASM, hosted plugin) is described by. `id` is the OPEN registry key; `kind` is the CLOSED PrimitiveKind the real-time loop lowers it to. Frozen v1: dsp.kind in {builtin,faust,wasm,none}, ui.kind in {auto,react}.",
+  "type": "object",
+  "required": ["id", "name", "dsp", "ui"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "OPEN registry key (arbitrary, namespaced string, e.g. \"builtin.gain\")."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable display name."
+    },
+    "kind": {
+      "description": "CLOSED PrimitiveKind the RT loop lowers `id` to (serde unit-variant name).",
+      "enum": [
+        "Osc",
+        "Sampler",
+        "Sf2",
+        "KarplusString",
+        "Gain",
+        "Biquad",
+        "Waveshaper",
+        "Delay",
+        "Convolution",
+        "FaustHost",
+        "WasmHost",
+        "PluginHost",
+        "Add",
+        "MicIn",
+        "SpeakerOut",
+        "GraphIn",
+        "GraphOut",
+        "Passthrough"
+      ]
+    },
+    "dsp": {
+      "description": "How the node's audio is computed (selects the executor backend).",
+      "enum": ["builtin", "faust", "wasm", "none"]
+    },
+    "ui": {
+      "description": "How the node's control surface is presented.",
+      "enum": ["auto", "react"]
+    },
+    "params": {
+      "type": "array",
+      "description": "Declared numeric parameters, addressed at runtime by `id`.",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "min", "max", "default"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "integer", "minimum": 0, "maximum": 65535 },
+          "name": { "type": "string", "minLength": 1 },
+          "min": { "type": "number" },
+          "max": { "type": "number" },
+          "default": { "type": "number" }
+        }
+      }
+    },
+    "ports": {
+      "type": "object",
+      "description": "Port topology (audio + control, in + out).",
+      "required": ["audio_in", "audio_out", "control_in", "control_out"],
+      "additionalProperties": false,
+      "properties": {
+        "audio_in": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "audio_out": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "control_in": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "control_out": { "type": "integer", "minimum": 0, "maximum": 255 }
+      }
+    }
+  }
+}

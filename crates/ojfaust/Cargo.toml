@@ -1,0 +1,35 @@
+[package]
+name = "ojfaust"
+description = "Host-side Faust DSP compilation for OpenJammer: turn Faust source (hand-written or AI-authored in U20) into a loadable DSP node, with an agentic compile->error->repair loop. This crate is a FEATURE-GATED scaffold: with the default (`libfaust` OFF) it is a clear stub that builds without any native dependency; the real backend is gated behind the `libfaust` feature."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[features]
+# DEFAULT OFF. The crate must build + clippy clean with NO native toolchain.
+#
+# With `libfaust` OFF:
+#   - `FaustCompiler::compile` returns `FaustError::Unavailable`.
+#   - the agentic `compile_repair` loop is fully present (pure control flow);
+#     it just bottoms out on `Unavailable` from the stub backend.
+#
+# With `libfaust` ON (cannot be verified in this environment — see README):
+#   - links the chosen native backend (libfaust C API via bindgen, OR the
+#     `faust` CLI ahead-of-time path). Everything behind it is TODO-marked.
+default = []
+libfaust = ["dep:libc"]
+
+[dependencies]
+# Host crate (std): this is off-RT-thread compilation tooling, NOT the audio
+# kernel, so it does not need `no_std`.
+#
+# `libc` is only pulled in when the native backend is enabled, so the default
+# stub build has ZERO third-party dependencies.
+libc = { version = "0.2.180", optional = true }
+
+# NOTE: when the libfaust C-API binding path is chosen, add the build-time
+# bindgen dependency here as well, e.g.:
+#   [build-dependencies]
+#   bindgen = "0.71"
+# It is intentionally omitted from the default scaffold so `cargo build`
+# pulls nothing and needs no `build.rs`.

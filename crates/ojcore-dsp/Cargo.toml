@@ -1,0 +1,9 @@
+[package]
+name = "ojcore-dsp"
+description = "Pure, allocation-free OpenJammer DSP kernels (no_std + libm). The single shared DSP source for the native and wasm executors."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+libm = { workspace = true }

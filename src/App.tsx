@@ -9,11 +9,14 @@ import { Toolbar } from './components/Toolbar/Toolbar';
 import { Breadcrumbs } from './components/Toolbar/Breadcrumbs';
 import { HelpPanel } from './components/Toolbar/HelpPanel';
 import { SettingsPanel } from './components/Settings/SettingsPanel';
+import { CommandBar } from './components/CommandBar/CommandBar';
+import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
-import { initAudioContext, isAudioReady, getLatencyMetrics } from './audio/AudioEngine';
-import { audioGraphManager } from './audio/AudioGraphManager';
-import { InstrumentLoader } from './audio/samplers/InstrumentLoader';
+import { initAudioContext, isAudioReady, getLatencyMetrics } from './audio/audioContext';
+import { getExecutor } from './audio/executor';
+import type { GraphNode, Connection } from './engine/types';
+import { initMidiVoiceRouting, disposeMidiVoiceRouting } from './midi';
 import { useAudioStore } from './store/audioStore';
 import { useGraphStore } from './store/graphStore';
 import { useProjectStore } from './store/projectStore';
@@ -58,7 +61,7 @@ function App() {
 
     // Create subscription wrappers for graph store
     // Zustand's subscribe returns an unsubscribe function
-    const subscribeToNodes = (callback: (nodes: Map<string, any>) => void) => {
+    const subscribeToNodes = (callback: (nodes: Map<string, GraphNode>) => void) => {
       let prevNodes = useGraphStore.getState().nodes;
       return useGraphStore.subscribe((state) => {
         if (state.nodes !== prevNodes) {
@@ -68,7 +71,7 @@ function App() {
       });
     };
 
-    const subscribeToConnections = (callback: (connections: Map<string, any>) => void) => {
+    const subscribeToConnections = (callback: (connections: Map<string, Connection>) => void) => {
       let prevConnections = useGraphStore.getState().connections;
       return useGraphStore.subscribe((state) => {
         if (state.connections !== prevConnections) {
@@ -81,34 +84,22 @@ function App() {
     const getNodes = useGraphStore.getState().getNodes;
     const getConnections = useGraphStore.getState().getConnections;
 
-    audioGraphManager.initialize(
+    const executor = getExecutor();
+    executor.initialize(
       subscribeToConnections,
       subscribeToNodes,
       getNodes,
       getConnections
     );
 
-    // Preload common instruments during browser idle time
-    // This reduces first-note latency when users create instrument nodes
-    const preloadInstruments = () => {
-      // Preload the most commonly used instruments
-      const commonInstruments = ['salamander-piano', 'tonejs-piano'];
-      commonInstruments.forEach(id => {
-        InstrumentLoader.preload(id).catch(err => {
-          console.warn(`[App] Failed to preload ${id}:`, err);
-        });
-      });
-    };
-
-    // Use requestIdleCallback if available, otherwise setTimeout
-    if ('requestIdleCallback' in window) {
-      (window as Window & { requestIdleCallback: (cb: () => void) => number }).requestIdleCallback(preloadInstruments);
-    } else {
-      setTimeout(preloadInstruments, 1000);
-    }
+    // Wire control-side MIDI -> voice routing (U13). Resolves incoming MIDI
+    // events against the live graph and drives the Executor note seam. Uses the
+    // default routing context (graph store + executor + MIDIManager).
+    initMidiVoiceRouting();
 
     return () => {
-      audioGraphManager.dispose();
+      disposeMidiVoiceRouting();
+      executor.dispose();
     };
   }, [isAudioContextReady]);
 
@@ -377,6 +368,12 @@ function App() {
 
       {/* Settings Panel */}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+
+      {/* Command Bar (Ctrl/Cmd+K) - owns its own toggle + open state (U19) */}
+      <CommandBar />
+
+      {/* Collaboration Share/Join control + peer list (U23 — collab state plane) */}
+      <CollabControl />
 
       {/* Help Panel */}
       <HelpPanel />

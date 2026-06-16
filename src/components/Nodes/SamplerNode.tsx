@@ -16,8 +16,8 @@ import { useCallback, useRef, useState, useEffect, memo } from 'react';
 import type { GraphNode, SamplerNodeData, SamplerRow, AudioClip, ClipDropTarget } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { getItemFile } from '../../store/libraryStore';
-import { getAudioContext } from '../../audio/AudioEngine';
-import { audioGraphManager } from '../../audio/AudioGraphManager';
+import { getAudioContext } from '../../audio/audioContext';
+import { getExecutor } from '../../audio/executor';
 import { useAudioClipStore, getClipBuffer } from '../../store/audioClipStore';
 import { loadClipAudio } from '../../utils/clipUtils';
 import { isSamplerNodeData } from '../../engine/typeGuards';
@@ -187,7 +187,7 @@ export const SamplerNode = memo(function SamplerNode({
 
         const loadAndSyncBuffer = async () => {
             const ctx = getAudioContext();
-            const sampler = audioGraphManager.getSamplerAdapter(node.id);
+            const sampler = getExecutor().getSamplerAdapter(node.id);
 
             if (!sampler) {
                 return;
@@ -252,7 +252,7 @@ export const SamplerNode = memo(function SamplerNode({
             }
 
             // Wait for sampler adapter to be available
-            const sampler = await audioGraphManager.waitForSamplerAdapter(node.id);
+            const sampler = await getExecutor().waitForSamplerAdapter(node.id);
             if (sampler) {
                 sampler.setBuffer(buffer);
             }
@@ -318,7 +318,7 @@ export const SamplerNode = memo(function SamplerNode({
                         const buffer = await ctx.decodeAudioData(arrayBuffer);
 
                         // Wait for sampler adapter to be available
-                        const sampler = await audioGraphManager.waitForSamplerAdapter(node.id);
+                        const sampler = await getExecutor().waitForSamplerAdapter(node.id);
                         if (sampler) {
                             sampler.setBuffer(buffer);
                         }
@@ -350,7 +350,7 @@ export const SamplerNode = memo(function SamplerNode({
                     const buffer = await ctx.decodeAudioData(arrayBuffer);
 
                     // Wait for sampler adapter to be available
-                    const sampler = await audioGraphManager.waitForSamplerAdapter(node.id);
+                    const sampler = await getExecutor().waitForSamplerAdapter(node.id);
                     if (sampler) {
                         sampler.setBuffer(buffer);
                     }
@@ -381,7 +381,7 @@ export const SamplerNode = memo(function SamplerNode({
             duration: undefined
         });
         setWaveformData([]);
-        const sampler = audioGraphManager.getSamplerAdapter(node.id);
+        const sampler = getExecutor().getSamplerAdapter(node.id);
         if (sampler) {
             sampler.setBuffer(null);
         }
@@ -390,13 +390,13 @@ export const SamplerNode = memo(function SamplerNode({
     // Change handlers for scrollable controls
     const handleRootNoteChange = useCallback((newValue: number) => {
         updateNodeData(node.id, { rootNote: newValue });
-        const sampler = audioGraphManager.getSamplerAdapter(node.id);
+        const sampler = getExecutor().getSamplerAdapter(node.id);
         if (sampler) sampler.setRootNote(newValue);
     }, [node.id, updateNodeData]);
 
     const handleGainChange = useCallback((newValue: number) => {
         updateNodeData(node.id, { gain: newValue });
-        const sampler = audioGraphManager.getSamplerAdapter(node.id);
+        const sampler = getExecutor().getSamplerAdapter(node.id);
         if (sampler) sampler.setGain(newValue);
     }, [node.id, updateNodeData]);
 
@@ -406,13 +406,13 @@ export const SamplerNode = memo(function SamplerNode({
 
     const handleAttackChange = useCallback((newValue: number) => {
         updateNodeData(node.id, { attack: newValue });
-        const sampler = audioGraphManager.getSamplerAdapter(node.id);
+        const sampler = getExecutor().getSamplerAdapter(node.id);
         if (sampler) sampler.setAttack(newValue);
     }, [node.id, updateNodeData]);
 
     const handleReleaseChange = useCallback((newValue: number) => {
         updateNodeData(node.id, { release: newValue });
-        const sampler = audioGraphManager.getSamplerAdapter(node.id);
+        const sampler = getExecutor().getSamplerAdapter(node.id);
         if (sampler) sampler.setRelease(newValue);
     }, [node.id, updateNodeData]);
 

@@ -11,9 +11,8 @@ import { useGraphStore } from '../../store/graphStore';
 import { useAudioStore } from '../../store/audioStore';
 import { useAudioClipStore, setClipBuffer, getClipBuffer } from '../../store/audioClipStore';
 import { useLibraryStore } from '../../store/libraryStore';
-import { audioGraphManager } from '../../audio/AudioGraphManager';
-import { getAudioContext } from '../../audio/AudioEngine';
-import { INFINITE_DURATION, isInfiniteDuration, type Loop } from '../../audio/Looper';
+import { getExecutor, INFINITE_DURATION, isInfiniteDuration, type Loop } from '../../audio/executor';
+import { getAudioContext } from '../../audio/audioContext';
 import { createClipFromLoop, loadClipAudio } from '../../utils/clipUtils';
 import { useScrollCapture } from '../../hooks/useScrollCapture';
 import type { ScrollData } from '../../hooks/useScrollCapture';
@@ -111,15 +110,13 @@ export const LooperNode = memo(function LooperNode({
 
     // Get port IDs from node.ports
     const inputPort = node.ports.find(p => p.direction === 'input' && p.type === 'audio');
-    const outputPort = node.ports.find(p => p.direction === 'output' && p.type === 'audio' && p.id !== 'sample-out');
-    const sampleOutPort = node.ports.find(p => p.id === 'sample-out');
+    const outputPort = node.ports.find(p => p.direction === 'output' && p.type === 'audio');
     const inputPortId = inputPort?.id || 'audio-in';
     const outputPortId = outputPort?.id || 'audio-out';
-    const sampleOutPortId = sampleOutPort?.id || 'sample-out';
 
-    // Get the Looper instance from AudioGraphManager
+    // Get the Looper instance from the audio executor
     const getLooper = useCallback(() => {
-        return audioGraphManager.getLooper(node.id);
+        return getExecutor().getLooper(node.id);
     }, [node.id]);
 
     // Set up Looper callbacks when component mounts or audio context becomes ready
@@ -147,10 +144,7 @@ export const LooperNode = memo(function LooperNode({
                 setWaveformHistory([]);
                 setPlayheadPosition(0);
 
-                // Send the loop's audio buffer to connected samplers via sample-out port
                 if (audioLoop.buffer) {
-                    audioGraphManager.sendSampleBuffer(node.id, audioLoop.buffer);
-
                     // Auto-save to project library with "loop" tag
                     // Use ref to get latest function without causing effect re-runs
                     try {
@@ -652,25 +646,6 @@ export const LooperNode = memo(function LooperNode({
                 />
             </div>
 
-            {/* Sample-out port - positioned on right side below audio-out */}
-            {sampleOutPort && (
-                <div
-                    className={`looper-sample-out-port ${hasConnection(sampleOutPortId) ? 'connected' : ''}`}
-                    style={{
-                        position: 'absolute',
-                        right: '-8px',
-                        top: `${(sampleOutPort.position?.y || 0.65) * 100}%`,
-                        transform: 'translateY(-50%)'
-                    }}
-                    onMouseDown={(e) => handlePortMouseDown?.(sampleOutPortId, e)}
-                    onMouseUp={(e) => handlePortMouseUp?.(sampleOutPortId, e)}
-                    onMouseEnter={() => handlePortMouseEnter?.(sampleOutPortId)}
-                    onMouseLeave={handlePortMouseLeave}
-                    data-node-id={node.id}
-                    data-port-id={sampleOutPortId}
-                    title="Sample buffer output - connect to Sampler"
-                />
-            )}
         </div>
     );
 });

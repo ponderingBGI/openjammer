@@ -1,0 +1,51 @@
+[package]
+name = "ojhost"
+description = "Third-party plugin host for OpenJammer (UNIT U-JUCE). Scans for and hosts VST3 / CLAP (AU on macOS) plugins behind ojcore's `DspInstance` trait, so a hosted plugin is just another node (\"everything is a plugin\"). NATIVE-ONLY (never wasm). All C++ is confined to this crate boundary; the rest of OpenJammer stays Rust. FEATURE-GATED: the default build is a dependency-free scaffold (scan returns empty, load is Unavailable); the real backends sit behind the `clap-host` (clack, pure Rust, MIT) and `juce` (bundled C++ JUCE 8 via CMake) features."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[features]
+# DEFAULT OFF on both backends. The crate MUST build + clippy clean + test
+# green with NO native toolchain and NO network — the scaffold path. This is
+# the same posture as `ojfaust`: the API shape, descriptor marshalling, scan
+# cache + crash-blacklist, and the `PluginHostNode: DspInstance` bridge are all
+# fully present and unit-tested; only the *backend that actually opens a plugin*
+# is gated.
+#
+#   cargo build  -p ojhost                      -> scaffold (no real hosting)
+#   cargo build  -p ojhost --features clap-host -> real CLAP hosting via clack
+#   cargo build  -p ojhost --features juce      -> JUCE C++ host (VST3/CLAP/AU)
+default = []
+
+# Pure-Rust CLAP host via the `clack` family (MIT, no C++). This is the
+# recommended path to host a real plugin in this sandbox: no CMake, no JUCE
+# checkout. Supports CLAP only.
+clap-host = ["dep:clack-host"]
+
+# The JUCE 8 C++ host (VST3 + CLAP, + AU on macOS). Pulls JUCE via CMake
+# FetchContent in `build.rs` and links the small `extern "C"` shim in `cpp/`.
+# Heavy (downloads + compiles JUCE); requires `cmake` + a C++ toolchain (and,
+# for VST3, the Steinberg VST3 SDK headers — see README). Off by default so the
+# default build needs none of that.
+juce = ["dep:cmake"]
+
+[dependencies]
+# Engine ABI: a hosted plugin is a `DspInstance` minted by a `PluginLoader`
+# registered under `PrimitiveKind::PluginHost`. `default-features = false`
+# keeps us off ojcore's std-only RT plumbing we do not need here.
+ojcore = { path = "../ojcore", default-features = false }
+ojproto = { path = "../ojproto" }
+serde = { workspace = true, features = ["std"] }
+# JSON for the on-disk scan cache. Runtime dep (not dev-only): the cache
+# round-trips through `scan_with` in normal use.
+serde_json = "1.0.150"
+
+# Pure-Rust CLAP host (MIT). Only linked with `--features clap-host`. Pinned
+# from a fresh `cargo add` resolve (governing principle #9).
+clack-host = { version = "0.1.0", optional = true }
+
+[build-dependencies]
+# Drives the CMake build of the bundled C++ JUCE host. Only used with
+# `--features juce`; the default build pulls no build dependency at all.
+cmake = { version = "0.1.58", optional = true }

@@ -14,7 +14,7 @@ import { useTransportStore } from '../../store/transportStore';
 import { getNodeDefinition } from '../../engine/registry';
 import { getPortPosition as calculatePortPosition } from '../../utils/portPositions';
 import { getConnectionBundleCount } from '../../utils/portSync';
-import { audioGraphManager } from '../../audio/AudioGraphManager';
+import { getExecutor } from '../../audio/executor';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
 import { ContextMenu } from './ContextMenu';
 import { NodeWrapper } from '../Nodes/NodeWrapper';
@@ -22,10 +22,12 @@ import { useMIDIStore } from '../../store/midiStore';
 import { useAudioClipStore } from '../../store/audioClipStore';
 import { useLibraryStore, getSampleFile } from '../../store/libraryStore';
 import { createClipFromSample, generateWaveformPeaksAsync } from '../../utils/clipUtils';
-import { getAudioContext } from '../../audio/AudioEngine';
+import { getAudioContext } from '../../audio/audioContext';
 import { AudioClipVisual } from '../Clips/AudioClipVisual';
 import { ClipDragLayer } from '../Clips/ClipDragLayer';
 import { WaveformEditorModal } from '../Clips/WaveformEditorModal';
+import { PresenceOverlay } from '../Collab/PresenceOverlay';
+import { useCollabStore } from '../../store/collabStore';
 import './NodeCanvas.css';
 
 interface SelectionBox {
@@ -112,10 +114,10 @@ export function NodeCanvas() {
     const signalLevelsRef = useRef<Map<string, number>>(new Map());
     const signalUpdateScheduled = useRef(false);
 
-    // Subscribe to signal level updates from AudioGraphManager
+    // Subscribe to signal level updates from the audio executor
     // Throttle state updates to ~30fps to reduce re-renders while keeping smooth animation
     useEffect(() => {
-        const unsubscribe = audioGraphManager.subscribeToSignalLevels((levels) => {
+        const unsubscribe = getExecutor().subscribeSignalLevels((levels) => {
             signalLevelsRef.current = levels;
 
             // Throttle state updates using requestAnimationFrame
@@ -201,6 +203,13 @@ export function NodeCanvas() {
 
     // Audio store for mode switching
     const setCurrentMode = useAudioStore((s) => s.setCurrentMode);
+
+    // Collaboration presence (U23): publish local cursor / selection / view level
+    // to peers. These are no-ops when no session is active.
+    const collabActive = useCollabStore((s) => s.status === 'connected');
+    const publishCursor = useCollabStore((s) => s.setCursor);
+    const publishSelection = useCollabStore((s) => s.setSelection);
+    const publishViewNode = useCollabStore((s) => s.setViewNode);
 
     // Mouse position: ref for zoom (always updated), state for temp connection (only when connecting)
     const mousePosRef = useRef<Position>({ x: 0, y: 0 });
@@ -305,10 +314,23 @@ export function NodeCanvas() {
         }
     }, [setPanning, clearSelection, stopConnecting, screenToCanvas]);
 
+    // Throttle presence cursor broadcasts to one per animation frame.
+    const cursorPublishScheduled = useRef(false);
+
     // Handle mouse move
     const handleMouseMove = useCallback((e: React.MouseEvent) => {
         // Always update ref for zoom operations
         mousePosRef.current = { x: e.clientX, y: e.clientY };
+
+        // Broadcast cursor position (in canvas coords) to collaborators, throttled.
+        if (collabActive && !cursorPublishScheduled.current) {
+            cursorPublishScheduled.current = true;
+            const screen = { x: e.clientX, y: e.clientY };
+            requestAnimationFrame(() => {
+                cursorPublishScheduled.current = false;
+                publishCursor(screenToCanvas(screen));
+            });
+        }
 
         // Only update state when connecting (for temp connection line)
         if (isConnecting) {
@@ -362,7 +384,7 @@ export function NodeCanvas() {
                 });
             }
         }
-    }, [isPanning, panBy, selectionBox, screenToCanvas, rightClickStart, selectNodesInRect, clipDragState.isDragging, updateClipDrag, isConnecting]);
+    }, [isPanning, panBy, selectionBox, screenToCanvas, rightClickStart, selectNodesInRect, clipDragState.isDragging, updateClipDrag, isConnecting, collabActive, publishCursor]);
 
     // Handle mouse up
     const handleMouseUp = useCallback(() => {
@@ -913,9 +935,23 @@ export function NodeCanvas() {
         };
     }, [deleteSelected, toggleGhostMode, undo, redo, startConnecting, setCurrentMode, enterNode, exitToParent, allNodes, currentViewNodeId, copySelected, pasteClipboard, selectedClipIds, removeClip]);
 
+    // Collaboration presence (U23): publish current view level + node selection
+    // whenever they change. No-op when no session is active.
+    useEffect(() => {
+        if (!collabActive) return;
+        publishViewNode(currentViewNodeId);
+    }, [collabActive, currentViewNodeId, publishViewNode]);
+
+    const selectedNodeIds = useGraphStore((s) => s.selectedNodeIds);
+    useEffect(() => {
+        if (!collabActive) return;
+        publishSelection(Array.from(selectedNodeIds));
+    }, [collabActive, selectedNodeIds, publishSelection]);
+
     // Cache for port positions - invalidated when pan/zoom/nodes change
     // This prevents expensive DOM queries on every render for every connection
     const portPositionCache = useRef<Map<string, Position>>(new Map());
+    const [portLayoutVersion, setPortLayoutVersion] = useState(0);
     const lastPanZoom = useRef({ pan, zoom });
 
     // Invalidate cache when pan/zoom changes
@@ -932,6 +968,17 @@ export function NodeCanvas() {
     useEffect(() => {
         portPositionCache.current.clear();
     }, [allNodes]);
+
+    // Connections render before nodes, so the first pass can only use fallback
+    // math. Re-render once after the node DOM paints so cables anchor to dots.
+    useEffect(() => {
+        const frame = window.requestAnimationFrame(() => {
+            portPositionCache.current.clear();
+            setPortLayoutVersion(version => version + 1);
+        });
+
+        return () => window.cancelAnimationFrame(frame);
+    }, [nodes, connections.size]);
 
     // Get port position for connection rendering
     // Uses cached positions or DOM query for accurate positions, falls back to math calculation
@@ -969,11 +1016,7 @@ export function NodeCanvas() {
         // Fall back to math-based calculation
         const node = allNodes.get(nodeId);
         if (!node) return null;
-        const position = calculatePortPosition(node, portId);
-        if (position) {
-            portPositionCache.current.set(cacheKey, position);
-        }
-        return position;
+        return calculatePortPosition(node, portId);
     }, [allNodes, pan, zoom]);
 
     // Render connection path using memoized component
@@ -1015,7 +1058,7 @@ export function NodeCanvas() {
                 onSelect={selectConnection}
             />
         );
-    }, [getPortPosition, selectedConnectionIds, selectConnection, allNodes, allConnections, signalLevels]);
+    }, [getPortPosition, selectedConnectionIds, selectConnection, allNodes, allConnections, signalLevels, portLayoutVersion]);
 
     // Render temporary connection while dragging
     const renderTempConnection = useCallback(() => {
@@ -1051,7 +1094,7 @@ export function NodeCanvas() {
                 })}
             </>
         );
-    }, [isConnecting, connectingFrom, getPortPosition, screenToCanvas, mousePos]);
+    }, [isConnecting, connectingFrom, getPortPosition, screenToCanvas, mousePos, portLayoutVersion]);
 
     // Calculate bounds for current level's nodes (not root)
     const getCurrentLevelBounds = useCallback((): NodeBounds | null => {
@@ -1221,6 +1264,10 @@ export function NodeCanvas() {
                         />
                     ))}
                 </div>
+
+                {/* Collaboration presence overlay (U23): remote peer cursors +
+                    selection rings. Renders nothing when not in a session. */}
+                <PresenceOverlay />
 
                 {/* Selection Box */}
                 {renderSelectionBox()}

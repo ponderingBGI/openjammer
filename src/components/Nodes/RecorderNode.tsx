@@ -1,6 +1,6 @@
 /**
  * Recorder Node - Record audio to WAV
- * Connected to the real Recorder audio class via AudioGraphManager
+ * Connected to the real Recorder audio class via the audio executor seam
  */
 
 import { useState, useCallback, useEffect, memo } from 'react';
@@ -9,9 +9,9 @@ import type { GraphNode } from '../../engine/types';
 import { useAudioStore } from '../../store/audioStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useLibraryStore } from '../../store/libraryStore';
-import { audioGraphManager } from '../../audio/AudioGraphManager';
-import { getAudioContext } from '../../audio/AudioEngine';
-import type { Recording as AudioRecording } from '../../audio/Recorder';
+import { getExecutor } from '../../audio/executor';
+import { getAudioContext } from '../../audio/audioContext';
+import type { Recording as AudioRecording } from '../../audio/executor';
 
 interface RecorderNodeProps {
     node: GraphNode;
@@ -41,9 +41,9 @@ export const RecorderNode = memo(function RecorderNode({ node }: RecorderNodePro
     const [recordingTime, setRecordingTime] = useState(0);
     const [isSaving, setIsSaving] = useState<string | null>(null);
 
-    // Get the Recorder instance from AudioGraphManager
+    // Get the Recorder instance from the audio executor
     const getRecorder = useCallback(() => {
-        return audioGraphManager.getRecorder(node.id);
+        return getExecutor().getRecorder(node.id);
     }, [node.id]);
 
     // Set up Recorder callbacks when component mounts or audio context becomes ready

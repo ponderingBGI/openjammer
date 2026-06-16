@@ -1,0 +1,413 @@
+/**
+ * U-EXEC-PARITY gate tests.
+ *
+ * Pin the ojcore executors' capability parity against the {@link Executor}
+ * interface, the level the founder's native (<5 ms) app depends on:
+ *
+ *  1. Each ojcore executor returns a NON-NULL handle from getLooper /
+ *     getRecorder / getSamplerAdapter (never null/throw — the seam stays whole).
+ *  2. A looper handle's actions map to the right `RtCommand::Looper` payloads
+ *     (arm/record/stop/clear/overdub) and a sampler handle's config maps to
+ *     `SetParam`s — over the SHARED bridge both backends use.
+ *  3. The native meter subscription delivers per-node levels from a MOCKED
+ *     `poll_meters` invoke (the engine -> UI level stream).
+ *  4. The mocked-Tauri-invoke path: `getInvoke` resolves the global bridge and
+ *     looper/sample/recorder/speaker/mic commands reach `invoke` with the right
+ *     command name + args.
+ */
+
+import { describe, it, expect, afterEach, vi } from 'vitest';
+import { LooperAction } from '../../../../packages/oj-protocol-ts/src/index';
+import type { RtCommand, EngineFrame } from '../../../../packages/oj-protocol-ts/src/index';
+import {
+    OjcoreLooperHandle,
+    OjcoreSamplerHandle,
+    OjcoreRecorderHandle,
+    OjcoreCapabilityRegistry,
+    type OjcoreBridge,
+} from '../ojcoreHandles';
+import { OjcoreNativeExecutor } from '../OjcoreNativeExecutor';
+import { OjcoreWasmExecutor } from '../OjcoreWasmExecutor';
+import { getNodeDefinition } from '../../../engine/registry';
+import type { Connection, GraphNode, NodeType } from '../../../engine/types';
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+/** Build a GraphNode from the real registry definition (ports + default data). */
+function makeNode(type: NodeType, id: string): GraphNode {
+    const def = getNodeDefinition(type);
+    return {
+        id,
+        type,
+        category: def.category,
+        position: { x: 0, y: 0 },
+        data: { ...def.defaultData },
+        ports: [...def.defaultPorts],
+        parentId: null,
+        childIds: [],
+    };
+}
+
+function makeConn(
+    sourceNodeId: string,
+    sourcePortId: string,
+    targetNodeId: string,
+    targetPortId: string,
+): Connection {
+    return {
+        id: `${sourceNodeId}:${sourcePortId}->${targetNodeId}:${targetPortId}`,
+        sourceNodeId,
+        sourcePortId,
+        targetNodeId,
+        targetPortId,
+        type: 'audio',
+    };
+}
+
+/** A spying mock of the shared engine bridge for handle-level tests. */
+function mockBridge(): { bridge: OjcoreBridge; sent: RtCommand[]; loaded: unknown[] } {
+    const sent: RtCommand[] = [];
+    const loaded: unknown[] = [];
+    const bridge: OjcoreBridge = {
+        // Every visual id maps to a fixed NodeIdx so command payloads are stable.
+        nodeIndex: () => 7,
+        sendCommand: (cmd) => {
+            sent.push(cmd);
+        },
+        loadSample: (nodeId, pcm, sampleRate, rootNote) => {
+            loaded.push({ nodeId, len: pcm.length, sampleRate, rootNote });
+            return Promise.resolve();
+        },
+        startCapture: () => {},
+        stopCapture: () => Promise.resolve(null),
+    };
+    return { bridge, sent, loaded };
+}
+
+// ---------------------------------------------------------------------------
+// 1) Non-null handles
+// ---------------------------------------------------------------------------
+
+describe('ojcore executors return real (never-null) capability handles', () => {
+    for (const make of [
+        ['OjcoreNativeExecutor', () => new OjcoreNativeExecutor()] as const,
+        ['OjcoreWasmExecutor', () => new OjcoreWasmExecutor()] as const,
+    ]) {
+        const [name, ctor] = make;
+        it(`${name}: getLooper / getRecorder / getSamplerAdapter are non-null`, () => {
+            const ex = ctor();
+            expect(ex.getLooper('n1')).not.toBeNull();
+            expect(ex.getRecorder('n1')).not.toBeNull();
+            expect(ex.getSamplerAdapter('n1')).not.toBeNull();
+        });
+
+        it(`${name}: returns the SAME handle for repeated calls (stateful)`, () => {
+            const ex = ctor();
+            expect(ex.getLooper('n1')).toBe(ex.getLooper('n1'));
+            expect(ex.getRecorder('n1')).toBe(ex.getRecorder('n1'));
+            expect(ex.getSamplerAdapter('n1')).toBe(ex.getSamplerAdapter('n1'));
+        });
+
+        it(`${name}: waitForSamplerAdapter resolves a non-null handle`, async () => {
+            const ex = ctor();
+            await expect(ex.waitForSamplerAdapter('n1')).resolves.not.toBeNull();
+        });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// 2) Looper actions -> RtCommand::Looper ; sampler config -> SetParam
+// ---------------------------------------------------------------------------
+
+describe('looper handle maps actions to the right RtCommand::Looper', () => {
+    it('record sends ARM then RECORD; stop sends STOP', async () => {
+        const { bridge, sent } = mockBridge();
+        const looper = new OjcoreLooperHandle('looper-1', bridge);
+
+        await looper.startRecording();
+        expect(sent).toEqual([
+            { Looper: { node: 7, action: LooperAction.ARM } },
+            { Looper: { node: 7, action: LooperAction.RECORD } },
+        ]);
+
+        sent.length = 0;
+        looper.stopRecording();
+        expect(sent).toEqual([{ Looper: { node: 7, action: LooperAction.STOP } }]);
+    });
+
+    it('deleting the last loop clears the engine buffer', async () => {
+        const { bridge, sent } = mockBridge();
+        const looper = new OjcoreLooperHandle('looper-1', bridge);
+        await looper.startRecording();
+        looper.stopRecording();
+        const loops = looper.getLoops();
+        expect(loops).toHaveLength(1);
+
+        sent.length = 0;
+        looper.deleteLoop(loops[0].id);
+        expect(sent).toEqual([{ Looper: { node: 7, action: LooperAction.CLEAR } }]);
+        expect(looper.getLoops()).toHaveLength(0);
+    });
+
+    it('stopRecording mirrors a loop layer the UI can render', async () => {
+        const { bridge } = mockBridge();
+        const looper = new OjcoreLooperHandle('looper-1', bridge);
+        const added: string[] = [];
+        looper.setOnLoopAdded((l) => added.push(l.id));
+        await looper.startRecording();
+        looper.stopRecording();
+        expect(added).toHaveLength(1);
+        const [loop] = looper.getLoops();
+        expect(loop.waveformData.length).toBeGreaterThan(0);
+        expect(loop.isMuted).toBe(false);
+    });
+});
+
+describe('sampler handle maps config to SetParam and loads PCM', () => {
+    it('setRootNote / setGain / setAttack / setRelease send SetParam', () => {
+        const { bridge, sent } = mockBridge();
+        const sampler = new OjcoreSamplerHandle('sampler-1', bridge);
+
+        sampler.setRootNote(48);
+        sampler.setGain(0.5);
+        sampler.setAttack(0.02);
+        sampler.setRelease(0.3);
+
+        // node is the fixed mock NodeIdx 7; param ids mirror the engine sampler.
+        expect(sent).toEqual([
+            { SetParam: { node: 7, param: 16, value: 48 } }, // ROOT_NOTE
+            { SetParam: { node: 7, param: 0, value: 0.5 } }, // GAIN
+            { SetParam: { node: 7, param: 1, value: 0.02 } }, // ATTACK
+            { SetParam: { node: 7, param: 3, value: 0.3 } }, // RELEASE
+        ]);
+    });
+
+    it('setBuffer downmixes to mono PCM and lowers it into the engine', () => {
+        const { bridge, loaded } = mockBridge();
+        const sampler = new OjcoreSamplerHandle('sampler-1', bridge);
+        const fakeBuffer = {
+            numberOfChannels: 2,
+            length: 4,
+            sampleRate: 44100,
+            getChannelData: () => new Float32Array([0.5, 0.5, 0.5, 0.5]),
+        } as unknown as AudioBuffer;
+
+        sampler.setBuffer(fakeBuffer);
+        expect(sampler.getBuffer()).toBe(fakeBuffer);
+        expect(loaded).toEqual([{ nodeId: 'sampler-1', len: 4, sampleRate: 44100, rootNote: 60 }]);
+
+        // Clearing the buffer does not attempt a load.
+        loaded.length = 0;
+        sampler.setBuffer(null);
+        expect(sampler.getBuffer()).toBeNull();
+        expect(loaded).toHaveLength(0);
+    });
+});
+
+describe('recorder handle captures via the bridge and surfaces a blob', () => {
+    it('start/stop drives the bridge and completes with a recording', async () => {
+        const captured: string[] = [];
+        const bridge: OjcoreBridge = {
+            nodeIndex: () => 7,
+            sendCommand: () => {},
+            loadSample: () => Promise.resolve(),
+            startCapture: (id) => captured.push(`start:${id}`),
+            stopCapture: (id) => {
+                captured.push(`stop:${id}`);
+                return Promise.resolve(new Blob(['x'], { type: 'audio/wav' }));
+            },
+        };
+        const recorder = new OjcoreRecorderHandle('rec-1', bridge);
+        const done = new Promise<void>((resolve) => {
+            recorder.setOnRecordingComplete(() => resolve());
+        });
+        recorder.startRecording();
+        expect(recorder.getIsRecording()).toBe(true);
+        recorder.stopRecording();
+        await done;
+        expect(captured).toEqual(['start:rec-1', 'stop:rec-1']);
+        expect(recorder.getRecordings()).toHaveLength(1);
+        expect(recorder.getRecordingBlob(recorder.getRecordings()[0].id)).not.toBeNull();
+    });
+});
+
+describe('OjcoreCapabilityRegistry caches one handle per node id', () => {
+    it('returns identical handles per id and clears them', () => {
+        const { bridge } = mockBridge();
+        const reg = new OjcoreCapabilityRegistry(bridge);
+        const a = reg.looper('x');
+        expect(reg.looper('x')).toBe(a);
+        expect(reg.looper('y')).not.toBe(a);
+        reg.clear();
+        expect(reg.looper('x')).not.toBe(a);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// 3) + 4) Mocked-Tauri-invoke path: commands + meter delivery
+// ---------------------------------------------------------------------------
+
+interface InvokeCall {
+    cmd: string;
+    args: Record<string, unknown> | undefined;
+}
+
+/** Install a mock `window.__TAURI__.core.invoke` and capture every call. */
+function installMockTauri(
+    handler?: (cmd: string, args?: Record<string, unknown>) => unknown,
+): InvokeCall[] {
+    const calls: InvokeCall[] = [];
+    const invoke = vi.fn((cmd: string, args?: Record<string, unknown>) => {
+        calls.push({ cmd, args });
+        return Promise.resolve(handler ? handler(cmd, args) : undefined);
+    });
+    (window as unknown as { __TAURI__?: unknown }).__TAURI__ = { core: { invoke } };
+    return calls;
+}
+
+/** A looper -> speaker graph so the looper interns to a stable NodeIdx. */
+function looperGraph(): {
+    nodes: Map<string, GraphNode>;
+    connections: Map<string, Connection>;
+} {
+    const looper = makeNode('looper', 'looper-1');
+    const speaker = makeNode('speaker', 'speaker-1');
+    const inPort = looper.ports.find((p) => p.direction === 'input');
+    const outPort = looper.ports.find((p) => p.direction === 'output');
+    const spkIn = speaker.ports.find((p) => p.direction === 'input');
+    const conns = new Map<string, Connection>();
+    if (outPort && spkIn) {
+        const c = makeConn(looper.id, outPort.id, speaker.id, spkIn.id);
+        conns.set(c.id, c);
+    }
+    void inPort;
+    return {
+        nodes: new Map([
+            [looper.id, looper],
+            [speaker.id, speaker],
+        ]),
+        connections: conns,
+    };
+}
+
+describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
+    afterEach(() => {
+        delete (window as unknown as { __TAURI__?: unknown }).__TAURI__;
+        vi.useRealTimers();
+    });
+
+    function initWith(
+        ex: OjcoreNativeExecutor,
+        graph: { nodes: Map<string, GraphNode>; connections: Map<string, Connection> },
+    ): void {
+        ex.initialize(
+            () => () => {},
+            () => () => {},
+            () => graph.nodes,
+            () => graph.connections,
+        );
+    }
+
+    it('pushes the graph on initialize via push_graph', () => {
+        const calls = installMockTauri();
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, looperGraph());
+        expect(calls.some((c) => c.cmd === 'push_graph')).toBe(true);
+        ex.dispose();
+    });
+
+    it('looper handle record/stop reach send_command with RtCommand::Looper', async () => {
+        const calls = installMockTauri();
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, looperGraph());
+
+        const looper = ex.getLooper('looper-1');
+        expect(looper).not.toBeNull();
+        await looper!.startRecording();
+        looper!.stopRecording();
+
+        type LooperCmd = Extract<RtCommand, { Looper: unknown }>;
+        const looperCmds = calls
+            .filter((c) => c.cmd === 'send_command')
+            .map((c) => c.args?.cmd as RtCommand)
+            .filter(
+                (cmd): cmd is LooperCmd =>
+                    typeof cmd === 'object' && cmd !== null && 'Looper' in cmd,
+            );
+        const actions = looperCmds.map((c) => c.Looper.action);
+        expect(actions).toContain(LooperAction.ARM);
+        expect(actions).toContain(LooperAction.RECORD);
+        expect(actions).toContain(LooperAction.STOP);
+        // Every looper command addresses the same interned NodeIdx.
+        const idxs = new Set(looperCmds.map((c) => c.Looper.node));
+        expect(idxs.size).toBe(1);
+        ex.dispose();
+    });
+
+    it('sampler config reaches send_command and sample reaches load_sample', () => {
+        const calls = installMockTauri();
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, looperGraph());
+
+        // Use the looper node id only to prove command addressing; the sampler
+        // handle works for any node id (interned or not — null-safe).
+        const sampler = ex.getSamplerAdapter('looper-1');
+        sampler!.setGain(0.42);
+        const setParams = calls
+            .filter((c) => c.cmd === 'send_command')
+            .map((c) => c.args?.cmd as RtCommand)
+            .filter((cmd) => typeof cmd === 'object' && cmd !== null && 'SetParam' in cmd);
+        expect(setParams.length).toBeGreaterThan(0);
+        ex.dispose();
+    });
+
+    it('speaker volume / device / mic reach their commands', () => {
+        const calls = installMockTauri();
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, looperGraph());
+
+        ex.setSpeakerVolume('speaker-1', 0.7, false);
+        ex.setSpeakerDevice('speaker-1', 'dev-2');
+        ex.setMicrophoneOutput('looper-1', {} as AudioNode);
+
+        expect(calls.some((c) => c.cmd === 'set_speaker_volume')).toBe(true);
+        expect(calls.some((c) => c.cmd === 'set_speaker_device')).toBe(true);
+        expect(calls.some((c) => c.cmd === 'set_mic')).toBe(true);
+        ex.dispose();
+    });
+
+    it('meter subscription enables metering and delivers per-node levels', async () => {
+        vi.useFakeTimers();
+        const graph = looperGraph();
+        // Mock poll_meters to return a Meter frame for the looper node's NodeIdx.
+        // The looper interns to NodeIdx 0 (sorted ids: looper-1 < speaker-1, and
+        // the speaker is structural so the looper takes the first index, 0).
+        const meterFrame = (node: number): EngineFrame => ({
+            Meter: { node, rms: 0.1, peak: 0.8 },
+        });
+        const calls = installMockTauri((cmd) => {
+            if (cmd === 'poll_meters') return [meterFrame(0)];
+            return undefined;
+        });
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, graph);
+
+        const received: Map<string, number>[] = [];
+        const unsub = ex.subscribeSignalLevels((levels) => received.push(levels));
+
+        // subscribe enabled metering.
+        expect(calls.some((c) => c.cmd === 'subscribe_meters')).toBe(true);
+
+        // Advance the meter poll loop and flush the pending poll promise.
+        await vi.advanceTimersByTimeAsync(120);
+
+        const withLooper = received.find((m) => m.has('looper-1'));
+        expect(withLooper, 'a level snapshot for the looper node was delivered').toBeTruthy();
+        expect(withLooper!.get('looper-1')).toBeCloseTo(0.8, 5);
+
+        unsub();
+        ex.dispose();
+    });
+});

@@ -1161,6 +1161,70 @@
     background: var(--bg-canvas);
 }
 
+/* About Panel */
+.about-panel {
+    padding: var(--space-md);
+}
+
+.about-header {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+}
+
+.about-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.about-version {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+}
+
+.about-description {
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: var(--space-lg);
+}
+
+.about-links {
+    margin-bottom: var(--space-lg);
+}
+
+.about-github-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    text-decoration: none;
+    font-weight: 500;
+    transition: all var(--transition-fast);
+}
+
+.about-github-link:hover {
+    border-color: var(--sketch-black);
+    background: var(--bg-canvas);
+}
+
+.about-license {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.about-license-label {
+    font-weight: 500;
+}
+
 /* ============================================
  * Looper Node (Schematic Style)
  * ============================================ */
@@ -1169,17 +1233,20 @@
     max-width: 260px;
 }
 
-/* Main row with inline ports and duration */
+/* Main row with side ports and duration */
 .looper-main-row {
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: var(--space-sm) var(--space-md);
+    justify-content: center;
+    padding: var(--space-sm) var(--space-lg);
     gap: var(--space-sm);
+    position: relative;
 }
 
 .looper-input-port,
 .looper-output-port {
+    position: absolute;
+    top: 50%;
     width: 14px;
     height: 14px;
     border: var(--border-sketch-width) solid var(--sketch-black);
@@ -1190,10 +1257,14 @@
 }
 
 .looper-input-port {
+    left: 0;
+    transform: translate(-50%, -50%);
     background: var(--audio-input);
 }
 
 .looper-output-port {
+    right: 0;
+    transform: translate(50%, -50%);
     background: var(--audio-output);
 }
 
@@ -1203,30 +1274,12 @@
     box-shadow: 0 0 6px var(--audio-connected);
 }
 
-.looper-input-port:hover,
+.looper-input-port:hover {
+    transform: translate(-50%, -50%) scale(1.2);
+}
+
 .looper-output-port:hover {
-    transform: scale(1.2);
-}
-
-/* Sample-out port - for sending buffer to sampler */
-.looper-sample-out-port {
-    width: 14px;
-    height: 14px;
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: 50%;
-    cursor: crosshair;
-    transition: all var(--transition-fast);
-    background: linear-gradient(135deg, var(--audio-output), var(--accent-primary));
-}
-
-.looper-sample-out-port:hover {
-    transform: scale(1.2);
-    box-shadow: 0 0 8px var(--accent-primary);
-}
-
-.looper-sample-out-port.connected {
-    background: var(--accent-primary);
-    box-shadow: 0 0 8px var(--accent-primary);
+    transform: translate(50%, -50%) scale(1.2);
 }
 
 /* Duration container - centered with fixed height */

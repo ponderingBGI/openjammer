@@ -1,0 +1,22 @@
+{
+  "name": "@openjammer/oj-protocol",
+  "version": "0.0.0",
+  "description": "Hand-maintained TypeScript mirror of the ojproto UI<->engine wire contract. Kept honest by crates/ojproto/tests/wire_shapes.rs.",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

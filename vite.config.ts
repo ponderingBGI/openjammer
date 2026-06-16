@@ -110,11 +110,31 @@ export default defineConfig({
       events: 'rollup-plugin-node-polyfills/polyfills/events'
     }
   },
-  optimizeDeps: {
-    exclude: ['webaudiofont']
-  },
   // Worker configuration for AudioWorklet modules
   worker: {
     format: 'es'
+  },
+  // Cross-Origin Isolation (U17) — required for SharedArrayBuffer, which the
+  // ojcore-wasm AudioWorklet uses for the zero-latency UI<->engine command ring.
+  // These headers make `crossOriginIsolated === true` so SAB is available.
+  //
+  // PRODUCTION HOSTING MUST SERVE THESE TOO. Any host serving the built `dist/`
+  // (Vercel/Netlify/nginx/etc.) has to emit the same two response headers on the
+  // app's HTML/JS, or the wasm executor silently falls back to the (functional,
+  // higher-latency) postMessage control path and SharedArrayBuffer is undefined:
+  //     Cross-Origin-Opener-Policy: same-origin
+  //     Cross-Origin-Embedder-Policy: require-corp
+  // (e.g. Vercel: vercel.json `headers`; nginx: `add_header`; Netlify: _headers.)
+  server: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp'
+    }
+  },
+  preview: {
+    headers: {
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'require-corp'
+    }
   }
 })

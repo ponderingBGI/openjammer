@@ -1,0 +1,29 @@
+[package]
+name = "ojinstrument"
+description = "OpenJammer instrument/voice nodes: polyphonic Osc, from-scratch Sampler, Karplus-Strong string, and a SoundFont (SF2) synth. Each is a manifest-described DspInstance + PluginLoader (\"everything is a plugin\"). no_std + alloc core; the SF2 backend needs std."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[features]
+# The polyphonic Osc / Sampler / Karplus instruments are pure `no_std + alloc`
+# and always available. The SF2 backend pulls in `rustysynth`, which depends on
+# `std` (it reads SoundFonts through `std::io::Read` and keeps `std` collections),
+# so it is gated behind the `sf2` feature — on by default for native hosts but
+# droppable for the `wasm32` worklet build:
+#   cargo build -p ojinstrument --no-default-features  ->  Osc/Sampler/Karplus only.
+default = ["sf2"]
+sf2 = ["std", "dep:rustysynth"]
+# Turning on `std` also lights up ojcore's host-side RT plumbing (command ring /
+# `Engine::apply` note routing) so the end-to-end note tests can drive it.
+std = ["ojcore/std"]
+
+[dependencies]
+ojcore = { path = "../ojcore", default-features = false }
+ojcore-dsp = { path = "../ojcore-dsp" }
+ojproto = { path = "../ojproto" }
+libm = { workspace = true }                              # no_std exp/pow for the ADSR + pitch math
+
+# SF2 backend (versions pinned from a fresh `cargo add` resolve). Pure-Rust
+# SoundFont synth; needs std, so it sits behind the `sf2` feature.
+rustysynth = { version = "1.3.6", optional = true }

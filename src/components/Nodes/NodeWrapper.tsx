@@ -29,6 +29,8 @@ import { MiniLab3Node } from './MiniLab3Node';
 import { MiniLab3VisualNode } from './MiniLab3VisualNode';
 import { SamplerNode } from './SamplerNode';
 import { SamplerVisualNode } from './SamplerVisualNode';
+import { AutoParamPanel } from '../params/AutoParamPanel';
+import { manifestFor } from '../../engine/manifest';
 import './BaseNode.css';
 
 interface NodeWrapperProps {
@@ -441,8 +443,17 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
                 return <AmplifierNode node={node} />;
             case 'recorder':
                 return <RecorderNode node={node} />;
-            default:
+            default: {
+                // Additive manifest fallback: any node type WITHOUT a bespoke
+                // React component (ui:'auto') gets the FREE AutoParamPanel UI
+                // derived from its manifest — this is how AI/Faust-authored
+                // nodes render with zero hand-written components.
+                const manifest = manifestFor(node.type);
+                if (manifest.ui === 'auto') {
+                    return <AutoParamPanel node={node} manifest={manifest} />;
+                }
                 return <div>Unknown node type</div>;
+            }
         }
     };
 

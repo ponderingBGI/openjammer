@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+# `crates/*` are the engine crates; `src-tauri` is the native desktop shell
+# (U22) — a workspace member so it shares the pinned deps + one Cargo.lock.
+members = ["crates/*", "src-tauri"]
+
+[workspace.package]
+edition = "2021"
+version = "0.0.0"
+license = "AGPL-3.0-only"
+
+# Pinned from a fresh cargo at scaffold time (governing principle #9).
+[workspace.dependencies]
+serde = { version = "1.0.228", default-features = false, features = ["derive", "alloc"] }
+libm = "0.2"
+
+# Keep release builds tight + deny accidental panics-as-control-flow later.
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

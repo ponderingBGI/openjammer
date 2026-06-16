@@ -6,8 +6,8 @@
 import { useState, useEffect } from 'react';
 import { useAudioStore } from '../../store/audioStore';
 import type { LatencyClassification } from '../../store/audioStore';
-import { reinitAudioContext, getLatencyMetrics, startLatencyMonitoring } from '../../audio/AudioEngine';
-import { audioGraphManager } from '../../audio/AudioGraphManager';
+import { reinitAudioContext, getLatencyMetrics, startLatencyMonitoring } from '../../audio/audioContext';
+import { getExecutor } from '../../audio/executor';
 import { LowLatencyGuide } from '../Guides';
 import { useLowLatencyGuide } from '../../store/guideStore';
 import './AudioSettingsPanel.css';
@@ -78,11 +78,11 @@ export function AudioSettingsPanel() {
             // Update store config first
             setAudioConfig(pendingConfig);
 
-            // Mark audio context as not ready - this triggers App.tsx to dispose audioGraphManager
+            // Mark audio context as not ready - this triggers App.tsx to dispose the executor
             setAudioContextReady(false);
 
             // Dispose the audio graph (clears all audio nodes)
-            audioGraphManager.dispose();
+            getExecutor().dispose();
 
             // Reinitialize audio context with new settings
             await reinitAudioContext({
@@ -92,7 +92,7 @@ export function AudioSettingsPanel() {
             });
 
             // Mark audio context as ready again - this triggers App.tsx to reinitialize
-            // the audioGraphManager, which will rebuild all audio connections.
+            // the executor, which will rebuild all audio connections.
             // MicrophoneNode and other components will reinitialize with new settings.
             setAudioContextReady(true);
 

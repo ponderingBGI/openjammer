@@ -2,7 +2,7 @@
 
 # OpenJammer
 
-**Browser-based node-driven music creation tool for live performance**
+**Node-driven music creation for live performance — a low-latency Rust core (`ojcore`), as a native desktop app or zero-install in the browser**
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.0--alpha-orange.svg)](package.json)
@@ -11,6 +11,9 @@
 [![Web Audio API](https://img.shields.io/badge/Web%20Audio%20API-ready-purple.svg)](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API)
 
 </div>
+
+> **⚙️ Powered by `ojcore` — one minimal, real-time-safe Rust audio core** that compiles to **native** (low-latency, with VST3/AU/CLAP plugin hosting via a JUCE/CLAP host) **and** **WebAssembly** (the zero-install PWA), driven by one shared React control plane. The legacy Web Audio engine has been fully retired — ojcore is the single engine.
+> See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the crate map, build/run/test commands, and the cross-platform release setup.
 
 ---
 

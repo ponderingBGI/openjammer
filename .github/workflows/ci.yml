@@ -1,0 +1,111 @@
+name: CI
+
+# Merge gate for OpenJammer (ojcore rewrite). Must be green for a reliable
+# merge to main: the Rust engine workspace (native + no_std + wasm legs) and the
+# TypeScript control plane (typecheck + tests + production build).
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  engine:
+    name: Engine (Rust workspace)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: System deps (ALSA for cpal + GTK/WebKit for the Tauri crate)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev \
+            librsvg2-dev
+      # Install nightly FIRST (only the wasm leg uses `cargo +nightly`), then
+      # stable LAST so stable is the DEFAULT toolchain for fmt/clippy/test/build
+      # (otherwise `cargo fmt` runs on nightly, which has no rustfmt component).
+      - name: Rust nightly (wasm leg)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+          targets: wasm32-unknown-unknown
+      - name: Rust stable (default; fmt, clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy (-D warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --workspace
+      - name: no_std core builds (wasm-friendly)
+        run: cargo build -p ojcore --no-default-features
+      - name: wasm32 build
+        run: cargo +nightly build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
+      - name: Offline audio render gate (device-free)
+        # Renders a real arpeggio (Osc->Biquad->Delay->Speaker) to a WAV and
+        # asserts the output is finite, non-silent, and in a sane RMS band — so
+        # CI verifies the engine actually produces correct audio, no device needed.
+        run: |
+          cargo clippy -p ojcore-native --features demo --all-targets -- -D warnings
+          cargo run -p ojcore-native --bin render --features demo -- "${RUNNER_TEMP:-/tmp}/ci-render.wav" 2
+      - name: Plugin host — real CLAP backend builds + tests
+        # The DEFAULT `ojhost` build is a dependency-free scaffold (scan empty,
+        # load Unavailable), so the workspace clippy/test above don't exercise the
+        # real hosting code. This compiles, lints, and tests the REAL pure-Rust
+        # CLAP backend (clack, MIT — no C++/CMake) so the plugin-host path stays
+        # green on every commit. The JUCE VST3/AU backend (`--features juce`) needs
+        # CMake + a C++ toolchain + the VST3 SDK and is built on the founder's rig.
+        run: |
+          cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings
+          cargo test -p ojhost --features clap-host
+
+  web:
+    name: Web (control plane)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Typecheck
+        run: bunx tsc --noEmit -p tsconfig.app.json
+      - name: Lint
+        run: bun run lint
+      - name: Test
+        run: bun run test:run
+      - name: Build
+        run: bun run build
+
+  windows-native:
+    name: Windows native build + audio gate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      - name: Install frontend deps
+        run: bun install --frozen-lockfile
+      - name: Build the native desktop app (oj-tauri)
+        run: cargo build -p oj-tauri
+      - name: Engine tests on Windows
+        run: cargo test -p ojcore -p ojinstrument -p ojcore-native
+      - name: Offline audio render gate (Windows, device-free)
+        run: cargo run -p ojcore-native --bin render --features demo -- ci-render.wav 2

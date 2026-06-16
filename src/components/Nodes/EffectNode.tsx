@@ -3,9 +3,8 @@
  */
 
 import { useCallback } from 'react';
-import type { GraphNode, EffectNodeData } from '../../engine/types';
+import type { GraphNode, EffectNodeData, EffectType } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
-import type { EffectType } from '../../audio/Effects';
 
 interface EffectNodeProps {
     node: GraphNode;

@@ -3,6 +3,7 @@
  */
 
 import type { NodeDefinition, NodeType, PortDefinition } from './types';
+import { isPluginId } from './types';
 import { MINILAB3_CONFIG, generatePortsFromConfig } from '../components/controls/MIDIDeviceConfig';
 
 // ============================================================================
@@ -475,8 +476,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Record and loop audio with auto-detection',
         defaultPorts: [
             { ...audioInput, position: { x: 0, y: 0.5 } },
-            { ...audioOutput, position: { x: 1, y: 0.35 } },
-            { id: 'sample-out', name: 'Sample', type: 'audio', direction: 'output', position: { x: 1, y: 0.65 } }
+            { ...audioOutput, position: { x: 1, y: 0.5 } }
         ],
         defaultData: {
             duration: 10,
@@ -797,8 +797,40 @@ export const menuCategories: MenuCategory[] = [
 // Utility Functions
 // ============================================================================
 
+/**
+ * Fallback definition returned by {@link get} when an unknown node type is
+ * requested (e.g. a workflow saved by a newer build, or a corrupt id). It is an
+ * inert "container"-shaped placeholder with no ports so the rest of the app can
+ * keep operating instead of dereferencing `undefined`.
+ */
+const MISSING_DEFINITION: NodeDefinition = {
+    type: 'container',
+    category: 'utility',
+    name: 'Unknown',
+    description: 'Unknown node type (definition missing)',
+    defaultPorts: [],
+    defaultData: {},
+    dimensions: { width: 160, height: 100 },
+    canEnter: false
+};
+
+/**
+ * Resolve a node definition by type, with a guaranteed non-undefined result.
+ *
+ * Unlike a raw `nodeDefinitions[type]` index, this validates the id against the
+ * known plugin set and returns {@link MISSING_DEFINITION} for anything unknown,
+ * giving callers (and serialization import) a safe fallback. (U10)
+ */
+export function get(type: NodeType): NodeDefinition {
+    if (!isPluginId(type)) {
+        return MISSING_DEFINITION;
+    }
+    // `type` is now a PluginId (a branded NodeType); widen to NodeType to index.
+    return nodeDefinitions[type as NodeType] ?? MISSING_DEFINITION;
+}
+
 export function getNodeDefinition(type: NodeType): NodeDefinition {
-    return nodeDefinitions[type];
+    return get(type);
 }
 
 export function canConnect(

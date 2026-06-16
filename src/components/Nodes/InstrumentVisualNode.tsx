@@ -173,6 +173,14 @@ export function InstrumentVisualNode({
     // Use selector pattern to subscribe only to specific node - avoids re-render on any node change
     const parentNode = useGraphStore((s) => node.parentId ? s.nodes.get(node.parentId) : null);
     const updateInstrumentRow = useGraphStore((s) => s.updateInstrumentRow);
+    const parentNodeId = parentNode?.id;
+
+    // Handle row field update. Declared before any early return so this hook is
+    // always called in the same order (Rules of Hooks).
+    const handleRowUpdate = useCallback((rowId: string, field: keyof InstrumentRow, value: number) => {
+        if (!parentNodeId) return;
+        updateInstrumentRow(parentNodeId, rowId, { [field]: value });
+    }, [parentNodeId, updateInstrumentRow]);
 
     // Validate parent node exists and has valid instrument data
     if (node.parentId && !parentNode) {
@@ -208,16 +216,9 @@ export function InstrumentVisualNode({
     }
 
     const rows: InstrumentRow[] = parentData.rows || [];
-    const parentNodeId = parentNode?.id;
 
     // Get output port for audio out
     const outputPorts = node.ports.filter(p => p.direction === 'output');
-
-    // Handle row field update
-    const handleRowUpdate = useCallback((rowId: string, field: keyof InstrumentRow, value: number) => {
-        if (!parentNodeId) return;
-        updateInstrumentRow(parentNodeId, rowId, { [field]: value });
-    }, [parentNodeId, updateInstrumentRow]);
 
     // Separate pedal rows from key rows
     const keyRows = rows.filter(r => r.portCount > 1);

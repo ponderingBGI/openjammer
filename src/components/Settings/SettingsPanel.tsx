@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { themes, applyTheme, getThemeById, getSavedThemeId, saveThemeId } from '../../styles/themes';
 import { KeybindingsPanel } from './KeybindingsPanel';
 import { AudioSettingsPanel } from './AudioSettingsPanel';
+import { AboutPanel } from './AboutPanel';
 import { ScrollContainer } from '../common/ScrollContainer';
 import '../Nodes/SchematicNodes.css';
 
@@ -34,7 +35,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className="minimal-settings-content">
                     {/* Sidebar */}
                     <div className="minimal-sidebar">
-                        {['graphics', 'keybindings', 'audio', 'interface'].map(tab => (
+                        {['graphics', 'keybindings', 'audio', 'about'].map(tab => (
                             <button
                                 key={tab}
                                 className={`minimal-tab-btn ${activeTab === tab ? 'active' : ''}`}
@@ -82,10 +83,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                         {activeTab === 'audio' && (
                             <AudioSettingsPanel />
                         )}
-                        {activeTab !== 'graphics' && activeTab !== 'keybindings' && activeTab !== 'audio' && (
-                            <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                                {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)} settings coming soon.
-                            </div>
+                        {activeTab === 'about' && (
+                            <AboutPanel />
                         )}
                     </ScrollContainer>
                 </div>

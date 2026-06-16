@@ -10,7 +10,7 @@ import type { GraphNode, InstrumentNodeData, InstrumentRow } from '../../engine/
 import { isBasicInstrumentNodeData } from '../../engine/typeGuards';
 import { useGraphStore } from '../../store/graphStore';
 import { nodeDefinitions } from '../../engine/registry';
-import { InstrumentLoader } from '../../audio/Instruments';
+import { InstrumentLoader } from '../../audio/instrumentCatalog';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
 import { ScrollContainer } from '../common/ScrollContainer';
 

@@ -6,7 +6,7 @@
  */
 
 import { create } from 'zustand';
-import { audioGraphManager } from '../audio/AudioGraphManager';
+import { getExecutor } from '../audio/executor';
 
 // ============================================================================
 // Store Interface
@@ -39,12 +39,12 @@ export const useTransportStore = create<TransportStore>((set, get) => ({
     },
 
     pause: () => {
-        audioGraphManager.pauseAllContinuousSources();
+        getExecutor().pauseContinuousSources();
         set({ isGloballyPaused: true });
     },
 
     resume: () => {
-        audioGraphManager.resumeAllContinuousSources();
+        getExecutor().resumeContinuousSources();
         set({ isGloballyPaused: false });
     },
 }));

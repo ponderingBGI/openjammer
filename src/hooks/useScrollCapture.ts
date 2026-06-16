@@ -174,16 +174,17 @@ export function useScrollCapture<T extends HTMLElement = HTMLElement>(
         setElement(node);
     };
 
-    // Use ref for callback to avoid re-attaching listeners on every render
+    // Ref the latest callback + options so the attached listener stays stable
+    // (avoids re-attaching on every render). Synced in an effect rather than
+    // during render so the ref write is not a render-phase side effect.
     const onScrollRef = useRef(onScroll);
-    onScrollRef.current = onScroll;
-
-    // Also ref the other options for stable listener
     const captureRef = useRef(capture);
-    captureRef.current = capture;
-
     const sensitivityRef = useRef(sensitivity);
-    sensitivityRef.current = sensitivity;
+    useEffect(() => {
+        onScrollRef.current = onScroll;
+        captureRef.current = capture;
+        sensitivityRef.current = sensitivity;
+    });
 
     // Development warning for common mistakes
     useEffect(() => {

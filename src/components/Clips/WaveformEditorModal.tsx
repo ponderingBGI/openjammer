@@ -13,7 +13,7 @@ import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { createPortal } from 'react-dom';
 import { useAudioClipStore, getClipBuffer } from '../../store/audioClipStore';
 import { getSampleFile } from '../../store/libraryStore';
-import { getAudioContext } from '../../audio/AudioEngine';
+import { getAudioContext } from '../../audio/audioContext';
 import { useScrollCapture } from '../../hooks/useScrollCapture';
 import type { ScrollData } from '../../hooks/useScrollCapture';
 import './WaveformEditorModal.css';

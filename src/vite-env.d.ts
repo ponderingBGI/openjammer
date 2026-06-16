@@ -1,5 +1,15 @@
 /// <reference types="vite/client" />
 
+/** App-specific Vite env vars. */
+interface ImportMetaEnv {
+  /** Selects the ojcore transport: 'ojcore-native' or 'ojcore-wasm'. */
+  readonly VITE_OJ_EXECUTOR?: string;
+}
+
+interface ImportMeta {
+  readonly env: ImportMetaEnv;
+}
+
 /**
  * Type declarations for vite-plugin-pwa virtual modules
  * @see https://vite-pwa-org.netlify.app/guide/register-service-worker.html

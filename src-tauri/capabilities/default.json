@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Capability set the OpenJammer web UI needs: invoke core commands, listen for the AI agent's streamed events (U20), plus the opener plugin for external links.",
+  "windows": ["main"],
+  "permissions": ["core:default", "core:event:default", "opener:default"]
+}
