@@ -46,6 +46,7 @@ import {
     monoPcmToWavBlob,
     type OjcoreBridge,
 } from './ojcoreHandles';
+import { logError, logWarn } from '../../utils/log';
 
 // Vite resolves these to URLs/assets at build time.
 // The worklet processor module (bundled as an ES module worklet).
@@ -117,8 +118,9 @@ export class OjcoreWasmExecutor implements Executor {
         this.getConnections = getConnections;
 
         if (typeof globalThis.crossOriginIsolated !== 'undefined' && !globalThis.crossOriginIsolated) {
-            console.warn(
-                '[OjcoreWasmExecutor] page is NOT cross-origin isolated; running the ' +
+            logWarn(
+                'audio.wasm',
+                'page is NOT cross-origin isolated; running the ' +
                     'postMessage control fallback. Serve COOP/COEP headers to enable the ' +
                     'SharedArrayBuffer fast path (see vite.config.ts).',
             );
@@ -126,7 +128,7 @@ export class OjcoreWasmExecutor implements Executor {
 
         // Begin async worklet setup; graph pushes coalesce until it is ready.
         void this.setup().catch((err: unknown) => {
-            console.error('[OjcoreWasmExecutor] worklet setup failed:', err);
+            logError('audio.wasm', 'worklet setup failed', { error: String(err) });
         });
 
         const unsubNodes = subscribeToNodes(() => this.pushGraph());
@@ -187,7 +189,7 @@ export class OjcoreWasmExecutor implements Executor {
                     this.onSampleStored(data.node, data.assetId, data.rootNote);
                     break;
                 case 'error':
-                    console.error('[OjcoreWasmExecutor] worklet error:', data.message);
+                    logError('audio.wasm', 'worklet error', { message: data.message });
                     break;
             }
         };
@@ -410,7 +412,7 @@ export class OjcoreWasmExecutor implements Executor {
         // `enumerateDevices` reports the system default as id 'default' (or ''), and
         // both are valid sinkIds, so the node's `deviceId` passes straight through.
         void ctx.setSinkId(deviceId).catch((err: unknown) => {
-            console.error('[OjcoreWasmExecutor] setSinkId failed:', err);
+            logError('audio.wasm', 'setSinkId failed', { error: String(err) });
         });
     }
 
@@ -444,7 +446,7 @@ export class OjcoreWasmExecutor implements Executor {
         if (!ctx || !this.node) return;
         const media = globalThis.navigator?.mediaDevices;
         if (!media || typeof media.getUserMedia !== 'function') {
-            console.warn('[OjcoreWasmExecutor] getUserMedia unavailable; mic not routed.');
+            logWarn('audio.wasm', 'getUserMedia unavailable; mic not routed.');
             return;
         }
         try {
@@ -461,7 +463,7 @@ export class OjcoreWasmExecutor implements Executor {
             this.micSource.connect(this.node);
         } catch (err) {
             // Permission denied / no device / insecure context: stay unrouted.
-            console.warn('[OjcoreWasmExecutor] microphone access denied or unavailable:', err);
+            logWarn('audio.wasm', 'microphone access denied or unavailable', { error: String(err) });
             this.disableMicrophone();
         }
     }

@@ -50,6 +50,7 @@ import {
     type OjcoreBridge,
 } from './ojcoreHandles';
 import { useLogStore } from '../../store/logStore';
+import { logError, logWarn } from '../../utils/log';
 
 /** Minimal shape of the Tauri global IPC bridge (`withGlobalTauri`). */
 interface TauriGlobal {
@@ -137,8 +138,9 @@ export class OjcoreNativeExecutor implements Executor {
         this.getConnections = getConnections;
 
         if (!this.invoke) {
-            console.warn(
-                '[OjcoreNativeExecutor] Tauri global IPC bridge not found ' +
+            logWarn(
+                'audio.native',
+                'Tauri global IPC bridge not found ' +
                     '(set app.withGlobalTauri=true in tauri.conf.json). Native audio disabled.',
             );
         }
@@ -190,7 +192,7 @@ export class OjcoreNativeExecutor implements Executor {
         if (!this.invoke || this.meterPollId !== null) return;
         // Ask the backend to enable metering (zero-cost while no graph runs).
         this.invoke('subscribe_meters', {}).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] subscribe_meters failed:', err);
+            logError('audio.native', 'subscribe_meters failed', { error: String(err) });
         });
         this.meterPollId = window.setInterval(() => {
             void this.pollMeters();
@@ -274,14 +276,14 @@ export class OjcoreNativeExecutor implements Executor {
     private sendGraph(graph: OjGraph): void {
         if (!this.invoke) return;
         this.invoke('push_graph', { graph }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] push_graph failed:', err);
+            logError('audio.native', 'push_graph failed', { error: String(err) });
         });
     }
 
     private send(cmd: RtCommand): void {
         if (!this.invoke) return;
         this.invoke('send_command', { cmd }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] send_command failed:', err);
+            logError('audio.native', 'send_command failed', { error: String(err) });
         });
     }
 
@@ -353,13 +355,13 @@ export class OjcoreNativeExecutor implements Executor {
             volume: isMuted ? 0 : volume,
             muted: isMuted,
         }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] set_speaker_volume failed:', err);
+            logError('audio.native', 'set_speaker_volume failed', { error: String(err) });
         });
     }
     setSpeakerDevice(nodeId: string, deviceId: string): void {
         if (!this.invoke) return;
         this.invoke('set_speaker_device', { nodeId, deviceId }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] set_speaker_device failed:', err);
+            logError('audio.native', 'set_speaker_device failed', { error: String(err) });
         });
     }
 
@@ -384,7 +386,7 @@ export class OjcoreNativeExecutor implements Executor {
     setMicrophoneOutput(nodeId: string, _outputNode: AudioNode): void {
         if (!this.invoke) return;
         this.invoke('set_mic', { nodeId, enabled: true }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] set_mic failed:', err);
+            logError('audio.native', 'set_mic failed', { error: String(err) });
         });
     }
 
@@ -451,7 +453,7 @@ export class OjcoreNativeExecutor implements Executor {
                 rootNote,
             });
         } catch (err) {
-            console.error('[OjcoreNativeExecutor] load_sample failed:', err);
+            logError('audio.native', 'load_sample failed', { error: String(err) });
         }
     }
 
@@ -461,7 +463,7 @@ export class OjcoreNativeExecutor implements Executor {
         const idx = this.index.get(nodeId);
         if (idx === undefined) return;
         this.invoke('recorder_start', { node: idx }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] recorder_start failed:', err);
+            logError('audio.native', 'recorder_start failed', { error: String(err) });
         });
     }
 
@@ -481,7 +483,7 @@ export class OjcoreNativeExecutor implements Executor {
             if (!res || !res.pcm || res.pcm.length === 0) return null;
             return monoPcmToWavBlob(Float32Array.from(res.pcm), res.sampleRate);
         } catch (err) {
-            console.error('[OjcoreNativeExecutor] recorder_stop failed:', err);
+            logError('audio.native', 'recorder_stop failed', { error: String(err) });
             return null;
         }
     }

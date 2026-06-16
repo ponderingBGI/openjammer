@@ -43,4 +43,18 @@ export default defineConfig([
       'react-hooks/immutability': 'warn',
     },
   },
+  // Console ratchet (L4 sweep governance, docs/plans/02-logging-and-observability.md).
+  // The repo-wide `console.*` -> `src/utils/log.ts` facade sweep lands incrementally,
+  // per-lane. Each fully-swept lane gets `no-console: error` here so it stays routed
+  // through the structured DevLog sink and cannot regress. The native audio executor
+  // lane (engine bridge: native + wasm + capability handles) is swept; its failure
+  // logs now flow into the searchable on-device DevLog. `__tests__` are excluded (a
+  // `*.ts` glob matches only the lane's direct children, not the test subdir), and
+  // the facade itself (`src/utils/log.ts`) legitimately calls `console.*`.
+  {
+    files: ['src/audio/executor/*.ts'],
+    rules: {
+      'no-console': 'error',
+    },
+  },
 ])
