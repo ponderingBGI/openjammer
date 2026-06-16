@@ -1,0 +1,7 @@
+# Astro build output + generated type cache
+dist/
+.astro/
+
+# This package is workspace-ISOLATED: it has its own bun.lock (committed), and
+# its own node_modules (ignored). Installed/built from inside apps/docs.
+node_modules/
