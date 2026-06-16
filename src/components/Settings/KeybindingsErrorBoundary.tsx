@@ -6,6 +6,7 @@
  */
 
 import { Component, type ReactNode } from 'react';
+import { logError } from '../../utils/log';
 
 interface Props {
     children: ReactNode;
@@ -27,7 +28,7 @@ export class KeybindingsErrorBoundary extends Component<Props, State> {
     }
 
     componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
-        console.error('KeybindingsPanel error:', error, errorInfo);
+        logError('settings', 'KeybindingsPanel error:', { error: String(error), errorInfo });
     }
 
     handleReset = (): void => {

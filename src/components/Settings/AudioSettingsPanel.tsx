@@ -10,6 +10,7 @@ import { reinitAudioContext, getLatencyMetrics, startLatencyMonitoring } from '.
 import { getExecutor } from '../../audio/executor';
 import { LowLatencyGuide } from '../Guides';
 import { useLowLatencyGuide } from '../../store/guideStore';
+import { logError } from '../../utils/log';
 import './AudioSettingsPanel.css';
 
 // Friendly messages for each latency classification
@@ -105,7 +106,7 @@ export function AudioSettingsPanel() {
                 });
             }
         } catch (err) {
-            console.error('Failed to apply audio config:', err);
+            logError('settings', 'Failed to apply audio config', { error: String(err) });
             alert('Failed to apply audio settings. Please try again.');
             // Try to restore audio context ready state on error
             setAudioContextReady(true);

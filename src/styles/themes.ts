@@ -2,6 +2,8 @@
  * Theme System - Multiple color themes with persistence
  */
 
+import { logError, logWarn } from "../utils/log";
+
 export interface Theme {
     id: string;
     name: string;
@@ -254,7 +256,7 @@ export function getSavedThemeId(): string {
         }
         return 'cream';
     } catch (error) {
-        console.error('Failed to read theme from localStorage:', error);
+        logError("theme", "Failed to read theme from localStorage:", { error: String(error) });
         return 'cream';
     }
 }
@@ -263,11 +265,11 @@ export function saveThemeId(id: string): void {
     try {
         // Validate the theme ID exists before saving
         if (!themes.some(t => t.id === id)) {
-            console.warn(`Invalid theme ID: ${id}, not saving`);
+            logWarn("theme", `Invalid theme ID: ${id}, not saving`);
             return;
         }
         localStorage.setItem('openjammer-theme', id);
     } catch (error) {
-        console.error('Failed to save theme to localStorage:', error);
+        logError("theme", "Failed to save theme to localStorage:", { error: String(error) });
     }
 }

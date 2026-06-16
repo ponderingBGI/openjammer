@@ -17,6 +17,7 @@ import { syncPortsWithInternalNodes, checkDynamicPortAddition, checkDynamicPortR
 import { useUIFeedbackStore } from './uiFeedbackStore';
 import { useCanvasNavigationStore } from './canvasNavigationStore';
 import { useMIDIStore } from './midiStore';
+import { logWarn, logError } from '../utils/log';
 import type { InstrumentRow, InstrumentNodeData, SamplerRow, SamplerNodeData } from '../engine/types';
 
 // ============================================================================
@@ -1527,14 +1528,14 @@ export const useGraphStore = create<GraphStore>()(
 
                         // Check if this is a special node (in specialNodes array)
                         if (parent?.specialNodes?.includes(nodeId)) {
-                            console.warn(`Cannot delete special node ${nodeId}`);
+                            logWarn('store', `Cannot delete special node ${nodeId}`);
                             useUIFeedbackStore.getState().flashNode(nodeId);
                             return;
                         }
 
                         // Check if this is an undeletable internal node type
                         if (UNDELETABLE_INTERNAL_TYPES.includes(node.type)) {
-                            console.warn(`Cannot delete ${node.type} node ${nodeId}`);
+                            logWarn('store', `Cannot delete ${node.type} node ${nodeId}`);
                             useUIFeedbackStore.getState().flashNode(nodeId);
                             return;
                         }
@@ -1801,7 +1802,7 @@ export const useGraphStore = create<GraphStore>()(
 
                         // Validate data structure exists
                         if (!parsed?.state) {
-                            console.warn('Invalid graph store data structure, resetting');
+                            logWarn('store', 'Invalid graph store data structure, resetting');
                             return null;
                         }
 
@@ -1859,7 +1860,7 @@ export const useGraphStore = create<GraphStore>()(
                             }
                         };
                     } catch (error) {
-                        console.error('Failed to load graph store from localStorage:', error);
+                        logError('store', 'Failed to load graph store from localStorage', { error: String(error) });
                         return null; // Graceful reset on any error
                     }
                 },
@@ -1884,7 +1885,7 @@ export const useGraphStore = create<GraphStore>()(
                     } catch (error) {
                         // Handle QuotaExceededError by clearing history and retrying
                         if (error instanceof DOMException && error.name === 'QuotaExceededError') {
-                            console.warn('localStorage quota exceeded, clearing history');
+                            logWarn('store', 'localStorage quota exceeded, clearing history');
                             try {
                                 const serializedWithoutHistory = {
                                     state: {
@@ -1900,10 +1901,10 @@ export const useGraphStore = create<GraphStore>()(
                                 };
                                 localStorage.setItem(name, JSON.stringify(serializedWithoutHistory));
                             } catch (retryError) {
-                                console.error('Failed to save graph store even after clearing history:', retryError);
+                                logError('store', 'Failed to save graph store even after clearing history', { error: String(retryError) });
                             }
                         } else {
-                            console.error('Failed to save graph store to localStorage:', error);
+                            logError('store', 'Failed to save graph store to localStorage', { error: String(error) });
                         }
                     }
                 },
@@ -1911,7 +1912,7 @@ export const useGraphStore = create<GraphStore>()(
                     try {
                         localStorage.removeItem(name);
                     } catch (error) {
-                        console.error('Failed to remove graph store from localStorage:', error);
+                        logError('store', 'Failed to remove graph store from localStorage', { error: String(error) });
                     }
                 }
             }

@@ -19,6 +19,7 @@ import type {
 } from '../engine/types';
 import { generateUniqueId } from './idGenerator';
 import { isValidCompositePortId } from './portSync';
+import { logWarn } from './log';
 
 // ============================================================================
 // Configuration
@@ -313,7 +314,7 @@ export function expandTargetForBundle(
     targetPortId?: string
 ): GraphNode {
     if (targetPanel.type !== 'input-panel') {
-        console.warn('[BundleManager] expandTargetForBundle called on non-input-panel');
+        logWarn('assets', 'expandTargetForBundle called on non-input-panel');
         return targetPanel;
     }
 

@@ -4,6 +4,7 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { logError } from '../utils/log';
 
 // ============================================================================
 // Constants
@@ -278,7 +279,7 @@ export const useKeybindingsStore = create<KeybindingsStore>()(
 
                     // Runtime validation: ensure binding has valid key
                     if (typeof binding.key !== 'string' || binding.key === '') {
-                        console.error(`Invalid keybinding for action "${actionId}": missing or empty key`);
+                        logError('store', `Invalid keybinding for action "${actionId}": missing or empty key`);
                         return undefined;
                     }
 

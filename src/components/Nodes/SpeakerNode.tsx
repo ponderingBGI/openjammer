@@ -16,6 +16,7 @@ import {
     getBestOutputDevice,
     detectLowLatencyDevice
 } from '../../utils/audioDeviceDetection';
+import { logError } from '../../utils/log';
 
 interface SpeakerNodeProps {
     node: GraphNode;
@@ -92,7 +93,7 @@ export const SpeakerNode = memo(function SpeakerNode({
             });
             setAudioContextReady(true);
         } catch (err) {
-            console.error('Failed to apply low latency mode:', err);
+            logError('nodes', 'Failed to apply low latency mode:', { error: String(err) });
             setAudioContextReady(true); // Restore on error
         }
     }, [setAudioConfig, setAudioContextReady]);

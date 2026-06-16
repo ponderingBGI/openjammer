@@ -8,6 +8,7 @@
 import type { AudioClip } from '../engine/types';
 import type { Loop } from '../audio/executor';
 import { useLibraryStore, getSampleFile, type LibraryItem } from '../store/libraryStore';
+import { logWarn } from './log';
 
 // Re-export async waveform generation for non-blocking execution
 export { generateWaveformPeaksAsync } from '../workers/waveformWorkerClient';
@@ -30,7 +31,7 @@ export function createClipFromLoop(
 ): AudioClip | null {
     const buffer = loop.buffer;
     if (!buffer) {
-        console.warn('[clipUtils] Cannot create clip from loop with null buffer');
+        logWarn('clips', 'Cannot create clip from loop with null buffer');
         return null;
     }
 

@@ -28,6 +28,7 @@ import { ClipDragLayer } from '../Clips/ClipDragLayer';
 import { WaveformEditorModal } from '../Clips/WaveformEditorModal';
 import { PresenceOverlay } from '../Collab/PresenceOverlay';
 import { useCollabStore } from '../../store/collabStore';
+import { logError } from '../../utils/log';
 import './NodeCanvas.css';
 
 interface SelectionBox {
@@ -506,20 +507,20 @@ export function NodeCanvas() {
             // Get the full item from the library store
             const item = libraryItems[itemData.id];
             if (!item) {
-                console.error('Library item not found:', itemData.id);
+                logError('canvas', 'Library item not found:', { itemId: itemData.id });
                 return;
             }
 
             // Load the audio file and create clip
             const file = await getSampleFile(item.id);
             if (!file) {
-                console.error('Could not load file for item:', item.id);
+                logError('canvas', 'Could not load file for item:', { itemId: item.id });
                 return;
             }
 
             const ctx = getAudioContext();
             if (!ctx) {
-                console.error('No audio context available');
+                logError('canvas', 'No audio context available');
                 return;
             }
 
@@ -543,7 +544,7 @@ export function NodeCanvas() {
             // Select the new clip
             selectClip(clipId);
         } catch (err) {
-            console.error('Failed to create clip from dropped item:', err);
+            logError('canvas', 'Failed to create clip from dropped item:', { error: String(err) });
         }
     }, [libraryItems, screenToCanvas, addClip, selectClip]);
 

@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { logError } from '../utils/log';
 
 // ============================================================================
 // Types
@@ -92,7 +93,7 @@ export function useInstallPrompt(): UseInstallPromptResult {
       }
       return false;
     } catch (err) {
-      console.error('Install prompt failed:', err);
+      logError('pwa', 'Install prompt failed:', { error: String(err) });
       return false;
     }
   }, [installPrompt]);
@@ -171,7 +172,7 @@ export function useServiceWorker(): UseServiceWorkerResult {
           // SW registered successfully
         },
         onRegisterError(error: Error) {
-          console.error('[SW] Registration error:', error);
+          logError('pwa', 'Registration error:', { error: String(error) });
         },
       });
       setUpdateSW(() => update);

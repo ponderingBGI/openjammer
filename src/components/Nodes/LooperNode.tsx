@@ -18,6 +18,7 @@ import { useScrollCapture } from '../../hooks/useScrollCapture';
 import type { ScrollData } from '../../hooks/useScrollCapture';
 import { ScrollContainer } from '../common/ScrollContainer';
 import { toast } from 'sonner';
+import { logError, logWarn } from '../../utils/log';
 
 // Type for library store functions to use in refs
 type SaveAudioToLibraryFn = (buffer: AudioBuffer, name: string, tags?: string[]) => Promise<string | null>;
@@ -159,7 +160,7 @@ export const LooperNode = memo(function LooperNode({
                             toast.error('Failed to save loop to library');
                         }
                     } catch (err) {
-                        console.warn('[Looper] Failed to auto-save loop to library:', err);
+                        logWarn('nodes', 'Failed to auto-save loop to library:', { error: String(err) });
                         toast.error('Failed to save loop to library');
                     }
                 }
@@ -214,7 +215,7 @@ export const LooperNode = memo(function LooperNode({
                     delay = Math.min(delay * 2, maxDelay);
                     pollIntervalId = window.setTimeout(poll, delay);
                 } else if (import.meta.env.DEV) {
-                    console.warn(`LooperNode: Failed to get looper after ${maxAttempts} attempts`);
+                    logWarn('nodes', `LooperNode: Failed to get looper after ${maxAttempts} attempts`);
                 }
             };
             pollIntervalId = window.setTimeout(poll, delay);
@@ -248,7 +249,7 @@ export const LooperNode = memo(function LooperNode({
     const handleRecord = useCallback(async () => {
         const looper = getLooper();
         if (!looper) {
-            console.warn('No looper instance available');
+            logWarn('nodes', 'No looper instance available');
             return;
         }
 
@@ -416,7 +417,7 @@ export const LooperNode = memo(function LooperNode({
     const handleClipDrop = useCallback(async (clip: AudioClip) => {
         const looper = getLooper();
         if (!looper) {
-            console.warn('Looper not available for clip drop');
+            logWarn('nodes', 'Looper not available for clip drop');
             return;
         }
 
@@ -432,7 +433,7 @@ export const LooperNode = memo(function LooperNode({
             // Otherwise load from sample library
             const audioContext = getAudioContext();
             if (!audioContext) {
-                console.warn('AudioContext not available');
+                logWarn('nodes', 'AudioContext not available');
                 return;
             }
 
@@ -441,7 +442,7 @@ export const LooperNode = memo(function LooperNode({
             // Add as a new loop
             looper.addLoopFromBuffer(buffer);
         } catch (error) {
-            console.error('Failed to load clip audio for looper:', error);
+            logError('nodes', 'Failed to load clip audio for looper:', { error: String(error) });
         }
     }, [getLooper]);
 

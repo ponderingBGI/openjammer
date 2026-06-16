@@ -5,6 +5,7 @@
 
 import { parseMIDIMessage } from './MIDIMessageParser';
 import { getPresetRegistry } from './MIDIDevicePresets';
+import { logError } from '../utils/log';
 import type {
   MIDIDeviceInfo,
   MIDIDevicePreset,
@@ -80,7 +81,7 @@ class MIDIManager {
     } catch (error) {
       const err = error as Error;
       this.initError = err.message || 'Failed to access MIDI devices';
-      console.error('[MIDIManager] Initialization failed:', this.initError);
+      logError('midi', 'Initialization failed:', { detail: this.initError });
       return false;
     }
   }

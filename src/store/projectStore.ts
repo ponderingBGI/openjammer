@@ -21,6 +21,7 @@ import {
 import { useLibraryStore } from './libraryStore';
 import { useGraphStore } from './graphStore';
 import { useAudioClipStore, clearClipBufferCache } from './audioClipStore';
+import { logError, logWarn } from '../utils/log';
 
 // ============================================================================
 // Types
@@ -164,7 +165,7 @@ function validateAudioFilePaths(
     if (isPathSafe(info.path)) {
       validated[id] = info;
     } else {
-      console.warn(`[ProjectStore] Blocked potentially unsafe audio file path: ${info.path}`);
+      logWarn('store', `Blocked potentially unsafe audio file path: ${info.path}`);
     }
   }
 
@@ -184,14 +185,14 @@ function validateViewport(viewport?: { x: number; y: number; zoom: number }): { 
 
   // Validate x coordinate
   if (!isFinite(x)) {
-    console.warn('[ProjectStore] Invalid viewport x value, using default:', x);
+    logWarn('store', 'Invalid viewport x value, using default:', { x });
     x = DEFAULT_VIEWPORT.x;
     hasWarning = true;
   }
 
   // Validate y coordinate
   if (!isFinite(y)) {
-    console.warn('[ProjectStore] Invalid viewport y value, using default:', y);
+    logWarn('store', 'Invalid viewport y value, using default:', { y });
     y = DEFAULT_VIEWPORT.y;
     hasWarning = true;
   }
@@ -199,13 +200,13 @@ function validateViewport(viewport?: { x: number; y: number; zoom: number }): { 
   // Validate zoom (must be positive and within reasonable bounds)
   // Bounds: 0.1x (10%) to 5.0x (500%) - beyond this causes rendering performance issues
   if (!isFinite(zoom) || zoom < 0.1 || zoom > 5.0) {
-    console.warn('[ProjectStore] Invalid viewport zoom value, using default:', zoom);
+    logWarn('store', 'Invalid viewport zoom value, using default:', { zoom });
     zoom = DEFAULT_VIEWPORT.zoom;
     hasWarning = true;
   }
 
   if (hasWarning) {
-    console.warn('[ProjectStore] Viewport partially recovered:', { x, y, zoom });
+    logWarn('store', 'Viewport partially recovered:', { x, y, zoom });
   }
 
   return { x, y, zoom };
@@ -354,7 +355,7 @@ async function createProjectStructure(
   } catch (err) {
     // Abort the writable stream on error to prevent corruption
     await writable.abort().catch((abortErr) => {
-      console.error('[ProjectStore] Failed to abort writable during project creation:', abortErr);
+      logError('store', 'Failed to abort writable during project creation:', { error: String(abortErr) });
     });
     throw new Error(`Failed to write project file: ${err instanceof Error ? err.message : 'Unknown error'}`);
   }
@@ -378,11 +379,11 @@ https://github.com/PonderingBGI/openjammer
       await readmeWritable.close();
     } catch (err) {
       await readmeWritable.abort().catch(() => {});
-      console.warn('[ProjectStore] Failed to write README file:', err);
+      logWarn('store', 'Failed to write README file:', { error: String(err) });
       // Don't throw - README failure shouldn't fail project creation
     }
   } catch (err) {
-    console.warn('[ProjectStore] Failed to create README file:', err);
+    logWarn('store', 'Failed to create README file:', { error: String(err) });
     // Don't throw - README failure shouldn't fail project creation
   }
 
@@ -447,7 +448,7 @@ async function loadRecentProjectsFromStorage(): Promise<RecentProject[]> {
     const projects = await idbGet<RecentProject[]>(RECENT_PROJECTS_KEY);
     return projects || [];
   } catch (err) {
-    console.warn('[ProjectStore] Failed to load recent projects from storage:', err);
+    logWarn('store', 'Failed to load recent projects from storage:', { error: String(err) });
     return [];
   }
 }
@@ -550,7 +551,7 @@ export const useProjectStore = create<ProjectState>()(
 
           // Auto-connect library (non-blocking, errors don't affect project creation)
           useLibraryStore.getState().addProjectLibrary(handle, projectName)
-            .catch(err => console.warn('[Project] Failed to connect library:', err));
+            .catch(err => logWarn('store', 'Failed to connect library:', { error: String(err) }));
 
           return handle;
         } catch (err) {
@@ -613,7 +614,7 @@ export const useProjectStore = create<ProjectState>()(
 
           // Auto-connect sample library (non-blocking, errors don't affect project opening)
           useLibraryStore.getState().addProjectLibrary(handle, manifest.name)
-            .catch(err => console.warn('[Project] Failed to connect sample library:', err));
+            .catch(err => logWarn('store', 'Failed to connect sample library:', { error: String(err) }));
 
           return { handle, manifest };
         } catch (err) {
@@ -679,7 +680,7 @@ export const useProjectStore = create<ProjectState>()(
 
           // Auto-connect sample library (non-blocking, errors don't affect project opening)
           useLibraryStore.getState().addProjectLibrary(handle, manifest.name)
-            .catch(err => console.warn('[Project] Failed to connect sample library:', err));
+            .catch(err => logWarn('store', 'Failed to connect sample library:', { error: String(err) }));
 
           return { handle, manifest };
         } catch (err) {
@@ -883,11 +884,11 @@ export async function ensureProjectStoreInitialized(): Promise<void> {
           if (hasPermission) {
             // Reconnect library silently (non-blocking)
             useLibraryStore.getState().addProjectLibrary(handle, state.name)
-              .catch(err => console.warn('[Project] Failed to reconnect library:', err));
+              .catch(err => logWarn('store', 'Failed to reconnect library:', { error: String(err) }));
           }
         }
       } catch (err) {
-        console.warn('Failed to reconnect project sample library:', err);
+        logWarn('store', 'Failed to reconnect project sample library:', { error: String(err) });
       }
     }
   })();

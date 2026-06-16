@@ -24,6 +24,7 @@ import {
 import { createSampleMetadata, generateWaveformFromFile, generateWaveformPeaks, peaksToBase64 } from '../utils/audioMetadata';
 import { getAudioContext } from '../audio/audioContext';
 import { audioBufferToWAV, generateRecordingFilename } from '../audio/wav';
+import { logError, logWarn } from '../utils/log';
 
 // ============================================================================
 // Types
@@ -74,7 +75,7 @@ const ITEM_HANDLE_PREFIX = 'openjammer-sample-handle-';
 // Helper for logging IndexedDB errors in development (I10)
 function logIdbError(operation: string, error: unknown): void {
   if (process.env.NODE_ENV === 'development') {
-    console.warn(`[Library] IndexedDB ${operation} failed:`, error);
+    logWarn('store', `IndexedDB ${operation} failed:`, { error: String(error) });
   }
 }
 
@@ -157,7 +158,7 @@ export async function getVirtualWaveform(itemId: string): Promise<string | null>
     await storeWaveform(itemId, peaks);
     return peaksToBase64(peaks);
   } catch (err) {
-    console.error('[Library] Failed to generate virtual waveform:', err);
+    logError('store', 'Failed to generate virtual waveform:', { error: String(err) });
     return null;
   }
 }
@@ -385,7 +386,7 @@ export const useLibraryStore = create<LibraryStore>()(
             return state;
           }
           if (library.status === 'scanning') {
-            console.warn(`[Library] Library ${libraryId} is already being scanned`);
+            logWarn('store', `Library ${libraryId} is already being scanned`);
             return state;
           }
           shouldProceed = true;
@@ -492,7 +493,7 @@ export const useLibraryStore = create<LibraryStore>()(
                       metadata.hasWaveform = true;
                     }
                   } catch (waveformError) {
-                    console.warn(`[Library] Waveform failed for ${entry.relativePath}:`, waveformError);
+                    logWarn('store', `Waveform failed for ${entry.relativePath}:`, { error: String(waveformError) });
                   }
                 }
 
@@ -504,7 +505,7 @@ export const useLibraryStore = create<LibraryStore>()(
               } catch (itemError) {
                 const errorMessage = itemError instanceof Error ? itemError.message : 'Unknown error';
                 itemErrors.push({ file: entry.relativePath, error: errorMessage });
-                console.warn(`[Library] Failed to process ${entry.relativePath}:`, itemError);
+                logWarn('store', `Failed to process ${entry.relativePath}:`, { error: String(itemError) });
               }
             },
             {
@@ -522,7 +523,7 @@ export const useLibraryStore = create<LibraryStore>()(
           );
 
           if (itemErrors.length > 0) {
-            console.warn(`[Library] ${itemErrors.length} files failed to process:`, itemErrors);
+            logWarn('store', `${itemErrors.length} files failed to process:`, { detail: itemErrors });
           }
 
           set(state => ({
@@ -543,7 +544,7 @@ export const useLibraryStore = create<LibraryStore>()(
           // Recompute all tags after scan
           get().computeAllTags();
         } catch (error) {
-          console.error('Scan failed:', error);
+          logError('store', 'Scan failed:', { error: String(error) });
 
           // Cleanup written data on error (I10: with error logging)
           await Promise.all([
@@ -567,7 +568,7 @@ export const useLibraryStore = create<LibraryStore>()(
 
       rescanLibrary: async (libraryId: string) => {
         if (!get().libraries[libraryId]) {
-          console.warn(`[Library] Cannot rescan: library ${libraryId} not found`);
+          logWarn('store', `Cannot rescan: library ${libraryId} not found`);
           return;
         }
 
@@ -582,7 +583,7 @@ export const useLibraryStore = create<LibraryStore>()(
             ])
           );
         } catch (cleanupError) {
-          console.warn('[Library] Error during cleanup, continuing with rescan:', cleanupError);
+          logWarn('store', 'Error during cleanup, continuing with rescan:', { error: String(cleanupError) });
         }
 
         set(state => {
@@ -615,7 +616,7 @@ export const useLibraryStore = create<LibraryStore>()(
           // Validate item exists before updating
           const existingItem = state.items[itemId];
           if (!existingItem) {
-            console.warn(`[Library] updateItem: item ${itemId} not found`);
+            logWarn('store', `updateItem: item ${itemId} not found`);
             return state;
           }
           return {
@@ -632,7 +633,7 @@ export const useLibraryStore = create<LibraryStore>()(
         set(state => {
           const item = state.items[itemId];
           if (!item) {
-            console.warn(`[Library] toggleFavorite: item ${itemId} not found`);
+            logWarn('store', `toggleFavorite: item ${itemId} not found`);
             return state;
           }
           return {
@@ -739,7 +740,7 @@ export const useLibraryStore = create<LibraryStore>()(
         set(state => {
           const item = state.items[itemId];
           if (!item) {
-            console.warn(`[Library] addTagToItem: item ${itemId} not found`);
+            logWarn('store', `addTagToItem: item ${itemId} not found`);
             return state;
           }
           if (item.tags.includes(tag)) {
@@ -765,7 +766,7 @@ export const useLibraryStore = create<LibraryStore>()(
         set(state => {
           const item = state.items[itemId];
           if (!item) {
-            console.warn(`[Library] removeTagFromItem: item ${itemId} not found`);
+            logWarn('store', `removeTagFromItem: item ${itemId} not found`);
             return state;
           }
           if (!item.tags.includes(tag)) {
@@ -867,7 +868,7 @@ export const useLibraryStore = create<LibraryStore>()(
       relinkItem: async (itemId: string, newHandle: FileSystemFileHandle) => {
         const item = get().items[itemId];
         if (!item) {
-          console.warn(`[Library] Cannot relink non-existent item: ${itemId}`);
+          logWarn('store', `Cannot relink non-existent item: ${itemId}`);
           return;
         }
 
@@ -888,7 +889,7 @@ export const useLibraryStore = create<LibraryStore>()(
             handleKey,
           });
         } catch (err) {
-          console.error(`[Library] Failed to relink item ${itemId}:`, err);
+          logError('store', `Failed to relink item ${itemId}:`, { error: String(err) });
           get().updateItem(itemId, { status: 'missing' });
         }
       },
@@ -1049,12 +1050,12 @@ export const useLibraryStore = create<LibraryStore>()(
           try {
             await get().scanLibrary(id, true);
           } catch (scanError) {
-            console.warn('[Library] Project library scan failed:', scanError);
+            logWarn('store', 'Project library scan failed:', { error: String(scanError) });
           }
 
           return id;
         } catch (error) {
-          console.error('Failed to add project library:', error);
+          logError('store', 'Failed to add project library:', { error: String(error) });
           return null;
         }
       },
@@ -1081,13 +1082,13 @@ export const useLibraryStore = create<LibraryStore>()(
       saveAudioToLibrary: async (buffer: AudioBuffer, name: string, tags: string[] = []) => {
         const projectLibraryId = get().projectLibraryId;
         if (!projectLibraryId) {
-          console.warn('[Library] No project library available for saving audio');
+          logWarn('store', 'No project library available for saving audio');
           return null;
         }
 
         const library = get().libraries[projectLibraryId];
         if (!library) {
-          console.warn('[Library] Project library not found');
+          logWarn('store', 'Project library not found');
           return null;
         }
 
@@ -1095,7 +1096,7 @@ export const useLibraryStore = create<LibraryStore>()(
           // Get directory handle
           const dirHandle = await restoreHandle(library.handleKey);
           if (!dirHandle || dirHandle.kind !== 'directory') {
-            console.warn('[Library] Could not restore library directory handle');
+            logWarn('store', 'Could not restore library directory handle');
             return null;
           }
           const libraryDir = dirHandle as FileSystemDirectoryHandle;
@@ -1103,7 +1104,7 @@ export const useLibraryStore = create<LibraryStore>()(
           // Verify permission
           const hasPermission = await verifyPermission(libraryDir);
           if (!hasPermission) {
-            console.warn('[Library] No permission to write to library');
+            logWarn('store', 'No permission to write to library');
             return null;
           }
 
@@ -1142,7 +1143,7 @@ export const useLibraryStore = create<LibraryStore>()(
                 hasWaveform = true;
               }
             } catch (e) {
-              console.warn('[Library] Failed to generate waveform:', e);
+              logWarn('store', 'Failed to generate waveform:', { error: String(e) });
             }
           }
 
@@ -1192,7 +1193,7 @@ export const useLibraryStore = create<LibraryStore>()(
 
           return itemId;
         } catch (error) {
-          console.error('[Library] Failed to save audio to library:', error);
+          logError('store', 'Failed to save audio to library:', { error: String(error) });
           return null;
         }
       },
@@ -1210,13 +1211,13 @@ export const useLibraryStore = create<LibraryStore>()(
       ) => {
         const parentItem = get().items[parentItemId];
         if (!parentItem) {
-          console.warn('[Library] Cannot create virtual item: parent not found');
+          logWarn('store', 'Cannot create virtual item: parent not found');
           return null;
         }
 
         // Prevent nested virtuals
         if (parentItem.isVirtual) {
-          console.warn('[Library] Cannot create virtual from virtual item');
+          logWarn('store', 'Cannot create virtual from virtual item');
           return null;
         }
 
@@ -1341,7 +1342,7 @@ export const useLibraryStore = create<LibraryStore>()(
             i => i.isVirtual && i.parentItemId === itemId
           );
           if (dependentVirtuals.length > 0) {
-            console.warn(`[Library] Cannot delete item ${itemId}: has ${dependentVirtuals.length} virtual children`);
+            logWarn('store', `Cannot delete item ${itemId}: has ${dependentVirtuals.length} virtual children`);
             return;
           }
         }
@@ -1387,7 +1388,7 @@ export const useLibraryStore = create<LibraryStore>()(
             const value = localStorage.getItem(name);
             return value ? JSON.parse(value) : null;
           } catch (e) {
-            console.error('[Library] Storage read failed:', e);
+            logError('store', 'Storage read failed:', { error: String(e) });
             return null;
           }
         },
@@ -1396,10 +1397,10 @@ export const useLibraryStore = create<LibraryStore>()(
             localStorage.setItem(name, JSON.stringify(value));
           } catch (e) {
             if (e instanceof DOMException && e.name === 'QuotaExceededError') {
-              console.error('[Library] Storage quota exceeded - library data may not persist');
+              logError('store', 'Storage quota exceeded - library data may not persist');
               // Note: toast is not available here, but console error is logged
             } else {
-              console.error('[Library] Storage write failed:', e);
+              logError('store', 'Storage write failed:', { error: String(e) });
             }
           }
         },
@@ -1407,7 +1408,7 @@ export const useLibraryStore = create<LibraryStore>()(
           try {
             localStorage.removeItem(name);
           } catch (e) {
-            console.error('[Library] Storage remove failed:', e);
+            logError('store', 'Storage remove failed:', { error: String(e) });
           }
         },
       },

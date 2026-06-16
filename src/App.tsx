@@ -24,6 +24,7 @@ import { useProjectStore } from './store/projectStore';
 import { useCanvasStore } from './store/canvasStore';
 import { useKeybindingsStore } from './store/keybindingsStore';
 import { applyTheme, getSavedThemeId, getThemeById } from './styles/themes';
+import { logError } from './utils/log';
 import './styles/global.css';
 
 function App() {
@@ -157,7 +158,7 @@ function App() {
           await saveProject(graphData);
           lastVersionRef.current = currentVersion;
         } catch (err) {
-          console.error('[Autosave] Failed:', err);
+          logError('app', 'autosave failed', { error: String(err) });
         } finally {
           isSavingRef.current = false;
         }
@@ -198,7 +199,7 @@ function App() {
         await saveProject(graphData);
         lastVersionRef.current = currentVersion;
       } catch (err) {
-        console.error('[Autosave] Periodic backup failed:', err);
+        logError('app', 'Periodic backup failed:', { error: String(err) });
       } finally {
         isSavingRef.current = false;
       }
@@ -238,7 +239,7 @@ function App() {
           await saveProject(graphData);
           lastVersionRef.current = currentVersion;
         } catch (err) {
-          console.error('[Autosave] Failed on tab switch:', err);
+          logError('app', 'Failed on tab switch:', { error: String(err) });
         } finally {
           isSavingRef.current = false;
         }
@@ -311,7 +312,7 @@ function App() {
           await saveProject(graphData);
           toast.success('Project saved');
         } catch (err) {
-          console.error('[Save] Failed:', err);
+          logError('app', 'manual save failed', { error: String(err) });
           toast.error(`Failed to save project: ${(err as Error).message}`);
         }
       }
@@ -341,7 +342,7 @@ function App() {
         });
       }
     } catch (err) {
-      console.error('Failed to initialize audio:', err);
+      logError('app', 'Failed to initialize audio:', { error: String(err) });
       // alert('Failed to initialize audio. Please check your browser settings.');
     }
   }, [setAudioContextReady, audioConfig, updateAudioMetrics]);

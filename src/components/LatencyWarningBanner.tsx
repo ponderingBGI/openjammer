@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react';
 import { useAudioStore } from '../store/audioStore';
 import { diagnoseLatency, shouldShowLatencyWarning } from '../utils/latencyDiagnostics';
+import { logWarn } from '../utils/log';
 import './LatencyWarningBanner.css';
 
 // Local storage key for dismissed timestamp
@@ -32,7 +33,7 @@ export function LatencyWarningBanner({ onOpenSettings }: LatencyWarningBannerPro
             if (!isNaN(timestamp) && timestamp > 0) {
                 setDismissedAt(timestamp);
             } else {
-                console.warn('[LatencyWarningBanner] Invalid timestamp in localStorage, clearing');
+                logWarn('ui', 'Invalid timestamp in localStorage, clearing');
                 localStorage.removeItem(DISMISSED_KEY);
             }
         }
@@ -73,7 +74,7 @@ export function LatencyWarningBanner({ onOpenSettings }: LatencyWarningBannerPro
         } catch (e) {
             // Handle QuotaExceededError (storage full, private browsing, iOS limits)
             if (e instanceof DOMException && e.name === 'QuotaExceededError') {
-                console.warn('[LatencyWarningBanner] localStorage full, dismissal will not persist');
+                logWarn('ui', 'localStorage full, dismissal will not persist');
             }
         }
     };

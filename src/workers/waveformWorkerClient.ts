@@ -6,6 +6,7 @@
  */
 
 import type { WaveformWorkerMessage, WaveformWorkerResponse } from './waveformWorker';
+import { logError, logWarn } from '../utils/log';
 
 let worker: Worker | null = null;
 let requestCounter = 0;
@@ -21,7 +22,7 @@ function getWorker(): Worker | null {
   if (worker) return worker;
 
   if (typeof Worker === 'undefined') {
-    console.warn('Web Workers not supported, waveform generation will run on main thread');
+    logWarn('waveform', 'Web Workers not supported, waveform generation will run on main thread');
     return null;
   }
 
@@ -44,7 +45,7 @@ function getWorker(): Worker | null {
     };
 
     worker.onerror = (error) => {
-      console.error('Waveform worker error:', error);
+      logError('waveform', 'Waveform worker error', { error: String(error) });
       // Reject all pending requests
       pendingRequests.forEach(({ reject }) => {
         reject(new Error('Worker error'));
@@ -54,7 +55,7 @@ function getWorker(): Worker | null {
 
     return worker;
   } catch (error) {
-    console.warn('Failed to create waveform worker:', error);
+    logWarn('waveform', 'Failed to create waveform worker', { error: String(error) });
     return null;
   }
 }
@@ -144,7 +145,7 @@ export async function generateWaveformFromFileAsync(
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
     return generateWaveformPeaksAsync(audioBuffer, numPoints);
   } catch (error) {
-    console.warn('Failed to generate waveform:', error);
+    logWarn('waveform', 'Failed to generate waveform', { error: String(error) });
     return null;
   }
 }

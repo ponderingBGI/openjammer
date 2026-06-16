@@ -12,6 +12,7 @@ import { useTransportStore } from '../../store/transportStore';
 import { exportWorkflow, downloadWorkflow, loadWorkflowFromFile, importWorkflow } from '../../engine/serialization';
 import { DropdownMenu, type MenuItemOrSeparator } from './DropdownMenu';
 import { useOnlineStatus } from '../../hooks/usePWA';
+import { logError } from '../../utils/log';
 import './Toolbar.css';
 
 export function Toolbar() {
@@ -65,7 +66,7 @@ export function Toolbar() {
             downloadWorkflow(workflow);
             toast.success('Workflow exported');
         } catch (err) {
-            console.error('Failed to export workflow:', err);
+            logError('toolbar', 'Failed to export workflow:', { error: String(err) });
             toast.error(`Failed to export workflow: ${(err as Error).message}`);
         }
     }, [nodes, connections]);
@@ -84,7 +85,7 @@ export function Toolbar() {
             const { nodes: importedNodes, connections: importedConnections } = importWorkflow(workflow);
             loadGraph(importedNodes, importedConnections);
         } catch (err) {
-            console.error('Failed to import workflow:', err);
+            logError('toolbar', 'Failed to import workflow:', { error: String(err) });
             toast.error('Failed to import workflow. Please check the file format.');
         }
 
@@ -119,7 +120,7 @@ export function Toolbar() {
             if ((err as Error).message !== 'Cancelled' &&
                 (err as Error).message !== 'Cancelled - folder already contains a project' &&
                 (err as DOMException).name !== 'AbortError') {
-                console.error('Failed to create project:', err);
+                logError('toolbar', 'Failed to create project:', { error: String(err) });
                 toast.error(`Failed to create project: ${(err as Error).message}`);
             }
         }
@@ -157,7 +158,7 @@ export function Toolbar() {
                         return;
                     }
                 } else {
-                    console.error('Failed to open project:', err);
+                    logError('toolbar', 'Failed to open project:', { error: String(err) });
                     toast.error(`Failed to open project: ${message}`);
                 }
             }
@@ -180,7 +181,7 @@ export function Toolbar() {
             await saveProject(graphData);
             toast.success('Project saved');
         } catch (err) {
-            console.error('Failed to save project:', err);
+            logError('toolbar', 'Failed to save project:', { error: String(err) });
             toast.error(`Failed to save project: ${(err as Error).message}`);
         }
     }, [projectName, nodes, connections, zoom, saveProject, handleNewProject]);
@@ -201,7 +202,7 @@ export function Toolbar() {
             }
             resetView();
         } catch (err) {
-            console.error('Failed to open recent project:', err);
+            logError('toolbar', 'Failed to open recent project:', { error: String(err) });
             toast.error(`Failed to open project: ${(err as Error).message}`);
         }
     }, [openRecentProject, loadGraph, clearGraph, resetView]);

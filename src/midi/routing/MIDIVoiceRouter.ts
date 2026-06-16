@@ -38,6 +38,7 @@ import type {
 import { getPresetRegistry } from '../MIDIDevicePresets';
 import type { GraphNode, MIDIInputNodeData } from '../../engine/types';
 import type { MIDIDevicePreset, MIDIEvent, MIDINoteEvent } from '../types';
+import { logError } from '../../utils/log';
 
 /** Sustain pedal CC number. */
 const SUSTAIN_CC = 64;
@@ -123,7 +124,7 @@ export class MIDIVoiceRouter {
             try {
                 this.handleEvent(event);
             } catch (err) {
-                console.error('[MIDIVoiceRouter] routing error:', err);
+                logError('midi', 'routing error:', { error: String(err) });
             }
         });
     }

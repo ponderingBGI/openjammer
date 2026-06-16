@@ -12,6 +12,7 @@ import { create } from 'zustand';
 import type { GraphNode, Position } from '../engine/types';
 import { useGraphStore, getNodeDimensions } from './graphStore';
 import { useCanvasStore } from './canvasStore';
+import { logError, logWarn } from '../utils/log';
 
 // Root view state (stored separately since root has no parent node)
 interface RootViewState {
@@ -50,7 +51,7 @@ export const useCanvasNavigationStore = create<CanvasNavigationState>((set, get)
         // Get the target node
         const targetNode = graphStore.nodes.get(nodeId);
         if (!targetNode) {
-            console.error('Cannot enter node: node not found', nodeId);
+            logError('store', 'Cannot enter node: node not found', { nodeId });
             return;
         }
 
@@ -140,7 +141,7 @@ export const useCanvasNavigationStore = create<CanvasNavigationState>((set, get)
         if (!currentNode) {
             // Node not found (deleted?) - gracefully reset to root without calling exitToRoot
             // (which would try to save viewport to the missing node)
-            console.warn('exitToParent: current node not found, resetting to root');
+            logWarn('store', 'exitToParent: current node not found, resetting to root');
             graphStore.clearSelection();
             set({ currentViewNodeId: null });
             // Restore root viewport if available
