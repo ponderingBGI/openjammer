@@ -1,15 +1,25 @@
 /**
- * Executor selection (U9).
+ * Executor selection (U9 + U17 cutover).
  *
- * `OJ_EXECUTOR` selects which audio backend the app drives. Only the Web Audio
- * backend exists today; the switch exists so a future wasm/native ojcore-backed
- * executor can be slotted in without touching call sites.
+ * `OJ_EXECUTOR` selects which audio backend drives the app:
+ *   • `webaudio`      — the legacy Web Audio backend (default; NEVER breaks).
+ *   • `ojcore-native` — the native Rust ojcore engine over Tauri IPC (the
+ *                       sub-5ms path; auto-selected when running under Tauri).
+ *   • `ojcore-wasm`   — the same ojcore engine compiled to wasm + AudioWorklet.
+ *
+ * This is an A/B CUTOVER, not a removal: the ojcore executors are opt-in (or
+ * auto under Tauri), and the Web Audio backend remains the safe default so the
+ * existing app keeps working. Legacy deletion is a LATER unit.
  *
  * The value is read from `import.meta.env.VITE_OJ_EXECUTOR` (Vite only exposes
- * `VITE_`-prefixed vars to client code) and defaults to `'webaudio'`.
+ * `VITE_`-prefixed vars to client code). When unset, we default to `webaudio`
+ * EXCEPT under Tauri, where `ojcore-native` is auto-selected (the whole reason
+ * the desktop shell exists). Any explicit value always wins.
  */
 
 import { WebAudioExecutor } from './WebAudioExecutor';
+import { OjcoreNativeExecutor, isTauri } from './OjcoreNativeExecutor';
+import { OjcoreWasmExecutor } from './OjcoreWasmExecutor';
 import type { Executor } from './Executor';
 
 export type { Executor } from './Executor';
@@ -19,28 +29,39 @@ export type {
     Unsubscribe
 } from './Executor';
 export { WebAudioExecutor } from './WebAudioExecutor';
+export { OjcoreNativeExecutor, isTauri } from './OjcoreNativeExecutor';
+export { OjcoreWasmExecutor } from './OjcoreWasmExecutor';
 
-/** Known executor identifiers. Only `webaudio` is implemented today. */
-export type ExecutorKind = 'webaudio';
+/** Known executor identifiers. */
+export type ExecutorKind = 'webaudio' | 'ojcore-native' | 'ojcore-wasm';
 
 const DEFAULT_EXECUTOR: ExecutorKind = 'webaudio';
 
+/**
+ * Resolve the selected executor kind. Explicit `VITE_OJ_EXECUTOR` always wins;
+ * otherwise default to `webaudio`, but auto-pick `ojcore-native` under Tauri.
+ */
 function resolveExecutorKind(): ExecutorKind {
     const raw = import.meta.env.VITE_OJ_EXECUTOR as string | undefined;
     switch (raw) {
         case 'webaudio':
-            return 'webaudio';
+        case 'ojcore-native':
+        case 'ojcore-wasm':
+            return raw;
         default:
-            // Unknown / unset → fall back to the only implemented backend.
-            return DEFAULT_EXECUTOR;
+            // Unset / unknown: default to webaudio, except auto-native on Tauri.
+            return isTauri() ? 'ojcore-native' : DEFAULT_EXECUTOR;
     }
 }
 
 /** Construct the executor selected by `OJ_EXECUTOR`. */
 export function createExecutor(kind: ExecutorKind = resolveExecutorKind()): Executor {
     switch (kind) {
+        case 'ojcore-native':
+            return new OjcoreNativeExecutor();
+        case 'ojcore-wasm':
+            return new OjcoreWasmExecutor();
         case 'webaudio':
-            return new WebAudioExecutor();
         default:
             return new WebAudioExecutor();
     }
