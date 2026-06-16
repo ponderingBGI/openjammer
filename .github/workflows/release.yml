@@ -65,9 +65,11 @@ jobs:
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
+        # src-tauri is a workspace member, so its build artifacts land in the
+        # workspace-root target/, not src-tauri/target.
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri -> target"
+          workspaces: ". -> target"
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
