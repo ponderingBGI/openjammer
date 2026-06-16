@@ -32,6 +32,10 @@ interface ExecCall {
 
 class FakeExecutor implements VoiceExecutor {
     calls: ExecCall[] = [];
+    /** Connection ids passed to activateControlSignal, in order. */
+    activated: string[] = [];
+    /** Connection ids passed to releaseControlSignal, in order. */
+    released: string[] = [];
     noteOn(keyboardId: string, row: number, keyIndex: number, velocity?: number): void {
         this.calls.push({ method: 'noteOn', keyboardId, row, keyIndex, velocity });
     }
@@ -43,6 +47,12 @@ class FakeExecutor implements VoiceExecutor {
     }
     controlUp(keyboardId: string): void {
         this.calls.push({ method: 'controlUp', keyboardId });
+    }
+    activateControlSignal(connectionId: string): void {
+        this.activated.push(connectionId);
+    }
+    releaseControlSignal(connectionId: string): void {
+        this.released.push(connectionId);
     }
 }
 
@@ -163,6 +173,16 @@ function noteOff(deviceId: string, note: number, channel = 0): MIDINoteEvent {
         deviceId
     };
 }
+function conn(id: string, sourceNodeId: string, targetNodeId: string): Connection {
+    return {
+        id,
+        sourceNodeId,
+        sourcePortId: 'out',
+        targetNodeId,
+        targetPortId: 'in',
+        type: 'control'
+    };
+}
 
 // ---------------------------------------------------------------------------
 // Tests
@@ -231,6 +251,45 @@ describe('MIDIVoiceRouter', () => {
 
             midi.emit(noteOn('dev-A', 60, 100, 0)); // channel 0 -> accepted
             expect(exec.calls).toHaveLength(1);
+        });
+    });
+
+    describe('signal glow on connection cables', () => {
+        it('lights the input node\'s outgoing cables on noteOn and fades them on noteOff', () => {
+            const node = midiInputNode('midi-1', 'dev-A');
+            const router = new MIDIVoiceRouter({
+                graph: makeGraph(
+                    [node],
+                    [conn('c1', 'midi-1', 'inst-1'), conn('c2', 'midi-1', 'inst-2')]
+                ),
+                executor: exec,
+                midi
+            });
+            router.start();
+
+            midi.emit(noteOn('dev-A', 60, 100));
+            expect(exec.activated).toEqual(['c1', 'c2']);
+            expect(exec.released).toEqual([]);
+
+            midi.emit(noteOff('dev-A', 60));
+            expect(exec.released).toEqual(['c1', 'c2']);
+        });
+
+        it('only glows cables leaving the node that played (not unrelated cables)', () => {
+            const a = midiInputNode('midi-A', 'dev-A');
+            const b = midiInputNode('midi-B', 'dev-B');
+            const router = new MIDIVoiceRouter({
+                graph: makeGraph(
+                    [a, b],
+                    [conn('ca', 'midi-A', 'inst-1'), conn('cb', 'midi-B', 'inst-1')]
+                ),
+                executor: exec,
+                midi
+            });
+            router.start();
+
+            midi.emit(noteOn('dev-A', 60, 100));
+            expect(exec.activated).toEqual(['ca']);
         });
     });
 
