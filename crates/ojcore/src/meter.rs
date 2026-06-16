@@ -581,6 +581,9 @@ mod tests {
         // The ring is now empty: a second drain collects nothing.
         let mut again = Vec::new();
         event_frame::drain_events(&ring, |ev| again.push(ev));
-        assert!(again.is_empty(), "second drain of an empty ring yields nothing");
+        assert!(
+            again.is_empty(),
+            "second drain of an empty ring yields nothing"
+        );
     }
 }
