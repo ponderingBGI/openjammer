@@ -497,6 +497,18 @@ describe('emitOjGraph — looper lowering (D1)', () => {
         expect(lp!.n_out).toBeGreaterThanOrEqual(1);
     });
 
+    it('emits NO IR params for the looper (its UI fields are not DSP params)', () => {
+        // The looper's defaultData (duration/currentTime/…) is UI state, not DSP
+        // params. Deriving params from it would misaddress the LooperNode ids
+        // (LOOP_SECS=0, WET=1, DRY=2) — `currentTime`→id1 forces WET=0 and silences
+        // loop playback. So the looper must carry no params and use the DSP node's
+        // own defaults; it is driven by RtCommand::Looper transport actions instead.
+        const graph = buildLooperPatch();
+        const lp = graph.nodes.find((n) => n.kind === 'Looper');
+        expect(lp).toBeTruthy();
+        expect(lp!.params).toEqual([]);
+    });
+
     it('remaps the looper to builtin.looper on BOTH backends (real loader, not a GAIN fallback)', () => {
         const graph = buildLooperPatch();
         for (const backend of ['native', 'wasm'] as const) {

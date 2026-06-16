@@ -193,6 +193,17 @@ function rangeFor(value: number): { min: number; max: number } {
     return { min: value * 2, max: -value * 2 };
 }
 
+/**
+ * Node types whose `defaultData` is bespoke-UI STATE (record flags, playhead,
+ * loop lists) rather than DSP parameters — so they must NOT emit derived IR
+ * params. The looper is driven entirely by `RtCommand::Looper` transport actions
+ * and uses its DSP node's own defaults; deriving params from its UI fields
+ * (`duration` → id 0, `currentTime` → id 1) would land on the Rust LooperNode's
+ * param ids (`LOOP_SECS=0`, `WET=1`, `DRY=2`) and force `WET=0`, which silences
+ * loop playback (`out = x·dry + loop·wet`). See crates/ojcore/src/looper.rs.
+ */
+const UI_STATE_ONLY_NODES = new Set<NodeType>(['looper']);
+
 /** OPEN registry id for a node type (namespaced under `builtin.`). */
 export function manifestIdFor(type: NodeType): string {
     return `builtin.${type}`;
@@ -209,7 +220,7 @@ export function manifestFromDefinition(def: NodeDefinition): PluginManifest {
         name: def.name,
         dsp: dspFor(kind),
         ui: uiFor(def.type),
-        params: paramsFor(def),
+        params: UI_STATE_ONLY_NODES.has(def.type) ? [] : paramsFor(def),
         ports: portsFor(def),
     };
     if (kind !== undefined) manifest.kind = kind;
