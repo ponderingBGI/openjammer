@@ -36,47 +36,12 @@ impl Engine {
     /// Apply a single command to the running program. RT-safe: a bounded amount
     /// of work, no allocation, no locking.
     ///
-    /// * `SetParam`  -> resolve node slot, call `set_param(param, value)`.
-    /// * `NoteOn`/`NoteOff` -> resolve node slot, drive the target instance's
-    ///   [`crate::DspInstance::note_on`] / [`crate::DspInstance::note_off`].
-    ///   Effect-only nodes inherit the trait's default no-op, so the event is
-    ///   harmlessly ignored there; instrument/voice nodes consume it.
-    /// * `Bypass`    -> toggle the node's bypass flag.
-    /// * `Transport*`/`Seek` -> drive the minimal sample-counting clock.
-    /// * `Looper`    -> resolve node slot, drive the target instance's
-    ///   [`crate::DspInstance::looper_action`]. Non-looper nodes inherit the
-    ///   trait's default no-op; a [`crate::LooperNode`] consumes it.
+    /// Thin std-side alias for the no_std [`Engine::apply_rt`] (the SINGLE
+    /// source of truth for command routing, shared with the wasm host). Kept for
+    /// the existing std host API; all per-variant logic lives in `apply_rt`.
+    #[inline]
     pub fn apply(&mut self, cmd: RtCommand) {
-        match cmd {
-            RtCommand::SetParam { node, param, value } => {
-                if let Some(slot) = self.program().slot_of_id(node) {
-                    self.program_mut().instances[slot].set_param(param, value);
-                }
-            }
-            RtCommand::NoteOn { node, note, vel } => {
-                if let Some(slot) = self.program().slot_of_id(node) {
-                    self.program_mut().instances[slot].note_on(note, vel);
-                }
-            }
-            RtCommand::NoteOff { node, note } => {
-                if let Some(slot) = self.program().slot_of_id(node) {
-                    self.program_mut().instances[slot].note_off(note);
-                }
-            }
-            RtCommand::Bypass { node, on } => {
-                if let Some(slot) = self.program().slot_of_id(node) {
-                    self.program_mut().bypassed[slot] = on;
-                }
-            }
-            RtCommand::TransportPlay => self.playing = true,
-            RtCommand::TransportPause => self.playing = false,
-            RtCommand::Seek { samples } => self.sample_pos = samples,
-            RtCommand::Looper { node, action } => {
-                if let Some(slot) = self.program().slot_of_id(node) {
-                    self.program_mut().instances[slot].looper_action(action);
-                }
-            }
-        }
+        self.apply_rt(cmd);
     }
 
     /// Drain every pending command from `rx`, applying each. Call once at block

@@ -12,7 +12,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use ojproto::{NodeIdx, PrimitiveKind};
+use ojproto::{NodeIdx, PrimitiveKind, RtCommand};
 
 use crate::compile::CompiledProgram;
 use crate::dsp::ProcessCtx;
@@ -242,6 +242,60 @@ impl Engine {
     /// params / toggle bypass on the live instances). RT-safe: no allocation.
     pub fn program_mut(&mut self) -> &mut CompiledProgram {
         &mut self.program
+    }
+
+    // --- Command application (no_std SINGLE source of truth) ----------------
+
+    /// Apply a single [`RtCommand`] to the running program. The ONE
+    /// implementation of command application, shared by BOTH hosts: the native
+    /// std [`crate::CommandQueue`] drain (`command.rs`) and the wasm
+    /// AudioWorklet's own SAB-ring drain delegate here, so there is exactly one
+    /// per-variant routing. **`no_std`** (not behind the `std` feature) and
+    /// RT-safe: a bounded amount of work, no allocation, no locking — callable
+    /// directly on the audio thread.
+    ///
+    /// * `SetParam`  -> resolve node slot, call `set_param(param, value)`.
+    /// * `NoteOn`/`NoteOff` -> resolve node slot, drive the target instance's
+    ///   [`crate::DspInstance::note_on`] / [`crate::DspInstance::note_off`].
+    ///   Effect-only nodes inherit the trait's default no-op, so the event is
+    ///   harmlessly ignored there; instrument/voice nodes consume it.
+    /// * `Bypass`    -> toggle the node's bypass flag.
+    /// * `TransportPlay`/`TransportPause`/`Seek` -> drive the minimal
+    ///   sample-counting clock (`playing` / `sample_pos`).
+    /// * `Looper`    -> resolve node slot, drive the target instance's
+    ///   [`crate::DspInstance::looper_action`]. Non-looper nodes inherit the
+    ///   trait's default no-op; a [`crate::LooperNode`] consumes it.
+    pub fn apply_rt(&mut self, cmd: RtCommand) {
+        match cmd {
+            RtCommand::SetParam { node, param, value } => {
+                if let Some(slot) = self.program.slot_of_id(node) {
+                    self.program.instances[slot].set_param(param, value);
+                }
+            }
+            RtCommand::NoteOn { node, note, vel } => {
+                if let Some(slot) = self.program.slot_of_id(node) {
+                    self.program.instances[slot].note_on(note, vel);
+                }
+            }
+            RtCommand::NoteOff { node, note } => {
+                if let Some(slot) = self.program.slot_of_id(node) {
+                    self.program.instances[slot].note_off(note);
+                }
+            }
+            RtCommand::Bypass { node, on } => {
+                if let Some(slot) = self.program.slot_of_id(node) {
+                    self.program.bypassed[slot] = on;
+                }
+            }
+            RtCommand::TransportPlay => self.playing = true,
+            RtCommand::TransportPause => self.playing = false,
+            RtCommand::Seek { samples } => self.sample_pos = samples,
+            RtCommand::Looper { node, action } => {
+                if let Some(slot) = self.program.slot_of_id(node) {
+                    self.program.instances[slot].looper_action(action);
+                }
+            }
+        }
     }
 
     /// Mutable view of a source node's output buffer, so the host can inject
@@ -531,5 +585,189 @@ impl Engine {
             let n = nframes.min(buf.len());
             self.meters.nodes[node].accumulate(&buf[..n]);
         }
+    }
+}
+
+#[cfg(test)]
+mod apply_rt_tests {
+    //! `no_std` unit tests for [`Engine::apply_rt`] — the SINGLE shared
+    //! command-routing surface both hosts delegate to. These build a minimal
+    //! [`CompiledProgram`] over a mock [`DspInstance`] that records the last
+    //! note/param/looper call, so each variant is checked in isolation without
+    //! the full compiler. (Std-side `Engine::apply` / `drain` parity is covered
+    //! by the `tests/engine.rs` integration suite, which still drives the same
+    //! `apply_rt` underneath.)
+    use super::*;
+    use crate::compile::{CompiledProgram, NodeRouting};
+    use crate::dsp::{DspInstance, ProcessCtx};
+    use alloc::boxed::Box;
+    use alloc::rc::Rc;
+    use core::cell::Cell;
+    use ojproto::{looper_action, NodeIdx, PrimitiveKind, RtCommand};
+
+    /// Shared sink the test keeps a handle to while the same handle lives inside
+    /// the boxed mock instance — so a test can read back which RT method
+    /// `apply_rt` drove (and with what payload) without downcasting the trait
+    /// object. `Rc<Cell<_>>` is single-thread (the test thread) and `alloc`-only,
+    /// keeping the module `no_std`.
+    #[derive(Default)]
+    struct ProbeState {
+        last_note_on: Cell<Option<(u8, u8)>>,
+        last_note_off: Cell<Option<u8>>,
+        last_set_param: Cell<Option<(u16, f32)>>,
+        last_looper: Cell<Option<u8>>,
+    }
+
+    /// A mock node that records every RT call it receives into a shared
+    /// [`ProbeState`].
+    struct ProbeNode {
+        state: Rc<ProbeState>,
+    }
+
+    // The probe never crosses threads in tests; `Send` only satisfies the trait
+    // bound. SAFETY: it is constructed and read on the single test thread.
+    unsafe impl Send for ProbeNode {}
+
+    impl DspInstance for ProbeNode {
+        fn activate(&mut self, _sample_rate: f32, _max_block: usize) {}
+        fn process(&mut self, _ctx: &mut ProcessCtx<'_, '_>) {}
+        fn set_param(&mut self, id: u16, value: f32) {
+            self.state.last_set_param.set(Some((id, value)));
+        }
+        fn note_on(&mut self, note: u8, vel: u8) {
+            self.state.last_note_on.set(Some((note, vel)));
+        }
+        fn note_off(&mut self, note: u8) {
+            self.state.last_note_off.set(Some(note));
+        }
+        fn looper_action(&mut self, action: u8) {
+            self.state.last_looper.set(Some(action));
+        }
+    }
+
+    /// Build a trivial two-node engine: one `ProbeNode` instrument (IR id `7`)
+    /// feeding a `SpeakerOut` master (IR id `0`). Returns the engine plus a
+    /// handle to the probe's state so the caller can assert what `apply_rt`
+    /// routed. Enough for `apply_rt` to resolve a slot, route
+    /// notes/params/looper, and toggle bypass.
+    fn probe_engine() -> (Engine, Rc<ProbeState>) {
+        let state = Rc::new(ProbeState::default());
+        // Slots: 0 = ProbeNode (id 7), 1 = SpeakerOut master (id 0).
+        let instances: Vec<Box<dyn DspInstance>> = vec![
+            Box::new(ProbeNode {
+                state: state.clone(),
+            }),
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }),
+        ];
+        let ids = vec![NodeIdx(7), NodeIdx(0)];
+        // Sorted-by-id index used by `slot_of_id`'s binary search.
+        let id_index = vec![(NodeIdx(0), 1), (NodeIdx(7), 0)];
+        let program = CompiledProgram {
+            instances,
+            routing: vec![NodeRouting::default(), NodeRouting::default()],
+            out_bufs: vec![vec![vec![0.0; 4]], vec![]],
+            bypassed: vec![false, false],
+            kinds: vec![PrimitiveKind::Osc, PrimitiveKind::SpeakerOut],
+            ids,
+            id_index,
+            master_out: 1,
+            block_size: 4,
+            in_scratch: vec![vec![0.0; 4]],
+            max_in: 1,
+            max_out: 1,
+            schedule: vec![0, 1],
+        };
+        (Engine::new(program), state)
+    }
+
+    #[test]
+    fn note_on_reaches_instance() {
+        let (mut engine, probe) = probe_engine();
+        engine.apply_rt(RtCommand::NoteOn {
+            node: NodeIdx(7),
+            note: 64,
+            vel: 100,
+        });
+        assert_eq!(probe.last_note_on.get(), Some((64, 100)));
+        assert_eq!(probe.last_note_off.get(), None);
+    }
+
+    #[test]
+    fn note_off_reaches_instance() {
+        let (mut engine, probe) = probe_engine();
+        engine.apply_rt(RtCommand::NoteOff {
+            node: NodeIdx(7),
+            note: 64,
+        });
+        assert_eq!(probe.last_note_off.get(), Some(64));
+    }
+
+    #[test]
+    fn set_param_reaches_instance() {
+        let (mut engine, probe) = probe_engine();
+        engine.apply_rt(RtCommand::SetParam {
+            node: NodeIdx(7),
+            param: 3,
+            value: 0.75,
+        });
+        assert_eq!(probe.last_set_param.get(), Some((3, 0.75)));
+    }
+
+    #[test]
+    fn looper_action_reaches_instance() {
+        let (mut engine, probe) = probe_engine();
+        engine.apply_rt(RtCommand::Looper {
+            node: NodeIdx(7),
+            action: looper_action::RECORD,
+        });
+        assert_eq!(probe.last_looper.get(), Some(looper_action::RECORD));
+    }
+
+    #[test]
+    fn bypass_toggles_the_flag() {
+        let (mut engine, _probe) = probe_engine();
+        assert!(!engine.program().bypassed[0]);
+        engine.apply_rt(RtCommand::Bypass {
+            node: NodeIdx(7),
+            on: true,
+        });
+        assert!(engine.program().bypassed[0]);
+        engine.apply_rt(RtCommand::Bypass {
+            node: NodeIdx(7),
+            on: false,
+        });
+        assert!(!engine.program().bypassed[0]);
+    }
+
+    #[test]
+    fn transport_play_pause_arm_the_clock() {
+        let (mut engine, _probe) = probe_engine();
+        assert!(!engine.is_playing());
+        engine.apply_rt(RtCommand::TransportPlay);
+        assert!(engine.is_playing());
+        engine.apply_rt(RtCommand::TransportPause);
+        assert!(!engine.is_playing());
+    }
+
+    #[test]
+    fn seek_moves_the_playhead() {
+        let (mut engine, _probe) = probe_engine();
+        assert_eq!(engine.sample_pos(), 0);
+        engine.apply_rt(RtCommand::Seek { samples: 48_000 });
+        assert_eq!(engine.sample_pos(), 48_000);
+    }
+
+    #[test]
+    fn unknown_node_is_ignored() {
+        let (mut engine, probe) = probe_engine();
+        // No slot for id 999: routing must be a harmless no-op (no panic).
+        engine.apply_rt(RtCommand::NoteOn {
+            node: NodeIdx(999),
+            note: 60,
+            vel: 64,
+        });
+        assert_eq!(probe.last_note_on.get(), None);
     }
 }

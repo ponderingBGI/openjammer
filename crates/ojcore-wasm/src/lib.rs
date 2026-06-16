@@ -427,51 +427,20 @@ fn drain_commands(host: &mut Host) {
     }
 }
 
-/// Apply one [`RtCommand`] to the engine through `ojcore`'s **no_std** public
-/// surface (allocation-free, no locks). This mirrors `ojcore`'s std-only
-/// `Engine::apply`, but reached via `program_mut()` because that convenience
-/// method lives behind the `std` feature we deliberately do NOT enable on wasm.
+/// Apply one [`RtCommand`] to the engine through `ojcore`'s **no_std**
+/// [`Engine::apply_rt`] — the SINGLE shared command-routing implementation the
+/// native std host (`ojcore::command`) and this wasm host both delegate to, so
+/// there is exactly one per-variant match (zero duplication). Allocation-free,
+/// no locks: callable straight from the worklet render path.
 ///
-///   * `SetParam` -> resolve slot, `set_param(param, value)` on the instance.
-///   * `Bypass`   -> toggle the slot's bypass flag.
-///   * `NoteOn`/`NoteOff` -> resolved only; the [`ojcore::DspInstance`] trait
-///     exposes no note entry point yet (dropped at the instance seam, exactly as
-///     native `Engine::apply` documents).
-///   * `Transport*`/`Seek` -> the engine's transport clock (`playing` /
-///     `sample_pos`) is `pub(crate)` and only settable through the std-gated
-///     `Engine::apply`; with `std` off there is no no_std setter, so these are
-///     dropped here until `ojcore` exposes a no_std transport surface. The wasm
-///     worklet's transport is driven host-side (JS render-quantum clock) in the
-///     meantime, so this is not a functional gap on the boundary.
-///   * `Looper` -> resolve slot, drive the instance's
-///     [`ojcore::DspInstance::looper_action`] (the looper is no_std and
-///     registered on wasm too, so the in-browser looper works end to end).
+/// EVERY decoded command routes (full parity with native): `SetParam` /
+/// `NoteOn` / `NoteOff` -> the resolved instance, `Bypass` -> the slot flag,
+/// `TransportPlay` / `TransportPause` / `Seek` -> the engine's sample clock, and
+/// `Looper` -> the instance's looper state machine. Notes and transport now flow
+/// in-browser, so keyboard/MIDI-driven instruments play under the wasm engine.
 #[inline]
 fn apply_command(engine: &mut Engine, cmd: RtCommand) {
-    match cmd {
-        RtCommand::SetParam { node, param, value } => {
-            if let Some(slot) = engine.program().slot_of_id(node) {
-                engine.program_mut().instances[slot].set_param(param, value);
-            }
-        }
-        RtCommand::Bypass { node, on } => {
-            if let Some(slot) = engine.program().slot_of_id(node) {
-                engine.program_mut().bypassed[slot] = on;
-            }
-        }
-        RtCommand::NoteOn { node, .. } | RtCommand::NoteOff { node, .. } => {
-            // Resolve only; no instance-level note sink exists yet.
-            let _ = engine.program().slot_of_id(node);
-        }
-        RtCommand::TransportPlay | RtCommand::TransportPause | RtCommand::Seek { .. } => {
-            // No no_std transport setter on `Engine` (see fn docs). Dropped.
-        }
-        RtCommand::Looper { node, action } => {
-            if let Some(slot) = engine.program().slot_of_id(node) {
-                engine.program_mut().instances[slot].looper_action(action);
-            }
-        }
-    }
+    engine.apply_rt(cmd);
 }
 
 // --- Memory / layout getters: let JS build SAB + typed-array views directly
