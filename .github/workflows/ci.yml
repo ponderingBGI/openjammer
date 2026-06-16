@@ -80,3 +80,22 @@ jobs:
         run: bun run test:run
       - name: Build
         run: bun run build
+
+  windows-native:
+    name: Windows native build + audio gate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+      - name: Install frontend deps
+        run: bun install --frozen-lockfile
+      - name: Build the native desktop app (oj-tauri)
+        run: cargo build -p oj-tauri
+      - name: Engine tests on Windows
+        run: cargo test -p ojcore -p ojinstrument -p ojcore-native
+      - name: Offline audio render gate (Windows, device-free)
+        run: cargo run -p ojcore-native --bin render --features demo -- ci-render.wav 2
