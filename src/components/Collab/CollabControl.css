@@ -1,0 +1,228 @@
+/* U23 — Share/Join collaboration control styles. */
+
+.collab-control {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 1000;
+    font-family: inherit;
+}
+
+.collab-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color, #333);
+    background: var(--panel-bg, #1e1e1e);
+    color: var(--text-color, #eee);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.collab-toggle:hover {
+    border-color: var(--accent-color, #4a9eff);
+}
+
+.collab-toggle-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #666;
+}
+
+.collab-toggle.connected .collab-toggle-dot {
+    background: #22c55e;
+    box-shadow: 0 0 6px #22c55e;
+}
+
+.collab-peer-count {
+    background: var(--accent-color, #4a9eff);
+    color: #fff;
+    border-radius: 10px;
+    padding: 0 6px;
+    font-size: 11px;
+    min-width: 18px;
+    text-align: center;
+}
+
+.collab-panel {
+    margin-top: 8px;
+    width: 280px;
+    padding: 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border-color, #333);
+    background: var(--panel-bg, #1e1e1e);
+    color: var(--text-color, #eee);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.collab-panel-title {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.collab-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-muted, #aaa);
+}
+
+.collab-field input,
+.collab-field select,
+.collab-field textarea,
+.collab-code-input {
+    padding: 7px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color, #333);
+    background: var(--input-bg, #2a2a2a);
+    color: var(--text-color, #eee);
+    font-size: 13px;
+    font-family: inherit;
+}
+
+.collab-field textarea {
+    resize: vertical;
+    font-family: monospace;
+    font-size: 11px;
+    word-break: break-all;
+}
+
+.collab-primary,
+.collab-secondary,
+.collab-leave,
+.collab-copy {
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: none;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.collab-primary {
+    background: var(--accent-color, #4a9eff);
+    color: #fff;
+}
+
+.collab-secondary {
+    background: var(--input-bg, #2a2a2a);
+    color: var(--text-color, #eee);
+    border: 1px solid var(--border-color, #333);
+}
+
+.collab-primary:disabled,
+.collab-secondary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.collab-divider {
+    display: flex;
+    align-items: center;
+    text-align: center;
+    color: var(--text-muted, #888);
+    font-size: 11px;
+}
+
+.collab-divider::before,
+.collab-divider::after {
+    content: '';
+    flex: 1;
+    border-bottom: 1px solid var(--border-color, #333);
+}
+
+.collab-divider span {
+    padding: 0 8px;
+}
+
+.collab-join-row {
+    display: flex;
+    gap: 8px;
+}
+
+.collab-code-input {
+    flex: 1;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.collab-error {
+    margin: 0;
+    color: #ef4444;
+    font-size: 12px;
+}
+
+.collab-session-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.collab-copy {
+    background: transparent;
+    color: var(--accent-color, #4a9eff);
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+.collab-transport {
+    margin: -4px 0 0;
+    font-size: 11px;
+    color: var(--text-muted, #888);
+}
+
+.collab-peer-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.collab-peer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+}
+
+.collab-peer-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.collab-peer-empty {
+    font-size: 12px;
+    color: var(--text-muted, #888);
+    font-style: italic;
+}
+
+.collab-leave {
+    background: transparent;
+    color: #ef4444;
+    border: 1px solid #ef4444;
+    margin-top: 4px;
+}
+
+.collab-signaling {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 0;
+    border-top: 1px solid var(--border-color, #333);
+    border-bottom: 1px solid var(--border-color, #333);
+}
