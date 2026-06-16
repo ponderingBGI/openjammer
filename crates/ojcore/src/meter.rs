@@ -401,9 +401,9 @@ mod tests {
     fn assert_event_roundtrips(ev: RtEvent) {
         let mut buf = [0u8; event_frame::MAX_LEN];
         let n = event_frame::encode(ev, &mut buf);
-        assert!(n <= event_frame::MAX_LEN, "encoded len {n} > MAX_LEN");
-        assert_eq!(buf[0], event_frame::TAG_EVENT, "frame must start with TAG_EVENT");
-        assert_eq!(event_frame::decode(&buf[..n]), Some(ev), "round trip {ev:?}");
+        assert!(n <= event_frame::MAX_LEN);
+        assert_eq!(buf[0], event_frame::TAG_EVENT);
+        assert_eq!(event_frame::decode(&buf[..n]), Some(ev));
     }
 
     #[test]
@@ -433,7 +433,8 @@ mod tests {
     fn event_frame_lengths_are_exact() {
         let mut buf = [0u8; event_frame::MAX_LEN];
         // Xrun: tag + sub + u32 = 6.
-        assert_eq!(event_frame::encode(RtEvent::Xrun { dropped: 1 }, &mut buf), 6);
+        let xrun_len = event_frame::encode(RtEvent::Xrun { dropped: 1 }, &mut buf);
+        assert_eq!(xrun_len, 6);
         // NodeFault: tag + sub + u32 + u8 = 7 == MAX_LEN.
         assert_eq!(
             event_frame::encode(
@@ -461,7 +462,8 @@ mod tests {
         // Correct tag, missing sub-kind byte.
         assert!(event_frame::decode(&[event_frame::TAG_EVENT]).is_none());
         // Xrun sub-kind but truncated payload (needs 6 bytes, has 4).
-        assert!(event_frame::decode(&[event_frame::TAG_EVENT, event_frame::SUB_XRUN, 1, 2]).is_none());
+        let trunc_xrun = [event_frame::TAG_EVENT, event_frame::SUB_XRUN, 1, 2];
+        assert!(event_frame::decode(&trunc_xrun).is_none());
         // NodeFault sub-kind but truncated payload (needs 7 bytes, has 6).
         assert!(event_frame::decode(&[
             event_frame::TAG_EVENT,
