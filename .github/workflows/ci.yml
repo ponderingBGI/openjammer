@@ -56,6 +56,13 @@ jobs:
         run: cargo build -p ojcore --no-default-features
       - name: wasm32 build
         run: cargo +nightly build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
+      - name: Offline audio render gate (device-free)
+        # Renders a real arpeggio (Osc->Biquad->Delay->Speaker) to a WAV and
+        # asserts the output is finite, non-silent, and in a sane RMS band — so
+        # CI verifies the engine actually produces correct audio, no device needed.
+        run: |
+          cargo clippy -p ojcore-native --features demo --all-targets -- -D warnings
+          cargo run -p ojcore-native --bin render --features demo -- "${RUNNER_TEMP:-/tmp}/ci-render.wav" 2
 
   web:
     name: Web (control plane)

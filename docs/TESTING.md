@@ -11,6 +11,15 @@ plugins, and provider keys. Run them on the **Windows native install**.
 - **CI:** after PR #10 merges to `main`, run the **“Build installers (on demand)”**
   workflow from the Actions tab → download the `openjammer-windows-latest` artifact.
 
+## 0.5 Hear it — no hardware needed
+```bash
+cargo run -p ojcore-native --bin render --features demo -- demo.wav 8
+```
+Renders a real arpeggio (Osc → Biquad → Delay → Speaker) to `demo.wav` and prints an
+RMS/peak/**PASS** summary — proof the engine produces correct audio independent of
+any device. **Listen to `demo.wav`** to confirm sound quality before the rig test.
+(This same render runs as a CI gate on every commit.)
+
 ## 1. Latency (<5ms target)  — the headline gate
 ```bash
 cargo run -p ojcore-native --bin loopback 48000 64    # then try 32-sample buffers
