@@ -2,6 +2,15 @@
 
 Thank you for your interest in contributing to OpenJammer! This document provides guidelines for contributing to the project.
 
+> **Before you start, read the philosophy.** OpenJammer is an instrument people play
+> live, and that sets the bar for every change. For design, read
+> [PRODUCT.md](PRODUCT.md) (who plays this and why, plus the design principles) and
+> [DESIGN.md](DESIGN.md) (the visual system). For the engine and the working covenant —
+> the perception beliefs, the nine code values, and the playbook — read
+> [.agent/workflows/agents.md](.agent/workflows/agents.md). The best contributions can name
+> which value they honor: perception you can feel, and a core kept minimal so the community
+> can make it their own.
+
 ## Development Setup
 
 ### Prerequisites
