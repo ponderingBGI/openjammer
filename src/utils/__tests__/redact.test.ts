@@ -72,6 +72,31 @@ describe('redactText — secrets are scrubbed', () => {
             raw: 'peer joined from 192.168.1.42:9000',
             mustNotContain: '192.168.1.42',
         },
+        {
+            name: 'bare GitHub PAT (ghp_)',
+            raw: 'git push failed: ghp_0123456789ABCDEFabcdef0123456789AAAA',
+            mustNotContain: 'ghp_0123456789ABCDEFabcdef0123456789AAAA',
+        },
+        {
+            name: 'bare fine-grained GitHub PAT (github_pat_)',
+            raw: 'token github_pat_11ABCDEFG0123456789_abcdefghijklmnop here',
+            mustNotContain: 'github_pat_11ABCDEFG0123456789_abcdefghijklmnop',
+        },
+        {
+            name: 'bare AWS access key id (AKIA)',
+            raw: 'aws creds AKIAIOSFODNN7EXAMPLE rotated',
+            mustNotContain: 'AKIAIOSFODNN7EXAMPLE',
+        },
+        {
+            name: 'bare Google API key (AIza)',
+            raw: 'maps key AIzaSyD-1234567890abcdefghijklmnopqrstu loaded',
+            mustNotContain: 'AIzaSyD-1234567890abcdefghijklmnopqrstu',
+        },
+        {
+            name: 'bare Slack token (xoxb-)',
+            raw: 'slack xoxb-1234567890-ABCDEFabcdef connected',
+            mustNotContain: 'xoxb-1234567890-ABCDEFabcdef',
+        },
     ];
 
     for (const { name, raw, mustNotContain } of leaks) {
@@ -102,6 +127,19 @@ describe('redactText — secrets are scrubbed', () => {
     it('leaves harmless diagnostic text untouched', () => {
         const safe = 'engine started: 48000 Hz, 64-frame buffer, 2 channels';
         expect(redactText(safe)).toBe(safe);
+    });
+
+    it('does not over-clip ordinary ids/hashes (the token formats are prefix-specific)', () => {
+        // A git short sha, a 40-char hex digest, and a UUID carry no secret-token
+        // prefix (ghp_/AKIA/AIza/xox/sk-), so they survive intact — they are useful
+        // diagnostics, not secrets.
+        for (const id of [
+            'commit a1b2c3d',
+            'sha256 da39a3ee5e6b4b0d3255bfef95601890afd80709',
+            'session 550e8400-e29b-41d4-a716-446655440000',
+        ]) {
+            expect(redactText(id)).toBe(id);
+        }
     });
 });
 

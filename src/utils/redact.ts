@@ -61,6 +61,16 @@ const RULES: readonly { re: RegExp; fn: Replacer }[] = [
     // Provider-style API keys (OpenAI `sk-…`, Anthropic `sk-ant-…`, etc.).
     { re: /\bsk-[A-Za-z0-9_-]{6,}/g, fn: () => MASK },
 
+    // Well-known token formats, scrubbed even when BARE (no `token=` label):
+    //   GitHub PATs (ghp_/gho_/ghu_/ghs_/ghr_ + the fine-grained `github_pat_`),
+    //   AWS access-key ids (AKIA…), Google API keys (AIza…), Slack tokens (xox…).
+    // The formats are specific enough not to clip ordinary identifiers/hashes.
+    { re: /\bgh[oprsu]_[A-Za-z0-9]{20,}\b/g, fn: () => MASK },
+    { re: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, fn: () => MASK },
+    { re: /\bAKIA[0-9A-Z]{16}\b/g, fn: () => MASK },
+    { re: /\bAIza[A-Za-z0-9_-]{35}\b/g, fn: () => MASK },
+    { re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g, fn: () => MASK },
+
     // IPv4 addresses (LAN peer ids) — keep loopback / unspecified, which are not
     // identifying and are useful diagnostics.
     {
