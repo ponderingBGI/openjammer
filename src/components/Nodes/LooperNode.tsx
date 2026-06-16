@@ -11,7 +11,7 @@ import { useGraphStore } from '../../store/graphStore';
 import { useAudioStore } from '../../store/audioStore';
 import { useAudioClipStore, setClipBuffer, getClipBuffer } from '../../store/audioClipStore';
 import { useLibraryStore } from '../../store/libraryStore';
-import { audioGraphManager } from '../../audio/AudioGraphManager';
+import { getExecutor } from '../../audio/executor';
 import { getAudioContext } from '../../audio/AudioEngine';
 import { INFINITE_DURATION, isInfiniteDuration, type Loop } from '../../audio/Looper';
 import { createClipFromLoop, loadClipAudio } from '../../utils/clipUtils';
@@ -115,9 +115,9 @@ export const LooperNode = memo(function LooperNode({
     const inputPortId = inputPort?.id || 'audio-in';
     const outputPortId = outputPort?.id || 'audio-out';
 
-    // Get the Looper instance from AudioGraphManager
+    // Get the Looper instance from the audio executor
     const getLooper = useCallback(() => {
-        return audioGraphManager.getLooper(node.id);
+        return getExecutor().getLooper(node.id);
     }, [node.id]);
 
     // Set up Looper callbacks when component mounts or audio context becomes ready

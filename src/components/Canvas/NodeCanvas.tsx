@@ -14,7 +14,7 @@ import { useTransportStore } from '../../store/transportStore';
 import { getNodeDefinition } from '../../engine/registry';
 import { getPortPosition as calculatePortPosition } from '../../utils/portPositions';
 import { getConnectionBundleCount } from '../../utils/portSync';
-import { audioGraphManager } from '../../audio/AudioGraphManager';
+import { getExecutor } from '../../audio/executor';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
 import { ContextMenu } from './ContextMenu';
 import { NodeWrapper } from '../Nodes/NodeWrapper';
@@ -112,10 +112,10 @@ export function NodeCanvas() {
     const signalLevelsRef = useRef<Map<string, number>>(new Map());
     const signalUpdateScheduled = useRef(false);
 
-    // Subscribe to signal level updates from AudioGraphManager
+    // Subscribe to signal level updates from the audio executor
     // Throttle state updates to ~30fps to reduce re-renders while keeping smooth animation
     useEffect(() => {
-        const unsubscribe = audioGraphManager.subscribeToSignalLevels((levels) => {
+        const unsubscribe = getExecutor().subscribeSignalLevels((levels) => {
             signalLevelsRef.current = levels;
 
             // Throttle state updates using requestAnimationFrame

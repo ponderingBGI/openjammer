@@ -7,7 +7,7 @@ import { useState, useEffect, useRef, useCallback, memo } from 'react';
 import type { GraphNode, SpeakerNodeData } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useAudioStore } from '../../store/audioStore';
-import { audioGraphManager } from '../../audio/AudioGraphManager';
+import { getExecutor } from '../../audio/executor';
 import { reinitAudioContext } from '../../audio/AudioEngine';
 import {
     type EnhancedAudioDevice,
@@ -81,7 +81,7 @@ export const SpeakerNode = memo(function SpeakerNode({
 
         // Toggle audio context to trigger full reinitialization
         setAudioContextReady(false);
-        audioGraphManager.dispose();
+        getExecutor().dispose();
 
         try {
             await reinitAudioContext({
@@ -113,7 +113,7 @@ export const SpeakerNode = memo(function SpeakerNode({
                 if (bestDevice && bestDevice.isLowLatency) {
                     hasAutoSelected.current = true;
                     updateNodeData<SpeakerNodeData>(node.id, { deviceId: bestDevice.deviceId });
-                    audioGraphManager.updateSpeakerDevice(node.id, bestDevice.deviceId);
+                    getExecutor().setSpeakerDevice(node.id, bestDevice.deviceId);
 
                     // Also enable low latency mode automatically
                     await applyLowLatencyMode();
@@ -126,7 +126,7 @@ export const SpeakerNode = memo(function SpeakerNode({
                 if (!deviceStillExists) {
                     // Device was unplugged, fall back to default
                     updateNodeData<SpeakerNodeData>(node.id, { deviceId: 'default' });
-                    audioGraphManager.updateSpeakerDevice(node.id, 'default');
+                    getExecutor().setSpeakerDevice(node.id, 'default');
                 }
             }
         };
@@ -177,7 +177,7 @@ export const SpeakerNode = memo(function SpeakerNode({
         setShowDevices(false);
 
         // Apply device change immediately
-        audioGraphManager.updateSpeakerDevice(node.id, deviceId);
+        getExecutor().setSpeakerDevice(node.id, deviceId);
 
         // Auto-enable low latency mode when selecting a low-latency device
         const selectedDevice = devices.find(d => d.deviceId === deviceId);
@@ -191,7 +191,7 @@ export const SpeakerNode = memo(function SpeakerNode({
         const newMuted = !isMuted;
         updateNodeData<SpeakerNodeData>(node.id, { isMuted: newMuted });
         // Update the actual audio node
-        audioGraphManager.updateSpeakerVolume(node.id, data.volume ?? 1, newMuted);
+        getExecutor().setSpeakerVolume(node.id, data.volume ?? 1, newMuted);
     };
 
     // Get input port for the speaker

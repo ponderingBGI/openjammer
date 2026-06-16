@@ -8,7 +8,7 @@ import type { GraphNode, MicrophoneNodeData } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useAudioStore } from '../../store/audioStore';
 import { getAudioContext } from '../../audio/AudioEngine';
-import { audioGraphManager } from '../../audio/AudioGraphManager';
+import { getExecutor } from '../../audio/executor';
 import { ScrollContainer } from '../common/ScrollContainer';
 import { detectLowLatencyDevice } from '../../utils/audioDeviceDetection';
 
@@ -213,7 +213,7 @@ export const MicrophoneNode = memo(function MicrophoneNode({
 
             // Register the analyser as output (it passes audio through)
             // This way the waveform reflects what's actually being sent out
-            audioGraphManager.setMicrophoneOutput(node.id, analyser);
+            getExecutor().setMicrophoneOutput(node.id, analyser);
 
             // Update refs for cleanup
             streamRef.current = mediaStream;

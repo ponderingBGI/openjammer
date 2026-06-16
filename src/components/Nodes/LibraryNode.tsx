@@ -26,7 +26,7 @@ import {
 } from '../../store/libraryStore';
 import { isFileSystemAccessSupported, selectLibraryFolder } from '../../utils/fileSystemAccess';
 import { getAudioContext } from '../../audio/AudioEngine';
-import { audioGraphManager } from '../../audio/AudioGraphManager';
+import { getExecutor } from '../../audio/executor';
 import { useResize } from '../../hooks/useResize';
 import { usePanelResize } from '../../hooks/usePanelResize';
 import { ResizeHandles } from '../common/ResizeHandles';
@@ -309,7 +309,7 @@ export const LibraryNode = memo(function LibraryNode({
         }
         const arrayBuffer = await file.arrayBuffer();
         const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-        audioGraphManager.sendSampleBuffer(node.id, audioBuffer);
+        getExecutor().sendSampleBuffer(node.id, audioBuffer);
       } catch (err) {
         console.error('Failed to load item for sampler:', err);
         toast.error('Failed to load audio file');
