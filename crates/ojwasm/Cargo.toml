@@ -1,0 +1,23 @@
+[package]
+name = "ojwasm"
+description = "Native wasmtime realtime host for OpenJammer code nodes (PrimitiveKind::WasmHost). Runs import-free `oj_*`-ABI wasm kernels behind ojcore's DspInstance trait, with the permanent OutputGuard chain (scrub -> DC-block -> soft-limit) applied OUTSIDE the wasm sandbox so a kernel can never disable it. NATIVE-ONLY (never wasm32). FEATURE-GATED: the default build is a dependency-free scaffold (the loader/registry bridge, the content-addressed WasmStore, and the transpose + guard + bypass RT logic are all present and unit-tested via a synthetic kernel; only the wasmtime instance that runs a real .wasm is gated behind `wasmtime-host`)."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[features]
+# DEFAULT OFF: builds + clippy + tests green with NO wasmtime — the scaffold path
+# (instantiate -> guarded silent/passthrough). Mirrors ojhost/ojfaust's posture.
+#   cargo build -p ojwasm                          -> scaffold (no execution)
+#   cargo build -p ojwasm --features wasmtime-host -> real wasmtime RT host
+default = []
+wasmtime-host = []
+
+[dependencies]
+# Engine ABI: a code node is a DspInstance minted by a PluginLoader registered
+# under PrimitiveKind::WasmHost. default-features=false keeps ojcore's std-only RT
+# plumbing we do not need out, exactly like ojhost (crates/ojhost/Cargo.toml:37).
+ojcore = { path = "../ojcore", default-features = false }
+ojproto = { path = "../ojproto" }
+# The permanent host output-guard chain, applied outside the wasm sandbox.
+ojcore-dsp = { path = "../ojcore-dsp" }
