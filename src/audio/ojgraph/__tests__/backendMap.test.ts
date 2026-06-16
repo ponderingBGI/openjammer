@@ -35,7 +35,25 @@ const NATIVE_REGISTRY = new Set<string>([
     ENGINE_IDS.sampler,
     ENGINE_IDS.karplus,
 ]);
-const WASM_REGISTRY = new Set<string>([ENGINE_IDS.gain, ENGINE_IDS.hostSpeakerOut]);
+// U-WASM-PARITY: the wasm registry now holds the FULL common set (instruments +
+// effects + structural I/O), minus SF2 — the same as native plus structural — so
+// the wasm remap preserves real loader ids (a Sampler stays builtin.sampler).
+const WASM_REGISTRY = new Set<string>([
+    ENGINE_IDS.gain,
+    ENGINE_IDS.osc,
+    ENGINE_IDS.sampler,
+    ENGINE_IDS.karplus,
+    ENGINE_IDS.biquad,
+    ENGINE_IDS.waveshaper,
+    ENGINE_IDS.delay,
+    ENGINE_IDS.convolution,
+    ENGINE_IDS.add,
+    ENGINE_IDS.passthrough,
+    ENGINE_IDS.hostGraphIn,
+    ENGINE_IDS.hostMicIn,
+    ENGINE_IDS.hostGraphOut,
+    ENGINE_IDS.hostSpeakerOut,
+]);
 
 function buildRichPatch() {
     const kb = makeNode('keyboard', 'kb');
@@ -85,6 +103,25 @@ describe('remapForBackend', () => {
         const g = remapForBackend(buildRichPatch(), 'wasm');
         const master = g.nodes.find((n) => n.kind === 'SpeakerOut');
         expect(master?.manifest_id).toBe(ENGINE_IDS.hostSpeakerOut);
+    });
+
+    it('wasm preserves the Sampler loader so a bound AssetRef plays (U-WASM-PARITY)', () => {
+        const g = remapForBackend(buildRichPatch(), 'wasm');
+        const sampler = g.nodes.find((n) => n.kind === 'Sampler');
+        expect(sampler?.manifest_id).toBe(ENGINE_IDS.sampler);
+    });
+
+    it('wasm preserves the MicIn loader so the captured block sources from it', () => {
+        const mic = makeNode('microphone', 'mic');
+        const spk = makeNode('speaker', 'spk');
+        const conns = [makeConn('mic', 'audio-out', 'spk', 'audio-in', 'audio')];
+        const emitted = emitOjGraph(
+            new Map([mic, spk].map((n) => [n.id, n])),
+            new Map(conns.map((c) => [c.id, c])),
+        );
+        const g = remapForBackend(emitted, 'wasm');
+        const micNode = g.nodes.find((n) => n.kind === 'MicIn');
+        expect(micNode?.manifest_id).toBe(ENGINE_IDS.hostMicIn);
     });
 
     it('native maps Sampler/Osc/Karplus to their loaders and master via gain', () => {

@@ -56,6 +56,11 @@ import ojcoreWasmUrl from '../wasm/pkg/ojcore_wasm_bg.wasm?url';
 /** Render quantum the AudioWorklet uses (the spec-fixed block size). */
 const WORKLET_BLOCK_SIZE = 128;
 
+/** The sampler's root-note param id — mirrors `ojinstrument::sampler::
+ *  SAMPLER_PCM_PARAM` (16). The compiler applies params BEFORE assets, so binding
+ *  this alongside the `AssetRef` lands the sample at unity at `rootNote`. */
+const SAMPLER_PCM_PARAM = 16;
+
 export class OjcoreWasmExecutor implements Executor {
     private getNodes: (() => Map<string, GraphNode>) | null = null;
     private getConnections: (() => Map<string, Connection>) | null = null;
@@ -75,6 +80,18 @@ export class OjcoreWasmExecutor implements Executor {
     /** Pending recorder-capture resolvers, keyed by NodeIdx, for the worklet's
      *  `recorder-data` reply. */
     private captureResolvers = new Map<number, (blob: Blob | null) => void>();
+    /** Live sampler asset bindings keyed by VISUAL node id: the worklet-assigned
+     *  `AssetId` + root note. Re-applied onto the emitted graph on every push so a
+     *  loaded sample survives subsequent node/connection edits (the wasm analogue
+     *  of native's persistent graph binding). */
+    private sampleBindings = new Map<string, { assetId: number; rootNote: number }>();
+    /** Pending `loadSample` resolvers keyed by VISUAL node id, settled when the
+     *  worklet replies `sample-stored` (or on a safety timeout). */
+    private sampleLoadResolvers = new Map<string, () => void>();
+    /** Active microphone capture: stream + worklet input source, so it can be
+     *  torn down on dispose / re-route. */
+    private micStream: MediaStream | null = null;
+    private micSource: MediaStreamAudioSourceNode | null = null;
 
     /** The engine-side seam the capability handles drive (wasm impl). */
     private readonly bridge: OjcoreBridge = {
@@ -129,7 +146,9 @@ export class OjcoreWasmExecutor implements Executor {
 
         await ctx.audioWorklet.addModule(ojcoreProcessorUrl);
         const node = new AudioWorkletNode(ctx, 'ojcore-processor', {
-            numberOfInputs: 0,
+            // One input so a `MediaStreamSource` (microphone) can be wired into
+            // the worklet and fed to the engine's `MicIn` node each block.
+            numberOfInputs: 1,
             numberOfOutputs: 1,
             outputChannelCount: [2],
         });
@@ -144,6 +163,8 @@ export class OjcoreWasmExecutor implements Executor {
                 node?: number;
                 pcm?: Float32Array;
                 sampleRate?: number;
+                assetId?: number;
+                rootNote?: number;
             };
             switch (data.type) {
                 case 'ready':
@@ -161,6 +182,9 @@ export class OjcoreWasmExecutor implements Executor {
                     break;
                 case 'recorder-data':
                     this.onRecorderData(data.node, data.pcm, data.sampleRate);
+                    break;
+                case 'sample-stored':
+                    this.onSampleStored(data.node, data.assetId, data.rootNote);
                     break;
                 case 'error':
                     console.error('[OjcoreWasmExecutor] worklet error:', data.message);
@@ -182,6 +206,7 @@ export class OjcoreWasmExecutor implements Executor {
     dispose(): void {
         this.unsub?.();
         this.unsub = null;
+        this.disableMicrophone();
         try {
             this.node?.disconnect();
         } catch {
@@ -196,6 +221,10 @@ export class OjcoreWasmExecutor implements Executor {
         // Resolve any in-flight captures so callers are not left hanging.
         for (const resolve of this.captureResolvers.values()) resolve(null);
         this.captureResolvers.clear();
+        // Settle any in-flight sample loads so the load flow never hangs.
+        for (const resolve of this.sampleLoadResolvers.values()) resolve();
+        this.sampleLoadResolvers.clear();
+        this.sampleBindings.clear();
         this.getNodes = null;
         this.getConnections = null;
         this.index = new Map();
@@ -213,10 +242,57 @@ export class OjcoreWasmExecutor implements Executor {
         this.reverseIndex = new Map();
         for (const [id, idx] of index) this.reverseIndex.set(idx, id);
         const wasmGraph = remapForBackend(graph, 'wasm');
+        // Re-apply any live sampler bindings so a loaded sample survives later
+        // node/connection edits (mirrors native keeping the bind in `last_graph`).
+        this.applySampleBindings(wasmGraph);
         if (this.ready) {
             this.sendGraph(wasmGraph);
         } else {
             this.pendingGraph = wasmGraph; // coalesce to latest until ready
+        }
+    }
+
+    /**
+     * Bind every recorded sampler asset onto its node in `graph`: set the
+     * sampler's root-note param and an `AssetRef` in slot 0, so
+     * `compile_with_assets` in the worklet resolves + installs the PCM into the
+     * live Sampler. Pure data shaping over the emitted IR (off any render path).
+     */
+    private applySampleBindings(graph: OjGraph): void {
+        if (this.sampleBindings.size === 0) return;
+        for (const [nodeId, { assetId, rootNote }] of this.sampleBindings) {
+            const idx = this.index.get(nodeId);
+            if (idx === undefined) continue;
+            const ir = graph.nodes.find((n) => n.id === idx);
+            if (!ir) continue;
+            // Root note -> the sampler's root-note param (compiler applies params
+            // before assets), matching native `bind_sample_to_node`.
+            const existing = ir.params.find((p) => p.id === SAMPLER_PCM_PARAM);
+            if (existing) existing.value = rootNote;
+            else ir.params.push({ id: SAMPLER_PCM_PARAM, value: rootNote });
+            // Bind the PCM asset in slot 0 (replace any prior binding on it).
+            const ref = ir.assets.find((a) => a.slot === 0);
+            if (ref) ref.asset = assetId;
+            else ir.assets.push({ slot: 0, asset: assetId });
+        }
+    }
+
+    /**
+     * Record the worklet-assigned `AssetId` for `nodeId`, re-push the graph so the
+     * worklet recompiles-with-assets and the live Sampler gets the sample, then
+     * settle the pending `loadSample` promise.
+     */
+    private onSampleStored(node?: number, assetId?: number, rootNote?: number): void {
+        if (node === undefined || assetId === undefined) return;
+        const nodeId = this.reverseIndex.get(node);
+        if (nodeId === undefined) return;
+        this.sampleBindings.set(nodeId, { assetId, rootNote: rootNote ?? 60 });
+        // Re-emit + push so the bound AssetRef reaches the worklet's recompile.
+        this.pushGraph();
+        const resolve = this.sampleLoadResolvers.get(nodeId);
+        if (resolve) {
+            this.sampleLoadResolvers.delete(nodeId);
+            resolve();
         }
     }
 
@@ -335,10 +411,61 @@ export class OjcoreWasmExecutor implements Executor {
     }
 
     // --- Microphone --------------------------------------------------------
-    // TODO(wasm-parity): mic capture into the worklet needs a `MediaStreamSource`
-    // -> worklet input wiring; the engine currently renders synthesis-only. The
-    // node id is recorded so the routing can be added without a UI change.
-    setMicrophoneOutput(_nodeId: string, _outputNode: AudioNode): void {}
+    // Wasm mic capture: open the microphone via `getUserMedia`, wrap it in a
+    // `MediaStreamSource`, and connect it to the worklet `AudioWorkletNode`'s
+    // input. The worklet copies that input block into the engine's `MicIn` node
+    // output buffer each render quantum (see ojcore-processor `feedMicInput`), so
+    // the mic flows through the engine graph. The Web-Audio `outputNode` is
+    // unused: the engine owns routing via the `MicIn` graph node (mirrors native,
+    // where only the node id crosses the seam). Permission denial is handled
+    // gracefully — it logs and leaves the mic unrouted, never throws.
+    setMicrophoneOutput(_nodeId: string, _outputNode: AudioNode): void {
+        void this.enableMicrophone();
+    }
+
+    /** Acquire the microphone and wire it into the worklet input. Idempotent
+     *  (a second call while a stream is live is a no-op); never throws. */
+    private async enableMicrophone(): Promise<void> {
+        if (this.micStream) return; // already capturing
+        const ctx = getAudioContext();
+        if (!ctx || !this.node) return;
+        const media = globalThis.navigator?.mediaDevices;
+        if (!media || typeof media.getUserMedia !== 'function') {
+            console.warn('[OjcoreWasmExecutor] getUserMedia unavailable; mic not routed.');
+            return;
+        }
+        try {
+            const stream = await media.getUserMedia({ audio: true });
+            // The node may have been disposed while permission was pending.
+            if (!this.node) {
+                for (const t of stream.getTracks()) t.stop();
+                return;
+            }
+            this.micStream = stream;
+            this.micSource = ctx.createMediaStreamSource(stream);
+            // Feed the mic into the worklet's input (input 0); the worklet routes
+            // it into the engine's MicIn node each block.
+            this.micSource.connect(this.node);
+        } catch (err) {
+            // Permission denied / no device / insecure context: stay unrouted.
+            console.warn('[OjcoreWasmExecutor] microphone access denied or unavailable:', err);
+            this.disableMicrophone();
+        }
+    }
+
+    /** Tear down any active microphone capture. */
+    private disableMicrophone(): void {
+        try {
+            this.micSource?.disconnect();
+        } catch {
+            // already disconnected
+        }
+        this.micSource = null;
+        if (this.micStream) {
+            for (const track of this.micStream.getTracks()) track.stop();
+        }
+        this.micStream = null;
+    }
 
     // --- Continuous sources ------------------------------------------------
     pauseContinuousSources(): void {
@@ -379,7 +506,13 @@ export class OjcoreWasmExecutor implements Executor {
 
     // --- Wasm command backings for the capability bridge -------------------
 
-    /** Transfer mono PCM into the worklet to install as `nodeId`'s sampler. */
+    /**
+     * Transfer mono PCM into the worklet to install as `nodeId`'s sampler, then
+     * bind the worklet-assigned `AssetId` onto the node and re-push so the live
+     * Sampler gets the sample (mirrors native `load_sample`). Resolves once the
+     * worklet has stored the PCM (the `sample-stored` reply) or after a safety
+     * timeout, so the UI's load flow always completes.
+     */
     private loadSampleWasm(
         nodeId: string,
         pcm: Float32Array,
@@ -390,11 +523,21 @@ export class OjcoreWasmExecutor implements Executor {
         if (idx === undefined || !this.node || !this.ready) return Promise.resolve();
         // Zero-copy transfer of the PCM into the worklet (off the render path).
         const copy = pcm.slice();
-        this.node.port.postMessage(
-            { type: 'load-sample', node: idx, pcm: copy, sampleRate, rootNote },
-            [copy.buffer],
-        );
-        return Promise.resolve();
+        return new Promise<void>((resolve) => {
+            this.sampleLoadResolvers.set(nodeId, resolve);
+            this.node?.port.postMessage(
+                { type: 'load-sample', node: idx, pcm: copy, sampleRate, rootNote },
+                [copy.buffer],
+            );
+            // Safety timeout: never leave the load flow hanging if the worklet is
+            // silent (e.g. torn down mid-load).
+            setTimeout(() => {
+                if (this.sampleLoadResolvers.has(nodeId)) {
+                    this.sampleLoadResolvers.delete(nodeId);
+                    resolve();
+                }
+            }, 2000);
+        });
     }
 
     /** Tell the worklet to begin capturing `nodeId`'s output bus. */

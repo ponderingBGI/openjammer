@@ -47,10 +47,14 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use ojcore::{compile, Engine, PluginRegistry, SPEAKER_OUT_ID};
+use ojcore::{
+    compile_with_assets, AssetPcm, AssetResolver, Engine, PluginRegistry, SPEAKER_OUT_ID,
+};
 use ojcore_midiring::{header_offsets, CmdRing, MidiRing};
 use ojinstrument::{register_all, RegisterOpts};
-use ojproto::{EngineFrame, IrNode, NodeIdx, OjGraph, PrimitiveKind, RtCommand, SCHEMA_VERSION};
+use ojproto::{
+    AssetId, EngineFrame, IrNode, NodeIdx, OjGraph, PrimitiveKind, RtCommand, SCHEMA_VERSION,
+};
 
 use wasm_bindgen::prelude::*;
 
@@ -59,6 +63,96 @@ use wasm_bindgen::prelude::*;
 /// "param":65535,"value":-1.0000000}}` ~ 60 B) fits comfortably. Sized with
 /// generous headroom so the drain scratch never needs to grow on the RT path.
 const CMD_FRAME_MAX: usize = 128;
+
+/// FNV-1a 64-bit offset basis / prime — the same content-address fingerprint the
+/// native `ojcore-native::AssetCatalog` uses, ported here so the wasm store
+/// deduplicates identical PCM the same way (and so the two hosts agree on ids if
+/// they ever share a serialized graph).
+const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// One decoded, host-owned mono sample. The wasm host owns the PCM here (the
+/// `no_std` `ojcore` core never owns asset bytes); the [`WasmAssetStore`]
+/// resolver hands back a borrow of `pcm` at compile time so a Sampler node's
+/// [`ojproto::AssetRef`] installs through [`ojcore::DspInstance::load_asset`].
+struct StoredAsset {
+    id: AssetId,
+    pcm: Vec<f32>,
+    sample_rate: f32,
+}
+
+/// The wasm-side content-addressed PCM store — the in-browser analogue of the
+/// native `AssetCatalog`. Holds every loaded sample by [`AssetId`]; the engine's
+/// [`compile_with_assets`] path resolves a node's [`ojproto::AssetRef`] against
+/// it so the live Sampler actually plays the sample in the browser. Small, append
+/// + dedup; off the RT thread (only [`store_asset`] / [`load_graph`] touch it).
+#[derive(Default)]
+struct WasmAssetStore {
+    assets: Vec<StoredAsset>,
+}
+
+impl WasmAssetStore {
+    /// Content-address `pcm`/`sample_rate` (FNV-1a over the spec + sample bytes,
+    /// folded to `u32` — identical to the native catalog) and store it, returning
+    /// its [`AssetId`]. Deduplicates: re-storing identical PCM keeps one copy.
+    fn insert(&mut self, pcm: Vec<f32>, sample_rate: f32) -> AssetId {
+        let id = content_address(&pcm, sample_rate);
+        if !self.assets.iter().any(|a| a.id == id) {
+            self.assets.push(StoredAsset {
+                id,
+                pcm,
+                sample_rate,
+            });
+        }
+        id
+    }
+
+    /// Borrow the PCM behind `id`, if present.
+    fn get(&self, id: AssetId) -> Option<&StoredAsset> {
+        self.assets.iter().find(|a| a.id == id)
+    }
+}
+
+/// The store IS the engine's compile-time [`AssetResolver`]: `compile_with_assets`
+/// calls [`AssetResolver::resolve`] for each node's [`ojproto::AssetRef`] and
+/// installs the borrowed PCM via [`ojcore::DspInstance::load_asset`] (Sampler ->
+/// `set_sample`) off the RT thread, before the program goes live — the wasm end
+/// of the sample-load seam, mirroring `AssetCatalog`.
+impl AssetResolver for WasmAssetStore {
+    fn resolve(&self, id: AssetId) -> Option<AssetPcm<'_>> {
+        let a = self.get(id)?;
+        Some(AssetPcm {
+            pcm: &a.pcm,
+            sample_rate: a.sample_rate,
+        })
+    }
+}
+
+/// Compute the deterministic content address of mono PCM at `sample_rate`. Mirrors
+/// `ojcore-native::store::content_address` for the mono case: hash the spec
+/// (channels = 1, the rate) then every sample's IEEE-754 LE bytes, fold the 64-bit
+/// FNV-1a to the `u32` [`AssetId`] domain by XORing its halves.
+fn content_address(pcm: &[f32], sample_rate: f32) -> AssetId {
+    #[inline]
+    fn mix(h: u64, byte: u8) -> u64 {
+        (h ^ byte as u64).wrapping_mul(FNV_PRIME)
+    }
+    let mut h = FNV_OFFSET;
+    // channels = 1 (the wasm store is mono-only, like the native live path).
+    for b in 1u16.to_le_bytes() {
+        h = mix(h, b);
+    }
+    // The native catalog hashes an integer sample rate; round to match.
+    for b in (sample_rate.max(1.0) as u32).to_le_bytes() {
+        h = mix(h, b);
+    }
+    for &s in pcm {
+        for b in s.to_le_bytes() {
+            h = mix(h, b);
+        }
+    }
+    AssetId((h ^ (h >> 32)) as u32)
+}
 
 /// The whole engine host, allocated once by [`init`] and owned by the worklet
 /// thread. Boxed so its address (and the rings' addresses inside it) are stable
@@ -80,6 +174,10 @@ struct Host {
     out_buf: Vec<f32>,
     /// Scratch popped command frame bytes (reused; never grows on the RT path).
     cmd_scratch: Vec<u8>,
+    /// Content-addressed PCM store backing the engine's asset resolution. A
+    /// Sampler node carrying an [`ojproto::AssetRef`] plays its PCM because
+    /// [`load_graph`] compiles through [`compile_with_assets`] over this store.
+    assets: WasmAssetStore,
     /// Render quantum the worklet uses (frames per [`process`] call).
     block_size: usize,
     /// Sample rate the engine compiles graphs against.
@@ -154,12 +252,15 @@ pub fn init(sample_rate: u32, block_size: u32) {
     let mut registry = PluginRegistry::new();
     register_all(&mut registry, RegisterOpts::wasm());
 
-    // `compile` requires exactly one master-output node, so the bootstrap graph
-    // is a LONE host `SpeakerOut` (no sources). It renders as silence until
-    // `load_graph` installs a real program — but it makes the engine valid from
-    // the very first `process` call.
+    // `compile_with_assets` requires exactly one master-output node, so the
+    // bootstrap graph is a LONE host `SpeakerOut` (no sources). It renders as
+    // silence until `load_graph` installs a real program — but it makes the
+    // engine valid from the very first `process` call. The bootstrap has no
+    // assets, so an empty store resolves nothing here.
+    let assets = WasmAssetStore::default();
     let boot = bootstrap_graph(sample_rate, block_size as u32);
-    let program = compile(&boot, &registry).expect("master-only graph always compiles");
+    let program =
+        compile_with_assets(&boot, &registry, &assets).expect("master-only graph always compiles");
     let engine = Engine::new(program);
 
     let host = Host {
@@ -169,6 +270,7 @@ pub fn init(sample_rate: u32, block_size: u32) {
         midi_ring: Box::new(MidiRing::new()),
         out_buf: vec![0.0f32; block_size],
         cmd_scratch: vec![0u8; CMD_FRAME_MAX],
+        assets,
         block_size,
         sample_rate,
     };
@@ -201,7 +303,11 @@ pub fn load_graph(bytes: &[u8]) -> bool {
     graph.sample_rate = host.sample_rate;
     graph.block_size = host.block_size as u32;
 
-    let program = match compile(&graph, &host.registry) {
+    // Compile RESOLVING each node's `AssetRef` through the host's PCM store (the
+    // wasm end of the sample-load seam): a Sampler carrying a bound `AssetId`
+    // gets its sample installed via `DspInstance::load_asset` here, off the RT
+    // thread, before the program goes live — mirroring native `compile_with_assets`.
+    let program = match compile_with_assets(&graph, &host.registry, &host.assets) {
         Ok(p) => p,
         Err(_) => return false,
     };
@@ -209,6 +315,68 @@ pub fn load_graph(bytes: &[u8]) -> bool {
     // allocation/free-free.
     let _old = host.engine.install(program);
     true
+}
+
+/// Store decoded mono `pcm` (captured at `sample_rate` Hz) in the host's PCM
+/// store and return its content-addressed [`AssetId`] (an integer the JS side
+/// then binds onto the node's [`ojproto::AssetRef`] and re-pushes the graph with,
+/// so the next [`load_graph`] resolves + installs it into the live Sampler).
+///
+/// Off the RT thread (the worklet calls it from a control message, between
+/// `process` calls). Returns `0` if the host is not initialized — `0` is a valid
+/// content address only for a degenerate input, so the JS side treats it as "not
+/// stored" only when the host is absent (it checks `ready` first).
+#[wasm_bindgen]
+pub fn store_asset(pcm: &[f32], sample_rate: f32) -> u32 {
+    let Some(host) = host_mut() else { return 0 };
+    host.assets.insert(pcm.to_vec(), sample_rate).0
+}
+
+/// Pointer (byte offset into wasm linear memory) of the FIRST `MicIn` node's
+/// output buffer (port 0), or null if the live program has no `MicIn`.
+///
+/// The worklet writes one block of microphone samples here BEFORE each
+/// [`process`] call; the executor leaves external-source output buffers intact
+/// (see `Engine::input_mut` / the exec loop's `MicIn` arm), so whatever lands
+/// here flows downstream this block. Recomputed each call from the live program
+/// because the master/slot layout changes across `load_graph` swaps.
+#[wasm_bindgen]
+pub fn mic_in_ptr() -> *mut f32 {
+    let Some(host) = host_mut() else {
+        return core::ptr::null_mut();
+    };
+    let prog = host.engine.program();
+    let Some(slot) = prog
+        .kinds
+        .iter()
+        .position(|k| matches!(k, PrimitiveKind::MicIn))
+    else {
+        return core::ptr::null_mut();
+    };
+    let id = prog.ids[slot];
+    match host.engine.input_mut(id, 0) {
+        Some(buf) => buf.as_mut_ptr(),
+        None => core::ptr::null_mut(),
+    }
+}
+
+/// Length (in f32s) of the `MicIn` output buffer the worklet may write — the
+/// configured block size — or `0` when the program has no `MicIn` node. Pairs
+/// with [`mic_in_ptr`]; the worklet clamps its write to this.
+#[wasm_bindgen]
+pub fn mic_in_len() -> u32 {
+    let Some(host) = host_ref() else { return 0 };
+    let has_mic = host
+        .engine
+        .program()
+        .kinds
+        .iter()
+        .any(|k| matches!(k, PrimitiveKind::MicIn));
+    if has_mic {
+        host.block_size as u32
+    } else {
+        0
+    }
 }
 
 /// Render one block. The AudioWorklet calls this every render quantum.
@@ -564,7 +732,8 @@ mod tests {
             ],
             schedule: vec![],
         };
-        let program = compile(&graph, &reg).expect("effect graph compiles");
+        let store = WasmAssetStore::default();
+        let program = compile_with_assets(&graph, &reg, &store).expect("effect graph compiles");
         let mut engine = Engine::new(program);
         let mut out = vec![0.0f32; 64];
         engine.process_block(&mut out, 64);
@@ -736,7 +905,8 @@ mod tests {
             ],
             schedule: vec![],
         };
-        let program = compile(&graph, &reg).expect("graph compiles");
+        let store = WasmAssetStore::default();
+        let program = compile_with_assets(&graph, &reg, &store).expect("graph compiles");
         let mut engine = Engine::new(program);
         engine.set_metering(true);
         assert!(engine.metering_enabled());
@@ -772,10 +942,10 @@ mod tests {
         assert!(any_signal, "expected a non-zero metered peak");
     }
 
-    /// A round-trip of the bootstrap graph through JSON + `compile` proves
-    /// `load_graph` will accept the same serde JSON payload `init` builds and the
-    /// protocol emits. Mirrors the registry setup `init` performs, without the
-    /// wasm `static`.
+    /// A round-trip of the bootstrap graph through JSON + `compile_with_assets`
+    /// proves `load_graph` will accept the same serde JSON payload `init` builds
+    /// and the protocol emits. Mirrors the registry setup `init` performs, without
+    /// the wasm `static`.
     #[test]
     fn graph_json_compiles_against_registry() {
         let mut registry = PluginRegistry::new();
@@ -784,9 +954,231 @@ mod tests {
         let graph = bootstrap_graph(48_000, 128);
         let json = serde_json::to_vec(&graph).unwrap();
         let decoded: OjGraph = serde_json::from_slice(&json).unwrap();
-        let program = compile(&decoded, &registry).expect("bootstrap graph compiles");
+        let store = WasmAssetStore::default();
+        let program =
+            compile_with_assets(&decoded, &registry, &store).expect("bootstrap graph compiles");
         let engine = Engine::new(program);
         // One node: the lone master sink.
         assert_eq!(engine.program().len(), 1);
+    }
+
+    // --- U-WASM-PARITY: asset store + sampler live-load + mic input ------------
+
+    /// The content address is deterministic and dedups identical PCM: storing the
+    /// same samples twice yields one id and one stored copy (the native catalog's
+    /// contract, ported for the wasm store).
+    #[test]
+    fn asset_store_dedups_identical_pcm() {
+        let mut store = WasmAssetStore::default();
+        let pcm: Vec<f32> = (0..256).map(|i| (i as f32 / 256.0) - 0.5).collect();
+        let a = store.insert(pcm.clone(), 48_000.0);
+        let b = store.insert(pcm.clone(), 48_000.0);
+        assert_eq!(a, b, "identical PCM must content-address the same");
+        assert_eq!(store.assets.len(), 1, "identical PCM must not duplicate");
+        // A different rate is a distinct asset (spec is part of the address).
+        let c = store.insert(pcm, 44_100.0);
+        assert_ne!(a, c);
+        assert_eq!(store.assets.len(), 2);
+    }
+
+    /// The store resolves a stored id back to a borrow of its PCM (the
+    /// `AssetResolver` seam `compile_with_assets` calls), and `None` for unknown.
+    #[test]
+    fn asset_store_resolves_stored_pcm() {
+        let mut store = WasmAssetStore::default();
+        let pcm = vec![0.25f32; 64];
+        let id = store.insert(pcm.clone(), 48_000.0);
+        let resolved = store.resolve(id).expect("stored asset resolves");
+        assert_eq!(resolved.pcm, &pcm[..]);
+        assert_eq!(resolved.sample_rate, 48_000.0);
+        assert!(store.resolve(AssetId(id.0 ^ 0xffff_ffff)).is_none());
+    }
+
+    /// A Sampler node carrying an `AssetRef` actually receives its PCM when the
+    /// graph compiles through `compile_with_assets` over the store — the in-browser
+    /// sample-load seam end to end: store PCM, bind the id on the node, compile,
+    /// and the live sampler plays (a `note_on` produces non-silent output).
+    #[test]
+    fn sampler_plays_bound_asset_via_compile_with_assets() {
+        use ojproto::{AssetRef, ConnectionType, IrEdge};
+        let mut reg = PluginRegistry::new();
+        register_all(&mut reg, RegisterOpts::wasm());
+
+        // A loud, finite mono buffer so a played voice meters non-zero.
+        let pcm = vec![0.8f32; 512];
+        let mut store = WasmAssetStore::default();
+        let id = store.insert(pcm, 48_000.0);
+
+        let graph = OjGraph {
+            ir_version: SCHEMA_VERSION,
+            sample_rate: 48_000,
+            block_size: 64,
+            nodes: vec![
+                IrNode {
+                    id: NodeIdx(0),
+                    manifest_id: String::from(ojinstrument::SAMPLER_ID),
+                    kind: PrimitiveKind::Sampler,
+                    params: vec![],
+                    // Bind the stored PCM in slot 0 (the sampler's single buffer).
+                    assets: vec![AssetRef { slot: 0, asset: id }],
+                    n_in: 0,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(1),
+                    manifest_id: String::from(SPEAKER_OUT_ID),
+                    kind: PrimitiveKind::SpeakerOut,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 0,
+                },
+            ],
+            edges: vec![IrEdge {
+                from_node: NodeIdx(0),
+                from_port: 0,
+                to_node: NodeIdx(1),
+                to_port: 0,
+                kind: ConnectionType::Audio,
+            }],
+            schedule: vec![],
+        };
+        let program = compile_with_assets(&graph, &reg, &store).expect("sampler graph compiles");
+        let mut engine = Engine::new(program);
+
+        // With the sample installed, a note produces audible output; without it
+        // the sampler is silent (the `set_sample`/`load_asset` seam is what makes
+        // the difference, so this proves the asset reached the live instance).
+        let slot = engine
+            .program()
+            .slot_of_id(NodeIdx(0))
+            .expect("sampler slot");
+        engine.program_mut().instances[slot].note_on(60, 100);
+        let mut out = vec![0.0f32; 64];
+        engine.process_block(&mut out, 64);
+        assert!(
+            out.iter().any(|s| s.abs() > 1e-4),
+            "sampler with a bound asset must produce non-silent output"
+        );
+    }
+
+    /// `compile_with_assets` over an EMPTY store leaves a Sampler with an
+    /// unresolvable `AssetRef` silent (the asset is skipped, never an error) — the
+    /// before state the live-load transitions out of.
+    #[test]
+    fn sampler_without_resolved_asset_is_silent() {
+        use ojproto::{AssetRef, ConnectionType, IrEdge};
+        let mut reg = PluginRegistry::new();
+        register_all(&mut reg, RegisterOpts::wasm());
+        let store = WasmAssetStore::default(); // empty: nothing resolves
+
+        let graph = OjGraph {
+            ir_version: SCHEMA_VERSION,
+            sample_rate: 48_000,
+            block_size: 64,
+            nodes: vec![
+                IrNode {
+                    id: NodeIdx(0),
+                    manifest_id: String::from(ojinstrument::SAMPLER_ID),
+                    kind: PrimitiveKind::Sampler,
+                    params: vec![],
+                    assets: vec![AssetRef {
+                        slot: 0,
+                        asset: AssetId(123),
+                    }],
+                    n_in: 0,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(1),
+                    manifest_id: String::from(SPEAKER_OUT_ID),
+                    kind: PrimitiveKind::SpeakerOut,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 0,
+                },
+            ],
+            edges: vec![IrEdge {
+                from_node: NodeIdx(0),
+                from_port: 0,
+                to_node: NodeIdx(1),
+                to_port: 0,
+                kind: ConnectionType::Audio,
+            }],
+            schedule: vec![],
+        };
+        let program = compile_with_assets(&graph, &reg, &store).expect("compiles");
+        let mut engine = Engine::new(program);
+        let slot = engine.program().slot_of_id(NodeIdx(0)).expect("slot");
+        engine.program_mut().instances[slot].note_on(60, 100);
+        let mut out = vec![0.0f32; 64];
+        engine.process_block(&mut out, 64);
+        assert!(
+            out.iter().all(|s| s.abs() <= 1e-6),
+            "an unresolved sampler asset stays silent"
+        );
+    }
+
+    /// A `MicIn` source node, fed externally via `Engine::input_mut` (the buffer
+    /// `mic_in_ptr` exposes to the worklet), flows downstream this block — the
+    /// in-browser mic-input seam: the worklet writes the captured block into the
+    /// MicIn output buffer, which the exec loop leaves intact, so it reaches the
+    /// master.
+    #[test]
+    fn mic_in_injected_block_flows_to_master() {
+        use ojproto::{ConnectionType, IrEdge};
+        let mut reg = PluginRegistry::new();
+        register_all(&mut reg, RegisterOpts::wasm());
+        // MicIn -> SpeakerOut: the simplest "monitor the mic" graph.
+        let graph = OjGraph {
+            ir_version: SCHEMA_VERSION,
+            sample_rate: 48_000,
+            block_size: 64,
+            nodes: vec![
+                IrNode {
+                    id: NodeIdx(0),
+                    manifest_id: String::from(ojcore::MIC_IN_ID),
+                    kind: PrimitiveKind::MicIn,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 0,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(1),
+                    manifest_id: String::from(SPEAKER_OUT_ID),
+                    kind: PrimitiveKind::SpeakerOut,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 0,
+                },
+            ],
+            edges: vec![IrEdge {
+                from_node: NodeIdx(0),
+                from_port: 0,
+                to_node: NodeIdx(1),
+                to_port: 0,
+                kind: ConnectionType::Audio,
+            }],
+            schedule: vec![],
+        };
+        let store = WasmAssetStore::default();
+        let program = compile_with_assets(&graph, &reg, &store).expect("mic graph compiles");
+        let mut engine = Engine::new(program);
+
+        // Inject a constant 0.5 into the MicIn source (what the worklet does each
+        // block by writing into the buffer `mic_in_ptr` points at), then render.
+        let buf = engine.input_mut(NodeIdx(0), 0).expect("mic-in buffer");
+        for s in buf.iter_mut() {
+            *s = 0.5;
+        }
+        let mut out = vec![0.0f32; 64];
+        engine.process_block(&mut out, 64);
+        assert!(
+            out.iter().take(64).all(|s| (*s - 0.5).abs() < 1e-6),
+            "injected mic block must flow to the master output"
+        );
     }
 }

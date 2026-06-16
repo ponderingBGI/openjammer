@@ -114,6 +114,33 @@ export function load_graph(bytes) {
 }
 
 /**
+ * Length (in f32s) of the `MicIn` output buffer the worklet may write — the
+ * configured block size — or `0` when the program has no `MicIn` node. Pairs
+ * with [`mic_in_ptr`]; the worklet clamps its write to this.
+ * @returns {number}
+ */
+export function mic_in_len() {
+    const ret = wasm.mic_in_len();
+    return ret >>> 0;
+}
+
+/**
+ * Pointer (byte offset into wasm linear memory) of the FIRST `MicIn` node's
+ * output buffer (port 0), or null if the live program has no `MicIn`.
+ *
+ * The worklet writes one block of microphone samples here BEFORE each
+ * [`process`] call; the executor leaves external-source output buffers intact
+ * (see `Engine::input_mut` / the exec loop's `MicIn` arm), so whatever lands
+ * here flows downstream this block. Recomputed each call from the live program
+ * because the master/slot layout changes across `load_graph` swaps.
+ * @returns {number}
+ */
+export function mic_in_ptr() {
+    const ret = wasm.mic_in_ptr();
+    return ret >>> 0;
+}
+
+/**
  * Total byte length of the MIDI ring struct (header + data region).
  * @returns {number}
  */
@@ -222,6 +249,27 @@ export function sample_rate() {
 export function set_metering(on) {
     wasm.set_metering(on);
 }
+
+/**
+ * Store decoded mono `pcm` (captured at `sample_rate` Hz) in the host's PCM
+ * store and return its content-addressed [`AssetId`] (an integer the JS side
+ * then binds onto the node's [`ojproto::AssetRef`] and re-pushes the graph with,
+ * so the next [`load_graph`] resolves + installs it into the live Sampler).
+ *
+ * Off the RT thread (the worklet calls it from a control message, between
+ * `process` calls). Returns `0` if the host is not initialized — `0` is a valid
+ * content address only for a degenerate input, so the JS side treats it as "not
+ * stored" only when the host is absent (it checks `ready` first).
+ * @param {Float32Array} pcm
+ * @param {number} sample_rate
+ * @returns {number}
+ */
+export function store_asset(pcm, sample_rate) {
+    const ptr0 = passArrayF32ToWasm0(pcm, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ret = wasm.store_asset(ptr0, len0, sample_rate);
+    return ret >>> 0;
+}
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
@@ -277,6 +325,13 @@ function getUint8ArrayMemory0() {
 function passArray8ToWasm0(arg, malloc) {
     const ptr = malloc(arg.length * 1, 1) >>> 0;
     getUint8ArrayMemory0().set(arg, ptr / 1);
+    WASM_VECTOR_LEN = arg.length;
+    return ptr;
+}
+
+function passArrayF32ToWasm0(arg, malloc) {
+    const ptr = malloc(arg.length * 4, 4) >>> 0;
+    getFloat32ArrayMemory0().set(arg, ptr / 4);
     WASM_VECTOR_LEN = arg.length;
     return ptr;
 }

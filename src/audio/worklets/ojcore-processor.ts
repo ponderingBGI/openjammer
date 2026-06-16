@@ -28,8 +28,18 @@
  *   { type: 'init',   module: WebAssembly.Module, blockSize: number }
  *   { type: 'graph',  bytes: Uint8Array }     // serde-JSON OjGraph
  *   { type: 'command', bytes: Uint8Array }    // serde-JSON RtCommand frame
+ *   { type: 'load-sample', node, pcm, sampleRate, rootNote }  // sampler live-load
  * Worklet -> UI:
  *   { type: 'ready' } | { type: 'graph-ack', ok: boolean } | { type: 'error', message }
+ *   { type: 'sample-stored', node, assetId, rootNote }        // sampler live-load ack
+ *
+ * ── Microphone input ─────────────────────────────────────────────────────────
+ * When the UI wires a `MediaStreamSource` to this `AudioWorkletNode`'s input
+ * (input 0), each {@link OjcoreProcessor.process} reads `inputs[0][0]` and copies
+ * it into the engine's first `MicIn` node output buffer (via the wasm
+ * `mic_in_ptr` / `mic_in_len` getters) BEFORE rendering, so the captured block
+ * flows downstream that same render quantum. No `MicIn` node (or no input wired)
+ * => the getters report a null/zero buffer and the copy is skipped.
  */
 
 // The wasm-bindgen `--target web` glue (committed under ../wasm/pkg). Imported
@@ -157,17 +167,23 @@ class OjcoreProcessor extends AudioWorkletProcessor {
     }
 
     /**
-     * Install mono PCM as a node's sampler buffer.
+     * Install mono PCM as a node's sampler buffer (wasm sample live-load).
      *
-     * TODO(wasm-parity): the wasm engine's `DspInstance` trait has no sample-load
-     * hook reachable from here (adding one is an `ojcore`/`ojinstrument` change
-     * outside this lane). Until that lands, the worklet records that the PCM
-     * arrived (so the UI's load flow completes) but cannot yet install it into the
-     * live engine sampler instance. The audible sampler still plays whatever the
-     * graph compiled; the buffer-install is the documented gap.
+     * Stores the transferred PCM in the wasm host's content-addressed asset store
+     * (`store_asset` -> `AssetId`) and replies with that id. The UI binds the id
+     * onto the node's `AssetRef` and re-pushes the graph, so the next
+     * `load_graph` recompiles through `compile_with_assets` and the live Sampler
+     * gets the sample via `DspInstance::load_asset` — mirroring the native flow.
      */
-    private handleLoadSample(_msg: LoadSampleMsg): void {
-        // Intentionally a no-op against the engine for now (see TODO above).
+    private handleLoadSample(msg: LoadSampleMsg): void {
+        if (!this.ready) return;
+        const assetId = wasm.store_asset(msg.pcm, msg.sampleRate) as number;
+        this.port.postMessage({
+            type: 'sample-stored',
+            node: msg.node,
+            assetId,
+            rootNote: msg.rootNote,
+        });
     }
 
     /** Finish a capture and post its concatenated mono PCM back to the UI. */
@@ -255,12 +271,42 @@ class OjcoreProcessor extends AudioWorkletProcessor {
         mem.setUint32(this.ringBase + this.offWrite, (write + frame) >>> 0, true);
     }
 
-    process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
+    /**
+     * Copy the captured microphone block (input 0, channel 0) into the engine's
+     * `MicIn` node output buffer. The wasm `mic_in_ptr`/`mic_in_len` getters point
+     * at the live program's MicIn buffer (recomputed each call since the slot
+     * layout changes across graph swaps); a null pointer / zero length means there
+     * is no MicIn node, so the mic is simply not routed and we do nothing.
+     */
+    private feedMicInput(inputs: Float32Array[][]): void {
+        if (!this.exports) return;
+        const micChannel = inputs[0]?.[0];
+        if (!micChannel || micChannel.length === 0) return; // no input wired
+        const len = wasm.mic_in_len() as number;
+        if (len === 0) return; // no MicIn node in the live graph
+        const ptr = wasm.mic_in_ptr() as number;
+        if (ptr === 0) return;
+        const dst = new Float32Array(this.exports.memory.buffer, ptr, len);
+        const n = Math.min(micChannel.length, len);
+        dst.set(micChannel.subarray(0, n));
+        // Zero any tail beyond the captured block so a short input never leaves
+        // stale samples from a previous block playing through the engine.
+        for (let i = n; i < len; i++) dst[i] = 0;
+    }
+
+    process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
         if (!this.ready || !this.exports) return true;
 
         const out = outputs[0];
         if (!out || out.length === 0) return true;
         const frames = out[0].length;
+
+        // Mic input: copy this block's captured samples (input 0, channel 0) into
+        // the engine's first `MicIn` node output buffer BEFORE rendering, so the
+        // mic flows downstream this same quantum. `mic_in_ptr` is null (and
+        // `mic_in_len` 0) when the graph has no MicIn node or no input is wired,
+        // in which case the copy is skipped.
+        this.feedMicInput(inputs);
 
         // Render one block into the wasm output buffer, then copy mono -> all
         // output channels (scaled by the master gain / speaker volume).

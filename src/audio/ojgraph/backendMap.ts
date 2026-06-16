@@ -33,6 +33,15 @@ export const ENGINE_IDS = {
     osc: 'builtin.osc',
     sampler: 'builtin.sampler',
     karplus: 'builtin.karplus',
+    biquad: 'builtin.biquad',
+    waveshaper: 'builtin.waveshaper',
+    delay: 'builtin.delay',
+    convolution: 'builtin.convolution',
+    add: 'builtin.add',
+    passthrough: 'builtin.passthrough',
+    hostGraphIn: 'host.graph_in',
+    hostMicIn: 'host.mic_in',
+    hostGraphOut: 'host.graph_out',
     hostSpeakerOut: 'host.speaker_out',
 } as const;
 
@@ -61,11 +70,45 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
                 return ENGINE_IDS.gain;
         }
     }
-    // wasm registry: only gain + host.speaker_out exist.
+    // wasm registry (U-WASM-PARITY): `ojcore-wasm::init` registers the FULL
+    // common set via `ojinstrument::register_all(RegisterOpts::wasm())` — every
+    // instrument (Osc / Sampler / Karplus), every effect (Gain / Biquad /
+    // Waveshaper / Delay / Convolution), and the structural I/O nodes — MINUS SF2
+    // (rustysynth needs std). So the wasm remap preserves each kind's real loader
+    // id (a Sampler stays `builtin.sampler` so its bound `AssetRef` plays; a MicIn
+    // stays `host.mic_in` so the worklet's captured block sources from it), and
+    // only falls back to GAIN for kinds the wasm registry genuinely lacks.
     switch (kind) {
-        case 'SpeakerOut':
+        case 'Osc':
+            return ENGINE_IDS.osc;
+        // SF2 has no wasm backend; lower it to the Sampler loader so a soundfont
+        // node still plays any bound PCM sample rather than silently erroring.
+        case 'Sampler':
+        case 'Sf2':
+            return ENGINE_IDS.sampler;
+        case 'KarplusString':
+            return ENGINE_IDS.karplus;
+        case 'Biquad':
+            return ENGINE_IDS.biquad;
+        case 'Waveshaper':
+            return ENGINE_IDS.waveshaper;
+        case 'Delay':
+            return ENGINE_IDS.delay;
+        case 'Convolution':
+            return ENGINE_IDS.convolution;
+        case 'Add':
+            return ENGINE_IDS.add;
+        case 'Passthrough':
+            return ENGINE_IDS.passthrough;
+        case 'GraphIn':
+            return ENGINE_IDS.hostGraphIn;
+        case 'MicIn':
+            return ENGINE_IDS.hostMicIn;
         case 'GraphOut':
+            return ENGINE_IDS.hostGraphOut;
+        case 'SpeakerOut':
             return ENGINE_IDS.hostSpeakerOut;
+        // Gain + any kind without a dedicated wasm loader: unity passthrough.
         default:
             return ENGINE_IDS.gain;
     }
