@@ -256,6 +256,80 @@ pub enum EngineFrame {
     },
 }
 
+/// Log severity, lowest to highest. Bare-variant-string serde (no `rename_all`),
+/// mirrored on the TS side exactly like [`PrimitiveKind`] / [`ConnectionType`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Severity {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+/// Which side of the dual-target seam emitted the event. Bare-variant-string
+/// serde, mirrored on the TS side exactly like [`PrimitiveKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Source {
+    Engine,
+    Wasm,
+    Ui,
+    Native,
+}
+
+/// The RT-emittable fault taxonomy. Each maps 1:1 onto an engine resilience
+/// flag (`non_finite` / `over_budget` / `auto_bypass`). Bare-variant-string
+/// serde, like [`PrimitiveKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FaultKind {
+    NonFinite,
+    OverBudget,
+    AutoBypassed,
+}
+
+/// The CLOSED, versioned, control-rate event taxonomy. EXTERNALLY tagged by
+/// serde (matching [`RtCommand`] / [`EngineFrame`]): unit variants serialize as
+/// a bare string, data variants as `{ "<Variant>": { ..fields.. } }`. `Message`
+/// is the ONLY `String`-carrying variant. Versioned by the existing
+/// [`SCHEMA_VERSION`] — there is NO second version axis.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum EventKind {
+    /// Process/stream lifecycle (start, stop, device change).
+    Lifecycle,
+    /// A hot-swap of the running program landed.
+    GraphSwap,
+    /// Buffer underrun(s) since the last event; `dropped` is a coalesced count.
+    Xrun { dropped: u32 },
+    /// A per-node DSP fault (NaN / over-budget / auto-bypass).
+    NodeFault { node: NodeIdx, fault: FaultKind },
+    /// The event ring overflowed and dropped frames (drop-and-count).
+    RingFull,
+    /// Asset (sample / IR / SF2) load or decode event.
+    Asset,
+    /// CLAP / host-plugin lifecycle event.
+    Plugin,
+    /// MIDI in/out event.
+    Midi,
+    /// Collaboration / LAN-peer event.
+    Collab,
+    /// Free-form coded message — the single `String`-carrying variant.
+    Message { code: u16, text: String },
+}
+
+/// The RT-safe `Copy` subset of [`EventKind`] that rides the `ByteRing`. NO heap
+/// field is permitted: a `String`/`Vec` would push this past 16 bytes and FAIL
+/// the build below — the same mechanical guard that protects [`RtCommand`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RtEvent {
+    Xrun { dropped: u32 },
+    NodeFault { node: NodeIdx, fault: FaultKind },
+    RingFull,
+}
+
+// Mirrors the proven `RtCommand` cap above. A heap field smuggled into
+// `RtEvent` becomes a COMPILE error, not a runtime surprise.
+const _: () = assert!(core::mem::size_of::<RtEvent>() <= 16);
+
 #[cfg(test)]
 mod tests {
     use super::*;

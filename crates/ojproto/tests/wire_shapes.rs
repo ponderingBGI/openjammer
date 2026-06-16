@@ -258,3 +258,83 @@ fn round_trips_back_to_rust() {
     let back: EngineFrame = serde_json::from_str(&json).unwrap();
     assert_eq!(frame, back);
 }
+
+#[test]
+fn severity_is_bare_variant_string() {
+    // Parallels `primitive_kind_is_bare_variant_string` — enumerate ALL.
+    let all = [
+        (Severity::Trace, "\"Trace\""),
+        (Severity::Debug, "\"Debug\""),
+        (Severity::Info, "\"Info\""),
+        (Severity::Warn, "\"Warn\""),
+        (Severity::Error, "\"Error\""),
+    ];
+    for (s, expected) in all {
+        assert_json(&s, expected);
+    }
+}
+
+#[test]
+fn source_is_bare_variant_string() {
+    let all = [
+        (Source::Engine, "\"Engine\""),
+        (Source::Wasm, "\"Wasm\""),
+        (Source::Ui, "\"Ui\""),
+        (Source::Native, "\"Native\""),
+    ];
+    for (s, expected) in all {
+        assert_json(&s, expected);
+    }
+}
+
+#[test]
+fn fault_kind_is_bare_variant_string() {
+    let all = [
+        (FaultKind::NonFinite, "\"NonFinite\""),
+        (FaultKind::OverBudget, "\"OverBudget\""),
+        (FaultKind::AutoBypassed, "\"AutoBypassed\""),
+    ];
+    for (f, expected) in all {
+        assert_json(&f, expected);
+    }
+}
+
+#[test]
+fn event_kind_external_tagging() {
+    // Parallels `engine_frame_external_tagging`. Assert EVERY variant.
+    assert_json(&EventKind::Lifecycle, "\"Lifecycle\"");
+    assert_json(&EventKind::GraphSwap, "\"GraphSwap\"");
+    assert_json(&EventKind::Xrun { dropped: 3 }, r#"{"Xrun":{"dropped":3}}"#);
+    assert_json(
+        &EventKind::NodeFault {
+            node: NodeIdx(3),
+            fault: FaultKind::NonFinite,
+        },
+        r#"{"NodeFault":{"node":3,"fault":"NonFinite"}}"#,
+    );
+    assert_json(&EventKind::RingFull, "\"RingFull\"");
+    assert_json(&EventKind::Asset, "\"Asset\"");
+    assert_json(&EventKind::Plugin, "\"Plugin\"");
+    assert_json(&EventKind::Midi, "\"Midi\"");
+    assert_json(&EventKind::Collab, "\"Collab\"");
+    assert_json(
+        &EventKind::Message {
+            code: 42,
+            text: "boom".into(),
+        },
+        r#"{"Message":{"code":42,"text":"boom"}}"#,
+    );
+}
+
+#[test]
+fn rt_event_external_tagging() {
+    assert_json(&RtEvent::Xrun { dropped: 5 }, r#"{"Xrun":{"dropped":5}}"#);
+    assert_json(
+        &RtEvent::NodeFault {
+            node: NodeIdx(3),
+            fault: FaultKind::OverBudget,
+        },
+        r#"{"NodeFault":{"node":3,"fault":"OverBudget"}}"#,
+    );
+    assert_json(&RtEvent::RingFull, "\"RingFull\"");
+}

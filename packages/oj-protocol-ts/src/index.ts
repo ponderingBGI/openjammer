@@ -248,3 +248,59 @@ export type EngineFrame =
   | { IrAck: { ir_version: number; ok: boolean } }
   | { Beat: { bar: number; beat: number; phase: number } }
   | { Error: { code: number; message: string } };
+
+/**
+ * Log severity, lowest→highest. Rust: `enum Severity` — bare variant string,
+ * exactly like `PrimitiveKind`. Verified shapes: "Trace" | "Debug" | ...
+ */
+export type Severity = "Trace" | "Debug" | "Info" | "Warn" | "Error";
+
+/** Which side of the dual-target seam emitted the event. Rust: `enum Source` — bare string. */
+export type Source = "Engine" | "Wasm" | "Ui" | "Native";
+
+/** RT fault taxonomy. Rust: `enum FaultKind` — bare string. */
+export type FaultKind = "NonFinite" | "OverBudget" | "AutoBypassed";
+
+/**
+ * The closed, versioned event taxonomy (control-rate). Rust: `enum EventKind`,
+ * EXTERNALLY tagged — unit variants are bare strings, data variants single-key
+ * objects. `Message` is the only `String`-carrying variant.
+ *
+ * Wire examples (pinned by wire_shapes.rs):
+ *   "Lifecycle"
+ *   "GraphSwap"
+ *   { "Xrun": { "dropped": 3 } }
+ *   { "NodeFault": { "node": 3, "fault": "NonFinite" } }
+ *   "RingFull"
+ *   "Asset"
+ *   "Plugin"
+ *   "Midi"
+ *   "Collab"
+ *   { "Message": { "code": 42, "text": "boom" } }
+ */
+export type EventKind =
+  | "Lifecycle"
+  | "GraphSwap"
+  | { Xrun: { dropped: number } }
+  | { NodeFault: { node: NodeIdx; fault: FaultKind } }
+  | "RingFull"
+  | "Asset"
+  | "Plugin"
+  | "Midi"
+  | "Collab"
+  | { Message: { code: number; text: string } };
+
+/**
+ * RT-safe `Copy` subset of `EventKind` that rides the ByteRing. Rust:
+ * `enum RtEvent`, EXTERNALLY tagged. Heap-free; mirrors only the three
+ * RT-emittable variants.
+ *
+ * Wire examples (pinned by wire_shapes.rs):
+ *   { "Xrun": { "dropped": 5 } }
+ *   { "NodeFault": { "node": 3, "fault": "OverBudget" } }
+ *   "RingFull"
+ */
+export type RtEvent =
+  | { Xrun: { dropped: number } }
+  | { NodeFault: { node: NodeIdx; fault: FaultKind } }
+  | "RingFull";
