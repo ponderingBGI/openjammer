@@ -180,7 +180,14 @@ impl EngineBackend {
     /// first successful start), and control commands still validate.
     pub fn new() -> Self {
         let registry = Self::build_registry();
-        let stream = DEFAULT_STREAM;
+        // Render at the DEVICE's default sample rate, not a hardcoded 48k: a pro
+        // interface (e.g. the MOTU M4) may run at 96k, and rendering at the wrong
+        // rate plays back at the wrong pitch/tempo. The hardware is authoritative;
+        // the graph's own rate is just the UI hint (overridden per push_graph too).
+        let mut stream = DEFAULT_STREAM;
+        if let Some(rate) = ojcore_native::default_output_sample_rate() {
+            stream.sample_rate = rate;
+        }
         let swap = ProgramSwap::new();
         let meter_ring = Arc::new(MeterRing::new());
 
@@ -305,11 +312,28 @@ impl EngineBackend {
     /// goes live — the founder-verified seam that makes a serialized graph with a
     /// bound sample actually play.
     pub fn push_graph(&mut self, graph: &OjGraph) -> Result<(), BackendError> {
-        self.adopt(graph)?;
-        // Remember the live graph so a later sample bind can re-resolve + recompile
-        // it against the updated catalog without a fresh UI push.
-        self.last_graph = Some(graph.clone());
+        // Render at the device's rate (see `new`): the graph's own sample_rate is a
+        // UI hint; the hardware is authoritative, so a 96k interface plays in tune.
+        let g = self.at_device_rate(graph);
+        self.adopt(&g)?;
+        // Remember the (rate-adjusted) live graph so a later sample bind can
+        // re-resolve + recompile it against the catalog without a fresh UI push.
+        self.last_graph = Some(g);
         Ok(())
+    }
+
+    /// Clone `graph` with its `sample_rate` set to the default output device's rate
+    /// (when one is available and differs) so the engine renders in tune on hardware
+    /// that isn't 48k. Falls back to the graph's own rate when no device is present.
+    fn at_device_rate(&self, graph: &OjGraph) -> OjGraph {
+        match ojcore_native::default_output_sample_rate() {
+            Some(rate) if rate != graph.sample_rate => {
+                let mut g = graph.clone();
+                g.sample_rate = rate;
+                g
+            }
+            _ => graph.clone(),
+        }
     }
 
     /// Compile `graph` (resolving its assets through the catalog) and adopt the
@@ -654,7 +678,11 @@ mod tests {
         let be = EngineBackend::new();
         // No device in CI => not running, but the producer ring is live.
         let info = be.stream_info();
-        assert_eq!(info.sample_rate, DEFAULT_STREAM.sample_rate);
+        // The engine follows the default output device's rate (e.g. 96k on a pro
+        // interface), falling back to DEFAULT_STREAM's rate when there is no device.
+        let expected_rate =
+            ojcore_native::default_output_sample_rate().unwrap_or(DEFAULT_STREAM.sample_rate);
+        assert_eq!(info.sample_rate, expected_rate);
         assert!(info.latency_ms > 0.0);
     }
 
@@ -782,7 +810,10 @@ mod tests {
         let mut be = EngineBackend::new();
         be.recorder_start(NodeIdx(4));
         let (pcm, rate) = be.recorder_stop(NodeIdx(4)).expect("capture was armed");
-        assert_eq!(rate, DEFAULT_STREAM.sample_rate);
+        // Capture rate follows the device (see backend_constructs_headless).
+        let expected_rate =
+            ojcore_native::default_output_sample_rate().unwrap_or(DEFAULT_STREAM.sample_rate);
+        assert_eq!(rate, expected_rate);
         // No engine-output tap in the sandbox, so the captured PCM is empty —
         // but the start/stop lifecycle is intact (the documented gap is the tap).
         assert!(pcm.is_empty());

@@ -65,20 +65,28 @@ pub fn render_block<P: BlockProcessor>(
         data.fill(0.0);
         return;
     }
-    let nframes = (data.len() / channels).min(mono.len());
 
-    proc.render(&mut mono[..nframes], nframes);
-
-    // Fan the mono render out across every interleaved channel.
-    for (frame, chunk) in data.chunks_mut(channels).enumerate().take(nframes) {
-        let s = mono[frame];
-        for c in chunk.iter_mut() {
-            *c = s;
+    // The callback buffer can be MUCH larger than the engine's block size — WASAPI
+    // shared mode hands us the device period (hundreds of frames), not our 64. Render
+    // the WHOLE buffer in `mono`-sized (engine-block) chunks so it is filled with
+    // continuous audio instead of one block followed by silence (the gappy-playback
+    // bug on a `BufferSize::Default` stream). No allocation on the RT path.
+    let total_frames = data.len() / channels;
+    let block = mono.len().max(1);
+    let mut done = 0;
+    while done < total_frames {
+        let n = (total_frames - done).min(block);
+        proc.render(&mut mono[..n], n);
+        // Fan each mono frame out across all interleaved channels.
+        for (f, &s) in mono[..n].iter().enumerate() {
+            let base = (done + f) * channels;
+            data[base..base + channels].fill(s);
         }
+        done += n;
     }
-    // Zero any trailing interleaved frames we did not render into.
-    for chunk in data.chunks_mut(channels).skip(nframes) {
-        chunk.fill(0.0);
+    // Zero any tail samples past whole frames (data.len() not divisible by channels).
+    for s in data[total_frames * channels..].iter_mut() {
+        *s = 0.0;
     }
 }
 
@@ -182,6 +190,17 @@ pub struct AudioHost {
     _input: Option<Stream>,
     /// The negotiated stream config, exposed for the latency estimate.
     config: StreamConfig,
+}
+
+/// The default output device's default sample rate (Hz), or `None` when there is
+/// no device. The engine renders at THIS rate (see `oj-tauri`'s `EngineBackend`)
+/// so playback is in tune even when the default output isn't 48k — e.g. a 96k pro
+/// interface like the MOTU M4.
+pub fn default_output_sample_rate() -> Option<u32> {
+    let host = cpal::default_host();
+    let device = host.default_output_device()?;
+    let cfg = device.default_output_config().ok()?;
+    Some(cfg.config().sample_rate)
 }
 
 /// Probe whether `device` accepts `config` for output by opening a throwaway
@@ -487,30 +506,26 @@ mod tests {
     }
 
     #[test]
-    fn callback_clamps_nframes_to_mono_scratch() {
-        // If cpal hands a block larger than the pre-sized scratch, we render only
-        // what fits and zero the rest rather than panicking / allocating.
+    fn callback_fills_large_buffer_in_chunks() {
+        // A callback buffer LARGER than the engine-block scratch must be FULLY
+        // rendered in mono-sized chunks — never one block + silence. WASAPI shared
+        // mode hands us the device period (much bigger than 64), so clamping would
+        // leave most of every buffer silent (the gappy-playback bug).
         let (_tx, rx) = ojcore::CommandQueue::split(4);
         let mut rx = rx;
         let mut proc = MockProcessor::new(1.0);
         let channels = 2;
         let big_frames = 10;
         let mut data = vec![9.0f32; big_frames * channels];
-        let mut mono = vec![0.0f32; 4]; // scratch only fits 4 frames
+        let mut mono = vec![0.0f32; 4]; // engine block fits 4 frames
 
         render_block(&mut proc, &mut rx, &mut data, channels, &mut mono);
 
-        assert_eq!(proc.last_nframes, 4);
-        // First 4 frames rendered to 1.0...
-        for frame in 0..4 {
-            assert_eq!(data[frame * 2], 1.0);
-            assert_eq!(data[frame * 2 + 1], 1.0);
-        }
-        // ...trailing frames zeroed, never left stale or out-of-bounds.
-        for frame in 4..big_frames {
-            assert_eq!(data[frame * 2], 0.0);
-            assert_eq!(data[frame * 2 + 1], 0.0);
-        }
+        // 10 frames in 4-frame chunks → 4 + 4 + 2 = three render calls, last = 2.
+        assert_eq!(proc.renders, 3);
+        assert_eq!(proc.last_nframes, 2);
+        // EVERY frame across EVERY channel is filled — no gaps, no stale samples.
+        assert!(data.iter().all(|&s| s == 1.0));
     }
 
     #[test]
