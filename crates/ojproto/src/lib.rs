@@ -330,6 +330,29 @@ pub enum RtEvent {
 // `RtEvent` becomes a COMPILE error, not a runtime surprise.
 const _: () = assert!(core::mem::size_of::<RtEvent>() <= 16);
 
+/// The off-RT, control-rate event ENVELOPE every L1/L3/L4 consumer reads: the
+/// decoded [`EventKind`] plus severity/source/timestamp/correlation metadata.
+/// A plain struct, so serde serializes it as an object with these field names in
+/// declaration order — mirrored byte-for-byte by the `oj-protocol-ts` `Event`
+/// interface and pinned by `event_struct_shape` in `wire_shapes.rs`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Event {
+    /// Schema version (mirrors [`SCHEMA_VERSION`]).
+    pub v: u16,
+    /// Monotonic per-source sequence number.
+    pub seq: u32,
+    /// Severity.
+    pub severity: Severity,
+    /// The event taxonomy payload.
+    pub kind: EventKind,
+    /// Which side emitted it.
+    pub source: Source,
+    /// Engine-stamped timestamp, microseconds.
+    pub ts_us: u64,
+    /// Correlation id for click-to-correlate; `0` = none.
+    pub corr_id: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

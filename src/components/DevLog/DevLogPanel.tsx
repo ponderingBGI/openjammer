@@ -63,6 +63,14 @@ function formatTime(ts: number): string {
 }
 
 export function DevLogPanel() {
+    // Gate BEFORE any hooks: a disabled build must not subscribe to the store or
+    // register global listeners. Conditional hooks are illegal, so the guard lives
+    // in this thin wrapper and all hooks live in DevLogPanelInner.
+    if (!DEVLOG_ENABLED) return null;
+    return <DevLogPanelInner />;
+}
+
+function DevLogPanelInner() {
     const [open, setOpen] = useState(false);
 
     // Filter state.
@@ -133,7 +141,7 @@ export function DevLogPanel() {
         setRawSearch('');
     }, []);
 
-    if (!DEVLOG_ENABLED || !open) return null;
+    if (!open) return null;
 
     return createPortal(
         <div className="devlog-overlay" onClick={() => setOpen(false)}>
@@ -245,7 +253,10 @@ function LogList({
     }, []);
 
     const total = entries.length;
-    const firstVisible = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+    // Clamp so a high scrollTop + a suddenly-shrunk list (filter/reset/clear) can
+    // never push the window past the end and mount an empty slice despite rows.
+    const rawFirst = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - OVERSCAN);
+    const firstVisible = total === 0 ? 0 : Math.min(rawFirst, total - 1);
     const visibleCount = Math.ceil(viewportH / ROW_HEIGHT) + OVERSCAN * 2;
     const lastVisible = Math.min(total, firstVisible + visibleCount);
     const slice = entries.slice(firstVisible, lastVisible);

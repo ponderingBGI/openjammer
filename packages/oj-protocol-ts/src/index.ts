@@ -292,16 +292,11 @@ export type EventKind =
 
 /**
  * A single control-rate structured event — the off-RT decoded record every L1/
- * L3/L4 consumer reads.
+ * L3/L4 consumer reads. Mirrors `ojproto::Event` (a plain struct → object with
+ * these fields in declaration order) and is pinned byte-for-byte by the
+ * `event_struct_shape` test in `crates/ojproto/tests/wire_shapes.rs`.
  *
- * FORWARD-DECLARED — NOT yet wire-verified. The Rust `struct Event { v, seq,
- * severity, kind, source, ts_us, corr_id }` and its `wire_shapes.rs` byte-parity
- * test land in the Phase-2 transport/decode wave (see docs/plans/02 + 09); the
- * schema wave deliberately deferred the envelope. Until that Rust struct exists
- * this is the app-side contract and MUST be kept in sync by hand — the parity
- * gate will enforce it the moment the Rust side is added.
- *
- * Expected wire shape (plain struct → object, snake_case fields, declaration order):
+ * Wire shape:
  *   { "v": 1, "seq": 12, "severity": "Warn",
  *     "kind": { "NodeFault": { "node": 3, "fault": "OverBudget" } },
  *     "source": "Engine", "ts_us": 123456, "corr_id": 0 }

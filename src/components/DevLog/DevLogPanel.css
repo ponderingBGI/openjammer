@@ -156,6 +156,15 @@
     outline: none;
 }
 
+/* Visible keyboard-focus indicator (replaces the removed native outline) so the
+   panel's controls stay navigable without a mouse. */
+.devlog-btn:focus-visible,
+.devlog-chip:focus-visible,
+.devlog-search:focus-visible {
+    outline: 2px solid var(--accent-primary, var(--sketch-black));
+    outline-offset: 2px;
+}
+
 .devlog-search::placeholder {
     color: var(--text-muted);
 }

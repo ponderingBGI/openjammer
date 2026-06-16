@@ -77,6 +77,16 @@ function buildNodeCommands(): Command[] {
 }
 
 /**
+ * Whether the DevLog dev/canary surface is built (mirrors DevLogPanel.tsx). When
+ * false the panel renders `null`, so its command must not be registered either —
+ * otherwise it is a guaranteed no-op in the palette for production users.
+ */
+const DEVLOG_ENABLED =
+    import.meta.env.DEV ||
+    import.meta.env.VITE_OJ_CANARY === 'true' ||
+    import.meta.env.VITE_OJ_CANARY === '1';
+
+/**
  * App-action commands sourced from menus/keybindings where trivially available.
  * These reuse the existing window CustomEvent seam (see App.tsx / HelpPanel.tsx).
  */
@@ -103,13 +113,18 @@ function buildAppCommands(): Command[] {
             keywords: ['new', 'project', 'create', 'file'],
             run: () => window.dispatchEvent(new CustomEvent('openjammer:new-project')),
         },
-        {
-            id: 'app.devlog.toggle',
-            title: 'Toggle DevLog',
-            group: 'App',
-            keywords: ['devlog', 'log', 'logs', 'debug', 'console', 'diagnostics', 'events'],
-            run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-devlog')),
-        },
+        // Registered only where the DevLogPanel renders (dev/canary).
+        ...(DEVLOG_ENABLED
+            ? [
+                  {
+                      id: 'app.devlog.toggle',
+                      title: 'Toggle DevLog',
+                      group: 'App',
+                      keywords: ['devlog', 'log', 'logs', 'debug', 'console', 'diagnostics', 'events'],
+                      run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-devlog')),
+                  },
+              ]
+            : []),
     ];
 }
 

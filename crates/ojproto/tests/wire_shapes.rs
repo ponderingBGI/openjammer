@@ -338,3 +338,23 @@ fn rt_event_external_tagging() {
     );
     assert_json(&RtEvent::RingFull, "\"RingFull\"");
 }
+
+#[test]
+fn event_struct_shape() {
+    // The off-RT Event ENVELOPE: a plain struct -> object with fields in
+    // declaration order. The oj-protocol-ts `Event` interface mirrors this exactly.
+    let ev = Event {
+        v: SCHEMA_VERSION,
+        seq: 12,
+        severity: Severity::Warn,
+        kind: EventKind::NodeFault {
+            node: NodeIdx(3),
+            fault: FaultKind::OverBudget,
+        },
+        source: Source::Engine,
+        ts_us: 123456,
+        corr_id: 0,
+    };
+    let expected = r#"{"v":1,"seq":12,"severity":"Warn","kind":{"NodeFault":{"node":3,"fault":"OverBudget"}},"source":"Engine","ts_us":123456,"corr_id":0}"#;
+    assert_json(&ev, expected);
+}
