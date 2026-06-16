@@ -191,3 +191,64 @@ and gated on the founder enabling them:
 Only after (1)+(3)+(4) land should anyone consider flipping the *execution* path
 default; the **authoring + validation pipeline in this document is complete and
 verified today**.
+
+---
+
+## Faust's actual wasm ABI + the `FaustWasmKernel` adapter (empirical)
+
+> Status update: the native wasmtime RT host now EXISTS (`crates/ojwasm`, behind
+> `--features wasmtime-host`): it runs import-free `oj_*` modules per §2 with the
+> guard chain + epoch-preemption + bypass, all unit-tested against hand-written
+> WAT fixtures. faust 2.85.5 (with the WebAssembly backend) is installed.
+
+The one open question this document deferred — *does `faust -lang wasm` emit
+`oj_*`?* — is resolved empirically: **no.** faust emits its OWN wasm ABI, so the
+`oj_*` contract above is for hand-authored modules (Rust/AssemblyScript/WAT), and
+faust modules are run through a host-side **adapter** instead.
+
+### What `faust -lang wasm` actually produces (faust 2.85.5)
+
+- **It IMPORTS `env.memoryBase` (an `i32` global).** So a faust module is NOT
+  import-free and is rejected by the `oj_*` loader by design. Math-using DSP also
+  imports `env._sinf` / `_expf` / … which the adapter's linker must supply.
+- **One exported `memory`** (e.g. `(memory (export "memory") 2 1002)` — 2 pages
+  initial). faust's static data lives in the low pages.
+- **A dsp-pointer ABI** — every function takes a `dsp: i32` pointer to a struct the
+  HOST allocates (struct byte size is the faust `-json` `"size"` field):
+  - `init(dsp, sample_rate)` — full init (class + instance).
+  - `compute(dsp, count, inputs, outputs)` — `inputs`/`outputs` are pointers to
+    arrays of per-channel buffer pointers; buffers are **non-interleaved** f32.
+  - `setParamValue(dsp, index, value)` / `getParamValue(dsp, index)` — params by the
+    sequential `index` from the `-json` `ui[]` (`"index"` field), the same order the
+    v1 manifest carries.
+  - `getNumInputs(dsp)` / `getNumOutputs(dsp)` / `getSampleRate(dsp)`,
+    `instanceInit` / `instanceConstants` / `instanceClear` /
+    `instanceResetUserInterface`.
+
+### The decision: `FaustWasmKernel` (host-side adapter), not an `oj_*` wrapper
+
+faust's wasm backend has no `oj_*` architecture-file hook, and re-exporting via a
+second linked module is heavy. Instead the host's `Kernel` trait
+(`init`/`process`/`param`, interleaved host buffers) is ABI-AGNOSTIC, so faust is
+supported by a second `Kernel` impl — `FaustWasmKernel` — that:
+
+1. instantiates with a `Linker` providing `env.memoryBase = 0` + the math shim
+   (mapping faust's imported `_sinf`/`_expf`/… to Rust `libm`);
+2. lays out the dsp struct + the per-channel I/O buffers + the two pointer arrays in
+   **fresh pages above faust's initial memory** (so they never collide with faust's
+   static data), and writes the pointer arrays once;
+3. `init` → `init(dsp, sr)`; `param(idx,v)` → `setParamValue(dsp, idx, v)`;
+   `process` → de-interleave host input into the channel buffers, `compute(dsp, n,
+   in_ptrs, out_ptrs)`, re-interleave the channel buffers into host output.
+
+The same `WasmHostNode` then wraps EITHER kernel with the identical guard chain +
+epoch-preemption + bypass, so `oj_*` and faust modules are audibly uniform. The dsp
+byte size + param indices come from the faust `-json` the authoring side already
+parses (`author_wasm_node`). `build_kernel` picks the adapter by sniffing the
+module's imports/exports.
+
+### Remaining to end-to-end faust → sound
+1. `FaustWasmKernel` in `crates/ojwasm/src/backend.rs` (+ a faust-compiling test).
+2. Wire `ojwasm` into the `oj-tauri` engine/registry; `author_wasm_node` stores the
+   bytes (fixing the discarded-bytes gap) and registers the loader + recompiles.
+3. The 64-sample `<5 ms` benchmark on real hardware (the MOTU M4 is present).
