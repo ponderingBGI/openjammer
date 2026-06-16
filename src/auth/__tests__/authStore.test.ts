@@ -39,6 +39,8 @@ function resetStore() {
     useAuthStore.setState({
         activeProvider: undefined,
         modelId: undefined,
+        key: undefined,
+        baseUrl: undefined,
         configured: false,
         conflict: false,
     });
@@ -62,7 +64,8 @@ describe('authStore', () => {
 
         await useAuthStore.getState().refreshStatus();
 
-        expect(invokeMock).toHaveBeenCalledWith('auth_status');
+        // refreshStatus passes the active provider so native can compute conflict.
+        expect(invokeMock).toHaveBeenCalledWith('auth_status', { provider: undefined });
         const s = useAuthStore.getState();
         expect(s.configured).toBe(true);
         expect(s.activeProvider).toBe('opencode');
@@ -117,36 +120,39 @@ describe('authStore', () => {
         expect(useAuthStore.getState().configured).toBe(false);
     });
 
-    it('forwards a BYO base URL through validateKey + storeKey (never persisted)', async () => {
-        // The BYO OpenAI-compatible base URL must reach the native side, not be
-        // dropped at the seam — but it is transient and must never be persisted.
-        invokeMock.mockImplementation((cmd: string) => {
-            if (cmd === 'auth_validate_key') return Promise.resolve({ ok: true });
-            if (cmd === 'auth_store_key') return Promise.resolve({ ok: true });
-            if (cmd === 'auth_status')
-                return Promise.resolve({ configured: true, activeProvider: 'openai', conflict: false });
-            return Promise.resolve({});
-        });
+    it('validateKey forwards the BYO base URL; storeKey holds key+baseUrl in memory (never persisted)', async () => {
+        // The BYO OpenAI-compatible base URL must reach the native VALIDATOR. But
+        // storeKey holds the key + base URL IN MEMORY (the keychain is founder-gated)
+        // — both transient, NEVER persisted to disk.
+        invokeMock.mockResolvedValue({ ok: true });
 
         await useAuthStore.getState().validateKey('openai', 'sk-byo', 'https://api.example.com/v1');
-        await useAuthStore.getState().storeKey('openai', 'sk-byo', 'https://api.example.com/v1');
+        const stored = await useAuthStore
+            .getState()
+            .storeKey('openai', 'sk-byo', 'https://api.example.com/v1');
 
+        // Validation reaches native WITH the base URL.
         expect(invokeMock).toHaveBeenCalledWith('auth_validate_key', {
             provider: 'openai',
             key: 'sk-byo',
             baseUrl: 'https://api.example.com/v1',
         });
-        expect(invokeMock).toHaveBeenCalledWith('auth_store_key', {
-            provider: 'openai',
-            key: 'sk-byo',
-            baseUrl: 'https://api.example.com/v1',
-        });
+        // storeKey is in-memory: it does NOT invoke the (founder-gated) keychain.
+        expect(invokeMock).not.toHaveBeenCalledWith('auth_store_key', expect.anything());
+        // It marks us configured and holds the key + base URL in memory.
+        expect(stored.ok).toBe(true);
+        const s = useAuthStore.getState();
+        expect(s.configured).toBe(true);
+        expect(s.activeProvider).toBe('openai');
+        expect(s.key).toBe('sk-byo');
+        expect(s.baseUrl).toBe('https://api.example.com/v1');
 
-        // The base URL is transient: it must NOT land in the persisted blob.
+        // The key + base URL are transient: nothing sensitive lands in the persisted blob.
         await Promise.resolve();
         const raw = localStorage.getItem(STORAGE_KEY);
         expect(raw?.toLowerCase()).not.toContain('example.com');
         expect(raw?.toLowerCase()).not.toContain('baseurl');
+        expect(raw?.toLowerCase()).not.toContain('sk-byo');
     });
 
     it('omits baseUrl from the invoke payload when none is given', async () => {

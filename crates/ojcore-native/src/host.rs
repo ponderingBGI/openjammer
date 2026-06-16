@@ -184,6 +184,21 @@ pub struct AudioHost {
     config: StreamConfig,
 }
 
+/// Probe whether `device` accepts `config` for output by opening a throwaway
+/// no-op stream and dropping it immediately. Used at startup to pick a config
+/// the backend actually supports (WASAPI shared mode rejects an arbitrary
+/// `Fixed` buffer, so the sub-5ms request must gracefully fall back).
+fn probe_output_config(device: &cpal::Device, config: &StreamConfig) -> bool {
+    device
+        .build_output_stream(
+            *config,
+            |_data: &mut [f32], _: &cpal::OutputCallbackInfo| {},
+            |_e: cpal::Error| {},
+            None,
+        )
+        .is_ok()
+}
+
 impl AudioHost {
     /// The negotiated output [`StreamConfig`] (channels / sample rate / buffer).
     pub fn config(&self) -> &StreamConfig {
@@ -231,11 +246,37 @@ impl AudioHost {
         } else {
             req.channels
         };
-        let config = StreamConfig {
-            channels,
-            sample_rate: req.sample_rate,
-            buffer_size: BufferSize::Fixed(req.buffer_frames),
-        };
+        // Pick a config the device actually accepts. WASAPI *shared* mode (the
+        // default Windows host) rejects an arbitrary `Fixed` buffer — and the
+        // sub-5ms ambition needs exclusive/ASIO anyway — so fall back to the
+        // device period, then to the device's full default config, probing each
+        // by opening a throwaway no-op stream first. Sample rate + channels are
+        // preserved where possible so the engine's compiled rate matches the
+        // stream (no resampling / pitch drift); only the last-resort device
+        // default may change the rate.
+        let default_stream_cfg = default_cfg.config();
+        let candidates = [
+            StreamConfig {
+                channels,
+                sample_rate: req.sample_rate,
+                buffer_size: BufferSize::Fixed(req.buffer_frames),
+            },
+            StreamConfig {
+                channels,
+                sample_rate: req.sample_rate,
+                buffer_size: BufferSize::Default,
+            },
+            default_stream_cfg,
+        ];
+        let config = candidates
+            .iter()
+            .copied()
+            .find(|c| probe_output_config(&device, c))
+            .unwrap_or(default_stream_cfg);
+        eprintln!(
+            "ojcore: audio stream negotiated: {} ch @ {} Hz, buffer {:?}",
+            config.channels, config.sample_rate, config.buffer_size
+        );
 
         // Optional duplex input. We open it first so it is running before output
         // pulls; the harness records into a shared buffer via a separate seam.

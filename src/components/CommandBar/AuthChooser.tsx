@@ -107,18 +107,32 @@ export function AuthChooser({ onConfigured, onBack }: AuthChooserProps) {
                 Choose who pays for the AI agent. This only sets the provider — every edit
                 still applies behind your Approve / Reject.
             </p>
-            <Command
-                label="Choose AI provider"
-                shouldFilter={false}
-                value={value}
-                onValueChange={setValue}
-                loop
-            >
+            <Command label="Choose AI provider" value={value} onValueChange={setValue} loop>
+                {/*
+                 * cmdk drives ↑/↓ navigation + Enter through its INPUT; without one
+                 * the list is unfocusable and the keyboard does nothing (the bug).
+                 * autoFocus so arrows/Enter work the moment the chooser opens.
+                 */}
+                <Command.Input
+                    autoFocus
+                    className="command-bar-input"
+                    placeholder="Filter providers…  (↑ ↓ to navigate, Enter to choose)"
+                    onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                            e.preventDefault();
+                            onBack();
+                        }
+                    }}
+                />
                 <Command.List className="command-bar-list">
+                    <Command.Empty className="command-bar-empty">
+                        No providers match.
+                    </Command.Empty>
                     {PROVIDERS.map((p) => (
                         <Command.Item
                             key={p.id}
                             value={p.id}
+                            keywords={[p.title, p.subtitle]}
                             className="command-bar-item command-bar-auth-item"
                             onSelect={() => setSelected(p)}
                         >
@@ -164,11 +178,13 @@ function ProviderDetail({
         // BYO OpenAI-compatible providers carry a base URL; forward it (transient,
         // never persisted) so it is not silently dropped at the auth seam.
         const url = isOpenAiCompatible ? baseUrl.trim() || undefined : undefined;
-        // Validate first (founder-gated HTTP check), then store in the keychain.
+        // Validate best-effort. A DEFINITIVE rejection blocks; but when validation
+        // is unavailable in this build (founder-gated HTTP round-trip), we proceed
+        // to store — a wrong key then surfaces as a clear error on the first run.
         const validation = await validateKey(provider.id, key.trim(), url);
-        if (!validation.ok) {
+        if (!validation.ok && !validation.notConfigured) {
             setBusy(false);
-            setMessage(validation.message ?? 'Could not validate the key.');
+            setMessage(validation.message ?? 'That key was rejected.');
             return;
         }
         const stored = await storeKey(provider.id, key.trim(), url);
@@ -248,6 +264,7 @@ function ProviderDetail({
                         />
                     )}
                     <input
+                        autoFocus
                         className="command-bar-input command-bar-auth-input"
                         type="password"
                         placeholder="Paste your API key, then press Enter…"

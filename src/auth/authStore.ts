@@ -63,7 +63,16 @@ interface AuthStoreState {
     activeProvider?: string;
     /** The model id pinned for runs, when the provider/chooser set one. */
     modelId?: string;
-    /** Derived from `auth_status`: a working key is available for `activeProvider`. */
+    /**
+     * The provider API key, held IN MEMORY for this session ONLY — never in
+     * `partialize`, never written to disk. It is forwarded transiently to Pi per
+     * run (the OS-keychain persistence is the founder-gated upgrade). This is what
+     * makes "paste a key → use the agent" work today without the keychain plugin.
+     */
+    key?: string;
+    /** BYO OpenAI-compatible base URL (in-memory, transient — never persisted). */
+    baseUrl?: string;
+    /** Derived from `auth_status` (or an in-memory key): a key is available. */
     configured: boolean;
     /** True when Pi's auth.json would resolve a conflicting working key (D6-A1). */
     conflict: boolean;
@@ -119,23 +128,30 @@ export const useAuthStore = create<AuthStoreState>()(
         (set, get) => ({
             activeProvider: undefined,
             modelId: undefined,
+            key: undefined,
+            baseUrl: undefined,
             configured: false,
             conflict: false,
 
             refreshStatus: async () => {
+                // An in-memory key (pasted this session) keeps us configured even
+                // though the keychain SOURCE is founder-gated.
+                const haveKey = () => !!get().key;
                 if (!authAvailable()) {
-                    set({ configured: false, conflict: false });
+                    set({ configured: haveKey(), conflict: false });
                     return;
                 }
                 const invoke = getInvoke();
                 if (!invoke) {
-                    set({ configured: false, conflict: false });
+                    set({ configured: haveKey(), conflict: false });
                     return;
                 }
                 try {
-                    const status = (await invoke('auth_status')) as NativeAuthStatus;
+                    const status = (await invoke('auth_status', {
+                        provider: get().activeProvider,
+                    })) as NativeAuthStatus;
                     set({
-                        configured: !!status.configured,
+                        configured: haveKey() || !!status.configured,
                         conflict: !!status.conflict,
                         // Adopt the native view of provider/model when it reports one
                         // (e.g. a key already in the keychain from a prior session),
@@ -144,7 +160,7 @@ export const useAuthStore = create<AuthStoreState>()(
                         modelId: status.modelId ?? get().modelId,
                     });
                 } catch {
-                    set({ configured: false, conflict: false });
+                    set({ configured: haveKey(), conflict: false });
                 }
             },
 
@@ -166,19 +182,12 @@ export const useAuthStore = create<AuthStoreState>()(
                 if (!authAvailable()) {
                     return { ok: false, message: 'AI auth requires the desktop app.' };
                 }
-                const invoke = getInvoke();
-                if (!invoke) return { ok: false, message: 'AI auth requires the desktop app.' };
-                // Forward the BYO base URL only when present (transient, never persisted).
-                const res = (await invoke('auth_store_key', {
-                    provider,
-                    key,
-                    ...(baseUrl ? { baseUrl } : {}),
-                })) as AuthActionResult;
-                if (res.ok) {
-                    set({ activeProvider: provider });
-                    await get().refreshStatus();
-                }
-                return res;
+                // Hold the key IN MEMORY for this session and forward it to Pi per
+                // run — never persisted to disk (OS-keychain persistence is the
+                // founder-gated upgrade). This makes "paste a key → use the agent"
+                // work today without the keychain plugin.
+                set({ key, baseUrl, activeProvider: provider, configured: true });
+                return { ok: true };
             },
 
             validateKey: async (provider, key, baseUrl) => {
@@ -203,7 +212,7 @@ export const useAuthStore = create<AuthStoreState>()(
                         // Best-effort: still reset local state below.
                     }
                 }
-                set({ configured: false, conflict: false });
+                set({ key: undefined, baseUrl: undefined, configured: false, conflict: false });
             },
 
             setProvider: (provider, modelId) => {

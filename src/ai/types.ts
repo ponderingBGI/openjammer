@@ -271,6 +271,16 @@ export interface AgentTask {
      * it. Omitted when the user relies on their `~/.pi` config / env instead.
      */
     providerKey?: string;
+    /**
+     * The active provider id (e.g. `'opencode'`). Selects the env var the key is
+     * forwarded under (see `ai.rs` `provider_env_var`); omitted → Pi's own config.
+     */
+    provider?: string;
+    /**
+     * Optional model id to pin for this run via `set_model`; omitted means Pi's
+     * configured default for the provider is used.
+     */
+    modelId?: string;
 }
 
 /**

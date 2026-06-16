@@ -77,7 +77,16 @@ export function AiPanel({ initialPrompt, forceAuth = false, onBack, onClose }: A
     const runPrompt = useCallback(() => {
         const prompt = (inputRef.current?.value ?? '').trim();
         if (!prompt || !available || !configured) return;
-        void start(backend, { prompt });
+        // Forward WHO PAYS to the run: the in-memory key + active provider (+ an
+        // optional model) flow to ai_run, which injects the key under the
+        // provider's env var (e.g. opencode → OPENCODE_API_KEY) for Pi.
+        const auth = useAuthStore.getState();
+        void start(backend, {
+            prompt,
+            providerKey: auth.key,
+            provider: auth.activeProvider,
+            modelId: auth.modelId,
+        });
     }, [available, configured, backend, start]);
 
     const running = phase === 'running';
@@ -86,17 +95,24 @@ export function AiPanel({ initialPrompt, forceAuth = false, onBack, onClose }: A
 
     return (
         <div className="command-bar-ai" data-available={available}>
-            <div className="command-bar-ai-header">
-                <button
-                    type="button"
-                    className="command-bar-ai-back"
-                    onClick={onBack}
-                    aria-label="Back to search"
-                >
-                    ← Search
-                </button>
-                <span className="command-bar-ai-badge">AI</span>
-            </div>
+            {/*
+             * The AuthChooser renders its OWN header ("← Search / Configure AI
+             * provider"); only show this one OUTSIDE the chooser so we don't stack
+             * two search bars (the reported double-header bug).
+             */}
+            {!showAuth && (
+                <div className="command-bar-ai-header">
+                    <button
+                        type="button"
+                        className="command-bar-ai-back"
+                        onClick={onBack}
+                        aria-label="Back to search"
+                    >
+                        ← Search
+                    </button>
+                    <span className="command-bar-ai-badge">AI</span>
+                </div>
+            )}
 
             {!available ? (
                 <DesktopOnly onClose={onClose} />
