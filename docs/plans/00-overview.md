@@ -161,7 +161,8 @@ render:
     cargo run -p ojcore-native --bin render --features demo -- {{wav}} 2
 
 # aggregate (dependency form; full recipe set in the canonical justfile / 07-reference-configs.md)
-rust: fmt clippy test doctest test-rt nostd wasm render clap-host
+# `test-rt` joins `rust` only in Phase 2 (it needs the ojcore `devlog` feature).
+rust: fmt clippy test doctest nostd wasm render clap-host
 ```
 
 ### F2 — One `oj` Bun/TS CLI

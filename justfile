@@ -71,7 +71,10 @@ web:
     bun run build
 
 # ── Aggregates the CI lanes call (dependency form: run in listed order) ────────
-rust: fmt clippy test doctest test-rt nostd wasm render clap-host
+# NOTE: `test-rt` is intentionally NOT in `rust` yet — it requires the ojcore
+# `devlog` feature, a Phase-2 addition. Run it standalone (`just test-rt`) only
+# after Phase 2 lands; it joins the per-PR gate then (docs/plans/02 + 00 §F3).
+rust: fmt clippy test doctest nostd wasm render clap-host
 
 ci: rust web
 

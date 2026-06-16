@@ -428,8 +428,9 @@ pub mod event_frame {
         }
     }
 
-    /// Decode one event frame (the bytes AFTER the tag has been matched by
-    /// `drain_frames`). Returns `None` on an unknown sub-kind or truncation.
+    /// Decode one event frame. `bytes` is the FULL frame exactly as `drain_frames`
+    /// passes it — starting with the `TAG_EVENT` tag byte at `bytes[0]`, then the
+    /// sub-kind byte, then the payload. Returns `None` on an unknown sub-kind or truncation.
     pub fn decode(bytes: &[u8]) -> Option<RtEvent> {
         match (*bytes.first()?, bytes.get(1).copied()) {
             (TAG_EVENT, Some(SUB_XRUN)) if bytes.len() >= 6 => {
@@ -543,7 +544,24 @@ fn main() -> std::io::Result<()> {
     )?;
 
     // A FLAT string list of every PrimitiveKind variant, for the set-equality gate.
-    let kinds = schemars::schema_for!(ojproto::PrimitiveKind);
+    // schema_for! returns a full JSON Schema DOCUMENT, not a bare list — so extract
+    // the variant names. PrimitiveKind is a unit enum (serde bare strings); schemars
+    // emits either {"enum":[...]} or {"oneOf":[{"const":"Osc"},...]} depending on
+    // version, so handle both and write only the flat name array the gate compares.
+    let schema = serde_json::to_value(schemars::schema_for!(ojproto::PrimitiveKind))
+        .expect("schema to value");
+    let kinds: Vec<String> = schema
+        .get("enum")
+        .and_then(|e| e.as_array())
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .or_else(|| {
+            schema.get("oneOf").and_then(|o| o.as_array()).map(|a| {
+                a.iter()
+                    .filter_map(|v| v.get("const").and_then(|c| c.as_str()).map(String::from))
+                    .collect()
+            })
+        })
+        .expect("PrimitiveKind schema should expose enum or oneOf/const variant names");
     fs::write(
         "schemas/primitive-kinds.json",
         serde_json::to_string_pretty(&kinds).expect("serialize kind list"),

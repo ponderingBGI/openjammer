@@ -274,8 +274,8 @@ name: build-installers
 on:
   workflow_call:
     inputs:
-      profile: { type: string, default: stable }   # "stable" | "canary" — selects the signing secret
-      tag:     { type: string, default: "" }        # immutable tag the caller assigns assets to
+      profile: { type: string, default: stable }   # "stable" | "canary" — labels the build channel (the signing KEY is caller-mapped, never selected here)
+      tag:     { type: string, default: "" }        # immutable tag stamped onto the build + used by the caller's assemble-manifest
     secrets:
       SIGNING_KEY:          { required: true }       # STABLE on release.yml, CANARY on canary.yml
       SIGNING_KEY_PASSWORD: { required: true }
@@ -315,6 +315,11 @@ jobs:
           # tauri-action auto-signs the bundle + emits latest.json when these are set.
           TAURI_SIGNING_PRIVATE_KEY:          ${{ secrets.SIGNING_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          # Wire the caller inputs through so they are actually consumed: the build
+          # stamps its channel (OJ_CHANNEL) and carries the immutable tag the caller's
+          # assemble-manifest assigns these assets to (OJ_BUILD_TAG).
+          OJ_CHANNEL:   ${{ inputs.profile }}
+          OJ_BUILD_TAG: ${{ inputs.tag }}
         with:
           projectPath: "."
           args: ${{ matrix.args }}
@@ -707,13 +712,17 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
       - name: Three-way version equality (a 0.0.0 binary can NEVER ship)
         run: |
-          # built-binary CARGO_PKG_VERSION == tag (sans 'v') == tauri.conf.json $.version.
-          # Guards against the verified four-way drift: Cargo.toml:9 = "0.0.0",
-          # package.json:3 = "0.1.0-alpha", tauri.conf.json:4 = "0.1.0",
-          # oj-protocol-ts/package.json:3 = "0.0.0" — release-please unifies these.
+          # tag (sans 'v') == Cargo workspace version (the binary's CARGO_PKG_VERSION)
+          # == tauri.conf.json $.version. All three are read at the BUILT ref (this tag),
+          # so the Cargo version IS what the shipped binary was compiled with. Guards the
+          # verified four-way drift release-please unifies. (Defense-in-depth: the
+          # installers job can additionally surface the built CARGO_PKG_VERSION as an output.)
           TAG="${GITHUB_REF_NAME#v}"
+          CARGO=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
           CONF=$(jq -r .version src-tauri/tauri.conf.json)
-          test "$TAG" = "$CONF" || { echo "::error::tag $TAG != tauri.conf.json $CONF"; exit 1; }
+          echo "tag=$TAG cargo=$CARGO conf=$CONF"
+          test "$TAG" = "$CARGO" || { echo "::error::tag $TAG != Cargo $CARGO"; exit 1; }
+          test "$TAG" = "$CONF"  || { echo "::error::tag $TAG != tauri.conf.json $CONF"; exit 1; }
         env: { GH_TOKEN: '${{ github.token }}' }
       - name: All-four-platform-keys post-publish gate (HARD)
         run: |

@@ -559,7 +559,9 @@ jobs:
     permissions: { contents: write, id-token: write, attestations: write }  # scoped to THIS job only
     uses: ./.github/workflows/build-installers.yml
     with: { profile: canary }
-    secrets: inherit    # CANARY signing key only (see §10) — never the stable key
+    secrets:            # map ONLY the canary keypair — `inherit` would leak the stable key
+      SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_CANARY }}
+      SIGNING_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD_CANARY }}
   notify-on-break:      # canary failure pings the merging author, not just a rolling issue (must-fix)
     needs: [full-engine, installers]
     if: failure()

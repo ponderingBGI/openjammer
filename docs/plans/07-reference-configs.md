@@ -297,7 +297,10 @@ web:
     bun run build
 
 # ── Aggregates (dependency form: just runs deps left-to-right, aborting on failure) ─
-rust: fmt clippy test doctest test-rt nostd wasm render clap-host
+# `test-rt` is intentionally NOT in `rust` until Phase 2: it needs the ojcore
+# `devlog` feature (a Phase-2 addition), so `just rust` would fail before then.
+# Run `just test-rt` standalone after Phase 2; it joins the per-PR gate at that point.
+rust: fmt clippy test doctest nostd wasm render clap-host
 
 ci: rust web
 

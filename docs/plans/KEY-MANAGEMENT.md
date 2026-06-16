@@ -320,7 +320,7 @@ stateDiagram-v2
    builder.build()?.check().await
    ```
 
-   > **Note:** Verify the exact multi-`pubkey` / fallback-verification API against the pinned `tauri-plugin-updater ~2.10` at implementation time; if the builder does not expose additive trust, the equivalent overlap is achieved by **continuing to sign N+1 with the old key** while the *next* build (N+2) embeds the new pubkey — clients still cross the gap because N+1 (old-signed) installs the N+2-trusting binary. Pick whichever the pinned plugin version actually supports and encode the choice here as the canonical mechanism.
+   > **Must-verify (tracked Phase-5 prerequisite — not a buried note):** Confirm the pinned `tauri-plugin-updater ~2.10` actually exposes the multi-`pubkey` append-trust API used above. **If it does not,** switch to the old-key-signed transitional strategy: **continue signing N+1 with the old key** while the *next* build (N+2) embeds the new pubkey — clients still cross the gap because N+1 (old-signed) installs the N+2-trusting binary. Pick whichever the pinned plugin version supports and encode the choice here as the canonical mechanism. This is an explicit checklist item in the Phase-5 release-delivery prerequisites, surfaced here because a wrong assumption silently breaks the rotation path.
 
 3. **Wait for fleet convergence:** leave N+1 live long enough that telemetry-free reasoning (download counts, release age) gives high confidence the fleet has moved off N. Desktop updates are not real-time; budget a generous window.
 4. **Build N+2 (new key only):** signed with the **new** private key; binary trusts the **new** pubkey only. Only clients on N+1 (which accept the new key) can take it. **Retire/destroy the old private key** after N+2 is published and verified.
