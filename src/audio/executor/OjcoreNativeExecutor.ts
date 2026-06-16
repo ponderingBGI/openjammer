@@ -38,6 +38,11 @@ import type {
 } from './Executor';
 import { emitWithIndex, remapForBackend, type NodeIdxMap } from '../ojgraph';
 import { resolveKeyboardNotes } from '../ojgraph';
+import {
+    DEFAULT_VOICE_INSTRUMENTS,
+    getDefaultInstrumentVoice,
+    type DefaultVoice,
+} from '../defaultInstrument';
 import type {
     NodeIdx,
     OjGraph,
@@ -214,14 +219,38 @@ export class OjcoreNativeExecutor implements Executor {
         this.reverseIndex = new Map();
         for (const [id, idx] of index) this.reverseIndex.set(idx, id);
         const native = remapForBackend(graph, 'native');
-        this.sendGraph(native);
+        void this.sendGraph(native);
     }
 
-    private sendGraph(graph: OjGraph): void {
+    private async sendGraph(graph: OjGraph): Promise<void> {
         if (!this.invoke) return;
-        this.invoke('push_graph', { graph }).catch((err: unknown) => {
+        try {
+            await this.invoke('push_graph', { graph });
+        } catch (err) {
             console.error('[OjcoreNativeExecutor] push_graph failed:', err);
-        });
+            return;
+        }
+        // A UI push REPLACES the engine's kept graph, dropping any imperatively
+        // bound sample (see engine.rs push_graph), so (re)install the built-in
+        // default voice for instrument nodes that ship one. Without this a
+        // freshly-wired Keys/Piano/… node lowers to an EMPTY builtin.sampler and
+        // is silent — the note routes correctly but there is no PCM to play.
+        this.loadDefaultInstrumentVoices();
+    }
+
+    /** (Re)lower the built-in default voice into every instrument node that needs
+     *  one, so melodic instruments are playable without a user-loaded sample.
+     *  Idempotent per push; the engine sampler SR-corrects + pitches the single
+     *  tone across the keyboard. A user-bound sample later simply replaces it. */
+    private loadDefaultInstrumentVoices(): void {
+        if (!this.invoke || !this.getNodes) return;
+        let voice: DefaultVoice | null = null;
+        for (const node of this.getNodes().values()) {
+            if (!DEFAULT_VOICE_INSTRUMENTS.has(node.type)) continue;
+            if (this.index.get(node.id) === undefined) continue;
+            if (!voice) voice = getDefaultInstrumentVoice();
+            void this.loadSampleNative(node.id, voice.pcm, voice.sampleRate, voice.rootNote);
+        }
     }
 
     private send(cmd: RtCommand): void {

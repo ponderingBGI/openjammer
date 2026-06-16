@@ -40,6 +40,7 @@ import type {
     SignalLevelsCallback,
 } from './Executor';
 import { getAudioContext } from '../audioContext';
+import { DEFAULT_VOICE_INSTRUMENTS, getDefaultInstrumentVoice } from '../defaultInstrument';
 import { emitWithIndex, remapForBackend, resolveKeyboardNotes, type NodeIdxMap } from '../ojgraph';
 import type { NodeIdx, OjGraph, RtCommand } from '../../../packages/oj-protocol-ts/src/index';
 import {
@@ -177,6 +178,9 @@ export class OjcoreWasmExecutor implements Executor {
                         this.sendGraph(this.pendingGraph);
                         this.pendingGraph = null;
                     }
+                    // Now that the worklet can receive PCM, give instrument nodes
+                    // their built-in default voice (was a no-op while not ready).
+                    this.loadDefaultInstrumentVoices();
                     break;
                 case 'meters':
                     this.onMeterFrame(data.levels ?? []);
@@ -253,8 +257,46 @@ export class OjcoreWasmExecutor implements Executor {
         this.applySampleBindings(wasmGraph);
         if (this.ready) {
             this.sendGraph(wasmGraph);
+            // Give melodic instrument nodes a built-in default voice so they are
+            // playable without a user-loaded sample (parity with native). Guarded
+            // to load once per node — `applySampleBindings` then persists it across
+            // later edits, mirroring the user-sample path.
+            this.loadDefaultInstrumentVoices();
         } else {
             this.pendingGraph = wasmGraph; // coalesce to latest until ready
+        }
+    }
+
+    /**
+     * Lower the built-in default voice into each instrument node that has no
+     * sample yet (see {@link DEFAULT_VOICE_INSTRUMENTS}). Once per node: the load
+     * round-trips through the worklet and records a `sampleBindings` entry, so this
+     * skips it next time and {@link applySampleBindings} keeps it bound. Needs the
+     * worklet ready + an AudioContext to build the buffer.
+     */
+    private loadDefaultInstrumentVoices(): void {
+        if (!this.ready || !this.getNodes) return;
+        const ctx = getAudioContext();
+        if (!ctx || typeof ctx.createBuffer !== 'function') return;
+        let buffer: AudioBuffer | null = null;
+        for (const node of this.getNodes().values()) {
+            if (!DEFAULT_VOICE_INSTRUMENTS.has(node.type)) continue;
+            if (this.index.get(node.id) === undefined) continue;
+            if (this.sampleBindings.has(node.id)) continue; // already has a sample
+            try {
+                if (!buffer) {
+                    const voice = getDefaultInstrumentVoice();
+                    buffer = ctx.createBuffer(1, voice.pcm.length, voice.sampleRate);
+                    // `.set()` (not copyToChannel) sidesteps the Float32Array
+                    // backing-buffer generic mismatch and copies PCM into the channel.
+                    buffer.getChannelData(0).set(voice.pcm);
+                }
+                this.getSamplerAdapter(node.id).setBuffer(buffer);
+            } catch (err) {
+                // A buffer-creation failure must never break the graph push.
+                console.error('[OjcoreWasmExecutor] default voice load failed:', err);
+                return;
+            }
         }
     }
 
