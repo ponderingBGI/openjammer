@@ -13,7 +13,7 @@
 </div>
 
 > **⚙️ Powered by `ojcore` — one minimal, real-time-safe Rust audio core** that compiles to **native** (low-latency, with VST3/AU/CLAP plugin hosting via a JUCE/CLAP host) **and** **WebAssembly** (the zero-install PWA), driven by one shared React control plane.
-> See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the crate map, build/run/test commands, and the cross-platform release setup.
+> 📚 **Docs:** the **[documentation site](https://ponderingbgi.github.io/openjammer/)** (source in [`apps/docs`](apps/docs)) covers the real-time-safety invariant, the on-device logging model, and the channel/version model. See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the crate map + build/run/test commands.
 
 ---
 

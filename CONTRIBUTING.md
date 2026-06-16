@@ -1,159 +1,104 @@
 # Contributing to OpenJammer
 
-Thank you for your interest in contributing to OpenJammer! This document provides guidelines for contributing to the project.
+Thanks for your interest in OpenJammer! This is a quick-start for contributors.
+The full architecture, the real-time-safety invariant, the logging model, and the
+release/version model live in the **[documentation site](https://ponderingbgi.github.io/openjammer/)**
+(source in [`apps/docs`](apps/docs)); the design plans are in [`docs/plans`](docs/plans).
 
-## Development Setup
+## What OpenJammer is
+
+A **dual-target** audio app: the *same* Rust engine (`ojcore`) runs both as a
+native Tauri desktop app (on a small-buffer audio stream, `<5 ms` latency) and
+compiled to `wasm32` inside a browser AudioWorklet. The UI is a React + TypeScript
+control plane (Vite). You patch a signal graph on a canvas and perform live.
+
+## Development setup
 
 ### Prerequisites
-- [Bun](https://bun.sh) runtime installed
 
-### Getting Started
+- **[Bun](https://bun.sh)** — the package manager + script runner. npm/yarn/pnpm
+  are blocked by a `preinstall` guard; use `bun`.
+- **Rust** (stable, plus the pinned nightly for the wasm leg) — for the engine
+  crates and the native desktop app.
+- Platform audio/UI system libraries for the Tauri build (ALSA + WebKitGTK on
+  Linux; bundled on macOS/Windows).
+
+### Frontend (control plane)
+
 ```bash
-# Clone the repository
-git clone https://github.com/YOUR_USERNAME/openjammer.git
-cd openjammer
-
-# Install dependencies
 bun install
-
-# Start development server
-bun dev
+bun run dev        # Vite dev server → http://localhost:5173 (COOP/COEP on)
+bun run test:run   # vitest
+bun run lint       # eslint (incl. the no-console logging-facade rule)
+bun run build      # tsc + production PWA build
 ```
 
-The app will be available at `http://localhost:3000`
+### Engine + native desktop app
 
-## Project Structure
+```bash
+cargo test --workspace                    # engine tests + the device-free golden render
+cargo test -p ojcore --features devlog    # the audio-thread no-allocation gate
+cargo build -p oj-tauri                   # the native desktop shell
+```
+
+## Project structure
 
 ```
 openjammer/
-├── src/
-│   ├── components/      # React components
-│   │   ├── Canvas/      # Node canvas system
-│   │   └── Nodes/       # Individual node types
-│   ├── audio/           # Web Audio API engine
-│   │   ├── samplers/    # Instrument samplers
-│   │   └── effects/     # Audio effects
-│   ├── store/           # Zustand state management
-│   ├── engine/          # Node system types & registry
-│   └── lib/             # Utility functions
-└── public/              # Static assets
+├── crates/            # the Rust engine workspace (no_std-friendly core + std edges)
+│   ├── ojproto/       # the wire schema (IR, EventKind, RtCommand) — the one source
+│   ├── ojcore/        # compile + Engine + the wait-free rings + metering/events
+│   ├── ojcore-dsp/    # pure DSP kernels (libm; native ↔ wasm reproducible)
+│   ├── ojcore-native/ # the cpal AudioHost + the L1 tracing log sink
+│   ├── ojcore-wasm/   # the wasm32 AudioWorklet host
+│   └── …              # ojinstrument, ojhost, ojfaust, ojcore-midiring
+├── src-tauri/         # oj-tauri — the native desktop shell (control-rate IPC ↔ engine)
+├── src/               # the React + TS control plane (canvas, nodes, stores, DevLog)
+├── packages/          # oj-protocol-ts — the hand-maintained, parity-gated TS wire mirror
+├── apps/docs/         # the Starlight documentation site (workspace-isolated)
+└── docs/plans/        # the foundations design plans
 ```
 
-## How to Contribute
+## A few load-bearing invariants
 
-### Reporting Bugs
-- Check if the issue already exists in GitHub Issues
-- Include browser version, OS, and steps to reproduce
-- For audio issues, include your audio interface details
+- **Never allocate, lock, or block on the audio thread.** This is enforced
+  mechanically (`assert_no_alloc` + the `no_std` core). All UI↔RT communication is
+  wait-free. See the docs site's *Real-time safety* page.
+- **Log through the facade, not `console.*`.** Route logging through
+  `src/utils/log.ts` (`logInfo`/`logWarn`/`logError`) so it lands in the searchable
+  on-device DevLog; a `no-console` lint rule enforces this in app code.
+- **The wire schema is one source.** `ojproto` is canonical; its TypeScript mirror
+  (`packages/oj-protocol-ts`) is parity-gated and the `PrimitiveKind` set is locked
+  by a cross-language equality gate. Change both sides together.
+- **CI is authoritative.** Every PR runs four required jobs — **Engine** (fmt +
+  clippy `-D warnings` + workspace tests + the no-alloc gate + no_std/wasm builds),
+  **Web** (typecheck + lint + tests + build), and the native **Windows** and
+  **macOS (aarch64)** legs. Local hooks are fast feedback only.
 
-### Suggesting Features
-- Open a GitHub Issue with the "enhancement" label
-- Describe the use case and how it benefits live performance
-- Consider how it fits with the node-based paradigm
+## Pull requests
 
-### Pull Request Process
+1. Fork + branch (`git checkout -b feat/your-feature`).
+2. Make focused changes that match the surrounding code; add tests.
+3. Keep CI green locally (`bun run lint && bun run test:run && bun run build`, and
+   `cargo test --workspace` if you touched Rust).
+4. Use [Conventional Commits](https://www.conventionalcommits.org) (`feat:`,
+   `fix:`, `docs:`, `refactor:`, `perf:`, `test:`, `ci:`) — they drive automated
+   versioning (release-please).
+5. Open the PR; describe what changed and why, with screenshots/GIFs for visual
+   changes.
 
-1. **Fork the repository** and create a feature branch
-   ```bash
-   git checkout -b feat/your-feature-name
-   ```
+## Reporting bugs
 
-2. **Make your changes**
-   - Write clean, commented code
-   - Follow existing code style
-   - Test thoroughly, especially audio functionality
-
-3. **Test audio behavior**
-   - Test with keyboard input
-   - Test with USB audio interface if applicable
-   - Ensure no audio dropouts or glitches
-   - Verify low-latency performance
-
-4. **Commit your changes**
-   ```bash
-   git commit -m "feat: add amazing feature"
-   ```
-   Use conventional commit messages:
-   - `feat:` for new features
-   - `fix:` for bug fixes
-   - `docs:` for documentation
-   - `refactor:` for code improvements
-   - `perf:` for performance improvements
-
-5. **Push and create a Pull Request**
-   ```bash
-   git push origin feat/your-feature-name
-   ```
-   - Include screenshots or GIFs of visual changes
-   - Describe what you changed and why
-   - Reference any related issues
-
-## Code Guidelines
-
-### React Components
-- Use functional components with hooks
-- Keep components focused and single-purpose
-- Extract reusable logic into custom hooks
-
-### Web Audio API
-- Always disconnect nodes properly to prevent memory leaks
-- Use `useEffect` cleanup functions for audio nodes
-- Test with different sample rates and buffer sizes
-
-### State Management
-- Use Zustand for global state
-- Keep state minimal and normalized
-- Document store slices with comments
-
-### Styling
-- Use Tailwind CSS utility classes
-- Follow the hand-drawn aesthetic theme
-- Ensure responsive design (laptop-first)
-
-## Testing
-
-Before submitting a PR:
-- [ ] Test on Chrome (primary target browser)
-- [ ] Test keyboard routing and bank switching
-- [ ] Test audio playback without glitches
-- [ ] Verify nodes connect/disconnect properly
-- [ ] Test undo/redo functionality
-- [ ] Check console for errors/warnings
-
-## Adding New Node Types
-
-1. Create node component in `src/components/Nodes/`
-2. Register in `src/engine/registry.ts`
-3. Add audio implementation if applicable
-4. Update context menu categories
-5. Document in README.md
-
-## Performance Considerations
-
-- Web Audio API runs on a separate thread - avoid blocking main thread
-- Minimize re-renders in canvas components
-- Use React.memo for expensive components
-- Profile with Chrome DevTools Performance tab
-
-## Browser Compatibility
-
-Primary target: **Chrome/Edge (Chromium) 110+**
-
-We use:
-- Web Audio API with `setSinkId()` for device selection
-- AudioWorklet for custom audio processing
-- Service Workers for offline functionality
-
-## Community
-
-- Be respectful and constructive in discussions
-- Help others in GitHub Issues when possible
-- Share your workflows and creative uses
+The fastest path is the in-app **"Report a problem"** action (Settings → About):
+it bundles a redacted diagnostic snapshot + a recent log tail into a pre-filled
+GitHub issue (secrets, home paths, and LAN addresses are scrubbed automatically;
+you review the full text before posting). Otherwise, open a GitHub Issue with your
+OS, build version, and steps to reproduce.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under the AGPL-3.0 license.
+By contributing, you agree your contributions are licensed under **AGPL-3.0**.
 
 ---
 
-**Questions?** Open a GitHub Issue or discussion. We're happy to help!
+**Questions?** Open a GitHub Issue or discussion — we're happy to help.
