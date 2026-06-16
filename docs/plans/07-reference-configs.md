@@ -242,50 +242,70 @@ set windows-shell := ['powershell.exe', '-NoLogo', '-Command']
 wav := if os() == "windows" { "$env:RUNNER_TEMP\\oj-render.wav" } else { "${RUNNER_TEMP:-/tmp}/oj-render.wav" }
 
 # ── Static analysis ────────────────────────────────────────────────────────────
-fmt:        cargo fmt --all -- --check
-clippy:     cargo clippy --workspace --all-targets -- -D warnings
+fmt:
+    cargo fmt --all -- --check
+
+clippy:
+    cargo clippy --workspace --all-targets -- -D warnings
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 # nextest gives process-per-test isolation — STRICTLY safer than `cargo test`'s
 # shared process for the global-allocator swap `assert_no_alloc` installs.
-test:       cargo nextest run --workspace
+test:
+    cargo nextest run --workspace
 # MANDATORY companion: nextest skips doctests, so run them explicitly.
-doctest:    cargo test --workspace --doc
+doctest:
+    cargo test --workspace --doc
 
 # RT no-alloc gate (Phase 2: the `devlog` feature is added to ojcore in Phase 2).
 # Trips over_budget / auto_bypass / non_finite (crates/ojcore/src/exec.rs) INSIDE
 # assert_no_alloc with both the meter ring and the event ring attached. Wired as a
 # `needs:` of the aggregate `gate` — a REQUIRED per-PR check, never nightly-only.
-test-rt:    cargo nextest run -p ojcore --features devlog
+test-rt:
+    cargo nextest run -p ojcore --features devlog
 
 # ── Build legs ─────────────────────────────────────────────────────────────────
 # `ojcore` defaults to ["std"]; --no-default-features compiles the no_std core
 # the wasm32 AudioWorklet shares (Cargo.toml:12-13).
-nostd:      cargo build -p ojcore --no-default-features
+nostd:
+    cargo build -p ojcore --no-default-features
 # The ONLY ojcore-wasm compile path: nightly + -Z build-std (rust-toolchain.toml).
-wasm:       cargo +nightly build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
+wasm:
+    cargo +nightly build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
 
 # Device-free `render` gate: render an Osc->Biquad->Delay->Speaker arpeggio to a
 # WAV and assert finite, non-silent, sane-RMS output — no audio device needed.
 # `render` is required-features=["demo"] and takes <wav-path> <seconds>.
-render:     cargo clippy -p ojcore-native --features demo --all-targets -- -D warnings && cargo run -p ojcore-native --bin render --features demo -- "{{wav}}" 2
+# (just runs each recipe line in its own shell, aborting the recipe on first failure.)
+render:
+    cargo clippy -p ojcore-native --features demo --all-targets -- -D warnings
+    cargo run -p ojcore-native --bin render --features demo -- "{{wav}}" 2
 
 # Real pure-Rust CLAP backend (clack, MIT). The default ojhost build is a
 # dependency-free scaffold, so this leg is the only one that exercises real hosting.
-clap-host:  cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings && cargo test -p ojhost --features clap-host
+clap-host:
+    cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings
+    cargo test -p ojhost --features clap-host
 
 # ── Web control plane ────────────────────────────────────────────────────────
 # Mirrors the verified ci.yml `web` job: frozen install, typecheck, lint, test, build.
-web:        bun install --frozen-lockfile && bunx tsc --noEmit -p tsconfig.app.json && bun run lint && bun run test:run && bun run build
+web:
+    bun install --frozen-lockfile
+    bunx tsc --noEmit -p tsconfig.app.json
+    bun run lint
+    bun run test:run
+    bun run build
 
-# ── Aggregates the CI lanes call ───────────────────────────────────────────────
-rust:       just fmt && just clippy && just test && just doctest && just test-rt && just nostd && just wasm && just render && just clap-host
-ci:         just rust && just web
+# ── Aggregates (dependency form: just runs deps left-to-right, aborting on failure) ─
+rust: fmt clippy test doctest test-rt nostd wasm render clap-host
+
+ci: rust web
 
 # ── Local fast-feedback entry point (Layer 2) ──────────────────────────────────
 # Shells to the merged `oj` Bun CLI, which DECIDES which recipes to run
 # (cache hits + affected-selection) — it never re-encodes a command.
-preflight *ARGS: bun scripts/oj/index.ts preflight {{ARGS}}
+preflight *ARGS:
+    bun scripts/oj/index.ts preflight {{ARGS}}
 ```
 
 > **Note:** CI collapses to installing pinned `just` + `cargo-nextest` via `taiki-e/install-action@v2` (both ship prebuilt Windows binaries), then calling `just rust` / `just web`. The engine test step becomes a 4-shard nextest matrix (`--profile ci --partition slice:N/4`) for ~4× free wall-clock — see [`01-testing-and-reliability.md` §T1](01-testing-and-reliability.md#t1--test-orchestration). The recipe set above is the *what*; the CI workflow is the *how*, owned by [`05-github-actions-ci.md`](05-github-actions-ci.md).

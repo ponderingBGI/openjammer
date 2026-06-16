@@ -91,18 +91,47 @@ set windows-shell := ['powershell.exe', '-NoLogo', '-Command']  # maintainer's p
 # OS-aware temp WAV for the device-free render gate (ci.yml windows-native runs this too)
 wav := if os() == "windows" { "$env:RUNNER_TEMP\\oj-render.wav" } else { "${RUNNER_TEMP:-/tmp}/oj-render.wav" }
 
-fmt:        cargo fmt --all -- --check
-clippy:     cargo clippy --workspace --all-targets -- -D warnings
-test:       cargo nextest run --workspace
-doctest:    cargo test --workspace --doc          # MANDATORY companion: nextest skips doctests
-nostd:      cargo build -p ojcore --no-default-features
-wasm:       cargo +nightly build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
-render:     cargo clippy -p ojcore-native --features demo --all-targets -- -D warnings && cargo run -p ojcore-native --bin render --features demo -- "{{wav}}" 2
-clap-host:  cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings && cargo test -p ojhost --features clap-host
-web:        bun install --frozen-lockfile && bunx tsc --noEmit -p tsconfig.app.json && bun run lint && bun run test:run && bun run build
-rust:       just fmt && just clippy && just test && just doctest && just nostd && just wasm && just render && just clap-host
-ci:         just rust && just web
-preflight *ARGS: bun scripts/oj/index.ts preflight {{ARGS}}
+fmt:
+    cargo fmt --all -- --check
+
+clippy:
+    cargo clippy --workspace --all-targets -- -D warnings
+
+test:
+    cargo nextest run --workspace
+
+# MANDATORY companion: nextest skips doctests
+doctest:
+    cargo test --workspace --doc
+
+nostd:
+    cargo build -p ojcore --no-default-features
+
+wasm:
+    cargo +nightly build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
+
+render:
+    cargo clippy -p ojcore-native --features demo --all-targets -- -D warnings
+    cargo run -p ojcore-native --bin render --features demo -- "{{wav}}" 2
+
+clap-host:
+    cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings
+    cargo test -p ojhost --features clap-host
+
+web:
+    bun install --frozen-lockfile
+    bunx tsc --noEmit -p tsconfig.app.json
+    bun run lint
+    bun run test:run
+    bun run build
+
+# Aggregates use dependency form: just runs deps left-to-right, aborting on first failure.
+rust: fmt clippy test doctest nostd wasm render clap-host
+
+ci: rust web
+
+preflight *ARGS:
+    bun scripts/oj/index.ts preflight {{ARGS}}
 ```
 
 ```toml

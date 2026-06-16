@@ -34,3 +34,23 @@ dist-ssr
 
 # Claude Code agent worktrees (transient)
 .claude/worktrees/
+
+# === Signing keys & secrets (R4 — committed BEFORE any `tauri signer generate`) ===
+# minisign / Tauri updater private keys (split stable + canary keypairs).
+# A leaked signing key is the single worst outcome for the updater root-of-trust.
+*.key
+openjammer.key
+*.minisign
+
+# OS code-signing material (Authenticode / Apple Developer ID workflows).
+*.pem
+*.p12
+*.pfx
+
+# Tauri's signer scratch / updater key cache.
+.tauri/
+
+# Local scratch files (commit messages, PR bodies, validation scripts).
+*.tmp
+.git-commit-msg.tmp
+.pr-body.tmp

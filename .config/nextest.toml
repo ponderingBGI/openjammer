@@ -1,0 +1,22 @@
+# .config/nextest.toml — the declarative serial RT lane + CI profile. Created in
+# Phase 1 alongside the justfile. `cargo nextest run` reads this automatically.
+# (Plan: docs/plans/07-reference-configs.md §6, docs/plans/01-testing-and-reliability.md §T1.)
+
+[test-groups]
+# RT-sensitive tests run one-at-a-time so timing/allocator assertions never contend.
+audio-serial = { max-threads = 1 }
+
+[[profile.default.overrides]]
+# Bind the ojcore ring / hot-swap / no-alloc tests to the serial lane by name.
+# The substring set matches the engine's RT tests; widen the alternation as new
+# RT-sensitive tests land (e.g. the Phase-2 event_frame / drain_frames round-trips).
+filter = 'package(ojcore) and test(/program_swap|meter_ring|hot_swap|alloc_free|drain_frames/)'
+test-group = 'audio-serial'
+
+[profile.ci]
+# Never stop at the first failure in CI — surface every failing test in one run.
+fail-fast = false
+
+[profile.ci.junit]
+# Emit a JUnit report so the CI run can publish a structured test summary.
+path = 'junit.xml'

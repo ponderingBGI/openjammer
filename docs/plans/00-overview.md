@@ -143,12 +143,25 @@ path = 'junit.xml'
 # justfile (excerpt) — Windows-primary dev box needs the shell directive
 set windows-shell := ['powershell.exe', '-NoLogo', '-Command']
 
-test:        cargo nextest run --workspace
-doctest:     cargo test --workspace --doc      # nextest skips doctests — MANDATORY
-nostd:       cargo build -p ojcore --no-default-features
-wasm:        cargo +nightly build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
-render:      cargo clippy -p ojcore-native --features demo --all-targets -- -D warnings && cargo run -p ojcore-native --bin render --features demo -- {{wav}} 2
-rust:        just fmt && just clippy && just test && just doctest && just test-rt && just nostd && just wasm && just render && just clap-host
+test:
+    cargo nextest run --workspace
+
+# nextest skips doctests — MANDATORY companion
+doctest:
+    cargo test --workspace --doc
+
+nostd:
+    cargo build -p ojcore --no-default-features
+
+wasm:
+    cargo +nightly build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
+
+render:
+    cargo clippy -p ojcore-native --features demo --all-targets -- -D warnings
+    cargo run -p ojcore-native --bin render --features demo -- {{wav}} 2
+
+# aggregate (dependency form; full recipe set in the canonical justfile / 07-reference-configs.md)
+rust: fmt clippy test doctest test-rt nostd wasm render clap-host
 ```
 
 ### F2 — One `oj` Bun/TS CLI

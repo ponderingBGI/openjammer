@@ -1,0 +1,23 @@
+# .github/CODEOWNERS — review pairing for the cross-language wire contract and the
+# byte-exact golden corpus. (Plan: docs/plans/07-reference-configs.md §8.)
+# The handle below is the current single owner; broaden/extend on second-maintainer
+# onboarding (the documented bus-factor accommodation — docs/plans/00-overview.md Open Question 6).
+#
+# NOTE: CODEOWNERS only ENFORCES once branch protection is active with
+# "require review from code owners" — itself a Phase-0 governance must-fix.
+# Landed here so the pairing exists the moment governance is flipped on.
+
+# The ojproto wire schema (Rust SSOT) and the oj-protocol-ts TS mirror are ONE
+# contract. A PR touching either must be reviewed by someone who knows both, so
+# the schema and its hand-mirrored types never drift through an unreviewed PR.
+# (The wire_shapes.rs parity gate catches byte drift in CI; this catches it in review.)
+/crates/ojproto/                       @PonderingBGI
+/packages/oj-protocol-ts/              @PonderingBGI
+
+# The byte-exact wire-parity gate itself.
+/crates/ojproto/tests/wire_shapes.rs   @PonderingBGI
+
+# T2 golden corpus snapshots: a change here is a DSP re-bless and must be
+# maintainer-reviewed + ear-checked (Danger requires a `BLESS:` line + the
+# listenable render WAV artifact). Mirrors the ojproto<->oj-protocol-ts pairing.
+/crates/*/tests/corpus/**/*.snap.json  @PonderingBGI

@@ -6,7 +6,11 @@ members = ["crates/*", "src-tauri"]
 
 [workspace.package]
 edition = "2021"
-version = "0.0.0"
+# Single version SSOT — written in lockstep by release-please (the single version
+# brain) across all four files: Cargo.toml, package.json, tauri.conf.json,
+# packages/oj-protocol-ts/package.json. See release-please-config.json. Do not
+# hand-edit out of lockstep; `oj doctor --check version-sync` asserts equality.
+version = "0.1.0-alpha.2"
 license = "AGPL-3.0-only"
 
 # Pinned from a fresh cargo at scaffold time (governing principle #9).
