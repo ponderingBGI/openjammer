@@ -218,9 +218,10 @@ impl Engine {
     /// hot-swap with no re-attach — re-attaching is only needed if a NEW engine is
     /// constructed, never on [`Self::install`].
     ///
-    /// The emit itself is non-blocking + allocation-free (encode to a stack buffer
-    /// + one wait-free `push`); a full ring drops the frame (drop-on-full), which
-    /// is RT-safe. Only compiled in under the `devlog` feature.
+    /// The emit itself is non-blocking and allocation-free (encode to a stack
+    /// buffer, then one wait-free `push`); a full ring drops the frame
+    /// (drop-on-full), which is RT-safe. Only compiled in under the `devlog`
+    /// feature.
     #[cfg(all(feature = "std", feature = "devlog"))]
     pub fn attach_event_ring(&mut self, ring: Option<alloc::sync::Arc<crate::meter::EventRing>>) {
         self.event_ring = ring;
@@ -264,8 +265,8 @@ impl Engine {
     /// at the fault-detection sites; a no-op when no ring is attached.
     ///
     /// RT-safe by construction: builds a `Copy` [`ojproto::RtEvent`] and makes a
-    /// SINGLE [`crate::meter::event_frame::emit`] call (encode into a stack buffer
-    /// + one wait-free `push`). NO `String`/`Vec`/`format!`/alloc/lock on this
+    /// SINGLE [`crate::meter::event_frame::emit`] call (encode into a stack buffer,
+    /// then one wait-free `push`). NO `String`/`Vec`/`format!`/alloc/lock on this
     /// path; drop-on-full keeps it wait-free. Compiled out entirely off `devlog`.
     ///
     /// TODO(phase2): per-(code,node) coalescing to bound ring traffic under fault
