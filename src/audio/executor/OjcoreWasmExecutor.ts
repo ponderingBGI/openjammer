@@ -38,7 +38,7 @@ import type {
     SamplerHandle,
     SignalLevelsCallback,
 } from './Executor';
-import { getAudioContext } from '../AudioEngine';
+import { getAudioContext } from '../audioContext';
 import { emitWithIndex, remapForBackend, resolveKeyboardNotes, type NodeIdxMap } from '../ojgraph';
 import type { NodeIdx, OjGraph, RtCommand } from '../../../packages/oj-protocol-ts/src/index';
 import {

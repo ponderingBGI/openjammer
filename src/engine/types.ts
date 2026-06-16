@@ -326,8 +326,11 @@ export interface LoopData {
     effects: string[]; // Effect node IDs applied to this loop
 }
 
+/** Audio effect kinds an EffectNode can apply. */
+export type EffectType = 'distortion' | 'pitch' | 'reverb' | 'delay';
+
 export interface EffectNodeData extends NodeData {
-    effectType: 'distortion' | 'pitch' | 'reverb' | 'delay';
+    effectType: EffectType;
     params: Record<string, number>;
 }
 

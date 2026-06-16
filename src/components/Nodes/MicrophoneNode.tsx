@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import type { GraphNode, MicrophoneNodeData } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useAudioStore } from '../../store/audioStore';
-import { getAudioContext } from '../../audio/AudioEngine';
+import { getAudioContext } from '../../audio/audioContext';
 import { getExecutor } from '../../audio/executor';
 import { ScrollContainer } from '../common/ScrollContainer';
 import { detectLowLatencyDevice } from '../../utils/audioDeviceDetection';

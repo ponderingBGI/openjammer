@@ -6,7 +6,7 @@
  */
 
 import type { AudioClip } from '../engine/types';
-import type { Loop } from '../audio/Looper';
+import type { Loop } from '../audio/executor';
 import { useLibraryStore, getSampleFile, type LibraryItem } from '../store/libraryStore';
 
 // Re-export async waveform generation for non-blocking execution

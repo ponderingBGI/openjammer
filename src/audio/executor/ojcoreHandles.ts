@@ -21,18 +21,18 @@
  * audio is engine-rendered; the visuals are mirrored. Founder-verified output.
  */
 
-import { audioBufferToWAV } from '../WavEncoder';
-import { getAudioContext } from '../AudioEngine';
-import { isInfiniteDuration } from '../Looper';
+import { audioBufferToWAV } from '../wav';
+import { getAudioContext } from '../audioContext';
 import type { NodeIdx } from '../../../packages/oj-protocol-ts/src/index';
 import { LooperAction } from '../../../packages/oj-protocol-ts/src/index';
 import type { RtCommand } from '../../../packages/oj-protocol-ts/src/index';
-import type {
-    LooperHandle,
-    LoopLayer,
-    RecorderHandle,
-    RecordingEntry,
-    SamplerHandle,
+import {
+    isInfiniteDuration,
+    type LooperHandle,
+    type LoopLayer,
+    type RecorderHandle,
+    type RecordingEntry,
+    type SamplerHandle,
 } from './capabilities';
 
 /**

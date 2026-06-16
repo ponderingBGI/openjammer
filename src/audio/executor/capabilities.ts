@@ -3,40 +3,63 @@
  *
  * These are the engine-agnostic contracts the UI consumes through the
  * {@link Executor}'s capability handles (`getLooper` / `getRecorder` /
- * `getSamplerAdapter` / `subscribeSignalLevels`). They were previously implicit
- * — the UI imported the CONCRETE Web Audio classes (`Looper`, `Recorder`,
- * `SamplerAdapter`) and `WebAudioExecutor` returned those instances, which
- * coupled every backend to Web Audio. Here we FORMALIZE the exact surface the
- * UI calls (derived by grepping `src/components` for `.getLooper()` /
- * `.getRecorder()` / `.getSamplerAdapter()` usage) as structural interfaces.
- *
- * The legacy classes already satisfy these interfaces structurally, so
- * `WebAudioExecutor` keeps returning them unchanged (it just types them as the
- * interface). The ojcore executors implement the SAME interfaces with handles
- * backed by the native/wasm engine — so the UI works identically on any backend
- * without importing a single Web-Audio type.
+ * `getSamplerAdapter` / `subscribeSignalLevels`). The ojcore executors implement
+ * these interfaces with handles backed by the native/wasm engine — so the UI
+ * works identically on either backend without importing a single Web-Audio type.
  *
  * The interfaces are intentionally a 1:1 distillation of consumed methods/props;
  * no behavior is added here.
+ *
+ * After U-DEDUP the legacy Web Audio engine is gone, so the leaf record types
+ * (`Loop` / `Recording`) and the loop-duration sentinel/guard — formerly owned
+ * by the deleted `../Looper` / `../Recorder` — now live HERE, in the
+ * engine-agnostic capability layer the UI and ojcore handles share.
  */
 
-import type { Loop } from '../Looper';
-import type { Recording } from '../Recorder';
+// ---------------------------------------------------------------------------
+// Loop duration sentinel
+// ---------------------------------------------------------------------------
+
+/**
+ * Sentinel for infinite loop duration. `-1` is clearly invalid for a duration
+ * and serializes to JSON correctly (`Number.POSITIVE_INFINITY` -> null).
+ */
+export const INFINITE_DURATION = -1;
+
+/** Type guard: does this duration represent infinite (free-run)? */
+export function isInfiniteDuration(duration: number): boolean {
+    return duration < 0;
+}
 
 // ---------------------------------------------------------------------------
 // Looper capability
 // ---------------------------------------------------------------------------
 
 /**
- * One captured loop layer, as the UI reads it. Aliased to the existing `Loop`
- * record type from `../Looper` (a plain data shape — id, buffer, isMuted,
- * waveformData, libraryItemId, plus Web-Audio bookkeeping fields). Reusing the
- * existing type keeps the UI components — which annotate their loop callbacks as
- * `Loop` — typecheck-clean across every backend; the ojcore loop handle produces
- * `Loop`-shaped objects with the Web-Audio-only fields nulled (the audible loop
- * is engine-rendered; the visual fields are what the UI reads). The DECOUPLING
- * is the capability METHOD surface below, not the leaf record type.
+ * One captured loop layer, as the UI reads it — a plain data shape (id, buffer,
+ * isMuted, waveformData, libraryItemId, plus playback bookkeeping). The ojcore
+ * loop handle produces `Loop`-shaped objects with the playback-only fields nulled
+ * (the audible loop is engine-rendered; the visual fields are what the UI reads).
+ * The DECOUPLING is the capability METHOD surface below, not this record type.
  */
+export interface Loop {
+    id: string;
+    /** Decoded audio (may be null when the audible loop is engine-rendered). */
+    buffer: AudioBuffer | null;
+    startTime: number;
+    isMuted: boolean;
+    gainNode: GainNode | null;
+    sourceNode: AudioBufferSourceNode | null;
+    /** Amplitude values over time for visualization. */
+    waveformData: number[];
+    /** Reference to the saved library item (if auto-saved). */
+    libraryItemId?: string;
+    isPaused: boolean;
+    /** Position in the buffer when paused (seconds). */
+    pausedAtOffset: number;
+}
+
+/** Alias kept for capability-handle call sites. @see Loop */
 export type LoopLayer = Loop;
 
 /**
@@ -75,10 +98,20 @@ export interface LooperHandle {
 // ---------------------------------------------------------------------------
 
 /**
- * One completed recording, as the UI reads it. Aliased to the existing
- * `Recording` record type from `../Recorder` (id, blob, duration, timestamp,
- * name, libraryItemId), for the same typecheck-clean reason as {@link LoopLayer}.
+ * One completed recording, as the UI reads it (id, blob, duration, timestamp,
+ * name, libraryItemId). Engine-agnostic — surfaced by the ojcore recorder handle.
  */
+export interface Recording {
+    id: string;
+    blob: Blob;
+    duration: number;
+    timestamp: number;
+    name: string;
+    /** Reference to the saved library item (if saved). */
+    libraryItemId?: string;
+}
+
+/** Alias kept for capability-handle call sites. @see Recording */
 export type RecordingEntry = Recording;
 
 /**

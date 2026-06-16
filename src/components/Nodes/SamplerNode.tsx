@@ -16,7 +16,7 @@ import { useCallback, useRef, useState, useEffect, memo } from 'react';
 import type { GraphNode, SamplerNodeData, SamplerRow, AudioClip, ClipDropTarget } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { getItemFile } from '../../store/libraryStore';
-import { getAudioContext } from '../../audio/AudioEngine';
+import { getAudioContext } from '../../audio/audioContext';
 import { getExecutor } from '../../audio/executor';
 import { useAudioClipStore, getClipBuffer } from '../../store/audioClipStore';
 import { loadClipAudio } from '../../utils/clipUtils';

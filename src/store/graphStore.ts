@@ -107,13 +107,14 @@ export function getNodeDimensions(node: GraphNode): { width: number; height: num
         case 'saxophone':
         case 'strings':
         case 'keys':
-        case 'winds':
+        case 'winds': {
             // Instrument nodes: height varies by number of input ports
             const inputPorts = node.ports.filter(p => p.direction === 'input').length;
             return {
                 width: NODE_DIMENSIONS.INSTRUMENT_WIDTH,
                 height: NODE_DIMENSIONS.INSTRUMENT_BASE_HEIGHT + (inputPorts * NODE_DIMENSIONS.INSTRUMENT_PORT_HEIGHT)
             };
+        }
         default:
             // Standard nodes (microphone, effect, amplifier, recorder)
             return {
@@ -846,7 +847,7 @@ export const useGraphStore = create<GraphStore>()(
                     }
 
                     newConnections.set(id, connection);
-                    let newNodes = new Map(state.nodes);
+                    const newNodes = new Map(state.nodes);
 
                     // ================================================================
                     // Generic Bundle Expansion

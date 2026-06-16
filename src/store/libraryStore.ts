@@ -22,8 +22,8 @@ import {
   type FileEntry,
 } from '../utils/fileSystemAccess';
 import { createSampleMetadata, generateWaveformFromFile, generateWaveformPeaks, peaksToBase64 } from '../utils/audioMetadata';
-import { getAudioContext } from '../audio/AudioEngine';
-import { audioBufferToWAV, generateRecordingFilename } from '../audio/WavEncoder';
+import { getAudioContext } from '../audio/audioContext';
+import { audioBufferToWAV, generateRecordingFilename } from '../audio/wav';
 
 // ============================================================================
 // Types

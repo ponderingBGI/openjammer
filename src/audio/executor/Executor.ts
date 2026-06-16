@@ -1,15 +1,14 @@
 /**
- * Executor — the audio-backend seam (U9).
+ * Executor — the audio-backend seam.
  *
- * This interface captures the surface the app actually uses to drive audio
- * today. It is implemented by {@link WebAudioExecutor}, which wraps the existing
- * `AudioGraphManager`. Introducing this seam lets the app target a stable
- * contract instead of a concrete singleton, so alternative backends (a future
- * wasm/native ojcore-backed executor) can be swapped in via `OJ_EXECUTOR`
- * without touching call sites.
+ * This interface captures the surface the app uses to drive audio. It is
+ * implemented by the ojcore executors ({@link OjcoreNativeExecutor} over Tauri
+ * IPC and {@link OjcoreWasmExecutor} over an AudioWorklet). Targeting this stable
+ * contract — instead of a concrete engine — keeps the UI and stores
+ * engine-agnostic; the transport is selected at startup via `OJ_EXECUTOR`.
  *
- * The shape is deliberately a 1:1 distillation of `AudioGraphManager`'s consumed
- * methods — no behavior is added or changed here.
+ * The shape is a 1:1 distillation of the control surface the app actually calls
+ * — no behavior is added here.
  */
 
 import type { Connection, GraphNode } from '../../engine/types';
@@ -24,11 +23,14 @@ export type {
     LooperHandle,
     RecorderHandle,
     SamplerHandle,
+    Loop,
     LoopLayer,
+    Recording,
     RecordingEntry,
     SignalLevels,
     SignalLevelsCallback,
 } from './capabilities';
+export { INFINITE_DURATION, isInfiniteDuration } from './capabilities';
 
 /** Callback invoked when the set of connections changes. */
 export type ConnectionChangeCallback = (connections: Map<string, Connection>) => void;

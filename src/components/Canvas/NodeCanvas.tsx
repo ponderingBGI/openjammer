@@ -22,7 +22,7 @@ import { useMIDIStore } from '../../store/midiStore';
 import { useAudioClipStore } from '../../store/audioClipStore';
 import { useLibraryStore, getSampleFile } from '../../store/libraryStore';
 import { createClipFromSample, generateWaveformPeaksAsync } from '../../utils/clipUtils';
-import { getAudioContext } from '../../audio/AudioEngine';
+import { getAudioContext } from '../../audio/audioContext';
 import { AudioClipVisual } from '../Clips/AudioClipVisual';
 import { ClipDragLayer } from '../Clips/ClipDragLayer';
 import { WaveformEditorModal } from '../Clips/WaveformEditorModal';

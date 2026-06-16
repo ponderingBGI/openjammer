@@ -4,7 +4,7 @@
 
 import { create } from 'zustand';
 import { getExecutor } from '../audio/executor';
-import { resumeAudio } from '../audio/AudioEngine';
+import { resumeAudio } from '../audio/audioContext';
 import { getConnectionsForRow, getConnectionsForPedal } from '../utils/connectionActivity';
 
 // ============================================================================

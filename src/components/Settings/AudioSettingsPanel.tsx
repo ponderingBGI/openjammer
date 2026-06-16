@@ -6,7 +6,7 @@
 import { useState, useEffect } from 'react';
 import { useAudioStore } from '../../store/audioStore';
 import type { LatencyClassification } from '../../store/audioStore';
-import { reinitAudioContext, getLatencyMetrics, startLatencyMonitoring } from '../../audio/AudioEngine';
+import { reinitAudioContext, getLatencyMetrics, startLatencyMonitoring } from '../../audio/audioContext';
 import { getExecutor } from '../../audio/executor';
 import { LowLatencyGuide } from '../Guides';
 import { useLowLatencyGuide } from '../../store/guideStore';

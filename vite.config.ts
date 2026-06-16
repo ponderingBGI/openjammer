@@ -110,9 +110,6 @@ export default defineConfig({
       events: 'rollup-plugin-node-polyfills/polyfills/events'
     }
   },
-  optimizeDeps: {
-    exclude: ['webaudiofont']
-  },
   // Worker configuration for AudioWorklet modules
   worker: {
     format: 'es'

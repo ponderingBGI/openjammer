@@ -8,7 +8,7 @@ import type { GraphNode, SpeakerNodeData } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useAudioStore } from '../../store/audioStore';
 import { getExecutor } from '../../audio/executor';
-import { reinitAudioContext } from '../../audio/AudioEngine';
+import { reinitAudioContext } from '../../audio/audioContext';
 import {
     type EnhancedAudioDevice,
     enhanceAudioDevices,
@@ -58,7 +58,7 @@ export const SpeakerNode = memo(function SpeakerNode({
     const [showDevices, setShowDevices] = useState(false);
     const [supportsSinkId] = useState(() => {
         const audio = document.createElement('audio');
-        return typeof (audio as any).setSinkId === 'function';
+        return typeof (audio as HTMLAudioElement & { setSinkId?: unknown }).setSinkId === 'function';
     });
     const isMuted = data.isMuted ?? false;
 
@@ -66,7 +66,9 @@ export const SpeakerNode = memo(function SpeakerNode({
     const hasAutoSelected = useRef(false);
     // Use refs to access current audio config without triggering re-renders
     const audioConfigRef = useRef(audioConfig);
-    audioConfigRef.current = audioConfig;
+    useEffect(() => {
+        audioConfigRef.current = audioConfig;
+    }, [audioConfig]);
 
     // Helper to apply low latency mode with proper audio context reinitialization
     const applyLowLatencyMode = useCallback(async () => {

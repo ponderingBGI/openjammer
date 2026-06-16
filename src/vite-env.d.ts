@@ -1,8 +1,8 @@
 /// <reference types="vite/client" />
 
-/** App-specific Vite env vars (U9). */
+/** App-specific Vite env vars. */
 interface ImportMetaEnv {
-  /** Selects the audio executor backend. Only 'webaudio' is implemented. */
+  /** Selects the ojcore transport: 'ojcore-native' or 'ojcore-wasm'. */
   readonly VITE_OJ_EXECUTOR?: string;
 }
 

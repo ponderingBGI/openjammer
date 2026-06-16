@@ -1,3 +1,7 @@
+// AudioWorklet global scope (AudioWorkletProcessor, registerProcessor, sampleRate)
+// is declared ambiently in worklet-types.d.ts; these are globals, not module
+// exports, so a triple-slash reference is the correct way to pull them in.
+// eslint-disable-next-line @typescript-eslint/triple-slash-reference
 /// <reference path="./worklet-types.d.ts" />
 /**
  * ojcore AudioWorklet processor (U17) — runs the wasm `ojcore` engine on the

@@ -25,7 +25,7 @@ import {
   type LibraryItem,
 } from '../../store/libraryStore';
 import { isFileSystemAccessSupported, selectLibraryFolder } from '../../utils/fileSystemAccess';
-import { getAudioContext } from '../../audio/AudioEngine';
+import { getAudioContext } from '../../audio/audioContext';
 import { getExecutor } from '../../audio/executor';
 import { useResize } from '../../hooks/useResize';
 import { usePanelResize } from '../../hooks/usePanelResize';

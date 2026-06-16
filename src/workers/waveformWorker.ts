@@ -56,7 +56,6 @@ self.onmessage = (e: MessageEvent<WaveformWorkerMessage>) => {
     };
 
     // Transfer the peaks buffer for zero-copy performance
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (self.postMessage as (message: unknown, transfer: Transferable[]) => void)(response, [peaks.buffer]);
   }
 };

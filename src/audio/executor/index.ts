@@ -1,23 +1,20 @@
 /**
- * Executor selection (U9 + U17 cutover).
+ * Executor selection (U-DEDUP).
  *
- * `OJ_EXECUTOR` selects which audio backend drives the app:
- *   • `webaudio`      — the legacy Web Audio backend (default; NEVER breaks).
+ * ojcore is now the ONE audio engine. `OJ_EXECUTOR` only selects WHICH ojcore
+ * transport drives the app:
  *   • `ojcore-native` — the native Rust ojcore engine over Tauri IPC (the
  *                       sub-5ms path; auto-selected when running under Tauri).
- *   • `ojcore-wasm`   — the same ojcore engine compiled to wasm + AudioWorklet.
+ *   • `ojcore-wasm`   — the same ojcore engine compiled to wasm + AudioWorklet
+ *                       (the browser default).
  *
- * This is an A/B CUTOVER, not a removal: the ojcore executors are opt-in (or
- * auto under Tauri), and the Web Audio backend remains the safe default so the
- * existing app keeps working. Legacy deletion is a LATER unit.
- *
- * The value is read from `import.meta.env.VITE_OJ_EXECUTOR` (Vite only exposes
- * `VITE_`-prefixed vars to client code). When unset, we default to `webaudio`
- * EXCEPT under Tauri, where `ojcore-native` is auto-selected (the whole reason
- * the desktop shell exists). Any explicit value always wins.
+ * The legacy Web Audio backend was removed in U-DEDUP; there is no `webaudio`
+ * kind anymore. The value is read from `import.meta.env.VITE_OJ_EXECUTOR` (Vite
+ * only exposes `VITE_`-prefixed vars to client code). When unset we default to
+ * `ojcore-wasm` in the browser and auto-pick `ojcore-native` under Tauri. Any
+ * explicit (valid) value always wins.
  */
 
-import { WebAudioExecutor } from './WebAudioExecutor';
 import { OjcoreNativeExecutor, isTauri } from './OjcoreNativeExecutor';
 import { OjcoreWasmExecutor } from './OjcoreWasmExecutor';
 import type { Executor } from './Executor';
@@ -26,30 +23,39 @@ export type { Executor } from './Executor';
 export type {
     ConnectionChangeCallback,
     NodeChangeCallback,
-    Unsubscribe
+    Unsubscribe,
+    Loop,
+    LoopLayer,
+    Recording,
+    RecordingEntry,
+    LooperHandle,
+    RecorderHandle,
+    SamplerHandle,
+    SignalLevels,
+    SignalLevelsCallback
 } from './Executor';
-export { WebAudioExecutor } from './WebAudioExecutor';
+export { INFINITE_DURATION, isInfiniteDuration } from './Executor';
 export { OjcoreNativeExecutor, isTauri } from './OjcoreNativeExecutor';
 export { OjcoreWasmExecutor } from './OjcoreWasmExecutor';
 
-/** Known executor identifiers. */
-export type ExecutorKind = 'webaudio' | 'ojcore-native' | 'ojcore-wasm';
+/** Known executor identifiers (ojcore-only after U-DEDUP). */
+export type ExecutorKind = 'ojcore-native' | 'ojcore-wasm';
 
-const DEFAULT_EXECUTOR: ExecutorKind = 'webaudio';
+/** Default ojcore transport in the browser (native is auto-picked under Tauri). */
+const DEFAULT_EXECUTOR: ExecutorKind = 'ojcore-wasm';
 
 /**
  * Resolve the selected executor kind. Explicit `VITE_OJ_EXECUTOR` always wins;
- * otherwise default to `webaudio`, but auto-pick `ojcore-native` under Tauri.
+ * otherwise default to `ojcore-wasm`, but auto-pick `ojcore-native` under Tauri.
  */
 function resolveExecutorKind(): ExecutorKind {
     const raw = import.meta.env.VITE_OJ_EXECUTOR as string | undefined;
     switch (raw) {
-        case 'webaudio':
         case 'ojcore-native':
         case 'ojcore-wasm':
             return raw;
         default:
-            // Unset / unknown: default to webaudio, except auto-native on Tauri.
+            // Unset / unknown: default to ojcore-wasm, except auto-native on Tauri.
             return isTauri() ? 'ojcore-native' : DEFAULT_EXECUTOR;
     }
 }
@@ -60,10 +66,8 @@ export function createExecutor(kind: ExecutorKind = resolveExecutorKind()): Exec
         case 'ojcore-native':
             return new OjcoreNativeExecutor();
         case 'ojcore-wasm':
-            return new OjcoreWasmExecutor();
-        case 'webaudio':
         default:
-            return new WebAudioExecutor();
+            return new OjcoreWasmExecutor();
     }
 }
 
@@ -71,8 +75,7 @@ let singleton: Executor | null = null;
 
 /**
  * The process-wide executor singleton. Lazily constructed on first access so the
- * selection happens once and the same instance is shared everywhere — mirroring
- * the previous `audioGraphManager` singleton it routes through.
+ * selection happens once and the same instance is shared everywhere.
  */
 export function getExecutor(): Executor {
     if (singleton === null) {

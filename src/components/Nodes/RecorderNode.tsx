@@ -10,8 +10,8 @@ import { useAudioStore } from '../../store/audioStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useLibraryStore } from '../../store/libraryStore';
 import { getExecutor } from '../../audio/executor';
-import { getAudioContext } from '../../audio/AudioEngine';
-import type { Recording as AudioRecording } from '../../audio/Recorder';
+import { getAudioContext } from '../../audio/audioContext';
+import type { Recording as AudioRecording } from '../../audio/executor';
 
 interface RecorderNodeProps {
     node: GraphNode;

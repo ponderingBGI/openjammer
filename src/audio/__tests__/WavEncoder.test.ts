@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { encodeWAV, WavEncoderError, audioBufferToWAV } from '../WavEncoder';
+import { encodeWAV, WavEncoderError, audioBufferToWAV } from '../wav';
 
 // Create a mock AudioBuffer for testing
 function createMockAudioBuffer(
