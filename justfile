@@ -8,7 +8,9 @@ set windows-shell := ['powershell.exe', '-NoLogo', '-Command']
 
 # OS-aware temp WAV for the device-free `render` gate. CI's windows-native job and
 # the ubuntu engine job both render here; locals get an OS-correct scratch path.
-wav := if os() == "windows" { "$env:RUNNER_TEMP\\oj-render.wav" } else { "${RUNNER_TEMP:-/tmp}/oj-render.wav" }
+# Prefer RUNNER_TEMP (CI), fall back to TEMP (local Windows shells), then a default.
+# Evaluated by `just` (env_var_or_default), so it works in CI and on a local dev box.
+wav := if os() == "windows" { env_var_or_default("RUNNER_TEMP", env_var_or_default("TEMP", "C:\\Windows\\Temp")) + "\\oj-render.wav" } else { "${RUNNER_TEMP:-/tmp}/oj-render.wav" }
 
 # Default: list available recipes.
 default:

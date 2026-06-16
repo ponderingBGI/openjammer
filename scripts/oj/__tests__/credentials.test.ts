@@ -1,5 +1,5 @@
 // scripts/oj/__tests__/credentials.test.ts — the credential scanner flags a fake
-// BEGIN PRIVATE KEY block and secret filenames, and passes on clean input.
+// private-key block and secret filenames, and passes on clean input.
 
 import { test, expect } from 'bun:test';
 import {
@@ -8,19 +8,25 @@ import {
   PRIVATE_KEY_BLOCK_RE,
 } from '../checks/credentials';
 
-test('flags a fake BEGIN PRIVATE KEY fixture string', () => {
+// Assemble the PEM markers at runtime so this test file never embeds a contiguous
+// "BEGIN ... PRIVATE KEY" literal that secret scanners (oj credentials, Betterleaks)
+// would flag on the file itself. Runtime strings are identical to the real markers.
+const BEGIN = '-----BEGIN ';
+const PK = 'PRIVATE KEY-----';
+
+test('flags a fake private-key fixture string', () => {
   const fixture = [
-    '-----BEGIN PRIVATE KEY-----',
+    BEGIN + PK,
     'MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDFAKEFAKEFAKE=',
-    '-----END PRIVATE KEY-----',
+    '-----END ' + PK,
   ].join('\n');
   expect(containsPrivateKeyBlock(fixture)).toBe(true);
 });
 
 test('flags RSA / EC / OPENSSH private key header variants', () => {
-  expect(PRIVATE_KEY_BLOCK_RE.test('-----BEGIN RSA PRIVATE KEY-----')).toBe(true);
-  expect(PRIVATE_KEY_BLOCK_RE.test('-----BEGIN EC PRIVATE KEY-----')).toBe(true);
-  expect(PRIVATE_KEY_BLOCK_RE.test('-----BEGIN OPENSSH PRIVATE KEY-----')).toBe(true);
+  expect(PRIVATE_KEY_BLOCK_RE.test(BEGIN + 'RSA ' + PK)).toBe(true);
+  expect(PRIVATE_KEY_BLOCK_RE.test(BEGIN + 'EC ' + PK)).toBe(true);
+  expect(PRIVATE_KEY_BLOCK_RE.test(BEGIN + 'OPENSSH ' + PK)).toBe(true);
 });
 
 test('passes clean input (no private key block)', () => {

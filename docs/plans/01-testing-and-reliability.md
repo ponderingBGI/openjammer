@@ -89,7 +89,7 @@ flowchart LR
 set windows-shell := ['powershell.exe', '-NoLogo', '-Command']  # maintainer's primary box
 
 # OS-aware temp WAV for the device-free render gate (ci.yml windows-native runs this too)
-wav := if os() == "windows" { "$env:RUNNER_TEMP\\oj-render.wav" } else { "${RUNNER_TEMP:-/tmp}/oj-render.wav" }
+wav := if os() == "windows" { env_var_or_default("RUNNER_TEMP", env_var_or_default("TEMP", "C:\\Windows\\Temp")) + "\\oj-render.wav" } else { "${RUNNER_TEMP:-/tmp}/oj-render.wav" }
 
 fmt:
     cargo fmt --all -- --check

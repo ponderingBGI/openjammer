@@ -58,12 +58,20 @@ function parseFlags(argv: string[]): ParsedFlags {
       case '--from-files':
         f.fromFiles = true;
         break;
-      case '--check':
-        f.check = argv[++i];
+      case '--check': {
+        const v = argv[i + 1];
+        if (v === undefined || v.startsWith('--')) throw new Error('missing value for --check');
+        f.check = v;
+        i += 1;
         break;
-      case '--base':
-        f.base = argv[++i];
+      }
+      case '--base': {
+        const v = argv[i + 1];
+        if (v === undefined || v.startsWith('--')) throw new Error('missing value for --base');
+        f.base = v;
+        i += 1;
         break;
+      }
       default:
         f.rest.push(a);
     }
@@ -98,7 +106,14 @@ async function main(): Promise<number> {
     return sub ? 0 : 2;
   }
 
-  const flags = parseFlags(rest);
+  let flags: ReturnType<typeof parseFlags>;
+  try {
+    flags = parseFlags(rest);
+  } catch (e) {
+    process.stderr.write(`oj: ${(e as Error).message}\n\n`);
+    usage();
+    return 2;
+  }
 
   switch (sub) {
     case 'doctor':

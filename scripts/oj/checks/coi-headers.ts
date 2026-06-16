@@ -14,6 +14,17 @@ export const name = 'COOP/COEP cross-origin isolation headers';
 
 const COOP = 'Cross-Origin-Opener-Policy';
 const COEP = 'Cross-Origin-Embedder-Policy';
+const COOP_VALUE = 'same-origin';
+const COEP_VALUE = 'require-corp';
+
+// Cross-origin isolation requires the correct VALUES, not just the header names —
+// a config with COOP set to anything other than `same-origin` (or COEP not
+// `require-corp`) still fails crossOriginIsolated. Match the header name within
+// ~120 chars of its required value, tolerating the various vite/JSON/_headers
+// syntaxes ('H': 'V' / "H": "V" / H = "V" / H "V").
+function hasHeaderValue(text: string, header: string, value: string): boolean {
+  return new RegExp(`${header}[\\s\\S]{0,120}${value}`, 'i').test(text);
+}
 
 // Committed hosting configs that could re-emit headers in production.
 const HOSTING_CONFIGS = ['vercel.json', '_headers', 'public/_headers', 'netlify.toml'];
@@ -33,8 +44,8 @@ export async function run(): Promise<CheckResult> {
     };
   }
 
-  const hasCoop = viteText.includes(COOP);
-  const hasCoep = viteText.includes(COEP);
+  const hasCoop = hasHeaderValue(viteText, COOP, COOP_VALUE);
+  const hasCoep = hasHeaderValue(viteText, COEP, COEP_VALUE);
   // Count occurrences so we can tell dev-only vs dev+preview.
   const coopCount = countOccurrences(viteText, COOP);
   const coepCount = countOccurrences(viteText, COEP);
@@ -79,7 +90,7 @@ export async function run(): Promise<CheckResult> {
   for (const cfg of present) {
     try {
       const t = await Bun.file(resolve(cfg)).text();
-      if (!t.includes(COOP) || !t.includes(COEP)) hostMissing.push(cfg);
+      if (!hasHeaderValue(t, COOP, COOP_VALUE) || !hasHeaderValue(t, COEP, COEP_VALUE)) hostMissing.push(cfg);
     } catch {
       hostMissing.push(cfg);
     }

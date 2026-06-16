@@ -718,7 +718,10 @@ jobs:
           # verified four-way drift release-please unifies. (Defense-in-depth: the
           # installers job can additionally surface the built CARGO_PKG_VERSION as an output.)
           TAG="${GITHUB_REF_NAME#v}"
-          CARGO=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')
+          # Section-scoped: read $.workspace.package.version specifically, not the
+          # first `version =` in the file (which could be a [workspace.dependencies] dep).
+          CARGO=$(awk '/^\[workspace\.package\]/{w=1;next} /^\[/{w=0} w&&$1=="version"{gsub(/"/,"",$3);print $3;exit}' Cargo.toml)
+          test -n "$CARGO" || { echo "::error::workspace.package.version not found in Cargo.toml"; exit 1; }
           CONF=$(jq -r .version src-tauri/tauri.conf.json)
           echo "tag=$TAG cargo=$CARGO conf=$CONF"
           test "$TAG" = "$CARGO" || { echo "::error::tag $TAG != Cargo $CARGO"; exit 1; }
