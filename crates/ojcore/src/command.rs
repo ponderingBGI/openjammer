@@ -43,6 +43,9 @@ impl Engine {
     ///   harmlessly ignored there; instrument/voice nodes consume it.
     /// * `Bypass`    -> toggle the node's bypass flag.
     /// * `Transport*`/`Seek` -> drive the minimal sample-counting clock.
+    /// * `Looper`    -> resolve node slot, drive the target instance's
+    ///   [`crate::DspInstance::looper_action`]. Non-looper nodes inherit the
+    ///   trait's default no-op; a [`crate::LooperNode`] consumes it.
     pub fn apply(&mut self, cmd: RtCommand) {
         match cmd {
             RtCommand::SetParam { node, param, value } => {
@@ -68,6 +71,11 @@ impl Engine {
             RtCommand::TransportPlay => self.playing = true,
             RtCommand::TransportPause => self.playing = false,
             RtCommand::Seek { samples } => self.sample_pos = samples,
+            RtCommand::Looper { node, action } => {
+                if let Some(slot) = self.program().slot_of_id(node) {
+                    self.program_mut().instances[slot].looper_action(action);
+                }
+            }
         }
     }
 

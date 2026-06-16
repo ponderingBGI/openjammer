@@ -78,7 +78,10 @@ export type PrimitiveKind =
   | "SpeakerOut"
   | "GraphIn"
   | "GraphOut"
-  | "Passthrough";
+  | "Passthrough"
+  // stateful (U-STATEFUL)
+  | "Looper"
+  | "Recorder";
 
 /** Edge signal kind. Rust: `enum ConnectionType { Audio, Control }` — bare string. */
 export type ConnectionType = "Audio" | "Control";
@@ -142,6 +145,7 @@ export interface OjGraph {
  *   "TransportPlay"
  *   "TransportPause"
  *   { "Seek": { "samples": 9000 } }
+ *   { "Looper": { "node": 3, "action": 5 } }
  */
 export type RtCommand =
   | { SetParam: { node: NodeIdx; param: number; value: number } }
@@ -150,7 +154,26 @@ export type RtCommand =
   | { Bypass: { node: NodeIdx; on: boolean } }
   | "TransportPlay"
   | "TransportPause"
-  | { Seek: { samples: number } };
+  | { Seek: { samples: number } }
+  | { Looper: { node: NodeIdx; action: LooperAction } };
+
+/**
+ * Looper transport actions carried by `RtCommand.Looper.action` (a bare `u8` on
+ * the wire). Mirrors Rust's `ojproto::looper_action` consts — kept as a numeric
+ * union so the JSON shape stays `{ "Looper": { "node": n, "action": k } }`.
+ *   ARM = 0, RECORD = 1, PLAY = 2, STOP = 3, CLEAR = 4, OVERDUB = 5
+ */
+export type LooperAction = 0 | 1 | 2 | 3 | 4 | 5;
+
+/** Named `LooperAction` values, mirroring Rust's `ojproto::looper_action`. */
+export const LooperAction = {
+  ARM: 0,
+  RECORD: 1,
+  PLAY: 2,
+  STOP: 3,
+  CLEAR: 4,
+  OVERDUB: 5,
+} as const satisfies Record<string, LooperAction>;
 
 /**
  * Hot parameter patch: a hand-packed 7-byte frame on the highest-rate UI->RT

@@ -661,3 +661,129 @@ fn process_block_alloc_free_with_metering_enabled() {
         }
     });
 }
+
+// ===========================================================================
+// U-STATEFUL: the built-in looper, driven end-to-end through the engine.
+// ===========================================================================
+
+/// A registry with gain (for the GraphIn/SpeakerOut manifests) + the looper.
+fn looper_registry() -> PluginRegistry {
+    let mut reg = PluginRegistry::new();
+    reg.register(Box::new(GainLoader::new()));
+    reg.register(Box::new(ojcore::LooperLoader::new()));
+    reg
+}
+
+/// GraphIn(1) -> Looper(2) -> SpeakerOut(3), with the looper's wet=1/dry=0 and a
+/// one-block quantized loop length so a single recorded block auto-loops.
+fn graphin_looper_speaker() -> OjGraph {
+    use ojcore::looper::looper_param;
+    let mut g = OjGraph::empty(SR, BLOCK);
+    let input = node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1);
+    let mut loop_node = node(2, ojcore::LOOPER_ID, PrimitiveKind::Looper, 1, 1);
+    loop_node.params.push(Param {
+        id: looper_param::LOOP_SECS,
+        value: BLOCK as f32 / SR as f32,
+    });
+    loop_node.params.push(Param {
+        id: looper_param::WET,
+        value: 1.0,
+    });
+    loop_node.params.push(Param {
+        id: looper_param::DRY,
+        value: 0.0,
+    });
+    let speaker = node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0);
+    g.nodes.push(input);
+    g.nodes.push(loop_node);
+    g.nodes.push(speaker);
+    g.edges.push(audio_edge(1, 0, 2, 0)); // input  -> looper
+    g.edges.push(audio_edge(2, 0, 3, 0)); // looper -> speaker
+    g
+}
+
+/// Record a known block, then play it back identically — through the engine, via
+/// `RtCommand::Looper` actions on the wait-free command ring.
+#[test]
+fn looper_records_then_plays_back_through_engine() {
+    use ojproto::looper_action;
+    let reg = looper_registry();
+    let prog = compile(&graphin_looper_speaker(), &reg).expect("compile");
+    let mut engine = Engine::new(prog);
+    let (mut tx, mut rx) = CommandQueue::split(8);
+
+    let signal = ramp();
+    let mut out = vec![0.0f32; NB];
+
+    // RECORD: one block fills the quantized loop and auto-switches to Playing.
+    tx.push(RtCommand::Looper {
+        node: NodeIdx(2),
+        action: looper_action::RECORD,
+    })
+    .unwrap();
+    engine.drain(&mut rx);
+    inject(&mut engine, &signal);
+    engine.process_block(&mut out, NB);
+
+    // Play back over silence: the GraphIn buffer is left at zero, so out == the
+    // recorded loop (wet=1, dry=0) within tolerance.
+    let silence = vec![0.0f32; NB];
+    inject(&mut engine, &silence);
+    engine.process_block(&mut out, NB);
+    for (i, (&x, &y)) in signal.iter().zip(out.iter()).enumerate() {
+        assert!(
+            (x - y).abs() < 1e-5,
+            "looper playback frame {i}: recorded {x} != played {y}"
+        );
+    }
+
+    // CLEAR resets the loop to silence; playback then yields pure silence.
+    tx.push(RtCommand::Looper {
+        node: NodeIdx(2),
+        action: looper_action::CLEAR,
+    })
+    .unwrap();
+    engine.drain(&mut rx);
+    inject(&mut engine, &silence);
+    engine.process_block(&mut out, NB);
+    assert!(out.iter().all(|&y| y.abs() < 1e-6), "loop not cleared");
+}
+
+/// `LooperNode::process` (driven through the engine) allocates zero bytes on the
+/// hot path, in every state of the machine.
+#[test]
+fn looper_process_is_allocation_free() {
+    use ojproto::looper_action;
+    let reg = looper_registry();
+    let prog = compile(&graphin_looper_speaker(), &reg).expect("compile");
+    let mut engine = Engine::new(prog);
+    let (mut tx, mut rx) = CommandQueue::split(8);
+
+    let signal = ramp();
+    let mut out = vec![0.0f32; NB];
+
+    // Warm up (and prime a captured loop) outside the gate.
+    inject(&mut engine, &signal);
+    engine.process_block(&mut out, NB);
+
+    // Cycle the looper through every state INSIDE the gate: applying the command
+    // (looper_action) and rendering must both be allocation-free.
+    assert_no_alloc(|| {
+        for &action in &[
+            looper_action::ARM,
+            looper_action::RECORD,
+            looper_action::OVERDUB,
+            looper_action::PLAY,
+            looper_action::STOP,
+            looper_action::CLEAR,
+        ] {
+            tx.push(RtCommand::Looper {
+                node: NodeIdx(2),
+                action,
+            })
+            .unwrap();
+            engine.drain(&mut rx);
+            engine.process_block(&mut out, NB);
+        }
+    });
+}

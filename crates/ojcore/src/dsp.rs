@@ -63,6 +63,13 @@ pub trait DspInstance: Send {
     /// invoked from the same thread as `process`; implementors MUST NOT allocate.
     fn note_off(&mut self, _note: u8) {}
 
+    /// RT-thread looper transport action (one of the [`ojproto::looper_action`]
+    /// codes: arm / record / play / stop / clear / overdub). Default no-op so
+    /// non-looper nodes ignore it; [`crate::LooperNode`] consumes it to drive its
+    /// state machine. RT-safe: invoked from the same thread as `process`;
+    /// implementors MUST NOT allocate. Carried by [`ojproto::RtCommand::Looper`].
+    fn looper_action(&mut self, _action: u8) {}
+
     /// Clear internal state (filter memory, delay lines, phase). Default no-op.
     fn reset(&mut self) {}
 }

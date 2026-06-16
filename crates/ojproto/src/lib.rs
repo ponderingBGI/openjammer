@@ -57,6 +57,32 @@ pub enum PrimitiveKind {
     GraphIn,
     GraphOut,
     Passthrough,
+    // stateful (U-STATEFUL)
+    Looper,
+    Recorder,
+}
+
+/// Looper transport actions carried by [`RtCommand::Looper`], encoded as a
+/// single `u8` so the command stays tiny and `Copy`. These drive a looper
+/// node's state machine (idle -> armed -> recording -> playing -> overdubbing).
+///
+/// Kept as `u8` consts (not a serde enum) so the wire form of
+/// [`RtCommand::Looper`] is a plain `{ "node": n, "action": k }` object — the TS
+/// mirror reads `action` as a bare number, matching these values.
+pub mod looper_action {
+    /// Arm the looper: the next record begins capture from a clean (silent)
+    /// loop buffer.
+    pub const ARM: u8 = 0;
+    /// Begin (or resume) recording the input into the loop buffer.
+    pub const RECORD: u8 = 1;
+    /// Play the recorded loop back (no new capture).
+    pub const PLAY: u8 = 2;
+    /// Stop playback/recording (loop contents retained).
+    pub const STOP: u8 = 3;
+    /// Clear the loop buffer back to silence and return to idle.
+    pub const CLEAR: u8 = 4;
+    /// Overdub: sum the input into the existing loop while playing it back.
+    pub const OVERDUB: u8 = 5;
 }
 
 /// Edge signal kind. The UI's `universal` ports are RESOLVED to `Audio` or
@@ -157,6 +183,13 @@ pub enum RtCommand {
     TransportPause,
     Seek {
         samples: u64,
+    },
+    /// Drive a looper node's state machine. `action` is one of the
+    /// [`looper_action`] consts (arm / record / play / stop / clear / overdub).
+    /// `NodeIdx(u32)` + `u8` is 5 payload bytes — well within the 16-byte cap.
+    Looper {
+        node: NodeIdx,
+        action: u8,
     },
 }
 

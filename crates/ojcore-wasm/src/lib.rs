@@ -275,6 +275,9 @@ fn drain_commands(host: &mut Host) {
 ///     dropped here until `ojcore` exposes a no_std transport surface. The wasm
 ///     worklet's transport is driven host-side (JS render-quantum clock) in the
 ///     meantime, so this is not a functional gap on the boundary.
+///   * `Looper` -> resolve slot, drive the instance's
+///     [`ojcore::DspInstance::looper_action`] (the looper is no_std and
+///     registered on wasm too, so the in-browser looper works end to end).
 #[inline]
 fn apply_command(engine: &mut Engine, cmd: RtCommand) {
     match cmd {
@@ -294,6 +297,11 @@ fn apply_command(engine: &mut Engine, cmd: RtCommand) {
         }
         RtCommand::TransportPlay | RtCommand::TransportPause | RtCommand::Seek { .. } => {
             // No no_std transport setter on `Engine` (see fn docs). Dropped.
+        }
+        RtCommand::Looper { node, action } => {
+            if let Some(slot) = engine.program().slot_of_id(node) {
+                engine.program_mut().instances[slot].looper_action(action);
+            }
         }
     }
 }

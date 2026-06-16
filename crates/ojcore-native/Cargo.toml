@@ -14,6 +14,11 @@ path = "src/bin/loopback.rs"
 ojcore = { path = "../ojcore" }
 ojproto = { path = "../ojproto" }
 
+# Wait-free SPSC ring for the off-RT Recorder capture path (U-STATEFUL): the
+# audio callback writes f32 frames in, the control thread drains them out. Same
+# crate (and pinned version) the engine's CommandQueue uses, so no new resolve.
+rtrb = "0.3.4"
+
 # Native audio I/O. `realtime` enables cpal's own RT-priority hint on the
 # callback thread; we additionally promote via `audio_thread_priority`.
 # Versions pinned from a fresh `cargo add` resolve (governing principle #9).

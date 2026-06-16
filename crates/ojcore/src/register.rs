@@ -13,6 +13,7 @@ use alloc::boxed::Box;
 
 use crate::builtin::GainLoader;
 use crate::effects::{BiquadLoader, ConvolutionLoader, DelayLoader, WaveshaperLoader};
+use crate::looper::LooperLoader;
 use crate::registry::PluginRegistry;
 use crate::structural::StructuralLoader;
 
@@ -52,7 +53,7 @@ impl BuiltinOpts {
 /// `ojinstrument::register_all`. Registers (when enabled by `opts`):
 ///
 /// * effects:    `builtin.gain`, `builtin.biquad`, `builtin.waveshaper`,
-///   `builtin.delay`, `builtin.convolution`
+///   `builtin.delay`, `builtin.convolution`, `builtin.looper`
 /// * structural: `host.graph_in`, `host.mic_in`, `host.graph_out`,
 ///   `host.speaker_out`, `builtin.add`, `builtin.passthrough`
 pub fn register_builtins(reg: &mut PluginRegistry, opts: BuiltinOpts) {
@@ -62,6 +63,9 @@ pub fn register_builtins(reg: &mut PluginRegistry, opts: BuiltinOpts) {
         reg.register(Box::new(WaveshaperLoader::new()));
         reg.register(Box::new(DelayLoader::new()));
         reg.register(Box::new(ConvolutionLoader::new()));
+        // U-STATEFUL: the looper rides the SAME shared path, so it appears in
+        // both the native and wasm registries (no_std -> wasm-safe).
+        reg.register(Box::new(LooperLoader::new()));
     }
     if opts.structural {
         reg.register(Box::new(StructuralLoader::graph_in()));
@@ -78,6 +82,7 @@ mod tests {
     use super::*;
     use crate::builtin::GAIN_ID;
     use crate::effects::{BIQUAD_ID, CONVOLUTION_ID, DELAY_ID, WAVESHAPER_ID};
+    use crate::looper::LOOPER_ID;
     use crate::structural::{
         ADD_ID, GRAPH_IN_ID, GRAPH_OUT_ID, MIC_IN_ID, PASSTHROUGH_ID, SPEAKER_OUT_ID,
     };
@@ -94,6 +99,7 @@ mod tests {
             WAVESHAPER_ID,
             DELAY_ID,
             CONVOLUTION_ID,
+            LOOPER_ID,
             GRAPH_IN_ID,
             MIC_IN_ID,
             GRAPH_OUT_ID,
@@ -103,8 +109,8 @@ mod tests {
         ] {
             assert!(reg.contains(id), "missing built-in id: {id}");
         }
-        // 5 effects + 6 structural == 11 loaders.
-        assert_eq!(reg.len(), 11);
+        // 6 effects (incl. looper) + 6 structural == 12 loaders.
+        assert_eq!(reg.len(), 12);
     }
 
     /// Opting structural off registers effects only (and vice versa).
@@ -119,8 +125,9 @@ mod tests {
             },
         );
         assert!(effects_only.contains(GAIN_ID));
+        assert!(effects_only.contains(LOOPER_ID));
         assert!(!effects_only.contains(SPEAKER_OUT_ID));
-        assert_eq!(effects_only.len(), 5);
+        assert_eq!(effects_only.len(), 6);
 
         let mut structural_only = PluginRegistry::new();
         register_builtins(
@@ -146,6 +153,7 @@ mod tests {
         assert_eq!(reg.lower(WAVESHAPER_ID), Some(PrimitiveKind::Waveshaper));
         assert_eq!(reg.lower(DELAY_ID), Some(PrimitiveKind::Delay));
         assert_eq!(reg.lower(CONVOLUTION_ID), Some(PrimitiveKind::Convolution));
+        assert_eq!(reg.lower(LOOPER_ID), Some(PrimitiveKind::Looper));
         assert_eq!(reg.lower(SPEAKER_OUT_ID), Some(PrimitiveKind::SpeakerOut));
     }
 }

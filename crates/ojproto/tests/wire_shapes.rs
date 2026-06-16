@@ -54,6 +54,8 @@ fn primitive_kind_is_bare_variant_string() {
         (PrimitiveKind::GraphIn, "\"GraphIn\""),
         (PrimitiveKind::GraphOut, "\"GraphOut\""),
         (PrimitiveKind::Passthrough, "\"Passthrough\""),
+        (PrimitiveKind::Looper, "\"Looper\""),
+        (PrimitiveKind::Recorder, "\"Recorder\""),
     ];
     for (kind, expected) in all {
         assert_json(&kind, expected);
@@ -177,6 +179,15 @@ fn rt_command_external_tagging() {
     assert_json(
         &RtCommand::Seek { samples: 9000 },
         r#"{"Seek":{"samples":9000}}"#,
+    );
+    // Looper carries a node + a u8 action (one of `looper_action::*`); `action`
+    // serializes as a bare number, mirrored on the TS side as `number`.
+    assert_json(
+        &RtCommand::Looper {
+            node: NodeIdx(3),
+            action: looper_action::OVERDUB,
+        },
+        r#"{"Looper":{"node":3,"action":5}}"#,
     );
 }
 

@@ -47,6 +47,13 @@ pub mod effects;
 pub mod register;
 pub mod structural;
 
+// --- U-STATEFUL: the built-in Looper -----------------------------------------
+// `looper` is a stateful audio thru-node (record / play / overdub / clear) whose
+// loop buffer is pre-allocated in `activate`; its `process` is allocation-free.
+// It is `no_std` (alloc only) so it compiles unchanged for the `wasm32` worklet
+// and is registered through the SAME shared `register_builtins` path.
+pub mod looper;
+
 // --- U4 engine core ---------------------------------------------------------
 // `compile` + `exec` are the engine proper and stay `no_std` (alloc only) so
 // they compile unchanged for the `wasm32` AudioWorklet. `command` (rtrb ring)
@@ -88,6 +95,10 @@ pub use effects::{
     WaveshaperLoader, WaveshaperNode, BIQUAD_ID, CONVOLUTION_ID, DELAY_ID, WAVESHAPER_ID,
 };
 pub use register::{register_builtins, BuiltinOpts};
+
+// --- U-STATEFUL: looper surface ---
+pub use looper::{LooperLoader, LooperNode, LooperState, LOOPER_ID, MAX_LOOP_SECS};
+
 pub use structural::{
     StructuralLoader, StructuralNode, ADD_ID, GRAPH_IN_ID, GRAPH_OUT_ID, MIC_IN_ID, PASSTHROUGH_ID,
     SPEAKER_OUT_ID,

@@ -13,6 +13,11 @@
 //!   engine's `AssetId` handles point at. See [`store`] for the fetch protocol.
 //! * [`latency`] — the Phase-1 loopback round-trip latency math + impulse
 //!   onset detection, plus the `loopback` harness (this lib + `src/bin/loopback.rs`).
+//! * [`Recorder`] / [`RecorderSink`] — the U-STATEFUL capture capability: the RT
+//!   audio thread pushes a bus's output into a wait-free SPSC ring; the control
+//!   thread drains it into a growing PCM buffer and stores it in the
+//!   [`AssetCatalog`] / exports it to WAV via the [`AssetStore`]. Native-only
+//!   (the ring + `Vec` growth live off the realtime, wasm-clean engine core).
 //!
 //! The audio-touching paths cannot run in a device-less CI sandbox; every such
 //! path returns a clear error (never a panic) so the harness can report "no
@@ -21,6 +26,7 @@
 pub mod asset;
 pub mod host;
 pub mod latency;
+pub mod recorder;
 pub mod store;
 
 pub use asset::{AssetError, AssetStore, Pcm};
@@ -28,6 +34,7 @@ pub use host::{render_block, AudioHost, BlockProcessor, HostError, StreamRequest
 pub use latency::{
     detect_onset, frames_to_ms, measure_round_trip_frames, ms_to_frames, LatencyEstimate,
 };
+pub use recorder::{Recorder, RecorderSink, DEFAULT_RING_FRAMES};
 pub use store::{content_address, AssetCatalog};
 
 /// The amplitude threshold used to detect the loopback impulse in the captured
