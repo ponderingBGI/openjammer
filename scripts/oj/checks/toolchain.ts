@@ -47,7 +47,6 @@ async function hasWasmTarget(): Promise<boolean | null> {
 
 export async function run(): Promise<CheckResult> {
   const results = await Promise.all(PROBES.map(async (p) => ({ p, r: await probe(p) })));
-  const present = results.filter((x) => x.r.ok);
   const absent = results.filter((x) => !x.r.ok);
 
   const detailLines: string[] = [];
