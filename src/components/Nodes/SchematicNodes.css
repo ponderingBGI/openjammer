@@ -1195,6 +1195,17 @@
 
 .about-links {
     margin-bottom: var(--space-lg);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+
+/* The "Report a problem" entry point is a <button> styled like the GitHub link
+   (the L5 issue reporter); reset the native button look so it matches. */
+.about-report-link {
+    font: inherit;
+    font-weight: 500;
+    cursor: pointer;
 }
 
 .about-github-link {

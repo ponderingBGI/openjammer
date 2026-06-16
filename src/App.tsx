@@ -11,6 +11,7 @@ import { HelpPanel } from './components/Toolbar/HelpPanel';
 import { SettingsPanel } from './components/Settings/SettingsPanel';
 import { CommandBar } from './components/CommandBar/CommandBar';
 import { DevLogPanel } from './components/DevLog/DevLogPanel';
+import { IssueReporter } from './components/IssueReporter/IssueReporter';
 import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
@@ -377,6 +378,11 @@ function App() {
       {/* DevLog panel (Ctrl/Cmd+Shift+L) - owns its own toggle + open state (L4).
           Mounted always; gated to dev/canary and hidden until toggled. */}
       <DevLogPanel />
+
+      {/* One-click issue reporter (L5) - opened by the `openjammer:report-issue`
+          window event; bundles a redacted diagnostic snapshot + DevLog tail into a
+          pre-filled GitHub issue. Always available (production users report too). */}
+      <IssueReporter />
 
       {/* Collaboration Share/Join control + peer list (U23 — collab state plane) */}
       <CollabControl />

@@ -1,8 +1,21 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react-swc'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// App version, inlined at build time from the SSOT (package.json, written in
+// lockstep by release-please). Exposed as `__APP_VERSION__` so the UI + the
+// issue reporter (L5) report the real shipped version instead of a hand-edited
+// string that drifts.
+const APP_VERSION: string = JSON.parse(
+  readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf-8'),
+).version
+
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   plugins: [
     react(),
     VitePWA({
