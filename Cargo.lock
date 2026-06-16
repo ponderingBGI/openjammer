@@ -2596,6 +2596,7 @@ version = "0.0.0"
 dependencies = [
  "ojcore",
  "ojcore-native",
+ "ojfaust",
  "ojhost",
  "ojinstrument",
  "ojproto",

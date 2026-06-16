@@ -38,6 +38,13 @@ ojproto = { path = "../crates/ojproto" }
 # `--features ojhost/juce` (bundled C++ JUCE 8) — see crates/ojhost/README.md.
 ojhost = { path = "../crates/ojhost" }
 
+# --- AI DSP-node authoring (U20) ---------------------------------------------
+# Host-side Faust compilation behind the AI agent's `author_dsp_node` tool.
+# Default build is a dependency-free stub (`compile` -> Unavailable); enable real
+# compilation with `--features ojfaust/libfaust` once libfaust is installed
+# (see crates/ojfaust/README.md). NEVER on the realtime path.
+ojfaust = { path = "../crates/ojfaust" }
+
 # --- the Tauri v2 shell ------------------------------------------------------
 tauri = { version = "2.11.2", features = [] }
 tauri-plugin-opener = "2.5.4"

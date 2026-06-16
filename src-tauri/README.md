@@ -46,6 +46,9 @@ On startup the backend:
 | `send_command(cmd: RtCommand)` | Enqueue a note/param/transport command onto the wait-free UI -> RT ring the audio callback drains each block. |
 | `query_stream()` | Return the negotiated stream + buffering-floor latency. |
 | `engine_running()` | Whether an audio stream is currently running. |
+| `scan_plugins(dirs)` | Scan for VST3 / CLAP (+ AU) plugins and register them as nodes. |
+| `ai_run(prompt, providerKey?, channel)` | **(U20)** Spawn Pi in a throwaway worktree, stream its tool calls back as Tauri events on `channel`. See [AI agent](#ai-agent-u20). |
+| `ai_faust_compile(source)` | **(U20)** Compile an AI-authored Faust DSP via `ojfaust`. `Ok(None)` in the default build (no libfaust); the agent stores the source instead. |
 
 > **Program swap note.** `push_graph` publishes the freshly compiled program to
 > the `ProgramSwap` mailbox (the publish point of record). Because the public
@@ -53,6 +56,73 @@ On startup the backend:
 > per-block swap hook of its own, adoption is currently realised by rebuilding
 > the host around a fresh `Engine`. When `AudioHost` gains an in-callback
 > `install_into` hook this collapses to "publish only" with no IPC change.
+
+## AI agent (U20)
+
+The Ctrl/Cmd+K command bar's **Ask AI** half (`src/ai/**`,
+`src/components/CommandBar/**`) drives a "Pi-inspired" agent: type a request,
+press Tab, and the agent proposes graph edits / new DSP nodes, streamed live with
+an **Approve / Reject** transaction. AI is **native/hybrid only** — in a plain
+browser the Tab -> AI path shows *"AI requires the desktop app"* and is disabled;
+only inside this Tauri shell does the Rust `ai_run` command drive Pi.
+
+`src/ai.rs` is the native driver. It treats **Pi as an untrusted generator,
+never a trusted runner** (Pi has no permission system — its tool calls
+auto-execute with the launching user's privileges, so sandboxing is the host's
+job):
+
+- **Throwaway worktree.** Pi runs with its cwd inside a fresh `git worktree`
+  under the OS temp dir, removed on run completion.
+- **Env allowlist.** The child starts from an empty environment; only
+  `PATH`/`HOME` (and the Windows equivalents) plus the **one** provider key the
+  user supplied are forwarded. Every other secret is stripped. OpenJammer never
+  stores the key.
+- **Tool calls are forwarded, not executed natively.** Graph mutations are
+  surfaced to the frontend and applied only behind the user's Approve, via the
+  same reversible `graphStore` verbs the UI uses.
+
+### Founder setup (one-time)
+
+Pi is **not** bundled. To enable the agent:
+
+1. **Install Pi** so the `pi` binary is on `PATH`:
+
+   ```bash
+   bun add -g @earendil-works/pi-coding-agent     # or: npm i -g …
+   # see github.com/earendil-works/pi for alternatives
+   pi --version                                   # verify it resolves
+   ```
+
+   (Or set `OPENJAMMER_PI_BIN=/abs/path/to/pi` to point at a custom build.)
+
+2. **Configure a provider key** — your own credentials, one provider. Either
+   put it in `~/.pi` (Pi reads ~30 providers from there), or let the UI collect
+   it and forward it to the child under the var your provider expects. The
+   forwarded var name defaults to `OPENJAMMER_PROVIDER_KEY`; override it with
+   `OPENJAMMER_AI_KEY_VAR` (e.g. `OPENJAMMER_AI_KEY_VAR=ANTHROPIC_API_KEY`).
+
+3. **(Optional) DSP authoring with real Faust compilation.** The
+   `author_dsp_node` tool generates Faust source. Without libfaust the source is
+   stored against the node (compile later); to compile in-app, build with
+   `--features ojfaust/libfaust` after installing libfaust — see
+   `crates/ojfaust/README.md`.
+
+### Pi RPC schema
+
+`ai.rs::parse_pi_line` maps Pi's LF-delimited JSONL (split **only** on `\n`)
+into `PiStreamLine`s defensively — recognised `tool_call` / `result` / `error`
+lines are typed, anything else degrades to a `thought` (nothing is lost). Pin a
+Pi version and tighten this mapping once the RPC schema is fixed. The frontend
+mirror is `src/ai/PiAgentBackend.ts`.
+
+### Testing without Pi
+
+The whole tool-call -> graph-verb path and the Approve/Reject transaction are
+proven with Pi **mocked** (`MockAgentBackend`) — `bun run test:run` covers
+`src/ai/__tests__` and `src/store/__tests__/agentSessionStore.test.ts`. The
+native `ai.rs` env-stripping + JSONL parsing have Rust unit tests
+(`cargo test -p oj-tauri ai::`). Real-Pi behaviour is enabled simply by
+installing Pi as above; no test here depends on it.
 
 ## Local development
 

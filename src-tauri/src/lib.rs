@@ -12,6 +12,7 @@
 //! starter graph, and starts the [`AudioHost`](ojcore_native::AudioHost)) and
 //! `manage` it as Tauri state. The commands below are the UI->RT seam.
 
+mod ai;
 mod engine;
 
 use std::path::PathBuf;
@@ -92,6 +93,20 @@ fn engine_running(state: tauri::State<'_, BackendState>) -> Result<bool, String>
         .is_running())
 }
 
+/// Compile an AI-authored Faust DSP source via the `ojfaust` crate (U20).
+///
+/// This is the DSP-NODE AUTHORING leg of the agent. When the desktop build was
+/// compiled with `--features ojfaust/libfaust` (and libfaust is installed), this
+/// returns the compiled DSP's name + port counts so the frontend can register it
+/// as a first-class node. In the DEFAULT build (no libfaust) it returns
+/// `Ok(None)` — the agent stores the Faust source against the node instead, to be
+/// compiled later, exactly as the project plan's fallback specifies. Reversible
+/// either way (the node is deletable). Never runs on the realtime path.
+#[tauri::command]
+fn ai_faust_compile(source: String) -> Result<Option<ai::FaustCompileResult>, String> {
+    ai::compile_faust(&source)
+}
+
 /// Build and run the Tauri application. Shared between the desktop binary
 /// (`main.rs`) and any future mobile entry point (the Tauri convention).
 ///
@@ -111,7 +126,9 @@ pub fn run() {
             send_command,
             query_stream,
             engine_running,
-            scan_plugins
+            scan_plugins,
+            ai::ai_run,
+            ai_faust_compile
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenJammer tauri application");
