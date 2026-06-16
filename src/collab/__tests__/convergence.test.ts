@@ -317,6 +317,12 @@ function mkNode(id: string): GraphNode {
 // ----------------------------------------------------------------------------
 
 describe('PresenceManager', () => {
+    // EphemeralStore local-update emission is async/throttled in the Loro WASM
+    // layer, so these assertions wait for eventual consistency. The waits resolve
+    // in milliseconds locally; the generous timeouts (well above the 1s default)
+    // are purely a safety margin against a heavily-loaded parallel CI runner where
+    // the emission has occasionally exceeded 1s — the source of a rare flake.
+    const PRESENCE_WAIT = { timeout: 5_000 } as const;
     it('adds, updates, and surfaces a remote peer; removes on destroy', async () => {
         const pa = new PresenceManager(makeSelfPresence('peer-a', 'Alice'), 60_000);
         const pb = new PresenceManager(makeSelfPresence('peer-b', 'Bob'), 60_000);
@@ -339,14 +345,24 @@ describe('PresenceManager', () => {
         // emission is throttled/async, so wait for eventual consistency rather
         // than assuming synchronous propagation (the latter is CI-timing-flaky).
         pb.setCursor({ x: 42, y: 7 });
-        await vi.waitFor(() =>
-            expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.cursor).toEqual({ x: 42, y: 7 }),
+        await vi.waitFor(
+            () =>
+                expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.cursor).toEqual({
+                    x: 42,
+                    y: 7,
+                }),
+            PRESENCE_WAIT,
         );
 
         // UPDATE: Bob selects nodes; Alice sees the selection.
         pb.setSelection(['n1', 'n2']);
-        await vi.waitFor(() =>
-            expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.selection).toEqual(['n1', 'n2']),
+        await vi.waitFor(
+            () =>
+                expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.selection).toEqual([
+                    'n1',
+                    'n2',
+                ]),
+            PRESENCE_WAIT,
         );
 
         // self excluded from getPeers.
@@ -356,7 +372,7 @@ describe('PresenceManager', () => {
         ub();
         pa.destroy();
         pb.destroy();
-    });
+    }, 15_000);
 
     it('keeps presence out of the persisted CRDT document', () => {
         // Presence lives in EphemeralStore, never in the LoroDoc.
