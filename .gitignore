@@ -54,3 +54,6 @@ openjammer.key
 *.tmp
 .git-commit-msg.tmp
 .pr-body.tmp
+
+# oj preflight content-addressed cache (Layer 2 fast-feedback).
+.oj-cache/

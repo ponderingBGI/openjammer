@@ -1,0 +1,140 @@
+#!/usr/bin/env bun
+// scripts/oj/index.ts — the merged `oj` developer CLI arg router.
+//
+// One binary, six entry points:
+//   oj doctor     [--json] [--fix] [--from-files [<files...>]] [--check <id>]
+//   oj preflight  [--json] [--affected] [--plan] [--base <ref>]
+//   oj plan       [--json] [--base <ref>]
+//   oj scaffold   <node|dsp-kernel> ...     (STUB, exit 2)
+//   oj dev        ...                        (STUB, exit 2)
+//
+// Shared lib/ (git, cache, ssot, report) means version-sync logic lives ONCE.
+// Exit code: non-zero only when a hard failure occurs (any check status `fail`,
+// a preflight recipe failure, or a stubbed subcommand).
+
+import { doctor } from './doctor';
+import { preflight } from './preflight';
+import { plan } from './plan';
+import { scaffold } from './scaffold';
+import { dev } from './dev';
+
+interface ParsedFlags {
+  json: boolean;
+  fix: boolean;
+  affected: boolean;
+  plan: boolean;
+  fromFiles: boolean;
+  check?: string;
+  base?: string;
+  /** Positional / passthrough args after flags are consumed. */
+  rest: string[];
+}
+
+function parseFlags(argv: string[]): ParsedFlags {
+  const f: ParsedFlags = {
+    json: false,
+    fix: false,
+    affected: false,
+    plan: false,
+    fromFiles: false,
+    rest: [],
+  };
+
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    switch (a) {
+      case '--json':
+        f.json = true;
+        break;
+      case '--fix':
+        f.fix = true;
+        break;
+      case '--affected':
+        f.affected = true;
+        break;
+      case '--plan':
+        f.plan = true;
+        break;
+      case '--from-files':
+        f.fromFiles = true;
+        break;
+      case '--check':
+        f.check = argv[++i];
+        break;
+      case '--base':
+        f.base = argv[++i];
+        break;
+      default:
+        f.rest.push(a);
+    }
+  }
+  return f;
+}
+
+function usage(): void {
+  process.stdout.write(
+    [
+      'oj — the OpenJammer developer CLI',
+      '',
+      'Usage:',
+      '  oj doctor    [--json] [--fix] [--from-files [<files...>]] [--check <id>]',
+      '  oj preflight [--json] [--affected] [--plan] [--base <ref>]',
+      '  oj plan      [--json] [--base <ref>]',
+      '  oj scaffold  <node|dsp-kernel> ...   (not yet implemented)',
+      '  oj dev       ...                      (not yet implemented)',
+      '',
+      'doctor checks: version-sync, credentials, coi-headers, docs-accuracy,',
+      '               toolchain, protocol-mirror, node-registry, ssot-set-equality',
+      '',
+    ].join('\n'),
+  );
+}
+
+async function main(): Promise<number> {
+  const [, , sub, ...rest] = process.argv;
+
+  if (!sub || sub === '--help' || sub === '-h' || sub === 'help') {
+    usage();
+    return sub ? 0 : 2;
+  }
+
+  const flags = parseFlags(rest);
+
+  switch (sub) {
+    case 'doctor':
+      return doctor({
+        json: flags.json,
+        fix: flags.fix,
+        check: flags.check,
+        fromFiles: flags.fromFiles,
+        // When --from-files is given trailing paths, use them; else read staged.
+        files: flags.fromFiles ? flags.rest : undefined,
+      });
+
+    case 'preflight':
+      return preflight({ json: flags.json, plan: flags.plan, base: flags.base });
+
+    case 'plan':
+      return plan({ json: flags.json, base: flags.base });
+
+    case 'scaffold':
+      return scaffold(flags.rest);
+
+    case 'dev':
+      return dev(flags.rest);
+
+    default:
+      process.stderr.write(`unknown subcommand: ${sub}\n\n`);
+      usage();
+      return 2;
+  }
+}
+
+main()
+  .then((code) => {
+    process.exit(code);
+  })
+  .catch((e) => {
+    process.stderr.write(`oj: fatal: ${(e as Error).stack ?? (e as Error).message}\n`);
+    process.exit(1);
+  });
