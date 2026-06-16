@@ -195,6 +195,92 @@ pub mod return_frame {
     }
 }
 
+/// Fixed-size wire codec for RT-emittable events, carried on a dedicated event
+/// ring (NOT the meter ring — a fault storm must never evict meters). One tag
+/// continues the [`return_frame`] numbering past `TAG_METER = 1` / `TAG_BEAT = 2`.
+///
+/// A single frame tag ([`TAG_EVENT`]) carries the externally-discriminated
+/// [`ojproto::RtEvent`] payload; a 1-byte sub-kind ([`SUB_XRUN`] / [`SUB_NODE_FAULT`]
+/// / [`SUB_RING_FULL`]) at `bytes[1]` selects the variant. This is purely byte
+/// ops (no alloc, no `std`), so the module is ungated and `no_std`-friendly like
+/// [`return_frame`]; only the host-side [`EventRing`] is `std`-gated.
+pub mod event_frame {
+    use ojproto::{FaultKind, NodeIdx, RtEvent};
+
+    /// Tag byte for an event frame. Continues `return_frame`'s sequence
+    /// (`TAG_METER = 1`, `TAG_BEAT = 2`).
+    pub const TAG_EVENT: u8 = 3;
+
+    /// Sub-kind for [`RtEvent::Xrun`] (byte 1 selects the variant).
+    pub const SUB_XRUN: u8 = 0;
+    /// Sub-kind for [`RtEvent::NodeFault`].
+    pub const SUB_NODE_FAULT: u8 = 1;
+    /// Sub-kind for [`RtEvent::RingFull`].
+    pub const SUB_RING_FULL: u8 = 2;
+
+    /// `FaultKind` <-> byte map (kept private; encode/decode are the only callers).
+    const FAULT_NON_FINITE: u8 = 0;
+    const FAULT_OVER_BUDGET: u8 = 1;
+    const FAULT_AUTO_BYPASSED: u8 = 2;
+
+    /// Largest event frame: tag + sub + node(u32) + fault(u8) = 7 bytes (the
+    /// `NodeFault` variant). Comfortably under [`return_frame::MAX_LEN`] (13), so
+    /// any fixed out-buffer already sized for meter frames also holds events.
+    pub const MAX_LEN: usize = 1 + 1 + 4 + 1;
+
+    /// Encode one [`RtEvent`] into `buf`, returning the written length. No alloc,
+    /// no panic on valid input — safe to call inside `assert_no_alloc`.
+    #[inline]
+    pub fn encode(ev: RtEvent, buf: &mut [u8; MAX_LEN]) -> usize {
+        buf[0] = TAG_EVENT;
+        match ev {
+            RtEvent::Xrun { dropped } => {
+                buf[1] = SUB_XRUN;
+                buf[2..6].copy_from_slice(&dropped.to_le_bytes());
+                6
+            }
+            RtEvent::NodeFault { node, fault } => {
+                buf[1] = SUB_NODE_FAULT;
+                buf[2..6].copy_from_slice(&node.0.to_le_bytes());
+                buf[6] = match fault {
+                    FaultKind::NonFinite => FAULT_NON_FINITE,
+                    FaultKind::OverBudget => FAULT_OVER_BUDGET,
+                    FaultKind::AutoBypassed => FAULT_AUTO_BYPASSED,
+                };
+                7
+            }
+            RtEvent::RingFull => {
+                buf[1] = SUB_RING_FULL;
+                2
+            }
+        }
+    }
+
+    /// Decode one event frame. `bytes` is the FULL frame starting with the
+    /// [`TAG_EVENT`] byte at `bytes[0]`, then the sub-kind byte, then the payload.
+    /// Returns `None` on an unknown sub-kind or a truncated frame.
+    pub fn decode(bytes: &[u8]) -> Option<RtEvent> {
+        match (*bytes.first()?, bytes.get(1).copied()) {
+            (TAG_EVENT, Some(SUB_XRUN)) if bytes.len() >= 6 => {
+                let dropped = u32::from_le_bytes(bytes[2..6].try_into().ok()?);
+                Some(RtEvent::Xrun { dropped })
+            }
+            (TAG_EVENT, Some(SUB_NODE_FAULT)) if bytes.len() >= 7 => {
+                let node = NodeIdx(u32::from_le_bytes(bytes[2..6].try_into().ok()?));
+                let fault = match bytes[6] {
+                    FAULT_NON_FINITE => FaultKind::NonFinite,
+                    FAULT_OVER_BUDGET => FaultKind::OverBudget,
+                    FAULT_AUTO_BYPASSED => FaultKind::AutoBypassed,
+                    _ => return None,
+                };
+                Some(RtEvent::NodeFault { node, fault })
+            }
+            (TAG_EVENT, Some(SUB_RING_FULL)) => Some(RtEvent::RingFull),
+            _ => None,
+        }
+    }
+}
+
 /// The RT -> control return ring (host side). A reused [`ojcore_midiring::ByteRing`]
 /// of 8 KiB, big enough to absorb a full block's worth of per-node meter frames
 /// plus a beat frame between control-thread drains. `std`-gated because it is a
@@ -202,10 +288,18 @@ pub mod return_frame {
 #[cfg(feature = "std")]
 pub type MeterRing = ojcore_midiring::ByteRing<8192>;
 
+/// The RT -> control EVENT return ring (host side). A SEPARATE, larger
+/// [`ojcore_midiring::ByteRing`] of 16 KiB carrying [`event_frame`] frames, so a
+/// fault storm (a burst of `NodeFault` / `Xrun` events) can never back-pressure
+/// or evict the per-node meter frames on [`MeterRing`]. `std`-gated for the same
+/// reason as `MeterRing`: it is a native host return path.
+#[cfg(feature = "std")]
+pub type EventRing = ojcore_midiring::ByteRing<16384>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ojproto::{EngineFrame, NodeIdx};
+    use ojproto::{EngineFrame, FaultKind, NodeIdx, RtEvent};
 
     #[test]
     fn rms_matches_known_signal() {
@@ -300,5 +394,94 @@ mod tests {
         assert!(return_frame::decode(&[0xFF, 0, 0, 0]).is_none());
         // Correct tag but truncated frame.
         assert!(return_frame::decode(&[return_frame::TAG_METER, 1, 2]).is_none());
+    }
+
+    /// Encode then decode, asserting the exact `RtEvent` survives the round trip
+    /// and that the written length never exceeds `MAX_LEN`.
+    fn assert_event_roundtrips(ev: RtEvent) {
+        let mut buf = [0u8; event_frame::MAX_LEN];
+        let n = event_frame::encode(ev, &mut buf);
+        assert!(n <= event_frame::MAX_LEN, "encoded len {n} > MAX_LEN");
+        assert_eq!(buf[0], event_frame::TAG_EVENT, "frame must start with TAG_EVENT");
+        assert_eq!(event_frame::decode(&buf[..n]), Some(ev), "round trip {ev:?}");
+    }
+
+    #[test]
+    fn event_frame_roundtrips_every_variant() {
+        // Xrun, including the zero and max edges.
+        assert_event_roundtrips(RtEvent::Xrun { dropped: 0 });
+        assert_event_roundtrips(RtEvent::Xrun { dropped: 7 });
+        assert_event_roundtrips(RtEvent::Xrun { dropped: u32::MAX });
+        // NodeFault for every FaultKind.
+        assert_event_roundtrips(RtEvent::NodeFault {
+            node: NodeIdx(42),
+            fault: FaultKind::NonFinite,
+        });
+        assert_event_roundtrips(RtEvent::NodeFault {
+            node: NodeIdx(0),
+            fault: FaultKind::OverBudget,
+        });
+        assert_event_roundtrips(RtEvent::NodeFault {
+            node: NodeIdx(u32::MAX),
+            fault: FaultKind::AutoBypassed,
+        });
+        // RingFull (unit variant, 2-byte frame).
+        assert_event_roundtrips(RtEvent::RingFull);
+    }
+
+    #[test]
+    fn event_frame_lengths_are_exact() {
+        let mut buf = [0u8; event_frame::MAX_LEN];
+        // Xrun: tag + sub + u32 = 6.
+        assert_eq!(event_frame::encode(RtEvent::Xrun { dropped: 1 }, &mut buf), 6);
+        // NodeFault: tag + sub + u32 + u8 = 7 == MAX_LEN.
+        assert_eq!(
+            event_frame::encode(
+                RtEvent::NodeFault {
+                    node: NodeIdx(1),
+                    fault: FaultKind::NonFinite,
+                },
+                &mut buf,
+            ),
+            7
+        );
+        assert_eq!(event_frame::MAX_LEN, 7);
+        // RingFull: tag + sub = 2.
+        assert_eq!(event_frame::encode(RtEvent::RingFull, &mut buf), 2);
+    }
+
+    #[test]
+    fn event_frame_rejects_garbage() {
+        // Empty buffer.
+        assert!(event_frame::decode(&[]).is_none());
+        // Wrong tag byte.
+        assert!(event_frame::decode(&[0xFF, event_frame::SUB_XRUN, 0, 0, 0, 0]).is_none());
+        // Correct tag but unknown sub-kind.
+        assert!(event_frame::decode(&[event_frame::TAG_EVENT, 0x7F]).is_none());
+        // Correct tag, missing sub-kind byte.
+        assert!(event_frame::decode(&[event_frame::TAG_EVENT]).is_none());
+        // Xrun sub-kind but truncated payload (needs 6 bytes, has 4).
+        assert!(event_frame::decode(&[event_frame::TAG_EVENT, event_frame::SUB_XRUN, 1, 2]).is_none());
+        // NodeFault sub-kind but truncated payload (needs 7 bytes, has 6).
+        assert!(event_frame::decode(&[
+            event_frame::TAG_EVENT,
+            event_frame::SUB_NODE_FAULT,
+            1,
+            0,
+            0,
+            0
+        ])
+        .is_none());
+        // NodeFault with an unknown FaultKind byte.
+        assert!(event_frame::decode(&[
+            event_frame::TAG_EVENT,
+            event_frame::SUB_NODE_FAULT,
+            1,
+            0,
+            0,
+            0,
+            0x7F
+        ])
+        .is_none());
     }
 }
