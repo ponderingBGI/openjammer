@@ -300,6 +300,42 @@ pub mod event_frame {
         let n = encode(ev, &mut buf);
         ring.push(&buf[..n])
     }
+
+    /// Off-RT consumer of the RT event-emit ring: drains every queued frame from
+    /// `ring`, decoding each back into an [`RtEvent`] and handing it to `on_event`
+    /// in FIFO order. This is the mirror of [`emit`] — the audio thread pushes,
+    /// the control thread pops here — and runs OFF the audio thread, so the
+    /// `on_event` closure may allocate freely (the helper itself only pops +
+    /// decodes + calls).
+    ///
+    /// The pop loop mirrors the meter-ring drain (`src-tauri/src/engine.rs`
+    /// `drain_meters`): pop one length-prefixed frame into a fixed `[u8; MAX_LEN]`
+    /// stack buffer with [`ByteRing::pop`](ojcore_midiring::ByteRing::pop), which
+    /// returns `Some(len)` per frame and `None` when the ring is empty; decode the
+    /// `len` written bytes via [`decode`] and forward each `Some` to `on_event`.
+    /// An undecodable frame (unknown sub-kind / truncated) is skipped rather than
+    /// aborting the drain. Returns when the ring is empty.
+    ///
+    /// The host wires this into the dedicated default-priority event-drain thread
+    /// (see `src-tauri/src/engine.rs`, beside `drain_meters`), forwarding each
+    /// decoded event to the tracing / SQLite / DevLog consumers.
+    ///
+    /// `std`-gated like [`EventRing`](super::EventRing) so the `no_std` build is
+    /// unaffected.
+    ///
+    // NOTE: future unification — the plan envisions ONE `drain_frames` routing by
+    // tag (TAG_METER / TAG_BEAT / TAG_EVENT); this dedicated `drain_events` for the
+    // EventRing is the lower-risk additive step. See docs/plans/02-logging-and-
+    // observability.md (L2, "Control-side decode -> drain_frames").
+    #[cfg(feature = "std")]
+    pub fn drain_events(ring: &super::EventRing, mut on_event: impl FnMut(RtEvent)) {
+        let mut buf = [0u8; MAX_LEN];
+        while let Some(n) = ring.pop(&mut buf) {
+            if let Some(ev) = decode(&buf[..n]) {
+                on_event(ev);
+            }
+        }
+    }
 }
 
 /// The RT -> control return ring (host side). A reused [`ojcore_midiring::ByteRing`]
@@ -506,5 +542,45 @@ mod tests {
             0x7F
         ])
         .is_none());
+    }
+
+    /// The off-RT `drain_events` helper pops + decodes the EventRing back into the
+    /// exact `RtEvent` sequence that was pushed, in FIFO order, and leaves the ring
+    /// empty (a second drain yields nothing). This is the consumer-side mirror of
+    /// `event_frame::emit`; it pushes events directly, so it needs no `devlog`.
+    #[cfg(feature = "std")]
+    #[test]
+    fn drain_events_yields_pushed_sequence_fifo() {
+        let ring = EventRing::new();
+        // A known sequence covering every variant: Xrun, NodeFault for each
+        // FaultKind, then RingFull.
+        let pushed = [
+            RtEvent::Xrun { dropped: 3 },
+            RtEvent::NodeFault {
+                node: NodeIdx(7),
+                fault: FaultKind::NonFinite,
+            },
+            RtEvent::NodeFault {
+                node: NodeIdx(42),
+                fault: FaultKind::OverBudget,
+            },
+            RtEvent::NodeFault {
+                node: NodeIdx(0),
+                fault: FaultKind::AutoBypassed,
+            },
+            RtEvent::RingFull,
+        ];
+        for &ev in &pushed {
+            assert!(event_frame::emit(&ring, ev), "ring should accept {ev:?}");
+        }
+
+        let mut drained = Vec::new();
+        event_frame::drain_events(&ring, |ev| drained.push(ev));
+        assert_eq!(drained, pushed, "drained order must match pushed FIFO");
+
+        // The ring is now empty: a second drain collects nothing.
+        let mut again = Vec::new();
+        event_frame::drain_events(&ring, |ev| again.push(ev));
+        assert!(again.is_empty(), "second drain of an empty ring yields nothing");
     }
 }
