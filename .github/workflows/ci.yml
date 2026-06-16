@@ -25,15 +25,18 @@ jobs:
       - uses: actions/checkout@v4
       - name: System deps (ALSA for cpal)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
-      - name: Rust stable (fmt, clippy)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      # Install nightly FIRST (only the wasm leg uses `cargo +nightly`), then
+      # stable LAST so stable is the DEFAULT toolchain for fmt/clippy/test/build
+      # (otherwise `cargo fmt` runs on nightly, which has no rustfmt component).
       - name: Rust nightly (wasm leg)
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
           targets: wasm32-unknown-unknown
+      - name: Rust stable (default; fmt, clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all -- --check

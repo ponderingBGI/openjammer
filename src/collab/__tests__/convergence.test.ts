@@ -9,7 +9,7 @@
  *   3. Presence add / update / remove works over the EphemeralStore.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { CrdtGraphProjection } from '../CrdtGraphProjection';
 import { GraphStoreBridge, type BridgeGraphState } from '../graphStoreBridge';
@@ -317,7 +317,7 @@ function mkNode(id: string): GraphNode {
 // ----------------------------------------------------------------------------
 
 describe('PresenceManager', () => {
-    it('adds, updates, and surfaces a remote peer; removes on destroy', () => {
+    it('adds, updates, and surfaces a remote peer; removes on destroy', async () => {
         const pa = new PresenceManager(makeSelfPresence('peer-a', 'Alice'), 60_000);
         const pb = new PresenceManager(makeSelfPresence('peer-b', 'Bob'), 60_000);
 
@@ -335,13 +335,19 @@ describe('PresenceManager', () => {
         expect(pb.getPeers().map((p) => p.peerId)).toContain('peer-a');
         expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.name).toBe('Bob');
 
-        // UPDATE: Bob moves his cursor; Alice sees it.
+        // UPDATE: Bob moves his cursor; Alice sees it. EphemeralStore local-update
+        // emission is throttled/async, so wait for eventual consistency rather
+        // than assuming synchronous propagation (the latter is CI-timing-flaky).
         pb.setCursor({ x: 42, y: 7 });
-        expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.cursor).toEqual({ x: 42, y: 7 });
+        await vi.waitFor(() =>
+            expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.cursor).toEqual({ x: 42, y: 7 }),
+        );
 
         // UPDATE: Bob selects nodes; Alice sees the selection.
         pb.setSelection(['n1', 'n2']);
-        expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.selection).toEqual(['n1', 'n2']);
+        await vi.waitFor(() =>
+            expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.selection).toEqual(['n1', 'n2']),
+        );
 
         // self excluded from getPeers.
         expect(pa.getPeers().map((p) => p.peerId)).not.toContain('peer-a');
