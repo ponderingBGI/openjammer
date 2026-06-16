@@ -342,7 +342,9 @@ function portCounts(manifest: PluginManifest): { n_in: number; n_out: number } {
             minIn = 0;
             minOut = 1;
             break;
-        // Processors: one in, one out.
+        // Processors: one in, one out. (The looper is a stateful processor —
+        // 1-in/1-out, matching the `builtin.looper` manifest — so it MUST be
+        // grouped here, not left to the 0/0 default, which would strip its ports.)
         case 'Gain':
         case 'Biquad':
         case 'Waveshaper':
@@ -351,6 +353,7 @@ function portCounts(manifest: PluginManifest): { n_in: number; n_out: number } {
         case 'FaustHost':
         case 'WasmHost':
         case 'PluginHost':
+        case 'Looper':
             minIn = 1;
             minOut = 1;
             break;

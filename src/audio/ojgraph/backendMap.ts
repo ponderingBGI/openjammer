@@ -39,6 +39,7 @@ export const ENGINE_IDS = {
     convolution: 'builtin.convolution',
     add: 'builtin.add',
     passthrough: 'builtin.passthrough',
+    looper: 'builtin.looper',
     hostGraphIn: 'host.graph_in',
     hostMicIn: 'host.mic_in',
     hostGraphOut: 'host.graph_out',
@@ -63,6 +64,12 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
                 return ENGINE_IDS.sampler;
             case 'KarplusString':
                 return ENGINE_IDS.karplus;
+            // U-STATEFUL: the looper has a real native loader (`builtin.looper`,
+            // registered via the shared `register_builtins` effects set), so it
+            // must NOT fall back to GAIN — that is what left looper nodes behaving
+            // as a unity passthrough instead of looping (D1).
+            case 'Looper':
+                return ENGINE_IDS.looper;
             // SpeakerOut/GraphOut: native loads the master instance via GAIN
             // (the `kind` flag is what marks it master) — matches starter_graph.
             // Gain / Add / Passthrough / processors / IO: GAIN passthrough.
@@ -100,6 +107,10 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
             return ENGINE_IDS.add;
         case 'Passthrough':
             return ENGINE_IDS.passthrough;
+        // The looper rides the SAME shared registry path, so the wasm worklet has
+        // `builtin.looper` too (register_all -> register_builtins effects set).
+        case 'Looper':
+            return ENGINE_IDS.looper;
         case 'GraphIn':
             return ENGINE_IDS.hostGraphIn;
         case 'MicIn':

@@ -15,6 +15,7 @@
 
 import type { NodeDefinition, NodeType } from './types';
 import { nodeDefinitions } from './registry';
+import type { PrimitiveKind } from '@openjammer/oj-protocol';
 
 // ============================================================================
 // Manifest types (mirror crates/ojcore/src/manifest.rs + oj-plugin-v1.json)
@@ -22,27 +23,12 @@ import { nodeDefinitions } from './registry';
 
 /**
  * CLOSED PrimitiveKind the RT loop lowers a manifest `id` to (serde unit-variant
- * names — must match `ojproto::PrimitiveKind` and the schema's `kind` enum).
+ * names). SINGLE-SOURCED: re-exported from `@openjammer/oj-protocol` (the wire
+ * mirror of `ojproto::PrimitiveKind`, parity-gated by `wire_shapes.rs`) rather
+ * than redeclared here — this file previously kept a DRIFTED copy that was
+ * missing `Looper`/`Recorder`, which is what mislabeled the looper node (D1).
  */
-export type PrimitiveKind =
-    | 'Osc'
-    | 'Sampler'
-    | 'Sf2'
-    | 'KarplusString'
-    | 'Gain'
-    | 'Biquad'
-    | 'Waveshaper'
-    | 'Delay'
-    | 'Convolution'
-    | 'FaustHost'
-    | 'WasmHost'
-    | 'PluginHost'
-    | 'Add'
-    | 'MicIn'
-    | 'SpeakerOut'
-    | 'GraphIn'
-    | 'GraphOut'
-    | 'Passthrough';
+export type { PrimitiveKind };
 
 /** How a node's audio is computed (selects the executor backend). Frozen v1. */
 export type DspKind = 'builtin' | 'faust' | 'wasm' | 'none';
@@ -124,7 +110,7 @@ const KIND_BY_TYPE: Partial<Record<NodeType, PrimitiveKind>> = {
     // processors
     amplifier: 'Gain',
     effect: 'Waveshaper',
-    looper: 'Delay',
+    looper: 'Looper',
     // routing / io
     add: 'Add',
     subtract: 'Add',

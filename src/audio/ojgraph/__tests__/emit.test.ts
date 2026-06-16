@@ -13,6 +13,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { emitOjGraph, SYNTHETIC_MASTER_ID } from '../emit';
+import { remapForBackend } from '../backendMap';
 import { getNodeDefinition } from '../../../engine/registry';
 import { manifestIdFor } from '../../../engine/manifest';
 import type { Connection, GraphNode, NodeType, PortDefinition } from '../../../engine/types';
@@ -467,5 +468,42 @@ describe('emitOjGraph — arity', () => {
         expect(gain.n_out).toBe(1);
         expect(spk.n_in).toBe(1);
         expect(spk.n_out).toBe(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// D1: the looper lowers to the real Looper primitive (not Delay), and remaps to
+// the real `builtin.looper` loader on BOTH backends (it previously fell back to
+// GAIN on native / DELAY on wasm, so looper nodes never actually looped).
+// ---------------------------------------------------------------------------
+
+describe('emitOjGraph — looper lowering (D1)', () => {
+    function buildLooperPatch() {
+        const instrument = makeNode('instrument', { id: 'inst' });
+        const looper = makeNode('looper', { id: 'lp' });
+        const speaker = makeNode('speaker', { id: 'spk' });
+        const a1 = makeConn(instrument.id, 'audio-out', looper.id, 'audio-in', 'audio');
+        const a2 = makeConn(looper.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        return emitOjGraph(nodeMap(instrument, looper, speaker), connMap(a1, a2));
+    }
+
+    it('lowers a looper node to PrimitiveKind Looper with 1-in/1-out ports', () => {
+        const graph = buildLooperPatch();
+        const lp = graph.nodes.find((n) => n.kind === 'Looper');
+        expect(lp, 'looper lowers to PrimitiveKind Looper, not Delay').toBeTruthy();
+        // No node should be mislabeled as a Delay (the old `looper: 'Delay'` bug).
+        expect(graph.nodes.some((n) => n.kind === 'Delay')).toBe(false);
+        expect(lp!.n_in).toBeGreaterThanOrEqual(1);
+        expect(lp!.n_out).toBeGreaterThanOrEqual(1);
+    });
+
+    it('remaps the looper to builtin.looper on BOTH backends (real loader, not a GAIN fallback)', () => {
+        const graph = buildLooperPatch();
+        for (const backend of ['native', 'wasm'] as const) {
+            const remapped = remapForBackend(graph, backend);
+            const lp = remapped.nodes.find((n) => n.kind === 'Looper');
+            expect(lp, `looper present after ${backend} remap`).toBeTruthy();
+            expect(lp!.manifest_id, `looper -> builtin.looper on ${backend}`).toBe('builtin.looper');
+        }
     });
 });
