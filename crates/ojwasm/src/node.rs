@@ -207,10 +207,11 @@ impl PluginLoader for WasmHostLoader {
         &self.manifest
     }
 
-    fn instantiate(&self, sample_rate: f32, max_block: usize) -> Box<dyn DspInstance> {
+    fn instantiate(&self, _sample_rate: f32, _max_block: usize) -> Box<dyn DspInstance> {
         let audio_in = self.manifest.ports.audio_in as usize;
         let audio_out = self.manifest.ports.audio_out as usize;
-        let kernel = build_kernel(&self.wasm, audio_in, audio_out, sample_rate, max_block);
+        // The kernel is built here (off-RT); memory sizing + oj_init run in activate.
+        let kernel = build_kernel(&self.wasm, audio_in, audio_out);
         Box::new(WasmHostNode::new(kernel, audio_in, audio_out))
     }
 }
@@ -231,16 +232,15 @@ pub fn register_wasm(
 
 /// Build a wasm [`Kernel`] from module `bytes`. The scaffold build has no wasmtime
 /// and always returns `None` (→ guarded passthrough); the `wasmtime-host` feature
-/// replaces this with the real builder.
+/// builds a real epoch-interruptible instance.
 #[cfg(not(feature = "wasmtime-host"))]
-fn build_kernel(
-    _bytes: &[u8],
-    _audio_in: usize,
-    _audio_out: usize,
-    _sample_rate: f32,
-    _max_block: usize,
-) -> Option<Box<dyn Kernel>> {
+fn build_kernel(_bytes: &[u8], _audio_in: usize, _audio_out: usize) -> Option<Box<dyn Kernel>> {
     None
+}
+
+#[cfg(feature = "wasmtime-host")]
+fn build_kernel(bytes: &[u8], audio_in: usize, audio_out: usize) -> Option<Box<dyn Kernel>> {
+    crate::backend::build_kernel(bytes, audio_in, audio_out)
 }
 
 #[cfg(test)]

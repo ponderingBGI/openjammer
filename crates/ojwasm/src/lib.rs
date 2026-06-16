@@ -30,6 +30,9 @@
 mod node;
 mod store;
 
+#[cfg(feature = "wasmtime-host")]
+mod backend;
+
 pub use node::{register_wasm, WasmHostLoader, WasmHostNode};
 pub use store::{fnv1a_hex, wasm_id_for, WasmStore, WasmStoreError};
 

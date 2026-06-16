@@ -11,7 +11,9 @@ license.workspace = true
 #   cargo build -p ojwasm                          -> scaffold (no execution)
 #   cargo build -p ojwasm --features wasmtime-host -> real wasmtime RT host
 default = []
-wasmtime-host = []
+# Real execution: pulls wasmtime (native-only, never wasm32). The dep is optional
+# so the scaffold build needs none of it.
+wasmtime-host = ["dep:wasmtime"]
 
 [dependencies]
 # Engine ABI: a code node is a DspInstance minted by a PluginLoader registered
@@ -21,3 +23,4 @@ ojcore = { path = "../ojcore", default-features = false }
 ojproto = { path = "../ojproto" }
 # The permanent host output-guard chain, applied outside the wasm sandbox.
 ojcore-dsp = { path = "../ojcore-dsp" }
+wasmtime = { version = "45.0.2", default-features = false, features = ["cranelift", "runtime", "wat"], optional = true }
