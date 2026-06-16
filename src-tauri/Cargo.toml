@@ -61,6 +61,14 @@ tauri-plugin-opener = "2.5.4"
 serde = { workspace = true, features = ["std"] }
 serde_json = "1.0.150"
 
+# L1 — the off-RT structured logging sink. `tracing` is used by the dedicated
+# event-drain thread (engine.rs) to project each decoded engine `Event` into a
+# structured record; `tracing-appender`'s `WorkerGuard` is parked in managed
+# state so the rolling NDJSON file flushes on exit. The subscriber itself is set
+# up by `ojcore_native::log::init_logging`. STD-only, never on the audio thread.
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+
 [features]
 # This feature must be enabled when building the app in production, so the
 # webview loads the bundled frontend instead of the dev server. Tauri's CLI sets

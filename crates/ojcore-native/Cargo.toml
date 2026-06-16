@@ -46,3 +46,12 @@ hound = "3.5.1"
 # Promote the audio callback thread to realtime scheduling priority. `dbus` is
 # off: we use the direct pthread/SCHED_FIFO path, not the desktop RT portal.
 audio_thread_priority = { version = "0.35.1", default-features = false }
+
+# L1 — the off-RT structured logging sink. `log::init_logging` brings up a
+# `tracing` subscriber (human stderr + non-blocking daily-rolling NDJSON file)
+# and bridges transitive `log` records (cpal / tauri) via `tracing-log`. STD-only
+# and strictly off the audio thread (foundation F-shared).
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-log = { workspace = true }

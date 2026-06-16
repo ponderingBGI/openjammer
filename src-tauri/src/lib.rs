@@ -275,17 +275,38 @@ fn set_mic(node: u32, enabled: bool, state: tauri::State<'_, BackendState>) -> R
     Ok(())
 }
 
+/// Parks the L1 `tracing` non-blocking file-writer flush guard for the process
+/// lifetime: when Tauri tears down managed state on exit, dropping it flushes any
+/// buffered NDJSON. Wrapped in a `Mutex` only to satisfy Tauri managed state's
+/// `Send + Sync` bound without asserting `WorkerGuard: Sync`; it is never locked.
+struct LogGuard(#[allow(dead_code)] std::sync::Mutex<tracing_appender::non_blocking::WorkerGuard>);
+
 /// Build and run the Tauri application. Shared between the desktop binary
 /// (`main.rs`) and any future mobile entry point (the Tauri convention).
 ///
-/// `setup` constructs the native engine backend and stores it as managed state
-/// so the `#[tauri::command]`s above can borrow it. Engine construction never
-/// panics on a missing audio device (the headless/CI path) — it simply leaves
-/// the host idle until a device is present.
+/// `setup` brings up the L1 logging sink, then constructs the native engine
+/// backend and stores it as managed state so the `#[tauri::command]`s above can
+/// borrow it. Engine construction never panics on a missing audio device (the
+/// headless/CI path) — it simply leaves the host idle until a device is present.
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            // L1: bring up the structured logging sink FIRST, before the engine
+            // starts, so its startup (and, with `devlog`, the event-drain
+            // thread's records) flow to the rolling on-device NDJSON file. The
+            // flush guard is parked in managed state for the process lifetime.
+            if let Ok(log_dir) = app.path().app_log_dir() {
+                if std::fs::create_dir_all(&log_dir).is_ok() {
+                    let guard = ojcore_native::init_logging(&log_dir);
+                    app.manage(LogGuard(std::sync::Mutex::new(guard)));
+                    tracing::info!(
+                        target: "openjammer",
+                        dir = %log_dir.display(),
+                        "logging initialized"
+                    );
+                }
+            }
             app.manage(BackendState::new());
             Ok(())
         })

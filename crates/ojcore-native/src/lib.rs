@@ -26,6 +26,7 @@
 pub mod asset;
 pub mod host;
 pub mod latency;
+pub mod log;
 pub mod recorder;
 pub mod store;
 
@@ -34,6 +35,7 @@ pub use host::{render_block, AudioHost, BlockProcessor, HostError, StreamRequest
 pub use latency::{
     detect_onset, frames_to_ms, measure_round_trip_frames, ms_to_frames, LatencyEstimate,
 };
+pub use log::init_logging;
 pub use recorder::{Recorder, RecorderSink, DEFAULT_RING_FRAMES};
 pub use store::{content_address, AssetCatalog};
 
