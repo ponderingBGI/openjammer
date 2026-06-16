@@ -391,15 +391,28 @@ export class OjcoreWasmExecutor implements Executor {
 
     // --- Speaker output ----------------------------------------------------
     // The wasm engine renders into the AudioContext destination; master volume is
-    // a worklet `gain` message (the SpeakerOut node is unparameterized). Device
-    // selection (`setSinkId`) is an AudioContext-level concern handled by the
-    // shell; the worklet just scales its master.
+    // a worklet `gain` message (the SpeakerOut node is unparameterized).
     setSpeakerVolume(_nodeId: string, volume: number, isMuted: boolean): void {
         this.node?.port.postMessage({ type: 'master-gain', gain: isMuted ? 0 : volume });
     }
-    // TODO(wasm-parity): per-speaker-node device routing needs `AudioContext.
-    // setSinkId` plumbing in the shell; the worklet renders to one destination.
-    setSpeakerDevice(_nodeId: string, _deviceId: string): void {}
+
+    // Per-device output routing. The browser has ONE AudioContext with ONE
+    // destination, so `AudioContext.setSinkId` is context-global: every SpeakerOut
+    // node shares it and the most-recently-selected device wins (a documented PWA
+    // limitation; the native build does true per-node routing via cpal). Browsers
+    // without the API (Safari, older Chromium) no-op here and the SpeakerNode shows
+    // its "device routing needs the native app" badge.
+    setSpeakerDevice(_nodeId: string, deviceId: string): void {
+        const base = getAudioContext();
+        if (!base) return;
+        const ctx = base as AudioContext & { setSinkId?: (id: string) => Promise<void> };
+        if (typeof ctx.setSinkId !== 'function') return;
+        // `enumerateDevices` reports the system default as id 'default' (or ''), and
+        // both are valid sinkIds, so the node's `deviceId` passes straight through.
+        void ctx.setSinkId(deviceId).catch((err: unknown) => {
+            console.error('[OjcoreWasmExecutor] setSinkId failed:', err);
+        });
+    }
 
     // --- Signal level metering --------------------------------------------
     subscribeSignalLevels(callback: SignalLevelsCallback): Unsubscribe {

@@ -121,10 +121,8 @@ impl WasmAssetStore {
 impl AssetResolver for WasmAssetStore {
     fn resolve(&self, id: AssetId) -> Option<AssetPcm<'_>> {
         let a = self.get(id)?;
-        Some(AssetPcm {
-            pcm: &a.pcm,
-            sample_rate: a.sample_rate,
-        })
+        // The wasm store is mono-only (the JS side downmixes before `store_asset`).
+        Some(AssetPcm::mono(&a.pcm, a.sample_rate))
     }
 }
 

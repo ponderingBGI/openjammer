@@ -439,10 +439,7 @@ struct OneAsset {
 impl AssetResolver for OneAsset {
     fn resolve(&self, id: AssetId) -> Option<AssetPcm<'_>> {
         if id == self.id {
-            Some(AssetPcm {
-                pcm: &self.pcm,
-                sample_rate: self.sample_rate,
-            })
+            Some(AssetPcm::mono(&self.pcm, self.sample_rate))
         } else {
             None
         }
