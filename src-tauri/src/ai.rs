@@ -430,8 +430,14 @@ pub fn compile_faust(source: &str) -> Result<Option<FaustCompileResult>, String>
 mod tests {
     use super::*;
 
+    // These tests mutate the GLOBAL process env (OPENJAMMER_AI_KEY_VAR etc.), so
+    // they must not run concurrently. Serialize via a shared lock; recover from
+    // poisoning so one failing test doesn't cascade into the others.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn stripped_env_forwards_only_the_allowlist_plus_key() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Set a secret that must NOT leak, and a key var override.
         std::env::set_var("SECRET_SHOULD_NOT_LEAK", "topsecret");
         std::env::set_var("OPENJAMMER_AI_KEY_VAR", "ANTHROPIC_API_KEY");
@@ -452,6 +458,7 @@ mod tests {
 
     #[test]
     fn stripped_env_omits_key_when_none() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("OPENJAMMER_AI_KEY_VAR");
         let env = stripped_env(None);
         assert_eq!(env.get("OPENJAMMER_PROVIDER_KEY"), None);
@@ -459,6 +466,7 @@ mod tests {
 
     #[test]
     fn stripped_env_uses_default_key_var() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("OPENJAMMER_AI_KEY_VAR");
         let env = stripped_env(Some("abc"));
         assert_eq!(
