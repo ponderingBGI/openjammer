@@ -283,9 +283,16 @@ export class OjcoreNativeExecutor implements Executor {
     }
 
     private emitSignal(connectionId: string, level: number): void {
+        // Persist the cable pulse into the SHARED level map (connection ids and the
+        // node-meter ids the poll writes are disjoint key spaces) and emit a MERGED
+        // snapshot. NodeCanvas replaces its whole map per emit, so a single-entry
+        // emit here was clobbered by the very next `pollMeters` snapshot a frame
+        // later — the "glow dies while the key is held" bug. Mirrors
+        // OjcoreWasmExecutor.emitSignal so both backends behave identically.
+        this.levels.set(connectionId, level);
         if (this.signalCallbacks.size === 0) return;
-        const levels = new Map<string, number>([[connectionId, level]]);
-        for (const cb of this.signalCallbacks) cb(levels);
+        const snapshot = new Map(this.levels);
+        for (const cb of this.signalCallbacks) cb(snapshot);
     }
 
     // --- Speaker output ----------------------------------------------------
