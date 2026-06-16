@@ -1,28 +1,45 @@
-//! Host-provided structural node loaders.
+//! Structural / routing built-ins: the no-DSP nodes that form a graph's I/O
+//! boundary and its trivial signal plumbing.
 //!
-//! `ojcore` ships exactly one reference DSP loader ([`ojcore::GainLoader`]). To
-//! bootstrap a VALID engine, the wasm host needs at minimum a master-output node
-//! to satisfy `compile`'s single-master-output rule. Rather than special-casing
-//! it, this module provides one tiny [`StructuralLoader`] that mints a no-op
-//! [`StructuralNode`] for any of the no-DSP "structural" primitive kinds
-//! (`SpeakerOut`, `GraphOut`, `GraphIn`, `MicIn`, `Add`, `Passthrough`).
+//! These were previously hand-rolled in the `ojcore-wasm` host. To reach PARITY
+//! across BOTH engine targets (native + wasm) from a SINGLE source, the
+//! [`StructuralLoader`] / [`StructuralNode`] pair now lives here and is shared
+//! by every registry through [`crate::register_builtins`]. There is exactly one
+//! implementation — no copy.
 //!
-//! These nodes carry no parameters and no DSP: the executor renders the I/O
-//! kinds specially (it never calls their `process`), and for `Add`/`Passthrough`
-//! the node simply forwards input 0 to output 0. Keeping them here (not in
-//! `ojcore`) honours this unit's lane: it is the HOST that decides which
-//! structural primitives its boundary exposes.
+//! Each structural node carries no parameters and no DSP:
+//! * The I/O kinds (`GraphIn`, `MicIn`, `GraphOut`, `SpeakerOut`) are rendered
+//!   specially by the executor — it never calls their `process` (sources keep
+//!   their host-injected buffer; sinks have their resolved input emitted as the
+//!   master output).
+//! * `Add` and `Passthrough` simply forward input 0 to output 0 in `process`.
+//!
+//! Allocation-free and panic-free on any channel arrangement, so they satisfy
+//! the RT contract uniformly with every other [`DspInstance`].
 
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
 
-use ojcore::{DspInstance, PluginLoader, ProcessCtx};
-use ojcore::{DspKind, PluginManifest, PortDecl, UiKind};
 use ojproto::PrimitiveKind;
+
+use crate::dsp::{DspInstance, ProcessCtx};
+use crate::loader::PluginLoader;
+use crate::manifest::{DspKind, PluginManifest, PortDecl, UiKind};
 
 /// Manifest id of the host's master speaker-output sink.
 pub const SPEAKER_OUT_ID: &str = "host.speaker_out";
+/// Manifest id of the host's graph-output sink (off-line / sub-graph master).
+pub const GRAPH_OUT_ID: &str = "host.graph_out";
+/// Manifest id of the host's graph-input source (host-injected buffer).
+pub const GRAPH_IN_ID: &str = "host.graph_in";
+/// Manifest id of the host's microphone / capture input source.
+pub const MIC_IN_ID: &str = "host.mic_in";
+/// Manifest id of the built-in summing node (input 0 -> output 0; the executor
+/// pre-mixes fan-in into input 0).
+pub const ADD_ID: &str = "builtin.add";
+/// Manifest id of the built-in passthrough (input 0 -> output 0).
+pub const PASSTHROUGH_ID: &str = "builtin.passthrough";
 
 /// Factory for a [`StructuralNode`] of a fixed [`PrimitiveKind`]. One loader
 /// instance is registered per structural primitive the host exposes.
@@ -63,6 +80,38 @@ impl StructuralLoader {
             0,
         )
     }
+
+    /// A graph-output sink (sub-graph / offline master): one audio in, no out.
+    pub fn graph_out() -> Self {
+        Self::new(GRAPH_OUT_ID, "Graph Out", PrimitiveKind::GraphOut, 1, 0)
+    }
+
+    /// A graph-input source: no audio in, one out (filled by the host via
+    /// [`crate::Engine::input_mut`]).
+    pub fn graph_in() -> Self {
+        Self::new(GRAPH_IN_ID, "Graph In", PrimitiveKind::GraphIn, 0, 1)
+    }
+
+    /// A microphone / capture source: no audio in, one out (host-injected).
+    pub fn mic_in() -> Self {
+        Self::new(MIC_IN_ID, "Mic In", PrimitiveKind::MicIn, 0, 1)
+    }
+
+    /// A summing node: one (pre-mixed) audio in, one out.
+    pub fn add() -> Self {
+        Self::new(ADD_ID, "Add", PrimitiveKind::Add, 1, 1)
+    }
+
+    /// A passthrough: one audio in, one out.
+    pub fn passthrough() -> Self {
+        Self::new(
+            PASSTHROUGH_ID,
+            "Passthrough",
+            PrimitiveKind::Passthrough,
+            1,
+            1,
+        )
+    }
 }
 
 impl PluginLoader for StructuralLoader {
@@ -76,7 +125,7 @@ impl PluginLoader for StructuralLoader {
 }
 
 /// A stateless no-op node. For the I/O kinds the executor handles specially this
-/// `process` is never reached; for `Add`/`Passthrough` it forwards input 0 to
+/// `process` is never reached; for `Add` / `Passthrough` it forwards input 0 to
 /// output 0. Allocation-free and panic-free on any channel arrangement.
 pub struct StructuralNode;
 
@@ -98,11 +147,12 @@ impl DspInstance for StructuralNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ojcore::{compile, Engine, PluginRegistry};
+    use crate::{compile, Engine, PluginRegistry};
     use ojproto::{IrEdge, IrNode, NodeIdx, OjGraph};
 
     /// A lone host `SpeakerOut` node compiles to a valid (silent) program — this
-    /// is exactly what `init` relies on to start the engine before any graph.
+    /// is exactly what the wasm/native bootstrap relies on to start the engine
+    /// before any graph.
     #[test]
     fn lone_speaker_out_compiles() {
         let mut reg = PluginRegistry::new();
@@ -131,20 +181,14 @@ mod tests {
         assert!(out.iter().all(|&s| s == 0.0), "no source -> silence");
     }
 
-    /// Gain feeding the speaker sink: the sink's resolved input is the master
-    /// output, so the engine emits gain(input). Proves a real two-node graph
-    /// using a host structural sink runs end to end.
+    /// GraphIn -> Passthrough -> SpeakerOut routes the injected input through to
+    /// the master output unchanged. Proves the structural forwarding `process`
+    /// and the I/O seam both work end to end against the shared loader.
     #[test]
-    fn gain_into_speaker_out_routes_to_master() {
+    fn passthrough_routes_input_to_master() {
         let mut reg = PluginRegistry::new();
-        reg.register(Box::new(ojcore::GainLoader::new()));
-        reg.register(Box::new(StructuralLoader::new(
-            "host.graph_in",
-            "Graph In",
-            PrimitiveKind::GraphIn,
-            0,
-            1,
-        )));
+        reg.register(Box::new(StructuralLoader::graph_in()));
+        reg.register(Box::new(StructuralLoader::passthrough()));
         reg.register(Box::new(StructuralLoader::speaker_out()));
 
         let graph = OjGraph {
@@ -154,7 +198,7 @@ mod tests {
             nodes: vec![
                 IrNode {
                     id: NodeIdx(0),
-                    manifest_id: String::from("host.graph_in"),
+                    manifest_id: String::from(GRAPH_IN_ID),
                     kind: PrimitiveKind::GraphIn,
                     params: vec![],
                     assets: vec![],
@@ -163,12 +207,9 @@ mod tests {
                 },
                 IrNode {
                     id: NodeIdx(1),
-                    manifest_id: String::from(ojcore::GAIN_ID),
-                    kind: PrimitiveKind::Gain,
-                    params: vec![ojproto::Param {
-                        id: ojcore::GAIN_PARAM,
-                        value: 2.0,
-                    }],
+                    manifest_id: String::from(PASSTHROUGH_ID),
+                    kind: PrimitiveKind::Passthrough,
+                    params: vec![],
                     assets: vec![],
                     n_in: 1,
                     n_out: 1,
@@ -203,8 +244,6 @@ mod tests {
         };
         let prog = compile(&graph, &reg).expect("graph compiles");
         let mut engine = Engine::new(prog);
-
-        // Inject a constant into the GraphIn source buffer, then render.
         if let Some(buf) = engine.input_mut(NodeIdx(0), 0) {
             for s in buf.iter_mut() {
                 *s = 0.5;
@@ -213,7 +252,7 @@ mod tests {
         let mut out = vec![0.0f32; 64];
         engine.process_block(&mut out, 64);
         for &s in out.iter() {
-            assert!((s - 1.0).abs() < 1e-3, "0.5 * gain(2.0) == 1.0, got {s}");
+            assert!((s - 0.5).abs() < 1e-6, "passthrough should preserve input");
         }
     }
 }

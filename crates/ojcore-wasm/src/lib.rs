@@ -8,6 +8,15 @@
 //! `SharedArrayBuffer` rings for the UI -> engine command path and the
 //! worker -> worklet MIDI path.
 //!
+//! # Built-in node set (PARITY with native)
+//! [`init`] registers the FULL common built-in set through the ONE shared path
+//! [`ojinstrument::register_all`] — the SAME function the native host calls — so
+//! the worklet can play instruments (Osc / Sampler / Karplus) and every effect
+//! (gain / biquad / waveshaper / delay / convolution) plus the structural I/O
+//! nodes. The ONLY documented gap is SF2 (`builtin.sf2`): its `rustysynth`
+//! backend needs `std` and does not build for `wasm32`, so it is native-only for
+//! now (no SF2 in-browser yet).
+//!
 //! # JS surface (wasm-bindgen)
 //!   * [`init`] — allocate the host once: registry + an empty [`Engine`] +
 //!     the command/MIDI rings. Everything that allocates happens here, off the
@@ -33,18 +42,15 @@
 
 extern crate alloc;
 
-mod nodes;
-
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use ojcore::{compile, Engine, GainLoader, PluginRegistry};
+use ojcore::{compile, Engine, PluginRegistry, SPEAKER_OUT_ID};
 use ojcore_midiring::{header_offsets, CmdRing, MidiRing};
+use ojinstrument::{register_all, RegisterOpts};
 use ojproto::{IrNode, NodeIdx, OjGraph, PrimitiveKind, RtCommand, SCHEMA_VERSION};
-
-use nodes::{StructuralLoader, SPEAKER_OUT_ID};
 
 use wasm_bindgen::prelude::*;
 
@@ -141,9 +147,12 @@ fn bootstrap_graph(sample_rate: u32, block_size: u32) -> OjGraph {
 pub fn init(sample_rate: u32, block_size: u32) {
     let block_size = block_size as usize;
 
+    // ONE shared registration path: the FULL common built-in set (effects +
+    // structural + Osc/Sampler/Karplus), minus SF2 (rustysynth needs std and is
+    // unavailable on wasm32 — the documented PWA limitation). This is the exact
+    // same `register_all` the native host calls, so the worklet is at PARITY.
     let mut registry = PluginRegistry::new();
-    registry.register(Box::new(GainLoader::new()));
-    registry.register(Box::new(StructuralLoader::speaker_out()));
+    register_all(&mut registry, RegisterOpts::wasm());
 
     // `compile` requires exactly one master-output node, so the bootstrap graph
     // is a LONE host `SpeakerOut` (no sources). It renders as silence until
@@ -397,6 +406,104 @@ mod tests {
     use ojcore_midiring::CmdRing;
     use ojproto::{NodeIdx, RtCommand};
 
+    /// The wasm registry built via the shared path holds the FULL common set
+    /// (effects + structural + instruments) and excludes SF2 (the documented
+    /// PWA limitation). This is the parity contract for the worklet.
+    #[test]
+    fn wasm_registry_is_at_parity_minus_sf2() {
+        let mut reg = PluginRegistry::new();
+        register_all(&mut reg, RegisterOpts::wasm());
+
+        for id in [
+            ojcore::GAIN_ID,
+            ojcore::BIQUAD_ID,
+            ojcore::WAVESHAPER_ID,
+            ojcore::DELAY_ID,
+            ojcore::CONVOLUTION_ID,
+            ojcore::SPEAKER_OUT_ID,
+            ojcore::GRAPH_IN_ID,
+            ojcore::GRAPH_OUT_ID,
+            ojcore::MIC_IN_ID,
+            ojcore::ADD_ID,
+            ojcore::PASSTHROUGH_ID,
+            ojinstrument::OSC_ID,
+            ojinstrument::SAMPLER_ID,
+            ojinstrument::KARPLUS_ID,
+        ] {
+            assert!(reg.contains(id), "wasm registry missing {id}");
+        }
+        assert!(
+            !reg.contains("builtin.sf2"),
+            "SF2 must be excluded on wasm32"
+        );
+    }
+
+    /// A small graph using a new effect (delay) compiles + runs against the wasm
+    /// registry end to end: GraphIn -> Delay -> SpeakerOut.
+    #[test]
+    fn effect_graph_compiles_and_runs() {
+        use ojproto::{ConnectionType, IrEdge};
+        let mut reg = PluginRegistry::new();
+        register_all(&mut reg, RegisterOpts::wasm());
+
+        let graph = OjGraph {
+            ir_version: SCHEMA_VERSION,
+            sample_rate: 48_000,
+            block_size: 64,
+            nodes: vec![
+                IrNode {
+                    id: NodeIdx(0),
+                    manifest_id: String::from(ojcore::GRAPH_IN_ID),
+                    kind: PrimitiveKind::GraphIn,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 0,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(1),
+                    manifest_id: String::from(ojcore::DELAY_ID),
+                    kind: PrimitiveKind::Delay,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(2),
+                    manifest_id: String::from(SPEAKER_OUT_ID),
+                    kind: PrimitiveKind::SpeakerOut,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 0,
+                },
+            ],
+            edges: vec![
+                IrEdge {
+                    from_node: NodeIdx(0),
+                    from_port: 0,
+                    to_node: NodeIdx(1),
+                    to_port: 0,
+                    kind: ConnectionType::Audio,
+                },
+                IrEdge {
+                    from_node: NodeIdx(1),
+                    from_port: 0,
+                    to_node: NodeIdx(2),
+                    to_port: 0,
+                    kind: ConnectionType::Audio,
+                },
+            ],
+            schedule: vec![],
+        };
+        let program = compile(&graph, &reg).expect("effect graph compiles");
+        let mut engine = Engine::new(program);
+        let mut out = vec![0.0f32; 64];
+        engine.process_block(&mut out, 64);
+        assert!(out.iter().all(|s| s.is_finite()));
+    }
+
     /// A `SetParam` command round-trips through the exact JSON frame format the
     /// command ring carries, and decodes back to the same `RtCommand`.
     #[test]
@@ -492,8 +599,7 @@ mod tests {
     #[test]
     fn graph_json_compiles_against_registry() {
         let mut registry = PluginRegistry::new();
-        registry.register(Box::new(GainLoader::new()));
-        registry.register(Box::new(StructuralLoader::speaker_out()));
+        register_all(&mut registry, RegisterOpts::wasm());
 
         let graph = bootstrap_graph(48_000, 128);
         let json = serde_json::to_vec(&graph).unwrap();

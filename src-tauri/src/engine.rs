@@ -6,8 +6,12 @@
 //! crates:
 //!
 //! * [`ojcore::PluginRegistry`] — every node type is "just a plugin"; on setup
-//!   we register the built-in gain plus the `ojinstrument` Osc / Sampler /
-//!   Karplus loaders. Compilation lowers an [`ojproto::OjGraph`] against it.
+//!   we register the FULL built-in set through the ONE shared path
+//!   [`ojinstrument::register_all`] (effects: gain / biquad / waveshaper /
+//!   delay / convolution; structural I/O; instruments: Osc / Sampler / Karplus /
+//!   SF2). The `wasm32` worklet calls the SAME function (minus SF2), so the two
+//!   registries stay in lockstep. Compilation lowers an [`ojproto::OjGraph`]
+//!   against it.
 //! * [`ojcore::compile`] -> [`ojcore::Engine`] — a graph becomes a runnable,
 //!   pre-allocated program; the engine runs it one block at a time.
 //! * [`ojcore_native::AudioHost`] — opens the small-buffer cpal stream and OWNS
@@ -29,11 +33,10 @@
 use std::sync::Mutex;
 
 use ojcore::{
-    compile, CommandProducer, CommandQueue, CompileError, Engine, GainLoader, PluginRegistry,
-    ProgramSwap,
+    compile, CommandProducer, CommandQueue, CompileError, Engine, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{AudioHost, HostError, StreamRequest};
-use ojinstrument::{KarplusLoader, OscLoader, SamplerLoader};
+use ojinstrument::{register_all, RegisterOpts};
 use ojproto::{OjGraph, RtCommand};
 
 /// Default stream request: 48 kHz, a small buffer for low latency, stereo out,
@@ -169,15 +172,16 @@ impl EngineBackend {
         }
     }
 
-    /// Register the built-in gain plus the `ojinstrument` Osc / Sampler /
-    /// Karplus loaders. "Everything is a plugin": these all implement the same
-    /// `PluginLoader` surface and the compiler lowers them uniformly.
+    /// Register the FULL native built-in set through the ONE shared path
+    /// [`ojinstrument::register_all`] — the SAME function the `wasm32` worklet
+    /// calls (`ojcore-wasm::init`), so the two registries never drift. Native
+    /// uses [`RegisterOpts::full`], which includes SF2 (`builtin.sf2`); the
+    /// worklet uses `RegisterOpts::wasm()`, which omits it. "Everything is a
+    /// plugin": every loader implements the same `PluginLoader` surface and the
+    /// compiler lowers them uniformly.
     fn build_registry() -> PluginRegistry {
         let mut registry = PluginRegistry::new();
-        registry.register(Box::new(GainLoader::new()));
-        registry.register(Box::new(OscLoader::new()));
-        registry.register(Box::new(SamplerLoader::new()));
-        registry.register(Box::new(KarplusLoader::new()));
+        register_all(&mut registry, RegisterOpts::full());
         registry
     }
 
@@ -360,14 +364,27 @@ mod tests {
         assert!(info.latency_ms > 0.0);
     }
 
-    /// The registry knows every loader the unit must register, by manifest id.
+    /// The registry knows every loader the unit must register, by manifest id —
+    /// the FULL native built-in set (effects + structural + instruments + SF2).
     #[test]
     fn registry_has_builtin_and_instruments() {
         let reg = EngineBackend::build_registry();
+        // Effects.
         assert!(reg.contains(ojcore::GAIN_ID));
+        assert!(reg.contains(ojcore::BIQUAD_ID));
+        assert!(reg.contains(ojcore::WAVESHAPER_ID));
+        assert!(reg.contains(ojcore::DELAY_ID));
+        assert!(reg.contains(ojcore::CONVOLUTION_ID));
+        // Structural.
+        assert!(reg.contains(ojcore::SPEAKER_OUT_ID));
+        assert!(reg.contains(ojcore::GRAPH_IN_ID));
+        assert!(reg.contains(ojcore::PASSTHROUGH_ID));
+        // Instruments.
         assert!(reg.contains(ojinstrument::OSC_ID));
         assert!(reg.contains(ojinstrument::SAMPLER_ID));
         assert!(reg.contains(ojinstrument::KARPLUS_ID));
+        // SF2 is native-only and on by default (the `sf2` feature).
+        assert!(reg.contains(ojinstrument::SF2_ID));
     }
 
     /// The starter graph lowers cleanly (exactly one master output, no cycle).

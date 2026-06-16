@@ -15,6 +15,11 @@ crate-type = ["cdylib", "rlib"]
 # available on wasm32, so we drive the bare no_std compile/exec/Engine surface
 # and bring our own SharedArrayBuffer ring instead.
 ojcore = { path = "../ojcore", default-features = false }
+# The instrument crate, std-OFF (no SF2): Osc/Sampler/Karplus are no_std+alloc
+# and compile for wasm32. SF2 (rustysynth) needs std and is dropped here — the
+# documented PWA limitation (no SF2 in-browser yet). `register_all(.., wasm())`
+# gives the worklet PARITY with native minus that one instrument.
+ojinstrument = { path = "../ojinstrument", default-features = false }
 ojproto = { path = "../ojproto" }
 ojcore-midiring = { path = "../ojcore-midiring" }
 

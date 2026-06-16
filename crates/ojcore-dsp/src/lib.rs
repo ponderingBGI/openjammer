@@ -269,6 +269,99 @@ impl DelayLine {
 }
 
 // ===========================================================================
+// Convolution (time-domain FIR) — impulse-response reverb / cabinet sim
+// ===========================================================================
+
+/// A time-domain (direct FIR) convolution engine. The impulse response is
+/// installed once off the RT thread ([`Convolver::set_ir`]); the `process` hot
+/// path runs a straight multiply-accumulate against a fixed-capacity input
+/// history ring, so it is allocation-free.
+///
+/// Time-domain (rather than partitioned FFT) keeps the crate `no_std` with zero
+/// extra deps. The IR is length-capped at construction; longer IRs are truncated
+/// to that cap so the per-sample cost stays bounded and predictable.
+#[derive(Debug, Clone)]
+pub struct Convolver {
+    /// The (possibly truncated) impulse response taps.
+    ir: Vec<f32>,
+    /// Ring of the most recent inputs; `len() == ir.capacity()`.
+    history: Vec<f32>,
+    /// Next write position in `history` (the slot the next input takes).
+    write: usize,
+    /// Number of valid IR taps actually loaded (`<= ir.capacity()`).
+    taps: usize,
+}
+
+impl Convolver {
+    /// Create a convolver that can hold an IR up to `max_taps` long. The history
+    /// ring is sized to match so the `process` MAC never reads out of bounds.
+    pub fn new(max_taps: usize) -> Self {
+        let cap = max_taps.max(1);
+        Self {
+            ir: vec![0.0; cap],
+            history: vec![0.0; cap],
+            write: 0,
+            taps: 0,
+        }
+    }
+
+    /// Maximum IR length this convolver was sized for.
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        self.ir.len()
+    }
+
+    /// Install (or replace) the impulse response. Off the RT thread. The IR is
+    /// truncated to [`Convolver::capacity`] if longer; the history ring is
+    /// cleared so no stale tail bleeds across the swap.
+    pub fn set_ir(&mut self, ir: &[f32]) {
+        let n = ir.len().min(self.ir.len());
+        self.ir[..n].copy_from_slice(&ir[..n]);
+        for t in self.ir[n..].iter_mut() {
+            *t = 0.0;
+        }
+        self.taps = n;
+        self.reset();
+    }
+
+    /// Whether an IR is currently loaded (non-empty).
+    #[inline]
+    pub fn is_loaded(&self) -> bool {
+        self.taps > 0
+    }
+
+    /// Clear the input history (filter memory). Keeps the loaded IR.
+    pub fn reset(&mut self) {
+        for s in self.history.iter_mut() {
+            *s = 0.0;
+        }
+        self.write = 0;
+    }
+
+    /// Convolve one input sample, returning `sum_{k} ir[k] * x[n-k]`. With no IR
+    /// loaded this is a clean passthrough so an unbound convolution node is a
+    /// no-op rather than silence.
+    #[inline]
+    pub fn process(&mut self, x: f32) -> f32 {
+        if self.taps == 0 {
+            return x;
+        }
+        let cap = self.history.len();
+        // Newest sample takes the `write` slot; advance the cursor past it.
+        self.history[self.write] = x;
+        self.write = (self.write + 1) % cap;
+        // MAC the IR against the history, newest-first: tap k multiplies x[n-k].
+        let mut acc = 0.0;
+        let mut idx = self.write; // one past newest; stepping back hits newest first
+        for &tap in self.ir[..self.taps].iter() {
+            idx = if idx == 0 { cap - 1 } else { idx - 1 };
+            acc += tap * self.history[idx];
+        }
+        acc
+    }
+}
+
+// ===========================================================================
 // One-pole parameter smoother (zipper-noise free)
 // ===========================================================================
 
@@ -489,6 +582,46 @@ mod tests {
             }
         }
         assert!(approx(tap.unwrap(), 1.0, 1e-4), "impulse not delayed");
+    }
+
+    #[test]
+    fn convolver_unit_impulse_is_passthrough() {
+        // IR = [1.0] is the identity kernel: out == in, one sample at a time.
+        let mut c = Convolver::new(8);
+        c.set_ir(&[1.0]);
+        for &x in &[0.5, -0.25, 1.0, 0.0, -1.0] {
+            assert!(approx(c.process(x), x, 1e-6));
+        }
+    }
+
+    #[test]
+    fn convolver_delays_by_tap_index() {
+        // IR = [0, 0, 1] delays the input by two samples (tap index == lag).
+        let mut c = Convolver::new(8);
+        c.set_ir(&[0.0, 0.0, 1.0]);
+        let xs = [1.0, 0.0, 0.0, 0.0, 0.0];
+        let ys: Vec<f32> = xs.iter().map(|&x| c.process(x)).collect();
+        assert!(approx(ys[0], 0.0, 1e-6));
+        assert!(approx(ys[1], 0.0, 1e-6));
+        assert!(approx(ys[2], 1.0, 1e-6), "impulse should appear at lag 2");
+    }
+
+    #[test]
+    fn convolver_no_ir_is_passthrough() {
+        let mut c = Convolver::new(8);
+        // No IR installed -> clean passthrough, not silence.
+        assert!(approx(c.process(0.7), 0.7, 1e-6));
+    }
+
+    #[test]
+    fn convolver_truncates_overlong_ir() {
+        let mut c = Convolver::new(2);
+        c.set_ir(&[1.0, 2.0, 3.0, 4.0]); // truncated to first 2 taps
+        assert_eq!(c.capacity(), 2);
+        // y[n] = 1*x[n] + 2*x[n-1]; feed an impulse.
+        let ys: Vec<f32> = [1.0, 0.0, 0.0].iter().map(|&x| c.process(x)).collect();
+        assert!(approx(ys[0], 1.0, 1e-6));
+        assert!(approx(ys[1], 2.0, 1e-6));
     }
 
     #[test]

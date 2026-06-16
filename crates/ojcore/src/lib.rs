@@ -36,6 +36,17 @@ pub mod loader;
 pub mod manifest;
 pub mod registry;
 
+// --- U-COVERAGE built-in node set -------------------------------------------
+// `effects` (biquad / waveshaper / delay / convolution) and `structural`
+// (GraphIn / MicIn / GraphOut / SpeakerOut / Add / Passthrough) bring the
+// built-in node set to PARITY across both engine targets. `register` is the ONE
+// shared registration path both the native host and the wasm worklet call (via
+// `ojinstrument::register_all`) — no hand-listed loaders, zero duplication. All
+// stay `no_std` (alloc only) so they compile unchanged for the `wasm32` worklet.
+pub mod effects;
+pub mod register;
+pub mod structural;
+
 // --- U4 engine core ---------------------------------------------------------
 // `compile` + `exec` are the engine proper and stay `no_std` (alloc only) so
 // they compile unchanged for the `wasm32` AudioWorklet. `command` (rtrb ring)
@@ -70,6 +81,17 @@ pub use exec::Engine;
 pub use loader::PluginLoader;
 pub use manifest::{DspKind, ParamDecl, PluginManifest, PortDecl, UiKind};
 pub use registry::PluginRegistry;
+
+// --- U-COVERAGE built-in set: effects, structural, and the shared registrar --
+pub use effects::{
+    BiquadLoader, BiquadNode, ConvolutionLoader, ConvolutionNode, DelayLoader, DelayNode,
+    WaveshaperLoader, WaveshaperNode, BIQUAD_ID, CONVOLUTION_ID, DELAY_ID, WAVESHAPER_ID,
+};
+pub use register::{register_builtins, BuiltinOpts};
+pub use structural::{
+    StructuralLoader, StructuralNode, ADD_ID, GRAPH_IN_ID, GRAPH_OUT_ID, MIC_IN_ID, PASSTHROUGH_ID,
+    SPEAKER_OUT_ID,
+};
 
 // --- U12/U15/U16 additive surface ---
 pub use meter::{Meter, MeterBank};
