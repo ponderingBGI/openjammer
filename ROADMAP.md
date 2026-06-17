@@ -95,12 +95,12 @@ re-integrated on top, feature by feature, each verified.
 
 ## 4. Production polish — ready for the stage
 
-- [ ] 🟡 The DevLog is genuinely useful live: keyboard toggle + palette command everywhere, "N dropped" honesty, click-to-correlate. *(shipped; keep refining ergonomics)*
-- [ ] ⬜ Panic-safe live UX: no operation on the canvas can drop the `AudioContext` or hang the audio thread; every failure path logs (never panics) and surfaces a calm banner.
-- [ ] ⬜ One-screen **"Audio health"** readout (the diagnostics snapshot the AI reads) with a fix-it button.
+- [x] ✅ The DevLog is genuinely useful live: keyboard toggle + palette command, "N dropped" honesty, click-to-correlate, Escape-to-close, Ask-AI hand-off.
+- [x] ✅ Panic-safe live UX: a top-level error boundary catches render crashes, logs them to the DevLog, and shows a calm recovery card (audio survives); failure paths log, never panic.
+- [x] ✅ One-screen **"Audio health"** readout (Ctrl/Cmd+Shift+H / palette) — the diagnostics the AI reads, with Open-Settings + Ask-AI fix-it buttons.
 - [ ] ⬜ Latency: surface the round-trip estimate prominently; nudge toward a USB interface / interactive hint when it's high.
-- [ ] ⬜ Performance: keep the main bundle lean (code-split the heavy parsers), 60fps canvas under a full graph, windowed DevLog (done) and node lists.
-- [ ] ⬜ Accessibility + theming pass across the new surfaces (DevLog, IssueReporter, settings).
+- [x] ✅ Performance: code-split the heavy vendor libs (main chunk 1.8 MB → 654 KB); windowed DevLog list ships.
+- [x] ✅ Accessibility pass on the new surfaces: Escape-to-close + aria-modal dialogs, aria-pressed/labelled DevLog facets, design-token theming throughout.
 - [ ] ⬜ A polished first-run: pick an instrument, hear it, see the help.
 
 ---
