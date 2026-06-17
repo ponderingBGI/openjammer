@@ -44,18 +44,44 @@ jobs:
         name: Compute affected legs (oj plan)
         shell: bash
         run: |
-          # FAIL-SAFE: anything other than a clean PR plan runs the FULL gate, so
-          # the merge gate can never be weakened by a planning hiccup.
+          # FAIL CLOSED: the affected-selection may only ever run a SUPERSET of the
+          # legs a change needs, never skip one — so a green PR guarantees a green
+          # push to canari. We run the FULL gate unless `oj plan` is provably
+          # trustworthy (parsed, real non-empty diff, every file recognized).
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "engine=true" >> "$GITHUB_OUTPUT"
             echo "web=true" >> "$GITHUB_OUTPUT"
             echo "Non-PR event -> full run."
             exit 0
           fi
-          git fetch origin "${{ github.base_ref }}" --depth=1 || true
-          recipes=$(bun scripts/oj/index.ts plan --json \
-            | python3 -c "import json,sys;print(' '.join(json.load(sys.stdin).get('recipes',[])))" \
-            2>/dev/null || echo "fmt clippy test doctest render web")
+
+          # Make the PR base available at FULL depth. NEVER shallow-fetch (`--depth`)
+          # here: a shallow base makes the `ref...HEAD` merge-base diff fail, which
+          # silently yields an EMPTY changeset and skips every affected leg (the bug
+          # that let a broken e2e test merge). The checkout above used fetch-depth: 0,
+          # so the base is present; this just refreshes it without shallowing.
+          git fetch --no-tags origin "${{ github.base_ref }}" || true
+
+          # Diff against the ACTUAL PR base (origin/<base_ref>), NOT oj plan's local
+          # default of origin/main.
+          plan="$(bun scripts/oj/index.ts plan --json --base "origin/${{ github.base_ref }}" 2>/dev/null)" || plan=""
+          echo "oj plan: ${plan:-<empty>}"
+
+          ok="$(jq -r '.ok // false' <<<"$plan" 2>/dev/null || echo false)"
+          changed="$(jq -r '.changedCount // 0' <<<"$plan" 2>/dev/null || echo 0)"
+          unrec="$(jq -r '.unrecognizedCount // 1' <<<"$plan" 2>/dev/null || echo 1)"
+          recipes="$(jq -r '(.recipes // []) | join(" ")' <<<"$plan" 2>/dev/null || echo "")"
+
+          # Trustworthy ONLY when it parsed (ok), saw a real non-empty diff, and
+          # recognized EVERY changed file (mapped to a leg, or known CI-irrelevant).
+          # Anything else -> run the full gate.
+          if [ "$ok" != "true" ] || [ "${changed:-0}" = "0" ] || [ "${unrec:-1}" != "0" ]; then
+            echo "Plan not fully trustworthy (ok=$ok changed=$changed unrecognized=$unrec) -> FULL gate."
+            echo "engine=true" >> "$GITHUB_OUTPUT"
+            echo "web=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           echo "affected recipes: ${recipes:-<none>}"
           if echo "$recipes" | grep -qE 'fmt|clippy|test|doctest|render|nostd|wasm|clap'; then
             echo "engine=true" >> "$GITHUB_OUTPUT"
