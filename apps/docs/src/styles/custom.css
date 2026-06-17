@@ -1,0 +1,97 @@
+@import '../fonts.css';
+
+:root{
+  --oj-ink:#1A1A1A; --oj-ink-soft:#4A4A4A; --oj-ink-muted:#8A8A8A;
+  --oj-paper:#F5F0E8; --oj-paper-panel:#EDE8E0; --oj-sand:#E8E3DA; --oj-white:#FFFFFF;
+  --oj-border-subtle:#D4CFC6; --oj-walnut:#6B5B4F;
+  --oj-pine:#4A7C59; --oj-ochre:#C68B3F; --oj-clay:#A65353;
+  --oj-blue:#4A90C2; --oj-blue-out:#2C5F88; --oj-blue-in:#7EB3D8;
+  --oj-shadow-rest:2px 3px 0 rgba(0,0,0,.10);
+  --oj-shadow-lift:3px 4px 0 rgba(0,0,0,.15);
+  --oj-shadow-ink:2px 2px 0 var(--oj-ink);
+  --sl-font:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --sl-font-mono:'JetBrains Mono','Fira Code',monospace;
+  --sl-shadow-sm:var(--oj-shadow-rest);
+  --sl-shadow-md:var(--oj-shadow-rest);
+  --sl-shadow-lg:var(--oj-shadow-lift);
+}
+
+/* LIGHT = resting Cream paper */
+:root[data-theme='light']{
+  --sl-color-bg:var(--oj-paper); --sl-color-bg-nav:var(--oj-paper);
+  --sl-color-bg-sidebar:var(--oj-paper-panel); --sl-color-bg-inline-code:var(--oj-sand);
+  --sl-color-text:var(--oj-ink);
+  --sl-color-text-accent:var(--oj-blue-out);   /* link text — 6.4:1 on paper, passes 4.5:1 */
+  --sl-color-accent:var(--oj-blue-out);
+  --sl-color-accent-low:#dbe7f0; --sl-color-accent-high:var(--oj-ink);
+  --sl-color-white:var(--oj-ink); --sl-color-black:var(--oj-paper);
+  --sl-color-gray-1:#2b2b2b; --sl-color-gray-2:var(--oj-ink-soft);
+  --sl-color-gray-3:var(--oj-ink-muted); --sl-color-gray-4:#a9a298;
+  --sl-color-gray-5:var(--oj-border-subtle); --sl-color-gray-6:var(--oj-paper-panel);
+  --sl-color-gray-7:var(--oj-sand);
+  --sl-color-hairline:var(--oj-border-subtle); --sl-color-hairline-shade:var(--oj-border-subtle);
+  --sl-color-asides-border:var(--oj-blue);
+}
+
+/* DARK = 'Midnight' (warm walnut-ink ground) — :root is Starlight's dark default */
+:root, :root[data-theme='dark']{
+  --sl-color-bg:#1C1A17; --sl-color-bg-nav:#1C1A17;
+  --sl-color-bg-sidebar:#23201C; --sl-color-bg-inline-code:#2A2722;
+  --sl-color-text:#EDE8E0;
+  --sl-color-text-accent:var(--oj-blue-in);    /* bright blue reads fine on dark */
+  --sl-color-accent:var(--oj-blue);
+  --sl-color-accent-low:#1f3140; --sl-color-accent-high:#EDE8E0;
+  --sl-color-white:#F5F0E8; --sl-color-black:#1C1A17;
+  --sl-color-gray-1:#EDE8E0; --sl-color-gray-2:#cfc8bd; --sl-color-gray-3:#a89f93;
+  --sl-color-gray-4:#776f64; --sl-color-gray-5:#4a443c; --sl-color-gray-6:#2e2a25;
+  --sl-color-gray-7:#23201C;
+  --sl-color-hairline:#3a352e; --sl-color-asides-border:var(--oj-blue);
+}
+
+/* Brand vars flip for Midnight dark — GATED to [data-theme='dark'] (NOT bare
+   :root) so the light theme is never touched. Without this the --oj-* values
+   stay light (near-black ink on near-black bg → invisible tagline, borders,
+   buttons, and shadows in dark mode). */
+:root[data-theme='dark']{
+  --oj-ink:#EDE8E0;          /* line / border / text becomes warm cream on dark */
+  --oj-ink-soft:#CFC8BD;     /* hero tagline + secondary text — ~9:1 on the dark panel */
+  --oj-ink-muted:#A89F93;
+  --oj-paper:#1C1A17;        /* primary-button TEXT (color:var(--oj-paper)) → dark on the cream fill */
+  --oj-paper-panel:#23201C;  /* aside background */
+  --oj-white:#23201C;        /* card fill */
+  --oj-border-subtle:#3A352E;
+  --oj-blue-out:#7EB3D8;     /* minimal-button text + focus outline read on dark */
+  --oj-shadow-rest:2px 3px 0 rgba(0,0,0,.5);
+  --oj-shadow-lift:3px 4px 0 rgba(0,0,0,.6);
+  --oj-shadow-ink:2px 2px 0 rgba(0,0,0,.55);
+}
+
+/* page is paper: faint dot grid */
+body{ background-image:radial-gradient(rgba(0,0,0,.06) 1px, transparent 1px); background-size:24px 24px; }
+:root[data-theme='dark'] body{ background-image:radial-gradient(rgba(255,255,255,.05) 1px, transparent 1px); }
+
+/* ---- KILL STARLIGHT DEFAULTS that would ship a brand-ban ---- */
+/* Caveat is VOICE — scoped to hero headline + h1/h2 ONLY (never sidebar/card titles → toy cuteness) */
+.hero h1, .sl-markdown-content h1, .sl-markdown-content h2{
+  font-family:'Caveat','Comic Sans MS',cursive; font-weight:700; letter-spacing:.2px;
+}
+.sl-markdown-content h1{font-size:2.6rem;line-height:1.1;}
+.sl-markdown-content h2{font-size:1.9rem;line-height:1.15;}
+/* hard offset shadows replace Starlight's blurred card/aside/code shadows (Hard-Shadow Rule) */
+.card{ background:var(--oj-white); border:2px solid var(--oj-ink); border-radius:14px; box-shadow:var(--oj-shadow-lift); }
+:root[data-theme='dark'] .card{ background:#23201C; border-color:#EDE8E0; }
+.card .icon{ color:var(--oj-blue-out); }
+/* warm-neutral aside ground (flips with --oj-paper-panel) so no Starlight default
+   hue bleeds through in dark mode; the colored border still signals the type */
+.starlight-aside{ background:var(--oj-paper-panel); border:2px solid var(--oj-ink); border-radius:10px; box-shadow:var(--oj-shadow-rest); border-inline-start-width:2px; }
+.starlight-aside--note{ border-color:var(--oj-blue); }
+.starlight-aside--tip{ border-color:var(--oj-pine); }
+.starlight-aside--caution{ border-color:var(--oj-ochre); }
+.starlight-aside--danger{ border-color:var(--oj-clay); }
+.expressive-code .frame, pre.astro-code{ border:2px solid var(--oj-ink); border-radius:10px; box-shadow:var(--oj-shadow-rest); }
+/* buttons: ink-fill primary, walnut hover, physical press, no glow */
+.sl-link-button.primary{ background:var(--oj-ink); color:var(--oj-paper); border:2px solid var(--oj-ink); border-radius:10px; box-shadow:var(--oj-shadow-ink); transition:transform .08s, box-shadow .08s; }
+.sl-link-button.primary:hover{ background:var(--oj-walnut); transform:translateY(-1px); box-shadow:3px 3px 0 var(--oj-ink); }
+.sl-link-button.primary:active{ transform:translateY(1px); box-shadow:1px 1px 0 var(--oj-ink); }
+.sl-link-button.minimal{ color:var(--oj-blue-out); border:2px solid transparent; }
+:focus-visible{ outline:2px solid var(--oj-blue-out); outline-offset:2px; }

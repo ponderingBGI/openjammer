@@ -1,0 +1,75 @@
+---
+title: Install the desktop app
+description: Per-OS install for macOS, Windows, and Linux — including the one-time unsigned-app trust prompt for the alpha.
+sidebar:
+  order: 2
+---
+import { LinkCard } from '@astrojs/starlight/components';
+
+The desktop app gives you the lowest latency — **under 5 ms** MIDI-to-audio — and lets you
+host your own VST3 / AU / CLAP plugins. Grab the installer for your operating system from
+the latest release, then follow the one-time trust step below.
+
+<LinkCard
+  title="Download the latest release →"
+  href="https://github.com/ponderingBGI/openjammer/releases/latest"
+  description="macOS .dmg · Windows .exe · Linux .AppImage / .deb"
+/>
+
+:::caution[This is an unsigned alpha]
+OpenJammer is **0.1.0-alpha.2** and the desktop builds are **not yet code-signed**. Your OS
+will warn you the first time you open the app. This is a one-time trust step — separate from
+the cryptographic **minisign** signature the auto-updater already verifies over every update
+payload — and the steps below clear it safely.
+:::
+
+## macOS
+
+OpenJammer ships a `.dmg` for both **Apple Silicon** (M1–M4) and **Intel** Macs. If you are
+not sure which Mac you have, the Apple Silicon build is the right pick for any Mac from late
+2020 onward.
+
+1. Download the `.dmg` and open it, then drag **OpenJammer** into your Applications folder.
+2. The first time you launch it, Gatekeeper will say the app is *"from an unidentified
+   developer."* **Right-click (or Control-click) the app icon → Open**, then confirm **Open**
+   in the dialog. macOS remembers the choice — every launch after that is a normal
+   double-click.
+
+:::note[Why the manual download on macOS]
+Auto-update is intentionally **off on macOS** until the project has an Apple Developer ID and
+notarization — Gatekeeper would quarantine a swapped `.app` without it. Until then, macOS
+updates are a manual re-download of the `.dmg`. A green minisign check does nothing for
+Gatekeeper, so we don't pretend it does.
+:::
+
+## Windows
+
+OpenJammer ships a single 64-bit NSIS installer (`.exe`).
+
+1. Download and run the `.exe`.
+2. Windows SmartScreen may show *"Windows protected your PC"* with an **unknown publisher**.
+   Click **More info → Run anyway**. This is the one-time SmartScreen prompt for an app
+   without an Authenticode identity; it does not reappear once OpenJammer is installed.
+
+After the first install, the Windows app **auto-updates**: it downloads the signed NSIS
+update, verifies its minisign signature, and applies it on idle — never mid-session.
+
+## Linux
+
+Two formats are published; pick whichever fits your setup:
+
+- **AppImage** (`.AppImage`) — runs anywhere, no root, no package manager. After
+  downloading, mark it executable (`chmod +x OpenJammer*.AppImage`) and run it. The AppImage
+  build **auto-updates** in place.
+- **Debian / Ubuntu** (`.deb`) — install with your package manager
+  (`sudo apt install ./OpenJammer*.deb`). The `.deb` does **not** auto-update — your package
+  manager owns it, so update through it or re-download a newer `.deb`.
+
+## After installing
+
+Open the app and you are on the canvas — head to
+[Your first sound in 60 seconds](/openjammer/play/first-patch/) to make your first patch, or
+press **Ctrl/Cmd+K** and ask the AI to build one for you.
+
+If sound doesn't come through, [Troubleshooting](/openjammer/play/troubleshooting/) and
+[Audio setup & latency](/openjammer/play/audio-and-latency/) cover the usual fixes.

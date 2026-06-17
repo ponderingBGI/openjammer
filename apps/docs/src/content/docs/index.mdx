@@ -3,45 +3,50 @@ title: OpenJammer
 description: Node-driven, real-time music creation for live performance — native (<5 ms) and in the browser.
 template: splash
 hero:
-  tagline: Patch instruments and effects on a canvas, then play live — natively at sub-5 ms latency, or right in the browser.
+  title: An instrument you patch on paper.
+  tagline: Wire up instruments and effects on a warm sketchbook canvas, then play it live. The same Rust engine runs natively at sub-5ms latency, or right in your browser.
   actions:
-    - text: How it stays real-time
-      link: /openjammer/architecture/real-time-safety/
-      icon: right-arrow
+    - text: Try in the browser
+      link: https://openjammer.app
+      variant: primary
+    - text: Download for desktop
+      link: /openjammer/play/install/
+      variant: primary
     - text: View on GitHub
       link: https://github.com/ponderingBGI/openjammer
-      icon: external
       variant: minimal
 ---
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
-import { Card, CardGrid } from '@astrojs/starlight/components';
+## Two ways in
 
-OpenJammer is a **dual-target** audio app: the *same* Rust engine (`ojcore`) runs
-both as a native Tauri desktop app on a small-buffer audio stream, and compiled to
-`wasm32` inside a browser AudioWorklet. You build a signal graph on a canvas and
-perform with it live.
+<CardGrid>
+  <Card title="Play" icon="open-book">
+    Open the canvas, drop a keyboard and a synth, draw a cable between them, and you are
+    making sound. Native desktop gives you **sub-5ms** MIDI-to-audio; the browser tier is
+    an honest **~15-25ms** — fast enough to jam, no install required.
 
-<CardGrid stagger>
-  <Card title="Hard real-time" icon="rocket">
-    The audio thread never allocates, locks, or blocks — a guarantee enforced
-    mechanically in CI. See [Real-time safety](/openjammer/architecture/real-time-safety/).
+    [Start playing →](https://openjammer.app)
   </Card>
-  <Card title="Everything on device" icon="laptop">
-    Structured logs stream to an on-device rolling file and a searchable in-app
-    panel — never to a server. See [Logging &amp; observability](/openjammer/architecture/logging/).
-  </Card>
-  <Card title="One wire schema" icon="setting">
-    A single `ojproto` event/IR schema crosses the native ↔ browser seam,
-    parity-gated against its TypeScript mirror.
-  </Card>
-  <Card title="Report a problem" icon="comment">
-    A one-click reporter bundles a redacted diagnostic snapshot + log tail into a
-    pre-filled GitHub issue — secrets and home paths auto-scrubbed.
+  <Card title="Build" icon="setting">
+    A deliberately tiny Rust core (`ojcore`) turns a graph into sound and blocks for
+    nothing. *Everything else* — instruments, effects, AI-authored DSP — is a plugin
+    behind one `DspInstance` contract. Extend the edges; never fork the core.
+
+    [Read the architecture →](/openjammer/build/architecture/real-time-safety/)
   </Card>
 </CardGrid>
 
-:::note
-These docs are a living reference for contributors. Engine internals are
-documented inline in the Rust crates (`cargo doc`); this site covers the
-cross-cutting architecture, the release/version model, and how to contribute.
+:::tip[A held note beats a glitch]
+The audio thread never allocates, locks, or blocks — enforced mechanically in CI. When
+something breaks mid-set, OpenJammer preserves the last good sound and reports without
+stealing your focus. Latency is not a number here; it is the threshold below which the
+software disappears and only the music is left.
 :::
+
+<CardGrid>
+  <LinkCard title="Audio setup & USB interfaces" href="/openjammer/play/audio-and-latency/" />
+  <LinkCard title="Real-time safety" href="/openjammer/build/architecture/real-time-safety/" />
+  <LinkCard title="Channels & versions" href="/openjammer/build/internals/channels-and-versions/" />
+  <LinkCard title="Contributing" href="/openjammer/build/contributing/" />
+</CardGrid>
