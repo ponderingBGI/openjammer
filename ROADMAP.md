@@ -111,7 +111,7 @@ re-integrated on top, feature by feature, each verified.
 - [x] ✅ Architecture logging page + this roadmap.
 - [x] ✅ An **"Instruments & sound"** doc (docs site): how voices are synthesized, how to bring your own sample/SoundFont/plugin, the family→voice map.
 - [x] ✅ A **"Troubleshooting with the AI"** doc (docs site): what to ask, what it can see + change, the safety boundary.
-- [ ] ⬜ Developer doc for the procedural voice engine + the executor sample-binding seam.
+- [x] ✅ Developer doc (`docs/voice-engine.md`) for the procedural voice engine + the executor sample-binding seam.
 
 ---
 
