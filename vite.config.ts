@@ -137,29 +137,11 @@ export default defineConfig({
       events: 'rollup-plugin-node-polyfills/polyfills/events'
     }
   },
-  // Keep the main bundle lean: split the heavy, rarely-changing vendor libs into
-  // their own long-cached chunks so a code change re-downloads only the app, and
-  // the parser-heavy metadata lib lands off the critical path.
+  // Let Rollup/Vite choose chunk boundaries. Hand-written vendor chunks caused
+  // production-only circular ESM initialization crashes (white screen before
+  // React mounted), so startup correctness beats cache-shape micro-optimization.
   build: {
     chunkSizeWarningLimit: 900,
-    rollupOptions: {
-      output: {
-        manualChunks(id: string) {
-          if (!id.includes('node_modules')) return undefined
-          if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) {
-            return 'vendor-react'
-          }
-          if (id.includes('music-metadata') || id.includes('strtok3') || id.includes('token-types')) {
-            return 'vendor-metadata'
-          }
-          if (id.includes('loro-crdt')) return 'vendor-collab'
-          if (id.includes('react-markdown') || id.includes('remark') || id.includes('micromark') || id.includes('mdast') || id.includes('hast') || id.includes('unist')) {
-            return 'vendor-markdown'
-          }
-          return 'vendor'
-        }
-      }
-    }
   },
   // Worker configuration for AudioWorklet modules
   worker: {

@@ -13,6 +13,9 @@ export default defineConfig([
   // agent/worktree resources, not app source — all excluded from the gates.
   globalIgnores([
     'dist/**',
+    'target/**',
+    'src-tauri/target/**',
+    'src-tauri/binaries/**',
     'apps/docs/.astro/**',
     'apps/docs/dist/**',
     'pi-openjammer-graph/**',

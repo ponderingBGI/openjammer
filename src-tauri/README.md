@@ -71,34 +71,31 @@ never a trusted runner** (Pi has no permission system — its tool calls
 auto-execute with the launching user's privileges, so sandboxing is the host's
 job):
 
-- **Throwaway worktree.** Pi runs with its cwd inside a fresh `git worktree`
-  under the OS temp dir, removed on run completion.
-- **Env allowlist.** The child starts from an empty environment; only
-  `PATH`/`HOME` (and the Windows equivalents) plus the **one** provider key the
-  user supplied are forwarded. Every other secret is stripped. OpenJammer never
-  stores the key.
+- **Persistent jailed workspace.** Pi runs with `HOME` pointed at
+  `~/.openjammer/agent/` and cwd inside that agent workspace, so sessions and
+  memory persist while the permission gate confines writes.
+- **Env allowlist.** In jailed mode the child starts from an empty environment;
+  only process basics plus the **one** provider key the user supplied are
+  forwarded. Every other secret is stripped. OpenJammer never stores the key.
 - **Tool calls are forwarded, not executed natively.** Graph mutations are
   surfaced to the frontend and applied only behind the user's Approve, via the
   same reversible `graphStore` verbs the UI uses.
 
-### Founder setup (one-time)
+### AI setup (one-time)
 
-Pi is **not** bundled. To enable the agent:
+Pi is bundled with **native desktop releases only**. The browser/PWA build does
+not ship or run Pi; it continues to show the desktop-required state.
 
-1. **Install Pi** so the `pi` binary is on `PATH`:
+1. **Use the desktop app.** `bun run tauri dev` and `bun run tauri build` run
+   `bun run build:pi-runtime`, which compiles the pinned Pi sidecar into
+   `src-tauri/binaries/` and bundles it as a Tauri resource. At runtime
+   OpenJammer copies that resource into `~/.openjammer/pi-runtime/<version>/`
+   and launches it over `--mode rpc`. Developers can override with
+   `OPENJAMMER_PI_BIN=/abs/path/to/pi`.
 
-   ```bash
-   bun add -g @earendil-works/pi-coding-agent     # or: npm i -g …
-   # see github.com/earendil-works/pi for alternatives
-   pi --version                                   # verify it resolves
-   ```
-
-   (Or set `OPENJAMMER_PI_BIN=/abs/path/to/pi` to point at a custom build.)
-
-2. **Configure a provider key** — your own credentials, one provider. Either
-   put it in `~/.pi` (Pi reads ~30 providers from there), or let the UI collect
-   it and forward it to the child under the var your provider expects. The
-   forwarded var name defaults to `OPENJAMMER_PROVIDER_KEY`; override it with
+2. **Configure a provider key** — your own credentials, one provider. Let the UI
+   collect it and forward it to the child under the provider's env var, or set
+   that env var yourself. Override the forwarded var name with
    `OPENJAMMER_AI_KEY_VAR` (e.g. `OPENJAMMER_AI_KEY_VAR=ANTHROPIC_API_KEY`).
 
 3. **(Optional) DSP authoring with real Faust compilation.** The
@@ -121,8 +118,8 @@ The whole tool-call -> graph-verb path and the Approve/Reject transaction are
 proven with Pi **mocked** (`MockAgentBackend`) — `bun run test:run` covers
 `src/ai/__tests__` and `src/store/__tests__/agentSessionStore.test.ts`. The
 native `ai.rs` env-stripping + JSONL parsing have Rust unit tests
-(`cargo test -p oj-tauri ai::`). Real-Pi behaviour is enabled simply by
-installing Pi as above; no test here depends on it.
+(`cargo test -p oj-tauri ai::`). Real-Pi behaviour in desktop builds uses the
+bundled sidecar; no test here depends on a global Pi install.
 
 ## Local development
 
@@ -130,12 +127,12 @@ From the **repo root** (not this directory):
 
 ```bash
 bun install                 # installs @tauri-apps/cli (+ web deps)
-bun run tauri dev           # launches the native window with the live Vite UI
+bun run tauri dev           # builds bundled Pi runtime, then launches native UI
 ```
 
-`bun run tauri dev` runs the config's `beforeDevCommand` (`bun run dev`), waits
-for `http://localhost:5173`, then opens the native window with hot reload of both
-the web UI and (on save) the Rust backend.
+`bun run tauri dev` runs the config's `beforeDevCommand` (`bun run build:pi-runtime && bun run dev`),
+waits for `http://localhost:5173`, then opens the native window with hot reload
+of both the web UI and (on save) the Rust backend.
 
 ### Linux build dependencies
 
