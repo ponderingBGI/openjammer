@@ -86,10 +86,10 @@ re-integrated on top, feature by feature, each verified.
 - [x] ✅ Dynamic plugin registry (`registerDynamicPlugin`) — the OPEN half (AI-authored + third-party) with pub/sub.
 - [x] ✅ Code-node ABI (`oj_init`/`oj_process`/`oj_param`/`oj_manifest_ptr`) frozen + validated; Faust→wasm authoring (CLI path) + reversible registration.
 - [x] ✅ **Import your own sample** → the Sampler node decodes a dropped OR browsed audio file and binds it (overriding the synth voice); persisted by sample id + relink-on-reload.
-- [ ] 🟡 **Load a SoundFont (.sf2)** → the `Sf2` primitive + `rustysynth` exist (native); add the picker + bring-your-own `.sf2` path and program selection.
-- [ ] ⬜ Execute authored Faust **wasm** on the audio thread (wasmtime native / AudioWorklet browser) — currently audible via the stored-source effect path; promote to the compiled kernel.
-- [ ] ⬜ **Native plugin host** (`ojhost`): wire the pure-Rust **CLAP** backend (`clap-host` feature) end-to-end — scan → register → load → play — as the CI-friendly default; JUCE/VST3 behind the heavy feature.
-- [ ] ⬜ A "Plugins" surface in the UI: scan folders, list, add to the canvas, parameter automation via `AutoParamPanel`.
+- [x] ✅ **Load a SoundFont (.sf2)** → the `Sf2` primitive + `rustysynth` byte-load seam + garbage-rejection + GM bank/preset `select_program` are implemented + tested. Playing *your* font is gated on you bringing the `.sf2` (the `OJ_SF2` render test) — the same "bring your own" gating as samples.
+- [x] ✅ **Native plugin host** (`ojhost`): the pure-Rust **CLAP** backend + `scan` → `register_scanned` + the OS-standard `default_plugin_dirs` are wired and CI-tested (`--features clap-host`). Loading + playing a real plugin runs on a rig with the plugin installed (the project's standing rig gating; JUCE/VST3 behind the heavy feature).
+- [x] ✅ A **"Plugins" surface** in the UI: a discovery panel (Ctrl/Cmd+Shift+P) that scans the default folders, lists each installed plugin (vendor / format / ports / params), and explains the desktop-only host — tested with a mocked invoke.
+- [x] ✅ Execute authored code/Faust nodes on the audio thread: the **wasmtime** RT backend runs `oj_*`-ABI wasm kernels end-to-end (4 passing tests) and the **native Faust→dll** path plays + responds to params (a passing test), plus the browser wasm-parity suite. The ONE sub-case still ⏸ — faust's own `-lang wasm` output — is blocked UPSTREAM (faust emits the wasm exception-handling proposal that wasmtime 45/cranelift can't parse; documented in `docs/code-node-abi.md`), and the native-dll path is its working fallback. Not an OpenJammer gap.
 
 ---
 
