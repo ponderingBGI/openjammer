@@ -263,40 +263,26 @@ body {
   white-space: nowrap;
 }
 
-/* ---- all-platforms disclosure ---- */
-.oj-all {
+/* ---- other / all platforms (always visible) ---- */
+.oj-other {
   border: 2px solid var(--oj-ink);
   border-radius: var(--oj-r-lg);
   background: var(--oj-white);
   box-shadow: var(--oj-shadow-lift);
-  padding: 0;
-  margin-bottom: 2rem;
+  padding: 1.25rem 1.25rem 0.5rem;
+  margin-bottom: 1.5rem;
 }
 
-.oj-all-summary {
+.oj-other-title {
   font-family: var(--oj-font-voice);
   font-weight: 700;
-  font-size: 1.5rem;
-  list-style: none;
-  cursor: pointer;
-  padding: 1rem 1.25rem;
-  user-select: none;
-}
-.oj-all-summary::-webkit-details-marker {
-  display: none;
-}
-.oj-all-summary::after {
-  content: '+';
-  float: right;
-  font-family: var(--oj-font-mono);
-  color: var(--oj-ink-muted);
-}
-.oj-all[open] .oj-all-summary::after {
-  content: '\2212'; /* minus sign */
+  font-size: 1.6rem;
+  margin: 0 0 0.5rem;
+  color: var(--oj-ink);
 }
 
-.oj-all-body {
-  padding: 0 1.25rem 1.25rem;
+.oj-other-body {
+  padding: 0;
 }
 
 .oj-plat {
@@ -320,18 +306,18 @@ body {
   margin: 0 0 0.75rem;
 }
 
-/* In the all-platforms list, buttons are white-on-paper (secondary), so the
+/* In the other-platforms list, buttons are white-on-paper (secondary), so the
    ink-fill primary is reserved for the detected card. */
-.oj-all-body .oj-btn {
+.oj-other-body .oj-btn {
   color: var(--oj-ink);
   background: var(--oj-white);
   box-shadow: var(--oj-shadow-rest);
 }
-.oj-all-body .oj-btn:hover {
+.oj-other-body .oj-btn:hover {
   background: var(--oj-sand);
   box-shadow: var(--oj-shadow-lift);
 }
-.oj-all-body .oj-btn:active {
+.oj-other-body .oj-btn:active {
   box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.15);
 }
 
@@ -350,11 +336,14 @@ body {
   margin: 1.5rem 0 0;
 }
 
-.oj-all-foot {
+.oj-versions {
   font-family: var(--oj-font-body);
-  font-size: 0.9rem;
+  font-size: 1rem;
   color: var(--oj-ink-soft);
-  margin: 1rem 0 0;
+  margin: 0 0 1.5rem;
+}
+.oj-link--versions {
+  font-weight: 700;
 }
 
 /* ---- links ---- */

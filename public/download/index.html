@@ -47,15 +47,15 @@
       </section>
 
       <!--
-        ALL-PLATFORMS FLOOR. Ships <details open>. download.js collapses it
-        (removes the `open` attribute) only after a clean detect; on a regex
-        miss or a detect throw it is re-opened / left open. Every <a> here is
-        present in the static HTML and points at github.com.
+        OTHER PLATFORMS. Always visible. Ships listing EVERY platform (the JS-off
+        / detect-fail floor). After a clean desktop detect, download.js hides the
+        detected OS's block here (it sits in the primary card above) and retitles
+        to "Other platforms". Every <a> is in the static HTML and points at github.com.
       -->
-      <details class="oj-all" id="oj-all" open>
-        <summary class="oj-all-summary">All platforms &amp; versions</summary>
+      <section class="oj-other" id="oj-other">
+        <h2 class="oj-other-title" id="oj-other-title">All platforms</h2>
 
-        <div class="oj-all-body">
+        <div class="oj-other-body">
           <div class="oj-plat" data-os="macos">
             <h2 class="oj-plat-title">macOS</h2>
             <div class="oj-btn-row">
@@ -114,16 +114,18 @@
             Lowest latency &mdash; under 5&nbsp;ms MIDI-to-audio (native desktop).
           </p>
 
-          <p class="oj-all-foot">
-            Everything is hosted free on GitHub Releases.
-            <a
-              class="oj-link"
-              href="https://github.com/ponderingBGI/openjammer/releases/latest"
-              >Browse every build and version on GitHub &rarr;</a
-            >
-          </p>
         </div>
-      </details>
+      </section>
+
+      <!-- Other versions: a promoted, always-visible link to the full releases list. -->
+      <p class="oj-versions">
+        Want an older version or the release notes?
+        <a
+          class="oj-link oj-link--versions"
+          href="https://github.com/ponderingBGI/openjammer/releases"
+          >All releases on GitHub &rarr;</a
+        >
+      </p>
 
       <!-- Persistent browser CTA: always present, JS-on or JS-off. -->
       <p class="oj-browser">
