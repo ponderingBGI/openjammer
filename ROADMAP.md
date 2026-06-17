@@ -101,8 +101,8 @@ re-integrated on top, feature by feature, each verified.
 
 - [x] ✅ `docs/agent-tools.md` covers the diagnostics/settings tools + the worked "get sound back" loop (drift-gated).
 - [x] ✅ Architecture logging page + this roadmap.
-- [ ] 🟡 An **"Instruments & sound"** doc: how voices are synthesized, how to bring your own sample/SoundFont/plugin, the family→voice map.
-- [ ] 🟡 A **"Troubleshooting with the AI"** doc: what to ask, what it can see + change, the safety boundary.
+- [x] ✅ An **"Instruments & sound"** doc (docs site): how voices are synthesized, how to bring your own sample/SoundFont/plugin, the family→voice map.
+- [x] ✅ A **"Troubleshooting with the AI"** doc (docs site): what to ask, what it can see + change, the safety boundary.
 - [ ] ⬜ Developer doc for the procedural voice engine + the executor sample-binding seam.
 
 ---
