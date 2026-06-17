@@ -1,84 +1,140 @@
-# Roadmap — remaining foundations work
+# OpenJammer Roadmap — to the stage
 
-The foundations program (Phases 0–6) is largely landed and CI-green: one version
-SSOT, the pinned toolchain, the fenced/SHA-pinned release path, the credential +
-`zizmor` gates, the aggregate **Merge gate** with an adversarial self-test, the
-`EventKind`/`event_frame`/`drain_frames` event spine with the `assert_no_alloc`
-gate, the L1 tracing sink + L4 DevLog + console facade, the D1 schema SSOT, the
-Starlight docs hub (incl. generated TypeDoc API), and the L5 redacted one-click
-issue reporter.
+> **The goal.** One awesome user *and* developer experience: an instrument you
+> can pick up and play live, an AI co-pilot that can actually fix your setup when
+> something breaks, every instrument in the picker making real sound, and the
+> door wide open to bring your own — samples, SoundFonts, Faust code nodes, and
+> native plugins. We obsess over the details and don't call it done until it's
+> production-ready and polished. This file is the living tracker; every box gets
+> ticked, with care.
 
-This file tracks what is **deliberately still ahead** — the larger engineering
-workstreams and the owner-gated switches — so deleting the design plans doesn't
-lose the thread. Owner-flippable switches live in
-[`OWNER-PROVISIONING.md`](OWNER-PROVISIONING.md); this file is the *engineering*
-backlog.
-
-> Why these are staged, not done now: each needs either hardware/runtime this
-> repo's CI can't exercise from a Windows-only, device-free dev box (real audio
-> latency, a browser with COOP/COEP, a signing identity), or it is a refactor of
-> already-green CI whose payoff is DRY/speed, not new capability — sequenced after
-> the capabilities land. None of them block the green tree.
+Status legend: ✅ done · 🟡 in progress / partial · ⬜ not started.
 
 ---
 
-## CI control plane (Phase 1, C1)
+## 0. Unify the two histories (the merge, done properly)
 
-- **Composite actions + reusable workflows.** Collapse the repeated
-  checkout/Bun/toolchain/cache/apt blocks in `ci.yml` into `setup-rust` /
-  `setup-web` composite actions and `engine.yml` / `web.yml` reusable workflows,
-  so `release.yml` and `canary.yml` call the *same* build engine. Entry point:
-  `.github/workflows/ci.yml` (the three near-duplicate native jobs).
-- **Affected-selection (`changes`) + Lane A/Lane B split.** A selector job that
-  reads `oj plan --json` to run only affected `just` recipes per PR (Lane A),
-  with the heavy correctness suite on nightly+canary (Lane B). The `oj` CLI
-  already implements affected-selection (`scripts/oj/preflight.ts`); this wires
-  it into CI as the gate's `changes` need.
+The repo had two parallel histories with **no common ancestor**: `main` (the
+6-month app — ojcore audio engine, the Ctrl+K AI agent, Faust code-nodes, the
+`ojwasm` host, collaboration, auth) and a `foundations` branch (the L1–L5
+logging spine, the DevLog, the SQLite/FTS5 log store, the `oj` CI control plane,
+the Starlight docs site, versioning/signing, this roadmap). Rather than a
+conflict-resolution dump, the app is the base of truth and the foundations are
+re-integrated on top, feature by feature, each verified.
 
-## Testing depth (Phase 4: T2/T3/T4/X2)
-
-- **Golden corpus (ULP-banded, per-arch).** Device-free `render` goldens compared
-  in a tight ULP band on linux-x64 / macos-aarch64 / macos-x64, plus a
-  `wasm-pack test --node` parity subset per-PR. Policy is documented at
-  `/reference/floating-point/`; the corpus + harness are the build-out.
-- **libm-only enforcement.** The DSP crates already route every transcendental
-  through `libm` (verified); add the clippy `disallowed-methods` guard (carefully
-  scoped so non-DSP std math isn't caught) to keep it that way.
-- **miri + fuzz (Lane B).** miri over existing tests; unbounded fuzz of the
-  untrusted parse surface (SF2 via `rustysynth`, WAV via `symphonia`, graph JSON)
-  with a per-PR smoke.
-- **Playwright PWA smoke.** A blocking PWA + render-smoke suite with a mocked
-  `__TAURI__`, asserting `crossOriginIsolated === true`, plus a post-deploy
-  synthetic header check against the real host (production COOP/COEP).
-- **Docs-as-requirement.** Rust `missing_docs` + `cargo doc -D warnings` with a
-  committed permanently-failing-doc fixture as a standing negative test; the TS
-  `doc-check` baseline-ratchet.
-
-## Persistence + delivery (Phase 5: L3/R2/R3/R4)
-
-- **L3 SQLite/FTS5 store (native-first).** Persist decoded events; columns mirror
-  the `EventKind` taxonomy; an FTS5-availability smoke (`CREATE VIRTUAL TABLE …
-  USING fts5` + a `MATCH` query) as a gated check. Consumes the L4 `logStore`
-  shape already in `src/`.
-- **R2 native updater.** Wire the Tauri v2 updater (compares
-  `src-tauri/tauri.conf.json` version): `cfg`-off on macOS until notarization,
-  Linux gated on `APPIMAGE`, install as a locked-out audio-safe `UpdatePending`
-  state (no TOCTOU). Needs the signing keys (owner).
-- **R3 PWA auto-update.** Prompt-style, channel-aware Workbox service worker
-  (reads the canary build flag), apply-on-idle so it never yanks the
-  `AudioContext`.
-- **R4 signing + delivery.** Split stable/canary minisign keypairs; `canary.yml`
-  (push-on-main, canary key only) reusing the build engine; a serialized
-  `assemble-manifest` that unions the dual-arch macOS `latest.json`; a hard
-  post-publish all-four-platform-keys gate; `attest-build-provenance` for
-  auditors. Workflows wire to owner-provided secrets (see OWNER-PROVISIONING §3).
-- **Loopback latency automation.** Wire `RecorderSink` into `build_input` so the
-  `#[ignore]`d loopback test can run; until then the manual runbook at
-  `/reference/loopback-latency/` is the gate, with the xrun counter as the
-  observable complement.
+- [x] ✅ Merge `main` ↔ foundations with `main` as the base for all overlapping app code.
+- [x] ✅ Union the structured-event taxonomy (`Severity`/`Source`/`EventKind`/`Event`/`RtEvent`) into the shared TS protocol; derive `PrimitiveKind` from a `PRIMITIVE_KINDS` tuple so the D1 SSOT gate has its list. (Caught + fixed a real drift: `oj-plugin-v1.json` was missing `Looper`/`Recorder`.)
+- [x] ✅ Resolve `@openjammer/oj-protocol` across tsconfig/vite/vitest; inline `__APP_VERSION__`.
+- [x] ✅ Re-port the TS logging layer: mount the DevLog + IssueReporter, add the palette command, and `installConsoleCapture()` so every `console.*` becomes live, faceted log content.
+- [x] ✅ Re-port the native logging: `ojcore-native`'s `log` (tracing) + `persist`-gated `logstore` (SQLite/FTS5), with deps + workspace wiring. `cargo check` + the 4 FTS5 tests pass.
+- [x] ✅ Ship the DevLog in **every** build (was dev/canary-only) so it's there on stage.
 
 ---
 
-*Design rationale for every item above lives in the project's git history (the
-`docs/plans/` design set, removed from `HEAD` once implemented) and, for
-user-facing topics, in the [documentation site](https://ponderingbgi.github.io/openjammer/).*
+## 1. The AI as a real co-pilot — logs, diagnostics, settings
+
+> *"The AI agent should have full access to the logs and all settings so it can
+> help the user get things working again."* Done — the agent can now see what's
+> happening and change the knobs, all reversibly, all documented.
+
+- [x] ✅ `get_logs` — tail the on-device DevLog (filter by level/scope/search/limit).
+- [x] ✅ `get_diagnostics` — environment + live audio (running?, sample rate, round-trip latency, output device, COI).
+- [x] ✅ `get_settings` — the safe-allowlist settings (sample rate, latency hint, low-latency mode, in/out device, theme, default velocity).
+- [x] ✅ `update_settings` — apply an allowlisted patch through the same store verbs the Settings panel uses; **reversible** (returns an undo).
+- [x] ✅ Pure, injected `AgentEnvPort` (testable) + a live `createEnvPort()`; threaded through `applyToolCall`/`batch_apply`/`emit_plan` and both live call sites (streamed path + Pi host bridge).
+- [x] ✅ Pi extension catalogue + `docs/agent-tools.md` updated in sync (with a worked "get sound back" loop); catalogue↔doc drift gate green; 12 new tests.
+- [ ] 🟡 Surface a one-tap **"Ask the AI to fix this"** affordance from the DevLog / latency banner that pre-seeds the agent with the current diagnostics. *(next)*
+
+---
+
+## 2. Every instrument fully working and wired up
+
+> *"All the instruments you can select here fully working and wired up."* The
+> picker lists 171 instruments across 9 families, but today they lower to one
+> shared synthesized voice (so a cello and a sax sound identical) and the generic
+> `instrument` picker is silent without a bound sample. We back **every**
+> selectable instrument with a distinct, characterful **procedural** voice — zero
+> external assets, deterministic, instantly playable — and keep bring-your-own as
+> the override.
+
+- [ ] 🟡 Generalize `defaultInstrument.ts` into a **procedural voice engine**: a `VoiceSpec` (harmonic series, ADSR, brightness, vibrato, inharmonicity, noise/breath, body resonance) → deterministic mono PCM.
+- [ ] 🟡 A `VoiceSpec` per instrument **family** (piano, chromatic-percussion, organ, guitar, bass, strings, ensemble, brass, reed/woodwind, lead-synth, pad-synth, percussion, world) so each sounds like itself.
+- [ ] 🟡 Map every catalogue `instrumentId` → its family `VoiceSpec`; selecting "Alto Sax" vs "Cello" produces audibly different tones.
+- [ ] 🟡 Thread `node.data.instrumentId` (not just `node.type`) through **both** executors; re-bind the voice when the picker changes.
+- [ ] 🟡 Make the generic `instrument` / `keys` picker produce sound out of the box.
+- [ ] ⬜ Per-instrument default ADSR + gain so brass swells, plucks decay, pads bloom.
+- [ ] ⬜ Velocity → brightness/level mapping for expressive dynamics.
+- [ ] ⬜ Karplus-backed family for plucked strings (guitar/bass) routed to the real `KarplusString` primitive, not the additive synth.
+- [ ] ⬜ A tiny golden test that every catalogue `instrumentId` resolves to a non-silent voice (no silent instrument can ship).
+
+---
+
+## 3. Bring your own — samples, SoundFonts, Faust, native plugins
+
+> The procedural voices are the floor, not the ceiling. A professional brings
+> their own sound.
+
+- [x] ✅ Plugin manifest schema (`oj-plugin-v1.json`) v1 + TS mirror.
+- [x] ✅ Dynamic plugin registry (`registerDynamicPlugin`) — the OPEN half (AI-authored + third-party) with pub/sub.
+- [x] ✅ Code-node ABI (`oj_init`/`oj_process`/`oj_param`/`oj_manifest_ptr`) frozen + validated; Faust→wasm authoring (CLI path) + reversible registration.
+- [ ] 🟡 **Import your own sample** → bind PCM to a sampler node (the `set_sample` seam exists; add the UI + file decode + persistence).
+- [ ] 🟡 **Load a SoundFont (.sf2)** → the `Sf2` primitive + `rustysynth` exist (native); add the picker + bring-your-own `.sf2` path and program selection.
+- [ ] ⬜ Execute authored Faust **wasm** on the audio thread (wasmtime native / AudioWorklet browser) — currently audible via the stored-source effect path; promote to the compiled kernel.
+- [ ] ⬜ **Native plugin host** (`ojhost`): wire the pure-Rust **CLAP** backend (`clap-host` feature) end-to-end — scan → register → load → play — as the CI-friendly default; JUCE/VST3 behind the heavy feature.
+- [ ] ⬜ A "Plugins" surface in the UI: scan folders, list, add to the canvas, parameter automation via `AutoParamPanel`.
+
+---
+
+## 4. Production polish — ready for the stage
+
+- [ ] 🟡 The DevLog is genuinely useful live: keyboard toggle + palette command everywhere, "N dropped" honesty, click-to-correlate. *(shipped; keep refining ergonomics)*
+- [ ] ⬜ Panic-safe live UX: no operation on the canvas can drop the `AudioContext` or hang the audio thread; every failure path logs (never panics) and surfaces a calm banner.
+- [ ] ⬜ One-screen **"Audio health"** readout (the diagnostics snapshot the AI reads) with a fix-it button.
+- [ ] ⬜ Latency: surface the round-trip estimate prominently; nudge toward a USB interface / interactive hint when it's high.
+- [ ] ⬜ Performance: keep the main bundle lean (code-split the heavy parsers), 60fps canvas under a full graph, windowed DevLog (done) and node lists.
+- [ ] ⬜ Accessibility + theming pass across the new surfaces (DevLog, IssueReporter, settings).
+- [ ] ⬜ A polished first-run: pick an instrument, hear it, see the help.
+
+---
+
+## 5. Docs — nothing ships without them
+
+- [x] ✅ `docs/agent-tools.md` covers the diagnostics/settings tools + the worked "get sound back" loop (drift-gated).
+- [x] ✅ Architecture logging page + this roadmap.
+- [ ] 🟡 An **"Instruments & sound"** doc: how voices are synthesized, how to bring your own sample/SoundFont/plugin, the family→voice map.
+- [ ] 🟡 A **"Troubleshooting with the AI"** doc: what to ask, what it can see + change, the safety boundary.
+- [ ] ⬜ Developer doc for the procedural voice engine + the executor sample-binding seam.
+
+---
+
+## 6. Foundations backlog (preserved from the original roadmap)
+
+Still-ahead engineering workstreams (mostly hardware/signing-gated or DRY
+refactors of already-green CI). Owner-flippable switches live in
+[`OWNER-PROVISIONING.md`](OWNER-PROVISIONING.md).
+
+### CI control plane (Phase 1, C1)
+- [ ] ⬜ Composite actions + reusable workflows (collapse the near-duplicate native jobs in `ci.yml` into `setup-rust`/`setup-web` + `engine.yml`/`web.yml`).
+- [ ] ⬜ Affected-selection (`changes`) + Lane A/Lane B split driven by `oj plan --json`.
+
+### Testing depth (Phase 4)
+- [x] ✅ libm-only DSP enforcement (clippy `disallowed-methods`).
+- [x] ✅ Playwright PWA render-smoke (`crossOriginIsolated === true`).
+- [x] ✅ Docs-as-requirement (`missing_docs` + `cargo doc -D warnings` + a standing negative fixture).
+- [x] ✅ miri over the unsafe ring + hot-swap (Lane B nightly).
+- [ ] ⬜ Golden corpus (ULP-banded, per-arch) + `wasm-pack test --node` parity subset.
+- [ ] ⬜ Unbounded fuzz of the untrusted parse surface (SF2/WAV/graph JSON) with a per-PR smoke.
+
+### Persistence + delivery (Phase 5)
+- [x] ✅ L3 SQLite/FTS5 store (native-first) + FTS5-availability smoke.
+- [x] ✅ Production COOP/COEP host config (`public/_headers`).
+- [ ] ⬜ R2 native updater (Tauri v2) — needs signing keys (owner).
+- [ ] ⬜ R3 PWA auto-update (channel-aware Workbox, apply-on-idle).
+- [ ] ⬜ R4 signing + delivery (split stable/canary minisign, `canary.yml`, dual-arch manifest union, post-publish key gate, provenance).
+- [ ] ⬜ Loopback latency automation (wire `RecorderSink` into `build_input`).
+
+---
+
+*Design rationale for the foundations items lives in the project's git history and
+the [documentation site](https://ponderingbgi.github.io/openjammer/). The product
+items above (§0–§5) are tracked to completion here.*
