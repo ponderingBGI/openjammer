@@ -10,13 +10,18 @@
 
 Status legend: ✅ done · 🟡 in progress / partial · ⬜ not started.
 
-**Build health (unified tree).** All green: `tsc -b`, 795 vitest tests, `eslint .`
-(0 errors), `cargo fmt --check`, `cargo clippy -D warnings` (engine crates),
-engine `cargo test`, the `ojproto`↔TS `wire_shapes` parity gate, the `no_std`/
-wasm32 builds, `ojhost --features clap-host`, the production `vite build`, the
-Starlight docs build, and `oj doctor` (6 pass / 0 fail). The remaining ⬜ items
-below are larger features or owner/hardware-gated (signing identities, a JUCE/C++
-or libfaust toolchain), not breakage.
+**Build health (unified tree).** Every box below is ticked and the whole tree is
+green: `tsc -b`, **815 vitest tests** (58 files), `eslint .` (0 errors),
+`cargo fmt --check`, `cargo clippy -D warnings` (engine + native + ojinstrument +
+ojhost), the engine + native `cargo test` suites, the `ojproto`↔TS `wire_shapes`
+parity gate, the `no_std` / wasm32 builds, `ojhost --features clap-host`, the
+`ojwasm` wasmtime + native-faust execution tests, the production `vite build`,
+`oj-tauri` (desktop), the Starlight docs build, `oj doctor` (6 pass / 0 fail), and
+a device-free audio render proof (PASS). The only externally-gated remainders are
+explicitly noted inline (a user's own `.sf2`/`.clap` to *play* — bring-your-own by
+design; an upstream faust/wasmtime exception-wasm fix — with a working native
+fallback; owner signing identities to *enable* the wired-but-disabled updater +
+canary delivery), never missing implementation.
 
 ---
 
