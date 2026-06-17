@@ -334,6 +334,21 @@ function App() {
       setAudioContextReady(true);
       setShowActivation(false);
 
+      // One-time first-run hint: the fastest path to a first sound. Shown once
+      // (localStorage-gated), dismissible, never blocking.
+      try {
+        if (!localStorage.getItem('oj-first-run-done')) {
+          localStorage.setItem('oj-first-run-done', '1');
+          toast('🎹 Make your first sound', {
+            description:
+              'Right-click the canvas → add a Keyboard and an Instrument, connect them to a Speaker, then press the Q–P keys. Press ? for help, or Ctrl/Cmd+K to ask the AI to build it for you.',
+            duration: 12000,
+          });
+        }
+      } catch {
+        // localStorage may be unavailable (private mode) — the hint is optional.
+      }
+
       // Get initial latency metrics
       const metrics = getLatencyMetrics();
       if (metrics) {
@@ -344,7 +359,10 @@ function App() {
       }
     } catch (err) {
       console.error('Failed to initialize audio:', err);
-      // alert('Failed to initialize audio. Please check your browser settings.');
+      toast.error('Could not start audio', {
+        description:
+          'Check your browser/OS audio permissions and device, then try again. Open “Audio health” (Ctrl/Cmd+Shift+H) or ask the AI for help.',
+      });
     }
   }, [setAudioContextReady, audioConfig, updateAudioMetrics]);
 
