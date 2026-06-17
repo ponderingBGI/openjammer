@@ -619,6 +619,15 @@ impl EngineBackend {
         &mut self,
         dirs: &[PathBuf],
     ) -> Result<Vec<PluginDescriptor>, BackendError> {
+        // Empty request -> scan the OS-standard plugin directories (the "scan my
+        // installed plugins" default the Plugins panel uses).
+        let default_dirs;
+        let dirs = if dirs.is_empty() {
+            default_dirs = ojhost::default_plugin_dirs();
+            &default_dirs[..]
+        } else {
+            dirs
+        };
         let found = scan(dirs).map_err(BackendError::PluginScan)?;
         register_scanned(&mut self.registry, &found);
         Ok(found)

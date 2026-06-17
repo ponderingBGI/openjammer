@@ -158,6 +158,50 @@ pub fn scan(dirs: &[PathBuf]) -> Result<Vec<PluginDescriptor>, HostError> {
     scan_with(dirs, &mut blacklist, None)
 }
 
+/// The OS-standard plugin install directories (CLAP everywhere, VST3 too where
+/// the backend can host it). The "scan my installed plugins with no arguments"
+/// default the UI uses — a missing directory is simply skipped by [`scan`], so
+/// this is always safe to pass. Reads `$HOME` / the Windows program-files env
+/// vars; pure path construction, no filesystem access.
+pub fn default_plugin_dirs() -> Vec<PathBuf> {
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(h) = home.as_ref() {
+            dirs.push(h.join("Library/Audio/Plug-Ins/CLAP"));
+            dirs.push(h.join("Library/Audio/Plug-Ins/VST3"));
+        }
+        dirs.push(PathBuf::from("/Library/Audio/Plug-Ins/CLAP"));
+        dirs.push(PathBuf::from("/Library/Audio/Plug-Ins/VST3"));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(cf) = std::env::var_os("COMMONPROGRAMFILES").map(PathBuf::from) {
+            dirs.push(cf.join("CLAP"));
+            dirs.push(cf.join("VST3"));
+        }
+        if let Some(la) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
+            dirs.push(la.join("Programs/Common/CLAP"));
+        }
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        if let Some(h) = home.as_ref() {
+            dirs.push(h.join(".clap"));
+            dirs.push(h.join(".vst3"));
+        }
+        dirs.push(PathBuf::from("/usr/lib/clap"));
+        dirs.push(PathBuf::from("/usr/local/lib/clap"));
+    }
+
+    let _ = home; // used per-cfg above
+    dirs
+}
+
 /// Like [`scan`] but with an explicit [`Blacklist`] and optional [`ScanCache`]
 /// path. A candidate already in the cache is reused (not re-probed); a candidate
 /// in the blacklist is skipped; everything else is probed under the
