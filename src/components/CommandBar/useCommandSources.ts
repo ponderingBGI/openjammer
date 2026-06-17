@@ -154,6 +154,14 @@ function buildAppCommands(): Command[] {
             run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-audio-health')),
         },
         {
+            // Bring-your-own plugin discovery (§3) — scan installed CLAP/VST3.
+            id: 'app.plugins.toggle',
+            title: 'Plugins',
+            group: 'App',
+            keywords: ['plugin', 'plugins', 'clap', 'vst', 'vst3', 'host', 'bring your own', 'effect', 'instrument'],
+            run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-plugins')),
+        },
+        {
             id: 'app.project.new',
             title: 'New Project',
             group: 'App',

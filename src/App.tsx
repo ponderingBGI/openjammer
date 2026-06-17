@@ -14,6 +14,7 @@ import { DevLogPanel } from './components/DevLog/DevLogPanel';
 import { IssueReporter } from './components/IssueReporter/IssueReporter';
 import { AudioHealthPanel } from './components/AudioHealth/AudioHealthPanel';
 import { PwaUpdatePrompt } from './components/PwaUpdatePrompt';
+import { PluginsPanel } from './components/Plugins/PluginsPanel';
 import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
@@ -406,6 +407,9 @@ function App() {
 
       {/* Channel-aware PWA update — applies on idle, never yanks the AudioContext. */}
       <PwaUpdatePrompt />
+
+      {/* Plugins (§3) — discover your installed CLAP/VST3 plugins (desktop host). */}
+      <PluginsPanel />
 
       {/* Collaboration Share/Join control + peer list (U23 — collab state plane) */}
       <CollabControl />
