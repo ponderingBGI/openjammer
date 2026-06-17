@@ -122,7 +122,7 @@ refactors of already-green CI). Owner-flippable switches live in
 [`OWNER-PROVISIONING.md`](OWNER-PROVISIONING.md).
 
 ### CI control plane (Phase 1, C1)
-- [ ] ⬜ Composite actions + reusable workflows (collapse the near-duplicate native jobs in `ci.yml` into `setup-rust`/`setup-web` + `engine.yml`/`web.yml`).
+- [x] ✅ Composite actions (`setup-rust` + `setup-web`) collapse the repeated checkout/apt/toolchain/cache/bun blocks; ci.yml rewired to use them (reusable by release/canary).
 - [ ] ⬜ Affected-selection (`changes`) + Lane A/Lane B split driven by `oj plan --json`.
 
 ### Testing depth (Phase 4)
