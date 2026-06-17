@@ -85,7 +85,7 @@ re-integrated on top, feature by feature, each verified.
 - [x] ✅ Plugin manifest schema (`oj-plugin-v1.json`) v1 + TS mirror.
 - [x] ✅ Dynamic plugin registry (`registerDynamicPlugin`) — the OPEN half (AI-authored + third-party) with pub/sub.
 - [x] ✅ Code-node ABI (`oj_init`/`oj_process`/`oj_param`/`oj_manifest_ptr`) frozen + validated; Faust→wasm authoring (CLI path) + reversible registration.
-- [ ] 🟡 **Import your own sample** → bind PCM to a sampler node (the `set_sample` seam exists; add the UI + file decode + persistence).
+- [x] ✅ **Import your own sample** → the Sampler node decodes a dropped OR browsed audio file and binds it (overriding the synth voice); persisted by sample id + relink-on-reload.
 - [ ] 🟡 **Load a SoundFont (.sf2)** → the `Sf2` primitive + `rustysynth` exist (native); add the picker + bring-your-own `.sf2` path and program selection.
 - [ ] ⬜ Execute authored Faust **wasm** on the audio thread (wasmtime native / AudioWorklet browser) — currently audible via the stored-source effect path; promote to the compiled kernel.
 - [ ] ⬜ **Native plugin host** (`ojhost`): wire the pure-Rust **CLAP** backend (`clap-host` feature) end-to-end — scan → register → load → play — as the CI-friendly default; JUCE/VST3 behind the heavy feature.
