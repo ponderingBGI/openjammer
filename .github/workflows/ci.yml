@@ -35,7 +35,7 @@ jobs:
       engine: ${{ steps.plan.outputs.engine }}
       web: ${{ steps.plan.outputs.web }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # history needed to diff against the base
       - name: Setup web (Bun + install)
@@ -74,7 +74,7 @@ jobs:
     if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup Rust (stable + nightly wasm leg)
         uses: ./.github/actions/setup-rust
         with:
@@ -113,7 +113,7 @@ jobs:
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup web (Bun + install)
         uses: ./.github/actions/setup-web
       - name: Typecheck
@@ -131,7 +131,7 @@ jobs:
     if: needs.changes.outputs.engine == 'true'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Setup web (Bun + install)
         uses: ./.github/actions/setup-web
       - name: Setup Rust (stable)
