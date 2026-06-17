@@ -92,6 +92,29 @@ signal reaches a speaker) before a single node is created.
 - **validate_plan** — Pre-flight a whole WorkflowPlan (nodes by ref, wires by port NAME) WITHOUT applying it. Side-effect-free: returns the structured errors (unknown type/port, bad direction, incompatible ports, feedback cycle, no path to a speaker). Prefer get_graph + find_nodes first to REUSE existing nodes, then validate_plan to repair before emit_plan.
 - **emit_plan** — Build a whole WorkflowPlan in ONE reversible frame: describe nodes by a symbolic ref and wires by port NAME, and emit_plan lowers it to add_node/update_node_data/add_connection applied atomically (each edit undoable with Ctrl+Z). PREFER this for whole workflows; reuse existing nodes via get_graph/find_nodes first, and validate_plan to repair before emitting.
 
+### Diagnostics & settings (the "help me get it working" surface)
+
+The agent is also a **second pair of hands on the controls**: it can read the
+on-device logs and the live environment, and read/write a **safe allowlist** of
+settings — so "there's no sound" becomes a question it can answer from evidence
+and then *fix*. The reads are side-effect-free; `update_settings` goes through the
+exact store verbs the Settings panel uses and is **reversible** (Ctrl+Z / Reject
+restores the previous values). It can never reach past what a user clicking the
+Settings panel can do.
+
+- **get_logs** — Read the on-device DevLog tail (newest first), optionally filtered by `levels`, `scope`, `search`, and `limit`. Side-effect-free. This is how you SEE engine xruns, node faults, MIDI, asset/plugin events, and every console line — diagnose "no sound" from evidence, not guesses.
+- **get_diagnostics** — Read the environment + live audio snapshot: app version/channel/executor, cross-origin isolation, platform, whether the AudioContext is running, the measured round-trip latency, sample rate, and the selected output device. Side-effect-free. Call it first when the user says something is broken.
+- **get_settings** — Read the user-facing settings you may change: audio sample rate, latency hint, low-latency mode, input/output device, theme, and default velocity. Side-effect-free.
+- **update_settings** — Change settings via a `patch` over the safe allowlist (sampleRate, latencyHint, lowLatencyMode, outputDeviceId, inputDeviceId, themeId, defaultVelocity). Unknown keys are ignored; the change is REVERSIBLE (Ctrl+Z / Reject restores the previous values). Use it to FIX a setup — e.g. select the USB interface or switch to the interactive latency hint.
+
+**A worked "get sound back" loop.** When a player says *"I hear nothing"*: call
+`get_diagnostics` (is the AudioContext even running? is the round-trip latency
+sane? is a USB interface selected?), then `get_logs` with
+`{ "levels": ["Warn","Error"] }` to surface xruns / node faults, then either
+`update_settings` to repair the obvious cause (e.g. select the interface,
+`{ "patch": { "lowLatencyMode": true } }`) or `find_nodes` + `emit_plan` to wire
+the missing path to the speaker. Every step is visible in the chat and undoable.
+
 ---
 
 ## WorkflowPlan shape (for `validate_plan` / `emit_plan`)
