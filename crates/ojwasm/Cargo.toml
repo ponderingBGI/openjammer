@@ -14,6 +14,10 @@ default = []
 # Real execution: pulls wasmtime (native-only, never wasm32). The dep is optional
 # so the scaffold build needs none of it.
 wasmtime-host = ["dep:wasmtime"]
+# Native faust path: faust -lang cpp -> cl.exe -> .dll, loaded via libloading and
+# driven through the same Kernel trait. UNSANDBOXED (see src/native.rs) — the
+# fallback for faust because wasmtime can't run faust's exception wasm.
+native-host = ["dep:libloading"]
 
 [dependencies]
 # Engine ABI: a code node is a DspInstance minted by a PluginLoader registered
@@ -24,3 +28,5 @@ ojproto = { path = "../ojproto" }
 # The permanent host output-guard chain, applied outside the wasm sandbox.
 ojcore-dsp = { path = "../ojcore-dsp" }
 wasmtime = { version = "45.0.2", default-features = false, features = ["cranelift", "runtime", "wat"], optional = true }
+# Loads native faust .dlls (native-host feature). Native-only.
+libloading = { version = "0.8", optional = true }

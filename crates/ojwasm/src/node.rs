@@ -7,6 +7,8 @@
 //! (the scaffold build) or the module can't be built, `instantiate` falls back to
 //! a guarded passthrough so the graph still compiles and runs — never a panic.
 
+use std::path::PathBuf;
+
 use ojcore::{DspInstance, DspKind, PluginLoader, PluginManifest, ProcessCtx, UiKind};
 use ojcore_dsp::guards::OutputGuard;
 use ojproto::PrimitiveKind;
@@ -190,6 +192,9 @@ pub struct WasmHostLoader {
     /// via faust's NATIVE ABI (see [`crate`] docs); `None` for an `oj_*` module.
     /// The size is faust's `-json` `"size"` (the dsp struct the host allocates).
     faust_dsp_size: Option<usize>,
+    /// `Some(path)` when this node is backed by a compiled native faust `.dll`
+    /// (the `native-host` path); takes precedence over the wasm sources.
+    faust_dll: Option<PathBuf>,
 }
 
 impl WasmHostLoader {
@@ -201,6 +206,7 @@ impl WasmHostLoader {
             manifest,
             wasm,
             faust_dsp_size: None,
+            faust_dll: None,
         }
     }
 
@@ -211,6 +217,19 @@ impl WasmHostLoader {
             manifest,
             wasm,
             faust_dsp_size: Some(dsp_size),
+            faust_dll: None,
+        }
+    }
+
+    /// Build a loader for a compiled native faust `.dll` (the `native-host` path:
+    /// faust → C++ → cl.exe). Driven by a `NativeKernel`. NOT sandboxed — see
+    /// `src/native.rs`.
+    pub fn new_native(manifest: PluginManifest, dll_path: PathBuf) -> Self {
+        Self {
+            manifest,
+            wasm: Vec::new(),
+            faust_dsp_size: None,
+            faust_dll: Some(dll_path),
         }
     }
 
@@ -228,10 +247,13 @@ impl PluginLoader for WasmHostLoader {
     fn instantiate(&self, _sample_rate: f32, _max_block: usize) -> Box<dyn DspInstance> {
         let audio_in = self.manifest.ports.audio_in as usize;
         let audio_out = self.manifest.ports.audio_out as usize;
-        // The kernel is built here (off-RT); memory sizing + init run in activate.
-        let kernel = match self.faust_dsp_size {
-            Some(dsp_size) => build_faust_kernel(&self.wasm, dsp_size),
-            None => build_kernel(&self.wasm, audio_in, audio_out),
+        // The kernel is built here (off-RT); buffer sizing + init run in activate.
+        let kernel = if let Some(dll) = &self.faust_dll {
+            build_native_kernel(dll)
+        } else if let Some(dsp_size) = self.faust_dsp_size {
+            build_faust_kernel(&self.wasm, dsp_size)
+        } else {
+            build_kernel(&self.wasm, audio_in, audio_out)
         };
         Box::new(WasmHostNode::new(kernel, audio_in, audio_out))
     }
@@ -274,6 +296,18 @@ fn build_faust_kernel(_bytes: &[u8], _dsp_size: usize) -> Option<Box<dyn Kernel>
 #[cfg(feature = "wasmtime-host")]
 fn build_faust_kernel(bytes: &[u8], dsp_size: usize) -> Option<Box<dyn Kernel>> {
     crate::backend::build_faust_kernel(bytes, dsp_size)
+}
+
+/// Build a [`Kernel`] from a compiled native faust `.dll`. Scaffold build (no
+/// `native-host`) → `None` (guarded passthrough).
+#[cfg(not(feature = "native-host"))]
+fn build_native_kernel(_dll: &std::path::Path) -> Option<Box<dyn Kernel>> {
+    None
+}
+
+#[cfg(feature = "native-host")]
+fn build_native_kernel(dll: &std::path::Path) -> Option<Box<dyn Kernel>> {
+    crate::native::build_native_kernel(dll)
 }
 
 #[cfg(test)]

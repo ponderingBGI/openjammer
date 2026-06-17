@@ -33,6 +33,11 @@ mod store;
 #[cfg(feature = "wasmtime-host")]
 mod backend;
 
+#[cfg(feature = "native-host")]
+mod native;
+#[cfg(feature = "native-host")]
+pub use native::compile_faust_to_dll;
+
 pub use node::{register_wasm, WasmHostLoader, WasmHostNode};
 pub use store::{fnv1a_hex, wasm_id_for, WasmStore, WasmStoreError};
 
