@@ -64,12 +64,33 @@ System deps (Linux): `libasound2-dev` (cpal) and, for the Tauri shell,
 
 ## CI & releases
 
+**Branch model.** `canari` is the default/integration branch — every feature PR
+targets it, and each push to `canari` feeds the **canary** delivery channel. A new
+version is minted by promoting `canari` → `main` (a **merge commit**, never a
+squash, so `release-please` sees every conventional commit). `main` is the stable
+branch; merging the `release-please` PR there tags `v*` and ships the stable channel.
+
 - **`.github/workflows/ci.yml`** — the merge gate: the full Rust engine gate
   (fmt/clippy `-D warnings`/test/no_std/wasm32) + the web gate (tsc/test/build).
-  Must be green to merge to `main`.
+  Must be green to merge to `canari` (and to promote `canari` → `main`).
+- **`.github/workflows/release-please.yml`** — the version brain. Runs on push to
+  `main` (pinned `target-branch: main`, since the repo default is `canari`) and
+  opens the Release PR that bumps all four version files in lockstep.
+- **`.github/workflows/canary.yml`** — on push to `canari` (owner-gated), builds +
+  canary-signs installers and publishes the rolling `canary` prerelease + a signed
+  `latest.json` (the canary auto-update channel).
 - **`.github/workflows/release.yml`** — on a `v*` tag, builds installers for
   macOS (aarch64+x86_64), Windows (.msi/.exe), and Linux (.deb/.AppImage) via
-  `tauri-action` and attaches them to a draft GitHub Release.
+  `tauri-action`, stable-signs them, and attaches them + `latest.json` to a draft
+  GitHub Release (the stable auto-update channel).
+
+Native auto-update (Tauri `tauri-plugin-updater`) is wired for **Windows + Linux**;
+macOS is compiled-off until Apple notarization (OWNER-PROVISIONING.md §4). It's quiet
+by design: a new build downloads in the background and **installs when you quit** (no
+mid-session prompts), gated through `ojcore_native::UpdateGate` so the binary is never
+swapped while audio is live. The channel (Stable / Canary) is a **runtime** choice in
+Settings → Updates; switching is upstream-only (never downgrades). See
+[channels-and-versions](../apps/docs/src/content/docs/reference/channels-and-versions.md).
 
 ## Founder-gated verification (needs real hardware/keys)
 

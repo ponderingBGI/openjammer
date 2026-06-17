@@ -62,6 +62,11 @@ openjammer/
 
 ### Pull Request Process
 
+> **Target `canari`, not `main`.** `canari` is the default/integration branch —
+> open every PR against it. `main` is the stable release branch, advanced only by
+> promoting `canari` → `main` (a maintainer merge commit) and by the automated
+> `release-please` version PR. Each merge into `canari` builds a fresh canary.
+
 1. **Fork the repository** and create a feature branch
    ```bash
    git checkout -b feat/your-feature-name

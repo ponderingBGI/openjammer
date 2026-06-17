@@ -1,8 +1,9 @@
 name: Canary
 
 # R4 — the canary delivery channel: build + CANARY-sign the installers on every
-# push to main and publish them as a prerelease, so brave users ride the bleeding
-# edge while `release.yml` (the `v*`-tagged stable channel) stays calm.
+# push to canari (the default/integration branch) and publish them as a
+# prerelease, so brave users ride the bleeding edge while `release.yml` (the
+# `v*`-tagged stable channel, cut by promoting canari -> main) stays calm.
 #
 # OWNER-GATED + WIRED-BUT-DISABLED. The whole workflow is guarded by the
 # `CANARY_RELEASES_ENABLED` repo variable, and signing uses the CANARY minisign
@@ -12,7 +13,7 @@ name: Canary
 
 on:
   push:
-    branches: [main]
+    branches: [canari]
   workflow_dispatch:
 
 permissions:
@@ -68,6 +69,37 @@ jobs:
         with:
           workspaces: ". -> target"
 
+      # Canary build config: stamp a MONOTONIC prerelease version + enable signed
+      # updater artifacts (latest.json). The version `<base>.canary.<run>` (or
+      # `<base>-canary.<run>` when base has no prerelease) makes each canary build
+      # supersede the last AND a future stable supersede the canary — the
+      # upstream-only model, straight out of semver precedence. No pubkey/endpoint
+      # injection: the client embeds the canary pubkey (src-tauri/src/updater.rs)
+      # and selects the channel + endpoint at RUNTIME. The base tauri.conf.json
+      # leaves createUpdaterArtifacts OFF so key-less builds (build-installers.yml,
+      # local `tauri build`) keep working; this flips it on for canary.
+      - name: Canary build config (version stamp + updater artifacts)
+        shell: bash
+        env:
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          base=$(jq -r '.version' package.json)
+          case "$base" in
+            *-*) canary_version="${base}.canary.${RUN_NUMBER}" ;;
+            *)   canary_version="${base}-canary.${RUN_NUMBER}" ;;
+          esac
+          echo "canary version: $canary_version"
+          # Stamp the version everywhere the build reads it: package.json drives
+          # Vite's __APP_VERSION__; tauri.conf.json drives the bundle + updater.
+          for f in package.json src-tauri/tauri.conf.json; do
+            tmp=$(mktemp)
+            jq --arg v "$canary_version" '.version = $v' "$f" > "$tmp" && mv "$tmp" "$f"
+          done
+          tmp=$(mktemp)
+          jq '.bundle.createUpdaterArtifacts = true' src-tauri/tauri.conf.json > "$tmp" \
+            && mv "$tmp" src-tauri/tauri.conf.json
+
       - name: Build + CANARY-sign + publish (tauri-action)
         id: tauri
         uses: tauri-apps/tauri-action@v0
@@ -77,10 +109,12 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_CANARY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD_CANARY }}
           OPENJAMMER_PI_TARGET: ${{ matrix.piTarget }}
+          # Self-identify as the canary channel (diagnostics.ts / PwaUpdatePrompt).
+          VITE_OJ_CANARY: 'true'
         with:
           tagName: canary
           releaseName: "OpenJammer canary"
-          releaseBody: "Bleeding-edge canary build from main. Signed with the canary key."
+          releaseBody: "Bleeding-edge canary build from the canari branch. Signed with the canary key."
           releaseDraft: false
           prerelease: true
           projectPath: "."

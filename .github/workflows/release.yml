@@ -78,10 +78,28 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
+      # Turn on signed updater artifacts (latest.json) for this stable build. The
+      # committed tauri.conf.json already carries the stable pubkey + the
+      # `releases/latest` endpoint and leaves createUpdaterArtifacts OFF (so
+      # key-less builds keep working); this flips it on. The stable signing key is
+      # the secret below; the public key is owner-pasted into tauri.conf.json
+      # (OWNER-PROVISIONING.md §3).
+      - name: Stable build config (updater artifacts)
+        shell: bash
+        run: |
+          set -euo pipefail
+          conf=src-tauri/tauri.conf.json
+          tmp=$(mktemp)
+          jq '.bundle.createUpdaterArtifacts = true' "$conf" > "$tmp" && mv "$tmp" "$conf"
+
       - name: Build + release (tauri-action)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The STABLE minisign key signs the update payload (tag-scoped: this
+          # workflow only ever runs on a `v*` tag, never on a PR/push job).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           OPENJAMMER_PI_TARGET: ${{ matrix.piTarget }}
         with:
           # Tag/release wiring. `__VERSION__` is substituted from the app config.

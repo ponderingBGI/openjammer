@@ -5,7 +5,7 @@ name: CI
 # TypeScript control plane (typecheck + tests + production build).
 #
 # Lane A (per-PR): an affected-selection `changes` job reads `oj plan --json` and
-# runs only the legs a PR actually touches. Non-PR events (push to main/dev,
+# runs only the legs a PR actually touches. Non-PR events (push to main/canari,
 # manual dispatch) run EVERYTHING. The aggregate `gate` job is the single
 # required check: it passes when every needed job is success-or-skipped and fails
 # if any failed — so skipping an unaffected leg never weakens the gate.
@@ -15,9 +15,9 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, canari]
   pull_request:
-    branches: [main, dev]
+    branches: [main, canari]
   workflow_dispatch:
 
 concurrency:
