@@ -1,0 +1,56 @@
+---
+title: Get OpenJammer
+description: Play instantly in your browser, or download the native desktop app for the lowest latency.
+sidebar:
+  order: 1
+---
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+There are two ways to get OpenJammer, and **the browser is the honest place to start** —
+it is the whole instrument with nothing to install. Reach for the desktop app when you
+want the lowest latency or to host your own VST3 / AU / CLAP plugins.
+
+<CardGrid>
+  <Card title="Play now in your browser" icon="rocket">
+    Zero install — open it and start making sound. The browser tier is an honest
+    **~15–25 ms** latency: fast enough to sketch and jam.
+
+    [Open openjammer.app →](https://openjammer.app)
+  </Card>
+  <Card title="Download the desktop app" icon="laptop">
+    The full instrument at native low latency — **under 5 ms** MIDI-to-audio — plus
+    VST3 / AU / CLAP plugin hosting.
+
+    [Install for your OS →](/openjammer/play/install/)
+  </Card>
+</CardGrid>
+
+## Which one should I pick?
+
+| | Browser (PWA) | Desktop (native) |
+|---|---|---|
+| **Install** | None — just open a tab | Download an installer per OS |
+| **Latency** | ~15–25 ms (honest tier) | **< 5 ms** MIDI-to-audio |
+| **Plugin hosting** | — | VST3 / AU / CLAP |
+| **Best for** | Sketching, jamming, trying it out | Live performance, lowest latency |
+| **Offline** | Works offline after first visit | Always offline |
+
+:::tip
+New here? **Play in the browser first.** When you want the lowest latency or to host the
+plugins you already own, the [desktop install](/openjammer/play/install/) is one download
+away. See [Browser vs native](/openjammer/play/browser-vs-native/) for the full comparison.
+:::
+
+## All builds
+
+Every desktop installer is published on GitHub Releases — macOS (`.dmg`), Windows (`.exe`),
+and Linux (`.AppImage` / `.deb`):
+
+<LinkCard
+  title="All desktop builds on GitHub →"
+  href="https://github.com/ponderingBGI/openjammer/releases/latest"
+/>
+
+OpenJammer is **0.1.0-alpha.2** — expect rough edges, and on first launch you may need to
+allow an unsigned app. The [install guide](/openjammer/play/install/) walks through the
+one-time OS trust prompt for each platform.

@@ -91,6 +91,7 @@ export function MIDIIntegration() {
             disposeMidiVoiceRouting();
             useMIDIStore.getState().cleanup();
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only init/teardown (init is idempotent); adding isSupported/isInitialized/initialize would re-run MIDI initialization and the dispose-on-cleanup mid-session
     }, []); // Empty deps - only run on mount/unmount, init is idempotent
 
     // Auto-reconnect MIDI nodes when devices become available
@@ -311,7 +312,7 @@ export function MIDIIntegration() {
         } finally {
             isCreatingNodeRef.current = false;
         }
-    }, [browserTargetNodeId, addNode, updateNodeData, generateDeviceName, findNodeBySignature, findNodeByDeviceId]);
+    }, [browserTargetNodeId, nodes, addNode, updateNodeData, generateDeviceName, findNodeBySignature, findNodeByDeviceId]);
 
     // Use the MIDI connection toast hook to show Sonner toasts
     useMIDIConnectionToast(handleAddDevice);

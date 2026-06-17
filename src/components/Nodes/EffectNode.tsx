@@ -2,7 +2,7 @@
  * Effect Node - Audio effects processor
  */
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { GraphNode, EffectNodeData, EffectType } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 
@@ -31,7 +31,7 @@ export function EffectNode({ node }: EffectNodeProps) {
     const updateNodeData = useGraphStore((s) => s.updateNodeData);
 
     const effectType = data.effectType || 'distortion';
-    const params = data.params || {};
+    const params = useMemo(() => data.params || {}, [data.params]);
 
     const currentEffect = EFFECT_OPTIONS.find(e => e.value === effectType);
 

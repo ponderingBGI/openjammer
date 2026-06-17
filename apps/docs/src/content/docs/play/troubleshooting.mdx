@@ -1,0 +1,62 @@
+---
+title: Troubleshooting
+description: No sound, crackle, or a device that won't show up — the fast fixes, and how to let the AI fix it for you.
+sidebar:
+  order: 10
+---
+
+Most "it's broken" moments on stage are one of three things: a missing cable, audio that was
+never started, or an interface that needs a setting flipped. Here are the fast fixes — and at
+the bottom, how to hand the whole problem to the AI.
+
+## No sound
+
+A correct minimal patch is **Keyboard → Instrument → Speaker**. If you hear nothing, check
+in this order:
+
+1. **Did you start audio?** Look for the **Start OpenJammer** overlay and click it — the
+   browser will not make sound until you do.
+2. **Is the keyboard wired to the instrument, and the instrument to a Speaker?** A grey
+   Keyboard output goes into the instrument; the instrument's blue output goes into the
+   Speaker.
+3. **Open the DevLog** (Ctrl/Cmd+Shift+L) and look for warnings or errors — an empty sampler,
+   an xrun, or a missing connection shows up there.
+4. **Check the output device** — open the Speaker's output-device dropdown and make sure it
+   points at the device you're actually listening on.
+
+## Device not detected
+
+- Ensure the interface is powered on and connected.
+- Refresh the browser page (or relaunch the desktop app).
+- On Windows, some interfaces need manufacturer drivers installed.
+- Try a different USB port.
+
+## Audio crackling or dropouts
+
+- Increase the buffer: **Settings → Audio → Latency Mode → Balanced**.
+- Close other audio applications.
+- Reduce CPU load — fewer effects and instruments.
+- Use a shorter, higher-quality USB cable.
+
+## High latency despite a USB interface
+
+- Verify **Low Latency Mode** is enabled.
+- Confirm the correct **input and output devices** are selected.
+- Some interfaces need their own configuration software — check the manufacturer docs.
+- On Windows, enable **exclusive mode** in Windows Sound settings.
+
+See [Audio setup & latency](/openjammer/play/audio-and-latency/) for the full tuning guide.
+
+## Microphone sounds echoey with Low Latency Mode
+
+Low Latency Mode disables echo cancellation. Either:
+
+- Use **headphones** instead of speakers for monitoring, or
+- Turn Low Latency Mode back off if you're jamming in an acoustically treated room.
+
+## Let the AI fix it
+
+Press **Ctrl/Cmd+K** and say *"I hear nothing."* The assistant can read your on-device logs
+and live audio diagnostics, then repair the obvious cause — select your interface, lower the
+latency, or wire the missing path to a speaker — all **reversibly** (undo with Ctrl+Z). See
+[Troubleshooting with the AI](/openjammer/play/troubleshooting-with-the-ai/).

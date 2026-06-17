@@ -90,7 +90,7 @@ Sound not coming through? You have two fast paths:
    missing connection will show up there.
 2. Ask the **AI assistant** (Ctrl/Cmd+K). It can read your logs and audio
    diagnostics and fix the obvious causes for you — see
-   [Troubleshooting with the AI](/guides/troubleshooting-with-the-ai/).
+   [Troubleshooting with the AI](/openjammer/play/troubleshooting-with-the-ai/).
 
 The usual culprits: the keyboard isn't wired to the instrument, the instrument
 isn't wired to a speaker, or audio was never started (the "Start OpenJammer"

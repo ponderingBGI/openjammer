@@ -30,6 +30,7 @@ export function LatencyWarningBanner({ onOpenSettings }: LatencyWarningBannerPro
             const timestamp = parseInt(stored, 10);
             // Validate the parsed timestamp - NaN check prevents corrupted data issues
             if (!isNaN(timestamp) && timestamp > 0) {
+                // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrating React state from localStorage (external store) once on mount; this is the sanctioned sync-from-external-system pattern
                 setDismissedAt(timestamp);
             } else {
                 console.warn('[LatencyWarningBanner] Invalid timestamp in localStorage, clearing');
@@ -41,6 +42,7 @@ export function LatencyWarningBanner({ onOpenSettings }: LatencyWarningBannerPro
     // Check if we should show warning based on dismissedAt and current classification
     useEffect(() => {
         if (dismissedAt && !shouldShowLatencyWarning(audioMetrics.classification, dismissedAt)) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing banner visibility to live audio-classification changes (external engine state); intentional external-system sync
             setDismissed(true);
         }
     }, [audioMetrics.classification, dismissedAt]);

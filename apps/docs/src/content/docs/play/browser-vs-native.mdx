@@ -1,0 +1,59 @@
+---
+title: Browser vs native
+description: The same Rust engine runs in your browser and on your desktop — here's which to pick and why.
+sidebar:
+  order: 9
+---
+
+OpenJammer is a **dual-target** instrument: the *same* Rust engine (`ojcore`) runs both ways.
+In the browser it's compiled to WebAssembly and runs inside an AudioWorklet; on the desktop
+it runs natively on a small-buffer audio stream. You get the same instrument either way — the
+difference is latency and plugin hosting, not features.
+
+## At a glance
+
+| | Browser (PWA) | Desktop (native) |
+|---|---|---|
+| **Install** | None — open a tab | Per-OS installer |
+| **Latency** | ~15–25 ms (honest tier) | **< 5 ms** MIDI-to-audio |
+| **Plugin hosting** | — | VST3 / AU / CLAP |
+| **Offline** | After first visit | Always |
+| **Best for** | Sketching, jamming, trying it out | Live performance, lowest latency |
+
+We never market the browser tier as sub-5 ms — that floor belongs to native desktop, and we
+say so plainly.
+
+## Why the latency difference
+
+Browsers **cannot access ASIO drivers**. They go through the operating system's audio layer:
+
+- **Windows** — WASAPI (10–30 ms typical)
+- **macOS** — Core Audio (3–5 ms typical)
+- **Linux** — ALSA / JACK (varies by configuration)
+
+The native app talks to the audio device directly with a small buffer, which is how it reaches
+sub-5 ms. A USB audio interface meaningfully narrows the gap in the browser — see
+[Audio setup & latency](/openjammer/play/audio-and-latency/).
+
+## Browser support
+
+The browser tier needs the Web Audio API, AudioWorklet, and Service Workers.
+
+| Browser | Version | Status | Notes |
+|---|---|---|---|
+| **Chrome** | 110+ | ✅ Recommended | Full support, device selection (`setSinkId`) |
+| **Edge** | 110+ | ✅ Recommended | Chromium-based, same as Chrome |
+| **Firefox** | Latest | ⚠️ Partial | Web Audio works, no output-device selection |
+| **Safari** | 15+ | ⚠️ Limited | macOS Core Audio is excellent; iOS is limited |
+
+For output-device selection (picking a specific USB interface as the output), use a
+Chromium-based browser — Chrome or Edge 110+.
+
+## Which should I pick?
+
+- **Just trying it out, or on a borrowed machine?** The browser — nothing to install, and it
+  works offline after the first visit.
+- **Playing live, or chasing the lowest latency?** The [desktop app](/openjammer/play/install/)
+  — native sub-5 ms.
+- **Want to host plugins you already own?** The desktop app — VST3 / AU / CLAP hosting is
+  native-only.

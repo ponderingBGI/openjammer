@@ -37,7 +37,7 @@ TLS + the immutable build hash are the integrity story.
 ## Channel behaviour
 
 Both the native updater feed and the PWA service worker are channel-aware (see
-[Channels & versions](/openjammer/reference/channels-and-versions/)). The canary
+[Channels & versions](/openjammer/build/internals/channels-and-versions/)). The canary
 feed points at an **immutable per-build tag**, never a moving `/latest/`, so a
 client polling mid-rebuild never sees a 404 or a signature mismatch.
 

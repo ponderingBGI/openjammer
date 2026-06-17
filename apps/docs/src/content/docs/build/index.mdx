@@ -1,0 +1,53 @@
+---
+title: Build OpenJammer
+description: The contributor and node-author track — the minimal real-time core and the one plugin contract that makes it infinite.
+---
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+OpenJammer is built around one boundary: **only what must be real-time-safe and
+universal lives in the core; anything that can be a plugin stays a plugin.** A
+deliberately tiny Rust core (`ojcore`) turns a node graph into sound and blocks for
+nothing. *Everything else* — every instrument, effect, and AI-authored DSP node — is
+community territory behind one contract: a `PluginManifest` plus one CLAP-shaped
+`DspInstance` trait. Built-in DSP and a synth written this morning are the same shape to
+the engine.
+
+The same engine runs **native** on the desktop (low latency, VST3 / AU / CLAP hosting)
+and compiled to **WebAssembly** in the browser, selected by `OJ_EXECUTOR`. The wire
+contract (`OjGraph`, `RtCommand`, `ParamPatch`, `EngineFrame`) lives once in `ojproto`
+and crosses the native ↔ browser seam, parity-gated against its TypeScript mirror.
+
+## Where to start
+
+<CardGrid>
+  <Card title="Architecture" icon="setting">
+    How the audio thread never blocks, and how structured logs stay on-device.
+
+    [Real-time safety →](/openjammer/build/architecture/real-time-safety/)
+  </Card>
+  <Card title="Create a node" icon="add-document">
+    Author a new DSP node — the manifest, the node standards, and the code-node ABI.
+
+    [Create a node →](/openjammer/build/create-a-node/)
+  </Card>
+  <Card title="Protocol API" icon="open-book">
+    The generated TypeScript reference for `@openjammer/oj-protocol` — `OjGraph`,
+    `RtCommand`, and the rest of the wire schema.
+
+    [Protocol API →](/openjammer/api/readme/)
+  </Card>
+  <Card title="Contributing" icon="pencil">
+    Get the dual-target build running and learn the invariants CI enforces.
+
+    [Contributing →](/openjammer/build/contributing/)
+  </Card>
+</CardGrid>
+
+## Go deeper
+
+<CardGrid>
+  <LinkCard title="Logging & observability" href="/openjammer/build/architecture/logging/" />
+  <LinkCard title="Channels & versions" href="/openjammer/build/internals/channels-and-versions/" />
+  <LinkCard title="Update-status matrix" href="/openjammer/build/internals/update-status/" />
+  <LinkCard title="Floating-point determinism" href="/openjammer/build/internals/floating-point/" />
+</CardGrid>

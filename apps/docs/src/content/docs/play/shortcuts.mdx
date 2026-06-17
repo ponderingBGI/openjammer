@@ -1,0 +1,46 @@
+---
+title: Keyboard shortcuts
+description: The live-performance cheat-sheet — the AI bar, the diagnostic panels, ghost mode, batch-connect, and undo.
+sidebar:
+  order: 7
+---
+
+OpenJammer is built to be driven from the keyboard while you play. These are the shortcuts
+worth committing to muscle memory. (On macOS, use **Cmd** wherever **Ctrl** is shown.)
+
+## The essentials
+
+| Shortcut | What it does |
+|---|---|
+| **Ctrl/Cmd + K** | Open the **AI bar** — ask in plain language to build, edit, or fix a patch. Everything it does is a reversible graph edit. |
+| **Ctrl/Cmd + Shift + L** | Toggle the **DevLog** — the searchable tail of engine xruns, node faults, MIDI, and every `console.*` line. |
+| **Ctrl/Cmd + Shift + H** | Toggle the **Audio health** readout — a green/amber/red view of the engine state, latency, sample rate, and output device. |
+| **W** | Toggle **Ghost mode** for live performance (below). |
+| **A** | **Batch-connect** — grab all free output ports of the selected node at once. |
+| **Ctrl/Cmd + Z** | Undo. |
+| **Ctrl/Cmd + Y** | Redo. |
+
+## Ghost mode (W)
+
+A live-performance view that gets the editing chrome out of your way:
+
+- All nodes fade to ~10% opacity.
+- Node controls (buttons, sliders) are disabled so you can't bump a knob mid-set.
+- Connections stay fully visible and editable, and input ports **glow** for easy rerouting
+  while you play.
+
+Press **W** again to return to the full editing view.
+
+## Multi-select & batch connect
+
+- **Drag** across the canvas to select multiple nodes, then **Backspace/Delete** to remove
+  them.
+- Select a node and press **A** to grab all of its free output ports at once. They follow
+  your cursor as a bundle; drop them on a target node and it expands its inputs to receive
+  them all.
+
+## Undo is your safety net
+
+Every edit — including everything the **Ctrl/Cmd+K** AI does — is reversible with
+**Ctrl/Cmd+Z**. There is no approve/reject gate on the AI; reversibility plus the sandbox is
+the boundary. Build fearlessly and undo anything you don't like.

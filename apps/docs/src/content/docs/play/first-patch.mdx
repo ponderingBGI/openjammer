@@ -1,0 +1,53 @@
+---
+title: Your first sound in 60 seconds
+description: Keyboard → Instrument → Speaker — build your first playable patch, or ask the AI to build it for you.
+sidebar:
+  order: 3
+---
+
+OpenJammer is meant to be picked up and **played**. A correct minimal patch is three nodes
+wired in a line — **Keyboard → Instrument → Speaker** — and you can build it in under a
+minute.
+
+## Build it by hand
+
+1. **Add a Keyboard.** Right-click empty canvas → **Keyboard → Add Keyboard Node**. This
+   routes your computer keyboard into instruments.
+2. **Add an instrument.** Right-click the canvas → **Instruments → Keyboard → Classic
+   Piano** (or any of the 171 instruments — each one already makes sound).
+3. **Wire them up.** Drag a cable from the Keyboard's output to the Piano's input, then add
+   a **Speaker** node and wire the Piano's output into it.
+4. **Play.** Press the **Q–P** top row of your keyboard to play notes. You're making sound.
+
+:::tip[Port colors tell you what travels down a cable]
+**Grey** ports carry numbers and triggers — the Keyboard's outputs are grey because they
+send *notes*, not sound. **Blue** ports carry audio — an instrument's output is blue because
+it makes *sound*. A grey output goes into a grey input; a blue output goes into a blue input.
+:::
+
+## Or ask the AI to build it
+
+Press **Ctrl/Cmd+K** and ask in plain language — *"give me a piano I can play"* — and the
+assistant wires the patch on the canvas for you, using the **same reversible graph edits you
+drive by hand**. Don't like the result? Press **Ctrl+Z** to undo it, just like anything else.
+There is no approve/reject gate; reversibility is the boundary.
+
+## If you hear nothing
+
+The usual culprits are a missing cable or audio that was never started:
+
+- The Keyboard isn't wired to the instrument, or the instrument isn't wired to a Speaker.
+- Audio was never started — look for the **Start OpenJammer** overlay and click it.
+
+Two fast paths to a fix: open the **DevLog** (Ctrl/Cmd+Shift+L) to see warnings and errors,
+or press **Ctrl/Cmd+K** and let the AI read your logs and repair the obvious cause — see
+[Troubleshooting with the AI](/openjammer/play/troubleshooting-with-the-ai/) and
+[Troubleshooting](/openjammer/play/troubleshooting/).
+
+## Next
+
+- [Sound & instruments](/openjammer/play/sound-and-instruments/) — the 171 procedural
+  voices, plus your own samples, SoundFonts, and plugins.
+- [Audio setup & latency](/openjammer/play/audio-and-latency/) — get the lowest latency out
+  of a USB interface.
+- [Keyboard shortcuts](/openjammer/play/shortcuts/) — the live-performance cheat-sheet.

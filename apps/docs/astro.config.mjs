@@ -24,6 +24,14 @@ export default defineConfig({
             editLink: {
                 baseUrl: 'https://github.com/ponderingBGI/openjammer/edit/main/apps/docs/',
             },
+            // Living-Sketchbook skin: CSS-variable token remap (warm paper, ink
+            // line, Caveat voice, hard offset shadows) plus exactly ONE bespoke
+            // component slot — the splash Hero. This is the only component
+            // override (hard cap): the brand ships through tokens, not forks.
+            customCss: ['./src/styles/custom.css'],
+            components: {
+                Hero: './src/components/Hero.astro',
+            },
             // Generate an in-site API reference for the @openjammer/oj-protocol TS
             // mirror straight from its JSDoc + types (plan §6.1). The generated
             // markdown lands in src/content/docs/reference/api/ (gitignored —
@@ -40,12 +48,42 @@ export default defineConfig({
                     sidebar: { label: 'Protocol API (oj-protocol-ts)' },
                 }),
             ],
+            // Two tracks: hand-author the player-facing Play group (a newcomer
+            // never scrolls past internals to find "how do I install"); keep
+            // `autogenerate` on the dev-owned Build subtrees so new builder pages
+            // sync for free. `typeDocSidebarGroup` nests INSIDE Build (its files
+            // still emit to `api/`); release-engineering is collapsed by default.
             sidebar: [
-                { label: 'Guides', autogenerate: { directory: 'guides' } },
-                { label: 'Architecture', autogenerate: { directory: 'architecture' } },
-                { label: 'Reference', autogenerate: { directory: 'reference' } },
-                typeDocSidebarGroup,
-                { label: 'Contributing', autogenerate: { directory: 'contributing' } },
+                {
+                    label: 'Play OpenJammer',
+                    items: [
+                        'play/download',
+                        'play/install',
+                        'play/first-patch',
+                        'play/audio-and-latency',
+                        'play/sound-and-instruments',
+                        'play/troubleshooting-with-the-ai',
+                        'play/shortcuts',
+                        'play/faq',
+                        'play/browser-vs-native',
+                        'play/troubleshooting',
+                    ],
+                },
+                {
+                    label: 'Build OpenJammer',
+                    items: [
+                        { label: 'Overview', slug: 'build' },
+                        { label: 'Architecture', autogenerate: { directory: 'build/architecture' } },
+                        { label: 'Create a node', autogenerate: { directory: 'build/create-a-node' } },
+                        typeDocSidebarGroup,
+                        {
+                            label: 'Internals / release engineering',
+                            collapsed: true,
+                            autogenerate: { directory: 'build/internals' },
+                        },
+                        'build/contributing',
+                    ],
+                },
             ],
         }),
     ],

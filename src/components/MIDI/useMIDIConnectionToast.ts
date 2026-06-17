@@ -155,11 +155,17 @@ export function useMIDIConnectionToast(
     // Cleanup on unmount
     useEffect(() => {
         return () => {
+            // Intentionally reads the LIVE ref contents at unmount: these refs are
+            // mutated throughout the component's life as toasts come and go, and the
+            // teardown must clear whatever is active then. Snapshotting `.current` into
+            // a local at mount would capture the empty initial Map/Set and clear nothing.
             toastStatesRef.current.forEach((state, deviceId) => {
                 if (state.intervalId) clearInterval(state.intervalId);
                 toast.dismiss(deviceId);
             });
+            // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown must read live ref values, not a mount-time snapshot
             toastStatesRef.current.clear();
+            // eslint-disable-next-line react-hooks/exhaustive-deps -- unmount teardown must read live ref values, not a mount-time snapshot
             activeToastIdsRef.current.clear();
         };
     }, []);

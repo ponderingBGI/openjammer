@@ -332,6 +332,7 @@ export const MicrophoneNode = memo(function MicrophoneNode({
     // Update gain when muted changes
     useEffect(() => {
         if (gainNode) {
+            // eslint-disable-next-line react-hooks/immutability -- gainNode is a Web Audio GainNode, not React state; setting AudioParam.value is the supported way to drive gain
             gainNode.gain.value = data.isMuted ? 0 : 1;
         }
     }, [data.isMuted, gainNode]);

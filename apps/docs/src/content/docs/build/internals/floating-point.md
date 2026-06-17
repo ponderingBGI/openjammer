@@ -41,7 +41,7 @@ date.
 ## What "real-time safe" adds on top
 
 The reproducibility policy is about **values**; the [real-time safety
-invariant](/openjammer/architecture/real-time-safety/) is about **timing**. They
+invariant](/openjammer/build/architecture/real-time-safety/) is about **timing**. They
 compose: the audio thread must produce the right numbers *and* never allocate,
 lock, or block to do it. A non-finite sample (NaN/Inf) is both a correctness bug
 and a fault event — it trips the engine's `non_finite` path and surfaces in the

@@ -106,9 +106,78 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "OpenJammer ${{ github.ref_name }}"
           releaseBody: "See the assets below to download and install OpenJammer for your platform."
-          releaseDraft: true
+          # Auto-publish on tag (founder decision): every `v*` tag is immediately
+          # live at /releases/latest, so the download page + updater resolve at once.
+          releaseDraft: false
           prerelease: false
           # The Tauri project lives in `src-tauri`; the frontend is the repo root
           # Vite app, built by the config's `beforeBuildCommand` ("bun run build").
           projectPath: "."
           args: ${{ matrix.args }}
+
+  # Bake the just-published release's per-asset URLs into
+  # public/download/releases.json so the static /download page renders the
+  # newest version instantly (and survives a GitHub API outage). The page still
+  # refreshes live from the REST API at runtime, so this is purely the fast,
+  # offline-safe default. Best-effort: never fails the release.
+  bake-manifest:
+    name: Bake download manifest
+    needs: release
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Regenerate public/download/releases.json from the latest release
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest"
+          rel="$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" "$api" || true)"
+          if [ -z "$rel" ]; then
+            echo "Latest release not resolvable yet — leaving baked releases.json untouched."
+            exit 0
+          fi
+          # Re-pick assets by the SAME suffix regexes the page uses. These must be
+          # confirmed against the first published release's real assets[].name.
+          out="$(printf '%s' "$rel" | jq '{
+            version: .tag_name,
+            platforms: {
+              "darwin-aarch64":       { browser_download_url: ((.assets[] | select(.name | test("_aarch64\\.dmg$"))      | .browser_download_url) // "https://github.com/ponderingBGI/openjammer/releases/latest") },
+              "darwin-x86_64":        { browser_download_url: ((.assets[] | select(.name | test("_x64\\.dmg$"))          | .browser_download_url) // "https://github.com/ponderingBGI/openjammer/releases/latest") },
+              "windows-x86_64":       { browser_download_url: ((.assets[] | select(.name | test("_x64-setup\\.exe$"))    | .browser_download_url) // "https://github.com/ponderingBGI/openjammer/releases/latest") },
+              "linux-x86_64-appimage":{ browser_download_url: ((.assets[] | select(.name | test("_amd64\\.AppImage$"))   | .browser_download_url) // "https://github.com/ponderingBGI/openjammer/releases/latest") },
+              "linux-x86_64-deb":     { browser_download_url: ((.assets[] | select(.name | test("_amd64\\.deb$"))        | .browser_download_url) // "https://github.com/ponderingBGI/openjammer/releases/latest") }
+            }
+          }' || true)"
+          if [ -z "$out" ]; then
+            echo "jq transform failed — leaving baked releases.json untouched."
+            exit 0
+          fi
+          printf '%s\n' "$out" > public/download/releases.json
+          echo "Baked public/download/releases.json:"
+          cat public/download/releases.json
+
+      - name: Commit the refreshed manifest
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          if git diff --quiet -- public/download/releases.json; then
+            echo "No change to releases.json — nothing to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B "${GITHUB_REF_NAME}-baked-manifest" || true
+          git add public/download/releases.json
+          git commit -m "chore(download): bake releases.json for ${GITHUB_REF_NAME}" || true
+          # Push to the repo's default branch so the next Vercel deploy ships the
+          # fresh URLs. Best-effort: a protected branch just no-ops here.
+          default_branch="$(git remote show origin | sed -n 's/.*HEAD branch: //p')"
+          git push origin "HEAD:${default_branch}" || \
+            echo "Push skipped (protected branch or no permission) — runtime REST refresh still serves newest."

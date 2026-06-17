@@ -1,0 +1,44 @@
+---
+// The ONE bespoke component override (hard cap). Starlight calls this on every
+// page render, but only the splash template populates `data.hero` — so we read
+// the route entry the way Starlight's own Hero does (`Astro.locals.starlightRoute`
+// in 0.34, NOT `Astro.props.entry`, which is undefined here) and render nothing
+// unless a `hero` block is present. Verified against @astrojs/starlight ^0.34.
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, actions = [] } = data.hero ?? {};
+---
+{data.hero && (
+<div class="oj-hero">
+  <div class="oj-hero-grid">
+    <h1 set:html={title} />
+    {tagline && <p class="oj-tagline" set:html={tagline} />}
+    <p class="oj-tiers">
+      <span class="oj-tier oj-tier--native">native <code>&lt;5ms</code></span>
+      <span class="oj-tier oj-tier--browser">browser <code>~15-25ms</code></span>
+    </p>
+    {actions.length > 0 && (
+      <div class="oj-actions">
+        {actions.map((a) => (
+          <a class={`sl-link-button ${a.variant ?? 'primary'}`} href={a.link}>{a.text}</a>
+        ))}
+      </div>
+    )}
+  </div>
+</div>
+)}
+<style>
+  .oj-hero{ padding:3rem 0 1rem; }
+  .oj-hero-grid{ border:2px solid var(--oj-ink,#1A1A1A); border-radius:20px;
+    box-shadow:3px 4px 0 rgba(0,0,0,.15); padding:2.5rem 2rem; background:var(--oj-white,#fff);
+    background-image:radial-gradient(rgba(0,0,0,.06) 1px, transparent 1px); background-size:24px 24px; }
+  :global([data-theme='dark']) .oj-hero-grid{ background:#23201C;
+    background-image:radial-gradient(rgba(255,255,255,.05) 1px, transparent 1px); }
+  .oj-hero h1{ font-family:'Caveat','Comic Sans MS',cursive; font-weight:700; font-size:3.4rem; line-height:1.05; margin:0 0 .5rem; }
+  .oj-tagline{ font-family:'Inter',sans-serif; font-size:1.15rem; color:var(--oj-ink-soft,#4A4A4A); max-width:46ch; }
+  .oj-tiers{ display:flex; gap:.75rem; flex-wrap:wrap; margin:1rem 0 1.5rem; }
+  .oj-tier{ font-family:'Inter',sans-serif; font-size:.95rem; border:2px solid var(--oj-ink); border-radius:50px; padding:.25rem .85rem; }
+  .oj-tier code{ font-family:'JetBrains Mono',monospace; }
+  .oj-tier--native{ border-color:var(--oj-pine,#4A7C59); }
+  .oj-tier--browser{ border-color:var(--oj-ochre,#C68B3F); }
+  .oj-actions{ display:flex; gap:.75rem; flex-wrap:wrap; }
+</style>

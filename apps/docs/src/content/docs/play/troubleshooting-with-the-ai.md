@@ -51,7 +51,7 @@ Every step is visible in the chat and undoable.
   ring at startup, so the panel and the assistant share one source of truth.
 - The assistant is native/desktop-first (it spawns a sandboxed coding agent). In
   a plain browser the AI path reports itself unavailable, but the DevLog and the
-  one-click [issue reporter](/architecture/logging/) still work for manual
+  one-click [issue reporter](/openjammer/build/architecture/logging/) still work for manual
   diagnosis.
 
 ## Privacy

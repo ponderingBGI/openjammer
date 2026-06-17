@@ -24,7 +24,7 @@ This is not a convention you have to remember — it is checked mechanically.
   (no `std`), so whole classes of blocking APIs simply are not in scope on the
   engine path. The same code compiles to `wasm32` for the browser worklet.
 - **No `tracing` on the audio thread** — structured logging is an *off*-thread
-  concern (see [Logging & observability](/openjammer/architecture/logging/)). The
+  concern (see [Logging & observability](/openjammer/build/architecture/logging/)). The
   engine core has no logging dependency at all, so a log call on the audio thread
   cannot even compile there.
 
@@ -44,7 +44,7 @@ Because the audio thread can't lock, all communication with it is **wait-free**:
 Faults detected on the audio thread (a non-finite sample, an over-budget node, an
 auto-bypass) are emitted as compact `RtEvent`s onto the event ring and lifted
 off-thread into full structured events — again, see
-[Logging & observability](/openjammer/architecture/logging/).
+[Logging & observability](/openjammer/build/architecture/logging/).
 
 ## Floating-point reproducibility
 

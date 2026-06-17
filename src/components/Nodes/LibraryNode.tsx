@@ -418,6 +418,7 @@ export const LibraryNode = memo(function LibraryNode({
           if (process.env.NODE_ENV === 'development') console.warn('Stop failed:', e);
         }
       });
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- the live ref set at unmount is exactly what must be stopped/cleared; copying to a local at mount would capture the empty initial set and leak sources
       activeSourcesRef.current.clear();
 
       // Stop current preview source
@@ -430,6 +431,7 @@ export const LibraryNode = memo(function LibraryNode({
       }
 
       // Clear file row refs (C2)
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- the live ref map at unmount is exactly what must be cleared; copying to a local at mount would capture a stale set
       fileRowRefs.current.clear();
     };
   }, []);

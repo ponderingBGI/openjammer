@@ -47,7 +47,7 @@ authoritative.
 ## A few invariants
 
 - **Never allocate/lock/block on the audio thread** — see
-  [Real-time safety](/openjammer/architecture/real-time-safety/).
+  [Real-time safety](/openjammer/build/architecture/real-time-safety/).
 - **Log through the facade** — route `console.*` through `src/utils/log.ts` so it
   lands in the searchable DevLog; the `no-console` rule enforces this.
 - **The wire schema is one source** — `ojproto` is canonical; its TypeScript
