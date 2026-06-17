@@ -44,7 +44,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMyRjM2MDZCNkYxRDY1RTYKUldUbVpSMXZhMkR6TXU0V3dZUzdzUnQ5bG1IZ2RBMkRyZnZWVDk2elA5YWgwdXlkUHFyZ3V3WDMK",
       "endpoints": [
         "https://github.com/ponderingBGI/openjammer/releases/latest/download/latest.json"
       ],

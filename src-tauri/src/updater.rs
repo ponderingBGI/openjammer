@@ -42,11 +42,11 @@ pub enum Channel {
 const CANARY_ENDPOINT: &str =
     "https://github.com/ponderingBGI/openjammer/releases/download/canary/latest.json";
 
-/// The CANARY updater public key (minisign). EMPTY until owner-provisioned — the
-/// canary channel then fails closed (a check returns `Err`, nothing installs).
-/// Public; safe to commit. Paste the canary pubkey here per OWNER-PROVISIONING §3.
+/// The CANARY updater public key (minisign). Public; safe to commit. Its private
+/// counterpart signs canary builds in `canary.yml` (the `TAURI_SIGNING_PRIVATE_KEY_CANARY`
+/// secret). A canari-channel check verifies the downloaded `latest.json` against this.
 #[cfg(any(windows, target_os = "linux"))]
-const CANARY_UPDATER_PUBKEY: &str = "";
+const CANARY_UPDATER_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZFRDU1NkQwNjZBNTNGMkYKUldRdlA2Vm0wRmJWL2dZVzZ2WC9HU2hpUUUrTTh5MGZqQXFoSTdXM0RLSnRwQ25WUERkRXpLankK";
 
 // --- native-side mirror of the auto-update preference ------------------------
 
