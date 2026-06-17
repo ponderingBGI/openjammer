@@ -98,10 +98,10 @@ re-integrated on top, feature by feature, each verified.
 - [x] ✅ The DevLog is genuinely useful live: keyboard toggle + palette command, "N dropped" honesty, click-to-correlate, Escape-to-close, Ask-AI hand-off.
 - [x] ✅ Panic-safe live UX: a top-level error boundary catches render crashes, logs them to the DevLog, and shows a calm recovery card (audio survives); failure paths log, never panic.
 - [x] ✅ One-screen **"Audio health"** readout (Ctrl/Cmd+Shift+H / palette) — the diagnostics the AI reads, with Open-Settings + Ask-AI fix-it buttons.
-- [ ] ⬜ Latency: surface the round-trip estimate prominently; nudge toward a USB interface / interactive hint when it's high.
+- [x] ✅ Latency surfaced prominently: the warning banner (Fix Now + Ask AI), the Audio-health round-trip row, and USB-interface nudges.
 - [x] ✅ Performance: code-split the heavy vendor libs (main chunk 1.8 MB → 654 KB); windowed DevLog list ships.
 - [x] ✅ Accessibility pass on the new surfaces: Escape-to-close + aria-modal dialogs, aria-pressed/labelled DevLog facets, design-token theming throughout.
-- [ ] ⬜ A polished first-run: pick an instrument, hear it, see the help.
+- [x] ✅ A polished first-run: a one-time hint on first audio-start guides you to a first sound; failed audio-init surfaces calmly.
 
 ---
 
