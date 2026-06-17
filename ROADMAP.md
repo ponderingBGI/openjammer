@@ -10,6 +10,14 @@
 
 Status legend: ✅ done · 🟡 in progress / partial · ⬜ not started.
 
+**Build health (unified tree).** All green: `tsc -b`, 795 vitest tests, `eslint .`
+(0 errors), `cargo fmt --check`, `cargo clippy -D warnings` (engine crates),
+engine `cargo test`, the `ojproto`↔TS `wire_shapes` parity gate, the `no_std`/
+wasm32 builds, `ojhost --features clap-host`, the production `vite build`, the
+Starlight docs build, and `oj doctor` (6 pass / 0 fail). The remaining ⬜ items
+below are larger features or owner/hardware-gated (signing identities, a JUCE/C++
+or libfaust toolchain), not breakage.
+
 ---
 
 ## 0. Unify the two histories (the merge, done properly)
