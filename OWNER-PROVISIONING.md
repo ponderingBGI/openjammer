@@ -13,7 +13,7 @@ Legend: 🔴 required before first signed release · 🟡 recommended · 🟢 op
 ## 1. 🟡 Branch model + protection on `canari` + `main` (governance)
 
 `canari` is the default/integration branch (all feature PRs target it, and it
-feeds the canary channel); `main` is the stable branch, advanced only by promoting
+feeds the canari channel); `main` is the stable branch, advanced only by promoting
 `canari` → `main`. Set this up, then bind the single required check — the aggregate
 **`Merge gate`** job — to both branches:
 
@@ -22,17 +22,16 @@ feeds the canary channel); `main` is the stable branch, advanced only by promoti
    git push origin main:canari
    gh repo edit ponderingBGI/openjammer --default-branch canari
    ```
-   Do this only **after** the `release-please.yml` change pinning `target-branch:
-   main` is merged, so release-please never briefly retargets to `canari`.
+   Do this only after the release workflow is merged, so automatic releases only
+   happen from `main`.
 2. **Ruleset on `canari`** (Settings → Rules → Rulesets → New branch ruleset):
    target `canari`; **enforcement: Active**; **Require a pull request before
    merging** (≥1 review); **Require status checks to pass** → add the check named
    exactly **`Merge gate`**.
 3. **Ruleset on `main`**: target `main`; **enforcement: Active**; **Require a pull
    request before merging**; require **`Merge gate`**; under repo merge settings
-   restrict `main` to **merge commits only** (so a stray squash of the promotion PR
-   can't corrupt the release-please changelog/bump). Only the `canari → main`
-   promotion PR and the release-please Release PR land on `main`.
+   restrict `main` to **merge commits only**. Only the `canari → main`
+   promotion PR and release automation commits land on `main`.
    > ⚠️ Do **not** rename the `gate` job in `.github/workflows/ci.yml` — branch
    > protection binds the literal string `Merge gate` (foundation F6).
 4. **Retire `dev`**: delete the branch (`git push origin --delete dev`) and the
@@ -60,47 +59,49 @@ only the deploy job needs Pages on:
 
 ---
 
-## 3. 🔴 Update-signing keys (minisign — split stable/canary)
+## 3. 🔴 Release token + update-signing keys
 
 The native auto-updater verifies a minisign signature over each downloaded
 installer against a pubkey compiled into the app. Full ceremony, backup, and
 rotation policy: [`KEY-MANAGEMENT.md`](KEY-MANAGEMENT.md). In short:
 
-1. Generate **two** keypairs (offline, backed up twice):
+1. Add an automation token as repository secret `OJ_RELEASE_TOKEN`. Use a
+   fine-grained PAT or GitHub App token scoped to this repo with **Contents:
+   read/write** and **Pull requests: read/write**. The workflows fall back to
+   `GITHUB_TOKEN`, but this token avoids recursive-workflow and protected-branch
+   edge cases when release automation creates version commits, tags, and sync PRs.
+2. Generate **two** keypairs (offline, backed up twice):
    ```sh
    bunx tauri signer generate -w openjammer-stable.key
    bunx tauri signer generate -w openjammer-canary.key
    ```
    (The `.gitignore` already blocks `*.key`/`*.minisign`/`.tauri/`, and a required
    CI credential-scan fails the build if one is ever staged.)
-2. Add the private keys as **repository secrets** (Settings → Secrets and
+3. Add the private keys as **repository secrets** (Settings → Secrets and
    variables → Actions):
    | Secret | Channel | Used by |
    |---|---|---|
    | `TAURI_SIGNING_PRIVATE_KEY` | stable | `release.yml` (tag-scoped only) |
    | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | stable | `release.yml` |
-   | `TAURI_SIGNING_PRIVATE_KEY_CANARY` | canary | `canary.yml` |
-   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD_CANARY` | canary | `canary.yml` |
-3. Paste the **public** keys (public = safe to commit; channel is chosen at
+   | `TAURI_SIGNING_PRIVATE_KEY_CANARY` | canari | `canary.yml` |
+   | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD_CANARY` | canari | `canary.yml` |
+4. Paste the **public** keys (public = safe to commit; channel is chosen at
    RUNTIME, so the client embeds BOTH and verifies against the active channel's):
    - **Stable** pubkey → `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`
      (it ships empty).
-   - **Canary** pubkey → `src-tauri/src/updater.rs` → the `CANARY_UPDATER_PUBKEY`
-     constant (it ships empty; the canary channel fails closed until filled).
+   - **Canari** pubkey → `src-tauri/src/updater.rs` → the `CANARY_UPDATER_PUBKEY`
+     constant (the canari channel fails closed until filled).
 
    No build-time pubkey injection and no `OJ_UPDATER_PUBKEY_*` variables — the
    release workflows' `jq` step only flips `bundle.createUpdaterArtifacts` on (it
    ships **off** so key-less builds — `build-installers.yml`, local `tauri build` —
-   keep working) and `canary.yml` additionally stamps the monotonic canary version.
-   The committed stable endpoint is `releases/latest/download/latest.json`; the
-   canary endpoint is the `CANARY_ENDPOINT` constant in `updater.rs`.
+   keep working) and `canary.yml` additionally stamps the numbered canari version.
+   Stable uses `releases/latest/download/latest.json`; canari resolves the newest
+   numbered prerelease (`vX.Y.Z-canari.N`) from the GitHub releases API.
 
 > The native updater is **Win + Linux only** (macOS is compiled-off until §4), and
-> the canary channel additionally requires `CANARY_RELEASES_ENABLED=true` (a repo
-> variable). The release path is already SHA-pinned and `zizmor`-audited (Phase 0
-> §0.5), and the stable key is scoped `if: startsWith(github.ref, 'refs/tags/v')`
-> so it is never reachable from a PR/push job. Pin-first-provision-later is
-> intentional.
+> the canari channel additionally requires `CANARY_RELEASES_ENABLED=true` (a repo
+> variable). Pin-first-provision-later is intentional.
 
 ---
 
@@ -168,10 +169,10 @@ unset to disable the bots entirely.
 | Concern | In-repo (done) | Owner action (this doc) |
 |---|---|---|
 | Required merge check | `Merge gate` job + self-test | Bind it in a ruleset (§1) |
-| Versioning | release-please + three-way gate | — (auto) |
+| Versioning | patch-only stable releases + numbered canari prereleases | `OJ_RELEASE_TOKEN` recommended |
 | Release path security | SHA-pinned + zizmor + credential-scan | — (auto) |
 | Docs site | built + Pages workflow | Turn Pages on (§2) |
-| Update signing | release/canary workflows wired | Provision keys (§3) |
+| Update signing | release/canari workflows wired | Provision keys (§3) |
 | macOS update | updater code present | Apple Developer ID (§4) |
 | Browser COOP/COEP | `public/_headers` committed | Pick a host (§5) |
 | Merge queue | `merge_group:` wired | Migrate to org (§7) |

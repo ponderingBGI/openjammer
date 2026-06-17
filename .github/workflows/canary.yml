@@ -1,15 +1,7 @@
-name: Canary
+name: Canari
 
-# R4 — the canary delivery channel: build + CANARY-sign the installers on every
-# push to canari (the default/integration branch) and publish them as a
-# prerelease, so brave users ride the bleeding edge while `release.yml` (the
-# `v*`-tagged stable channel, cut by promoting canari -> main) stays calm.
-#
-# OWNER-GATED + WIRED-BUT-DISABLED. The whole workflow is guarded by the
-# `CANARY_RELEASES_ENABLED` repo variable, and signing uses the CANARY minisign
-# key — both provisioned per OWNER-PROVISIONING.md §3. Until the owner flips the
-# variable + adds the secrets, this is a no-op (nothing builds, nothing signs),
-# so it can land safely now and be enabled later.
+# Numbered prereleases from the integration branch. If the next stable promotion
+# will be v0.0.2, canari builds are v0.0.2-canari.1, v0.0.2-canari.2, ...
 
 on:
   push:
@@ -18,18 +10,73 @@ on:
 
 permissions:
   contents: write
-  id-token: write # attest-build-provenance
+  id-token: write
   attestations: write
 
 concurrency:
-  group: canary-${{ github.ref }}
-  cancel-in-progress: true
+  group: canari-release
+  cancel-in-progress: false
 
 jobs:
-  build:
-    # Owner-flippable switch: no canary build until the owner opts in.
+  prepare:
     if: ${{ vars.CANARY_RELEASES_ENABLED == 'true' }}
-    name: Canary installers (${{ matrix.platform }})
+    name: Prepare canari version
+    runs-on: ubuntu-latest
+    outputs:
+      base: ${{ steps.canari.outputs.base }}
+      version: ${{ steps.canari.outputs.version }}
+      tag: ${{ steps.canari.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Resolve promotion target
+        id: stable
+        env:
+          GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(gh pr list --base main --head canari --state open \
+            --json body --jq '.[0].body // ""')"
+          target="$(printf '%s\n' "$body" \
+            | sed -n 's/^oj-next-stable:[[:space:]]*//p' | head -1 || true)"
+          if [ -n "$target" ]; then
+            echo "version=$target" >> "$GITHUB_OUTPUT"
+          else
+            bun scripts/oj/release.ts next-stable --repo "${{ github.repository }}" \
+              | tee stable.txt
+            echo "version=$(cat stable.txt)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Compute next canari version
+        id: canari
+        env:
+          GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          bun scripts/oj/release.ts next-canari \
+            --repo "${{ github.repository }}" \
+            --base "${{ steps.stable.outputs.version }}"
+
+      - name: Reserve canari tag
+        env:
+          RELEASE_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git tag -a "${{ steps.canari.outputs.tag }}" \
+            -m "OpenJammer Canari ${{ steps.canari.outputs.tag }}"
+          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git" \
+            "${{ steps.canari.outputs.tag }}"
+
+  build:
+    name: Canari installers (${{ matrix.platform }})
+    needs: prepare
+    if: ${{ vars.CANARY_RELEASES_ENABLED == 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -51,9 +98,9 @@ jobs:
       artifacts: ${{ steps.tauri.outputs.artifactPaths }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
-      # Reuse the SAME build engine as CI: web deps + the Rust toolchain (with the
-      # macOS cross-targets the dual-arch matrix needs).
       - name: Setup web (Bun + install)
         uses: ./.github/actions/setup-web
       - name: Linux webview build deps
@@ -69,62 +116,33 @@ jobs:
         with:
           workspaces: ". -> target"
 
-      # Canary build config: stamp a MONOTONIC prerelease version + enable signed
-      # updater artifacts (latest.json). The version `<base>.canary.<run>` (or
-      # `<base>-canary.<run>` when base has no prerelease) makes each canary build
-      # supersede the last AND a future stable supersede the canary — the
-      # upstream-only model, straight out of semver precedence. No pubkey/endpoint
-      # injection: the client embeds the canary pubkey (src-tauri/src/updater.rs)
-      # and selects the channel + endpoint at RUNTIME. The base tauri.conf.json
-      # leaves createUpdaterArtifacts OFF so key-less builds (build-installers.yml,
-      # local `tauri build`) keep working; this flips it on for canary.
-      - name: Canary build config (version stamp + updater artifacts)
+      - name: Canari build config (version stamp + updater artifacts)
         shell: bash
-        env:
-          RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          base=$(jq -r '.version' package.json)
-          case "$base" in
-            *-*) canary_version="${base}.canary.${RUN_NUMBER}" ;;
-            *)   canary_version="${base}-canary.${RUN_NUMBER}" ;;
-          esac
-          echo "canary version: $canary_version"
-          # Stamp the version everywhere the build reads it: package.json drives
-          # Vite's __APP_VERSION__; tauri.conf.json drives the bundle + updater.
-          for f in package.json src-tauri/tauri.conf.json; do
-            tmp=$(mktemp)
-            jq --arg v "$canary_version" '.version = $v' "$f" > "$tmp" && mv "$tmp" "$f"
-          done
+          bun scripts/oj/release.ts stamp "${{ needs.prepare.outputs.version }}"
           tmp=$(mktemp)
           jq '.bundle.createUpdaterArtifacts = true' src-tauri/tauri.conf.json > "$tmp" \
             && mv "$tmp" src-tauri/tauri.conf.json
 
-      - name: Build + CANARY-sign + publish (tauri-action)
+      - name: Build + CANARI-sign + publish (tauri-action)
         id: tauri
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # The CANARY minisign key signs the update payload (NOT the stable key).
+          GITHUB_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_CANARY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD_CANARY }}
           OPENJAMMER_PI_TARGET: ${{ matrix.piTarget }}
-          # Self-identify as the canary channel (diagnostics.ts / PwaUpdatePrompt).
           VITE_OJ_CANARY: 'true'
         with:
-          tagName: canary
-          releaseName: "OpenJammer canary"
-          releaseBody: "Bleeding-edge canary build from the canari branch. Signed with the canary key."
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseName: "OpenJammer Canari ${{ needs.prepare.outputs.tag }}"
+          releaseBody: "Canari build for the next stable line ${{ needs.prepare.outputs.base }}."
           releaseDraft: false
           prerelease: true
           projectPath: "."
           args: ${{ matrix.args }}
 
-      # Build the newline-delimited subject list correctly: the previous
-      # `join(..., '\n')` emitted a LITERAL backslash-n, which the attest action
-      # read as one bogus path and failed on macOS's dual-arch multi-artifact
-      # output. Pass artifactPaths via env (no shell-quoting pitfalls) and split to
-      # real newlines with jq into a multiline step output.
       - name: Build provenance subject list
         id: subjects
         if: ${{ steps.tauri.outputs.artifactPaths != '' }}
@@ -137,35 +155,30 @@ jobs:
             jq -r '.[]' <<< "$ARTIFACTS"
             echo 'OJEOF'
           } >> "$GITHUB_OUTPUT"
-      - name: Attest build provenance (auditors)
-        # Best-effort: provenance is an auditor nicety and must never fail the
-        # signed canary release.
+      - name: Attest build provenance
         if: ${{ steps.tauri.outputs.artifactPaths != '' }}
         continue-on-error: true
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: ${{ steps.subjects.outputs.paths }}
 
-  # Serialized post-publish gate: after all four platforms publish, assert the
-  # canary `latest.json` carries a signature for EVERY platform key (so a partial
-  # macOS dual-arch publish can't ship a half-signed manifest). Belt-and-braces
-  # over the dual-arch union tauri-action already performs.
   manifest-gate:
     name: All-platform signature gate
-    needs: build
+    needs: [prepare, build]
     if: ${{ vars.CANARY_RELEASES_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
       - name: Assert every platform key is present in latest.json
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         shell: bash
         run: |
           set -euo pipefail
-          asset_url=$(gh release view canary --repo "$GITHUB_REPOSITORY" --json assets \
+          asset_url=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
             --jq '.assets[] | select(.name=="latest.json") | .url' || true)
           if [ -z "${asset_url:-}" ]; then
-            echo "::error::canary latest.json was not published"; exit 1
+            echo "::error::$TAG latest.json was not published"; exit 1
           fi
           curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
             "$asset_url" -o latest.json
@@ -174,4 +187,18 @@ jobs:
               echo "::error::latest.json is missing a signature for $plat"; exit 1
             fi
           done
-          echo "All four platform signatures present in the canary manifest."
+          echo "All four platform signatures present in the canari manifest."
+
+  cleanup-reserved-tag:
+    name: Cleanup reserved failed tag
+    needs: [prepare, build, manifest-gate]
+    if: ${{ failure() && needs.prepare.outputs.tag != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete reserved tag after failed canari publish
+        env:
+          GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || \
+          gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" || true

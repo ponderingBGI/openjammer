@@ -1,11 +1,13 @@
 import '../Nodes/SchematicNodes.css';
 
 export function AboutPanel() {
+    const version = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0-dev';
+
     return (
         <div className="about-panel">
             <div className="about-header">
                 <h2>OpenJammer</h2>
-                <span className="about-version">v0.1.0-alpha</span>
+                <span className="about-version">v{version}</span>
             </div>
 
             <p className="about-description">

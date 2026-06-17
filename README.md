@@ -8,7 +8,7 @@
 core (`ojcore`) runs native on the desktop and compiled to WebAssembly in your browser.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0--alpha.2-orange.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.0.0-orange.svg)](package.json)
 [![Docs](https://img.shields.io/badge/docs-living%20reference-4A7C59.svg)](https://ponderingbgi.github.io/openjammer/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
@@ -25,7 +25,7 @@ core (`ojcore`) runs native on the desktop and compiled to WebAssembly in your b
 
 > New here? **Play in the browser first** — it's the whole instrument with nothing to
 > install. Reach for the desktop app when you want the lowest latency or to host your own
-> VST3 / AU / CLAP plugins. OpenJammer is **0.1.0-alpha.2** — expect rough edges, and on
+> VST3 / AU / CLAP plugins. OpenJammer is an early release — expect rough edges, and on
 > first launch you may need to allow an unsigned app
 > ([install notes](https://ponderingbgi.github.io/openjammer/play/install/)).
 

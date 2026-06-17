@@ -64,8 +64,8 @@ openjammer/
 
 > **Target `canari`, not `main`.** `canari` is the default/integration branch —
 > open every PR against it. `main` is the stable release branch, advanced only by
-> promoting `canari` → `main` (a maintainer merge commit) and by the automated
-> `release-please` version PR. Each merge into `canari` builds a fresh canary.
+> promoting `canari` → `main` (a maintainer merge commit). Each merge into
+> `canari` can build a numbered canari prerelease such as `v0.0.2-canari.1`.
 
 1. **Fork the repository** and create a feature branch
    ```bash

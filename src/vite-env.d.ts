@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 /**
- * App version inlined at build time from package.json (the release-please SSOT)
+ * App version inlined at build time from package.json (the release SSOT)
  * via the `__APP_VERSION__` define in `vite.config.ts`. May be `undefined` under
  * a non-Vite runner (e.g. vitest), so read it defensively.
  */
@@ -11,7 +11,7 @@ declare const __APP_VERSION__: string;
 interface ImportMetaEnv {
   /** Selects the ojcore transport: 'ojcore-native' or 'ojcore-wasm'. */
   readonly VITE_OJ_EXECUTOR?: string;
-  /** Set on canary builds (mirrors DevLogPanel / useCommandSources gating). */
+  /** Set on canari builds (mirrors DevLogPanel / useCommandSources gating). */
   readonly VITE_OJ_CANARY?: string;
 }
 
