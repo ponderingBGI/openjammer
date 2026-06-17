@@ -1,0 +1,15 @@
+# Production cross-origin isolation (plan §5.7).
+#
+# The SharedArrayBuffer fast path the browser engine uses requires the document to
+# be cross-origin isolated, i.e. `crossOriginIsolated === true`. That is only true
+# when the HTML response carries BOTH headers below. They exist for the Vite dev +
+# preview servers (vite.config.ts), but a production host must re-emit them — a
+# static host can't infer them.
+#
+# This file is read by Netlify and Cloudflare Pages. On Vercel use vercel.json's
+# `headers` instead; on nginx use `add_header`. GitHub Pages cannot set custom
+# response headers, so it cannot host the cross-origin-isolated PWA — pick a
+# header-capable host (the owner-gated decision in the update-status matrix).
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
