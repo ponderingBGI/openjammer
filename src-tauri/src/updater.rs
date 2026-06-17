@@ -10,11 +10,12 @@
 //!
 //! CHANNEL IS RUNTIME, not build-time: the user picks Stable or Canary in
 //! Settings. The STABLE pubkey + endpoint live in `tauri.conf.json`
-//! (`plugins.updater`); the CANARY pubkey + endpoint are embedded here so a check
-//! on the canary channel verifies against the canary key. Both pubkeys are PUBLIC
-//! (safe to commit) — fill them per OWNER-PROVISIONING.md §3. The default version
-//! comparison (`remote > current`) gives the UPSTREAM-ONLY behaviour for free:
-//! switching Canary→Stable never downgrades; you wait until Stable reaches you.
+//! (`plugins.updater`); the CANARI pubkey is embedded here, while the canari
+//! endpoint is resolved from the newest numbered GitHub prerelease
+//! (`vX.Y.Z-canari.N`). Both pubkeys are PUBLIC (safe to commit) — fill them per
+//! OWNER-PROVISIONING.md §3. The default version comparison (`remote > current`)
+//! gives the UPSTREAM-ONLY behaviour for free: switching Canary→Stable never
+//! downgrades; you wait until Stable reaches you.
 
 use std::sync::{Arc, Mutex};
 
@@ -36,15 +37,13 @@ pub enum Channel {
     Canary,
 }
 
-/// Owner-provisioned canary endpoint. The stable endpoint lives in
-/// `tauri.conf.json` (`plugins.updater.endpoints`) and is the builder default.
 #[cfg(any(windows, target_os = "linux"))]
-const CANARY_ENDPOINT: &str =
-    "https://github.com/ponderingBGI/openjammer/releases/download/canary/latest.json";
+const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/ponderingBGI/openjammer/releases";
 
-/// The CANARY updater public key (minisign). Public; safe to commit. Its private
-/// counterpart signs canary builds in `canary.yml` (the `TAURI_SIGNING_PRIVATE_KEY_CANARY`
-/// secret). A canari-channel check verifies the downloaded `latest.json` against this.
+/// The CANARI updater public key (minisign). Public; safe to commit. Its private
+/// counterpart signs canari builds in `canary.yml` (the
+/// `TAURI_SIGNING_PRIVATE_KEY_CANARY` secret). A canari-channel check verifies
+/// the downloaded `latest.json` against this.
 #[cfg(any(windows, target_os = "linux"))]
 const CANARY_UPDATER_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZFRDU1NkQwNjZBNTNGMkYKUldRdlA2Vm0wRmJWL2dZVzZ2WC9HU2hpUUUrTTh5MGZqQXFoSTdXM0RLSnRwQ25WUERkRXpLankK";
 
@@ -127,10 +126,76 @@ pub fn update_try_install(
 #[derive(Default)]
 pub struct PendingUpdate(pub Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>>);
 
-/// Build the updater for `channel`: the canary channel overrides the endpoint +
-/// embeds the canary pubkey; stable uses the `tauri.conf.json` defaults.
 #[cfg(any(windows, target_os = "linux"))]
-fn channel_updater(
+#[derive(Debug, serde::Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    draft: bool,
+    prerelease: bool,
+    assets: Vec<GithubAsset>,
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+#[derive(Debug, serde::Deserialize)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn canari_version(tag: &str) -> Option<semver::Version> {
+    let raw = tag.strip_prefix('v').unwrap_or(tag);
+    let version = semver::Version::parse(raw).ok()?;
+    let pre = version.pre.as_str();
+    if pre.starts_with("canari.") && pre["canari.".len()..].parse::<u64>().is_ok() {
+        Some(version)
+    } else {
+        None
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn select_latest_canari_manifest_url(releases: &[GithubRelease]) -> Option<String> {
+    releases
+        .iter()
+        .filter(|release| !release.draft && release.prerelease)
+        .filter_map(|release| {
+            let version = canari_version(&release.tag_name)?;
+            let manifest = release
+                .assets
+                .iter()
+                .find(|asset| asset.name == "latest.json")?;
+            Some((version, manifest.browser_download_url.clone()))
+        })
+        .max_by(|(a, _), (b, _)| a.cmp(b))
+        .map(|(_, url)| url)
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+async fn latest_canari_manifest_url() -> Result<url::Url, String> {
+    let releases = reqwest::Client::new()
+        .get(GITHUB_RELEASES_API)
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .header(reqwest::header::USER_AGENT, "openjammer-updater")
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .json::<Vec<GithubRelease>>()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let manifest = select_latest_canari_manifest_url(&releases)
+        .ok_or_else(|| "no numbered canari release with latest.json was found".to_string())?;
+    url::Url::parse(&manifest).map_err(|e| e.to_string())
+}
+
+/// Build the updater for `channel`: the canari channel resolves the newest
+/// numbered prerelease endpoint and embeds the canari pubkey; stable uses the
+/// `tauri.conf.json` defaults.
+#[cfg(any(windows, target_os = "linux"))]
+async fn channel_updater(
     app: &tauri::AppHandle,
     channel: Channel,
 ) -> Result<tauri_plugin_updater::Updater, String> {
@@ -138,7 +203,7 @@ fn channel_updater(
     match channel {
         Channel::Stable => app.updater().map_err(|e| e.to_string()),
         Channel::Canary => {
-            let url = url::Url::parse(CANARY_ENDPOINT).map_err(|e| e.to_string())?;
+            let url = latest_canari_manifest_url().await?;
             app.updater_builder()
                 .endpoints(vec![url])
                 .map_err(|e| e.to_string())?
@@ -163,7 +228,8 @@ pub async fn update_check_and_stage(
     #[cfg(any(windows, target_os = "linux"))]
     {
         use tauri::Manager;
-        let Some(update) = channel_updater(&app, channel)?
+        let Some(update) = channel_updater(&app, channel)
+            .await?
             .check()
             .await
             .map_err(|e| e.to_string())?
@@ -321,3 +387,65 @@ pub fn install_on_quit(app: &tauri::AppHandle) {
 /// macOS / unsupported platforms: nothing to install on quit.
 #[cfg(not(any(windows, target_os = "linux")))]
 pub fn install_on_quit(_app: &tauri::AppHandle) {}
+
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod tests {
+    use super::*;
+
+    fn release(tag: &str, draft: bool, prerelease: bool, has_manifest: bool) -> GithubRelease {
+        GithubRelease {
+            tag_name: tag.to_string(),
+            draft,
+            prerelease,
+            assets: if has_manifest {
+                vec![GithubAsset {
+                    name: "latest.json".to_string(),
+                    browser_download_url: format!("https://example.test/{tag}/latest.json"),
+                }]
+            } else {
+                vec![GithubAsset {
+                    name: "OpenJammer.dmg".to_string(),
+                    browser_download_url: format!("https://example.test/{tag}/OpenJammer.dmg"),
+                }]
+            },
+        }
+    }
+
+    #[test]
+    fn canari_version_accepts_only_numbered_canari_prereleases() {
+        assert_eq!(
+            canari_version("v0.0.1-canari.12").map(|v| v.to_string()),
+            Some("0.0.1-canari.12".to_string())
+        );
+        assert!(canari_version("v0.0.1").is_none());
+        assert!(canari_version("v0.0.1-canary.1").is_none());
+        assert!(canari_version("v0.0.1.canari.1").is_none());
+    }
+
+    #[test]
+    fn selects_newest_canari_manifest_by_semver() {
+        let releases = vec![
+            release("v0.0.2-canari.1", false, true, true),
+            release("v0.0.2-canari.3", true, true, true),
+            release("v0.0.2-canari.2", false, true, true),
+            release("v0.0.3-canari.1", false, true, false),
+            release("v0.0.1", false, false, true),
+            release("v0.0.2-canary.9", false, true, true),
+        ];
+
+        assert_eq!(
+            select_latest_canari_manifest_url(&releases),
+            Some("https://example.test/v0.0.2-canari.2/latest.json".to_string())
+        );
+    }
+
+    #[test]
+    fn returns_none_without_numbered_canari_manifest() {
+        let releases = vec![
+            release("v0.0.1", false, false, true),
+            release("v0.0.2-canari.1", false, true, false),
+        ];
+
+        assert!(select_latest_canari_manifest_url(&releases).is_none());
+    }
+}

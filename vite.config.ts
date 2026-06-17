@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin, type Connect } from 'vite'
 import react from '@vitejs/plugin-react-swc'
 import { VitePWA } from 'vite-plugin-pwa'
 // wasm-bindgen libraries (e.g. loro-crdt, the collab CRDT) import their `.wasm`
@@ -17,11 +17,41 @@ const pkgVersion = JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
 ).version as string
 
+// Serve the static /download page for BOTH `/download` and `/download/` in the
+// dev + preview servers. Vite's SPA fallback otherwise serves the app shell for
+// the extensionless `/download` (no trailing slash) — so the browser shows the
+// welcome screen instead of the download page ("looks like a refresh"; only the
+// trailing-slash form resolves to the directory index). We rewrite to the exact
+// index.html path (NOT a redirect), so the browser URL is unchanged and Vite's
+// static serve handles it with no directory-index ambiguity. Production (Vercel)
+// is covered by the equivalent rewrite in vercel.json.
+function serveDownloadPage(): Plugin {
+  const rewrite: Connect.NextHandleFunction = (req, _res, next) => {
+    const url = req.url || ''
+    const q = url.indexOf('?')
+    const path = q === -1 ? url : url.slice(0, q)
+    if (path === '/download' || path === '/download/') {
+      req.url = '/download/index.html' + (q === -1 ? '' : url.slice(q))
+    }
+    next()
+  }
+  return {
+    name: 'oj-serve-download-page',
+    configureServer(server) {
+      server.middlewares.use(rewrite)
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use(rewrite)
+    },
+  }
+}
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkgVersion),
   },
   plugins: [
+    serveDownloadPage(),
     wasm(),
     topLevelAwait(),
     react(),
@@ -62,6 +92,12 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         // Allow larger files (audio samples can be big)
         maximumFileSizeToCacheInBytes: 50 * 1024 * 1024, // 50MB
+        // The static /download page is NOT the SPA. Without this, the SW's
+        // NavigationRoute serves the cached app shell (index.html) for the
+        // /download navigation — so the welcome screen re-renders instead of the
+        // download page ("looks like a refresh"). Excluding it lets the request
+        // hit the network/host, which serves public/download/index.html.
+        navigateFallbackDenylist: [/^\/download/],
         runtimeCaching: [
           // Audio files - CacheFirst with long expiration
           {

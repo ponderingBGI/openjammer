@@ -8,8 +8,7 @@ sidebar:
 ## One version, everywhere
 
 OpenJammer has **one** version string, written in lockstep across all four files
-by [release-please](https://github.com/googleapis/release-please) (the single
-version brain):
+by the OpenJammer release workflow:
 
 - `Cargo.toml` (`[workspace.package].version` — the canonical seed)
 - `package.json`
@@ -17,9 +16,9 @@ version brain):
 - `packages/oj-protocol-ts/package.json`
 
 A consistency check (`oj doctor --check version-sync`) asserts the four agree;
-`release-please` owns the bump, so they never drift by hand. The app reads this
-version at build time (the `__APP_VERSION__` define), so the About panel and the
-issue reporter always show the real shipped version.
+the release script owns the bump, so they never drift by hand. The app reads
+this version at build time (the `__APP_VERSION__` define), so the About panel
+and the issue reporter always show the real shipped version.
 
 ## Two channels
 
@@ -27,13 +26,14 @@ Exactly two release channels, defined once:
 
 | Channel | Tag | Audience |
 |---|---|---|
-| **stable** | a `v*` tag **without** a `-` (e.g. `v0.2.0`) | everyone |
-| **canary** | a single force-moved `canary` prerelease tag | early adopters |
+| **stable** | a `vX.Y.Z` tag without a prerelease suffix (e.g. `v0.0.1`) | everyone |
+| **canari** | numbered prerelease tags such as `v0.0.1-canari.1` | early adopters |
 
-The canonical "is this a prerelease?" test is `contains(ref_name, '-')`. The same
-two identifiers drive the release workflow, the updater endpoints, the canary
-build, and the `VITE_OJ_CANARY` build flag the UI reads to enable dev/canary-only
-surfaces (like the DevLog panel).
+Stable releases start at `v0.0.1`. Each automatic `canari -> main` promotion
+increments the patch number only: `v0.0.1`, `v0.0.2`, `v0.0.3`. When the project
+is ready for a new minor line, the maintainer runs the promotion workflow with
+an exact target such as `0.1.0`; automatic releases then continue as `0.1.1`,
+`0.1.2`, and so on.
 
 ## Branch model
 
@@ -41,21 +41,21 @@ Two branches map onto the two channels:
 
 | Branch | Role | Feeds |
 |---|---|---|
-| **`canari`** | default / integration — every feature PR targets it | the **canary** channel (each push builds + publishes the rolling `canary` prerelease) |
-| **`main`** | stable / release | the **stable** channel (the `release-please` PR tags `v*` → installers) |
+| **`canari`** | default / integration — every feature PR targets it | the **canari** channel (numbered prereleases) |
+| **`main`** | stable / release | the **stable** channel |
 
 A new version is minted by **promoting `canari` → `main`** with a **merge commit**
-(not a squash), so `release-please` — pinned to `target-branch: main` because the
-repo default is `canari` — sees every conventional commit and computes the right
-bump. Feature PRs into `canari` may squash freely (one clean commit each).
+(not a squash). The standing promotion PR title is the stable version that will
+publish after merge, for example `Release v0.0.2 (canari -> main)`. Feature PRs
+into `canari` may squash freely (one clean commit each).
 
-### Canary versioning
+### Canari versioning
 
-Each canary build is stamped (in `canary.yml`) with a **monotonic prerelease**
-version: `<base>.canary.<run>` (or `<base>-canary.<run>` when `<base>` has no
-prerelease), where `<run>` is the CI run number. Semver precedence then makes a
-later canary supersede an earlier one, **and** a future stable supersede the
-canary — which is exactly what makes the channel switch *upstream-only*.
+Each canari build is stamped (in `canary.yml`) with a numbered prerelease:
+`<next-stable>-canari.<n>`. If the next stable promotion will publish `v0.0.2`,
+canari builds are `v0.0.2-canari.1`, `v0.0.2-canari.2`, and so on. That makes it
+easy to find an older canari build by the stable line it was previewing, while
+SemVer still makes the final `v0.0.2` supersede every `v0.0.2-canari.N` build.
 
 ## Native auto-update (desktop)
 
@@ -69,11 +69,13 @@ the auto-update toggle, and — right after you switch channels — the availabl
 build with an "Update & restart now".
 
 The **channel is chosen at runtime**, so the client embeds both pubkeys (stable in
-`tauri.conf.json`, canary in `updater.rs`) and verifies against the active
-channel's key. Switching is **upstream-only**: Canary → Stable never downgrades —
-you stay on your build until Stable reaches it. macOS auto-update is compiled-off
-until notarization (manual `.dmg`); Linux auto-update covers the **AppImage** (the
-`.deb` updates via your package manager).
+`tauri.conf.json`, canari in `updater.rs`) and verifies against the active
+channel's key. Stable uses GitHub's latest full release; canari resolves the
+newest numbered `vX.Y.Z-canari.N` prerelease and downloads that release's
+`latest.json`. Switching is **upstream-only**: Canari → Stable never downgrades
+— you stay on your build until Stable reaches it. macOS auto-update is
+compiled-off until notarization (manual `.dmg`); Linux auto-update covers the
+**AppImage** (the `.deb` updates via your package manager).
 
 :::caution[Owner-gated]
 Signed installers + auto-update delivery are gated on owner-provisioned

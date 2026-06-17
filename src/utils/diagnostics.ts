@@ -33,7 +33,7 @@ const URL_BODY_BUDGET = 6000;
 
 /** The fail-closed allowlist of environment facts attached to a report. */
 export interface DiagnosticSnapshot {
-    /** App version (release-please SSOT, inlined as `__APP_VERSION__`). */
+    /** App version (release SSOT, inlined as `__APP_VERSION__`). */
     version: string;
     /** Release channel derived from the build flags. */
     channel: 'dev' | 'canary' | 'stable';

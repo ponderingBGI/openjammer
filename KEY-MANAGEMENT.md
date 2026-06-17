@@ -414,7 +414,7 @@ This composes with the other R4 publish gates feeding `gate`:
 |---|---|
 | Updater design, channel routing, audio-safe install gate | R2 — native desktop auto-update (Tauri v2 first-party updater); see https://ponderingbgi.github.io/openjammer/reference/update-status/ |
 | Artifact hosting, split keys, manifest completeness, canary immutable tag | R4 — desktop artifact hosting & signing-key management |
-| `release-please` single version brain, draft-auto-publish | R1 — `release-please` as the single version brain + decoupled moving-tag canary; see https://ponderingbgi.github.io/openjammer/reference/channels-and-versions/ |
+| Patch-only stable releases + numbered canari prereleases | Channels & versions; see https://ponderingbgi.github.io/openjammer/reference/channels-and-versions/ |
 | One signing story / split keypairs invariant | The overview's §F5 one-signing-story invariant |
 | `zizmor`, action pinning, credential scan, provenance | The CI design's §8 security & supply-chain suite |
 | Release-path signing & draft-vs-publish model | The CI design's §10 release-path signing & draft-vs-publish model |

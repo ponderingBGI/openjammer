@@ -8,7 +8,7 @@ import { buildIssueReport, githubIssueUrl, type DiagnosticSnapshot } from '../di
 import type { LogEntry } from '../../store/logStore';
 
 const SNAP: DiagnosticSnapshot = {
-    version: '0.1.0-alpha.2',
+    version: '0.0.0',
     channel: 'stable',
     executor: 'ojcore-wasm',
     crossOriginIsolated: true,
@@ -37,7 +37,7 @@ describe('buildIssueReport', () => {
         ];
         const r = buildIssueReport({ title: 'crash on load', whatHappened: 'it broke', snapshot: SNAP, logs });
 
-        expect(r.body).toContain('OpenJammer: 0.1.0-alpha.2 (stable)');
+        expect(r.body).toContain('OpenJammer: 0.0.0 (stable)');
         expect(r.body).toContain('Executor: ojcore-wasm');
         expect(r.body).toContain('it broke');
         // The log tail is REDACTED in the report.
