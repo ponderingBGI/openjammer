@@ -10,25 +10,39 @@ Legend: 🔴 required before first signed release · 🟡 recommended · 🟢 op
 
 ---
 
-## 1. 🟡 Branch protection on `main` (governance)
+## 1. 🟡 Branch model + protection on `canari` + `main` (governance)
 
-CI already exposes the single required check — the aggregate **`Merge gate`** job.
-Bind it:
+`canari` is the default/integration branch (all feature PRs target it, and it
+feeds the canary channel); `main` is the stable branch, advanced only by promoting
+`canari` → `main`. Set this up, then bind the single required check — the aggregate
+**`Merge gate`** job — to both branches:
 
-1. **Settings → Rules → Rulesets → New branch ruleset** (or edit the existing
-   `main` ruleset, which currently has `enforcement: disabled`).
-2. Target `main`; set **enforcement: Active**.
-3. Enable **Require a pull request before merging**.
-4. Enable **Require status checks to pass** and add the check named exactly
-   **`Merge gate`**.
+1. **Create `canari` from `main`** and make it the default:
+   ```sh
+   git push origin main:canari
+   gh repo edit ponderingBGI/openjammer --default-branch canari
+   ```
+   Do this only **after** the `release-please.yml` change pinning `target-branch:
+   main` is merged, so release-please never briefly retargets to `canari`.
+2. **Ruleset on `canari`** (Settings → Rules → Rulesets → New branch ruleset):
+   target `canari`; **enforcement: Active**; **Require a pull request before
+   merging** (≥1 review); **Require status checks to pass** → add the check named
+   exactly **`Merge gate`**.
+3. **Ruleset on `main`**: target `main`; **enforcement: Active**; **Require a pull
+   request before merging**; require **`Merge gate`**; under repo merge settings
+   restrict `main` to **merge commits only** (so a stray squash of the promotion PR
+   can't corrupt the release-please changelog/bump). Only the `canari → main`
+   promotion PR and the release-please Release PR land on `main`.
    > ⚠️ Do **not** rename the `gate` job in `.github/workflows/ci.yml` — branch
    > protection binds the literal string `Merge gate` (foundation F6).
-5. Resolve the stale `dev` ruleset: it targets a malformed `refs/heads/"dev"` for
-   a branch that doesn't exist — either create a real `dev` branch or delete the
-   ruleset.
+4. **Retire `dev`**: delete the branch (`git push origin --delete dev`) and the
+   stale `refs/heads/"dev"` ruleset — its role is now `canari`.
+5. **Retarget open PRs** from `main`/`dev` onto `canari` (`gh pr edit <n> --base
+   canari`); dependabot retargets itself to the new default on its next run.
 
-Optional hardening: a CI assertion that `main` enforcement stays `active` can be
-added once the ruleset is live (so a future edit can't silently disable the gate).
+Optional hardening: a CI assertion that enforcement on `canari`/`main` stays
+`active` can be added once the rulesets are live (so a future edit can't silently
+disable the gate).
 
 ---
 
@@ -67,12 +81,26 @@ rotation policy: [`KEY-MANAGEMENT.md`](KEY-MANAGEMENT.md). In short:
    | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | stable | `release.yml` |
    | `TAURI_SIGNING_PRIVATE_KEY_CANARY` | canary | `canary.yml` |
    | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD_CANARY` | canary | `canary.yml` |
-3. Embed **both** public keys in `src-tauri/tauri.conf.json` →
-   `plugins.updater.pubkey` (the app trusts stable + canary).
+3. Paste the **public** keys (public = safe to commit; channel is chosen at
+   RUNTIME, so the client embeds BOTH and verifies against the active channel's):
+   - **Stable** pubkey → `src-tauri/tauri.conf.json` → `plugins.updater.pubkey`
+     (it ships empty).
+   - **Canary** pubkey → `src-tauri/src/updater.rs` → the `CANARY_UPDATER_PUBKEY`
+     constant (it ships empty; the canary channel fails closed until filled).
 
-> The release path is already SHA-pinned and `zizmor`-audited (Phase 0 §0.5), and
-> the stable key is scoped `if: startsWith(github.ref, 'refs/tags/v')` so it is
-> never reachable from a PR/push job. Pin-first-provision-later is intentional.
+   No build-time pubkey injection and no `OJ_UPDATER_PUBKEY_*` variables — the
+   release workflows' `jq` step only flips `bundle.createUpdaterArtifacts` on (it
+   ships **off** so key-less builds — `build-installers.yml`, local `tauri build` —
+   keep working) and `canary.yml` additionally stamps the monotonic canary version.
+   The committed stable endpoint is `releases/latest/download/latest.json`; the
+   canary endpoint is the `CANARY_ENDPOINT` constant in `updater.rs`.
+
+> The native updater is **Win + Linux only** (macOS is compiled-off until §4), and
+> the canary channel additionally requires `CANARY_RELEASES_ENABLED=true` (a repo
+> variable). The release path is already SHA-pinned and `zizmor`-audited (Phase 0
+> §0.5), and the stable key is scoped `if: startsWith(github.ref, 'refs/tags/v')`
+> so it is never reachable from a PR/push job. Pin-first-provision-later is
+> intentional.
 
 ---
 

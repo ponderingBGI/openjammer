@@ -14,6 +14,7 @@
 
 mod ai;
 mod auth;
+mod backup;
 mod bridge;
 mod engine;
 mod sandbox;
@@ -279,6 +280,32 @@ fn set_mic(node: u32, enabled: bool, state: tauri::State<'_, BackendState>) -> R
     Ok(())
 }
 
+/// Snapshot the current user data before an update installs — the frontend passes
+/// its exported `localStorage`; the Pi agent dir is copied natively. Best-effort:
+/// a failed backup never fails the caller. Records the OUTGOING version + channel
+/// so a later rollback knows its target.
+#[tauri::command]
+fn update_backup(
+    webview_state: String,
+    app: tauri::AppHandle,
+    config: tauri::State<'_, updater::AutoUpdateConfig>,
+) {
+    let version = app.package_info().version.to_string();
+    let channel = match config.0.lock().unwrap_or_else(|p| p.into_inner()).channel {
+        updater::Channel::Stable => "stable",
+        updater::Channel::Canary => "canary",
+    };
+    backup::snapshot(&app, &version, channel, &webview_state);
+}
+
+/// Restore the last-good snapshot for a rollback: copies the Pi agent dir back and
+/// returns the version to pin to + the webview state for the frontend to re-import
+/// (`null` when there's no snapshot). The UI then pins + turns auto-update off.
+#[tauri::command]
+fn update_rollback(app: tauri::AppHandle) -> Option<backup::RestoreData> {
+    backup::restore(&app)
+}
+
 /// Build and run the Tauri application. Shared between the desktop binary
 /// (`main.rs`) and any future mobile entry point (the Tauri convention).
 ///
@@ -287,8 +314,22 @@ fn set_mic(node: u32, enabled: bool, state: tauri::State<'_, BackendState>) -> R
 /// panics on a missing audio device (the headless/CI path) — it simply leaves
 /// the host idle until a device is present.
 pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
+    // Win + Linux get the native auto-updater plugin; macOS is compiled-off
+    // (manual `.dmg` until Apple notarization — OWNER-PROVISIONING.md §4), so the
+    // plugin is never registered there and the updater commands are inert.
+    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    #[cfg(any(windows, target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    builder
+        // Ableton-style install-on-quit: if the user has auto-update on and a
+        // verified update is staged, apply it on the way out (no relaunch, no
+        // mid-session interruption). Best-effort; never blocks quitting. macOS:
+        // no-op (updater compiled-off).
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                updater::install_on_quit(window.app_handle());
+            }
+        })
         .setup(|app| {
             app.manage(BackendState::new());
             // The at-most-one warm Pi child for the session (Phase 1: instant feel).
@@ -300,6 +341,13 @@ pub fn run() {
             app.manage::<updater::UpdateGateState>(std::sync::Arc::new(
                 ojcore_native::UpdateGate::new(),
             ));
+            // The staged-update holder the native updater downloads into before
+            // the audio-idle install (Win/Linux only; macOS has no runtime updater).
+            #[cfg(any(windows, target_os = "linux"))]
+            app.manage(updater::PendingUpdate::default());
+            // The native mirror of the auto-update preference (toggle + channel),
+            // read by the install-on-quit handler. Synced from the UI on mount.
+            app.manage(updater::AutoUpdateConfig::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -337,7 +385,13 @@ pub fn run() {
             set_mic,
             updater::update_stage,
             updater::update_is_pending,
-            updater::update_try_install
+            updater::update_try_install,
+            updater::update_check_and_stage,
+            updater::update_install_if_idle,
+            updater::update_set_config,
+            updater::update_status,
+            update_backup,
+            update_rollback
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenJammer tauri application");

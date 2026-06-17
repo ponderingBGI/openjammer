@@ -1377,7 +1377,12 @@ fn installed_bundled_pi(app: &AppHandle) -> Option<PathBuf> {
     }
 
     let version = runtime_version(&resource_runtime).unwrap_or_else(|| "bundled".to_string());
-    let install_root = app.path().app_data_dir().ok()?.join("pi-runtime").join(version);
+    let install_root = app
+        .path()
+        .app_data_dir()
+        .ok()?
+        .join("pi-runtime")
+        .join(version);
     let installed_bin = install_root.join(pi_binary_name());
 
     if !executable_works(&installed_bin) {
@@ -1540,7 +1545,7 @@ impl AgentWorkspace {
 
 /// The user's home dir (`HOME` / `USERPROFILE`), for siting the persistent agent
 /// home. Falls back to the temp dir at the call site when neither is set.
-fn home_dir() -> Option<PathBuf> {
+pub(crate) fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)

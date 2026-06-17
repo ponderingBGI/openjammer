@@ -15,7 +15,10 @@ on:
       - 'apps/docs/**'
       - '.github/workflows/docs.yml'
   pull_request:
-    branches: [main]
+    # Build-verify docs on PRs into either branch (catch breakage before the
+    # canari -> main promotion); deploy stays main-only via the deploy job's
+    # `if: github.event_name != 'pull_request'`.
+    branches: [main, canari]
     paths:
       - 'apps/docs/**'
       - '.github/workflows/docs.yml'

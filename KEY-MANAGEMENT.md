@@ -11,12 +11,12 @@ This is the **must-write-before-ship** runbook for OpenJammer's update-payload s
 | Property | Value (canonical, verified) |
 |---|---|
 | Signature scheme | minisign ed25519 (Tauri v2 updater payload signing) |
-| Key model | The `{stable, canary}` channel model → **split stable/canary keypairs**; both pubkeys embedded |
+| Key model | The `{stable, canary}` channel model → **split stable/canary keypairs**; the client embeds BOTH pubkeys and verifies against the RUNTIME-selected channel's key |
 | Stable key trigger scope | `release.yml`, **only** `if: startsWith(github.ref, 'refs/tags/v')` (tag-triggered) |
-| Canary key trigger scope | `canary.yml`, push-on-`main` only (distinct secret name) |
+| Canary key trigger scope | `canary.yml`, push-on-`canari` only (distinct secret name) |
 | Generator command | `bunx tauri signer generate -w <path>` (Tauri CLI `2.11.2`, verified `package.json:52`) |
 | CI secrets | `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (stable); distinct canary secret names |
-| Public-key home | `src-tauri/tauri.conf.json` → `plugins.updater.pubkey` (no `plugins` block today — added in R2 Phase 0/5) |
+| Public-key home | stable → `src-tauri/tauri.conf.json` `plugins.updater.pubkey`; canary → `src-tauri/src/updater.rs` `CANARY_UPDATER_PUBKEY` const (both ship empty, both committed; channel chosen at runtime) |
 | Rotation | Pubkey-overlap window (build N: old; N+1: old+new accepted; N+2: drop old) |
 | No native rotation | minisign has **no** built-in key-rotation; break-glass = Security Advisory + manual-reinstall notice |
 | Re-verification gate | Post-sign CI re-verifies every `.sig` against the committed pubkey; **fail the release on mismatch** |
@@ -71,18 +71,17 @@ OpenJammer uses **two independent minisign ed25519 keypairs**, one per channel o
 
 | | Stable keypair | Canary keypair |
 |---|---|---|
-| Signs | Tagged releases (`vX.Y.Z`) | Every push to `main` |
+| Signs | Tagged releases (`vX.Y.Z`) | Every push to `canari` |
 | Workflow | `release.yml` | `canary.yml` (new, Phase 1) |
-| **Trigger scope** | `if: startsWith(github.ref, 'refs/tags/v')` | push-on-`main` only |
+| **Trigger scope** | `if: startsWith(github.ref, 'refs/tags/v')` | push-on-`canari` only |
 | GitHub secret (private) | `TAURI_SIGNING_PRIVATE_KEY` + `_PASSWORD` | `TAURI_SIGNING_PRIVATE_KEY_CANARY` + `_PASSWORD_CANARY` |
-| Embedded pubkey | stable pubkey in the stable build's `tauri.conf.json` | canary pubkey in the canary build's `tauri.conf.json` |
+| Embedded pubkey | stable pubkey (`tauri.conf.json`) | canary pubkey (`updater.rs` const) — BOTH compiled into every build |
+| Active pubkey | the one for the user's RUNTIME-selected channel (`updater_builder().pubkey(..)` for canary; the config default for stable) |
 | Exposure profile | Touched only by infrequent, high-scrutiny tag pushes | Touched by every merge — high-frequency, lower-scrutiny |
 
-**Why split:** the canary key is exposed on the high-frequency, lower-scrutiny push-on-`main` trigger. A single-key plan would expose the production-trust (stable) key to that same trigger, directly contradicting the tag-only scoping. With split keys, **a leaked or compromised canary key cannot forge a stable update** — a stable client embeds and trusts only the stable pubkey.
+**Why split:** the canary key is exposed on the high-frequency, lower-scrutiny push-on-`canari` trigger. A single-key plan would expose the production-trust (stable) key to that same trigger, directly contradicting the tag-only scoping. With split keys, **a leaked or compromised canary key cannot forge a stable update**: although both pubkeys are compiled in (so the in-app channel switch works), an update is verified against the pubkey of the user's *active* channel only. A client on Stable verifies against the stable key and is unaffected by a leaked canary key; switching to Canary is an explicit opt-in to canary trust. The channel-selection routing lives in `update_check_and_stage(channel)` (`updater_builder().endpoints(..).pubkey(..)`).
 
-Both pubkeys are embedded **into their respective channel builds** (the stable build trusts the stable pubkey; the canary build trusts the canary pubkey). A canary build that should additionally trust the stable key for a downgrade-to-stable path is an explicit per-channel `updater_builder().endpoints()` routing concern (R2's `check_update(channel)` command), not a multi-key embed.
-
-> **Must-fix (critical):** `TAURI_SIGNING_PRIVATE_KEY` (stable) is scoped `if: startsWith(github.ref, 'refs/tags/v')` and is **never** exposed to `pull_request`, `pull_request_target`, or `push`-to-`main` jobs. This is enforced mechanically by **`zizmor`** as a required PR gate (CI design §8c) — it asserts `TAURI_SIGNING_*` is never referenced under PR triggers (`secrets-on-pr` / `template-injection` audits). A leaked signing key is the single worst outcome in the entire program; this check runs on **every** workflow change, not nightly.
+> **Must-fix (critical):** `TAURI_SIGNING_PRIVATE_KEY` (stable) is scoped `if: startsWith(github.ref, 'refs/tags/v')` and is **never** exposed to `pull_request`, `pull_request_target`, or any `push` job (`canari`/`main`). This is enforced mechanically by **`zizmor`** as a required PR gate (CI design §8c) — it asserts `TAURI_SIGNING_*` is never referenced under PR triggers (`secrets-on-pr` / `template-injection` audits). A leaked signing key is the single worst outcome in the entire program; this check runs on **every** workflow change, not nightly.
 
 ```mermaid
 flowchart LR
@@ -92,8 +91,8 @@ flowchart LR
         SK --> SR
     end
     subgraph canary["CANARY keypair"]
-        CK["TAURI_SIGNING_PRIVATE_KEY_CANARY<br/>push-to-main only"]
-        CR["canary.yml<br/>(push-main only)"]
+        CK["TAURI_SIGNING_PRIVATE_KEY_CANARY<br/>push-to-canari only"]
+        CR["canary.yml<br/>(push-canari only)"]
         CK --> CR
     end
 
@@ -218,7 +217,7 @@ The **public** keys are safe to commit (that is their purpose) and live in versi
 |---|---|---|---|
 | `TAURI_SIGNING_PRIVATE_KEY` | stable | content of `openjammer.key` (the encrypted secret key) | `release.yml`, `if: startsWith(github.ref, 'refs/tags/v')` |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | stable | the stable passphrase | same |
-| `TAURI_SIGNING_PRIVATE_KEY_CANARY` | canary | content of `openjammer-canary.key` | `canary.yml`, push-on-`main` only |
+| `TAURI_SIGNING_PRIVATE_KEY_CANARY` | canary | content of `openjammer-canary.key` | `canary.yml`, push-on-`canari` only |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD_CANARY` | canary | the canary passphrase | same |
 
 Set them with `gh` (run interactively so the value never lands in shell history; `gh secret set` reads from a prompt or file):

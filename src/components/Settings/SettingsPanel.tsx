@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { themes, applyTheme, getThemeById, getSavedThemeId, saveThemeId } from '../../styles/themes';
 import { KeybindingsPanel } from './KeybindingsPanel';
 import { AudioSettingsPanel } from './AudioSettingsPanel';
+import { UpdatesPanel } from './UpdatesPanel';
 import { AboutPanel } from './AboutPanel';
 import { ScrollContainer } from '../common/ScrollContainer';
 import '../Nodes/SchematicNodes.css';
@@ -35,7 +36,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className="minimal-settings-content">
                     {/* Sidebar */}
                     <div className="minimal-sidebar">
-                        {['graphics', 'keybindings', 'audio', 'about'].map(tab => (
+                        {['graphics', 'keybindings', 'audio', 'updates', 'about'].map(tab => (
                             <button
                                 key={tab}
                                 className={`minimal-tab-btn ${activeTab === tab ? 'active' : ''}`}
@@ -82,6 +83,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                         )}
                         {activeTab === 'audio' && (
                             <AudioSettingsPanel />
+                        )}
+                        {activeTab === 'updates' && (
+                            <UpdatesPanel />
                         )}
                         {activeTab === 'about' && (
                             <AboutPanel />

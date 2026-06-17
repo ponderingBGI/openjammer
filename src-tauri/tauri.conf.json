@@ -27,7 +27,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["deb", "appimage", "app", "dmg", "nsis"],
     "category": "Music",
     "shortDescription": "Node-driven music creation for live performance.",
     "longDescription": "OpenJammer is a node-based music creation tool for live performance. This native desktop build runs the low-latency Rust ojcore engine behind the existing web UI.",
@@ -41,5 +41,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDMyRjM2MDZCNkYxRDY1RTYKUldUbVpSMXZhMkR6TXU0V3dZUzdzUnQ5bG1IZ2RBMkRyZnZWVDk2elA5YWgwdXlkUHFyZ3V3WDMK",
+      "endpoints": [
+        "https://github.com/ponderingBGI/openjammer/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

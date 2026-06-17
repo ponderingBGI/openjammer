@@ -8,6 +8,12 @@ name: release-please
 # .release-please-manifest.json). Merging that PR tags v<X.Y.Z>, which fires
 # release.yml. This ends the verified four-way version drift; `oj doctor`'s
 # version-sync check is only a CONSISTENCY assertion, never a second source.
+#
+# `main` is the STABLE branch; `canari` is the default/integration branch.
+# Versions are minted by promoting `canari` -> `main` (a merge commit, so
+# release-please sees every conventional commit). The action's `target-branch`
+# defaults to the repo DEFAULT branch (`canari`), so it MUST be pinned to `main`
+# below — otherwise release-please would open Release PRs against canari.
 
 on:
   push:
@@ -25,3 +31,5 @@ jobs:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7  # v5.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Release from `main`, NOT the repo default branch (`canari`).
+          target-branch: main
