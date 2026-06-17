@@ -27,7 +27,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["deb", "appimage", "app", "dmg", "nsis"],
     "category": "Music",
     "shortDescription": "Node-driven music creation for live performance.",
     "longDescription": "OpenJammer is a node-based music creation tool for live performance. This native desktop build runs the low-latency Rust ojcore engine behind the existing web UI.",
