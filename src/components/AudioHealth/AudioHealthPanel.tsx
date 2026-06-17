@@ -16,6 +16,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAudioStore } from '../../store/audioStore';
+import { isTauri } from '../../audio/executor';
 import { gatherDiagnostics } from '../../utils/diagnostics';
 import './AudioHealthPanel.css';
 
@@ -115,7 +116,7 @@ export function AudioHealthPanel() {
                         label="Audio engine"
                         value={ready ? 'running' : 'not started'}
                         status={ready ? 'ok' : 'idle'}
-                        hint={ready ? undefined : 'Click "Start OpenJammer" to enable audio.'}
+                        hint={ready || isTauri() ? undefined : 'Choose "Play here in your browser" to enable audio.'}
                     />
                     <Row
                         label="Round-trip latency"
