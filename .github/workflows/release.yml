@@ -4,7 +4,7 @@ name: Release
 #
 # Fires on a `v*` tag push and, across a macOS / Linux / Windows matrix, runs
 # `tauri-apps/tauri-action` to build each platform's installers
-# (.dmg + .app, .deb + .AppImage, .msi + .exe) and attach them to a DRAFT
+# (.dmg + .app, .deb + .AppImage, NSIS .exe) and attach them to a DRAFT
 # GitHub Release. The frontend is the existing Vite web app (built by Tauri's
 # `beforeBuildCommand`, "bun run build"); the backend is the native ojcore
 # engine compiled into the `openjammer` binary.
@@ -37,7 +37,7 @@ jobs:
           - platform: ubuntu-latest
             args: ""
             piTarget: "x86_64-unknown-linux-gnu"
-          # Windows (.msi/.exe).
+          # Windows (NSIS .exe).
           - platform: windows-latest
             args: ""
             piTarget: "x86_64-pc-windows-msvc"

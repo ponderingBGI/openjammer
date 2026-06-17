@@ -80,7 +80,7 @@ branch; merging the `release-please` PR there tags `v*` and ships the stable cha
   canary-signs installers and publishes the rolling `canary` prerelease + a signed
   `latest.json` (the canary auto-update channel).
 - **`.github/workflows/release.yml`** — on a `v*` tag, builds installers for
-  macOS (aarch64+x86_64), Windows (.msi/.exe), and Linux (.deb/.AppImage) via
+  macOS (aarch64+x86_64), Windows (NSIS .exe), and Linux (.deb/.AppImage) via
   `tauri-action`, stable-signs them, and attaches them + `latest.json` to a draft
   GitHub Release (the stable auto-update channel).
 
