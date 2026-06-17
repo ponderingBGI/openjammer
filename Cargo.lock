@@ -2929,7 +2929,7 @@ dependencies = [
 
 [[package]]
 name = "oj-tauri"
-version = "0.0.0"
+version = "0.1.0-alpha.2"
 dependencies = [
  "landlock",
  "ojcore",
@@ -2948,7 +2948,7 @@ dependencies = [
 
 [[package]]
 name = "ojcore"
-version = "0.0.0"
+version = "0.1.0-alpha.2"
 dependencies = [
  "arc-swap",
  "assert_no_alloc",
@@ -2963,18 +2963,18 @@ dependencies = [
 
 [[package]]
 name = "ojcore-dsp"
-version = "0.0.0"
+version = "0.1.0-alpha.2"
 dependencies = [
  "libm",
 ]
 
 [[package]]
 name = "ojcore-midiring"
-version = "0.0.0"
+version = "0.1.0-alpha.2"
 
 [[package]]
 name = "ojcore-native"
-version = "0.0.0"
+version = "0.1.0-alpha.2"
 dependencies = [
  "audio_thread_priority",
  "cpal",
@@ -2993,7 +2993,7 @@ dependencies = [
 
 [[package]]
 name = "ojcore-wasm"
-version = "0.0.0"
+version = "0.1.0-alpha.2"
 dependencies = [
  "ojcore",
  "ojcore-midiring",
@@ -3005,7 +3005,7 @@ dependencies = [
 
 [[package]]
 name = "ojfaust"
-version = "0.0.0"
+version = "0.1.0-alpha.2"
 dependencies = [
  "libc",
  "serde_json",
@@ -3013,7 +3013,7 @@ dependencies = [
 
 [[package]]
 name = "ojhost"
-version = "0.0.0"
+version = "0.1.0-alpha.2"
 dependencies = [
  "clack-host",
  "cmake",
@@ -3025,7 +3025,7 @@ dependencies = [
 
 [[package]]
 name = "ojinstrument"
-version = "0.0.0"
+version = "0.1.0-alpha.2"
 dependencies = [
  "libm",
  "ojcore",
@@ -3036,7 +3036,7 @@ dependencies = [
 
 [[package]]
 name = "ojproto"
-version = "0.0.0"
+version = "0.1.0-alpha.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -3044,7 +3044,7 @@ dependencies = [
 
 [[package]]
 name = "ojwasm"
-version = "0.0.0"
+version = "0.1.0-alpha.2"
 dependencies = [
  "libloading 0.8.9",
  "ojcore",
