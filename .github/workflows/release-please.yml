@@ -1,0 +1,27 @@
+name: release-please
+
+# The single version brain (foundation F4, plan §0.2). On every push to `main`,
+# release-please opens/updates ONE Release PR that rewrites all four version files
+# in lockstep — Cargo.toml [workspace.package].version, src-tauri/tauri.conf.json,
+# package.json, and packages/oj-protocol-ts/package.json — from the conventional
+# commits since the last release (config: release-please-config.json, seed:
+# .release-please-manifest.json). Merging that PR tags v<X.Y.Z>, which fires
+# release.yml. This ends the verified four-way version drift; `oj doctor`'s
+# version-sync check is only a CONSISTENCY assertion, never a second source.
+
+on:
+  push:
+    branches: [main]
+
+# release-please needs to create/update the Release PR and its branch.
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071  # v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}

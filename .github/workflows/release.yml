@@ -14,13 +14,45 @@ on:
     tags:
       - "v*"
 
-# Needed for tauri-action to create the GitHub Release and upload assets.
+# Default-deny at the workflow level (zizmor excessive-permissions): the read-only
+# version-gate needs nothing, and only the `release` job elevates to contents:write
+# (for tauri-action to create the GitHub Release and upload assets).
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  # Three-way version equality (plan §0.2 must-fix): the pushed v* tag, the Cargo
+  # workspace version the binary compiles with, and tauri.conf.json's version must
+  # all agree — read at THIS tag's checkout, so they describe the bytes about to
+  # ship. A mismatch (e.g. a stale 0.0.0 seed) red-walls the release BEFORE the
+  # expensive matrix build, so a 0.0.0 binary can never ship into an infinite
+  # update-prompt loop against the R2 updater (which compares tauri.conf.json).
+  version-gate:
+    name: Version equality gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - name: tag == Cargo workspace version == tauri.conf.json version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          # Section-scoped read of [workspace.package].version — never the first
+          # `version =` in the file (which could be a [workspace.dependencies] dep).
+          CARGO=$(awk '/^\[workspace\.package\]/{w=1;next} /^\[/{w=0} w&&$1=="version"{gsub(/"/,"",$3);print $3;exit}' Cargo.toml)
+          test -n "$CARGO" || { echo "::error::workspace.package.version not found in Cargo.toml"; exit 1; }
+          CONF=$(jq -r .version src-tauri/tauri.conf.json)
+          echo "tag=$TAG cargo=$CARGO conf=$CONF"
+          test "$TAG" = "$CARGO" || { echo "::error::tag $TAG != Cargo workspace version $CARGO"; exit 1; }
+          test "$TAG" = "$CONF"  || { echo "::error::tag $TAG != tauri.conf.json version $CONF"; exit 1; }
+          echo "All three versions agree: $TAG"
+
   release:
     name: Build installers (${{ matrix.platform }})
+    needs: version-gate
+    # Scoped here (not workflow-level): tauri-action creates the Release + uploads.
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
