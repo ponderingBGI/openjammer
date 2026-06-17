@@ -146,6 +146,14 @@ function buildAppCommands(): Command[] {
             run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-devlog')),
         },
         {
+            // The one-screen audio-health readout (§4) — same diagnostics the AI reads.
+            id: 'app.audio-health.toggle',
+            title: 'Audio health',
+            group: 'App',
+            keywords: ['audio', 'health', 'latency', 'sound', 'diagnostics', 'device', 'status', 'no sound'],
+            run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-audio-health')),
+        },
+        {
             id: 'app.project.new',
             title: 'New Project',
             group: 'App',
