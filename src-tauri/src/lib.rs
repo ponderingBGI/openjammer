@@ -297,6 +297,7 @@ pub fn run() {
             ai::ai_set_learning,
             ai::ai_forget,
             ai::ai_sessions,
+            ai::ai_session_messages,
             bridge::ai_tool_result,
             ai_faust_compile,
             ai::author_wasm_node,

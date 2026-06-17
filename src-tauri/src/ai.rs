@@ -135,6 +135,19 @@ impl PiStreamLine {
         }
     }
 
+    /// A `session` line carrying the agent's ACTIVE Pi session id, so the
+    /// frontend can persist it and auto-reattach to the same conversation on the
+    /// next run / after a restart (the id rides in `text`). NOT terminal.
+    fn session(id: impl Into<String>) -> Self {
+        Self {
+            kind: "session".into(),
+            text: Some(id.into()),
+            call: None,
+            id: None,
+            request: None,
+        }
+    }
+
     /// A `ui-request` line carrying the raw `extension_ui_request` payload.
     fn ui_request(request: serde_json::Value) -> Self {
         let id = request
@@ -172,6 +185,10 @@ pub fn ai_run(
     provider: Option<String>,
     model_id: Option<String>,
     yolo: Option<bool>,
+    // When present, resume this Pi session (so the run continues that
+    // conversation's context); when absent, Pi uses/creates its current session
+    // and we report the active id back so the frontend can persist it.
+    session_id: Option<String>,
     channel: String,
     warm: tauri::State<'_, WarmChildState>,
     bridge: tauri::State<'_, crate::bridge::BridgeState>,
@@ -320,6 +337,37 @@ pub fn ai_run(
         None => return Ok(()),
     };
 
+    // Reattach to the requested session if the live child isn't already on it
+    // (works for a fresh spawn AND a reused child — switching is cheaper than a
+    // respawn, so a session change never forces one). A failed switch is a soft
+    // note, not fatal: we keep going on whatever session Pi has.
+    if let Some(sid) = session_id.as_deref() {
+        if child.current_session.as_deref() != Some(sid) {
+            let req = serde_json::json!({ "type": "switch_session", "id": sid });
+            if send_command(&mut child.stdin, &req).is_ok() {
+                match await_response(&mut child.reader, &mut child.stdin, &app, &channel, "switch_session") {
+                    Ok(true) => child.current_session = Some(sid.to_string()),
+                    Ok(false) => emit(
+                        &app,
+                        &channel,
+                        PiStreamLine::thought(
+                            "couldn't resume the previous session — continuing in the current one.".to_string(),
+                        ),
+                    ),
+                    Err(()) => {
+                        emit(
+                            &app,
+                            &channel,
+                            PiStreamLine::error("Pi closed the stream while resuming the session."),
+                        );
+                        drop(guard.take());
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+
     if let Err(e) = send_command(
         &mut child.stdin,
         &serde_json::json!({ "type": "prompt", "message": prompt }),
@@ -335,6 +383,22 @@ pub fn ai_run(
     }
 
     stream_until_end(&mut child.reader, &mut child.stdin, &app, &channel);
+
+    // Report the ACTIVE session id so the frontend persists it and reattaches on
+    // the next run / after a restart. Prefer what we already track; else ask Pi
+    // (get_state); else fall back to the most-recently-written session file (the
+    // one this run just appended to). Best-effort — never fatal.
+    let mut active = child.current_session.clone();
+    if active.is_none() {
+        active = query_session_id(&mut child.reader, &mut child.stdin, &app, &channel);
+    }
+    if active.is_none() {
+        active = newest_session_id();
+    }
+    if let Some(id) = active {
+        child.current_session = Some(id.clone());
+        emit(&app, &channel, PiStreamLine::session(id));
+    }
     // The child stays WARM for the next prompt — no kill.
     Ok(())
 }
@@ -357,6 +421,10 @@ pub struct WarmChild {
     /// Whether this child was spawned jailed (gate loaded + env stripped) vs YOLO
     /// (gate dropped + full env). A mode flip forces a respawn.
     jailed: bool,
+    /// The Pi session this child is currently on, tracked so a session change
+    /// `switch_session`es the live child instead of respawning, and so the active
+    /// id can be reported back to the frontend for persistence / reattach.
+    current_session: Option<String>,
 }
 
 impl WarmChild {
@@ -532,6 +600,9 @@ fn spawn_and_configure(
         model_id: model_id.map(String::from),
         project_root: project_root.to_path_buf(),
         jailed,
+        // A fresh child starts on Pi's own current/auto session; the first run
+        // resolves + reports the real id (or switches to a requested one).
+        current_session: None,
     })
 }
 
@@ -663,10 +734,7 @@ pub struct SessionInfo {
 /// session store, for the resume / session-tree UI.
 #[tauri::command]
 pub fn ai_sessions() -> Result<Vec<SessionInfo>, String> {
-    let agent_home = AgentWorkspace::ensure()
-        .map_err(|e| e.to_string())?
-        .agent_home;
-    let dir = agent_home.join(".pi").join("agent").join("sessions");
+    let dir = sessions_dir().map_err(|e| e.to_string())?;
 
     let mut out = Vec::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
@@ -692,6 +760,205 @@ pub fn ai_sessions() -> Result<Vec<SessionInfo>, String> {
     }
     out.sort_by_key(|s| std::cmp::Reverse(s.modified_ms));
     Ok(out)
+}
+
+/// The persisted-session store under the global agent brain
+/// (`~/.openjammer/agent/.pi/agent/sessions`). One JSONL file per session, the
+/// file stem is the session id `switch_session` resumes by.
+fn sessions_dir() -> std::io::Result<PathBuf> {
+    Ok(AgentWorkspace::ensure()?
+        .agent_home
+        .join(".pi")
+        .join("agent")
+        .join("sessions"))
+}
+
+/// The id (file stem) of the most-recently-written session — the one the current
+/// run appended to. Used as the last-resort way to learn a fresh run's session id
+/// when Pi's `get_state` didn't surface one.
+fn newest_session_id() -> Option<String> {
+    let dir = sessions_dir().ok()?;
+    let mut best: Option<(std::time::SystemTime, String)> = None;
+    for entry in std::fs::read_dir(&dir).ok()?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|x| x.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Some(id) = path.file_stem().and_then(|s| s.to_str()).map(String::from) else {
+            continue;
+        };
+        let modified = entry.metadata().ok().and_then(|m| m.modified().ok());
+        if let Some(t) = modified {
+            if best.as_ref().map(|(bt, _)| t > *bt).unwrap_or(true) {
+                best = Some((t, id));
+            }
+        }
+    }
+    best.map(|(_, id)| id)
+}
+
+/// Pull a session id out of a Pi response payload, trying the field names Pi has
+/// used across versions. Best-effort — `None` when the payload carries none.
+fn extract_session_id(value: &serde_json::Value) -> Option<String> {
+    for key in ["sessionId", "session_id", "session", "id"] {
+        if let Some(s) = value.get(key).and_then(|v| v.as_str()) {
+            if !s.is_empty() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    // Some shapes nest it under a `state` / `session` object.
+    for outer in ["state", "session"] {
+        if let Some(obj) = value.get(outer) {
+            if let Some(s) = extract_session_id(obj) {
+                return Some(s);
+            }
+        }
+    }
+    None
+}
+
+/// Ask Pi for its active session id via `get_state` (request/response). Used after
+/// a fresh run with no requested session, so a brand-new session's id can be
+/// persisted. Best-effort: returns `None` if Pi doesn't surface one.
+fn query_session_id(
+    reader: &mut impl BufRead,
+    stdin: &mut impl Write,
+    app: &AppHandle,
+    channel: &str,
+) -> Option<String> {
+    if send_command(stdin, &serde_json::json!({ "type": "get_state" })).is_err() {
+        return None;
+    }
+    match await_response_value(reader, stdin, app, channel, "get_state") {
+        Ok(value) => extract_session_id(&value),
+        Err(()) => None,
+    }
+}
+
+/// One renderable message from a persisted session, for the `/resume` history.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisplayMessage {
+    /// `"user" | "assistant" | "system" | "tool"`.
+    role: String,
+    /// The message text (markdown for assistant turns), best-effort extracted.
+    text: String,
+    /// A tool name, when this message is a tool call / result.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool: Option<String>,
+}
+
+/// A loaded session transcript for display. `incomplete` is set when some lines
+/// couldn't be parsed into a known shape (the UI says so, but still resumes).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionTranscript {
+    messages: Vec<DisplayMessage>,
+    incomplete: bool,
+}
+
+/// Load a persisted session's messages for display (the `/resume` history).
+///
+/// READ-ONLY: parses `<sessions>/<id>.jsonl` directly (mirrors [`ai_sessions`]),
+/// so it needs no warm child. The JSONL message shape is Pi's, not ours, so the
+/// parser is deliberately TOLERANT and flags `incomplete` rather than failing —
+/// the persisted-locally transcript covers the current session's display; this is
+/// only for resuming OTHER sessions. (If the shape proves unstable, switch to
+/// `get_fork_messages` over RPC.)
+#[tauri::command]
+pub fn ai_session_messages(id: String) -> Result<SessionTranscript, String> {
+    let path = sessions_dir().map_err(|e| e.to_string())?.join(format!("{id}.jsonl"));
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+
+    let mut messages = Vec::new();
+    let mut incomplete = false;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<serde_json::Value>(line) {
+            Ok(value) => {
+                if let Some(msg) = parse_session_line(&value) {
+                    messages.push(msg);
+                }
+            }
+            Err(_) => incomplete = true,
+        }
+    }
+    Ok(SessionTranscript { messages, incomplete })
+}
+
+/// Best-effort: turn one parsed session-store JSON line into a [`DisplayMessage`].
+/// Handles a plain message (`{role, content}`), an enveloped one
+/// (`{message:{role, content}}`), string OR array-of-parts content, and a
+/// standalone tool call. `None` for lines that carry no renderable message
+/// (metadata, partial deltas, …).
+fn parse_session_line(value: &serde_json::Value) -> Option<DisplayMessage> {
+    // Unwrap a common `{ message: {…} }` / `{ data: {…} }` envelope.
+    let msg = value
+        .get("message")
+        .or_else(|| value.get("data"))
+        .unwrap_or(value);
+
+    let role = msg.get("role").and_then(|v| v.as_str())?;
+    if !matches!(role, "user" | "assistant" | "system" | "tool") {
+        return None;
+    }
+
+    let text = extract_message_text(msg.get("content"));
+    let tool = msg
+        .get("name")
+        .or_else(|| msg.get("toolName"))
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .or_else(|| first_tool_name(msg.get("content")));
+
+    if text.trim().is_empty() && tool.is_none() {
+        return None;
+    }
+    Some(DisplayMessage {
+        role: role.to_string(),
+        text,
+        tool,
+    })
+}
+
+/// Flatten a message `content` (string | array-of-parts | object) into plain text.
+fn extract_message_text(content: Option<&serde_json::Value>) -> String {
+    match content {
+        Some(serde_json::Value::String(s)) => s.clone(),
+        Some(serde_json::Value::Array(parts)) => parts
+            .iter()
+            .filter_map(|p| {
+                p.as_str().map(String::from).or_else(|| {
+                    p.get("text")
+                        .and_then(|t| t.as_str())
+                        .map(String::from)
+                })
+            })
+            .collect::<Vec<_>>()
+            .join(""),
+        Some(serde_json::Value::Object(_)) => content
+            .and_then(|c| c.get("text"))
+            .and_then(|t| t.as_str())
+            .unwrap_or_default()
+            .to_string(),
+        _ => String::new(),
+    }
+}
+
+/// The first tool name inside an array-of-parts content (a `tool_use`/`tool-call`
+/// part), so a tool turn shows what it did.
+fn first_tool_name(content: Option<&serde_json::Value>) -> Option<String> {
+    let parts = content?.as_array()?;
+    for p in parts {
+        if let Some(name) = p.get("name").or_else(|| p.get("toolName")).and_then(|v| v.as_str()) {
+            return Some(name.to_string());
+        }
+    }
+    None
 }
 
 /// CLI-parity seam (Phase 4): forward ONE raw RPC envelope to the warm Pi child
@@ -745,23 +1012,21 @@ pub fn ai_command(
         return Ok(());
     }
 
-    match await_response(
-        &mut child.reader,
-        &mut child.stdin,
-        &app,
-        &channel,
-        &cmd_name,
-    ) {
-        Ok(true) => emit(
-            &app,
-            &channel,
-            PiStreamLine::result(format!("{cmd_name} ok")),
-        ),
-        Ok(false) => emit(
-            &app,
-            &channel,
-            PiStreamLine::error(format!("Pi rejected {cmd_name}")),
-        ),
+    match await_response_value(&mut child.reader, &mut child.stdin, &app, &channel, &cmd_name) {
+        Ok(value) => {
+            // A session-mutating command (`new_session` / `switch_session` /
+            // `get_state`) carries the active id — track + report it so the
+            // frontend persists and reattaches to it.
+            if let Some(sid) = extract_session_id(&value) {
+                child.current_session = Some(sid.clone());
+                emit(&app, &channel, PiStreamLine::session(sid));
+            }
+            if value.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+                emit(&app, &channel, PiStreamLine::result(format!("{cmd_name} ok")));
+            } else {
+                emit(&app, &channel, PiStreamLine::error(format!("Pi rejected {cmd_name}")));
+            }
+        }
         Err(()) => {
             emit(
                 &app,
@@ -791,6 +1056,21 @@ fn await_response(
     channel: &str,
     command: &str,
 ) -> Result<bool, ()> {
+    await_response_value(reader, stdin, app, channel, command).map(|v| {
+        v.get("success").and_then(|s| s.as_bool()).unwrap_or(false)
+    })
+}
+
+/// As [`await_response`], but returns the WHOLE `{"type":"response",…}` object so
+/// the caller can read its payload (e.g. the session id a `new_session` /
+/// `get_state` command surfaces). `Err(())` means EOF/read error before the ack.
+fn await_response_value(
+    reader: &mut impl BufRead,
+    stdin: &mut impl Write,
+    app: &AppHandle,
+    channel: &str,
+    command: &str,
+) -> Result<serde_json::Value, ()> {
     let mut line = String::new();
     loop {
         line.clear();
@@ -811,10 +1091,7 @@ fn await_response(
         if value.get("type").and_then(|v| v.as_str()) == Some("response")
             && value.get("command").and_then(|v| v.as_str()) == Some(command)
         {
-            return Ok(value
-                .get("success")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false));
+            return Ok(value);
         }
         handle_event(&value, stdin, app, channel);
     }

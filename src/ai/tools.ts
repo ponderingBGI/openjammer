@@ -124,8 +124,8 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
         description:
             'Apply an ORDERED list of mutation sub-calls as ONE atomic frame. ' +
             'batch_apply builds a whole connected workflow atomically — ' +
-            'all-or-nothing: if any sub-call fails the entire frame is reverted, and ' +
-            'Reject undoes it in a single step. Cannot be nested.',
+            'all-or-nothing: if any sub-call fails the entire frame is reverted. ' +
+            'Applied edits are live and undoable with Ctrl+Z. Cannot be nested.',
     },
     {
         name: 'validate_plan',
@@ -141,9 +141,9 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
         description:
             'Build a whole WorkflowPlan in ONE reversible frame: describe nodes by ' +
             'a symbolic ref and wires by port NAME, and emit_plan lowers it to ' +
-            'add_node/update_node_data/add_connection applied atomically (Reject = ' +
-            'one undo). PREFER this for whole workflows; reuse existing nodes via ' +
-            'get_graph/find_nodes first, and validate_plan to repair before emitting.',
+            'add_node/update_node_data/add_connection applied atomically (each edit ' +
+            'undoable with Ctrl+Z). PREFER this for whole workflows; reuse existing ' +
+            'nodes via get_graph/find_nodes first, and validate_plan to repair before emitting.',
     },
 ];
 

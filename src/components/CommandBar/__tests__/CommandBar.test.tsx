@@ -40,10 +40,12 @@ vi.mock('../../../ai', () => ({
 // auth refresh keeps `configured: true` and the Tab fast-path reaches the agent
 // input (the unconfigured → AuthChooser path is tested in AuthChooser.test).
 vi.mock('../../../ai/tauri', () => ({
+    isTauri: () => true,
     getInvoke: () => (cmd: string) =>
         cmd === 'auth_status'
             ? Promise.resolve({ configured: true, activeProvider: 'opencode', conflict: false })
             : Promise.resolve({}),
+    listen: () => Promise.resolve(() => {}),
     openExternal: vi.fn(),
 }));
 
@@ -70,6 +72,7 @@ import {
 import { usePaletteLearningStore } from '../../../store/paletteLearningStore';
 import { useGraphStore } from '../../../store/graphStore';
 import { useAuthStore } from '../../../auth/authStore';
+import { useCommandBarStore } from '../../../store/commandBarStore';
 
 function makeAction(id: string, title: string, run = vi.fn()): Action {
     return {
@@ -103,6 +106,9 @@ describe('CommandBar (M2)', () => {
         // D6 (M7): a configured provider so the Tab fast-path reaches the agent
         // input (the unconfigured path routes to the AuthChooser, tested separately).
         useAuthStore.setState({ configured: true, conflict: false });
+        // The bar mode is persisted; reset to search so a prior AI-mode test
+        // doesn't leak into the next render.
+        useCommandBarStore.setState({ mode: 'search' });
     });
 
     afterEach(() => {

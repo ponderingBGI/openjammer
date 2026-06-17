@@ -54,8 +54,9 @@ and the default answer is the plugin side. Then:
    an external plugin that may misbehave.
 5. **Docs are part of the feature.** A node or plugin others cannot safely author is not
    finished. The agent is an **untrusted generator, never a trusted runner**: it emits the
-   same reversible graph verbs a user drives by hand, applied optimistically, gated behind
-   one Approve / Reject ([docs/agent-tools.md](../../docs/agent-tools.md)).
+   same reversible graph verbs a user drives by hand, applied live to the canvas and undone
+   with plain **Ctrl+Z** — no Approve/Reject gate; reversibility plus the OS/Pi sandbox is
+   the boundary ([docs/agent-tools.md](../../docs/agent-tools.md)).
 6. **Reliability before novelty.** The audio thread never allocates, locks, or blocks —
    enforced mechanically (`assert_no_alloc` in CI, the compile-time `RtCommand` size guard,
    the acyclic-schedule invariant the compiler proves). A dropout is a bug, not a trade-off.
@@ -167,6 +168,8 @@ Before you open a pull request:
       core kept minimal so the community can make it their own
 
 If you are the Ctrl+K agent: you are an **untrusted generator, never a trusted runner**.
-You only ever emit the same reversible graph verbs a user drives by hand, applied
-optimistically and gated behind a single Approve / Reject. Ground every plan in what is
-already on the canvas before you add anything.
+You only ever emit the same reversible graph verbs a user drives by hand; they apply live
+to the canvas and the player undoes anything with plain Ctrl+Z (no Approve/Reject gate).
+The conversation is persistent and session-aware — it auto-reattaches to the last Pi
+session; `/new` starts a fresh one and `/resume` moves between them. Ground every plan in
+what is already on the canvas before you add anything.

@@ -37,8 +37,8 @@ import type {
  * serialization in `src-tauri/src/ai.rs`.
  */
 export interface PiStreamLine {
-    kind: 'thought' | 'tool-call' | 'result' | 'error' | 'ui-request';
-    /** Present for `thought` / `result` / `error`. */
+    kind: 'thought' | 'tool-call' | 'result' | 'error' | 'ui-request' | 'session';
+    /** Present for `thought` / `result` / `error`; the session id for `session`. */
     text?: string;
     /** Present for `tool-call`: the proposed call. */
     call?: AgentToolCall;
@@ -69,6 +69,8 @@ function toAgentEvent(line: PiStreamLine): AgentEvent {
             return { kind: 'result', summary: line.text ?? 'Done.' };
         case 'error':
             return { kind: 'error', message: line.text ?? 'Unknown agent error.' };
+        case 'session':
+            return { kind: 'session', sessionId: line.text ?? '' };
         case 'ui-request':
             return {
                 kind: 'ui-request',
@@ -130,6 +132,7 @@ export class PiAgentBackend implements AgentBackend {
             provider: task.provider ?? null,
             modelId: task.modelId ?? null,
             yolo: task.yolo ?? false,
+            sessionId: task.sessionId ?? null,
             channel,
         }).catch((err: unknown) => {
             push({ kind: 'error', message: `ai_run failed: ${describe(err)}` });

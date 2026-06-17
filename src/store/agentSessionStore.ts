@@ -1,43 +1,41 @@
 /**
- * Agent session store (U20) — the streaming transcript + Approve/Reject
- * transaction behind the Ctrl/Cmd+K AI command bar.
+ * Agent session store — the PERSISTENT, multi-turn conversation behind the
+ * Ctrl/Cmd+K AI command bar (redesign).
  *
- * LIFECYCLE of one run:
- *   idle --start()--> running  (events stream into `transcript`; each proposed
- *                               tool call is APPLIED IMMEDIATELY against the live
- *                               graph so the user sees the result, but its undo
- *                               closure is recorded)
- *        --(terminal result)--> awaiting-approval
- *   awaiting-approval --approve()--> idle   (keep the changes; discard undos)
- *                     --reject()---> idle   (run every undo in reverse; revert)
- *   running/any --cancel()--> reverts + idle
+ * This is a chat, not a one-shot transcript. The whole conversation + the active
+ * Pi session id are PERSISTED (localStorage), so closing the bar — or the app —
+ * and reopening Ctrl+K drops you exactly where you were, and the next prompt
+ * AUTO-REATTACHES to the same Pi session (its history lives in
+ * `~/.openjammer/agent`, so "come back three months later" just works).
  *
- * WHY apply-then-revert (optimistic), not stage-then-apply: the agent is an
- * untrusted GENERATOR but the operations are the SAME reversible verbs the user
- * already drives by hand, and showing the proposed graph live is the whole point
- * of a "build what I asked" bar. Reject is a precise, local revert (each
- * applied tool returns its own `undo`), so the transaction stays deterministic
- * regardless of what else touched the graph history meanwhile.
+ * LIFECYCLE of one turn:
+ *   idle --send()--> running  (a user entry + a streaming assistant entry are
+ *                              appended; thought deltas coalesce into the
+ *                              assistant's markdown; each tool call is APPLIED
+ *                              IMMEDIATELY against the live graph)
+ *        --(terminal result/error)--> idle / error
  *
- * This store is the {@link DspNodeRegistrar}: `author_dsp_node` tool calls
- * register a command-palette entry (so the authored DSP node is addable) and are
- * remembered here for the session; rejecting unregisters them.
+ * NO Approve/Reject. The agent is still an UNTRUSTED GENERATOR — it only ever
+ * emits the SAME reversible graph verbs a user drives by hand — but its edits now
+ * apply live and are reverted with plain **Ctrl+Z** (each edit its own undo step,
+ * recorded by the graph store like any manual edit). A held, believable result
+ * beats a modal: on error we keep what was built (it's undoable) rather than
+ * yanking it away.
  *
- * APPROVAL SEMANTICS (G1 / D3-A3 — confirm + comment): tool calls APPLY
- * OPTIMISTICALLY on arrival (the user watches the graph build live), and the
- * SINGLE Approve / Reject fires at the TERMINAL result — i.e. the TURN boundary,
- * not per call. This is intentional: per-call confirmation would stall the stream
- * and defeat "build what I asked". A `batch_apply` is itself ONE undo frame, so
- * the whole connected workflow approves or rejects as a unit.
+ * Sessions: `newSession()` starts a fresh Pi session (the `/new` verb);
+ * `resumeSession(id)` loads a prior session's history and continues it (`/resume`);
+ * `listSessions()` feeds the resume picker.
  *
- * G2 (collab): an AI run is wrapped in a collab "AI frame" ({@link beginAiFrame}
- * on start, {@link commitAiFrame} on approve, {@link discardAiFrame} on
- * reject/error/reset) so the optimistic edits accumulate as ONE CRDT commit (or
- * none) at the turn boundary instead of broadcasting each speculative verb. All
- * frame calls are no-ops with no active session, so single-user is unaffected.
+ * Collab (G2): a turn is wrapped in the collab AI frame ({@link beginAiFrame} on
+ * send, {@link commitAiFrame} on every terminal) so the turn's edits land as ONE
+ * CRDT commit. No-op with no active session, so single-user is unaffected.
+ *
+ * This store is the {@link DspNodeRegistrar}: `author_dsp_node` / `author_code_node`
+ * tool calls register an addable command-palette entry, remembered for the session.
  */
 
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import { register as registerCommand } from './commandRegistry';
 import type { ActionCtx } from './commandRegistry';
 import {
@@ -52,20 +50,21 @@ import type { ParamDecl } from '../engine/manifest';
 import { useGraphStore } from './graphStore';
 import { useCanvasStore } from './canvasStore';
 import { useCanvasNavigationStore } from './canvasNavigationStore';
-import { beginAiFrame, commitAiFrame, discardAiFrame } from '../collab';
+import { beginAiFrame, commitAiFrame } from '../collab';
 import type {
     AgentBackend,
-    AgentEvent,
     AgentTask,
     AgentToolCall,
     AuthorDspNodeArgs,
 } from '../ai/types';
+import { applyToolCall, type DspNodeRegistrar } from '../ai/tools';
 import {
-    applyToolCall,
-    type AppliedToolResult,
-    type DspNodeRegistrar,
-    type PerSubCall,
-} from '../ai/tools';
+    listSessions as piListSessions,
+    loadSessionMessages,
+    runCommand,
+    type DisplayMessage,
+    type SessionInfo,
+} from '../ai/piSessions';
 import { createGraphStoreApi } from '../ai/graphAdapter';
 import { createPlanEnv } from '../ai/planAdapter';
 import type { Position } from '../engine/types';
@@ -74,55 +73,71 @@ import type { Position } from '../engine/types';
 // Types
 // ============================================================================
 
-/** Run phase, driving which controls the UI shows. */
-export type AgentPhase = 'idle' | 'running' | 'awaiting-approval' | 'error';
+/** Run phase, driving which controls the chat shows. */
+export type AgentPhase = 'idle' | 'running' | 'error';
 
-/** One rendered transcript line (mirrors {@link AgentEvent} plus a local id). */
-export interface TranscriptEntry {
-    id: string;
-    event: AgentEvent;
-    /** For applied tool calls: the human summary of what actually happened. */
-    appliedSummary?: string;
-    /** For applied tool calls: whether the mutation succeeded. */
-    applied?: boolean;
-    /**
-     * For a `batch_apply` entry (M3): the per-sub-call status, so the line can
-     * render as one GROUP summarizing N sub-calls + their individual ok/summary.
-     */
-    children?: { name: string; ok: boolean; summary: string }[];
-    /**
-     * For READ tool calls and `batch_apply` (M3): the DATA the tool produced
-     * (graph summary / node list / per-sub-call status), surfaced in the
-     * transcript so an inspection's result is visible.
-     */
-    resultData?: unknown;
+/** A quiet "what the agent did" chip under an assistant turn. */
+export interface ActionChip {
+    /** The tool name (e.g. `add_node`, `add_connection`). */
+    name: string;
+    /** The human summary of what happened (e.g. "added looper"). */
+    summary: string;
+    /** Whether the mutation succeeded. */
+    ok: boolean;
 }
+
+/** A user's prompt turn. */
+export interface UserEntry {
+    id: string;
+    role: 'user';
+    text: string;
+}
+
+/** An assistant turn: streamed markdown prose + the actions it took. */
+export interface AssistantEntry {
+    id: string;
+    role: 'assistant';
+    /** Coalesced assistant text (markdown). */
+    markdown: string;
+    /** The graph actions taken during this turn (quiet chips). */
+    actions: ActionChip[];
+    /** True while the turn is still streaming. */
+    streaming: boolean;
+    /** True if the turn ended in an error. */
+    errored?: boolean;
+}
+
+/** One rendered conversation entry. */
+export type ConversationEntry = UserEntry | AssistantEntry;
 
 interface AgentSessionStore {
     // --- State ---
+    /** The active Pi session id (persisted), or null for "a fresh session". */
+    sessionId: string | null;
+    /** The whole conversation (persisted). */
+    messages: ConversationEntry[];
+    /** Run phase of the in-flight turn. */
     phase: AgentPhase;
-    /** The prompt of the in-flight / last run. */
-    prompt: string;
-    /** The streamed, rendered transcript. */
-    transcript: TranscriptEntry[];
-    /** Terminal error message, if the run failed. */
+    /** Terminal error message, if the last turn failed. */
     error: string | null;
     /**
-     * The graph node ids that existed BEFORE this run started (snapshot taken at
-     * {@link start}). Any node NOT in this set while a run is live is one the
-     * agent just added — the canvas highlights it so you watch the build happen.
-     * `null` when no run is active.
+     * The graph node ids that existed BEFORE the in-flight turn (snapshot at
+     * {@link send}). A node NOT in this set while a turn is live is one the agent
+     * just added — the canvas highlights it so you watch the build. `null` when
+     * idle.
      */
     runBaseline: ReadonlySet<string> | null;
 
     // --- Actions ---
-    /** Start a run with `backend` for `task`. Resolves when the stream ends. */
-    start: (backend: AgentBackend, task: AgentTask) => Promise<void>;
-    /** Keep all applied changes; clear the session back to idle. */
-    approve: () => void;
-    /** Revert every applied change (DSP registrations + graph edits); go idle. */
-    reject: () => void;
-    /** Reset to a clean idle state (used by tests + closing the bar). */
+    /** Send a prompt: append the turn, stream it, apply edits live. */
+    send: (backend: AgentBackend, task: AgentTask) => Promise<void>;
+    /** Start a fresh Pi session (`/new`): clears the conversation. */
+    newSession: () => Promise<void>;
+    /** Resume a prior session by id (`/resume`): loads its history + continues it. */
+    resumeSession: (id: string) => Promise<{ incomplete: boolean }>;
+    /** List persisted sessions (newest first) for the resume picker. */
+    listSessions: () => Promise<SessionInfo[]>;
+    /** Hard reset (tests + "start over"): clears conversation + session. */
     reset: () => void;
 }
 
@@ -130,8 +145,13 @@ interface AgentSessionStore {
 // Internals (not part of the public store state)
 // ============================================================================
 
-/** Undo closures for every applied tool call, in application order. */
-let appliedResults: AppliedToolResult[] = [];
+/** Read tools are introspection, not actions — they get no chip (keeps a chat
+ * answer clean; the real read round-trip to Pi is the host bridge's job). */
+const SILENT_TOOLS = new Set(['get_graph', 'list_node_types', 'find_nodes', 'validate_plan']);
+
+/** Max conversation entries kept in localStorage (older history still lives in
+ * Pi's session and is reloadable via `/resume`). */
+const MAX_PERSISTED = 120;
 
 let entryCounter = 0;
 function nextEntryId(): string {
@@ -140,35 +160,15 @@ function nextEntryId(): string {
 }
 
 /**
- * Registrar implementation for `author_dsp_node`: surface the authored DSP node
- * as an "Add …" entry on BOTH surfaces (M4) AND give it a FIRST-CLASS OPEN
- * identity (M5).
- *
- * M5: an AI-authored node gets a stable open `pluginId` (`"ai.dsp." +
- * shortHash(faustSource)`) registered in the dynamic registry as an effect-shaped
- * definition, so its display/params/name resolve from that dynamic def. The added
- * node still has `type: 'effect'` (a valid closed NodeType) carrying the Faust
- * source in `data`, so EXECUTION is UNCHANGED — only the identity is now open.
- * (M6 will swap the kernel from stored source to compiled wasm.)
- *
- * Registered as a real {@link Action} (not a legacy zero-arg Command) with
- * `surfaces: ['palette','menu']` and `path: ['AI DSP']`, so an AI-authored node
- * appears in the Ctrl+K palette AND the right-click context menu for free.
- * `run(ctx)` spawns at the menu's clicked `ctx.point` (inside `ctx.node` when a
- * node was right-clicked), else at the viewport centre / current view, and stamps
- * the new node's `pluginId` with the open id.
- *
- * REVERSIBILITY: the returned undo unregisters BOTH the palette/menu Action AND
- * the dynamic plugin, so Reject leaves no orphaned identity behind.
- */
-/**
  * Register a dynamic plugin (carrying its REAL params, M6) AND its palette/menu
  * Action under the open `pluginId`, returning a combined unregister. Shared by
  * `author_dsp_node` and the `author_code_node` authoring bridge so both surface
  * an "Add …" entry and stamp the open identity on the node they create.
  *
  * `params` (M6) flow into the dynamic def's manifest so AutoParamPanel renders the
- * node's true controls; empty for the stored-source path.
+ * node's true controls; empty for the stored-source path. The returned undo
+ * unregisters BOTH the palette/menu Action AND the dynamic plugin, so removing the
+ * node leaves no orphaned identity behind.
  */
 function registerAuthoredNode(opts: {
     pluginId: string;
@@ -258,15 +258,9 @@ const dspRegistrar: DspNodeRegistrar = {
             }),
             sourcePluginId: (source) => dspPluginIdFor(source),
             wasmPluginId: (hash) => wasmPluginIdFor(hash),
-            // Native path: author_faust_native compiles the source to a runnable
-            // native .dll AND registers it in the live engine, so the upgraded
-            // ai.wasm.<hash> node plays the REAL DSP (the wasm sandbox can't host
-            // faust's exception wasm — see docs/code-node-abi.md). Same result shape
-            // as author_wasm_node, so the upgrade flow is unchanged. faust is the
-            // only code-node language today, so `lang` is implied.
             invokeAuthor: invoke
-                ? async (source, _lang) =>
-                      (await invoke('author_faust_native', { source })) as AuthoredNodeResult
+                ? async (source, lang) =>
+                      (await invoke('author_wasm_node', { source, lang })) as AuthoredNodeResult
                 : null,
             parseManifestParams: parseManifestParams,
         });
@@ -298,185 +292,202 @@ function slug(name: string): string {
 }
 
 /**
- * Apply one streamed tool call and record its undo + a transcript summary.
+ * Apply one streamed tool call against the live graph and return its action chip.
  *
- * A `batch_apply` lands as ONE {@link appliedResults} entry — its single undo
- * reverts the whole frame — and its per-sub-call status is hung on the transcript
- * entry's `children` so the UI renders it as one grouped line (M3). READS apply
- * with a NO-OP undo (the result's undo) and carry their `data` into the entry.
- *
- * `toolCallId` is the backend's own id for this tool call (from the streamed
- * `tool-call` event), threaded through so the transcript event keeps the real
- * backend id — the same id a relayed `tool-result` is keyed to (M7) — instead of
- * minting a throwaway counter value.
+ * The mutation flows through the SAME reversible graph-store verbs the UI uses
+ * (via {@link applyToolCall}), so it is recorded in the graph's undo history —
+ * plain Ctrl+Z reverts it. We don't keep our own undo log anymore (no Reject).
  */
-function applyStreamedToolCall(call: AgentToolCall, toolCallId: string): TranscriptEntry {
+function applyStreamedToolCall(call: AgentToolCall): ActionChip {
     const store = createGraphStoreApi();
-    // M7: pass the plan registry env so `validate_plan` / `emit_plan` resolve real
-    // types + ports. (Verb-only tool calls ignore it.)
     const result = applyToolCall(call, store, dspRegistrar, createPlanEnv());
-    appliedResults.push(result);
-
-    const entry: TranscriptEntry = {
-        id: nextEntryId(),
-        event: { kind: 'tool-call', call, id: toolCallId },
-        appliedSummary: result.summary,
-        applied: result.ok,
-    };
-
-    // batch_apply AND emit_plan land as ONE appliedResults entry whose single
-    // undo reverts the whole frame; their per-sub-call status renders as a grouped
-    // line (M3 grouping reused for M7's emit_plan).
-    if (call.name === 'batch_apply' || call.name === 'emit_plan') {
-        const status = (result.data as { status?: PerSubCall[] } | undefined)?.status ?? [];
-        entry.children = status.map((s) => ({ name: s.name, ok: s.ok, summary: s.summary }));
-        // Keep the FULL data (status + post-state + validator diagnostics) on the
-        // entry so the state the agent must reason on survives into the transcript
-        // (and the M7 relay), not just the rendered per-sub-call lines.
-        entry.resultData = result.data;
-    }
-    // Reads (get_graph / list_node_types / find_nodes) and validate_plan carry
-    // their inspection result so it is visible in the transcript.
-    if (
-        call.name === 'get_graph' ||
-        call.name === 'list_node_types' ||
-        call.name === 'find_nodes' ||
-        call.name === 'validate_plan'
-    ) {
-        entry.resultData = result.data;
-    }
-
-    return entry;
+    return { name: call.name, summary: result.summary, ok: result.ok };
 }
 
-/** Run every recorded undo in REVERSE order, then clear them. */
-function revertApplied(): void {
-    for (let i = appliedResults.length - 1; i >= 0; i--) {
-        appliedResults[i].undo();
+/** Map a loaded session's display messages into renderable conversation entries. */
+function toConversationEntries(msgs: DisplayMessage[]): ConversationEntry[] {
+    const out: ConversationEntry[] = [];
+    for (const m of msgs) {
+        if (m.role === 'user') {
+            out.push({ id: nextEntryId(), role: 'user', text: m.text });
+        } else if (m.role === 'assistant') {
+            out.push({
+                id: nextEntryId(),
+                role: 'assistant',
+                markdown: m.text,
+                actions: m.tool ? [{ name: m.tool, summary: '', ok: true }] : [],
+                streaming: false,
+            });
+        } else if (m.role === 'tool') {
+            // Hang a tool result on the previous assistant turn as a quiet chip.
+            const last = out[out.length - 1];
+            if (last && last.role === 'assistant') {
+                last.actions.push({ name: m.tool ?? 'tool', summary: m.text, ok: true });
+            }
+        }
+        // 'system' messages are not rendered in the chat.
     }
-    appliedResults = [];
+    return out;
 }
 
 // ============================================================================
 // Store
 // ============================================================================
 
-export const useAgentSessionStore = create<AgentSessionStore>((set, get) => ({
-    phase: 'idle',
-    prompt: '',
-    transcript: [],
-    error: null,
-    runBaseline: null,
+export const useAgentSessionStore = create<AgentSessionStore>()(
+    persist(
+        (set, get) => ({
+            sessionId: null,
+            messages: [],
+            phase: 'idle',
+            error: null,
+            runBaseline: null,
 
-    start: async (backend, task) => {
-        // Clean slate for this run.
-        appliedResults = [];
-        // G2 (M3): open the collab AI frame BEFORE applying anything so the whole
-        // optimistic run accumulates as one CRDT delta (no-op single-user).
-        beginAiFrame();
-        // Snapshot the pre-run graph so the canvas can highlight what the agent adds.
-        const runBaseline = new Set(useGraphStore.getState().nodes.keys());
-        set({ phase: 'running', prompt: task.prompt, transcript: [], error: null, runBaseline });
+            send: async (backend, task) => {
+                const userEntry: UserEntry = { id: nextEntryId(), role: 'user', text: task.prompt };
+                const assistantId = nextEntryId();
+                const assistantEntry: AssistantEntry = {
+                    id: assistantId,
+                    role: 'assistant',
+                    markdown: '',
+                    actions: [],
+                    streaming: true,
+                };
+                // Snapshot the pre-run graph so the canvas highlights what's added.
+                const runBaseline = new Set(useGraphStore.getState().nodes.keys());
+                // G2: open the collab AI frame so the turn lands as one CRDT delta.
+                beginAiFrame();
+                set((s) => ({
+                    messages: [...s.messages, userEntry, assistantEntry],
+                    phase: 'running',
+                    error: null,
+                    runBaseline,
+                }));
 
-        try {
-            for await (const event of backend.run(task)) {
-                if (event.kind === 'tool-call') {
-                    const entry = applyStreamedToolCall(event.call, event.id);
-                    set((s) => ({ transcript: [...s.transcript, entry] }));
-                    continue;
+                // Patch just the in-flight assistant entry.
+                const patch = (fn: (a: AssistantEntry) => AssistantEntry) =>
+                    set((s) => ({
+                        messages: s.messages.map((m) =>
+                            m.id === assistantId && m.role === 'assistant' ? fn(m) : m,
+                        ),
+                    }));
+
+                const finish = (next: Partial<AgentSessionStore>) => {
+                    patch((a) => ({ ...a, streaming: false }));
+                    commitAiFrame();
+                    set({ runBaseline: null, ...next });
+                };
+
+                try {
+                    for await (const event of backend.run({
+                        ...task,
+                        sessionId: get().sessionId ?? undefined,
+                    })) {
+                        switch (event.kind) {
+                            case 'thought':
+                                patch((a) => ({ ...a, markdown: a.markdown + event.text }));
+                                break;
+                            case 'tool-call': {
+                                const chip = applyStreamedToolCall(event.call);
+                                if (!SILENT_TOOLS.has(event.call.name)) {
+                                    patch((a) => ({ ...a, actions: [...a.actions, chip] }));
+                                }
+                                break;
+                            }
+                            case 'session':
+                                set({ sessionId: event.sessionId });
+                                break;
+                            case 'error':
+                                patch((a) => ({ ...a, errored: true }));
+                                finish({ phase: 'error', error: event.message });
+                                return;
+                            case 'result':
+                                finish({ phase: 'idle' });
+                                return;
+                            // tool-result / ui-request carry no chat signal here.
+                            case 'tool-result':
+                            case 'ui-request':
+                                break;
+                        }
+                    }
+                    // Stream ended without a terminal event: settle to idle.
+                    finish({ phase: 'idle' });
+                } catch (err) {
+                    const message = err instanceof Error ? err.message : String(err);
+                    patch((a) => ({ ...a, errored: true }));
+                    finish({ phase: 'error', error: message });
                 }
+            },
 
-                if (event.kind === 'tool-result') {
-                    // A read/batch result the backend relayed (e.g. after Pi asked
-                    // for the live graph). Surface it as a subtle "↳ result" line so
-                    // its data is visible. (M7 owns the real relay back to Pi over
-                    // stdin; here we only render what arrived.)
-                    const entry: TranscriptEntry = {
-                        id: nextEntryId(),
-                        event,
-                        resultData: event.data,
-                    };
-                    set((s) => ({ transcript: [...s.transcript, entry] }));
-                    continue;
-                }
+            newSession: async () => {
+                set({ messages: [], phase: 'idle', error: null, runBaseline: null });
+                // Reset the live child if one is warm; capture the fresh id. With no
+                // warm child this no-ops and the next send spawns a fresh session.
+                const res = await runCommand({ type: 'new_session' });
+                set({ sessionId: res.sessionId ?? null });
+            },
 
-                const entry: TranscriptEntry = { id: nextEntryId(), event };
-                set((s) => ({ transcript: [...s.transcript, entry] }));
+            resumeSession: async (id) => {
+                const transcript = await loadSessionMessages(id);
+                set({
+                    sessionId: id,
+                    messages: toConversationEntries(transcript.messages),
+                    phase: 'idle',
+                    error: null,
+                    runBaseline: null,
+                });
+                return { incomplete: transcript.incomplete };
+            },
 
-                if (event.kind === 'error') {
-                    // Revert anything applied before the failure; surface the error.
-                    revertApplied();
-                    discardAiFrame(); // store == pre-run == CRDT; emit nothing
-                    set({ phase: 'error', error: event.message });
-                    return;
-                }
-                if (event.kind === 'result') {
-                    set({ phase: 'awaiting-approval' });
-                    return;
-                }
-            }
-            // Stream ended without a terminal event: treat as completed-for-approval
-            // if anything was applied, else idle.
-            if (get().transcript.length > 0) {
-                set({ phase: 'awaiting-approval' });
-            } else {
-                // Nothing applied: close the (empty) frame so we don't leave it open.
-                discardAiFrame();
-                set({ phase: 'idle' });
-            }
-        } catch (err) {
-            revertApplied();
-            discardAiFrame();
-            const message = err instanceof Error ? err.message : String(err);
-            set({ phase: 'error', error: message });
-        }
-    },
+            listSessions: () => piListSessions(),
 
-    approve: () => {
-        // Keep the changes; just drop the undo closures and reset session UI.
-        // G2: commit the accumulated AI delta as ONE collab commit.
-        appliedResults = [];
-        commitAiFrame();
-        set({ phase: 'idle', transcript: [], prompt: '', error: null, runBaseline: null });
-    },
-
-    reject: () => {
-        revertApplied();
-        // G2: store is now back to pre-run (== CRDT) — discard emits nothing.
-        discardAiFrame();
-        set({ phase: 'idle', transcript: [], prompt: '', error: null, runBaseline: null });
-    },
-
-    reset: () => {
-        // If a run is mid-flight or awaiting approval, reverting is the safe reset.
-        revertApplied();
-        discardAiFrame();
-        set({ phase: 'idle', transcript: [], prompt: '', error: null, runBaseline: null });
-    },
-}));
+            reset: () => {
+                set({
+                    sessionId: null,
+                    messages: [],
+                    phase: 'idle',
+                    error: null,
+                    runBaseline: null,
+                });
+            },
+        }),
+        {
+            name: 'openjammer-agent-chat',
+            version: 1,
+            // Persist only the durable conversation + session; never the transient
+            // phase/error/baseline. Cap history and freeze any mid-stream entry so
+            // a reload never resurrects a "streaming" turn.
+            partialize: (s) => ({
+                sessionId: s.sessionId,
+                messages: s.messages.slice(-MAX_PERSISTED).map((m) =>
+                    m.role === 'assistant' ? { ...m, streaming: false } : m,
+                ),
+            }),
+        },
+    ),
+);
 
 /**
- * Whether `nodeId` is a node the AGENT just added in the live (not-yet-approved)
- * run — so the canvas can highlight it as it builds. Stays a stable boolean per
- * node so a node only re-renders when its own pending state flips.
+ * Whether `nodeId` is a node the AGENT just added in the live turn — so the
+ * canvas can highlight it as it builds. Stays a stable boolean per node so a node
+ * only re-renders when its own pending state flips.
  */
 export function useIsAgentPending(nodeId: string): boolean {
     return useAgentSessionStore(
         (s) =>
-            (s.phase === 'running' || s.phase === 'awaiting-approval') &&
+            s.phase === 'running' &&
             s.runBaseline != null &&
             !s.runBaseline.has(nodeId),
     );
 }
 
-/** Test-only: hard reset, including the module-level undo log. */
+/** Test-only: hard reset, including the module-level entry counter. */
 export function _resetAgentSessionForTests(): void {
-    appliedResults = [];
     entryCounter = 0;
     useAgentSessionStore.setState({
+        sessionId: null,
+        messages: [],
         phase: 'idle',
-        prompt: '',
-        transcript: [],
         error: null,
         runBaseline: null,
     });

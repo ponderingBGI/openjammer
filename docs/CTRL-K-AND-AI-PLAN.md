@@ -6,6 +6,20 @@
 > "Decisions at a glance" table and the **ROADMAP** as binding, and read the relevant
 > per-area section before touching code.
 
+> **AMENDMENT — Chat redesign (supersedes the Approve/Reject model below).** The Ctrl+K AI
+> is now a **persistent, session-aware chat** in one centred Raycast-style panel (Tab morphs
+> it in place). The **Approve/Reject gate is removed**: agent edits apply live and are
+> reverted with plain **Ctrl+Z** (each edit its own step, recorded in the graph's undo
+> history). The untrusted-generator guarantee is preserved by *reversibility + the OS/Pi
+> sandbox*, not a modal. Wherever this doc says "Approve/Reject", "one Approve at
+> `agent_end`", G1, invariant #4, or D3-A3, read: **apply live → Ctrl+Z**. The conversation
+> + active Pi session id persist (localStorage), the next run **auto-reattaches** to the last
+> session, `/new` starts a fresh one, and `/resume` switches between them (native verbs via
+> `ai.rs`: `ai_run`'s `session_id`, `ai_command`, `ai_sessions`, `ai_session_messages`).
+> Collab keeps one commit per turn (the AI frame commits on every terminal). The
+> conversation lives in `agentSessionStore`; the UI in `CommandBar` / `AiPanel` +
+> `ChatMessage`/`Markdown`/`ActionChip`/`SessionPicker`.
+
 ## North star
 
 OpenJammer is a node-based live-performance music tool ("ComfyUI for audio"). The user does

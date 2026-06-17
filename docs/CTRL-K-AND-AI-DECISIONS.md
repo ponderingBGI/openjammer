@@ -3,6 +3,11 @@
 > Companion to `CTRL-K-AND-AI-PLAN.md`. Raw output of the multi-agent research workflow:
 > the architecture spine, each decision's judged winner + adversarial verdict, and the
 > cross-decision coherence critique. Kept for traceability of how each decision was reached.
+>
+> **Superseded (chat redesign):** the **Approve/Reject** transaction described throughout is
+> retired — agent edits now apply live and are undone with plain **Ctrl+Z** (untrusted-
+> generator safety = reversibility + the OS/Pi sandbox). See the amendment banner atop
+> `CTRL-K-AND-AI-PLAN.md`.
 
 ## Architecture spine (winner)
 

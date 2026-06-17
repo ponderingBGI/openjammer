@@ -254,6 +254,12 @@ export type AgentEvent =
      * graph it just inspected. NOT a terminal event.
      */
     | { kind: 'tool-result'; toolCallId: string; data: unknown }
+    /**
+     * The agent's ACTIVE Pi session id, reported by the native backend so the
+     * conversation store can persist it and auto-reattach to the same session on
+     * the next run / after a restart. NOT a terminal event.
+     */
+    | { kind: 'session'; sessionId: string }
     /** A Pi extension UI request (surfaced, not yet interactively answered). */
     | { kind: 'ui-request'; request: AgentUiRequest; id: string };
 
@@ -288,6 +294,12 @@ export interface AgentTask {
      * warm child. The graph Approve/Reject gate is unaffected either way.
      */
     yolo?: boolean;
+    /**
+     * Resume this Pi session so the run continues that conversation's context.
+     * Omitted/undefined means "use Pi's current session"; the backend reports the
+     * resolved active id back via a `session` event so the store can persist it.
+     */
+    sessionId?: string;
 }
 
 /**

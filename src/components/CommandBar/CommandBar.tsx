@@ -50,12 +50,9 @@ import { usePaletteLearningStore } from '../../store/paletteLearningStore';
 import { score as paletteScore } from '../../store/paletteScore';
 import { useCommandSources } from './useCommandSources';
 import { AiPanel } from './AiPanel';
-import { useAgentSessionStore } from '../../store/agentSessionStore';
+import { useCommandBarStore } from '../../store/commandBarStore';
 import { startBridgeListener } from '../../ai/bridgeListener';
 import './CommandBar.css';
-
-/** Bar mode: 'search' (U19, the action registry) or 'ai' (U20, the agent). */
-type CommandBarMode = 'search' | 'ai';
 
 /** Max rows rendered after ranking (keeps the list snappy). */
 const MAX_ROWS = 50;
@@ -96,7 +93,11 @@ function searchableText(action: Action): string {
 export function CommandBar() {
     const [open, setOpen] = useState(false);
     const [search, setSearch] = useState('');
-    const [mode, setMode] = useState<CommandBarMode>('search');
+    // The mode is PERSISTED (commandBarStore): close the bar in AI mode, press
+    // Ctrl+K again, and you're back in the chat (conversation restored by the
+    // agent session store). `open` itself is never persisted (no auto-open).
+    const mode = useCommandBarStore((s) => s.mode);
+    const setMode = useCommandBarStore((s) => s.setMode);
     // Text carried from the search input into AI mode on the Tab handoff.
     const [aiPrompt, setAiPrompt] = useState('');
     // D6 (M7): when entering AI mode via "Configure AI provider", force the
@@ -141,14 +142,14 @@ export function CommandBar() {
     const learning = usePaletteLearningStore();
 
     const close = useCallback(() => {
+        // Persist the mode + conversation across close: only the transient search
+        // UI is cleared. The agent session store keeps the chat so reopening lands
+        // you exactly where you were (mode + conversation intact).
         setOpen(false);
         setSearch('');
-        setMode('search');
         setAiPrompt('');
         setForceAuth(false);
         setValue('');
-        // Drop any in-flight / pending agent transaction when the bar closes.
-        useAgentSessionStore.getState().reset();
     }, []);
 
     // Hand the typed text off to AI mode (Tab from search, or the "Ask AI" item).
@@ -156,7 +157,7 @@ export function CommandBar() {
         setAiPrompt(search);
         setForceAuth(false);
         setMode('ai');
-    }, [search]);
+    }, [search, setMode]);
 
     // D6 (M7): the "Configure AI provider" action opens AI mode straight into the
     // AuthChooser (forceAuth), so a configured user can still re-pick a provider.
@@ -169,13 +170,13 @@ export function CommandBar() {
         };
         window.addEventListener('openjammer:configure-ai', onConfigure);
         return () => window.removeEventListener('openjammer:configure-ai', onConfigure);
-    }, []);
+    }, [setMode]);
 
-    // Return from AI mode to search, discarding any pending agent transaction.
+    // Return from AI mode to search. The conversation is preserved (persisted),
+    // so coming back to AI later picks up exactly where it left off.
     const backToSearch = useCallback(() => {
-        useAgentSessionStore.getState().reset();
         setMode('search');
-    }, []);
+    }, [setMode]);
 
     // Global Ctrl/Cmd+K toggle. MUST early-return when the palette is already
     // open/focused so the handler doesn't fight the in-palette key handling
@@ -299,10 +300,10 @@ export function CommandBar() {
     const grouped = groupRanked(ranked);
 
     return createPortal(
-        // In AI mode the overlay is NON-BLOCKING (no scrim) so the real canvas
-        // stays visible and the agent's nodes build on it live; the rail docks
-        // left. In search mode it is the familiar centred modal over a flat ink
-        // wash. (See data-mode rules in CommandBar.css.)
+        // ONE centred panel for BOTH modes over a flat ink wash (Raycast-style):
+        // Tab morphs the content in place rather than repositioning into a side
+        // rail, so the AI feels like a natural extension of the same window.
+        // Clicking the scrim closes. (See data-mode rules in CommandBar.css.)
         <div className="command-bar-overlay" data-mode={mode} onClick={close}>
             <div
                 className="command-bar-container"
@@ -314,7 +315,6 @@ export function CommandBar() {
                         initialPrompt={aiPrompt}
                         forceAuth={forceAuth}
                         onBack={backToSearch}
-                        onClose={close}
                     />
                 ) : (
                     <Command

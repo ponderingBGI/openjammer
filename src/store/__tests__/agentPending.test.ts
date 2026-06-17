@@ -1,7 +1,7 @@
 /**
- * useIsAgentPending (Phase 5) — a node is "agent-pending" (and so highlighted on
- * the real canvas) exactly when a live, not-yet-approved agent run added it: the
- * run is running/awaiting-approval AND the node post-dates the run's baseline.
+ * useIsAgentPending — a node is "agent-pending" (and so highlighted on the real
+ * canvas) exactly when a live agent turn added it: the turn is RUNNING AND the
+ * node post-dates the turn's baseline. The highlight clears when the turn ends.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
@@ -27,12 +27,12 @@ describe('useIsAgentPending', () => {
         expect(renderHook(() => useIsAgentPending('pre-existing')).result.current).toBe(false);
     });
 
-    it('stays true through awaiting-approval, clears on approve/reject', () => {
-        useAgentSessionStore.setState({ phase: 'awaiting-approval', runBaseline: new Set() });
+    it('clears when the turn finishes (phase leaves running)', () => {
+        useAgentSessionStore.setState({ phase: 'running', runBaseline: new Set() });
         expect(renderHook(() => useIsAgentPending('x')).result.current).toBe(true);
 
-        // Reject clears the baseline → no more highlight.
-        useAgentSessionStore.getState().reject();
+        // The turn settles → no more highlight.
+        useAgentSessionStore.setState({ phase: 'idle', runBaseline: null });
         expect(renderHook(() => useIsAgentPending('x')).result.current).toBe(false);
     });
 });

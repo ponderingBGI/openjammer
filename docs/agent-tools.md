@@ -9,10 +9,16 @@ provider / a real Pi / a real audio device.
 
 > **The agent is an UNTRUSTED GENERATOR, never a trusted runner.** It only ever
 > EMITS tool calls; OpenJammer turns each into the SAME reversible graph-store
-> verb the user already drives by hand, applies it optimistically so the user
-> watches the graph build, and gates the whole turn behind a single **Approve /
-> Reject**. The worst an agent can do is the worst a user clicking around the
-> canvas can do — and every step is undoable.
+> verb the user already drives by hand and applies it live, so the user watches
+> the graph build. There is **no Approve/Reject gate**: every edit is recorded in
+> the graph's undo history, so the player reverts anything with plain **Ctrl+Z**
+> (each edit its own step). The worst an agent can do is the worst a user clicking
+> around the canvas can do — and every step is undoable. Reversibility plus the
+> OS/Pi sandbox (jail + env allowlist) is the boundary, not a modal.
+>
+> The chat is **persistent and session-aware**: it auto-reattaches to your last
+> Pi session (so you can return days later and continue), `/new` starts a fresh
+> session, and `/resume` moves between past sessions.
 
 ---
 
@@ -82,9 +88,9 @@ signal reaches a speaker) before a single node is created.
 
 ### Whole-workflow tools (one reversible frame)
 
-- **batch_apply** — Apply an ORDERED list of mutation sub-calls as ONE atomic frame. batch_apply builds a whole connected workflow atomically — all-or-nothing: if any sub-call fails the entire frame is reverted, and Reject undoes it in a single step. Cannot be nested.
+- **batch_apply** — Apply an ORDERED list of mutation sub-calls as ONE atomic frame. batch_apply builds a whole connected workflow atomically — all-or-nothing: if any sub-call fails the entire frame is reverted. Applied edits are live and undoable with Ctrl+Z. Cannot be nested.
 - **validate_plan** — Pre-flight a whole WorkflowPlan (nodes by ref, wires by port NAME) WITHOUT applying it. Side-effect-free: returns the structured errors (unknown type/port, bad direction, incompatible ports, feedback cycle, no path to a speaker). Prefer get_graph + find_nodes first to REUSE existing nodes, then validate_plan to repair before emit_plan.
-- **emit_plan** — Build a whole WorkflowPlan in ONE reversible frame: describe nodes by a symbolic ref and wires by port NAME, and emit_plan lowers it to add_node/update_node_data/add_connection applied atomically (Reject = one undo). PREFER this for whole workflows; reuse existing nodes via get_graph/find_nodes first, and validate_plan to repair before emitting.
+- **emit_plan** — Build a whole WorkflowPlan in ONE reversible frame: describe nodes by a symbolic ref and wires by port NAME, and emit_plan lowers it to add_node/update_node_data/add_connection applied atomically (each edit undoable with Ctrl+Z). PREFER this for whole workflows; reuse existing nodes via get_graph/find_nodes first, and validate_plan to repair before emitting.
 
 ---
 
