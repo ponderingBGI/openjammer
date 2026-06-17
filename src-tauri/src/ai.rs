@@ -1377,7 +1377,12 @@ fn installed_bundled_pi(app: &AppHandle) -> Option<PathBuf> {
     }
 
     let version = runtime_version(&resource_runtime).unwrap_or_else(|| "bundled".to_string());
-    let install_root = app.path().app_data_dir().ok()?.join("pi-runtime").join(version);
+    let install_root = app
+        .path()
+        .app_data_dir()
+        .ok()?
+        .join("pi-runtime")
+        .join(version);
     let installed_bin = install_root.join(pi_binary_name());
 
     if !executable_works(&installed_bin) {
