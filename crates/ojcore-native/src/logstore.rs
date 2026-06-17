@@ -216,11 +216,15 @@ mod tests {
     #[test]
     fn insert_and_full_text_search_roundtrip() {
         let store = LogStore::open_in_memory().expect("store");
-        store.insert(&rec(1, "Xrun", "xrun: 3 frames dropped")).unwrap();
+        store
+            .insert(&rec(1, "Xrun", "xrun: 3 frames dropped"))
+            .unwrap();
         store
             .insert(&rec(2, "NodeFault", "node 4 produced a non-finite sample"))
             .unwrap();
-        store.insert(&rec(3, "Lifecycle", "engine started")).unwrap();
+        store
+            .insert(&rec(3, "Lifecycle", "engine started"))
+            .unwrap();
         assert_eq!(store.count().unwrap(), 3);
 
         // term in the message column
