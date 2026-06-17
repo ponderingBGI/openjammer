@@ -73,7 +73,7 @@ re-integrated on top, feature by feature, each verified.
 - [x] ✅ Per-family baked ADSR + character so brass swells, plucks decay, pads bloom, organs hold.
 - [x] ✅ A golden test that every catalogue `instrumentId` resolves to a non-silent, finite voice (no silent instrument can ship).
 - [x] ✅ Velocity → brightness/level mapping: per-voice velocity-modulated low-pass in the sampler (soft = darker, hard = open), tested.
-- [ ] ⬜ Karplus-backed family for plucked strings (guitar/bass) routed to the real `KarplusString` primitive, not the additive synth.
+- [x] ✅ Karplus-backed plucked strings (guitar/bass) routed to the real `KarplusString` primitive (one predicate drives both emit + executor), tested.
 
 ---
 
