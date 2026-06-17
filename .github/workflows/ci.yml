@@ -3,6 +3,10 @@ name: CI
 # Merge gate for OpenJammer (ojcore rewrite). Must be green for a reliable
 # merge to main: the Rust engine workspace (native + no_std + wasm legs) and the
 # TypeScript control plane (typecheck + tests + production build).
+#
+# The repeated checkout/apt/toolchain/cache/bun blocks are collapsed into the
+# `setup-rust` + `setup-web` composite actions (.github/actions/*), so the engine
+# and web setup is defined ONCE and reused here (and by release/canary).
 
 on:
   push:
@@ -23,29 +27,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: System deps (ALSA for cpal + GTK/WebKit for the Tauri crate)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev \
-            libwebkit2gtk-4.1-dev \
-            libgtk-3-dev \
-            libsoup-3.0-dev \
-            libjavascriptcoregtk-4.1-dev \
-            librsvg2-dev
-      # Install nightly FIRST (only the wasm leg uses `cargo +nightly`), then
-      # stable LAST so stable is the DEFAULT toolchain for fmt/clippy/test/build
-      # (otherwise `cargo fmt` runs on nightly, which has no rustfmt component).
-      - name: Rust nightly (wasm leg)
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Setup Rust (stable + nightly wasm leg)
+        uses: ./.github/actions/setup-rust
         with:
-          components: rust-src
-          targets: wasm32-unknown-unknown
-      - name: Rust stable (default; fmt, clippy)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+          nightly: 'true'
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy (-D warnings)
@@ -79,9 +64,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - name: Install
-        run: bun install --frozen-lockfile
+      - name: Setup web (Bun + install)
+        uses: ./.github/actions/setup-web
       - name: Typecheck
         run: bunx tsc --noEmit -p tsconfig.app.json
       - name: Lint
@@ -96,13 +80,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-      - name: Install frontend deps
-        run: bun install --frozen-lockfile
+      - name: Setup web (Bun + install)
+        uses: ./.github/actions/setup-web
+      - name: Setup Rust (stable)
+        uses: ./.github/actions/setup-rust
       - name: Build the native desktop app (oj-tauri)
         run: cargo build -p oj-tauri
       - name: Engine tests on Windows

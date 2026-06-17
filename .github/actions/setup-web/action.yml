@@ -1,0 +1,12 @@
+name: setup-web
+description: >
+  Bun + a frozen-lockfile install — the shared web control-plane setup, so every
+  workflow that touches the frontend installs deps the SAME way.
+
+runs:
+  using: composite
+  steps:
+    - uses: oven-sh/setup-bun@v2
+    - name: Install (frozen lockfile)
+      shell: bash
+      run: bun install --frozen-lockfile
