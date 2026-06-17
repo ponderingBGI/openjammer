@@ -70,3 +70,15 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
+
+# --- native auto-updater (R2/R4) ---------------------------------------------
+# Win + Linux ONLY. macOS is intentionally excluded: without an Apple Developer
+# ID + notarization Gatekeeper quarantines a swapped `.app`, so the macOS updater
+# stays compiled-off and Mac ships a manual `.dmg` (OWNER-PROVISIONING.md §4).
+# The download-complete path hands off to `ojcore_native::UpdateGate` so an
+# install never swaps the binary out from under live audio (a held note beats a
+# glitch). Owner-enabled: needs the split stable/canary minisign keys + the
+# update endpoints (OWNER-PROVISIONING.md §3) before it does anything.
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+tauri-plugin-updater = "2.10.1"
+url = "2.5.8"

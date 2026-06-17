@@ -1540,7 +1540,7 @@ impl AgentWorkspace {
 
 /// The user's home dir (`HOME` / `USERPROFILE`), for siting the persistent agent
 /// home. Falls back to the temp dir at the call site when neither is set.
-fn home_dir() -> Option<PathBuf> {
+pub(crate) fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
