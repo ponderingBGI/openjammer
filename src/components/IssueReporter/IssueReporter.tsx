@@ -79,6 +79,7 @@ export function IssueReporter() {
                 className="issue-panel"
                 onClick={(e) => e.stopPropagation()}
                 role="dialog"
+                aria-modal="true"
                 aria-label="Report a problem"
             >
                 <header className="issue-header">
