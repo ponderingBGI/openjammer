@@ -32,6 +32,21 @@ const norm = (p: string) => p.replace(/\\/g, '/');
 const anyMatch = (changed: string[], pred: (p: string) => boolean) =>
   changed.map(norm).some(pred);
 
+// Paths that affect NEITHER CI leg (the engine workspace or the web control
+// plane): docs have their own Docs workflow; markdown/meta files gate nothing.
+// CONSERVATIVE on purpose — anything NOT listed here and NOT mapped to a recipe
+// is treated as "unrecognized" and forces the FULL gate (fail closed), so a new
+// kind of input can never silently skip a leg.
+const ciIrrelevant = (p: string): boolean =>
+  p.endsWith('.md') ||
+  p.startsWith('docs/') ||
+  p.startsWith('apps/docs/') ||
+  p === 'LICENSE' ||
+  p === '.gitignore' ||
+  p === '.gitattributes' ||
+  p === 'CODEOWNERS' ||
+  p.startsWith('.github/ISSUE_TEMPLATE/');
+
 // The mapping from changed files -> just recipes. Conservative: when in doubt,
 // select the recipe (a false-positive is a wasted-but-correct run; a false
 // negative would skip a needed gate).
@@ -81,16 +96,27 @@ const RECIPES: RecipeSpec[] = [
   {
     recipe: 'web',
     inputs: ['package.json', 'bun.lock', 'tsconfig.app.json'],
+    // The web job runs typecheck + lint + unit tests + production build + the
+    // Playwright PWA smoke test, so its inputs are the whole TS/JS app AND its
+    // tooling: source, packages, the e2e suite, public assets baked into the
+    // bundle, the HTML entry, and every build/test/lint config. (e2e/ and the
+    // configs were previously unmapped — an e2e-only change skipped the gate.)
     selects: (c) =>
       anyMatch(
         c,
         (p) =>
           p.startsWith('src/') ||
           p.startsWith('packages/') ||
+          p.startsWith('public/') ||
+          p.startsWith('e2e/') ||
+          p === 'index.html' ||
           p === 'package.json' ||
           p === 'bun.lock' ||
           p.startsWith('tsconfig') ||
-          p === 'vite.config.ts',
+          p === 'vite.config.ts' ||
+          p === 'vitest.config.ts' ||
+          p === 'playwright.config.ts' ||
+          p === 'eslint.config.js',
       ),
   },
 ];
@@ -106,19 +132,37 @@ interface Selection {
   inputs: string[];
 }
 
-/** Compute which recipes the changed-file set selects (registry order). */
+/**
+ * Compute which recipes the changed-file set selects (registry order).
+ *
+ * `ok` is false when the diff was UNTRUSTWORTHY (base unresolvable / shallow /
+ * git error) — callers must then run the FULL gate, never skip. `unrecognized`
+ * lists changed files that map to no recipe and are not known CI-irrelevant; a
+ * non-empty list also forces the full gate (a file of unknown impact may affect
+ * a leg the mapping doesn't model yet).
+ */
 export async function selectRecipes(base?: string): Promise<{
+  ok: boolean;
   changed: string[];
   selected: Selection[];
+  unrecognized: string[];
 }> {
-  const changed = await changedVsBase(base ?? 'origin/main');
+  let changed: string[];
+  try {
+    changed = await changedVsBase(base ?? 'origin/main');
+  } catch {
+    return { ok: false, changed: [], selected: [], unrecognized: [] };
+  }
   const selected: Selection[] = [];
   for (const spec of RECIPES) {
     if (spec.selects(changed)) {
       selected.push({ recipe: spec.recipe, inputs: dedupe([...spec.inputs, ...ALWAYS_INPUTS]) });
     }
   }
-  return { changed, selected };
+  const unrecognized = changed
+    .map(norm)
+    .filter((p) => !ciIrrelevant(p) && !RECIPES.some((spec) => spec.selects([p])));
+  return { ok: true, changed, selected, unrecognized };
 }
 
 async function justPresent(): Promise<boolean> {
@@ -131,7 +175,7 @@ async function justPresent(): Promise<boolean> {
 }
 
 export async function preflight(args: PreflightArgs): Promise<number> {
-  const { changed, selected } = await selectRecipes(args.base);
+  const { ok, changed, selected, unrecognized } = await selectRecipes(args.base);
 
   if (args.plan) {
     if (args.json) {
@@ -139,19 +183,32 @@ export async function preflight(args: PreflightArgs): Promise<number> {
         JSON.stringify(
           {
             mode: 'plan',
+            ok, // false => untrustworthy diff => CI MUST run the full gate
             base: args.base ?? 'origin/main',
             changedCount: changed.length,
             recipes: selected.map((s) => s.recipe),
+            unrecognizedCount: unrecognized.length,
+            unrecognized: unrecognized.slice(0, 20),
           },
           null,
           2,
         ) + '\n',
       );
-      return 0;
+      // Non-zero exit on an untrustworthy plan so the CI fail-safe runs everything.
+      return ok ? 0 : 1;
     }
     process.stdout.write('oj preflight --plan (dry run; nothing executed)\n');
     process.stdout.write(`base: ${args.base ?? 'origin/main'}\n`);
+    if (!ok) {
+      process.stdout.write('plan: UNTRUSTWORTHY (could not diff vs base) — CI runs the full gate.\n');
+      return 1;
+    }
     process.stdout.write(`changed files: ${changed.length}\n`);
+    if (unrecognized.length > 0) {
+      process.stdout.write(
+        `unrecognized (forces full gate): ${unrecognized.slice(0, 20).join(', ')}\n`,
+      );
+    }
     if (selected.length === 0) {
       process.stdout.write('selected recipes: (none — no affected recipes)\n');
     } else {
@@ -161,7 +218,15 @@ export async function preflight(args: PreflightArgs): Promise<number> {
     return 0;
   }
 
-  // Real run.
+  // Real run. A degraded/untrustworthy diff locally is non-fatal — CI is the
+  // authoritative gate; just don't run a misleading partial selection.
+  if (!ok) {
+    process.stdout.write(
+      'oj preflight: could not determine changes vs base (origin/main?). ' +
+        'Skipping local run — CI is authoritative.\n',
+    );
+    return 0;
+  }
   const haveJust = await justPresent();
   if (!haveJust) {
     process.stdout.write(

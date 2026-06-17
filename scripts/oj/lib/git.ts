@@ -37,21 +37,30 @@ export async function stagedFiles(): Promise<string[]> {
 }
 
 /**
- * Paths changed versus a base ref (default origin/main). Falls back to `main`
- * if origin/main is unknown; returns [] if neither resolves. Includes the merge
- * base so feature-branch diffs are accurate rather than picking up base churn.
+ * Paths changed versus a base ref (default origin/main), using the merge base so
+ * feature-branch diffs are accurate rather than picking up base churn.
+ *
+ * THROWS when the diff is untrustworthy — the base ref can't be resolved, or
+ * `git diff` fails (e.g. a shallow clone whose merge base is unreachable). The
+ * affected-selection caller MUST treat a throw as "unknown → run everything",
+ * never as "no changes": a silently-empty changeset would skip every gated leg
+ * (the exact bug that let a broken test merge). Returns [] ONLY for a genuinely
+ * empty diff against a resolved base.
  */
 export async function changedVsBase(base = 'origin/main'): Promise<string[]> {
-  if (!(await isGitRepo())) return [];
-  const ref = (await refExists(base)) ? base : (await refExists('main')) ? 'main' : null;
-  if (!ref) return [];
-  try {
-    // `git diff ref...HEAD` uses the merge base, the affected-selection intent.
-    const out = await $`git diff --name-only ${ref}...HEAD`.quiet();
-    return splitLines(out.text());
-  } catch {
-    return [];
-  }
+  if (!(await isGitRepo())) throw new Error('oj: not inside a git work tree');
+  const ref = (await refExists(base))
+    ? base
+    : (await refExists('origin/main'))
+      ? 'origin/main'
+      : (await refExists('main'))
+        ? 'main'
+        : null;
+  if (!ref) throw new Error(`oj: base ref not found (${base})`);
+  // `.quiet()` still throws on a non-zero git exit (e.g. an unreachable merge
+  // base under a shallow clone) — let it propagate so the caller fails CLOSED.
+  const out = await $`git diff --name-only ${ref}...HEAD`.quiet();
+  return splitLines(out.text());
 }
 
 /** All tracked files (used as the credentials-scan fallback in a clean repo). */
