@@ -3047,6 +3047,7 @@ name = "ojwasm"
 version = "0.1.0-alpha.2"
 dependencies = [
  "libloading 0.8.9",
+ "libm",
  "ojcore",
  "ojcore-dsp",
  "ojproto",

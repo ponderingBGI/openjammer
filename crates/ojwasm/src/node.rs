@@ -414,7 +414,7 @@ mod tests {
     /// it (a constant or very-low-freq signal would be high-passed away, which is
     /// correct guard behavior but useless for asserting host logic).
     fn tone(n: usize, amp: f32) -> Vec<f32> {
-        (0..n).map(|i| (i as f32 * 0.7).sin() * amp).collect()
+        (0..n).map(|i| libm::sinf(i as f32 * 0.7) * amp).collect()
     }
 
     fn energy(buf: &[f32]) -> f32 {

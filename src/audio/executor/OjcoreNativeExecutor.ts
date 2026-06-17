@@ -347,8 +347,10 @@ export class OjcoreNativeExecutor implements Executor {
     // node is unparameterized, so this routes around it).
     setSpeakerVolume(nodeId: string, volume: number, isMuted: boolean): void {
         if (!this.invoke) return;
+        const node = this.index.get(nodeId);
+        if (node === undefined) return;
         this.invoke('set_speaker_volume', {
-            nodeId,
+            node,
             volume: isMuted ? 0 : volume,
             muted: isMuted,
         }).catch((err: unknown) => {
@@ -357,7 +359,9 @@ export class OjcoreNativeExecutor implements Executor {
     }
     setSpeakerDevice(nodeId: string, deviceId: string): void {
         if (!this.invoke) return;
-        this.invoke('set_speaker_device', { nodeId, deviceId }).catch((err: unknown) => {
+        const node = this.index.get(nodeId);
+        if (node === undefined) return;
+        this.invoke('set_speaker_device', { node, deviceId }).catch((err: unknown) => {
             console.error('[OjcoreNativeExecutor] set_speaker_device failed:', err);
         });
     }
@@ -382,7 +386,9 @@ export class OjcoreNativeExecutor implements Executor {
     // so only the node id crosses the seam.
     setMicrophoneOutput(nodeId: string, _outputNode: AudioNode): void {
         if (!this.invoke) return;
-        this.invoke('set_mic', { nodeId, enabled: true }).catch((err: unknown) => {
+        const node = this.index.get(nodeId);
+        if (node === undefined) return;
+        this.invoke('set_mic', { node, enabled: true }).catch((err: unknown) => {
             console.error('[OjcoreNativeExecutor] set_mic failed:', err);
         });
     }

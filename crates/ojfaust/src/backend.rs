@@ -7,8 +7,8 @@
 //!   on `PATH` it returns [`FaustError::Unavailable`] so the crate still builds
 //!   + behaves with no toolchain at all.
 //! * feature ON: the [`native`] backend — a TODO-marked scaffold of the
-//!   in-process libfaust JIT (Path A). Intentionally `unimplemented!()` for now;
-//!   see `README.md` for the install prerequisites.
+//!   in-process libfaust JIT (Path A). It returns [`FaustError::Unavailable`]
+//!   until implemented; see `README.md` for the install prerequisites.
 //!
 //! # FOUNDER-GATED BOUNDARY (D4)
 //!
@@ -169,10 +169,17 @@ mod cli {
     /// Pure + total: split out from the process plumbing so it is unit-testable
     /// against a sample JSON document with no `faust` binary present.
     pub(super) fn parse_faust_json(json_text: &str) -> Result<FaustMeta, FaustError> {
-        let v: serde_json::Value =
-            serde_json::from_str(json_text).map_err(|e| FaustError::Compile {
-                message: format!("could not parse faust -json metadata: {e}"),
-            })?;
+        let v: serde_json::Value = match serde_json::from_str(json_text) {
+            Ok(v) => v,
+            Err(first_err) => {
+                let sanitized = escape_invalid_json_backslashes(json_text);
+                serde_json::from_str(&sanitized).map_err(|second_err| FaustError::Compile {
+                    message: format!(
+                        "could not parse faust -json metadata: {first_err}; after escaping invalid backslashes: {second_err}"
+                    ),
+                })?
+            }
+        };
 
         let name = v
             .get("name")
@@ -196,6 +203,43 @@ mod cli {
             n_out,
             params,
         })
+    }
+
+    /// Faust on Windows can emit JSON with unescaped backslashes in diagnostic
+    /// path fields such as `"C:\Program Files\Faust"`. Those fields are not
+    /// semantically needed here, but they make strict JSON parsing fail before
+    /// we can read the name/port/UI metadata. Preserve valid JSON escapes and
+    /// escape only invalid backslashes inside strings.
+    fn escape_invalid_json_backslashes(input: &str) -> String {
+        let mut out = String::with_capacity(input.len());
+        let mut chars = input.chars();
+        let mut in_string = false;
+
+        while let Some(ch) = chars.next() {
+            match ch {
+                '"' => {
+                    in_string = !in_string;
+                    out.push(ch);
+                }
+                '\\' if in_string => match chars.next() {
+                    Some(next)
+                        if matches!(next, '"' | '\\' | '/' | 'b' | 'f' | 'n' | 'r' | 't' | 'u') =>
+                    {
+                        out.push('\\');
+                        out.push(next);
+                    }
+                    Some(next) => {
+                        out.push('\\');
+                        out.push('\\');
+                        out.push(next);
+                    }
+                    None => out.push('\\'),
+                },
+                _ => out.push(ch),
+            }
+        }
+
+        out
     }
 
     /// Coerce a JSON number-or-string (faust emits port counts as either) to u8.
@@ -338,6 +382,14 @@ mod cli {
         }
 
         #[test]
+        fn tolerates_faust_windows_paths_with_unescaped_backslashes() {
+            let json = "{\n  \"name\": \"x\",\n  \"inputs\": 0,\n  \"outputs\": 1,\n  \"library_list\": [\"C:\\Program Files\\Faust\\share\\faust/stdfaust.lib\"],\n  \"ui\": []\n}";
+            let meta = parse_faust_json(json).expect("faust Windows metadata should parse");
+            assert_eq!(meta.name, "x");
+            assert_eq!(meta.n_out, 1);
+        }
+
+        #[test]
         fn button_and_checkbox_become_0_1_toggles() {
             let json = r#"{
                 "name": "g", "inputs": 0, "outputs": 1,
@@ -370,7 +422,8 @@ mod native {
 
     /// Real in-process Faust compilation (Path A — libfaust C API JIT).
     /// **TODO**: implement the bindgen binding; see `README.md`. Until then this
-    /// fails loudly so a `--features libfaust` build cannot masquerade as working.
+    /// reports a terminal unavailable backend so `--features libfaust` builds and
+    /// tests stay deterministic without masquerading as a working JIT.
     pub(super) fn compile(
         cfg: &CompilerConfig,
         dsp_source: &str,
@@ -382,10 +435,6 @@ mod native {
         // `getCDSPFactoryError`). Lowest latency; stash the JIT factory on
         // `CompiledFaust` (wasm: None) and wrap as an `ojcore::DspInstance`.
         let _ = (cfg, dsp_source);
-        unimplemented!(
-            "ojfaust: `libfaust` feature is a scaffold; implement backend::native::compile \
-             (see crate README for install + the Path A decision). The DEFAULT CLI Path B \
-             needs no libfaust."
-        )
+        Err(FaustError::Unavailable)
     }
 }

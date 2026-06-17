@@ -23,7 +23,7 @@ use std::path::PathBuf;
 
 use engine::BackendState;
 use ojhost::PluginDescriptor;
-use ojproto::{EngineFrame, NodeIdx, OjGraph, RtCommand};
+use ojproto::{EngineFrame, Event, NodeIdx, OjGraph, RtCommand};
 use tauri::Manager;
 
 /// Push a full graph from the UI: recompile it against the plugin registry and
@@ -157,6 +157,16 @@ fn poll_meters(state: tauri::State<'_, BackendState>) -> Result<Vec<EngineFrame>
         .lock()
         .map_err(|_| "engine backend mutex poisoned".to_string())?
         .drain_meters())
+}
+
+/// Drain pending engine fault events for DevLog / diagnostics.
+#[tauri::command]
+fn poll_events(state: tauri::State<'_, BackendState>) -> Result<Vec<Event>, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .drain_events())
 }
 
 /// Load decoded mono PCM as the sample for `node`'s sampler (content-addressed
@@ -317,6 +327,7 @@ pub fn run() {
             looper_cmd,
             subscribe_meters,
             poll_meters,
+            poll_events,
             load_sample,
             recorder_start,
             recorder_stop,

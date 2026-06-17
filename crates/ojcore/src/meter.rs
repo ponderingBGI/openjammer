@@ -195,6 +195,100 @@ pub mod return_frame {
     }
 }
 
+/// Fixed-size wire codec for RT-emittable events, carried on a dedicated event
+/// ring (NOT the meter ring — a fault storm must never evict meters). One tag
+/// continues the [`return_frame`] numbering past `TAG_METER = 1` / `TAG_BEAT = 2`.
+pub mod event_frame {
+    use ojproto::{FaultKind, NodeIdx, RtEvent};
+
+    /// Tag byte for an event frame. Continues `return_frame`'s sequence
+    /// (`TAG_METER = 1`, `TAG_BEAT = 2`).
+    pub const TAG_EVENT: u8 = 3;
+
+    /// Sub-kind for [`RtEvent::Xrun`] (byte 1 selects the variant).
+    pub const SUB_XRUN: u8 = 0;
+    /// Sub-kind for [`RtEvent::NodeFault`].
+    pub const SUB_NODE_FAULT: u8 = 1;
+    /// Sub-kind for [`RtEvent::RingFull`].
+    pub const SUB_RING_FULL: u8 = 2;
+
+    const FAULT_NON_FINITE: u8 = 0;
+    const FAULT_OVER_BUDGET: u8 = 1;
+    const FAULT_AUTO_BYPASSED: u8 = 2;
+
+    /// Largest event frame: tag + sub + node(u32) + fault(u8) = 7 bytes.
+    pub const MAX_LEN: usize = 1 + 1 + 4 + 1;
+
+    /// Encode one [`RtEvent`] into `buf`, returning the written length.
+    #[inline]
+    pub fn encode(ev: RtEvent, buf: &mut [u8; MAX_LEN]) -> usize {
+        buf[0] = TAG_EVENT;
+        match ev {
+            RtEvent::Xrun { dropped } => {
+                buf[1] = SUB_XRUN;
+                buf[2..6].copy_from_slice(&dropped.to_le_bytes());
+                6
+            }
+            RtEvent::NodeFault { node, fault } => {
+                buf[1] = SUB_NODE_FAULT;
+                buf[2..6].copy_from_slice(&node.0.to_le_bytes());
+                buf[6] = match fault {
+                    FaultKind::NonFinite => FAULT_NON_FINITE,
+                    FaultKind::OverBudget => FAULT_OVER_BUDGET,
+                    FaultKind::AutoBypassed => FAULT_AUTO_BYPASSED,
+                };
+                7
+            }
+            RtEvent::RingFull => {
+                buf[1] = SUB_RING_FULL;
+                2
+            }
+        }
+    }
+
+    /// Decode one event frame. Returns `None` on unknown sub-kind or truncation.
+    pub fn decode(bytes: &[u8]) -> Option<RtEvent> {
+        match (*bytes.first()?, bytes.get(1).copied()) {
+            (TAG_EVENT, Some(SUB_XRUN)) if bytes.len() >= 6 => {
+                let dropped = u32::from_le_bytes(bytes[2..6].try_into().ok()?);
+                Some(RtEvent::Xrun { dropped })
+            }
+            (TAG_EVENT, Some(SUB_NODE_FAULT)) if bytes.len() >= 7 => {
+                let node = NodeIdx(u32::from_le_bytes(bytes[2..6].try_into().ok()?));
+                let fault = match bytes[6] {
+                    FAULT_NON_FINITE => FaultKind::NonFinite,
+                    FAULT_OVER_BUDGET => FaultKind::OverBudget,
+                    FAULT_AUTO_BYPASSED => FaultKind::AutoBypassed,
+                    _ => return None,
+                };
+                Some(RtEvent::NodeFault { node, fault })
+            }
+            (TAG_EVENT, Some(SUB_RING_FULL)) => Some(RtEvent::RingFull),
+            _ => None,
+        }
+    }
+
+    /// RT-safe event emit: encode `ev` into a stack buffer and publish it.
+    #[cfg(feature = "std")]
+    #[inline]
+    pub fn emit(ring: &super::EventRing, ev: RtEvent) -> bool {
+        let mut buf = [0u8; MAX_LEN];
+        let n = encode(ev, &mut buf);
+        ring.push(&buf[..n])
+    }
+
+    /// Off-RT consumer of the event ring.
+    #[cfg(feature = "std")]
+    pub fn drain_events(ring: &super::EventRing, mut on_event: impl FnMut(RtEvent)) {
+        let mut buf = [0u8; MAX_LEN];
+        while let Some(n) = ring.pop(&mut buf) {
+            if let Some(ev) = decode(&buf[..n]) {
+                on_event(ev);
+            }
+        }
+    }
+}
+
 /// The RT -> control return ring (host side). A reused [`ojcore_midiring::ByteRing`]
 /// of 8 KiB, big enough to absorb a full block's worth of per-node meter frames
 /// plus a beat frame between control-thread drains. `std`-gated because it is a
@@ -202,10 +296,15 @@ pub mod return_frame {
 #[cfg(feature = "std")]
 pub type MeterRing = ojcore_midiring::ByteRing<8192>;
 
+/// The RT -> control EVENT return ring (host side). A separate ring so a fault
+/// storm can never back-pressure or evict per-node meter frames.
+#[cfg(feature = "std")]
+pub type EventRing = ojcore_midiring::ByteRing<16384>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ojproto::{EngineFrame, NodeIdx};
+    use ojproto::{EngineFrame, FaultKind, NodeIdx, RtEvent};
 
     #[test]
     fn rms_matches_known_signal() {
@@ -300,5 +399,73 @@ mod tests {
         assert!(return_frame::decode(&[0xFF, 0, 0, 0]).is_none());
         // Correct tag but truncated frame.
         assert!(return_frame::decode(&[return_frame::TAG_METER, 1, 2]).is_none());
+    }
+
+    fn assert_event_roundtrips(ev: RtEvent) {
+        let mut buf = [0u8; event_frame::MAX_LEN];
+        let n = event_frame::encode(ev, &mut buf);
+        assert!(n <= event_frame::MAX_LEN);
+        assert_eq!(buf[0], event_frame::TAG_EVENT);
+        assert_eq!(event_frame::decode(&buf[..n]), Some(ev));
+    }
+
+    #[test]
+    fn event_frame_roundtrips_every_variant() {
+        assert_event_roundtrips(RtEvent::Xrun { dropped: 7 });
+        assert_event_roundtrips(RtEvent::NodeFault {
+            node: NodeIdx(42),
+            fault: FaultKind::NonFinite,
+        });
+        assert_event_roundtrips(RtEvent::NodeFault {
+            node: NodeIdx(0),
+            fault: FaultKind::OverBudget,
+        });
+        assert_event_roundtrips(RtEvent::NodeFault {
+            node: NodeIdx(u32::MAX),
+            fault: FaultKind::AutoBypassed,
+        });
+        assert_event_roundtrips(RtEvent::RingFull);
+    }
+
+    #[test]
+    fn event_frame_rejects_garbage() {
+        assert!(event_frame::decode(&[]).is_none());
+        assert!(event_frame::decode(&[0xFF, event_frame::SUB_XRUN, 0, 0, 0, 0]).is_none());
+        assert!(event_frame::decode(&[event_frame::TAG_EVENT, 0x7F]).is_none());
+        assert!(event_frame::decode(&[event_frame::TAG_EVENT]).is_none());
+        assert!(
+            event_frame::decode(&[event_frame::TAG_EVENT, event_frame::SUB_XRUN, 1, 2]).is_none()
+        );
+        assert!(event_frame::decode(&[
+            event_frame::TAG_EVENT,
+            event_frame::SUB_NODE_FAULT,
+            1,
+            0,
+            0,
+            0,
+            0x7F,
+        ])
+        .is_none());
+    }
+
+    #[cfg(feature = "std")]
+    #[test]
+    fn drain_events_yields_pushed_sequence_fifo() {
+        let ring = EventRing::new();
+        let pushed = [
+            RtEvent::Xrun { dropped: 3 },
+            RtEvent::NodeFault {
+                node: NodeIdx(7),
+                fault: FaultKind::NonFinite,
+            },
+            RtEvent::RingFull,
+        ];
+        for &ev in &pushed {
+            assert!(event_frame::emit(&ring, ev), "ring should accept {ev:?}");
+        }
+
+        let mut drained = Vec::new();
+        event_frame::drain_events(&ring, |ev| drained.push(ev));
+        assert_eq!(drained, pushed);
     }
 }

@@ -30,3 +30,6 @@ ojcore-dsp = { path = "../ojcore-dsp" }
 wasmtime = { version = "45.0.2", default-features = false, features = ["cranelift", "runtime", "wat"], optional = true }
 # Loads native faust .dlls (native-host feature). Native-only.
 libloading = { version = "0.8", optional = true }
+
+[dev-dependencies]
+libm = { workspace = true }

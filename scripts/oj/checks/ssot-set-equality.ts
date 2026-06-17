@@ -63,7 +63,7 @@ export async function run(): Promise<CheckResult> {
   // The TS `PRIMITIVE_KINDS = [ ... ] as const` tuple — extract its string literals.
   const block = tsText.match(/PRIMITIVE_KINDS\s*=\s*\[([\s\S]*?)\]\s*as const/);
   const tsKinds = sortedUnique(
-    block ? [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]) : [],
+    block?.[1] ? [...block[1].matchAll(/"([^"]+)"/g)].map((m) => m[1] ?? '') : [],
   );
 
   const schemaOk = setEqual(schemaEnum, list);

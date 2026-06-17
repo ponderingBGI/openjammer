@@ -235,6 +235,54 @@ fn engine_frame_external_tagging() {
 }
 
 #[test]
+fn event_taxonomy_shapes_match_ts_mirror() {
+    assert_json(&Severity::Warn, "\"Warn\"");
+    assert_json(&Source::Engine, "\"Engine\"");
+    assert_json(&FaultKind::OverBudget, "\"OverBudget\"");
+
+    assert_json(&EventKind::Xrun { dropped: 2 }, r#"{"Xrun":{"dropped":2}}"#);
+    assert_json(
+        &EventKind::NodeFault {
+            node: NodeIdx(4),
+            fault: FaultKind::NonFinite,
+        },
+        r#"{"NodeFault":{"node":4,"fault":"NonFinite"}}"#,
+    );
+    assert_json(&EventKind::RingFull, "\"RingFull\"");
+    assert_json(
+        &EventKind::Message {
+            code: 7,
+            text: "hi".into(),
+        },
+        r#"{"Message":{"code":7,"text":"hi"}}"#,
+    );
+
+    assert_json(
+        &RtEvent::NodeFault {
+            node: NodeIdx(4),
+            fault: FaultKind::AutoBypassed,
+        },
+        r#"{"NodeFault":{"node":4,"fault":"AutoBypassed"}}"#,
+    );
+
+    assert_json(
+        &Event {
+            v: SCHEMA_VERSION,
+            seq: 9,
+            severity: Severity::Error,
+            kind: EventKind::NodeFault {
+                node: NodeIdx(4),
+                fault: FaultKind::OverBudget,
+            },
+            source: Source::Engine,
+            ts_us: 123456,
+            corr_id: 0,
+        },
+        r#"{"v":1,"seq":9,"severity":"Error","kind":{"NodeFault":{"node":4,"fault":"OverBudget"}},"source":"Engine","ts_us":123456,"corr_id":0}"#,
+    );
+}
+
+#[test]
 fn round_trips_back_to_rust() {
     // Deserialization must accept the exact same shape we assert above, so the
     // contract is symmetric (the TS side both produces and consumes these).

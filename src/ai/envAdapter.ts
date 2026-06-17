@@ -26,6 +26,7 @@ import {
 } from '../store/logStore';
 import { useAudioStore } from '../store/audioStore';
 import { gatherDiagnostics } from '../utils/diagnostics';
+import { redactText, redactValue } from '../utils/redact';
 import { applyTheme, getSavedThemeId, getThemeById, saveThemeId } from '../styles/themes';
 import type {
     AgentEnvPort,
@@ -49,8 +50,8 @@ function toSummary(e: LogEntry): LogEntrySummary {
         level: e.level,
         source: e.source,
         scope: e.scope,
-        message: e.message,
-        ...(e.fields !== undefined ? { fields: e.fields } : {}),
+        message: redactText(e.message),
+        ...(e.fields !== undefined ? { fields: redactValue(e.fields) as Record<string, unknown> } : {}),
         ...(e.corr !== undefined ? { corr: e.corr } : {}),
     };
 }

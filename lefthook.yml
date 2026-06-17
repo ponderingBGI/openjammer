@@ -16,17 +16,17 @@ pre-commit:
     # auto-fixes drift (line-surgical version-sync, stale-doc routing, etc).
     # `stage_fixed: true` re-stages whatever --fix modified so the commit is clean.
     doctor:
-      run: bunx oj doctor --fix --from-files {staged_files}
+      run: bun scripts/oj/index.ts doctor --fix --from-files {staged_files}
       stage_fixed: true
     # Version-sync consistency check (all four files == the release-please value).
     # A CONSISTENCY check, never an independent SSOT — release-please owns the bump.
     versions:
-      run: bunx oj doctor --check version-sync
+      run: bun scripts/oj/index.ts doctor --check version-sync
     # Credential scan. ALSO a required CI step (this local copy is early-warning).
     # Fails the commit on staged *.key / *.pem / *.p12 / *.pfx / *.minisign /
     # minisign secret headers / anything under .tauri/ — hardening the .gitignore.
     creds:
-      run: bunx oj doctor --check credentials
+      run: bun scripts/oj/index.ts doctor --check credentials
     # Format + lint via the ONE command surface — never re-encoded here. Shells to
     # `just`, which needs cargo (hence: install hooks on a Rust-equipped machine).
     fmt-lint:
@@ -38,4 +38,4 @@ pre-push:
     # affected-selection. Decides WHICH `just` recipes to run; never re-encodes them.
     # On a non-Rust rig this is a degraded no-op (just absent) — acceptable, CI is authoritative.
     preflight:
-      run: bunx oj preflight --affected
+      run: bun scripts/oj/index.ts preflight --affected

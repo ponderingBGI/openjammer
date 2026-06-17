@@ -102,7 +102,7 @@ fn run(node: &mut dyn DspInstance, input: &[f32]) -> Vec<f32> {
 }
 
 fn tone(n: usize, amp: f32) -> Vec<f32> {
-    (0..n).map(|i| (i as f32 * 0.7).sin() * amp).collect()
+    (0..n).map(|i| libm::sinf(i as f32 * 0.7) * amp).collect()
 }
 
 fn energy(buf: &[f32]) -> f32 {
