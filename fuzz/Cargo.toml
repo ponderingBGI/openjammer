@@ -1,0 +1,24 @@
+# cargo-fuzz harness for the untrusted parse surface (Lane B / nightly).
+# A DETACHED workspace (empty [workspace] table) so the root `cargo` build never
+# pulls in libfuzzer; run with `cargo +nightly fuzz run wav_decode`.
+[package]
+name = "ojcore-native-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+ojcore-native = { path = "../crates/ojcore-native" }
+
+[[bin]]
+name = "wav_decode"
+path = "fuzz_targets/wav_decode.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

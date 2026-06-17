@@ -32,5 +32,12 @@ dist-ssr
 # Rust / Cargo (ojcore workspace)
 /target
 
+# cargo-fuzz build + run artifacts (Lane B)
+/fuzz/target
+/fuzz/corpus
+/fuzz/artifacts
+/fuzz/coverage
+/fuzz/Cargo.lock
+
 # Claude Code agent worktrees (transient)
 .claude/worktrees/
