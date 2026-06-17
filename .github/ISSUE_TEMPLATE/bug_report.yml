@@ -1,0 +1,100 @@
+name: Bug report
+description: Report something broken or misbehaving in OpenJammer.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! The fastest path is the in-app **Report a problem**
+        action (Settings → About): it bundles a **redacted** diagnostic snapshot +
+        a recent log tail you can paste below (secrets, home-directory paths, and
+        LAN addresses are scrubbed automatically — review before posting).
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, and what went wrong?
+      placeholder: I clicked record on the looper and…
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps that reliably reproduce it, if you have them.
+      placeholder: |
+        1. Add a Sampler → Looper → Speaker
+        2. Play a few notes, hit record
+        3. …
+    validations:
+      required: false
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs. actual
+      placeholder: I expected the loop to play back; instead it was silent.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: build
+    attributes:
+      label: Build
+      options:
+        - Native desktop app (Tauri)
+        - Browser / PWA
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Channel
+      options:
+        - stable
+        - canary
+        - dev / local build
+        - Not sure
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: OpenJammer version
+      description: Shown in Settings → About (or the issue reporter's snapshot).
+      placeholder: 0.1.0-alpha.2
+    validations:
+      required: false
+
+  - type: input
+    id: os
+    attributes:
+      label: OS + browser
+      placeholder: Windows 11 / Chrome 142, or macOS 15 (Apple Silicon)
+    validations:
+      required: false
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic snapshot + logs (redacted)
+      description: Paste the output of the in-app "Report a problem" → "Copy full report" here. It is already redacted.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirms
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this isn't a duplicate.
+          required: true
+        - label: I reviewed the pasted logs and they contain no secrets.
+          required: true

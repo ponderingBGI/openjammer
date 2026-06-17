@@ -1,0 +1,67 @@
+/* AppErrorBoundary (§4) — a calm full-screen recovery card, design-token themed. */
+
+.app-error-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-lg, 24px);
+    background: color-mix(in srgb, var(--sketch-black, #1a1a1a) 40%, transparent);
+}
+
+.app-error-card {
+    width: min(420px, calc(100vw - 48px));
+    background: var(--bg-node, #fdfcf7);
+    border: var(--border-sketch-width, 2px) solid var(--sketch-black, #1a1a1a);
+    border-radius: var(--radius-lg, 14px);
+    box-shadow: var(--shadow-menu, 0 8px 28px rgba(0, 0, 0, 0.25));
+    color: var(--text-primary, #1a1a1a);
+    padding: var(--space-lg, 24px);
+    text-align: center;
+}
+
+.app-error-title {
+    font-family: var(--font-sketch, sans-serif);
+    margin: 0 0 var(--space-sm, 8px);
+}
+
+.app-error-msg {
+    font-family: var(--font-mono, monospace);
+    font-size: var(--text-sm, 13px);
+    color: var(--accent-danger, #e53935);
+    word-break: break-word;
+    margin: 0 0 var(--space-sm, 8px);
+}
+
+.app-error-note {
+    font-size: var(--text-xs, 12px);
+    color: var(--text-muted, #777);
+    margin: 0 0 var(--space-md, 16px);
+}
+
+.app-error-actions {
+    display: flex;
+    gap: var(--space-sm, 8px);
+    justify-content: center;
+}
+
+.app-error-btn {
+    font-family: var(--font-sketch, sans-serif);
+    padding: var(--space-xs, 6px) var(--space-md, 16px);
+    border: var(--border-sketch-width, 2px) solid var(--sketch-black, #1a1a1a);
+    border-radius: var(--radius-sm, 8px);
+    background: var(--bg-node, #fdfcf7);
+    color: var(--text-primary, #1a1a1a);
+    cursor: pointer;
+}
+
+.app-error-btn.primary {
+    background: var(--accent, var(--sketch-black, #1a1a1a));
+    color: var(--text-on-accent, #fff);
+}
+
+.app-error-btn:hover {
+    filter: brightness(1.06);
+}

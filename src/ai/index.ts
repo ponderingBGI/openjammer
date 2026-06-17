@@ -24,13 +24,24 @@ export type {
 export { PiAgentBackend } from './PiAgentBackend';
 export { MockAgentBackend, demoScript, type MockAgentOptions } from './MockAgentBackend';
 export { applyToolCall, TOOL_CATALOGUE } from './tools';
-export type { AppliedToolResult, DspNodeRegistrar, ToolDescriptor } from './tools';
+export type {
+    AppliedToolResult,
+    DspNodeRegistrar,
+    ToolDescriptor,
+    AgentEnvPort,
+    LogEntrySummary,
+    LogsReadResult,
+    DiagnosticsReadResult,
+    SettingsReadResult,
+    SettingsUpdateResult,
+} from './tools';
 export {
     createGraphStoreApi,
     currentParentId,
     type GraphStoreApi,
     type NodeSnapshot,
 } from './graphAdapter';
+export { createEnvPort } from './envAdapter';
 export { isTauri } from './tauri';
 export {
     listSessions,

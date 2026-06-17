@@ -83,6 +83,24 @@ export function LatencyWarningBanner({ onOpenSettings }: LatencyWarningBannerPro
         onOpenSettings?.();
     };
 
+    // Hand the latency problem to the AI co-pilot, seeded so it uses its
+    // diagnostics/settings tools rather than guessing.
+    const handleAskAi = () => {
+        handleDismiss();
+        window.dispatchEvent(
+            new CustomEvent('openjammer:ask-ai', {
+                detail: {
+                    prompt:
+                        'My audio latency is high in OpenJammer. Call get_diagnostics and ' +
+                        'get_settings, tell me in a sentence why the round-trip is high, and fix ' +
+                        'what you safely can — e.g. switch to the interactive latency hint, enable ' +
+                        'low-latency mode, or recommend selecting a USB audio interface. Keep every ' +
+                        'change reversible.',
+                },
+            }),
+        );
+    };
+
     // Get the primary issue to display
     const primaryIssue = diagnosis.issues[0];
 
@@ -102,6 +120,9 @@ export function LatencyWarningBanner({ onOpenSettings }: LatencyWarningBannerPro
             <div className="warning-actions">
                 <button className="warning-btn primary" onClick={handleFixNow}>
                     Fix Now
+                </button>
+                <button className="warning-btn secondary" onClick={handleAskAi}>
+                    Ask AI
                 </button>
                 <button className="warning-btn secondary" onClick={handleDismiss}>
                     Dismiss

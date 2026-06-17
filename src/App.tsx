@@ -10,6 +10,11 @@ import { Breadcrumbs } from './components/Toolbar/Breadcrumbs';
 import { HelpPanel } from './components/Toolbar/HelpPanel';
 import { SettingsPanel } from './components/Settings/SettingsPanel';
 import { CommandBar } from './components/CommandBar/CommandBar';
+import { DevLogPanel } from './components/DevLog/DevLogPanel';
+import { IssueReporter } from './components/IssueReporter/IssueReporter';
+import { AudioHealthPanel } from './components/AudioHealth/AudioHealthPanel';
+import { PwaUpdatePrompt } from './components/PwaUpdatePrompt';
+import { PluginsPanel } from './components/Plugins/PluginsPanel';
 import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
@@ -331,6 +336,21 @@ function App() {
       setAudioContextReady(true);
       setShowActivation(false);
 
+      // One-time first-run hint: the fastest path to a first sound. Shown once
+      // (localStorage-gated), dismissible, never blocking.
+      try {
+        if (!localStorage.getItem('oj-first-run-done')) {
+          localStorage.setItem('oj-first-run-done', '1');
+          toast('🎹 Make your first sound', {
+            description:
+              'Right-click the canvas → add a Keyboard and an Instrument, connect them to a Speaker, then press the Q–P keys. Press ? for help, or Ctrl/Cmd+K to ask the AI to build it for you.',
+            duration: 12000,
+          });
+        }
+      } catch {
+        // localStorage may be unavailable (private mode) — the hint is optional.
+      }
+
       // Get initial latency metrics
       const metrics = getLatencyMetrics();
       if (metrics) {
@@ -341,7 +361,10 @@ function App() {
       }
     } catch (err) {
       console.error('Failed to initialize audio:', err);
-      // alert('Failed to initialize audio. Please check your browser settings.');
+      toast.error('Could not start audio', {
+        description:
+          'Check your browser/OS audio permissions and device, then try again. Open “Audio health” (Ctrl/Cmd+Shift+H) or ask the AI for help.',
+      });
     }
   }, [setAudioContextReady, audioConfig, updateAudioMetrics]);
 
@@ -371,6 +394,22 @@ function App() {
 
       {/* Command Bar (Ctrl/Cmd+K) - owns its own toggle + open state (U19) */}
       <CommandBar />
+
+      {/* DevLog panel (L4) — the on-device structured-log surface; the AI agent
+          reads the same store. Toggled via the command palette / openjammer:toggle-devlog. */}
+      <DevLogPanel />
+
+      {/* L5 one-click "report a problem" reporter — captures a redacted log bundle. */}
+      <IssueReporter />
+
+      {/* Audio-health readout (§4) — the live diagnostics the AI reads, with fix-it. */}
+      <AudioHealthPanel />
+
+      {/* Channel-aware PWA update — applies on idle, never yanks the AudioContext. */}
+      <PwaUpdatePrompt />
+
+      {/* Plugins (§3) — discover your installed CLAP/VST3 plugins (desktop host). */}
+      <PluginsPanel />
 
       {/* Collaboration Share/Join control + peer list (U23 — collab state plane) */}
       <CollabControl />

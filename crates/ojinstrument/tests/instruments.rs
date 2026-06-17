@@ -3,6 +3,10 @@
 //! voices oldest-first. Exercised directly through the [`DspInstance`] surface
 //! (the same one the engine drives) plus loader/manifest sanity.
 
+// Test signal generators use std transcendentals; the libm-only guard is for the
+// deterministic DSP path, not the test reference tones.
+#![allow(clippy::disallowed_methods)]
+
 use std::sync::Arc;
 
 use ojcore::{DspInstance, PluginLoader, ProcessCtx};
@@ -213,6 +217,51 @@ fn sampler_plays_loaded_sample_at_root() {
         (f - 1000.0).abs() < 30.0,
         "sampler at root measured {f} Hz, expected ~1000"
     );
+}
+
+#[test]
+fn sampler_velocity_controls_brightness() {
+    // A low fundamental + a strong high partial, so the velocity low-pass changes
+    // the spectral BALANCE (a single tone would just be attenuated, not dulled).
+    fn bright_sample() -> Arc<SamplerSample> {
+        let n = SR as usize;
+        let pcm: Vec<f32> = (0..n)
+            .map(|i| {
+                let t = i as f32 / SR;
+                let low = (2.0 * std::f32::consts::PI * 220.0 * t).sin();
+                let high = (2.0 * std::f32::consts::PI * 8000.0 * t).sin();
+                0.5 * (low + high)
+            })
+            .collect();
+        Arc::new(SamplerSample::new(pcm, SR, 69))
+    }
+    // Spectral-tilt proxy (amplitude-independent): first-difference energy / total.
+    fn brightness(buf: &[f32]) -> f32 {
+        let total: f32 = buf.iter().map(|&x| x * x).sum::<f32>().max(1e-12);
+        let hf: f32 = buf.windows(2).map(|w| (w[1] - w[0]).powi(2)).sum();
+        hf / total
+    }
+
+    let mut soft = SamplerInstrument::new(SR);
+    soft.activate(SR, BLOCK);
+    soft.set_param(param::SUSTAIN, 1.0);
+    soft.set_sample(bright_sample());
+    soft.note_on(69, 20); // soft -> dark
+    let soft_out = render(&mut soft, 8);
+
+    let mut hard = SamplerInstrument::new(SR);
+    hard.activate(SR, BLOCK);
+    hard.set_param(param::SUSTAIN, 1.0);
+    hard.set_sample(bright_sample());
+    hard.note_on(69, 127); // hard -> open / bright
+    let hard_out = render(&mut hard, 8);
+
+    let (b_soft, b_hard) = (brightness(&soft_out), brightness(&hard_out));
+    assert!(
+        b_hard > b_soft * 1.5,
+        "a hard note ({b_hard}) must be brighter than a soft one ({b_soft})"
+    );
+    assert!(peak(&soft_out) > 0.001, "soft note went silent");
 }
 
 #[test]

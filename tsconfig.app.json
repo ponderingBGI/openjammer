@@ -8,6 +8,12 @@
     "types": ["vite/client", "node"],
     "skipLibCheck": true,
 
+    /* Path mapping for the shared TS protocol package (the wire/event SSOT). */
+    "baseUrl": ".",
+    "paths": {
+      "@openjammer/oj-protocol": ["./packages/oj-protocol-ts/src/index.ts"]
+    },
+
     /* Bundler mode */
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

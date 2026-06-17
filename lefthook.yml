@@ -1,0 +1,41 @@
+# lefthook.yml — the ONE hook control plane (T1-owned, co-designed with D1/D2/X2).
+# Created in Phase 1. Invoked via `bunx` NOT `-g` (evilmartians/lefthook#1165
+# Windows PATH bug on the maintainer's primary box). Local fast-feedback ONLY —
+# GitHub Actions' aggregate `gate` stays authoritative.
+#
+# `lefthook install` is run by the DEVELOPER on a Rust-equipped machine (the
+# fmt/clippy pre-commit step shells to `just`, which needs cargo). It is
+# intentionally NOT auto-installed here — there is deliberately no postinstall
+# that runs `lefthook install`, so a non-Rust contributor / CI is never forced
+# into hooks that cannot run locally.
+
+pre-commit:
+  parallel: true
+  commands:
+    # Affected-selection doctor: maps each staged path to a <2s check subset and
+    # auto-fixes drift (line-surgical version-sync, stale-doc routing, etc).
+    # `stage_fixed: true` re-stages whatever --fix modified so the commit is clean.
+    doctor:
+      run: bun scripts/oj/index.ts doctor --fix --from-files {staged_files}
+      stage_fixed: true
+    # Version-sync consistency check (all four files == the release-please value).
+    # A CONSISTENCY check, never an independent SSOT — release-please owns the bump.
+    versions:
+      run: bun scripts/oj/index.ts doctor --check version-sync
+    # Credential scan. ALSO a required CI step (this local copy is early-warning).
+    # Fails the commit on staged *.key / *.pem / *.p12 / *.pfx / *.minisign /
+    # minisign secret headers / anything under .tauri/ — hardening the .gitignore.
+    creds:
+      run: bun scripts/oj/index.ts doctor --check credentials
+    # Format + lint via the ONE command surface — never re-encoded here. Shells to
+    # `just`, which needs cargo (hence: install hooks on a Rust-equipped machine).
+    fmt-lint:
+      run: just fmt && just clippy
+
+pre-push:
+  commands:
+    # The affected-only preflight (Layer 2): content-addressed cache + git-diff
+    # affected-selection. Decides WHICH `just` recipes to run; never re-encodes them.
+    # On a non-Rust rig this is a degraded no-op (just absent) — acceptable, CI is authoritative.
+    preflight:
+      run: bun scripts/oj/index.ts preflight --affected

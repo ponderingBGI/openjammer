@@ -24,6 +24,7 @@
 
 import type { GraphStoreApi } from './graphAdapter';
 import type { Connection, GraphNode } from '../engine/types';
+import type { Severity, Source } from '@openjammer/oj-protocol';
 import type {
     AddConnectionArgs,
     AddNodeArgs,
@@ -33,9 +34,12 @@ import type {
     BatchApplyArgs,
     EmitPlanArgs,
     FindNodesArgs,
+    GetLogsArgs,
     RemoveConnectionArgs,
     RemoveNodeArgs,
+    SettingsPatch,
     UpdateNodeDataArgs,
+    UpdateSettingsArgs,
     ValidatePlanArgs,
 } from './types';
 import { planToToolCalls, type PlanPortResolver, type RefToId } from './plan';
@@ -144,6 +148,38 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'add_node/update_node_data/add_connection applied atomically (each edit ' +
             'undoable with Ctrl+Z). PREFER this for whole workflows; reuse existing ' +
             'nodes via get_graph/find_nodes first, and validate_plan to repair before emitting.',
+    },
+    {
+        name: 'get_logs',
+        description:
+            'Read the on-device DevLog tail (newest first), optionally filtered by ' +
+            '`levels`, `scope`, `search`, and `limit`. Side-effect-free. This is how ' +
+            'you SEE engine xruns, node faults, MIDI, asset/plugin events, and every ' +
+            'console line — diagnose "no sound" from evidence, not guesses.',
+    },
+    {
+        name: 'get_diagnostics',
+        description:
+            'Read the environment + live audio snapshot: app version/channel/executor, ' +
+            'cross-origin isolation, platform, whether the AudioContext is running, the ' +
+            'measured round-trip latency, sample rate, and the selected output device. ' +
+            'Side-effect-free. Call it first when the user says something is broken.',
+    },
+    {
+        name: 'get_settings',
+        description:
+            'Read the user-facing settings you may change: audio sample rate, latency ' +
+            'hint, low-latency mode, input/output device, theme, and default velocity. ' +
+            'Side-effect-free.',
+    },
+    {
+        name: 'update_settings',
+        description:
+            'Change settings via a `patch` over the safe allowlist (sampleRate, ' +
+            'latencyHint, lowLatencyMode, outputDeviceId, inputDeviceId, themeId, ' +
+            'defaultVelocity). Unknown keys are ignored; the change is REVERSIBLE ' +
+            '(Ctrl+Z / Reject restores the previous values). Use it to FIX a setup — ' +
+            'e.g. select the USB interface or switch to the interactive latency hint.',
     },
 ];
 
@@ -256,6 +292,113 @@ export interface PlanEnv {
     resolvePort: PlanPortResolver;
 }
 
+// ============================================================================
+// Diagnostics & settings port (the "help me get it working" surface)
+// ============================================================================
+
+/** One DevLog entry as relayed to the agent by `get_logs` (compact, redaction-safe). */
+export interface LogEntrySummary {
+    /** Wall-clock capture time, ms since epoch. */
+    ts: number;
+    /** ojproto severity. */
+    level: Severity;
+    /** Which side emitted it. */
+    source: Source;
+    /** Short subsystem tag, e.g. "audio" | "engine" | "midi" | "console". */
+    scope: string;
+    /** Human-readable message. */
+    message: string;
+    /** Optional structured fields. */
+    fields?: Record<string, unknown>;
+    /** Optional correlation id. */
+    corr?: number;
+}
+
+/** The `get_logs` relay: the filtered tail plus ring accounting. */
+export interface LogsReadResult {
+    /** Total entries currently in the ring (pre-filter). */
+    total: number;
+    /** How many entries were dropped because the ring filled. */
+    dropped: number;
+    /** How many entries this result carries (post-filter, post-limit). */
+    returned: number;
+    /** The matching entries, NEWEST first. */
+    entries: LogEntrySummary[];
+}
+
+/** The `get_diagnostics` relay: environment + live audio facts. */
+export interface DiagnosticsReadResult {
+    /** App version (release-please SSOT). */
+    version: string;
+    /** Release channel. */
+    channel: 'dev' | 'canary' | 'stable';
+    /** Selected audio transport, or "(auto)". */
+    executor: string;
+    /** Whether the page is cross-origin isolated (SharedArrayBuffer fast path). */
+    crossOriginIsolated: boolean;
+    /** Coarse OS family (e.g. "Win32", "MacIntel"). */
+    platform: string;
+    /** Whether the AudioContext has been started/resumed. */
+    audioReady: boolean;
+    /** Live AudioContext sample rate in Hz, or null when audio is not running. */
+    sampleRate: number | null;
+    /** Estimated round-trip latency for live playing (ms), or null when unknown. */
+    estimatedRoundTripMs: number | null;
+    /** Human latency classification (e.g. "excellent" | "high"), or null. */
+    latencyClass: string | null;
+    /** The selected/active output device label, or null for the system default. */
+    outputDeviceLabel: string | null;
+    /** True when the active output looks like a USB audio interface. */
+    usbAudioInterface: boolean;
+}
+
+/** The `get_settings` / `update_settings` relay: the safe-allowlist settings. */
+export interface SettingsReadResult {
+    /** AudioContext sample rate in Hz. */
+    sampleRate: number;
+    /** AudioContext latency hint. */
+    latencyHint: AudioContextLatencyCategory | number;
+    /** Whether low-latency input mode is on (echo-cancel/NS/AGC off). */
+    lowLatencyMode: boolean;
+    /** Selected output device id, or null for the system default. */
+    outputDeviceId: string | null;
+    /** Selected input device id, or null for the system default. */
+    inputDeviceId: string | null;
+    /** Active UI theme id. */
+    themeId: string;
+    /** Default note velocity, 0..1. */
+    defaultVelocity: number;
+}
+
+/** The outcome of applying an `update_settings` patch (reversible). */
+export interface SettingsUpdateResult {
+    /** The settings keys that were actually changed (allowlist ∩ patch, value-different). */
+    applied: string[];
+    /** The settings AFTER the patch. */
+    settings: SettingsReadResult;
+    /** Restores the previous values for exactly the changed keys. */
+    undo: () => void;
+}
+
+/**
+ * The diagnostics + settings port, injected into {@link applyToolCall} so the
+ * tool module stays PURE and unit-testable with a fake. {@link createEnvPort} (in
+ * `./envAdapter`) binds it to the live Zustand stores; tests pass an in-memory
+ * fake. OPTIONAL everywhere: when a caller omits it, the four diagnostics/settings
+ * tools degrade to a clear "not available in this context" result rather than
+ * throwing, so every existing caller keeps working unchanged.
+ */
+export interface AgentEnvPort {
+    /** Read the DevLog tail (newest first), filtered by {@link GetLogsArgs}. */
+    getLogs(args: GetLogsArgs): LogsReadResult;
+    /** Read the environment + live audio diagnostics snapshot. */
+    getDiagnostics(): DiagnosticsReadResult;
+    /** Read the current safe-allowlist settings. */
+    getSettings(): SettingsReadResult;
+    /** Apply a settings patch (allowlisted, reversible). */
+    updateSettings(patch: SettingsPatch): SettingsUpdateResult;
+}
+
 /**
  * Apply a single {@link AgentToolCall} against the graph store, returning a
  * reversible {@link AppliedToolResult}.
@@ -270,6 +413,7 @@ export function applyToolCall(
     store: GraphStoreApi,
     registrar: DspNodeRegistrar,
     planEnv?: PlanEnv,
+    env?: AgentEnvPort,
 ): AppliedToolResult {
     switch (call.name) {
         case 'add_node':
@@ -295,12 +439,21 @@ export function applyToolCall(
             return applyFindNodes(call.args, store);
         // BATCH (M3): one reversible frame, all-or-nothing.
         case 'batch_apply':
-            return applyBatch(call.args, store, registrar, planEnv);
+            return applyBatch(call.args, store, registrar, planEnv, env);
         // PLAN (M7): pure validation + the one-frame plan apply.
         case 'validate_plan':
             return applyValidatePlan(call.args, planEnv);
         case 'emit_plan':
-            return applyEmitPlan(call.args, store, registrar, planEnv);
+            return applyEmitPlan(call.args, store, registrar, planEnv, env);
+        // DIAGNOSTICS & SETTINGS: read logs/env/settings; write allowlisted settings.
+        case 'get_logs':
+            return applyGetLogs(call.args, env);
+        case 'get_diagnostics':
+            return applyGetDiagnostics(env);
+        case 'get_settings':
+            return applyGetSettings(env);
+        case 'update_settings':
+            return applyUpdateSettings(call.args, env);
     }
 }
 
@@ -535,6 +688,7 @@ function applyBatch(
     store: GraphStoreApi,
     registrar: DspNodeRegistrar,
     planEnv?: PlanEnv,
+    env?: AgentEnvPort,
 ): AppliedToolResult {
     const subUndos: Array<() => void> = [];
     const status: PerSubCall[] = [];
@@ -556,7 +710,7 @@ function applyBatch(
             break;
         }
 
-        const res = applyToolCall(sub, store, registrar, planEnv);
+        const res = applyToolCall(sub, store, registrar, planEnv, env);
         status.push({ index: i, name: sub.name, ok: res.ok, summary: res.summary });
         if (res.ok) {
             subUndos.push(res.undo);
@@ -650,6 +804,7 @@ function applyEmitPlan(
     store: GraphStoreApi,
     registrar: DspNodeRegistrar,
     planEnv?: PlanEnv,
+    env?: AgentEnvPort,
 ): AppliedToolResult {
     if (!planEnv) {
         return {
@@ -670,7 +825,7 @@ function applyEmitPlan(
     let index = 0;
 
     const runSub = (call: AgentToolCall, name: AgentToolCall['name']): AppliedToolResult => {
-        const res = applyToolCall(call, store, registrar, planEnv);
+        const res = applyToolCall(call, store, registrar, planEnv, env);
         status.push({ index: index++, name, ok: res.ok, summary: res.summary });
         if (res.ok) subUndos.push(res.undo);
         else failed = true;
@@ -727,6 +882,99 @@ function applyEmitPlan(
             for (let i = subUndos.length - 1; i >= 0; i--) subUndos[i]();
         }),
         data: { status, postState: graphSummary(store), validatorErrors, divergence },
+    };
+}
+
+// ============================================================================
+// Diagnostics & settings handlers — the "help me get it working" surface
+// ============================================================================
+
+/** The shared "this caller didn't wire the diagnostics/settings port" message. */
+const ENV_MISSING =
+    'diagnostics/settings are not available in this context (no environment port wired)';
+
+/**
+ * `get_logs`: relay the on-device DevLog tail (newest first). SIDE-EFFECT-FREE.
+ * Without an {@link AgentEnvPort} it returns an empty, clearly-labelled result
+ * rather than throwing, so a caller that omits the port still gets a valid shape.
+ */
+function applyGetLogs(args: GetLogsArgs, env?: AgentEnvPort): AppliedToolResult {
+    if (!env) {
+        return {
+            ok: true,
+            summary: `get_logs: ${ENV_MISSING}.`,
+            undo: NO_OP,
+            data: { total: 0, dropped: 0, returned: 0, entries: [] } satisfies LogsReadResult,
+        };
+    }
+    const result = env.getLogs(args);
+    const filt = args.search || args.scope || args.levels ? ' (filtered)' : '';
+    return {
+        ok: true,
+        summary: `Read ${result.returned} of ${result.total} log entr${result.total === 1 ? 'y' : 'ies'}${filt}${result.dropped ? `, ${result.dropped} dropped` : ''}.`,
+        undo: NO_OP,
+        data: result,
+    };
+}
+
+/** `get_diagnostics`: relay the environment + live audio snapshot. SIDE-EFFECT-FREE. */
+function applyGetDiagnostics(env?: AgentEnvPort): AppliedToolResult {
+    if (!env) {
+        return { ok: true, summary: `get_diagnostics: ${ENV_MISSING}.`, undo: NO_OP, data: null };
+    }
+    const d = env.getDiagnostics();
+    const audio = d.audioReady
+        ? `audio running @ ${d.sampleRate ?? '?'} Hz${d.estimatedRoundTripMs != null ? `, ~${Math.round(d.estimatedRoundTripMs)} ms round-trip` : ''}`
+        : 'audio NOT started';
+    return {
+        ok: true,
+        summary: `OpenJammer ${d.version} (${d.channel}) — ${audio}.`,
+        undo: NO_OP,
+        data: d,
+    };
+}
+
+/** `get_settings`: relay the current safe-allowlist settings. SIDE-EFFECT-FREE. */
+function applyGetSettings(env?: AgentEnvPort): AppliedToolResult {
+    if (!env) {
+        return { ok: true, summary: `get_settings: ${ENV_MISSING}.`, undo: NO_OP, data: null };
+    }
+    const s = env.getSettings();
+    return {
+        ok: true,
+        summary: `Settings: ${s.sampleRate} Hz, latency "${String(s.latencyHint)}", low-latency ${s.lowLatencyMode ? 'on' : 'off'}, theme "${s.themeId}".`,
+        undo: NO_OP,
+        data: s,
+    };
+}
+
+/**
+ * `update_settings`: apply an allowlisted, REVERSIBLE settings patch.
+ *
+ * The port validates the patch against the safe allowlist and returns the
+ * applied keys + the post-patch settings + an `undo` that restores the previous
+ * values — so this tool is exactly as reversible as a graph edit (Ctrl+Z /
+ * Reject). A patch that changes nothing is a successful no-op.
+ */
+function applyUpdateSettings(args: UpdateSettingsArgs, env?: AgentEnvPort): AppliedToolResult {
+    if (!env) {
+        return { ok: false, summary: `update_settings failed: ${ENV_MISSING}.`, undo: NO_OP };
+    }
+    const patch: SettingsPatch = args.patch ?? {};
+    const { applied, settings, undo } = env.updateSettings(patch);
+    if (applied.length === 0) {
+        return {
+            ok: true,
+            summary: 'update_settings: no allowlisted changes to apply (no-op).',
+            undo: NO_OP,
+            data: { applied, settings },
+        };
+    }
+    return {
+        ok: true,
+        summary: `Updated settings: ${applied.join(', ')}.`,
+        undo: once(undo),
+        data: { applied, settings },
     };
 }
 

@@ -5,7 +5,7 @@
 **Node-driven music creation for live performance — a low-latency Rust core (`ojcore`), as a native desktop app or zero-install in the browser**
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0--alpha-orange.svg)](package.json)
+[![Version](https://img.shields.io/badge/version-0.1.0--alpha.2-orange.svg)](package.json)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![Made with React](https://img.shields.io/badge/Made%20with-React-61dafb.svg)](https://reactjs.org/)
 [![Web Audio API](https://img.shields.io/badge/Web%20Audio%20API-ready-purple.svg)](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API)
@@ -25,6 +25,8 @@
 - [Browser Compatibility](#browser-compatibility)
 - [Audio Setup & USB Interfaces](#audio-setup--usb-interfaces)
 - [Vision](#vision)
+- [AI co-pilot & live debugging](#ai-co-pilot--live-debugging)
+- [Sound & bring your own](#sound--bring-your-own)
 - [Node System](#node-system)
 - [Node Categories](#node-categories)
 - [Ghost Mode](#ghost-mode-w-key)
@@ -59,7 +61,25 @@ covenant — the two beliefs, the nine code values, and the playbook — in
 
 ## Features
 
-🎹 **Real-time Keyboard Routing** - Bank switching (1-9) for controlling multiple instruments simultaneously
+🎹 **Every instrument plays out of the box** - 171 selectable instruments, each
+backed by a distinct **procedural voice** (16 timbre families — piano, organ,
+strings, reed, mallet, bell, pluck, …) so a cello and a sax sound like
+themselves, with **zero sample downloads**. Velocity shapes brightness; plucked
+strings use the real Karplus-Strong model.
+
+🤖 **AI co-pilot that can fix your setup** - The Ctrl/Cmd+K assistant builds graphs
+*and* can read your on-device logs + audio diagnostics and change your settings
+(reversibly) — so "there's no sound" becomes a question it answers and fixes.
+One-tap **"Ask AI to fix this"** from the DevLog and the latency banner.
+
+🩺 **Built for the stage** - An on-device **DevLog** (Ctrl/Cmd+Shift+L) and a
+one-screen **Audio health** readout (Ctrl/Cmd+Shift+H) surface xruns, latency,
+and device state; a panic-safe error boundary keeps a render glitch from
+white-screening a live show (your audio keeps playing).
+
+🎛️ **Bring your own sound** - Import your own samples, load SoundFonts, author
+Faust/code-node DSP, and discover your installed **CLAP/VST3 plugins** — the
+minimal core stays tiny; everything else is a plugin.
 
 🔁 **Layer-Based Looping** - Stack loops as layers instead of overdubbing, with individual mute/delete/effects per layer
 
@@ -67,11 +87,11 @@ covenant — the two beliefs, the nine code values, and the playbook — in
 
 🔌 **USB Audio Interface Support** - Professional low-latency audio (3-10ms with optimized setup)
 
-🎨 **Hand-Drawn Aesthetic** - Scribble/organic style with customizable theming (inspired by Cyberpunk 2077 UI)
+🎨 **Hand-Drawn Aesthetic** - Scribble/organic "Living Sketchbook" style with customizable theming
 
 ⚡ **Zero-Latency Editing** - Modify parameters, add effects, and reroute nodes without audio dropouts
 
-📴 **Offline Capability** - Full PWA support, works offline after first visit
+📴 **Offline Capability** - Full PWA support (apply-on-idle updates), works offline after first visit
 
 🎚️ **Live Performance Focused** - Ghost mode (W key), laptop-first design, screen real estate optimization
 
@@ -80,20 +100,21 @@ covenant — the two beliefs, the nine code values, and the playbook — in
 ## Quick Start
 
 ```bash
-# Install dependencies
+# Install dependencies (bun only)
 bun install
 
 # Start development server
 bun dev
 ```
 
-Open `http://localhost:3000` and click "Start Audio" to begin.
+Open the printed URL (Vite's default is `http://localhost:5173`) and click
+**Start OpenJammer** to begin.
 
 **First workflow:**
 1. Right-click canvas → Keyboard → Add Keyboard Node
 2. Right-click canvas → Instruments → Keyboard → Classic Piano
 3. Connect Keyboard output to Piano input
-4. Press keys (Q-P row) to play!
+4. Press keys (Q-P row) to play! — or press **Ctrl/Cmd+K** and ask the AI to build it for you.
 
 ---
 
@@ -162,7 +183,7 @@ This is a browser limitation, not an OpenJammer limitation. USB audio interfaces
 #### 2. Configure Browser Permissions
 
 1. Open OpenJammer
-2. Click "Start Audio" when prompted
+2. Click "Start OpenJammer" when prompted
 3. Grant microphone permissions when browser asks
 4. Open Settings → Audio tab
 5. Select your USB interface from the device dropdown
@@ -232,6 +253,55 @@ OpenJammer is a visual node-based audio workstation inspired by ComfyUI's interf
 ## Design Aesthetic
 
 **Scribble/hand-drawn style** with cream/beige backgrounds, black hand-drawn outlines, and rounded organic shapes (see design mockups). Theming is user-customizable via a settings panel inspired by Cyberpunk 2077's in-game menu.
+
+---
+
+## AI co-pilot & live debugging
+
+Press **Ctrl/Cmd+K** to open the command bar. The AI half hands a plain-language
+task to a sandboxed agent that builds and edits the canvas with the *same
+reversible graph verbs you drive by hand* — undo anything with plain **Ctrl+Z**,
+no Approve/Reject gate.
+
+Crucially, the agent can also **see what's happening and fix it**: it reads the
+on-device logs (`get_logs`), the live audio diagnostics (`get_diagnostics`), and
+your settings (`get_settings`), and can change the safe-allowlist settings
+(`update_settings`) — all reversibly. So *"I hear nothing"* becomes a question it
+answers from evidence and repairs (select your interface, lower the latency, wire
+the missing path to a speaker). See [docs/agent-tools.md](docs/agent-tools.md) and
+the [Troubleshooting with the AI](https://ponderingbgi.github.io/openjammer/guides/troubleshooting-with-the-ai/) guide.
+
+When something breaks on stage, two surfaces are always one keystroke away:
+
+- **DevLog** (`Ctrl/Cmd+Shift+L`) — the structured tail of engine xrun/node-fault/
+  MIDI/asset events and every captured `console.*` line, faceted + searchable,
+  with a one-tap **"Ask AI to fix this"**.
+- **Audio health** (`Ctrl/Cmd+Shift+H`) — a calm green/amber/red readout: is the
+  engine running, the round-trip latency, sample rate, output device, COI — with
+  Open-Settings + Ask-AI fix-it buttons.
+
+A held note beats a glitch: a render error never white-screens a show — a panic-safe
+boundary keeps your audio (which runs off the React tree) playing and offers a calm
+recovery card.
+
+---
+
+## Sound & bring your own
+
+Every one of the 171 selectable instruments plays immediately — each backed by a
+distinct, deterministic **procedural voice** (no sample packs to download). The
+floor is procedural; the ceiling is yours:
+
+- **Your own samples** — drop or browse an audio file onto a Sampler node.
+- **SoundFonts (.sf2)** — the native SoundFont synth with GM program selection.
+- **Faust / code nodes** — author DSP from source (the AI can do this for you);
+  it runs on the real-time wasmtime / native kernel.
+- **Native plugins** — discover your installed **CLAP/VST3** plugins from the
+  **Plugins** panel (`Ctrl/Cmd+Shift+P`).
+
+How voices are synthesized and how to extend them:
+[docs/voice-engine.md](docs/voice-engine.md) ·
+[Instruments & sound](https://ponderingbgi.github.io/openjammer/guides/instruments-and-sound/).
 
 ---
 
@@ -326,12 +396,13 @@ Toggle for live performance view:
 ## Technical Details
 
 - **Runtime**: Bun
-- **Framework**: React 19 with TypeScript
-- **Audio**: Web Audio API with AudioWorklet
+- **Framework**: React 19 with TypeScript (the shared control plane)
+- **Audio engine**: `ojcore` — one real-time-safe **Rust** core compiled to **native** (cpal, low-latency, CLAP/VST3 hosting) and **WebAssembly** (AudioWorklet PWA), selected by `OJ_EXECUTOR`
+- **AI**: a sandboxed Ctrl/Cmd+K agent with reversible graph + diagnostics/settings tools
 - **State Management**: Zustand
-- **Storage**: Local browser storage + JSON import/export
-- **Hosting**: Vercel (static deployment)
-- **Offline**: Full PWA functionality with Service Workers
+- **Storage**: Local browser storage + JSON import/export; native SQLite/FTS5 log store
+- **Hosting**: Vercel (static PWA) + native installers
+- **Offline**: Full PWA functionality with Service Workers (apply-on-idle updates)
 
 ### Architecture Goals
 

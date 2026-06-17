@@ -23,6 +23,7 @@
 import type { NodeType, Position } from '../engine/types';
 import type { ParamDecl } from '../engine/manifest';
 import type { WorkflowPlan } from './plan';
+import type { Severity } from '@openjammer/oj-protocol';
 
 // ============================================================================
 // Tool calls — the ONLY thing an agent is allowed to emit
@@ -55,7 +56,14 @@ export type AgentToolName =
     | 'find_nodes'
     | 'batch_apply'
     | 'validate_plan'
-    | 'emit_plan';
+    | 'emit_plan'
+    // Diagnostics & settings (the "help me get it working" surface): the agent
+    // can READ the on-device logs + environment and READ/WRITE the safe-allowlist
+    // settings, so "why is there no sound?" becomes an answerable, fixable question.
+    | 'get_logs'
+    | 'get_diagnostics'
+    | 'get_settings'
+    | 'update_settings';
 
 /** Arguments for {@link AgentToolName} `add_node`. Mirrors `graphStore.addNode`. */
 export interface AddNodeArgs {
@@ -201,6 +209,70 @@ export type ValidatePlanArgs = WorkflowPlan;
  */
 export type EmitPlanArgs = WorkflowPlan;
 
+/**
+ * Arguments for the READ tool `get_logs`: tail the on-device DevLog ring,
+ * optionally filtered. SIDE-EFFECT-FREE. This is how the agent SEES what the app
+ * has been doing — engine xruns, node faults, MIDI, asset/plugin events, and
+ * every captured `console.*` line — so it can diagnose "there's no sound" from
+ * evidence instead of guessing.
+ */
+export interface GetLogsArgs {
+    /** Keep only these severities (omit = all levels). */
+    levels?: Severity[];
+    /** Keep only this scope tag, e.g. "audio" | "engine" | "midi" | "console" (omit = all). */
+    scope?: string;
+    /** Case-insensitive substring over message + scope (omit = no text filter). */
+    search?: string;
+    /** Max entries to return, NEWEST first. Defaults to 50; capped server-side. */
+    limit?: number;
+}
+
+/**
+ * Arguments for the READ tool `get_diagnostics`: none. Returns the environment +
+ * live audio snapshot (version/channel/executor/isolation/platform, plus whether
+ * the AudioContext is running, the measured round-trip latency, sample rate, and
+ * the selected output device). SIDE-EFFECT-FREE.
+ */
+export type GetDiagnosticsArgs = Record<string, never>;
+
+/**
+ * Arguments for the READ tool `get_settings`: none. Returns the current
+ * user-facing settings the agent is allowed to inspect/change (audio sample
+ * rate, latency hint, low-latency mode, input/output device, theme, default
+ * velocity). SIDE-EFFECT-FREE.
+ */
+export type GetSettingsArgs = Record<string, never>;
+
+/**
+ * Arguments for `update_settings`: a partial patch over the SAFE ALLOWLIST of
+ * settings keys (see {@link GetSettingsArgs}). Unknown keys are ignored (never
+ * an error), and the change is REVERSIBLE — applying it returns an undo that
+ * restores the previous values, so the agent's "let me try 48 kHz" is as
+ * undoable as every graph edit.
+ */
+export interface UpdateSettingsArgs {
+    /** Settings keys to change; only known, safe keys are honoured. */
+    patch: SettingsPatch;
+}
+
+/** The safe-allowlist settings the agent may read and write. All optional. */
+export interface SettingsPatch {
+    /** AudioContext sample rate in Hz (e.g. 44100 | 48000 | 96000). */
+    sampleRate?: number;
+    /** AudioContext latency hint: 'interactive' | 'balanced' | 'playback' | a seconds number. */
+    latencyHint?: AudioContextLatencyCategory | number;
+    /** Disable echo-cancellation/noise-suppression/AGC for lowest input latency. */
+    lowLatencyMode?: boolean;
+    /** Selected output device id (`setSinkId`), or null for the system default. */
+    outputDeviceId?: string | null;
+    /** Selected input device id, or null for the system default. */
+    inputDeviceId?: string | null;
+    /** UI theme id (e.g. 'cream' | 'cyberpunk' | 'midnight'). */
+    themeId?: string;
+    /** Default note velocity, 0..1. */
+    defaultVelocity?: number;
+}
+
 /** Discriminated union of every concrete tool call an agent may emit. */
 export type AgentToolCall =
     | { name: 'add_node'; args: AddNodeArgs }
@@ -215,7 +287,11 @@ export type AgentToolCall =
     | { name: 'find_nodes'; args: FindNodesArgs }
     | { name: 'batch_apply'; args: BatchApplyArgs }
     | { name: 'validate_plan'; args: ValidatePlanArgs }
-    | { name: 'emit_plan'; args: EmitPlanArgs };
+    | { name: 'emit_plan'; args: EmitPlanArgs }
+    | { name: 'get_logs'; args: GetLogsArgs }
+    | { name: 'get_diagnostics'; args: GetDiagnosticsArgs }
+    | { name: 'get_settings'; args: GetSettingsArgs }
+    | { name: 'update_settings'; args: UpdateSettingsArgs };
 
 // ============================================================================
 // Streamed transcript events

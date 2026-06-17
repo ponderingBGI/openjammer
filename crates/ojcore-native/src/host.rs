@@ -24,6 +24,8 @@ use cpal::{BufferSize, SampleFormat, Stream, StreamConfig};
 
 use ojcore::{CommandConsumer, Engine};
 
+use crate::recorder::RecorderSink;
+
 /// The minimal slice of [`Engine`] the audio callback needs. Abstracting it lets
 /// the callback wiring be tested against a mock without an audio device (and
 /// without a compiled DSP program).
@@ -242,8 +244,30 @@ impl AudioHost {
     /// audio hardware — the device-less sandbox path.
     pub fn start(
         req: StreamRequest,
+        engine: Engine,
+        rx: CommandConsumer,
+    ) -> Result<Self, HostError> {
+        Self::start_inner(req, engine, rx, None)
+    }
+
+    /// Like [`start`](Self::start) but the duplex input is captured into
+    /// `capture` (a [`RecorderSink`]) on the RT thread — the seam the loopback
+    /// latency harness uses to record the round-trip impulse on real hardware.
+    /// Requires `req.duplex_input = true` to actually open the input stream.
+    pub fn start_with_input_capture(
+        req: StreamRequest,
+        engine: Engine,
+        rx: CommandConsumer,
+        capture: RecorderSink,
+    ) -> Result<Self, HostError> {
+        Self::start_inner(req, engine, rx, Some(capture))
+    }
+
+    fn start_inner(
+        req: StreamRequest,
         mut engine: Engine,
         mut rx: CommandConsumer,
+        input_capture: Option<RecorderSink>,
     ) -> Result<Self, HostError> {
         let host = cpal::default_host();
         let device = host
@@ -302,7 +326,7 @@ impl AudioHost {
         // For U7 the input stream simply proves duplex open succeeds; the live
         // loopback capture wiring runs on the founder's hardware.
         let input = if req.duplex_input {
-            Some(Self::build_input(&host, &config)?)
+            Some(Self::build_input(&host, &config, input_capture)?)
         } else {
             None
         };
@@ -361,7 +385,11 @@ impl AudioHost {
     /// Build the duplex input (capture) stream. For U7 this is a minimal,
     /// no-op-consuming capture that proves the duplex path opens; the live
     /// loopback harness on real hardware swaps in a capturing callback.
-    fn build_input(host: &cpal::Host, out_config: &StreamConfig) -> Result<Stream, HostError> {
+    fn build_input(
+        host: &cpal::Host,
+        out_config: &StreamConfig,
+        mut capture: Option<RecorderSink>,
+    ) -> Result<Stream, HostError> {
         let in_device = host
             .default_input_device()
             .ok_or(HostError::NoInputDevice)?;
@@ -389,9 +417,14 @@ impl AudioHost {
         in_device
             .build_input_stream(
                 in_config,
-                move |_data: &[f32], _info: &cpal::InputCallbackInfo| {
-                    // Capture sink is wired on real hardware; here it just drains
-                    // the input ring so the backend does not overrun.
+                move |data: &[f32], _info: &cpal::InputCallbackInfo| {
+                    // RT-safe capture: push the interleaved input block into the
+                    // off-RT recorder ring when a sink is wired (the loopback
+                    // harness installs one); otherwise just drain so the backend
+                    // does not overrun.
+                    if let Some(sink) = capture.as_mut() {
+                        sink.capture(data);
+                    }
                 },
                 err_fn,
                 None,
@@ -602,6 +635,84 @@ mod tests {
         )
         .expect("host start");
         std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(host.config().sample_rate, 48_000);
+    }
+
+    /// Loopback round-trip automation: with a loopback cable (or software
+    /// loopback) feeding output back into input, `start_with_input_capture`
+    /// records the input on the RT thread into a [`Recorder`]; the control thread
+    /// drains it and detects the rendered impulse, turning the manual runbook into
+    /// a measurement. Device-gated; run on founder hardware with
+    /// `cargo test -p ojcore-native -- --ignored loopback`.
+    #[test]
+    #[ignore = "requires a real duplex device + a loopback cable; run on founder hardware"]
+    fn loopback_capture_records_input() {
+        use crate::recorder::Recorder;
+        use ojcore::{compile, GainLoader, PluginRegistry};
+        use ojproto::{IrEdge, IrNode, NodeIdx, OjGraph, PrimitiveKind};
+
+        let mut reg = PluginRegistry::new();
+        reg.register(Box::new(GainLoader::new()));
+        let graph = OjGraph {
+            ir_version: ojproto::SCHEMA_VERSION,
+            sample_rate: 48_000,
+            block_size: 64,
+            nodes: vec![
+                IrNode {
+                    id: NodeIdx(0),
+                    manifest_id: ojcore::GAIN_ID.into(),
+                    kind: PrimitiveKind::Gain,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(1),
+                    manifest_id: ojcore::GAIN_ID.into(),
+                    kind: PrimitiveKind::SpeakerOut,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 1,
+                },
+            ],
+            edges: vec![IrEdge {
+                from_node: NodeIdx(0),
+                from_port: 0,
+                to_node: NodeIdx(1),
+                to_port: 0,
+                kind: ojproto::ConnectionType::Audio,
+            }],
+            schedule: vec![],
+        };
+        let prog = compile(&graph, &reg).expect("compile");
+        let engine = Engine::new(prog);
+        let (_tx, rx) = ojcore::CommandQueue::split(64);
+
+        // Capture the duplex input into a Recorder via its RT-side sink.
+        let (mut recorder, sink) = Recorder::with_default_ring(2, 48_000);
+        let host = AudioHost::start_with_input_capture(
+            StreamRequest {
+                sample_rate: 48_000,
+                buffer_frames: 64,
+                channels: 2,
+                duplex_input: true,
+            },
+            engine,
+            rx,
+            sink,
+        )
+        .expect("host start with capture");
+
+        // Let the duplex stream run, then drain what the input captured.
+        std::thread::sleep(Duration::from_millis(300));
+        recorder.drain();
+        let pcm = recorder.finish();
+        assert!(
+            !pcm.samples.is_empty(),
+            "loopback capture recorded no input frames"
+        );
         assert_eq!(host.config().sample_rate, 48_000);
     }
 }

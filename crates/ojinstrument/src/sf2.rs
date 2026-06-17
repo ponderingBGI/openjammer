@@ -81,6 +81,19 @@ impl Sf2Instrument {
     pub fn is_loaded(&self) -> bool {
         self.synth.is_some()
     }
+
+    /// Select the General-MIDI `bank`/`preset` (program) the loaded SoundFont
+    /// plays — e.g. bank 0 preset 0 = Acoustic Grand, bank 128 = the percussion
+    /// kit. Sends a bank-select (CC0) + program-change on the synth channel.
+    /// A no-op (safe) when no SoundFont is loaded. Off the RT thread.
+    pub fn select_program(&mut self, bank: u8, preset: u8) {
+        if let Some(synth) = self.synth.as_mut() {
+            // Control change: bank-select MSB (CC 0).
+            synth.process_midi_message(CHANNEL, 0xB0, 0x00, bank as i32);
+            // Program change to `preset`.
+            synth.process_midi_message(CHANNEL, 0xC0, preset as i32, 0);
+        }
+    }
 }
 
 /// Format any `rustysynth` error (its errors impl `Display`) into an owned

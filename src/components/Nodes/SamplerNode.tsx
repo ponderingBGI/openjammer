@@ -141,6 +141,7 @@ export const SamplerNode = memo(function SamplerNode({
     const updateNodeData = useGraphStore((s) => s.updateNodeData);
     const nodeRef = useRef<HTMLDivElement>(null);
     const sampleAreaRef = useRef<HTMLDivElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Audio clip store for accepting clip drops
     const registerDropTarget = useAudioClipStore((s) => s.registerDropTarget);
@@ -300,6 +301,44 @@ export const SamplerNode = memo(function SamplerNode({
         setIsDragOver(false);
     }, []);
 
+    // Decode an audio File and bind it as this sampler's voice (the bring-your-own
+    // path). Shared by the drag-drop zone AND the click-to-browse file input.
+    const loadAudioFile = useCallback(
+        async (file: File) => {
+            if (!(file.type.startsWith('audio/') || file.name.match(/\.(wav|mp3|ogg|flac|aiff|m4a)$/i))) {
+                return;
+            }
+            const ctx = getAudioContext();
+            if (!ctx) return;
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const buffer = await ctx.decodeAudioData(arrayBuffer);
+                const sampler = await getExecutor().waitForSamplerAdapter(node.id);
+                if (sampler) sampler.setBuffer(buffer);
+                const points = generateWaveform(buffer);
+                setWaveformData(points);
+                updateNodeData(node.id, {
+                    sampleName: file.name,
+                    sampleId: `file:${file.name}:${Date.now()}`,
+                    waveformData: points,
+                    duration: buffer.duration,
+                });
+            } catch (err) {
+                console.error('[SamplerNode] Failed to decode audio file:', err);
+            }
+        },
+        [node.id, updateNodeData, generateWaveform],
+    );
+
+    const handleFileInputChange = useCallback(
+        (e: React.ChangeEvent<HTMLInputElement>) => {
+            const file = e.target.files?.[0];
+            if (file) void loadAudioFile(file);
+            e.target.value = ''; // allow re-picking the same file
+        },
+        [loadAudioFile],
+    );
+
     const handleDrop = useCallback(async (e: React.DragEvent) => {
         e.preventDefault();
         e.stopPropagation();
@@ -310,34 +349,8 @@ export const SamplerNode = memo(function SamplerNode({
         // Handle file system files
         const files = e.dataTransfer.files;
         if (files.length > 0) {
-            const file = files[0];
-            if (file.type.startsWith('audio/') || file.name.match(/\.(wav|mp3|ogg|flac|aiff|m4a)$/i)) {
-                try {
-                    const arrayBuffer = await file.arrayBuffer();
-                    if (ctx) {
-                        const buffer = await ctx.decodeAudioData(arrayBuffer);
-
-                        // Wait for sampler adapter to be available
-                        const sampler = await getExecutor().waitForSamplerAdapter(node.id);
-                        if (sampler) {
-                            sampler.setBuffer(buffer);
-                        }
-
-                        const points = generateWaveform(buffer);
-                        setWaveformData(points);
-
-                        updateNodeData(node.id, {
-                            sampleName: file.name,
-                            sampleId: `file:${file.name}:${Date.now()}`,
-                            waveformData: points,
-                            duration: buffer.duration
-                        });
-                    }
-                } catch (err) {
-                    console.error('[SamplerNode] Failed to decode audio file:', err);
-                }
-                return;
-            }
+            await loadAudioFile(files[0]);
+            return;
         }
 
         // Handle library sample drop
@@ -369,7 +382,7 @@ export const SamplerNode = memo(function SamplerNode({
                 console.error('[SamplerNode] Failed to load library sample:', err);
             }
         }
-    }, [node.id, updateNodeData, generateWaveform]);
+    }, [node.id, updateNodeData, generateWaveform, loadAudioFile]);
 
     // Clear sample
     const handleClearSample = useCallback((e: React.MouseEvent) => {
@@ -566,9 +579,24 @@ export const SamplerNode = memo(function SamplerNode({
                         </div>
                     </>
                 ) : (
-                    <span className="sampler-drop-text">Drop audio file</span>
+                    <button
+                        type="button"
+                        className="sampler-drop-text"
+                        onClick={() => fileInputRef.current?.click()}
+                        title="Click to choose an audio file, or drop one here"
+                    >
+                        Drop or click to load audio
+                    </button>
                 )}
             </div>
+            {/* Hidden picker for click-to-browse (bring your own sample). */}
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/*,.wav,.mp3,.ogg,.flac,.aiff,.m4a"
+                style={{ display: 'none' }}
+                onChange={handleFileInputChange}
+            />
 
             {/* Controls */}
             <div className="sampler-controls">

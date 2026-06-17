@@ -67,6 +67,7 @@ import {
 } from '../ai/piSessions';
 import { createGraphStoreApi } from '../ai/graphAdapter';
 import { createPlanEnv } from '../ai/planAdapter';
+import { createEnvPort } from '../ai/envAdapter';
 import type { Position } from '../engine/types';
 
 // ============================================================================
@@ -300,7 +301,7 @@ function slug(name: string): string {
  */
 function applyStreamedToolCall(call: AgentToolCall): ActionChip {
     const store = createGraphStoreApi();
-    const result = applyToolCall(call, store, dspRegistrar, createPlanEnv());
+    const result = applyToolCall(call, store, dspRegistrar, createPlanEnv(), createEnvPort());
     return { name: call.name, summary: result.summary, ok: result.ok };
 }
 

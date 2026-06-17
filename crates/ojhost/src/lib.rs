@@ -43,7 +43,7 @@ mod scan;
 pub use descriptor::{PluginDescriptor, PluginFormat, PortCounts};
 pub use error::HostError;
 pub use node::{HostedPlugin, PluginHostLoader, PluginHostNode, PLUGIN_HOST_ID};
-pub use scan::{scan, scan_with, Blacklist, ScanCache};
+pub use scan::{default_plugin_dirs, scan, scan_with, Blacklist, ScanCache};
 
 use ojcore::PluginRegistry;
 
@@ -167,5 +167,19 @@ mod tests {
         let mut reg = PluginRegistry::new();
         assert_eq!(register_scanned(&mut reg, &[]), 0);
         assert!(!reg.contains(PLUGIN_HOST_ID));
+    }
+
+    #[test]
+    fn default_plugin_dirs_are_nonempty_and_clap_shaped() {
+        let dirs = default_plugin_dirs();
+        assert!(!dirs.is_empty(), "no default plugin dirs for this platform");
+        // At least one standard CLAP directory is present.
+        assert!(
+            dirs.iter().any(|d| {
+                let s = d.to_string_lossy().to_lowercase();
+                s.contains("clap")
+            }),
+            "default dirs missing a CLAP path: {dirs:?}"
+        );
     }
 }

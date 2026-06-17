@@ -256,6 +256,118 @@ pub enum EngineFrame {
     },
 }
 
+/// Log severity, lowest to highest. Bare-variant-string serde (no `rename_all`),
+/// mirrored on the TS side exactly like [`PrimitiveKind`] / [`ConnectionType`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Severity {
+    /// Finest-grained tracing.
+    Trace,
+    /// Debug-level detail.
+    Debug,
+    /// Informational.
+    Info,
+    /// A warning.
+    Warn,
+    /// An error.
+    Error,
+}
+
+/// Which side of the dual-target seam emitted the event. Bare-variant-string
+/// serde, mirrored on the TS side exactly like [`PrimitiveKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Source {
+    /// The native engine core.
+    Engine,
+    /// The browser wasm worklet.
+    Wasm,
+    /// The UI / control plane.
+    Ui,
+    /// The native desktop host (cpal / Tauri).
+    Native,
+}
+
+/// The RT-emittable fault taxonomy. Each maps 1:1 onto an engine resilience
+/// flag (`non_finite` / `over_budget` / `auto_bypass`). Bare-variant-string
+/// serde, like [`PrimitiveKind`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FaultKind {
+    /// A non-finite sample (NaN/Inf) was produced.
+    NonFinite,
+    /// The node exceeded its per-block time budget.
+    OverBudget,
+    /// The node was auto-bypassed after repeated faults.
+    AutoBypassed,
+}
+
+/// The CLOSED, versioned, control-rate event taxonomy. EXTERNALLY tagged by
+/// serde (matching [`RtCommand`] / [`EngineFrame`]): unit variants serialize as
+/// a bare string, data variants as `{ "<Variant>": { ..fields.. } }`. `Message`
+/// is the ONLY `String`-carrying variant. Versioned by the existing
+/// [`SCHEMA_VERSION`] — there is NO second version axis.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum EventKind {
+    /// Process/stream lifecycle (start, stop, device change).
+    Lifecycle,
+    /// A hot-swap of the running program landed.
+    GraphSwap,
+    /// Buffer underrun(s) since the last event; `dropped` is a coalesced count.
+    Xrun { dropped: u32 },
+    /// A per-node DSP fault (NaN / over-budget / auto-bypass).
+    NodeFault { node: NodeIdx, fault: FaultKind },
+    /// The event ring overflowed and dropped frames (drop-and-count).
+    RingFull,
+    /// Asset (sample / IR / SF2) load or decode event.
+    Asset,
+    /// CLAP / host-plugin lifecycle event.
+    Plugin,
+    /// MIDI in/out event.
+    Midi,
+    /// Collaboration / LAN-peer event.
+    Collab,
+    /// Free-form coded message — the single `String`-carrying variant.
+    Message { code: u16, text: String },
+}
+
+/// The RT-safe `Copy` subset of [`EventKind`] that rides the `ByteRing`. NO heap
+/// field is permitted: a `String`/`Vec` would push this past 16 bytes and FAIL
+/// the build below — the same mechanical guard that protects [`RtCommand`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RtEvent {
+    /// Buffer underrun(s); `dropped` is a coalesced count.
+    Xrun { dropped: u32 },
+    /// A per-node DSP fault.
+    NodeFault { node: NodeIdx, fault: FaultKind },
+    /// The event ring overflowed (drop-and-count).
+    RingFull,
+}
+
+// Mirrors the proven `RtCommand` cap above. A heap field smuggled into
+// `RtEvent` becomes a COMPILE error, not a runtime surprise.
+const _: () = assert!(core::mem::size_of::<RtEvent>() <= 16);
+
+/// The off-RT, control-rate event ENVELOPE every L1/L3/L4 consumer reads: the
+/// decoded [`EventKind`] plus severity/source/timestamp/correlation metadata.
+/// A plain struct, so serde serializes it as an object with these field names in
+/// declaration order — mirrored byte-for-byte by the `oj-protocol-ts` `Event`
+/// interface and pinned by wire-shape tests.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Event {
+    /// Schema version (mirrors [`SCHEMA_VERSION`]).
+    pub v: u16,
+    /// Monotonic per-source sequence number.
+    pub seq: u32,
+    /// Severity.
+    pub severity: Severity,
+    /// The event taxonomy payload.
+    pub kind: EventKind,
+    /// Which side emitted it.
+    pub source: Source,
+    /// Engine-stamped timestamp, microseconds.
+    pub ts_us: u64,
+    /// Correlation id for click-to-correlate; `0` = none.
+    pub corr_id: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

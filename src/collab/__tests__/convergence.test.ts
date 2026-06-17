@@ -449,14 +449,24 @@ describe('PresenceManager', () => {
         // emission is throttled/async, so wait for eventual consistency rather
         // than assuming synchronous propagation (the latter is CI-timing-flaky).
         pb.setCursor({ x: 42, y: 7 });
-        await vi.waitFor(() =>
-            expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.cursor).toEqual({ x: 42, y: 7 }),
+        await vi.waitFor(
+            () =>
+                expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.cursor).toEqual({
+                    x: 42,
+                    y: 7,
+                }),
+            { timeout: 5_000 },
         );
 
         // UPDATE: Bob selects nodes; Alice sees the selection.
         pb.setSelection(['n1', 'n2']);
-        await vi.waitFor(() =>
-            expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.selection).toEqual(['n1', 'n2']),
+        await vi.waitFor(
+            () =>
+                expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.selection).toEqual([
+                    'n1',
+                    'n2',
+                ]),
+            { timeout: 5_000 },
         );
 
         // self excluded from getPeers.

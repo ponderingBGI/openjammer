@@ -8,7 +8,16 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   // `pi-openjammer-graph/` is a BUNDLED Pi resource (mounted into a Pi worktree,
   // not the app build), so it is excluded from the app's tsc/vitest/eslint gates.
-  globalIgnores(['dist', 'pi-openjammer-graph']),
+  // `dist` + the docs site's generated output (`apps/docs/.astro`, `apps/docs/dist`)
+  // are BUILD ARTIFACTS, not source; `pi-openjammer-graph/` and `.claude/` are
+  // agent/worktree resources, not app source — all excluded from the gates.
+  globalIgnores([
+    'dist/**',
+    'apps/docs/.astro/**',
+    'apps/docs/dist/**',
+    'pi-openjammer-graph/**',
+    '.claude/**',
+  ]),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

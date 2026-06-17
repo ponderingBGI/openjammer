@@ -1,0 +1,25 @@
+# rust-toolchain.toml — the single toolchain pin (foundation F6).
+#
+# Consumed by:
+#   • the `oj preflight` cache hash (ALWAYS_INPUT, scripts/oj/preflight.ts:18-20 —
+#     a bump busts every cache entry)
+#   • `oj doctor`'s toolchain presence check (scripts/oj/checks/toolchain.ts)
+#   • the `just wasm` recipe + CI's wasm leg (the ONLY ojcore-wasm compile path)
+#
+# DEFAULT channel = stable. `cargo fmt` / `cargo clippy` / `cargo test` / `cargo
+# build` all resolve against stable, matching the device-free green CI. rust-src
+# is here so `-Z build-std` works without a second `rustup component add`, and the
+# wasm32 target is pre-added for the AudioWorklet leg.
+#
+# The browser-wasm leg is nightly-only (`cargo +nightly-2026-06-01 … -Z build-std`)
+# and is pinned to an exact date at its call sites (ci.yml's wasm step + the `just
+# wasm` recipe) so a nightly bump is a deliberate re-bless, not silent drift — the
+# reproducibility guarantee 07-reference-configs.md §1 asks for. It is NOT made the
+# repo-wide default here on purpose: a nightly default would route fmt/clippy
+# through nightly (formatting drift + newer lints can red-wall a green tree), and
+# `miri` is not published for every nightly date — both are deferred to the Lane B
+# (nightly) rewrite that re-blesses formatting and the golden corpus together.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy", "rust-src"]
+targets = ["wasm32-unknown-unknown"]

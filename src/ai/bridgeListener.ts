@@ -17,6 +17,7 @@ import { listen, getInvoke } from './tauri';
 import { applyToolCall, type DspNodeRegistrar } from './tools';
 import { createGraphStoreApi } from './graphAdapter';
 import { createPlanEnv } from './planAdapter';
+import { createEnvPort } from './envAdapter';
 import type { AgentToolCall, AgentToolName } from './types';
 
 /** Tools that only READ — safe to run here to return real state to Pi. */
@@ -25,6 +26,10 @@ const READ_TOOLS = new Set<AgentToolName>([
     'list_node_types',
     'find_nodes',
     'validate_plan',
+    // Diagnostics/settings READS: ground-truth env + logs + current settings.
+    'get_logs',
+    'get_diagnostics',
+    'get_settings',
 ]);
 
 /** Reads never register a node; a no-op registrar satisfies the signature. */
@@ -59,6 +64,7 @@ export async function startBridgeListener(): Promise<(() => void) | null> {
                     createGraphStoreApi(),
                     NOOP_REGISTRAR,
                     createPlanEnv(),
+                    createEnvPort(),
                 );
                 result = { ok: applied.ok, data: applied.data };
             } else {

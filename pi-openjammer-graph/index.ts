@@ -114,6 +114,10 @@ const TOOLS: ReadonlyArray<Pick<PiTool, 'name' | 'description'>> = [
     { name: 'emit_plan', description: 'Build a whole WorkflowPlan in ONE reversible frame.' },
     { name: 'author_dsp_node', description: 'Author a new DSP effect from Faust source — a fallback, not the first move.' },
     { name: 'author_code_node', description: 'Author a new DSP node from source — a fallback, not the first move.' },
+    { name: 'get_logs', description: 'Read the on-device DevLog tail, filtered (side-effect-free). Diagnose from evidence.' },
+    { name: 'get_diagnostics', description: 'Read the environment + live audio snapshot (side-effect-free). Call first when something is broken.' },
+    { name: 'get_settings', description: 'Read the user-facing settings you may change (side-effect-free).' },
+    { name: 'update_settings', description: 'Change settings via an allowlisted, reversible `patch` — use it to FIX a setup.' },
 ];
 
 /**

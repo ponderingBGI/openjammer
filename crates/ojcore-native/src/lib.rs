@@ -26,8 +26,12 @@
 pub mod asset;
 pub mod host;
 pub mod latency;
+pub mod log;
+#[cfg(feature = "persist")]
+pub mod logstore;
 pub mod recorder;
 pub mod store;
+pub mod update_gate;
 
 pub use asset::{AssetError, AssetStore, Pcm};
 pub use host::{
@@ -37,8 +41,12 @@ pub use host::{
 pub use latency::{
     detect_onset, frames_to_ms, measure_round_trip_frames, ms_to_frames, LatencyEstimate,
 };
+pub use log::init_logging;
+#[cfg(feature = "persist")]
+pub use logstore::{LogHit, LogRecord, LogStore};
 pub use recorder::{Recorder, RecorderSink, DEFAULT_RING_FRAMES};
 pub use store::{content_address, AssetCatalog};
+pub use update_gate::{UpdateGate, UpdateState};
 
 /// The amplitude threshold used to detect the loopback impulse in the captured
 /// buffer. Well above any realistic noise floor, well below a full-scale click.

@@ -1,0 +1,25 @@
+# Dependabot keeps OpenJammer's dependencies fresh and, critically, bumps the
+# SHA-pinned GitHub Actions (see the `# v<x>` comments in .github/workflows/*)
+# via PRs so the release path stays current without re-introducing floating
+# tags. Cargo + npm (Bun) registry deps are watched on the same weekly cadence.
+version: 2
+updates:
+  # GitHub Actions used by the workflows — Dependabot rewrites the pinned
+  # commit SHAs (preserving the human-readable version comment) as new releases
+  # land, so the pins never go stale.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Rust workspace crates (ojcore, ojcore-native, ojhost, oj-tauri, etc.).
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # Frontend / control-plane deps installed via Bun from the npm registry.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"

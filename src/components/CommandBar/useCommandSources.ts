@@ -136,6 +136,32 @@ function buildAppCommands(): Command[] {
             run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-help')),
         },
         {
+            // The on-device structured-log surface (L4). Available in every build so
+            // a performer can pull up xruns / node faults / MIDI on stage. The AI
+            // agent reads the same store via its `get_logs` tool.
+            id: 'app.devlog.toggle',
+            title: 'Toggle DevLog',
+            group: 'App',
+            keywords: ['devlog', 'log', 'logs', 'debug', 'console', 'diagnostics', 'events', 'xrun'],
+            run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-devlog')),
+        },
+        {
+            // The one-screen audio-health readout (§4) — same diagnostics the AI reads.
+            id: 'app.audio-health.toggle',
+            title: 'Audio health',
+            group: 'App',
+            keywords: ['audio', 'health', 'latency', 'sound', 'diagnostics', 'device', 'status', 'no sound'],
+            run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-audio-health')),
+        },
+        {
+            // Bring-your-own plugin discovery (§3) — scan installed CLAP/VST3.
+            id: 'app.plugins.toggle',
+            title: 'Plugins',
+            group: 'App',
+            keywords: ['plugin', 'plugins', 'clap', 'vst', 'vst3', 'host', 'bring your own', 'effect', 'instrument'],
+            run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-plugins')),
+        },
+        {
             id: 'app.project.new',
             title: 'New Project',
             group: 'App',

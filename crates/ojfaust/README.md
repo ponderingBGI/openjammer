@@ -39,9 +39,10 @@ diagnostic back to the author and retry) from the **terminal** `Unavailable`
 ## Enabling the real backend (`--features libfaust`)
 
 The feature currently compiles a **TODO-marked scaffold** in
-`src/backend.rs::native` that `unimplemented!()`s on call, so it cannot
-masquerade as working. To make it real you must (a) install the native
-dependency and (b) implement one of the two paths below.
+`src/backend.rs::native` that returns `FaustError::Unavailable` on call, so it
+cannot masquerade as working or panic in feature-matrix tests. To make it real
+you must (a) install the native dependency and (b) implement one of the two paths
+below.
 
 ### What to install
 

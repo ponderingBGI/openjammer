@@ -61,6 +61,10 @@ pub struct Engine {
     /// computes meters but publishes nothing (host-side return path, std-only).
     #[cfg(feature = "std")]
     pub(crate) meter_ring: Option<alloc::sync::Arc<crate::meter::MeterRing>>,
+    /// Optional RT -> control event ring for compact fault events. Separate from
+    /// meters so a fault storm cannot evict level frames.
+    #[cfg(feature = "std")]
+    pub(crate) event_ring: Option<alloc::sync::Arc<crate::meter::EventRing>>,
 }
 
 // The raw pointers in the scratch are only ever populated and consumed within a
@@ -89,6 +93,8 @@ impl Engine {
             watchdog: None,
             #[cfg(feature = "std")]
             meter_ring: None,
+            #[cfg(feature = "std")]
+            event_ring: None,
         }
     }
 
@@ -200,6 +206,13 @@ impl Engine {
         self.meter_ring = ring;
     }
 
+    /// Attach a dedicated RT -> control event ring so detected node faults can
+    /// surface to DevLog/diagnostics without allocating on the audio thread.
+    #[cfg(feature = "std")]
+    pub fn attach_event_ring(&mut self, ring: Option<alloc::sync::Arc<crate::meter::EventRing>>) {
+        self.event_ring = ring;
+    }
+
     /// Non-blocking publish of the current meter snapshot + transport beat onto
     /// the attached return ring. Called at block end from `process_block` when
     /// metering is on; safe to call directly too. Allocation-free: it encodes
@@ -231,6 +244,16 @@ impl Engine {
         let pos = self.transport_pos();
         let n = return_frame::encode_beat(pos.bar, pos.beat, pos.phase, &mut buf);
         let _ = ring.push(&buf[..n]);
+    }
+
+    /// Emit a compact, RT-safe node fault event onto the attached event ring.
+    #[cfg(feature = "std")]
+    fn emit_node_fault(&self, slot: usize, fault: ojproto::FaultKind) {
+        if let Some(ring) = self.event_ring.as_ref() {
+            let node = self.program.ids[slot];
+            let ev = ojproto::RtEvent::NodeFault { node, fault };
+            let _ = crate::meter::event_frame::emit(ring, ev);
+        }
     }
 
     /// Borrow the current program (e.g. to inspect node count in tests).
@@ -385,10 +408,12 @@ impl Engine {
                 let over = self.watchdog.as_mut().map(|w| w.check()).unwrap_or(false);
                 if over {
                     self.budget.over_budget[node] = true;
+                    self.emit_node_fault(node, ojproto::FaultKind::OverBudget);
                     if self.watchdog.map(|w| w.auto_bypass).unwrap_or(false) {
                         // Auto-bypass the offender: zero its output this block so a
                         // runaway node degrades to silence rather than xrunning.
                         self.program.bypassed[node] = true;
+                        self.emit_node_fault(node, ojproto::FaultKind::AutoBypassed);
                         for buf in self.program.out_bufs[node].iter_mut() {
                             for s in buf.iter_mut().take(nframes) {
                                 *s = 0.0;
@@ -449,6 +474,8 @@ impl Engine {
         if sanitize(&mut out[..nframes]) {
             // Flag the master node so the control plane sees the garbage.
             self.budget.non_finite[self.program.master_out] = true;
+            #[cfg(feature = "std")]
+            self.emit_node_fault(self.program.master_out, ojproto::FaultKind::NonFinite);
         }
         if self.meters.enabled {
             self.meters.master.accumulate(&out[..nframes]);
@@ -572,6 +599,8 @@ impl Engine {
         }
         if dirty {
             self.budget.non_finite[node] = true;
+            #[cfg(feature = "std")]
+            self.emit_node_fault(node, ojproto::FaultKind::NonFinite);
         }
     }
 

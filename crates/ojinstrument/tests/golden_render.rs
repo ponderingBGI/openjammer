@@ -16,6 +16,9 @@
 //! `GraphIn -> Effect -> SpeakerOut` lets us assert the effect's exact transfer.
 //! Instruments are sources (no audio in); a `NoteOn` drives them.
 #![cfg(feature = "std")]
+// Test reference tones use std transcendentals; the libm-only guard is for the
+// deterministic DSP path, not the test fixtures.
+#![allow(clippy::disallowed_methods)]
 
 use ojcore::effects::{biquad_param, convolution_param, delay_param, waveshaper_param};
 use ojcore::{
@@ -907,4 +910,78 @@ fn instrument_effect_chain_renders_expected_output() {
         (f - 330.0).abs() < 20.0,
         "chain fundamental {f} Hz not ~330 Hz"
     );
+}
+
+// ===========================================================================
+// Golden corpus: a COMMITTED per-arch fingerprint, ULP-banded.
+//
+// libm routes every transcendental through one implementation, so the engine's
+// render is bit-stable across linux-x64 / macos-aarch64 / macos-x64 / wasm. This
+// pins a sparse fingerprint of the deterministic Osc(440)->Speaker render to a
+// committed golden in a tight band — a regression in the DSP (or a non-libm math
+// call sneaking in) moves the samples and fails on every arch.
+// ===========================================================================
+
+/// Render the canonical Osc(440)->Speaker tone and return a sparse fingerprint:
+/// the sample at every 64th index of a fixed post-attack window.
+fn osc440_fingerprint() -> Vec<f32> {
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes.push(with_params(
+        node(1, OSC_ID, PrimitiveKind::Osc, 0, 1),
+        &[
+            (instr_param::GAIN, 1.0),
+            (instr_param::ATTACK, 0.001),
+            (instr_param::DECAY, 0.001),
+            (instr_param::SUSTAIN, 1.0),
+            (instr_param::RELEASE, 0.2),
+        ],
+    ));
+    g.nodes
+        .push(node(2, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 2));
+
+    let mut engine = Engine::new(compile(&g, &registry()).expect("compile osc graph"));
+    engine.apply(RtCommand::NoteOn {
+        node: NodeIdx(1),
+        note: 69,
+        vel: 127,
+    });
+    let _settle = render(&mut engine, 1);
+    let tone = render(&mut engine, 4); // 1024 samples
+    tone.iter().step_by(64).copied().collect()
+}
+
+/// The committed golden (16 samples). Generated once on a libm rig; identical on
+/// every supported arch. Update ONLY with an intentional DSP change.
+const OSC440_GOLDEN: [f32; 16] = [
+    0.8211538,
+    -0.40674695,
+    -0.12532012,
+    0.6211351,
+    -0.9372757,
+    0.982291,
+    -0.74316037,
+    0.28905588,
+    0.24866231,
+    -0.7144515,
+    0.97357154,
+    -0.9510674,
+    0.6534479,
+    -0.1668075,
+    -0.36808708,
+    0.7965039,
+];
+
+#[test]
+fn osc_440_matches_committed_golden() {
+    let fp = osc440_fingerprint();
+    assert_eq!(fp.len(), OSC440_GOLDEN.len(), "fingerprint length drifted");
+    // Tight ULP band: libm is deterministic, so allow only a few ULP of slack.
+    for (i, (&got, &want)) in fp.iter().zip(OSC440_GOLDEN.iter()).enumerate() {
+        let tol = 8.0 * f32::EPSILON * want.abs().max(1.0);
+        assert!(
+            (got - want).abs() <= tol,
+            "golden sample #{i} drifted: got {got:?}, want {want:?} (tol {tol:?})"
+        );
+    }
 }

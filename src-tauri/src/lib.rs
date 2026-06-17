@@ -17,12 +17,13 @@ mod auth;
 mod bridge;
 mod engine;
 mod sandbox;
+mod updater;
 
 use std::path::PathBuf;
 
 use engine::BackendState;
 use ojhost::PluginDescriptor;
-use ojproto::{EngineFrame, NodeIdx, OjGraph, RtCommand};
+use ojproto::{EngineFrame, Event, NodeIdx, OjGraph, RtCommand};
 use tauri::Manager;
 
 /// Push a full graph from the UI: recompile it against the plugin registry and
@@ -158,6 +159,16 @@ fn poll_meters(state: tauri::State<'_, BackendState>) -> Result<Vec<EngineFrame>
         .drain_meters())
 }
 
+/// Drain pending engine fault events for DevLog / diagnostics.
+#[tauri::command]
+fn poll_events(state: tauri::State<'_, BackendState>) -> Result<Vec<Event>, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .drain_events())
+}
+
 /// Load decoded mono PCM as the sample for `node`'s sampler (content-addressed
 /// into the asset catalog). `pcm` is f32 samples in `[-1, 1]` (control-rate asset
 /// load, never the audio thread). Returns the stored `AssetId`.
@@ -284,6 +295,11 @@ pub fn run() {
             app.manage(ai::WarmChildState::default());
             // The loopback tool bridge (Phase 3: real graph reads round-trip to Pi).
             app.manage(bridge::BridgeState::default());
+            // R2: the audio-safe update gate (the owner-enabled updater stages
+            // into it; the install is refused while audio plays).
+            app.manage::<updater::UpdateGateState>(std::sync::Arc::new(
+                ojcore_native::UpdateGate::new(),
+            ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -311,13 +327,17 @@ pub fn run() {
             looper_cmd,
             subscribe_meters,
             poll_meters,
+            poll_events,
             load_sample,
             recorder_start,
             recorder_stop,
             recorder_export,
             set_speaker_volume,
             set_speaker_device,
-            set_mic
+            set_mic,
+            updater::update_stage,
+            updater::update_is_pending,
+            updater::update_try_install
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenJammer tauri application");

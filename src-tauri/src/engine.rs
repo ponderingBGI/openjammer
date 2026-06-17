@@ -33,17 +33,20 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use ojcore::meter::return_frame;
+use ojcore::meter::{event_frame, return_frame};
 use ojcore::{
     compile, compile_with_assets, master_param, CommandProducer, CommandQueue, CompileError,
-    Engine, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
+    Engine, EventRing, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{
     AssetCatalog, AssetError, AssetStore, AudioHost, HostError, Pcm, StreamRequest,
 };
 use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
 use ojinstrument::{register_all, RegisterOpts};
-use ojproto::{AssetId, AssetRef, EngineFrame, NodeIdx, OjGraph, RtCommand};
+use ojproto::{
+    AssetId, AssetRef, EngineFrame, Event, EventKind, NodeIdx, OjGraph, RtCommand, RtEvent,
+    Severity, Source,
+};
 use ojwasm::WasmHostLoader;
 
 /// Default stream request: 48 kHz, a small buffer for low latency, stereo out,
@@ -141,6 +144,12 @@ pub struct EngineBackend {
     /// frames here at block end, and [`EngineBackend::drain_meters`] reads them
     /// off the control thread for the `meters` Tauri event.
     meter_ring: Arc<MeterRing>,
+    /// Control-side clone of the engine's dedicated RT -> control event ring.
+    /// The engine publishes compact fault events here; `poll_events` drains and
+    /// lifts them into full protocol `Event` envelopes for DevLog/diagnostics.
+    event_ring: Arc<EventRing>,
+    /// Monotonic sequence assigned while lifting compact RT events off-thread.
+    event_seq: u32,
     /// Whether metering is enabled (mirrored so a graph swap re-applies it).
     metering: bool,
     /// Off-RT content-addressed asset catalog (sample PCM for the sampler,
@@ -191,6 +200,7 @@ impl EngineBackend {
         }
         let swap = ProgramSwap::new();
         let meter_ring = Arc::new(MeterRing::new());
+        let event_ring = Arc::new(EventRing::new());
 
         // Compile the minimal starter program (silent: a gain into the speaker).
         // `compile` only fails on a malformed graph, and ours is well-formed by
@@ -202,6 +212,7 @@ impl EngineBackend {
         // subscriber asks (zero-cost while off). The same `Arc` clone is kept on
         // the control side so `drain_meters` reads what the audio thread publishes.
         engine.attach_meter_ring(Some(Arc::clone(&meter_ring)));
+        engine.attach_event_ring(Some(Arc::clone(&event_ring)));
 
         // Split a fresh command ring; the consumer moves into the audio host.
         let (producer, consumer) = CommandQueue::split(COMMAND_RING_CAP);
@@ -230,6 +241,8 @@ impl EngineBackend {
             swap,
             stream,
             meter_ring,
+            event_ring,
+            event_seq: 0,
             metering: false,
             catalog: AssetCatalog::new(),
             store: AssetStore::new(),
@@ -356,6 +369,7 @@ impl EngineBackend {
         // Re-attach the meter ring + re-apply the metering toggle to the fresh
         // engine so the level stream survives a graph swap.
         engine.attach_meter_ring(Some(Arc::clone(&self.meter_ring)));
+        engine.attach_event_ring(Some(Arc::clone(&self.event_ring)));
         engine.set_metering(self.metering);
 
         // Fresh command ring for the new audio callback; the old producer (and
@@ -436,6 +450,18 @@ impl EngineBackend {
                 }
             }
         }
+        out
+    }
+
+    /// Drain compact RT fault events and lift them into protocol `Event`s for
+    /// DevLog/diagnostics. Control-rate: called by the UI poll command, never on
+    /// the audio thread.
+    pub fn drain_events(&mut self) -> Vec<Event> {
+        let mut out = Vec::new();
+        event_frame::drain_events(&self.event_ring, |rt| {
+            self.event_seq = self.event_seq.wrapping_add(1);
+            out.push(lift_event(rt, self.event_seq, now_us()));
+        });
         out
     }
 
@@ -619,6 +645,15 @@ impl EngineBackend {
         &mut self,
         dirs: &[PathBuf],
     ) -> Result<Vec<PluginDescriptor>, BackendError> {
+        // Empty request -> scan the OS-standard plugin directories (the "scan my
+        // installed plugins" default the Plugins panel uses).
+        let default_dirs;
+        let dirs = if dirs.is_empty() {
+            default_dirs = ojhost::default_plugin_dirs();
+            &default_dirs[..]
+        } else {
+            dirs
+        };
         let found = scan(dirs).map_err(BackendError::PluginScan)?;
         register_scanned(&mut self.registry, &found);
         Ok(found)
@@ -685,6 +720,35 @@ impl BackendState {
 impl Default for BackendState {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn now_us() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_micros().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or(0)
+}
+
+fn lift_event(rt: RtEvent, seq: u32, ts_us: u64) -> Event {
+    let kind = match rt {
+        RtEvent::Xrun { dropped } => EventKind::Xrun { dropped },
+        RtEvent::NodeFault { node, fault } => EventKind::NodeFault { node, fault },
+        RtEvent::RingFull => EventKind::RingFull,
+    };
+    let severity = match kind {
+        EventKind::NodeFault { .. } => Severity::Error,
+        _ => Severity::Warn,
+    };
+    Event {
+        v: ojproto::SCHEMA_VERSION,
+        seq,
+        severity,
+        kind,
+        source: Source::Engine,
+        ts_us,
+        corr_id: 0,
     }
 }
 

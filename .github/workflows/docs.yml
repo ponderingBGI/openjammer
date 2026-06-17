@@ -1,0 +1,70 @@
+name: Docs
+
+# Build (always) + deploy (main only) the Starlight docs site at apps/docs to
+# GitHub Pages. The docs app is workspace-ISOLATED (its own bun.lock), so it
+# installs/builds independently of the main app.
+#
+# NOTE (owner-gated): deployment requires GitHub Pages to be enabled with
+# Settings -> Pages -> Source: "GitHub Actions". Until then the build job still
+# runs (so docs breakage is caught on every PR that touches them), and the deploy
+# job is the only piece that needs Pages turned on.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/docs/**'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/docs/**'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+# Least privilege at the workflow level; the deploy job widens its own scope.
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build docs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: apps/docs
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2
+      - name: Install (isolated lockfile)
+        run: bun install --frozen-lockfile
+      - name: Build
+        run: bun run build
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa  # v3
+        with:
+          path: apps/docs/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    # Build-verify on PRs; only deploy from main / manual dispatch.
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e  # v4

@@ -1,0 +1,65 @@
+name: Lane B (nightly)
+
+# Heavy correctness backstop (plan §2.5 / §4.3). Lane B is the slow, thorough
+# leg that does NOT gate per-PR merges — it runs on a schedule + on demand, so a
+# long run (or a genuine finding) never blocks a merge. It runs miri over the
+# workspace's unsafe-heavy code (the wait-free SPSC ring + the hot-swap cell) and
+# UNBOUNDED fuzz of the untrusted WAV parse surface (the bounded per-PR smoke is
+# `crates/ojcore-native/tests/fuzz_smoke.rs`). loom model checking is the next
+# addition here.
+
+on:
+  schedule:
+    - cron: "0 6 * * *" # 06:00 UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lane-b-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  miri:
+    name: miri — unsafe ring + hot-swap
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Rust nightly + miri
+        uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
+        with:
+          toolchain: nightly
+          components: miri
+      - name: miri — wait-free SPSC ByteRing (copy_nonoverlapping) + swap
+        # The ring and the RtProgram hot-swap are the workspace's load-bearing
+        # `unsafe`. miri runs their existing tests under its UB checker. Isolation
+        # is disabled so tests that read the clock/time work under miri.
+        env:
+          MIRIFLAGS: -Zmiri-disable-isolation
+        run: |
+          cargo +nightly miri test -p ojcore-midiring
+          cargo +nightly miri test -p ojcore swap
+
+  fuzz:
+    name: fuzz — WAV parse surface (unbounded)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: ALSA dev headers (cpal/alsa-sys)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Rust nightly
+        uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
+        with:
+          toolchain: nightly
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Fuzz the WAV decoder (time-boxed)
+        # A clean Err on any input is correct; a crash/UB is a finding. Time-boxed
+        # so the nightly stays bounded; the corpus is seeded from the smoke's RIFF
+        # shapes implicitly via libFuzzer's mutation.
+        run: cargo +nightly fuzz run wav_decode -- -max_total_time=300 -rss_limit_mb=4096

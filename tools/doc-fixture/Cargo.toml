@@ -1,0 +1,15 @@
+# Negative fixture for the docs-as-requirement gate (plan §4.4). Standalone (its
+# own [workspace] table) and excluded from the root workspace, so it never builds
+# in the normal `cargo build/clippy/test --workspace`. A dedicated CI step builds
+# it and asserts the build FAILS — proving the missing_docs gate really catches a
+# missing doc (a throwaway commit is not a guarantee; this stands permanently).
+[package]
+name = "oj-doc-fixture"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[lib]
+path = "lib.rs"

@@ -8,14 +8,28 @@ import { VitePWA } from 'vite-plugin-pwa'
 // app boots in `tauri dev` / `vite dev`. They are build-safe too.
 import wasm from 'vite-plugin-wasm'
 import topLevelAwait from 'vite-plugin-top-level-await'
+import { readFileSync } from 'node:fs'
+
+// App version SSOT: inline package.json's version as `__APP_VERSION__` at build
+// time. The diagnostics snapshot + IssueReporter stamp every bug report with it,
+// and the AI agent's `get_diagnostics` tool reports it — one source of truth.
+const pkgVersion = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
+).version as string
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkgVersion),
+  },
   plugins: [
     wasm(),
     topLevelAwait(),
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // PROMPT, not autoUpdate: a new service worker must NEVER silently reload
+      // the page (and yank the AudioContext) mid-performance. The app surfaces a
+      // non-blocking prompt and applies the update on idle (see PwaUpdatePrompt).
+      registerType: 'prompt',
       includeAssets: ['favicon.ico', 'robots.txt', 'apple-touch-icon.png'],
       manifest: {
         name: 'OpenJammer',
@@ -116,7 +130,35 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': '/src',
+      // The shared TS protocol package (the wire/event SSOT). Aliased so both the
+      // bare workspace specifier and app code resolve to the single source file
+      // without a build step. Mirrors the tsconfig `paths` + vitest alias.
+      '@openjammer/oj-protocol': '/packages/oj-protocol-ts/src/index.ts',
       events: 'rollup-plugin-node-polyfills/polyfills/events'
+    }
+  },
+  // Keep the main bundle lean: split the heavy, rarely-changing vendor libs into
+  // their own long-cached chunks so a code change re-downloads only the app, and
+  // the parser-heavy metadata lib lands off the critical path.
+  build: {
+    chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) {
+            return 'vendor-react'
+          }
+          if (id.includes('music-metadata') || id.includes('strtok3') || id.includes('token-types')) {
+            return 'vendor-metadata'
+          }
+          if (id.includes('loro-crdt')) return 'vendor-collab'
+          if (id.includes('react-markdown') || id.includes('remark') || id.includes('micromark') || id.includes('mdast') || id.includes('hast') || id.includes('unist')) {
+            return 'vendor-markdown'
+          }
+          return 'vendor'
+        }
+      }
     }
   },
   // Worker configuration for AudioWorklet modules

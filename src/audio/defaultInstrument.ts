@@ -1,25 +1,38 @@
 /**
- * Built-in default instrument voice.
+ * Built-in instrument voices (the playable-out-of-the-box layer).
  *
- * Melodic instrument nodes (Keys, Piano, Cello, …) lower to the engine's
+ * Melodic instrument nodes (Keys, Piano, Cello, Sax, …) lower to the engine's
  * `builtin.sampler` (see `src/engine/manifest.ts`), which is **silent until PCM
- * is bound**. The repo ships no sample assets and these category-alias
- * instruments have no sample-picker UI, so a freshly-wired `MiniLab → Keys →
- * Speaker` patch produces no sound at all — the note routes correctly but lands
- * on an empty sampler.
+ * is bound**. The repo ships no sample assets, so without help a freshly-wired
+ * `MiniLab → Keys → Speaker` patch produces no sound — the note routes correctly
+ * but lands on an empty sampler.
  *
- * To make instruments playable out of the box we synthesize one pleasant default
- * voice here and the executor lowers it into every such node (per
- * {@link DEFAULT_VOICE_INSTRUMENTS}). The engine sampler pitch-shifts a single
- * sample by `2^((note-rootNote)/12)`, so one tone at C4 plays correctly across
- * the whole keyboard. A user who later binds a real sample simply replaces it.
+ * To make instruments playable immediately we SYNTHESIZE a distinct voice per
+ * instrument (see {@link import('./voiceSynth')}) and the executors lower it into
+ * each instrument node. A node that carries an `instrumentId` (the picker) gets
+ * that instrument's family voice — a piano sounds like a piano, a sax like a sax —
+ * and a bare category node gets a sensible default. A user who later binds a real
+ * sample / SoundFont / plugin simply replaces the synthesized voice.
  *
- * The waveform is a warm additive tone with a natural per-partial decay (an
- * electric-piano / bell character that suits "Keys") — deterministic and pure so
- * it is unit-testable and identical every run.
+ * This module is the thin executor-facing seam over the voice engine: the set of
+ * node types that receive a built-in voice, plus the per-node resolver.
  */
 
-/** Instrument node types that get the built-in default voice (no sample UI). */
+import { INSTRUMENT_DEFINITIONS } from './instrumentCatalog';
+import {
+    getFamilyVoice,
+    getInstrumentVoice,
+    isKarplusFamily,
+    resolveVoiceFamily,
+    type SynthVoice,
+    type VoiceFamily,
+} from './voiceSynth';
+
+/**
+ * Instrument node types that receive a built-in voice when they have no
+ * user-bound sample. The category aliases plus the generic `instrument` picker
+ * (which resolves its voice from the selected `instrumentId`).
+ */
 export const DEFAULT_VOICE_INSTRUMENTS: ReadonlySet<string> = new Set([
     'keys',
     'piano',
@@ -29,72 +42,76 @@ export const DEFAULT_VOICE_INSTRUMENTS: ReadonlySet<string> = new Set([
     'saxophone',
     'strings',
     'winds',
+    'instrument',
 ]);
 
 /** A decoded mono voice ready to lower into the engine sampler. */
-export interface DefaultVoice {
-    /** Mono PCM, peak-normalized to ~0.9. */
-    pcm: Float32Array;
-    /** Sample rate of {@link pcm} (the engine SR-corrects on load). */
-    sampleRate: number;
-    /** The MIDI note the sample is recorded at (C4) — the sampler's unity pitch. */
-    rootNote: number;
+export type DefaultVoice = SynthVoice;
+
+/** Catalogue lookup so a picker `instrumentId` resolves to its name + category. */
+const CATALOG_BY_ID = new Map(INSTRUMENT_DEFINITIONS.map((d) => [d.id, d]));
+
+/** The resolved {@link VoiceFamily} for an instrument node (picker id or type). */
+function familyForNode(nodeType: string, data: Record<string, unknown> | undefined): VoiceFamily {
+    const instrumentId = typeof data?.instrumentId === 'string' ? data.instrumentId : undefined;
+    if (instrumentId) {
+        const def = CATALOG_BY_ID.get(instrumentId);
+        return resolveVoiceFamily(instrumentId, def?.name, def?.category);
+    }
+    return resolveVoiceFamily(nodeType);
 }
 
-/** C4 in MIDI + Hz (the sample's recorded pitch / unity playback note). */
-const ROOT_NOTE = 60;
-const ROOT_HZ = 261.6256;
-/** 24 kHz keeps the IPC payload small; the sampler SR-corrects on load. */
-const SAMPLE_RATE = 24000;
-const DURATION_S = 1.4;
-const ATTACK_S = 0.004;
+/**
+ * Whether an instrument node should be lowered to the engine's real Karplus
+ * primitive (a plucked string / bass) instead of the additive sampler. Used by
+ * BOTH the emit (to pick `KarplusString`) and the executors (to skip binding a
+ * sample — Karplus is note-triggered and needs no PCM), so the two never disagree.
+ */
+export function instrumentUsesKarplus(
+    nodeType: string,
+    data: Record<string, unknown> | undefined,
+): boolean {
+    if (!DEFAULT_VOICE_INSTRUMENTS.has(nodeType)) return false;
+    return isKarplusFamily(familyForNode(nodeType, data));
+}
 
 /**
- * Harmonic series for the voice: each partial has its own amplitude and decay
- * rate. Higher partials decay faster, so the tone is bright on attack and mellows
- * as it rings out — the natural behaviour of a struck/plucked string.
+ * The default voice (the warm `keys` family) — the back-compatible single-voice
+ * accessor used where no specific instrument is in play.
  */
-const PARTIALS: ReadonlyArray<{ mult: number; amp: number; decay: number }> = [
-    { mult: 1, amp: 1.0, decay: 3.0 },
-    { mult: 2, amp: 0.45, decay: 4.5 },
-    { mult: 3, amp: 0.22, decay: 6.0 },
-    { mult: 4, amp: 0.12, decay: 8.0 },
-    { mult: 6, amp: 0.06, decay: 11.0 },
-];
-
-let cached: DefaultVoice | null = null;
-
-/** Synthesize the default voice once and cache it (pure + deterministic). */
 export function getDefaultInstrumentVoice(): DefaultVoice {
-    if (cached) return cached;
+    return getFamilyVoice('keys');
+}
 
-    const n = Math.floor(SAMPLE_RATE * DURATION_S);
-    const pcm = new Float32Array(n);
-    const twoPiOverSr = (2 * Math.PI) / SAMPLE_RATE;
+/** The resolved voice for one instrument node + a stable cache KEY (its family). */
+export interface NodeVoice {
+    /** The synthesized PCM voice to bind into the engine sampler. */
+    voice: DefaultVoice;
+    /**
+     * A stable key identifying WHICH voice this is (the resolved family). The
+     * executors compare it against the last-bound key so a voice is only re-sent
+     * when the instrument selection actually changes.
+     */
+    key: string;
+}
 
-    let peak = 0;
-    for (let i = 0; i < n; i++) {
-        const t = i / SAMPLE_RATE;
-        // Soft attack ramp avoids a click at the very start of the note.
-        const attack = t < ATTACK_S ? t / ATTACK_S : 1;
-        let s = 0;
-        for (const p of PARTIALS) {
-            const env = Math.exp(-p.decay * t);
-            s += p.amp * env * Math.sin(twoPiOverSr * ROOT_HZ * p.mult * i);
-        }
-        const v = attack * s;
-        pcm[i] = v;
-        const a = Math.abs(v);
-        if (a > peak) peak = a;
+/**
+ * Resolve the built-in voice for an instrument node from its `type` and its
+ * `data.instrumentId` (the picker selection). A node-type maps to a category
+ * voice; an `instrumentId` refines it to the specific instrument's family.
+ */
+export function getVoiceForInstrumentNode(
+    nodeType: string,
+    data: Record<string, unknown> | undefined,
+): NodeVoice {
+    const instrumentId = typeof data?.instrumentId === 'string' ? data.instrumentId : undefined;
+    if (instrumentId) {
+        const def = CATALOG_BY_ID.get(instrumentId);
+        const family = resolveVoiceFamily(instrumentId, def?.name, def?.category);
+        return { voice: getInstrumentVoice(instrumentId, def?.name, def?.category), key: family };
     }
-
-    // Peak-normalize to ~0.9 so a single voice is healthy but leaves headroom for
-    // polyphony / the engine limiter.
-    if (peak > 0) {
-        const g = 0.9 / peak;
-        for (let i = 0; i < n; i++) pcm[i] *= g;
-    }
-
-    cached = { pcm, sampleRate: SAMPLE_RATE, rootNote: ROOT_NOTE };
-    return cached;
+    // No picker selection: resolve a voice from the node TYPE itself (e.g. the
+    // `cello` / `saxophone` category nodes), falling back to the warm default.
+    const family = resolveVoiceFamily(nodeType);
+    return { voice: getFamilyVoice(family), key: family };
 }

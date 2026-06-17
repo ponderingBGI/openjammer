@@ -328,11 +328,16 @@ mod tests {
             .unwrap_or(false)
     }
 
+    fn cli_path_available() -> bool {
+        cfg!(not(feature = "libfaust")) && faust_on_path()
+    }
+
     #[test]
     fn compile_is_unavailable_without_faust() {
-        // Default CLI Path B: no `faust` binary -> terminal Unavailable. When
-        // faust IS installed this case doesn't apply, so skip it.
-        if faust_on_path() {
+        // Default CLI Path B with no `faust`, or the TODO libfaust scaffold,
+        // returns terminal Unavailable. When the CLI path is available this case
+        // doesn't apply, so skip it.
+        if cli_path_available() {
             return;
         }
         let c = FaustCompiler::new();
@@ -341,9 +346,10 @@ mod tests {
 
     #[test]
     fn repair_bails_immediately_on_unavailable() {
-        // With no faust binary the default backend is Unavailable -> author never
-        // called. (Skip when faust is present: there the first compile succeeds.)
-        if faust_on_path() {
+        // With no faust binary, or with the TODO libfaust scaffold, the backend
+        // is Unavailable -> author never called. Skip when the CLI path is
+        // available: there the first compile succeeds.
+        if cli_path_available() {
             return;
         }
         let mut called = false;
@@ -365,10 +371,10 @@ mod tests {
 
     #[test]
     fn real_faust_compiles_to_wasm_and_parses_params() {
-        // GATED on a real faust binary: skip silently when absent so CI stays
-        // green without the toolchain (M6 brief). When present, prove the CLI
-        // Path B emits wasm bytes + parses the declared params from -json.
-        if !faust_on_path() {
+        // GATED on the real CLI Path B: skip silently when absent or when the
+        // libfaust scaffold is selected so CI stays green without that backend.
+        // When present, prove it emits wasm bytes + parses params from -json.
+        if !cli_path_available() {
             return;
         }
         let src = "import(\"stdfaust.lib\");\n\
@@ -389,9 +395,10 @@ mod tests {
 
     #[test]
     fn real_faust_rejects_broken_source_recoverably() {
-        // GATED: a syntactically broken program yields a RECOVERABLE Compile
-        // error (the diagnostic the repair loop feeds back), never Unavailable.
-        if !faust_on_path() {
+        // GATED on the real CLI Path B: a syntactically broken program yields a
+        // RECOVERABLE Compile error (the diagnostic the repair loop feeds back),
+        // never Unavailable.
+        if !cli_path_available() {
             return;
         }
         let err = FaustCompiler::new()
