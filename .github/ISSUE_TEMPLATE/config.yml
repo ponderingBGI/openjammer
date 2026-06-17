@@ -1,0 +1,8 @@
+# Keep blank issues enabled so the in-app one-click reporter (L5), which opens a
+# pre-filled free-form `issues/new?title=&body=` URL with the redacted snapshot,
+# still works alongside the structured bug-report form.
+blank_issues_enabled: true
+contact_links:
+  - name: 📚 Documentation
+    url: https://ponderingbgi.github.io/openjammer/
+    about: Architecture, the logging model, the channel/version model, and contributing.
