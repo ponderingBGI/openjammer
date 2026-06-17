@@ -14,5 +14,10 @@
     "@astrojs/starlight": "^0.34.3",
     "astro": "^5.6.1",
     "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "starlight-typedoc": "0.21.0",
+    "typedoc": "^0.28.19",
+    "typedoc-plugin-markdown": "^4.12.0"
   }
 }
