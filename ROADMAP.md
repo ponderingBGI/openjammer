@@ -43,7 +43,7 @@ re-integrated on top, feature by feature, each verified.
 - [x] ✅ `update_settings` — apply an allowlisted patch through the same store verbs the Settings panel uses; **reversible** (returns an undo).
 - [x] ✅ Pure, injected `AgentEnvPort` (testable) + a live `createEnvPort()`; threaded through `applyToolCall`/`batch_apply`/`emit_plan` and both live call sites (streamed path + Pi host bridge).
 - [x] ✅ Pi extension catalogue + `docs/agent-tools.md` updated in sync (with a worked "get sound back" loop); catalogue↔doc drift gate green; 12 new tests.
-- [ ] 🟡 Surface a one-tap **"Ask the AI to fix this"** affordance from the DevLog / latency banner that pre-seeds the agent with the current diagnostics. *(next)*
+- [x] ✅ One-tap **"Ask AI to fix this"** from the DevLog seeds the agent with the current diagnostics (closes the panel, opens the chat pre-filled).
 
 ---
 
