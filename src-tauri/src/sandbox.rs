@@ -18,6 +18,9 @@ use std::path::PathBuf;
 use std::process::Command;
 
 /// The writable + readable roots for a jailed run.
+// `writable`/`readable` are consumed by the Linux landlock path; on other targets
+// the jail is constructed but not enforced, so the fields read as dead there.
+#[allow(dead_code)]
 pub struct Jail {
     /// Subtrees the child may WRITE (and read): the project + the agent's own brain.
     pub writable: Vec<PathBuf>,

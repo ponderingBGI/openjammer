@@ -103,7 +103,10 @@ fn handle_conn(stream: TcpStream, inner: Arc<BridgeInner>, app: AppHandle) {
     }
 
     let name = req.get("name").and_then(|v| v.as_str()).unwrap_or_default();
-    let args = req.get("args").cloned().unwrap_or_else(|| serde_json::json!({}));
+    let args = req
+        .get("args")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!({}));
     let req_id = inner.next_id.fetch_add(1, Ordering::SeqCst);
 
     let (tx, rx) = channel();

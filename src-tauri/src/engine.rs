@@ -36,7 +36,7 @@ use std::sync::{Arc, Mutex};
 use ojcore::meter::return_frame;
 use ojcore::{
     compile, compile_with_assets, master_param, CommandProducer, CommandQueue, CompileError,
-    Engine, MeterRing, PluginRegistry, ProgramSwap,
+    Engine, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{
     AssetCatalog, AssetError, AssetStore, AudioHost, HostError, Pcm, StreamRequest,
@@ -44,6 +44,7 @@ use ojcore_native::{
 use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
 use ojinstrument::{register_all, RegisterOpts};
 use ojproto::{AssetId, AssetRef, EngineFrame, NodeIdx, OjGraph, RtCommand};
+use ojwasm::WasmHostLoader;
 
 /// Default stream request: 48 kHz, a small buffer for low latency, stereo out,
 /// no duplex input (pure synthesis path). Matches the `<5 ms` engine target;
@@ -471,6 +472,27 @@ impl EngineBackend {
             }
         }
         Ok(id)
+    }
+
+    /// Register an AI-authored NATIVE faust code node (already compiled to a
+    /// `.dll`) under its `manifest_id`, then recompile the live graph so a node
+    /// referencing that id instantiates the native kernel. Off-RT (called from the
+    /// `author_faust_native` command). The `OutputGuard` chain wraps the kernel.
+    pub fn register_native_faust(
+        &mut self,
+        manifest_json: &str,
+        dll_path: PathBuf,
+    ) -> Result<(), String> {
+        let manifest: PluginManifest =
+            serde_json::from_str(manifest_json).map_err(|e| format!("bad manifest json: {e}"))?;
+        self.registry
+            .register(Box::new(WasmHostLoader::new_native(manifest, dll_path)));
+        // Recompile the live graph so the loader resolves + instantiates: the node
+        // may already be present (re-author), else the next `push_graph` uses it.
+        if let Some(graph) = self.last_graph.clone() {
+            self.adopt(&graph).map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     /// Bind `asset` (and its `root_note`) onto `node` in `graph`: set the node's

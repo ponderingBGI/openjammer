@@ -15,6 +15,7 @@ import { describe, expect, it } from 'vitest';
 import { emitOjGraph, SYNTHETIC_MASTER_ID } from '../emit';
 import { getNodeDefinition } from '../../../engine/registry';
 import { manifestIdFor } from '../../../engine/manifest';
+import { makeDspNodeDefinition, registerDynamicPlugin } from '../../../engine/dynamicRegistry';
 import type { Connection, GraphNode, NodeType, PortDefinition } from '../../../engine/types';
 import type { IrEdge, IrNode, OjGraph } from '../../../../packages/oj-protocol-ts/src/index';
 
@@ -281,6 +282,43 @@ describe('emitOjGraph — master output', () => {
                 (e) => e.from_node === sampler.id && e.to_node === masters[0].id && e.kind === 'Audio',
             ),
         ).toBe(true);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// AI-authored code nodes (M6): compiled node lowers to WasmHost
+// ---------------------------------------------------------------------------
+
+describe('emitOjGraph — AI-authored code nodes (WasmHost)', () => {
+    it('lowers an ai.wasm.* node to WasmHost only when codeNodesAsWasmHost is set', () => {
+        const pluginId = 'ai.wasm.deadbeef';
+        const unregister = registerDynamicPlugin(
+            pluginId,
+            makeDspNodeDefinition({ name: 'AI Gain', faustSource: 'process = _;', params: [] }),
+        );
+        try {
+            const fx = makeNode('effect', { id: 'fx' });
+            fx.pluginId = pluginId; // stamped by the agent authoring path
+            const speaker = makeNode('speaker', { id: 's' });
+            const conn = makeConn(fx.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+
+            // NATIVE opt: the authored node lowers to its REAL WasmHost manifest, so
+            // the engine (which registered a WasmHost loader) runs the actual DSP.
+            const native = emitOjGraph(nodeMap(fx, speaker), connMap(conn), {
+                codeNodesAsWasmHost: true,
+            });
+            const authored = native.nodes.find((n) => n.manifest_id === pluginId);
+            expect(authored, 'emitted under its ai.wasm.* id').toBeTruthy();
+            expect(authored!.kind).toBe('WasmHost');
+
+            // DEFAULT (browser / no loader): keeps the closed effect fallback, so an
+            // unrunnable WasmHost node never reaches a loader-less engine.
+            const fallback = emitOjGraph(nodeMap(fx, speaker), connMap(conn));
+            expect(fallback.nodes.some((n) => n.kind === 'Waveshaper')).toBe(true);
+            expect(fallback.nodes.some((n) => n.manifest_id === pluginId)).toBe(false);
+        } finally {
+            unregister();
+        }
     });
 });
 

@@ -122,10 +122,15 @@ export function CommandBar() {
     useEffect(() => {
         let unlisten: (() => void) | null = null;
         let cancelled = false;
-        void startBridgeListener().then((fn) => {
-            if (cancelled) fn?.();
-            else unlisten = fn;
-        });
+        void startBridgeListener()
+            .then((fn) => {
+                if (cancelled) fn?.();
+                else unlisten = fn;
+            })
+            .catch(() => {
+                // Best-effort: a missing/failed tool bridge (no Tauri, or a test
+                // mock without `listen`) must not surface as an unhandled rejection.
+            });
         return () => {
             cancelled = true;
             unlisten?.();

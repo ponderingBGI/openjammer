@@ -213,7 +213,12 @@ export class OjcoreNativeExecutor implements Executor {
     /** Emit + remap + push the current graph to the native engine. */
     private pushGraph(): void {
         if (!this.getNodes || !this.getConnections) return;
-        const { graph, index } = emitWithIndex(this.getNodes(), this.getConnections());
+        // The native engine registers a WasmHost loader per AI-authored faust node
+        // (author_faust_native), so lower compiled code nodes to their real WasmHost
+        // manifest — they play the actual DSP instead of the effect fallback.
+        const { graph, index } = emitWithIndex(this.getNodes(), this.getConnections(), {
+            codeNodesAsWasmHost: true,
+        });
         this.index = index;
         // Build the reverse NodeIdx -> visual id map for routing meter frames.
         this.reverseIndex = new Map();

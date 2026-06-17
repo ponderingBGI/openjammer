@@ -164,6 +164,7 @@ impl PiStreamLine {
 /// failure) are streamed as a terminal `error` line so the UI surfaces them
 /// uniformly.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // the agent run threads the full auth + bridge context
 pub fn ai_run(
     app: AppHandle,
     prompt: String,
@@ -258,7 +259,10 @@ pub fn ai_run(
                 .join(":"),
         );
         if key_for_env.is_some() {
-            env.insert("OJ_KEY_VAR".to_string(), provider_key_var(provider.as_deref()));
+            env.insert(
+                "OJ_KEY_VAR".to_string(),
+                provider_key_var(provider.as_deref()),
+            );
         }
     }
 
@@ -379,6 +383,7 @@ pub struct WarmChildState(pub std::sync::Mutex<Option<WarmChild>>);
 /// Spawn a fresh Pi child, run the `get_commands` handshake, and pin the model
 /// ONCE. Emits a reasoned `error` line and returns `Err(())` on any failure (the
 /// caller then just returns `Ok(())`, surfacing the streamed error to the UI).
+#[allow(clippy::too_many_arguments)] // spawning a configured child needs the full run context
 fn spawn_and_configure(
     pi: &Path,
     env: HashMap<String, String>,
@@ -621,7 +626,9 @@ fn persistent_intelligence_pkg() -> String {
 /// the floor either way). A mode change takes effect on the next (re)spawn.
 #[tauri::command]
 pub fn ai_set_learning(enabled: bool) -> Result<(), String> {
-    let agent_home = AgentWorkspace::ensure().map_err(|e| e.to_string())?.agent_home;
+    let agent_home = AgentWorkspace::ensure()
+        .map_err(|e| e.to_string())?
+        .agent_home;
     set_settings_package(&agent_home, &persistent_intelligence_pkg(), enabled)
         .map_err(|e| e.to_string())
 }
@@ -630,7 +637,9 @@ pub fn ai_set_learning(enabled: bool) -> Result<(), String> {
 /// auth + sessions intact. The "delete one brain" action behind a Ctrl+K command.
 #[tauri::command]
 pub fn ai_forget() -> Result<(), String> {
-    let agent_home = AgentWorkspace::ensure().map_err(|e| e.to_string())?.agent_home;
+    let agent_home = AgentWorkspace::ensure()
+        .map_err(|e| e.to_string())?
+        .agent_home;
     let mem = agent_home.join(".pi").join("agent").join("pi-memory");
     if mem.exists() {
         std::fs::remove_dir_all(&mem).map_err(|e| e.to_string())?;
@@ -654,7 +663,9 @@ pub struct SessionInfo {
 /// session store, for the resume / session-tree UI.
 #[tauri::command]
 pub fn ai_sessions() -> Result<Vec<SessionInfo>, String> {
-    let agent_home = AgentWorkspace::ensure().map_err(|e| e.to_string())?.agent_home;
+    let agent_home = AgentWorkspace::ensure()
+        .map_err(|e| e.to_string())?
+        .agent_home;
     let dir = agent_home.join(".pi").join("agent").join("sessions");
 
     let mut out = Vec::new();
@@ -679,7 +690,7 @@ pub fn ai_sessions() -> Result<Vec<SessionInfo>, String> {
             out.push(SessionInfo { id, modified_ms });
         }
     }
-    out.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms));
+    out.sort_by_key(|s| std::cmp::Reverse(s.modified_ms));
     Ok(out)
 }
 
@@ -734,8 +745,18 @@ pub fn ai_command(
         return Ok(());
     }
 
-    match await_response(&mut child.reader, &mut child.stdin, &app, &channel, &cmd_name) {
-        Ok(true) => emit(&app, &channel, PiStreamLine::result(format!("{cmd_name} ok"))),
+    match await_response(
+        &mut child.reader,
+        &mut child.stdin,
+        &app,
+        &channel,
+        &cmd_name,
+    ) {
+        Ok(true) => emit(
+            &app,
+            &channel,
+            PiStreamLine::result(format!("{cmd_name} ok")),
+        ),
         Ok(false) => emit(
             &app,
             &channel,
@@ -1451,6 +1472,65 @@ fn author_wasm_from_compile(
         n_out: compiled.n_out,
         diagnostic: None,
     })
+}
+
+/// The faust binary the native author path falls back to when `OJFAUST_FAUST_BIN`
+/// is unset and faust isn't on PATH (Windows dev install; mirrors ojwasm's path).
+const DEFAULT_FAUST_BIN: &str = r"C:\Program Files\Faust\bin\faust.exe";
+
+/// A stable per-node directory for an authored code node's compiled artifacts,
+/// keyed by the content hash so re-authoring the same node reuses it.
+fn code_node_dir(hash: &str) -> std::path::PathBuf {
+    let mut dir = std::env::temp_dir();
+    dir.push("openjammer-codenodes");
+    dir.push(hash);
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// The faust path → NATIVE EXECUTION (M6): compile the source to a runnable native
+/// `.dll` and register it in the live engine, so the authored node actually plays
+/// the REAL DSP. (faust's `-lang wasm` output uses an exception proposal wasmtime
+/// can't run, so the native dll is the execution path — see docs/code-node-abi.md.)
+///
+/// Returns the SAME [`AuthoredNode`] shape as [`author_wasm_node`] (so the frontend
+/// `authorCodeNode` upgrade flow is unchanged): on success the id is
+/// `ai.wasm.<hash>` AND the engine now hosts it; if faust/MSVC are unavailable it
+/// returns a diagnostic and the frontend keeps the stored-source fallback.
+#[tauri::command]
+pub fn author_faust_native(
+    source: String,
+    state: tauri::State<'_, crate::engine::BackendState>,
+) -> Result<AuthoredNode, String> {
+    // 1) Manifest + validation via the existing wasm-author path (ojfaust metadata).
+    //    Help ojfaust find faust even if it isn't on the app's PATH (dev convenience).
+    if std::env::var("OJFAUST_FAUST_BIN").is_err()
+        && std::path::Path::new(DEFAULT_FAUST_BIN).exists()
+    {
+        std::env::set_var("OJFAUST_FAUST_BIN", DEFAULT_FAUST_BIN);
+    }
+    let authored = author_wasm_node(source.clone(), "faust".to_string())?;
+    if authored.diagnostic.is_some() || authored.manifest_id.is_empty() {
+        return Ok(authored); // no faust / compile error → frontend keeps fallback
+    }
+
+    // 2) Compile the runnable NATIVE dll (faust -lang cpp → cl.exe).
+    let out_dir = code_node_dir(&authored.wasm_hash);
+    let Some(dll) = ojwasm::compile_faust_to_dll(&source, &out_dir) else {
+        // No native toolchain → diagnostic, so the frontend keeps the source
+        // fallback (an unrunnable `ai.wasm.*` would fail to compile in the engine).
+        return Ok(AuthoredNode::failed(
+            "native faust toolchain unavailable (needs faust + MSVC cl.exe)",
+        ));
+    };
+
+    // 3) Register the native loader in the live engine + recompile.
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine state poisoned".to_string())?
+        .register_native_faust(&authored.manifest_json, dll)?;
+    Ok(authored)
 }
 
 #[cfg(test)]

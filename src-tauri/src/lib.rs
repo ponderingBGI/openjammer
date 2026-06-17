@@ -300,6 +300,7 @@ pub fn run() {
             bridge::ai_tool_result,
             ai_faust_compile,
             ai::author_wasm_node,
+            ai::author_faust_native,
             auth::auth_status,
             auth::auth_store_key,
             auth::auth_get_key,

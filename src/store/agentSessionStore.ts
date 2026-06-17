@@ -258,9 +258,15 @@ const dspRegistrar: DspNodeRegistrar = {
             }),
             sourcePluginId: (source) => dspPluginIdFor(source),
             wasmPluginId: (hash) => wasmPluginIdFor(hash),
+            // Native path: author_faust_native compiles the source to a runnable
+            // native .dll AND registers it in the live engine, so the upgraded
+            // ai.wasm.<hash> node plays the REAL DSP (the wasm sandbox can't host
+            // faust's exception wasm — see docs/code-node-abi.md). Same result shape
+            // as author_wasm_node, so the upgrade flow is unchanged. faust is the
+            // only code-node language today, so `lang` is implied.
             invokeAuthor: invoke
-                ? async (source, lang) =>
-                      (await invoke('author_wasm_node', { source, lang })) as AuthoredNodeResult
+                ? async (source, _lang) =>
+                      (await invoke('author_faust_native', { source })) as AuthoredNodeResult
                 : null,
             parseManifestParams: parseManifestParams,
         });

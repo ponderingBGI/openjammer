@@ -45,6 +45,14 @@ ojhost = { path = "../crates/ojhost" }
 # (see crates/ojfaust/README.md). NEVER on the realtime path.
 ojfaust = { path = "../crates/ojfaust" }
 
+# --- AI code-node EXECUTION host (M6) ----------------------------------------
+# Runs AI-authored faust code nodes natively: `native-host` compiles faust to a
+# .dll (faust -lang cpp -> cl.exe) and drives it via libloading behind ojcore's
+# DspInstance, with the permanent OutputGuard chain. (The wasmtime `oj_*` sandbox
+# path is also in this crate but unused here — faust's wasm needs an exception
+# proposal wasmtime can't run; see docs/code-node-abi.md.) NATIVE-ONLY.
+ojwasm = { path = "../crates/ojwasm", features = ["native-host"] }
+
 # --- the Tauri v2 shell ------------------------------------------------------
 tauri = { version = "2.11.2", features = [] }
 tauri-plugin-opener = "2.5.4"
