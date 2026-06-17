@@ -139,6 +139,7 @@ export function useResize(options: UseResizeOptions): UseResizeReturn {
 
   // Sync with external changes (e.g., undo/redo)
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resetting local drag dimensions when the store-driven initial size changes (e.g. undo/redo); intentional external-state sync
     setDimensions({ width: initialWidth, height: initialHeight });
   }, [initialWidth, initialHeight]);
 

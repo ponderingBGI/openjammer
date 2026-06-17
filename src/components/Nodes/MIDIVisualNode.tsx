@@ -55,7 +55,7 @@ export function MIDIVisualNode({
     const presetId = nodeData.presetId || 'generic';
     const deviceId = nodeData.deviceId || null;
     const registry = getPresetRegistry();
-    const preset = useMemo(() => registry.getPreset(presetId), [presetId]);
+    const preset = useMemo(() => registry.getPreset(presetId), [presetId, registry]);
 
     // Build control sections
     const hasKeys = preset?.controls.keys !== undefined;

@@ -147,11 +147,13 @@ export function NodeCanvas() {
     const nodes = useMemo(() => {
         const nodeArray = getNodesAtLevel(currentViewNodeId);
         return new Map(nodeArray.map(n => [n.id, n]));
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- allNodes is the reactivity trigger: getNodesAtLevel reads the store via get(), so this memo must recompute when the nodes Map identity changes
     }, [currentViewNodeId, getNodesAtLevel, allNodes]);
 
     const connections = useMemo(() => {
         const connArray = getConnectionsAtLevel(currentViewNodeId);
         return new Map(connArray.map(c => [c.id, c]));
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- allConnections is the reactivity trigger: getConnectionsAtLevel reads the store via get(), so this memo must recompute when the connections Map identity changes
     }, [currentViewNodeId, getConnectionsAtLevel, allConnections]);
     const selectedConnectionIds = useGraphStore((s) => s.selectedConnectionIds);
     const selectConnection = useGraphStore((s) => s.selectConnection);
@@ -926,6 +928,7 @@ export function NodeCanvas() {
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- stable window listeners by design: ROW_KEYS (recreated each render), contextMenu/selectionBox (frequently-changing local state read via closure) intentionally omitted so the handlers are not torn down/re-added mid-keystroke; clearSelection/stopConnecting are stable Zustand actions
     }, [deleteSelected, toggleGhostMode, undo, redo, startConnecting, setCurrentMode, enterNode, exitToParent, allNodes, currentViewNodeId, copySelected, pasteClipboard, selectedClipIds, removeClip]);
 
     // Collaboration presence (U23): publish current view level + node selection
@@ -1051,6 +1054,7 @@ export function NodeCanvas() {
                 onSelect={selectConnection}
             />
         );
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- portLayoutVersion is a deliberate cache-bust: getPortPosition reads the portPositionCache ref (untracked), so this callback must change identity when the cache is invalidated after DOM paint, or cables render with stale anchor positions
     }, [getPortPosition, selectedConnectionIds, selectConnection, allNodes, allConnections, signalLevels, portLayoutVersion]);
 
     // Render temporary connection while dragging
@@ -1087,6 +1091,7 @@ export function NodeCanvas() {
                 })}
             </>
         );
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- portLayoutVersion is a deliberate cache-bust: getPortPosition reads the portPositionCache ref (untracked), so this callback must change identity when the cache is invalidated after DOM paint, or the temp cable renders from a stale anchor position
     }, [isConnecting, connectingFrom, getPortPosition, screenToCanvas, mousePos, portLayoutVersion]);
 
     // Calculate bounds for current level's nodes (not root)

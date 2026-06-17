@@ -88,6 +88,7 @@ export const InputPanelNode = memo(function InputPanelNode({
             regularPorts: regular,
             emptySlotPort: emptySlot
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- only node.ports is read; depending on the whole node would recompute on unrelated node changes (position, selection)
     }, [node.ports]);
 
     // Callback for when bundle expansion is toggled

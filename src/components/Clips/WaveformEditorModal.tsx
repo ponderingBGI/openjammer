@@ -97,6 +97,7 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
         };
 
         loadAudio();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on the specific clip fields read here; depending on the whole clip object would re-trigger audio decode on any unrelated clip identity change
     }, [clip?.sampleId, clip?.startFrame, clip?.endFrame]);
 
     // Draw waveform

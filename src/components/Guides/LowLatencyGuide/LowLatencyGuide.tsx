@@ -84,6 +84,7 @@ export function LowLatencyGuide() {
     };
 
     initialize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs only when the panel opens; `guide` is a fresh object each render, so depending on it would re-run device enumeration / mic-permission requests on every store change
   }, [guide.isOpen]);
 
   // Calculate progress

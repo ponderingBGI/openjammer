@@ -392,7 +392,7 @@ export const InstrumentNode = memo(function InstrumentNode({
     }, [dragStartPos]);
 
     // Get rows data
-    const rows: InstrumentRow[] = data.rows || [];
+    const rows: InstrumentRow[] = useMemo(() => data.rows || [], [data.rows]);
 
     // Get output port from the node
     const outputPort = node.ports.find(p => p.direction === 'output' && p.type === 'audio');

@@ -78,6 +78,7 @@ export function PluginsPanel() {
 
     // Scan once each time the panel opens.
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- opening the panel kicks off a native plugin scan (side effect on an external system); the scan's setState is the sanctioned subscribe-and-update pattern
         if (open) void scan();
     }, [open, scan]);
 

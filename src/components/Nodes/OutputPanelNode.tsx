@@ -80,6 +80,7 @@ export const OutputPanelNode = memo(function OutputPanelNode({
             regularPorts: regular,
             emptySlotPort: emptySlot
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- only node.ports is read; depending on the whole node would recompute on unrelated node changes (position, selection)
     }, [node.ports]);
 
     // Start editing a port label

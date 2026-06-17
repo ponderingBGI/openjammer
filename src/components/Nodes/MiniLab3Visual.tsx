@@ -509,6 +509,7 @@ export const MiniLab3Visual = memo(function MiniLab3Visual({
                             <button className="minilab3-button">Oct -</button>
                             <button className="minilab3-button">Oct +</button>
                         </div>
+                        {/* eslint-disable-next-line react-hooks/refs -- renderTouchStrips reads stateRef.current by design: live MIDI state is held in a ref and renders are RAF-batched to avoid a re-render per MIDI event */}
                         {renderTouchStrips()}
                     </div>
 
@@ -526,11 +527,13 @@ export const MiniLab3Visual = memo(function MiniLab3Visual({
 
                     {/* 8 Knobs */}
                     <div className="minilab3-knobs-section">
+                        {/* eslint-disable-next-line react-hooks/refs -- renderKnobs reads stateRef.current by design: live MIDI state is held in a ref and renders are RAF-batched to avoid a re-render per MIDI event */}
                         {renderKnobs()}
                     </div>
 
                     {/* 4 Faders */}
                     <div className="minilab3-faders-section">
+                        {/* eslint-disable-next-line react-hooks/refs -- renderFaders reads stateRef.current by design: live MIDI state is held in a ref and renders are RAF-batched to avoid a re-render per MIDI event */}
                         {renderFaders()}
                     </div>
                 </div>
@@ -538,6 +541,7 @@ export const MiniLab3Visual = memo(function MiniLab3Visual({
                 {/* Middle row - 8 Pads positioned below knobs */}
                 <div className="minilab3-middle-row">
                     <div className="minilab3-pads-section">
+                        {/* eslint-disable-next-line react-hooks/refs -- renderPads reads stateRef.current by design: live MIDI state is held in a ref and renders are RAF-batched to avoid a re-render per MIDI event */}
                         {renderPads()}
                     </div>
                 </div>
@@ -557,6 +561,7 @@ export const MiniLab3Visual = memo(function MiniLab3Visual({
                 {/* Keyboard section */}
                 <div className="minilab3-keyboard-section">
                     <div className="minilab3-keyboard">
+                        {/* eslint-disable-next-line react-hooks/refs -- renderKeyboard reads stateRef.current by design: live MIDI state is held in a ref and renders are RAF-batched to avoid a re-render per MIDI event */}
                         {renderKeyboard()}
                     </div>
                 </div>
