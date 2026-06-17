@@ -18,6 +18,10 @@ required-features = ["demo"]
 
 [features]
 demo = ["dep:ojinstrument"]
+# L3 — the native persistent log store (SQLite + FTS5). Optional + off by default
+# so the workspace's clippy/test stay sqlite-free and fast; a dedicated CI step
+# builds with `--features persist` and runs the FTS5-availability smoke (plan §5.1).
+persist = ["dep:rusqlite"]
 
 [dependencies]
 # Engine core (std feature on: we need CommandQueue/CommandConsumer + Engine).
@@ -42,6 +46,11 @@ symphonia = { version = "0.6.0", default-features = false, features = ["wav", "p
 
 # WAV write/capture for the AssetStore.
 hound = "3.5.1"
+
+# L3 — SQLite + FTS5 persistent log store (optional; the `persist` feature).
+# `bundled` compiles SQLite from source with FTS5 enabled, so there is no system
+# sqlite dependency and FTS5 is guaranteed present on every target.
+rusqlite = { version = "0.32", optional = true, features = ["bundled"] }
 
 # Promote the audio callback thread to realtime scheduling priority. `dbus` is
 # off: we use the direct pthread/SCHED_FIFO path, not the desktop RT portal.

@@ -92,6 +92,14 @@ jobs:
         run: |
           cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings
           cargo test -p ojhost --features clap-host
+      - name: L3 persistent log store — SQLite/FTS5 gated smoke
+        # The `persist` feature pulls bundled SQLite (FTS5 compiled in) and is OFF
+        # in the default workspace build above (so it stays fast). This dedicated
+        # step lints + runs the FTS5-availability smoke and the store round-trip
+        # tests (plan §5.1: an FTS5-off store is a silent runtime failure).
+        run: |
+          cargo clippy -p ojcore-native --features persist --all-targets -- -D warnings
+          cargo test -p ojcore-native --features persist
 
   web:
     name: Web (control plane)
