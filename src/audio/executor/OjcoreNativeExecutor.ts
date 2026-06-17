@@ -38,7 +38,11 @@ import type {
 } from './Executor';
 import { emitWithIndex, remapForBackend, type NodeIdxMap } from '../ojgraph';
 import { resolveKeyboardNotes } from '../ojgraph';
-import { DEFAULT_VOICE_INSTRUMENTS, getVoiceForInstrumentNode } from '../defaultInstrument';
+import {
+    DEFAULT_VOICE_INSTRUMENTS,
+    getVoiceForInstrumentNode,
+    instrumentUsesKarplus,
+} from '../defaultInstrument';
 import type {
     NodeIdx,
     OjGraph,
@@ -251,6 +255,9 @@ export class OjcoreNativeExecutor implements Executor {
         for (const node of this.getNodes().values()) {
             if (!DEFAULT_VOICE_INSTRUMENTS.has(node.type)) continue;
             if (this.index.get(node.id) === undefined) continue;
+            // Karplus-routed plucked strings are note-triggered; they need no PCM.
+            if (instrumentUsesKarplus(node.type, node.data as Record<string, unknown> | undefined))
+                continue;
             const { voice, key } = getVoiceForInstrumentNode(
                 node.type,
                 node.data as Record<string, unknown> | undefined,

@@ -11,7 +11,7 @@ import {
     _resetVoiceCacheForTests,
     type VoiceFamily,
 } from '../voiceSynth';
-import { getVoiceForInstrumentNode } from '../defaultInstrument';
+import { getVoiceForInstrumentNode, instrumentUsesKarplus } from '../defaultInstrument';
 import { INSTRUMENT_DEFINITIONS } from '../instrumentCatalog';
 
 const ALL_FAMILIES: VoiceFamily[] = [
@@ -105,6 +105,27 @@ describe('NO instrument in the catalogue is silent (golden)', () => {
             expect(Number.isFinite(p), `${def.id} produced non-finite PCM`).toBe(true);
             expect(p, `${def.id} is silent`).toBeGreaterThan(0.1);
         }
+    });
+});
+
+describe('Karplus routing — plucked strings use the real primitive', () => {
+    it('routes guitars + basses to Karplus, but not pianos/saxes/keys', () => {
+        // Guitar + bass instrumentIds → Karplus.
+        expect(instrumentUsesKarplus('instrument', { instrumentId: 'karplus-acoustic' })).toBe(true);
+        expect(instrumentUsesKarplus('instrument', { instrumentId: 'gm-electric-bass-finger' })).toBe(
+            true,
+        );
+        // Sampler-backed families → not Karplus.
+        expect(instrumentUsesKarplus('instrument', { instrumentId: 'gm-acoustic-grand-piano' })).toBe(
+            false,
+        );
+        expect(instrumentUsesKarplus('instrument', { instrumentId: 'gm-alto-sax' })).toBe(false);
+        expect(instrumentUsesKarplus('keys', undefined)).toBe(false);
+    });
+
+    it('only applies to instrument node types', () => {
+        // A non-instrument type is never Karplus-routed regardless of data.
+        expect(instrumentUsesKarplus('speaker', { instrumentId: 'karplus-acoustic' })).toBe(false);
     });
 });
 

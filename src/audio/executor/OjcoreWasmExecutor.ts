@@ -40,7 +40,11 @@ import type {
     SignalLevelsCallback,
 } from './Executor';
 import { getAudioContext } from '../audioContext';
-import { DEFAULT_VOICE_INSTRUMENTS, getVoiceForInstrumentNode } from '../defaultInstrument';
+import {
+    DEFAULT_VOICE_INSTRUMENTS,
+    getVoiceForInstrumentNode,
+    instrumentUsesKarplus,
+} from '../defaultInstrument';
 import { emitWithIndex, remapForBackend, resolveKeyboardNotes, type NodeIdxMap } from '../ojgraph';
 import type { NodeIdx, OjGraph, RtCommand } from '../../../packages/oj-protocol-ts/src/index';
 import {
@@ -288,6 +292,9 @@ export class OjcoreWasmExecutor implements Executor {
             if (!DEFAULT_VOICE_INSTRUMENTS.has(node.type)) continue;
             if (this.index.get(node.id) === undefined) continue;
             if (this.sampleBindings.has(node.id)) continue; // user-bound sample wins
+            // Karplus-routed plucked strings are note-triggered; they need no PCM.
+            if (instrumentUsesKarplus(node.type, node.data as Record<string, unknown> | undefined))
+                continue;
             try {
                 const { voice, key } = getVoiceForInstrumentNode(
                     node.type,

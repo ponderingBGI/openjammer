@@ -351,6 +351,20 @@ const CATEGORY_FAMILY: Record<string, VoiceFamily> = {
 };
 
 /**
+ * Families backed by the engine's real Karplus-Strong physical-model primitive
+ * (`builtin.karplus`) rather than the additive procedural sampler: plucked
+ * strings (guitars, harp, …) and basses. The emit lowers these instrument nodes
+ * to `KarplusString` so the engine plucks a live, per-note string; the executors
+ * skip sample-binding them (Karplus needs no PCM).
+ */
+const KARPLUS_FAMILIES: ReadonlySet<VoiceFamily> = new Set<VoiceFamily>(['pluck', 'bass']);
+
+/** Whether a {@link VoiceFamily} is rendered by the real Karplus primitive. */
+export function isKarplusFamily(family: VoiceFamily): boolean {
+    return KARPLUS_FAMILIES.has(family);
+}
+
+/**
  * Resolve an `instrumentId` (and optional display name + catalogue category) to a
  * timbre {@link VoiceFamily}. Keyword rules win (so "Church Organ" → organ even
  * though its catalogue category is "piano"); the category is the fallback; an

@@ -123,6 +123,38 @@ describe('emitOjGraph — basic shape', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Instrument family routing (Sampler vs the real Karplus primitive)
+// ---------------------------------------------------------------------------
+
+describe('emitOjGraph — instrument family routing', () => {
+    it('lowers a plucked-string instrument to the real Karplus primitive', () => {
+        const guitar = makeNode('instrument', {
+            id: 'g',
+            data: { instrumentId: 'karplus-acoustic' },
+        });
+        const speaker = makeNode('speaker', { id: 's' });
+        const conn = makeConn(guitar.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(guitar, speaker), connMap(conn));
+        const kinds = graph.nodes.map((n) => n.kind);
+        expect(kinds).toContain('KarplusString');
+        expect(kinds).not.toContain('Sampler');
+    });
+
+    it('keeps a piano instrument on the Sampler primitive', () => {
+        const piano = makeNode('instrument', {
+            id: 'p',
+            data: { instrumentId: 'gm-acoustic-grand-piano' },
+        });
+        const speaker = makeNode('speaker', { id: 's' });
+        const conn = makeConn(piano.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(piano, speaker), connMap(conn));
+        const kinds = graph.nodes.map((n) => n.kind);
+        expect(kinds).toContain('Sampler');
+        expect(kinds).not.toContain('KarplusString');
+    });
+});
+
+// ---------------------------------------------------------------------------
 // The canonical keyboard -> instrument -> effect -> speaker patch
 // ---------------------------------------------------------------------------
 

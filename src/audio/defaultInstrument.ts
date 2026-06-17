@@ -19,7 +19,14 @@
  */
 
 import { INSTRUMENT_DEFINITIONS } from './instrumentCatalog';
-import { getFamilyVoice, getInstrumentVoice, resolveVoiceFamily, type SynthVoice } from './voiceSynth';
+import {
+    getFamilyVoice,
+    getInstrumentVoice,
+    isKarplusFamily,
+    resolveVoiceFamily,
+    type SynthVoice,
+    type VoiceFamily,
+} from './voiceSynth';
 
 /**
  * Instrument node types that receive a built-in voice when they have no
@@ -43,6 +50,30 @@ export type DefaultVoice = SynthVoice;
 
 /** Catalogue lookup so a picker `instrumentId` resolves to its name + category. */
 const CATALOG_BY_ID = new Map(INSTRUMENT_DEFINITIONS.map((d) => [d.id, d]));
+
+/** The resolved {@link VoiceFamily} for an instrument node (picker id or type). */
+function familyForNode(nodeType: string, data: Record<string, unknown> | undefined): VoiceFamily {
+    const instrumentId = typeof data?.instrumentId === 'string' ? data.instrumentId : undefined;
+    if (instrumentId) {
+        const def = CATALOG_BY_ID.get(instrumentId);
+        return resolveVoiceFamily(instrumentId, def?.name, def?.category);
+    }
+    return resolveVoiceFamily(nodeType);
+}
+
+/**
+ * Whether an instrument node should be lowered to the engine's real Karplus
+ * primitive (a plucked string / bass) instead of the additive sampler. Used by
+ * BOTH the emit (to pick `KarplusString`) and the executors (to skip binding a
+ * sample — Karplus is note-triggered and needs no PCM), so the two never disagree.
+ */
+export function instrumentUsesKarplus(
+    nodeType: string,
+    data: Record<string, unknown> | undefined,
+): boolean {
+    if (!DEFAULT_VOICE_INSTRUMENTS.has(nodeType)) return false;
+    return isKarplusFamily(familyForNode(nodeType, data));
+}
 
 /**
  * The default voice (the warm `keys` family) — the back-compatible single-voice

@@ -52,6 +52,7 @@ import {
     type PrimitiveKind,
 } from '../../engine/manifest';
 import { AI_WASM_ID_PREFIX, getDynamicPlugin } from '../../engine/dynamicRegistry';
+import { instrumentUsesKarplus } from '../defaultInstrument';
 import type {
     ConnectionType,
     IrEdge,
@@ -229,7 +230,13 @@ export function emitWithIndex(
         if (isStructural(node)) continue;
         const manifest = manifestForNode(node);
         // kind is defined here (structural check above filters undefined kinds).
-        const kind = manifest.kind as PrimitiveKind;
+        let kind = manifest.kind as PrimitiveKind;
+        // Plucked-string / bass instruments lower to the engine's real Karplus
+        // physical-model primitive instead of the additive sampler (a guitar is
+        // plucked live, per note). The executors skip sample-binding these.
+        if (kind === 'Sampler' && instrumentUsesKarplus(node.type, node.data as Record<string, unknown> | undefined)) {
+            kind = 'KarplusString';
+        }
         emitted.set(id, { idx: nextIdx as NodeIdx, node, manifest, kind });
         nextIdx++;
     }
