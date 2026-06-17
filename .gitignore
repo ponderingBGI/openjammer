@@ -18,6 +18,12 @@ dist
 dist-ssr
 *.local
 
+# Playwright (E2E) artifacts — generated on every run.
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

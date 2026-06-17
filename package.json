@@ -31,6 +31,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
     "tauri": "tauri",
     "oj": "bun run scripts/oj/index.ts",
     "doctor": "bun run scripts/oj/index.ts doctor"
@@ -55,6 +56,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.61.0",
     "@tauri-apps/cli": "2.11.2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",

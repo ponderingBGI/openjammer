@@ -171,6 +171,25 @@ jobs:
       - name: Offline audio render gate (macOS, device-free)
         run: cargo run -p ojcore-native --bin render --features demo -- "${RUNNER_TEMP:-/tmp}/ci-render.wav" 2
 
+  e2e:
+    name: PWA E2E (Playwright)
+    # Render-smoke for the browser target (plan §4.2): build the production PWA,
+    # serve it via `vite preview` (which emits COOP/COEP), and assert the page
+    # comes up cross-origin isolated with SharedArrayBuffer available and the
+    # React shell mounted. Feeds the aggregate gate.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2
+      - name: Install
+        run: bun install --frozen-lockfile
+      - name: Install Playwright Chromium (+ OS deps)
+        run: bunx playwright install --with-deps chromium
+      - name: PWA smoke (build + preview + crossOriginIsolated)
+        run: bunx playwright test
+
   credential-scan:
     name: Credential scan
     # REQUIRED (plan §0.5): the founder is Windows-only, so the local pre-commit
@@ -225,7 +244,7 @@ jobs:
   # here as a `need`, never as an independently-required check. DO NOT RENAME.
   gate:
     name: Merge gate
-    needs: [engine, web, windows-native, macos-native, credential-scan, zizmor, gate-selftest]
+    needs: [engine, web, windows-native, macos-native, credential-scan, zizmor, gate-selftest, e2e]
     if: always()
     runs-on: ubuntu-latest
     steps:
