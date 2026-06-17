@@ -57,15 +57,15 @@ re-integrated on top, feature by feature, each verified.
 > external assets, deterministic, instantly playable — and keep bring-your-own as
 > the override.
 
-- [ ] 🟡 Generalize `defaultInstrument.ts` into a **procedural voice engine**: a `VoiceSpec` (harmonic series, ADSR, brightness, vibrato, inharmonicity, noise/breath, body resonance) → deterministic mono PCM.
-- [ ] 🟡 A `VoiceSpec` per instrument **family** (piano, chromatic-percussion, organ, guitar, bass, strings, ensemble, brass, reed/woodwind, lead-synth, pad-synth, percussion, world) so each sounds like itself.
-- [ ] 🟡 Map every catalogue `instrumentId` → its family `VoiceSpec`; selecting "Alto Sax" vs "Cello" produces audibly different tones.
-- [ ] 🟡 Thread `node.data.instrumentId` (not just `node.type`) through **both** executors; re-bind the voice when the picker changes.
-- [ ] 🟡 Make the generic `instrument` / `keys` picker produce sound out of the box.
-- [ ] ⬜ Per-instrument default ADSR + gain so brass swells, plucks decay, pads bloom.
-- [ ] ⬜ Velocity → brightness/level mapping for expressive dynamics.
+- [x] ✅ Generalize `defaultInstrument.ts` into a **procedural voice engine** (`voiceSynth.ts`): a `VoiceSpec` (harmonic series, ADSR, brightness, vibrato, tremolo, inharmonicity, breath noise) → deterministic mono PCM.
+- [x] ✅ A `VoiceSpec` per instrument **family** (keys, piano, epiano, organ, mallet, bell, pluck, bass, strings, brass, reed, flute, lead, pad, percussion, world) so each sounds like itself.
+- [x] ✅ Map every catalogue `instrumentId` → its family `VoiceSpec` (keyword rules + category fallback); "Alto Sax" vs "Cello" produce audibly different tones.
+- [x] ✅ Thread `node.data.instrumentId` (not just `node.type`) through **both** executors; re-bind the voice (a `boundVoiceKey` guard) when the picker changes.
+- [x] ✅ Make the generic `instrument` / `keys` picker produce sound out of the box.
+- [x] ✅ Per-family baked ADSR + character so brass swells, plucks decay, pads bloom, organs hold.
+- [x] ✅ A golden test that every catalogue `instrumentId` resolves to a non-silent, finite voice (no silent instrument can ship).
+- [ ] ⬜ Velocity → brightness/level mapping for expressive dynamics. *(next)*
 - [ ] ⬜ Karplus-backed family for plucked strings (guitar/bass) routed to the real `KarplusString` primitive, not the additive synth.
-- [ ] ⬜ A tiny golden test that every catalogue `instrumentId` resolves to a non-silent voice (no silent instrument can ship).
 
 ---
 
