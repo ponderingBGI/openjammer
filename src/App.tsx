@@ -13,6 +13,7 @@ import { CommandBar } from './components/CommandBar/CommandBar';
 import { DevLogPanel } from './components/DevLog/DevLogPanel';
 import { IssueReporter } from './components/IssueReporter/IssueReporter';
 import { AudioHealthPanel } from './components/AudioHealth/AudioHealthPanel';
+import { PwaUpdatePrompt } from './components/PwaUpdatePrompt';
 import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
@@ -402,6 +403,9 @@ function App() {
 
       {/* Audio-health readout (§4) — the live diagnostics the AI reads, with fix-it. */}
       <AudioHealthPanel />
+
+      {/* Channel-aware PWA update — applies on idle, never yanks the AudioContext. */}
+      <PwaUpdatePrompt />
 
       {/* Collaboration Share/Join control + peer list (U23 — collab state plane) */}
       <CollabControl />

@@ -26,7 +26,10 @@ export default defineConfig({
     topLevelAwait(),
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // PROMPT, not autoUpdate: a new service worker must NEVER silently reload
+      // the page (and yank the AudioContext) mid-performance. The app surfaces a
+      // non-blocking prompt and applies the update on idle (see PwaUpdatePrompt).
+      registerType: 'prompt',
       includeAssets: ['favicon.ico', 'robots.txt', 'apple-touch-icon.png'],
       manifest: {
         name: 'OpenJammer',
