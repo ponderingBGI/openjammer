@@ -17,6 +17,7 @@ mod auth;
 mod bridge;
 mod engine;
 mod sandbox;
+mod updater;
 
 use std::path::PathBuf;
 
@@ -284,6 +285,11 @@ pub fn run() {
             app.manage(ai::WarmChildState::default());
             // The loopback tool bridge (Phase 3: real graph reads round-trip to Pi).
             app.manage(bridge::BridgeState::default());
+            // R2: the audio-safe update gate (the owner-enabled updater stages
+            // into it; the install is refused while audio plays).
+            app.manage::<updater::UpdateGateState>(std::sync::Arc::new(
+                ojcore_native::UpdateGate::new(),
+            ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -317,7 +323,10 @@ pub fn run() {
             recorder_export,
             set_speaker_volume,
             set_speaker_device,
-            set_mic
+            set_mic,
+            updater::update_stage,
+            updater::update_is_pending,
+            updater::update_try_install
         ])
         .run(tauri::generate_context!())
         .expect("error while running OpenJammer tauri application");
