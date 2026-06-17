@@ -76,7 +76,10 @@ their own:
   agent can do this for you, or you can paste source. See
   [the code-node ABI](https://github.com/PonderingBGI/openjammer/blob/main/docs/code-node-abi.md).
 - **Native plugins.** A CLAP/VST3 host (`ojhost`) lets you bring instruments and
-  effects you already own.
+  effects you already own. On the pure-Rust CLAP path a hosted **instrument**
+  plays straight from the keyboard and follows parameter automation — note-on/off
+  and param changes are delivered to the plugin as sample-accurate CLAP events
+  through an allocation-free RT seam.
 
 See the project [ROADMAP](https://github.com/PonderingBGI/openjammer/blob/main/ROADMAP.md)
 §3 for the current status of each bring-your-own path.

@@ -28,11 +28,64 @@
 
 use std::path::Path;
 
+use clack_host::events::event_types::{NoteOffEvent, NoteOnEvent, ParamValueEvent};
+use clack_host::events::Match;
 use clack_host::prelude::*;
+use clack_host::utils::Cookie;
 
 use super::HostedBackend;
 use crate::descriptor::{PluginDescriptor, PluginFormat, PortCounts};
 use crate::error::HostError;
+
+/// Max control events (note-on/off + param-value) buffered between two
+/// `process` calls. [`ClapBackend::in_events`] is pre-allocated to this many of
+/// the LARGEST CLAP event (via [`EventBuffer::with_capacity`]) at `open`, and
+/// every queue helper refuses to push past it, so the RT-thread event pushes are
+/// **guaranteed allocation-free** (the `HostedBackend::set_param`/`note_*`
+/// contract). 256 is far beyond the handful of control events a real block ever
+/// carries; the cap is a hard RT-safety floor, not an expected limit.
+const EVENT_CAPACITY: usize = 256;
+
+/// Queue a CLAP note-on for the plugin's next `process` block. Sample-accurate
+/// time 0 (block start); `Match::All` note-id lets the plugin assign its own
+/// voice id. No-op (never allocs) once [`EVENT_CAPACITY`] is reached.
+fn queue_note_on(buf: &mut EventBuffer, count: &mut usize, note: u8, vel: u8) {
+    if *count >= EVENT_CAPACITY {
+        return;
+    }
+    let pckn = Pckn::new(0u16, 0u16, note as u16, Match::All);
+    buf.push(&NoteOnEvent::new(0, pckn, vel as f64 / 127.0));
+    *count += 1;
+}
+
+/// Queue a CLAP note-off (velocity 0) for the next block. See [`queue_note_on`].
+fn queue_note_off(buf: &mut EventBuffer, count: &mut usize, note: u8) {
+    if *count >= EVENT_CAPACITY {
+        return;
+    }
+    let pckn = Pckn::new(0u16, 0u16, note as u16, Match::All);
+    buf.push(&NoteOffEvent::new(0, pckn, 0.0));
+    *count += 1;
+}
+
+/// Queue a CLAP param-value change for the next block. `id` is treated as the
+/// plugin's `clap_id` with an empty [`Cookie`] (the spec-allowed lookup-by-id
+/// path); plugins that key automation on a host-supplied cookie are refined when
+/// the `clack-extensions` params extension is wired (see crate README).
+fn queue_param(buf: &mut EventBuffer, count: &mut usize, id: u16, value: f32) {
+    if *count >= EVENT_CAPACITY {
+        return;
+    }
+    let ev = ParamValueEvent::new(
+        0,
+        ClapId::new(id as u32),
+        Pckn::match_all(),
+        value as f64,
+        Cookie::empty(),
+    );
+    buf.push(&ev);
+    *count += 1;
+}
 
 /// A minimal CLAP host: registers no extensions and ignores every callback.
 /// Enough to scan and to render audio. A later unit can grow the handlers
@@ -166,8 +219,10 @@ pub(super) fn open(
         out_ports: AudioPorts::with_capacity(channels, 1),
         in_scratch: vec![vec![0.0f32; max_block]; channels],
         out_scratch: vec![vec![0.0f32; max_block]; channels],
-        in_events: EventBuffer::new(),
-        out_events: EventBuffer::new(),
+        // Pre-allocated off-RT so the per-block control-event pushes never alloc.
+        in_events: EventBuffer::with_capacity(EVENT_CAPACITY),
+        out_events: EventBuffer::with_capacity(EVENT_CAPACITY),
+        events_this_block: 0,
         channels,
         max_block,
         latency: desc.latency_samples,
@@ -185,9 +240,15 @@ struct ClapBackend {
     /// Per-channel input/output scratch, allocated once at `open`.
     in_scratch: Vec<Vec<f32>>,
     out_scratch: Vec<Vec<f32>>,
-    /// Reusable empty event buffers (no param/note events wired yet).
+    /// Control events queued for the next block (note-on/off, param-value) and
+    /// the plugin's own output events. `in_events` is drained + cleared each
+    /// `process`; both are pre-sized to [`EVENT_CAPACITY`] so pushes never alloc.
     in_events: EventBuffer,
     out_events: EventBuffer,
+    /// Count of events queued into `in_events` since the last `process`, so the
+    /// queue helpers can hard-cap at [`EVENT_CAPACITY`] without an O(n) length
+    /// scan on the RT thread.
+    events_this_block: usize,
     channels: usize,
     max_block: usize,
     latency: u32,
@@ -270,13 +331,24 @@ impl HostedBackend for ClapBackend {
                 }
             }
         }
+        // The plugin has consumed this block's input events; reset so the next
+        // block's note/param queue starts empty. `clear` retains the pre-sized
+        // capacity, keeping subsequent pushes allocation-free.
+        self.in_events.clear();
+        self.events_this_block = 0;
         self.out_events.clear();
     }
 
-    fn set_param(&mut self, _id: u16, _value: f32) {
-        // TODO(clap-host): push a CLAP param-value event into `in_events` so the
-        // plugin sees the change next block. Requires the `clack-extensions`
-        // params extension; deferred (see crate README).
+    fn set_param(&mut self, id: u16, value: f32) {
+        queue_param(&mut self.in_events, &mut self.events_this_block, id, value);
+    }
+
+    fn note_on(&mut self, note: u8, vel: u8) {
+        queue_note_on(&mut self.in_events, &mut self.events_this_block, note, vel);
+    }
+
+    fn note_off(&mut self, note: u8) {
+        queue_note_off(&mut self.in_events, &mut self.events_this_block, note);
     }
 
     fn latency_samples(&self) -> u32 {
@@ -287,5 +359,58 @@ impl HostedBackend for ClapBackend {
         // Dropping the processor (sole Arc owner) stops processing, deactivates,
         // and destroys the instance via clack's PluginInstanceInner::drop.
         self.processor = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The note/param queue helpers form well-typed CLAP events, land them in a
+    /// pre-sized buffer the plugin can read as `InputEvents`, and `clear` resets
+    /// it for the next block. This is the RT seam a hosted CLAP instrument plays
+    /// through; opening a real plugin to hear it is the standing rig gate.
+    #[test]
+    fn control_events_queue_drain_and_clear() {
+        let mut buf = EventBuffer::with_capacity(EVENT_CAPACITY);
+        let mut count = 0usize;
+
+        queue_note_on(&mut buf, &mut count, 60, 100);
+        queue_param(&mut buf, &mut count, 3, 0.5);
+        queue_note_off(&mut buf, &mut count, 60);
+        assert_eq!(count, 3, "three control events queued");
+        assert_eq!(
+            InputEvents::from_buffer(&buf).len(),
+            3,
+            "the plugin sees all three as CLAP input events"
+        );
+
+        // A fresh block clears the buffer but keeps capacity (no realloc).
+        buf.clear();
+        assert_eq!(
+            InputEvents::from_buffer(&buf).len(),
+            0,
+            "drained for next block"
+        );
+    }
+
+    /// The hard cap is honoured, so RT pushes can never grow the pre-sized buffer
+    /// (the allocation-free guarantee the `HostedBackend` contract requires).
+    #[test]
+    fn queue_helpers_refuse_to_grow_past_capacity() {
+        let mut buf = EventBuffer::with_capacity(EVENT_CAPACITY);
+        let mut count = EVENT_CAPACITY;
+        queue_note_on(&mut buf, &mut count, 64, 90);
+        queue_param(&mut buf, &mut count, 1, 1.0);
+        queue_note_off(&mut buf, &mut count, 64);
+        assert_eq!(
+            count, EVENT_CAPACITY,
+            "pushes past the cap are dropped, not grown"
+        );
+        assert_eq!(
+            InputEvents::from_buffer(&buf).len(),
+            0,
+            "nothing was buffered"
+        );
     }
 }

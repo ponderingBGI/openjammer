@@ -105,10 +105,18 @@ and type-check. To finish enabling it in a real environment:
 
 * install CMake + toolchain (above) and run a `--features juce` build to compile
   JUCE + the shim (cannot be verified in the scaffold sandbox: no CMake there);
-* confirm/extend the platform link libraries in `build.rs` for your OS;
-* wire CLAP param/note events on the `clack` path (`set_param` is currently a
-  no-op there — it needs the `clack-extensions` params extension; the JUCE path
-  already forwards params + MIDI notes).
+* confirm/extend the platform link libraries in `build.rs` for your OS.
+
+CLAP note + param events are wired on the `clack` path: `note_on`/`note_off` and
+`set_param` queue sample-accurate CLAP events into a pre-sized, allocation-free
+input buffer that the plugin reads each `process` block (see
+`src/backend/clap.rs` + its `tests`), so a hosted CLAP **instrument** plays from
+the keyboard and responds to automation. The one refinement still open: param
+events use the param `id` directly as the `clap_id` with an empty cookie (the
+spec's lookup-by-id path, correct for the common case). Plugins that key
+automation on a host-supplied cookie or a non-index `clap_id` need the
+`clack-extensions` params extension enumerated at load to build an
+`id → (clap_id, cookie)` map — a drop-in once that extension is added.
 
 [`clack`]: https://github.com/prokopyl/clack
 [`ojcore::DspInstance`]: ../ojcore/src/dsp.rs
