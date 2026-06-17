@@ -57,6 +57,23 @@ fn sf2_rejects_garbage_soundfont() {
 }
 
 #[test]
+fn sf2_select_program_before_load_is_safe() {
+    // Program/bank selection must be a safe no-op before a SoundFont is loaded
+    // (and must not panic), then stays drivable through the render path.
+    let mut inst = Sf2Instrument::new(SR, BLOCK);
+    inst.activate(SR, BLOCK);
+    inst.select_program(0, 0); // grand piano
+    inst.select_program(128, 0); // percussion bank
+    inst.note_on(60, 100);
+    let mut buf = vec![0.0f32; BLOCK];
+    render_block(&mut inst, &mut buf);
+    assert!(
+        buf.iter().all(|&x| x == 0.0),
+        "still silent + safe before load"
+    );
+}
+
+#[test]
 fn sf2_loader_instantiates() {
     let l = Sf2Loader::new();
     let mut inst = l.instantiate(SR, BLOCK);
