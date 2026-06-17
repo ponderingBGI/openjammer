@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Get OpenJammer</title>
+    <meta
+      name="description"
+      content="Download OpenJammer — a node-driven instrument you patch on a warm sketchbook canvas, then play live. Native desktop builds for macOS, Windows and Linux, or just play in your browser."
+    />
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#F5F0E8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <!--
+      Standalone static page. NO React, NO service worker, NO app bundle.
+      Vite copies public/ verbatim into dist/, so this ships at /download.
+      Structure below survives JS-off: a <details open> all-platforms list and
+      a static <a> to /releases/latest are present before download.js runs.
+      download.js only ENHANCES this (collapses <details>, swaps in a detected
+      primary card); it never removes the floor.
+    -->
+    <link rel="stylesheet" href="/download/download.css" />
+  </head>
+  <body>
+    <main class="oj-page">
+      <header class="oj-head">
+        <a class="oj-back" href="https://openjammer.app">&larr; openjammer.app</a>
+        <h1 class="oj-title">Get OpenJammer</h1>
+        <p class="oj-sub">
+          Patch instruments and effects on a canvas, then play live. Pick the
+          desktop app for the lowest latency, or just play in your browser.
+        </p>
+      </header>
+
+      <!--
+        PRIMARY CARD. Hidden until JS detects an OS (no flash of a wrong OS).
+        download.js fills .oj-primary-slot with the detected-OS card and
+        unhides this section. JS-off users never see it; they use the
+        <details> floor below, which ships open.
+      -->
+      <section class="oj-primary" id="oj-primary" hidden aria-live="polite">
+        <div class="oj-primary-slot" id="oj-primary-slot"></div>
+        <p class="oj-version-line">
+          Version
+          <code class="oj-version" id="oj-version">latest</code>
+        </p>
+      </section>
+
+      <!--
+        ALL-PLATFORMS FLOOR. Ships <details open>. download.js collapses it
+        (removes the `open` attribute) only after a clean detect; on a regex
+        miss or a detect throw it is re-opened / left open. Every <a> here is
+        present in the static HTML and points at github.com.
+      -->
+      <details class="oj-all" id="oj-all" open>
+        <summary class="oj-all-summary">All platforms &amp; versions</summary>
+
+        <div class="oj-all-body">
+          <div class="oj-plat" data-os="macos">
+            <h2 class="oj-plat-title">macOS</h2>
+            <div class="oj-btn-row">
+              <a
+                class="oj-btn"
+                id="dl-macos-arm"
+                href="https://github.com/ponderingBGI/openjammer/releases/latest"
+              >
+                Apple Silicon (M1&ndash;M4)
+                <span class="oj-chip" id="dl-macos-arm-chip">Recommended</span>
+              </a>
+              <a
+                class="oj-btn"
+                id="dl-macos-intel"
+                href="https://github.com/ponderingBGI/openjammer/releases/latest"
+              >
+                Intel
+              </a>
+            </div>
+          </div>
+
+          <div class="oj-plat" data-os="windows">
+            <h2 class="oj-plat-title">Windows</h2>
+            <div class="oj-btn-row">
+              <a
+                class="oj-btn"
+                id="dl-windows"
+                href="https://github.com/ponderingBGI/openjammer/releases/latest"
+              >
+                Windows (x64 installer)
+              </a>
+            </div>
+          </div>
+
+          <div class="oj-plat" data-os="linux">
+            <h2 class="oj-plat-title">Linux</h2>
+            <div class="oj-btn-row">
+              <a
+                class="oj-btn"
+                id="dl-linux-appimage"
+                href="https://github.com/ponderingBGI/openjammer/releases/latest"
+              >
+                AppImage (x86_64)
+              </a>
+              <a
+                class="oj-btn"
+                id="dl-linux-deb"
+                href="https://github.com/ponderingBGI/openjammer/releases/latest"
+              >
+                .deb (x86_64)
+              </a>
+            </div>
+          </div>
+
+          <p class="oj-latency oj-latency--native" id="oj-latency-native">
+            Lowest latency &mdash; under 5&nbsp;ms MIDI-to-audio (native desktop).
+          </p>
+
+          <p class="oj-all-foot">
+            Everything is hosted free on GitHub Releases.
+            <a
+              class="oj-link"
+              href="https://github.com/ponderingBGI/openjammer/releases/latest"
+              >Browse every build and version on GitHub &rarr;</a
+            >
+          </p>
+        </div>
+      </details>
+
+      <!-- Persistent browser CTA: always present, JS-on or JS-off. -->
+      <p class="oj-browser">
+        <a class="oj-link oj-link--browser" href="https://openjammer.app"
+          >Or just play in your browser &rarr;</a
+        >
+        <span class="oj-latency oj-latency--browser" id="oj-latency-browser"
+          >No install, plays in your browser &mdash; ~15&ndash;25&nbsp;ms
+          latency.</span
+        >
+      </p>
+
+      <footer class="oj-foot">
+        <p>
+          OpenJammer is an early alpha &mdash; expect rough edges. On first
+          launch you may need to allow an unsigned app.
+          <a
+            class="oj-link"
+            href="https://ponderingbgi.github.io/openjammer/play/install/"
+            >Install notes &rarr;</a
+          >
+        </p>
+      </footer>
+    </main>
+
+    <script src="/download/download.js" defer></script>
+  </body>
+</html>

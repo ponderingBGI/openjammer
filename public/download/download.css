@@ -1,0 +1,416 @@
+/*
+ * OpenJammer — /download
+ * The Living Sketchbook, hand-authored (no framework, no theme to fight).
+ * Warm paper + dot grid, ink line, Caveat voice, hard blur-free offset shadows.
+ * See DESIGN.md. Fonts are the PWA's own /fonts/*.woff2 (same build, visible here).
+ *
+ * Color contract (from the plan / DESIGN.md):
+ *   ink      #1A1A1A   the drawn line, body text, button fill
+ *   paper    #F5F0E8   the page
+ *   walnut   #6B5B4F   primary-button hover
+ *   pine     #4A7C59   the Apple-Silicon "Recommended" highlight (state, w/ a label)
+ *   blue     #4A90C2   borders / large accents ONLY  (fails 4.5:1 as text on paper)
+ *   blue-out #2C5F88   body LINK text (~6.4:1 on paper — passes AA)
+ * BANNED: glassmorphism, glowing gradients, blurred shadows, gradient text,
+ *         side-stripe borders, SaaS chrome. Every box-shadow blur radius is 0.
+ */
+
+/* ---- fonts: reuse the PWA's woff2 (public/fonts → /fonts in the build) ---- */
+@font-face {
+  font-family: 'Caveat';
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/caveat-regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Caveat';
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/caveat-bold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/inter-regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/inter-medium.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/inter-semibold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/inter-bold.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-medium.woff2') format('woff2');
+}
+
+:root {
+  --oj-ink: #1a1a1a;
+  --oj-ink-soft: #4a4a4a;
+  --oj-ink-muted: #8a8a8a;
+  --oj-paper: #f5f0e8;
+  --oj-paper-panel: #ede8e0;
+  --oj-sand: #e8e3da;
+  --oj-white: #ffffff;
+  --oj-border-subtle: #d4cfc6;
+  --oj-walnut: #6b5b4f;
+  --oj-pine: #4a7c59;
+  --oj-ochre: #c68b3f;
+  --oj-blue: #4a90c2;
+  --oj-blue-out: #2c5f88; /* link text — passes 4.5:1 on paper */
+
+  --oj-shadow-rest: 2px 3px 0 rgba(0, 0, 0, 0.1);
+  --oj-shadow-lift: 3px 4px 0 rgba(0, 0, 0, 0.15);
+  --oj-shadow-ink: 2px 2px 0 var(--oj-ink);
+
+  --oj-r-sm: 6px;
+  --oj-r-md: 10px;
+  --oj-r-lg: 14px;
+  --oj-r-xl: 20px;
+  --oj-r-pill: 50px;
+
+  --oj-font-voice: 'Caveat', 'Comic Sans MS', cursive;
+  --oj-font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --oj-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--oj-font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--oj-ink);
+  background-color: var(--oj-paper);
+  /* dot-grid paper */
+  background-image: radial-gradient(rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+.oj-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: clamp(1.5rem, 5vw, 4rem) clamp(1rem, 4vw, 2rem) 3rem;
+}
+
+/* ---- header ---- */
+.oj-head {
+  margin-bottom: 2rem;
+}
+
+.oj-back {
+  display: inline-block;
+  font-family: var(--oj-font-body);
+  font-weight: 500;
+  font-size: 0.95rem;
+  color: var(--oj-blue-out);
+  text-decoration: none;
+  margin-bottom: 1.25rem;
+}
+.oj-back:hover {
+  text-decoration: underline;
+}
+
+.oj-title {
+  font-family: var(--oj-font-voice);
+  font-weight: 700;
+  font-size: clamp(2.6rem, 8vw, 3.6rem);
+  line-height: 1.05;
+  letter-spacing: 0.2px;
+  margin: 0 0 0.5rem;
+}
+
+.oj-sub {
+  font-family: var(--oj-font-body);
+  font-size: 1.1rem;
+  color: var(--oj-ink-soft);
+  max-width: 46ch;
+  margin: 0;
+}
+
+/* ---- primary detected-OS card ---- */
+.oj-primary {
+  margin-bottom: 2rem;
+}
+
+.oj-card {
+  border: 2px solid var(--oj-ink);
+  border-radius: var(--oj-r-xl);
+  background: var(--oj-white);
+  box-shadow: var(--oj-shadow-lift);
+  padding: clamp(1.25rem, 4vw, 2rem);
+}
+
+.oj-card-os {
+  font-family: var(--oj-font-voice);
+  font-weight: 700;
+  font-size: 1.9rem;
+  line-height: 1.1;
+  margin: 0 0 0.25rem;
+}
+
+.oj-card-note {
+  font-family: var(--oj-font-body);
+  font-size: 1rem;
+  color: var(--oj-ink-soft);
+  margin: 0 0 1.25rem;
+}
+
+.oj-card .oj-btn-row {
+  margin-bottom: 0;
+}
+
+.oj-version-line {
+  font-family: var(--oj-font-body);
+  font-size: 0.9rem;
+  color: var(--oj-ink-muted);
+  margin: 0.85rem 0 0;
+}
+
+.oj-version {
+  font-family: var(--oj-font-mono);
+  font-weight: 500;
+  font-size: 0.9rem;
+  color: var(--oj-ink);
+  background: var(--oj-sand);
+  border: 1px solid var(--oj-border-subtle);
+  border-radius: var(--oj-r-sm);
+  padding: 1px 6px;
+}
+
+/* ---- buttons (links to github.com) ---- */
+.oj-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.oj-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 auto;
+  min-width: 12rem;
+  justify-content: center;
+  font-family: var(--oj-font-body);
+  font-weight: 600;
+  font-size: 1rem;
+  text-align: center;
+  text-decoration: none;
+  color: var(--oj-paper);
+  background: var(--oj-ink);
+  border: 2px solid var(--oj-ink);
+  border-radius: var(--oj-r-md);
+  padding: 0.7rem 1.1rem;
+  box-shadow: var(--oj-shadow-ink);
+  cursor: pointer;
+  transition:
+    transform 0.08s,
+    box-shadow 0.08s,
+    background 0.08s;
+}
+.oj-btn:hover {
+  background: var(--oj-walnut);
+  transform: translateY(-1px);
+  box-shadow: 3px 3px 0 var(--oj-ink);
+}
+.oj-btn:active {
+  transform: translateY(1px);
+  box-shadow: 1px 1px 0 var(--oj-ink);
+}
+
+/* The "Recommended" state is a TEXT CHIP — never color alone. */
+.oj-chip {
+  font-family: var(--oj-font-body);
+  font-weight: 600;
+  font-size: 0.7rem;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--oj-white);
+  background: var(--oj-pine);
+  border-radius: var(--oj-r-pill);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+/* ---- all-platforms disclosure ---- */
+.oj-all {
+  border: 2px solid var(--oj-ink);
+  border-radius: var(--oj-r-lg);
+  background: var(--oj-white);
+  box-shadow: var(--oj-shadow-lift);
+  padding: 0;
+  margin-bottom: 2rem;
+}
+
+.oj-all-summary {
+  font-family: var(--oj-font-voice);
+  font-weight: 700;
+  font-size: 1.5rem;
+  list-style: none;
+  cursor: pointer;
+  padding: 1rem 1.25rem;
+  user-select: none;
+}
+.oj-all-summary::-webkit-details-marker {
+  display: none;
+}
+.oj-all-summary::after {
+  content: '+';
+  float: right;
+  font-family: var(--oj-font-mono);
+  color: var(--oj-ink-muted);
+}
+.oj-all[open] .oj-all-summary::after {
+  content: '\2212'; /* minus sign */
+}
+
+.oj-all-body {
+  padding: 0 1.25rem 1.25rem;
+}
+
+.oj-plat {
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--oj-border-subtle);
+  margin-top: 1.25rem;
+}
+.oj-plat:first-child {
+  border-top: 0;
+  margin-top: 0.25rem;
+  padding-top: 0;
+}
+
+.oj-plat-title {
+  font-family: var(--oj-font-body);
+  font-weight: 700;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--oj-ink-muted);
+  margin: 0 0 0.75rem;
+}
+
+/* In the all-platforms list, buttons are white-on-paper (secondary), so the
+   ink-fill primary is reserved for the detected card. */
+.oj-all-body .oj-btn {
+  color: var(--oj-ink);
+  background: var(--oj-white);
+  box-shadow: var(--oj-shadow-rest);
+}
+.oj-all-body .oj-btn:hover {
+  background: var(--oj-sand);
+  box-shadow: var(--oj-shadow-lift);
+}
+.oj-all-body .oj-btn:active {
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.15);
+}
+
+/* A target whose asset regex found nothing is hidden (no dead/disabled button). */
+.oj-btn[hidden],
+.oj-plat[hidden] {
+  display: none !important;
+}
+
+.oj-latency {
+  font-family: var(--oj-font-body);
+  font-size: 0.9rem;
+  color: var(--oj-ink-soft);
+}
+.oj-latency--native {
+  margin: 1.5rem 0 0;
+}
+
+.oj-all-foot {
+  font-family: var(--oj-font-body);
+  font-size: 0.9rem;
+  color: var(--oj-ink-soft);
+  margin: 1rem 0 0;
+}
+
+/* ---- links ---- */
+.oj-link {
+  color: var(--oj-blue-out);
+  text-decoration: none;
+  font-weight: 500;
+}
+.oj-link:hover {
+  text-decoration: underline;
+}
+
+.oj-browser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.85rem;
+  border: 2px solid var(--oj-blue);
+  border-radius: var(--oj-r-lg);
+  box-shadow: var(--oj-shadow-lift);
+  background: var(--oj-paper-panel);
+  padding: 1rem 1.25rem;
+  margin: 0 0 2rem;
+}
+.oj-link--browser {
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.oj-latency--browser {
+  color: var(--oj-ink-soft);
+}
+
+/* ---- footer ---- */
+.oj-foot {
+  border-top: 1px solid var(--oj-border-subtle);
+  padding-top: 1.25rem;
+}
+.oj-foot p {
+  font-size: 0.9rem;
+  color: var(--oj-ink-muted);
+  margin: 0;
+}
+
+/* ---- focus + motion ---- */
+:focus-visible {
+  outline: 2px solid var(--oj-ink);
+  outline-offset: 2px;
+  border-radius: var(--oj-r-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oj-btn {
+    transition: none;
+  }
+  .oj-btn:hover,
+  .oj-btn:active {
+    transform: none;
+  }
+}
