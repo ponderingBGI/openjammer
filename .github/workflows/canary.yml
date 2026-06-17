@@ -83,7 +83,7 @@ jobs:
 
       - name: Attest build provenance (auditors)
         if: ${{ steps.tauri.outputs.artifactPaths != '' }}
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: ${{ join(fromJSON(steps.tauri.outputs.artifactPaths), '\n') }}
 
