@@ -38,11 +38,7 @@ import type {
 } from './Executor';
 import { emitWithIndex, remapForBackend, type NodeIdxMap } from '../ojgraph';
 import { resolveKeyboardNotes } from '../ojgraph';
-import {
-    DEFAULT_VOICE_INSTRUMENTS,
-    getDefaultInstrumentVoice,
-    type DefaultVoice,
-} from '../defaultInstrument';
+import { DEFAULT_VOICE_INSTRUMENTS, getVoiceForInstrumentNode } from '../defaultInstrument';
 import type {
     NodeIdx,
     OjGraph,
@@ -99,6 +95,9 @@ export class OjcoreNativeExecutor implements Executor {
     private index: NodeIdxMap = new Map();
     /** Reverse map NodeIdx -> visual node id, for routing meter frames back. */
     private reverseIndex = new Map<number, string>();
+    /** Which built-in voice (family key) is currently bound per instrument node,
+     *  so the picker selection re-binds but a plain re-push does not. */
+    private boundVoiceKey = new Map<string, string>();
     private signalCallbacks = new Set<SignalLevelsCallback>();
     /** Latest per-node levels, keyed by visual node id (for meter delivery). */
     private levels = new Map<string, number>();
@@ -249,11 +248,17 @@ export class OjcoreNativeExecutor implements Executor {
      *  tone across the keyboard. A user-bound sample later simply replaces it. */
     private loadDefaultInstrumentVoices(): void {
         if (!this.invoke || !this.getNodes) return;
-        let voice: DefaultVoice | null = null;
         for (const node of this.getNodes().values()) {
             if (!DEFAULT_VOICE_INSTRUMENTS.has(node.type)) continue;
             if (this.index.get(node.id) === undefined) continue;
-            if (!voice) voice = getDefaultInstrumentVoice();
+            const { voice, key } = getVoiceForInstrumentNode(
+                node.type,
+                node.data as Record<string, unknown> | undefined,
+            );
+            // Re-send only when the instrument selection (its voice family) changed,
+            // so changing the picker re-binds but a plain re-push does not.
+            if (this.boundVoiceKey.get(node.id) === key) continue;
+            this.boundVoiceKey.set(node.id, key);
             void this.loadSampleNative(node.id, voice.pcm, voice.sampleRate, voice.rootNote);
         }
     }

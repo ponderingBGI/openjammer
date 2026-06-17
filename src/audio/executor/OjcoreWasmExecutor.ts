@@ -40,7 +40,7 @@ import type {
     SignalLevelsCallback,
 } from './Executor';
 import { getAudioContext } from '../audioContext';
-import { DEFAULT_VOICE_INSTRUMENTS, getDefaultInstrumentVoice } from '../defaultInstrument';
+import { DEFAULT_VOICE_INSTRUMENTS, getVoiceForInstrumentNode } from '../defaultInstrument';
 import { emitWithIndex, remapForBackend, resolveKeyboardNotes, type NodeIdxMap } from '../ojgraph';
 import type { NodeIdx, OjGraph, RtCommand } from '../../../packages/oj-protocol-ts/src/index';
 import {
@@ -87,6 +87,10 @@ export class OjcoreWasmExecutor implements Executor {
      *  loaded sample survives subsequent node/connection edits (the wasm analogue
      *  of native's persistent graph binding). */
     private sampleBindings = new Map<string, { assetId: number; rootNote: number }>();
+    /** Which built-in voice (family key) is currently bound per instrument node,
+     *  so a voice is re-synthesized + re-bound only when the picker selection
+     *  changes (not on every graph push). */
+    private boundVoiceKey = new Map<string, string>();
     /** Pending `loadSample` resolvers keyed by VISUAL node id, settled when the
      *  worklet replies `sample-stored` (or on a safety timeout). */
     private sampleLoadResolvers = new Map<string, () => void>();
@@ -278,20 +282,30 @@ export class OjcoreWasmExecutor implements Executor {
         if (!this.ready || !this.getNodes) return;
         const ctx = getAudioContext();
         if (!ctx || typeof ctx.createBuffer !== 'function') return;
-        let buffer: AudioBuffer | null = null;
+        // Cache one AudioBuffer per voice family across nodes in this pass.
+        const bufferByKey = new Map<string, AudioBuffer>();
         for (const node of this.getNodes().values()) {
             if (!DEFAULT_VOICE_INSTRUMENTS.has(node.type)) continue;
             if (this.index.get(node.id) === undefined) continue;
-            if (this.sampleBindings.has(node.id)) continue; // already has a sample
+            if (this.sampleBindings.has(node.id)) continue; // user-bound sample wins
             try {
+                const { voice, key } = getVoiceForInstrumentNode(
+                    node.type,
+                    node.data as Record<string, unknown> | undefined,
+                );
+                // Skip if this node already has exactly this voice bound (the picker
+                // hasn't changed) — avoids re-uploading PCM on every graph push.
+                if (this.boundVoiceKey.get(node.id) === key) continue;
+                let buffer = bufferByKey.get(key);
                 if (!buffer) {
-                    const voice = getDefaultInstrumentVoice();
                     buffer = ctx.createBuffer(1, voice.pcm.length, voice.sampleRate);
                     // `.set()` (not copyToChannel) sidesteps the Float32Array
                     // backing-buffer generic mismatch and copies PCM into the channel.
                     buffer.getChannelData(0).set(voice.pcm);
+                    bufferByKey.set(key, buffer);
                 }
                 this.getSamplerAdapter(node.id).setBuffer(buffer);
+                this.boundVoiceKey.set(node.id, key);
             } catch (err) {
                 // A buffer-creation failure must never break the graph push.
                 console.error('[OjcoreWasmExecutor] default voice load failed:', err);
