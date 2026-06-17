@@ -1,0 +1,118 @@
+name: Canary
+
+# R4 — the canary delivery channel: build + CANARY-sign the installers on every
+# push to main and publish them as a prerelease, so brave users ride the bleeding
+# edge while `release.yml` (the `v*`-tagged stable channel) stays calm.
+#
+# OWNER-GATED + WIRED-BUT-DISABLED. The whole workflow is guarded by the
+# `CANARY_RELEASES_ENABLED` repo variable, and signing uses the CANARY minisign
+# key — both provisioned per OWNER-PROVISIONING.md §3. Until the owner flips the
+# variable + adds the secrets, this is a no-op (nothing builds, nothing signs),
+# so it can land safely now and be enabled later.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write # attest-build-provenance
+  attestations: write
+
+concurrency:
+  group: canary-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Owner-flippable switch: no canary build until the owner opts in.
+    if: ${{ vars.CANARY_RELEASES_ENABLED == 'true' }}
+    name: Canary installers (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+          - platform: ubuntu-latest
+            args: ""
+          - platform: windows-latest
+            args: ""
+    runs-on: ${{ matrix.platform }}
+    outputs:
+      artifacts: ${{ steps.tauri.outputs.artifactPaths }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reuse the SAME build engine as CI: web deps + the Rust toolchain (with the
+      # macOS cross-targets the dual-arch matrix needs).
+      - name: Setup web (Bun + install)
+        uses: ./.github/actions/setup-web
+      - name: Linux webview build deps
+        if: matrix.platform == 'ubuntu-latest'
+        uses: ./.github/actions/setup-rust
+      - name: Rust stable (+ macOS cross-targets)
+        if: matrix.platform != 'ubuntu-latest'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Build + CANARY-sign + publish (tauri-action)
+        id: tauri
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The CANARY minisign key signs the update payload (NOT the stable key).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_CANARY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD_CANARY }}
+        with:
+          tagName: canary
+          releaseName: "OpenJammer canary"
+          releaseBody: "Bleeding-edge canary build from main. Signed with the canary key."
+          releaseDraft: false
+          prerelease: true
+          projectPath: "."
+          args: ${{ matrix.args }}
+
+      - name: Attest build provenance (auditors)
+        if: ${{ steps.tauri.outputs.artifactPaths != '' }}
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: ${{ join(fromJSON(steps.tauri.outputs.artifactPaths), '\n') }}
+
+  # Serialized post-publish gate: after all four platforms publish, assert the
+  # canary `latest.json` carries a signature for EVERY platform key (so a partial
+  # macOS dual-arch publish can't ship a half-signed manifest). Belt-and-braces
+  # over the dual-arch union tauri-action already performs.
+  manifest-gate:
+    name: All-platform signature gate
+    needs: build
+    if: ${{ vars.CANARY_RELEASES_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Assert every platform key is present in latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset_url=$(gh release view canary --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[] | select(.name=="latest.json") | .url' || true)
+          if [ -z "${asset_url:-}" ]; then
+            echo "::error::canary latest.json was not published"; exit 1
+          fi
+          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
+            "$asset_url" -o latest.json
+          for plat in darwin-aarch64 darwin-x86_64 linux-x86_64 windows-x86_64; do
+            if ! jq -e ".platforms[\"$plat\"].signature | length > 0" latest.json >/dev/null; then
+              echo "::error::latest.json is missing a signature for $plat"; exit 1
+            fi
+          done
+          echo "All four platform signatures present in the canary manifest."
