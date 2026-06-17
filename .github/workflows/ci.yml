@@ -17,6 +17,11 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
+# Least privilege (zizmor excessive-permissions): every job here only reads the
+# repo. The deploy-style writes (Pages, releases) live in their own workflows.
+permissions:
+  contents: read
+
 jobs:
   engine:
     name: Engine (Rust workspace)
@@ -170,12 +175,29 @@ jobs:
       - name: Scan tree for committed signing keys / secrets
         run: bun run scripts/oj/index.ts doctor --check credentials
 
+  zizmor:
+    name: zizmor (workflow security audit)
+    # REQUIRED (plan §0.5): static security audit of every workflow — most
+    # importantly it FAILS on any un-SHA-pinned third-party action (a key-
+    # exfiltration path once signing secrets are added), plus excessive
+    # permissions, credential persistence, and template-injection. Pinned to the
+    # zizmor version this tree is clean against; `--offline` runs the static
+    # audits without needing a token.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6
+      - name: Audit workflows
+        run: uvx zizmor@1.25.2 --offline .github/workflows/
+
   # ── The SINGLE required status check (foundation F6) ───────────────────────
   # Branch protection binds the string "Merge gate"; everything else funnels in
   # here as a `need`, never as an independently-required check. DO NOT RENAME.
   gate:
     name: Merge gate
-    needs: [engine, web, windows-native, macos-native, credential-scan]
+    needs: [engine, web, windows-native, macos-native, credential-scan, zizmor]
     if: always()
     runs-on: ubuntu-latest
     steps:

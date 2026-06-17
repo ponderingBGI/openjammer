@@ -25,6 +25,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 2
+          persist-credentials: false  # zizmor artipacked: don't leave the token in .git/config
 
       - name: Claude Security Review
         # Pinned to latest main commit for supply chain security

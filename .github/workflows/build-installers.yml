@@ -12,6 +12,11 @@ concurrency:
   group: build-installers-${{ github.ref }}
   cancel-in-progress: true
 
+# Least privilege (zizmor excessive-permissions): this only builds + uploads
+# workflow artifacts; it does not publish a Release (that is release.yml).
+permissions:
+  contents: read
+
 jobs:
   build:
     name: Build installer (${{ matrix.platform }})
