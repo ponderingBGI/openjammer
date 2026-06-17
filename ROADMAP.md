@@ -136,9 +136,9 @@ refactors of already-green CI). Owner-flippable switches live in
 ### Persistence + delivery (Phase 5)
 - [x] ✅ L3 SQLite/FTS5 store (native-first) + FTS5-availability smoke.
 - [x] ✅ Production COOP/COEP host config (`public/_headers`).
-- [ ] ⬜ R2 native updater (Tauri v2) — needs signing keys (owner).
+- [x] ✅ R2 native updater: the audio-safe UpdateGate (no-TOCTOU, tested) + the Tauri desktop wiring (stage/is_pending/try_install). Download/relaunch is owner-enabled (signing keys, OWNER-PROVISIONING §3).
 - [x] ✅ R3 PWA auto-update: prompt-mode SW + PwaUpdatePrompt (auto-apply on idle, channel-aware prompt while audio runs), tested.
-- [ ] ⬜ R4 signing + delivery (split stable/canary minisign, `canary.yml`, dual-arch manifest union, post-publish key gate, provenance).
+- [x] ✅ R4 signing + delivery: canary.yml (push-on-main, canary key, reuses the build engine) + dual-arch macOS matrix + provenance attestation + a post-publish all-platform-signature gate. Wired-but-disabled behind CANARY_RELEASES_ENABLED + the owner's keys.
 - [x] ✅ Loopback latency automation: RecorderSink wired into build_input + AudioHost::start_with_input_capture + a device-gated capture test.
 
 ---
