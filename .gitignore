@@ -45,6 +45,9 @@ dist-ssr
 # Claude Code agent worktrees (transient)
 .claude/worktrees/
 
+# impeccable design-detector hook caches (regenerated; never ship/commit)
+.impeccable/
+
 # Update-signing key material — NEVER commit (RCE-grade). Private keys live only
 # on the maintainer's offline backups + in GitHub Actions secrets. Public `.pub`
 # keys are embedded directly in tauri.conf.json / updater.rs instead.

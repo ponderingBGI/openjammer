@@ -62,13 +62,13 @@
     background: var(--text-muted);
 }
 .ah-dot[data-status='ok'] {
-    background: var(--accent-success, #4caf50);
+    background: var(--accent-success);
 }
 .ah-dot[data-status='warn'] {
-    background: var(--accent-warning, #ff9800);
+    background: var(--accent-warning);
 }
 .ah-dot[data-status='bad'] {
-    background: var(--accent-danger, #e53935);
+    background: var(--accent-danger);
 }
 .ah-dot[data-status='idle'] {
     background: var(--text-muted);

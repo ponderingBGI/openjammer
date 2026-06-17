@@ -9,7 +9,7 @@
  *   3. Presence add / update / remove works over the EphemeralStore.
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createStore } from 'zustand/vanilla';
 import { CrdtGraphProjection } from '../CrdtGraphProjection';
 import { GraphStoreBridge, type BridgeGraphState } from '../graphStoreBridge';
@@ -445,29 +445,26 @@ describe('PresenceManager', () => {
         expect(pb.getPeers().map((p) => p.peerId)).toContain('peer-a');
         expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.name).toBe('Bob');
 
-        // UPDATE: Bob moves his cursor; Alice sees it. EphemeralStore local-update
-        // emission is throttled/async, so wait for eventual consistency rather
-        // than assuming synchronous propagation (the latter is CI-timing-flaky).
-        pb.setCursor({ x: 42, y: 7 });
-        await vi.waitFor(
-            () =>
-                expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.cursor).toEqual({
-                    x: 42,
-                    y: 7,
-                }),
-            { timeout: 5_000 },
-        );
+        // UPDATE: Bob moves his cursor / changes selection; forward his encoded
+        // state synchronously (exactly what the transport does) and assert.
+        //
+        // EphemeralStore is last-write-wins by WALL-CLOCK timestamp: Bob's seed
+        // write and his setCursor write within the same millisecond tie, and the
+        // update is silently dropped — the real source of the flake (the old
+        // `vi.waitFor` only masked it ~75% of the time by letting the clock tick
+        // over). A short real delay puts each write on a strictly later timestamp,
+        // making propagation deterministic.
+        const tick = () => new Promise((resolve) => setTimeout(resolve, 10));
 
-        // UPDATE: Bob selects nodes; Alice sees the selection.
+        await tick();
+        pb.setCursor({ x: 42, y: 7 });
+        pa.apply(pb.encodeAll());
+        expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.cursor).toEqual({ x: 42, y: 7 });
+
+        await tick();
         pb.setSelection(['n1', 'n2']);
-        await vi.waitFor(
-            () =>
-                expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.selection).toEqual([
-                    'n1',
-                    'n2',
-                ]),
-            { timeout: 5_000 },
-        );
+        pa.apply(pb.encodeAll());
+        expect(pa.getPeers().find((p) => p.peerId === 'peer-b')?.selection).toEqual(['n1', 'n2']);
 
         // self excluded from getPeers.
         expect(pa.getPeers().map((p) => p.peerId)).not.toContain('peer-a');

@@ -19,7 +19,7 @@ A `tracing` subscriber (native, `std`-only) fans every structured record to a
 human-readable stderr stream **and** a non-blocking, daily-rolling NDJSON file
 under the platform log dir (`%APPDATA%`/`~/Library/Application Support`/`$XDG`).
 One JSON object per line — greppable, on-device, never uploaded. `tracing` is
-strictly off the audio thread (see [Real-time safety](/openjammer/architecture/real-time-safety/)).
+strictly off the audio thread (see [Real-time safety](/openjammer/build/architecture/real-time-safety/)).
 
 ## L2 — one event schema across the seam
 

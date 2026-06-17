@@ -76,11 +76,15 @@ branch; merging the `release-please` PR there tags `v*` and ships the stable cha
 - **`.github/workflows/release-please.yml`** — the version brain. Runs on push to
   `main` (pinned `target-branch: main`, since the repo default is `canari`) and
   opens the Release PR that bumps all four version files in lockstep.
+- **`.github/workflows/promotion-pr.yml`** — keeps one standing `canari → main`
+  "release candidate" PR open, titled with the version release-please will cut once
+  it's merged (predicted via `release-please --dry-run`). The single place to
+  discuss the next release; re-opens after each promotion as `canari` advances.
 - **`.github/workflows/canary.yml`** — on push to `canari` (owner-gated), builds +
   canary-signs installers and publishes the rolling `canary` prerelease + a signed
   `latest.json` (the canary auto-update channel).
 - **`.github/workflows/release.yml`** — on a `v*` tag, builds installers for
-  macOS (aarch64+x86_64), Windows (.msi/.exe), and Linux (.deb/.AppImage) via
+  macOS (aarch64+x86_64), Windows (NSIS .exe), and Linux (.deb/.AppImage) via
   `tauri-action`, stable-signs them, and attaches them + `latest.json` to a draft
   GitHub Release (the stable auto-update channel).
 

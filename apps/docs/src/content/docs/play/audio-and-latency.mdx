@@ -1,0 +1,104 @@
+---
+title: Audio setup & latency
+description: Pick a USB interface, tune the audio settings, and get the lowest latency your platform allows.
+sidebar:
+  order: 4
+---
+
+Latency is the one thing your fingers feel before your eyes read anything. OpenJammer ships
+sensible defaults that work immediately, but a USB audio interface plus a few settings will
+get you from "good enough to sketch" to "the software disappears and only the music is left."
+
+## The honest latency tiers
+
+There is no single latency number — it depends on whether you run native or in the browser,
+and on your hardware:
+
+| Where you run | Typical latency | Notes |
+|---|---|---|
+| **Native desktop** | **< 5 ms** MIDI-to-audio | The lowest tier — small-buffer audio stream, the threshold below which the software disappears. |
+| Browser, built-in audio | 30–80 ms | Fine to try it out, high for tight playing. |
+| Browser, USB interface | 10–20 ms | A USB interface is the single biggest browser improvement. |
+| Browser, USB optimized | 3–10 ms | With Low Latency Mode + interactive hint + the right devices selected. |
+
+We never label the browser tier sub-5 ms — that floor belongs to native desktop. The browser
+is honest at **~15–25 ms** out of the box and is great for sketching and jamming.
+
+## Tune the audio settings
+
+Open **Settings** (the gear icon) → **Audio** tab. Three settings do most of the work:
+
+1. **Low Latency Mode** — *Enable.* This disables echo cancellation and other input
+   processing for a 20–50 ms improvement. It is safe with a USB interface in a quiet room
+   (see the headphones note below).
+2. **Sample Rate** — **48 kHz** is recommended; choose 96 kHz only if your interface supports
+   it and you need it.
+3. **Latency Mode** — **Interactive** for the lowest latency. Drop to **Balanced** if you
+   hear crackle.
+
+You can see your **actual measured latency** in the Audio Settings panel, and the AI
+assistant (Ctrl/Cmd+K) can read it and change these settings for you reversibly — see
+[Troubleshooting with the AI](/openjammer/play/troubleshooting-with-the-ai/).
+
+## Recommended USB audio interfaces
+
+For the best jamming experience, use a USB audio interface instead of built-in audio. These
+all work class-compliant (no drivers needed) unless noted:
+
+| Tier | Model | Price | Latency | Inputs | Notes |
+|------|-------|-------|---------|--------|-------|
+| **Budget** | PreSonus AudioBox USB 96 | ~$100 | 5–8 ms | 2 | Great starter interface, MIDI I/O |
+| **Budget+** | Behringer UMC404HD | ~$170 | 6–10 ms | 4 | 4 inputs, MIDAS preamps |
+| **Mid-Range** | MOTU M4 | ~$250 | **2.4 ms** | 4 | Best value: ESS Sabre32 DAC, class-compliant |
+| **Mid-Range** | Focusrite Scarlett 4i4 | ~$280 | 4 ms | 4 | Industry standard, excellent preamps |
+| **Guitar/Bass** | Audient iD4 MKII | ~$200 | 4 ms | 2 | Class-A JFET instrument input |
+| **Professional** | RME Babyface Pro FS | ~$850 | **3 ms** | 4 | Reference-quality, TotalMix FX routing |
+| **Professional** | Universal Audio Apollo Twin | ~$900 | 3–5 ms | 2 | Built-in DSP for effects processing |
+
+**Best value:** the **MOTU M4** offers 2.4 ms round-trip latency, professional-grade
+converters, and class-compliant USB that works without drivers on every platform.
+
+## Set up your interface
+
+1. **Connect it.** Most interfaces work over a standard USB 2.0/3.0 or USB-C port, and most
+   are bus-powered (no external power needed).
+2. **Grant permissions** (browser). Click **Start OpenJammer**, grant microphone access when
+   asked, then open **Settings → Audio** and select your interface from the device dropdown.
+3. **Enable the optimizations** above (Low Latency Mode, 48 kHz, Interactive).
+
+**Expected result:** built-in audio is 30–80 ms; a basic USB interface is 10–20 ms; an
+optimized USB interface is 3–10 ms.
+
+## Why the browser can't use ASIO
+
+Web browsers **cannot access ASIO drivers**. They use the OS audio layer instead:
+
+- **Windows** — WASAPI (10–30 ms typical)
+- **macOS** — Core Audio (3–5 ms typical)
+- **Linux** — ALSA / JACK (varies by configuration)
+
+This is a browser limitation, not an OpenJammer one. A USB interface still helps a lot in the
+browser — better hardware buffering and low-latency-optimized drivers — but if you need ASIO
+and the absolute lowest latency, use the [native desktop app](/openjammer/play/install/).
+
+## OS-specific notes
+
+- **macOS** — generally the best latency, thanks to Core Audio. Most interfaces are
+  class-compliant (no drivers).
+- **Windows** — WASAPI adds latency versus ASIO; a USB interface helps significantly. Some
+  interfaces need manufacturer drivers — check the support page. Enabling exclusive mode in
+  Windows Sound settings can also help.
+- **Linux** — setup varies by distro. JACK gives the best latency but needs configuration;
+  PipeWire offers a good balance; PulseAudio works but is higher latency.
+
+## Verify your setup
+
+In Audio Settings, confirm:
+
+- ✅ Your USB interface is detected (a banner appears).
+- ✅ Total latency is under ~15 ms (excellent).
+- ✅ Low Latency Mode is enabled (if you're in a quiet room).
+- ✅ The correct input and output devices are selected.
+
+Still hearing crackle, dropouts, or nothing at all? Head to
+[Troubleshooting](/openjammer/play/troubleshooting/).

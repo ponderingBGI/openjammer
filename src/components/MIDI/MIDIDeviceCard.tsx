@@ -25,7 +25,7 @@ export function MIDIDeviceCard({
 }: MIDIDeviceCardProps) {
     // Get preset info for icon
     const registry = getPresetRegistry();
-    const preset = useMemo(() => registry.getPreset(presetId), [presetId]);
+    const preset = useMemo(() => registry.getPreset(presetId), [registry, presetId]);
 
     // Determine icon based on preset or default
     const icon = useMemo(() => {

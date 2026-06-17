@@ -2,439 +2,129 @@
 
 # OpenJammer
 
-**Node-driven music creation for live performance — a low-latency Rust core (`ojcore`), as a native desktop app or zero-install in the browser**
+### Patch instruments and effects on a canvas, then play live.
+
+**A node-driven instrument — not a web app, not a dashboard.** One real-time-safe Rust
+core (`ojcore`) runs native on the desktop and compiled to WebAssembly in your browser.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.1.0--alpha.2-orange.svg)](package.json)
+[![Docs](https://img.shields.io/badge/docs-living%20reference-4A7C59.svg)](https://ponderingbgi.github.io/openjammer/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
-[![Made with React](https://img.shields.io/badge/Made%20with-React-61dafb.svg)](https://reactjs.org/)
-[![Web Audio API](https://img.shields.io/badge/Web%20Audio%20API-ready-purple.svg)](https://developer.mozilla.org/en-US/docs/Web/API/Web_Audio_API)
 
 </div>
 
-> **⚙️ Powered by `ojcore` — one minimal, real-time-safe Rust audio core** that compiles to **native** (low-latency, with VST3/AU/CLAP plugin hosting via a JUCE/CLAP host) **and** **WebAssembly** (the zero-install PWA), driven by one shared React control plane.
-> See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the crate map, build/run/test commands, and the cross-platform release setup.
+---
+
+## Get OpenJammer
+
+|  ▶ Play now in your browser  |  ⬇ Download the desktop app  |  📖 Read the docs  |
+|---|---|---|
+| Zero install — open it and start. Honest browser tier, **~15–25 ms** latency. | The full instrument, native low latency: **< 5 ms** MIDI→audio, plus VST3 / AU / CLAP hosting. | A living reference: guides, the node catalog, audio setup, and the architecture. |
+| **[→ openjammer.app](https://openjammer.app)** | **[→ Download](https://openjammer.app/download)** · [all builds on GitHub](https://github.com/ponderingBGI/openjammer/releases/latest) | **[→ ponderingbgi.github.io/openjammer](https://ponderingbgi.github.io/openjammer/)** |
+
+> New here? **Play in the browser first** — it's the whole instrument with nothing to
+> install. Reach for the desktop app when you want the lowest latency or to host your own
+> VST3 / AU / CLAP plugins. OpenJammer is **0.1.0-alpha.2** — expect rough edges, and on
+> first launch you may need to allow an unsigned app
+> ([install notes](https://ponderingbgi.github.io/openjammer/play/install/)).
 
 ---
 
-## Table of Contents
+## What it is
 
-- [Philosophy](#philosophy)
-- [Features](#features)
-- [Quick Start](#quick-start)
-- [Browser Compatibility](#browser-compatibility)
-- [Audio Setup & USB Interfaces](#audio-setup--usb-interfaces)
-- [Vision](#vision)
-- [AI co-pilot & live debugging](#ai-co-pilot--live-debugging)
-- [Sound & bring your own](#sound--bring-your-own)
-- [Node System](#node-system)
-- [Node Categories](#node-categories)
-- [Ghost Mode](#ghost-mode-w-key)
-- [Technical Details](#technical-details)
-- [Contributing](#contributing)
-- [License](#license)
-
----
-
-## Philosophy
-
-OpenJammer is an **instrument**, not just an app — and an instrument is judged by how it
-*feels*. Two beliefs carry the whole project:
+OpenJammer is an **instrument**, and an instrument is judged by how it *feels*. Two
+beliefs carry the whole project:
 
 - **Perception is the medium.** A musician feels latency in their fingers and hears a
-  glitch before they read a spec. So the audio thread never blocks, editing never drops
-  a sample, and `<5ms` MIDI→audio (native) is the threshold below which the software
-  disappears and only the music is left.
-- **A minimal core, made infinite by everyone.** `ojcore` stays tiny and perfect;
-  everything else — every instrument, effect, AI node, and hosted plugin — is community
-  territory behind one shared contract. Inspired by [pi.dev](https://pi.dev): a small,
-  trustworthy core that every user makes their own.
+  glitch before they read a spec. So the audio thread never blocks, editing never drops a
+  sample, and `< 5 ms` MIDI→audio (native) is the threshold below which the software
+  disappears and only the music is left. The browser tier is an honest `~15–25 ms` — we
+  never dress it up as sub-5 ms.
+- **A minimal core, made infinite by everyone.** `ojcore` stays tiny and perfect; *every*
+  instrument, effect, AI-authored DSP node, and hosted plugin is community territory
+  behind one shared contract. When in doubt, it's a plugin — and every user makes it
+  their own.
 
-For how those beliefs become daily practice, see **[PRODUCT.md](PRODUCT.md)** (who plays
-this and why, plus the design principles and the Live Performance Rule) and
-**[DESIGN.md](DESIGN.md)** (the visual system). Contributors and the AI agent work from the
-covenant — the two beliefs, the nine code values, and the playbook — in
-**[.agent/workflows/agents.md](.agent/workflows/agents.md)** (see also
-**[CONTRIBUTING.md](CONTRIBUTING.md)**).
+What you get:
 
----
+- 🎹 **171 instruments out of the box** — distinct procedural voices (piano, strings,
+  reed, bell, pluck…), zero sample downloads.
+- 🤖 **A Ctrl/Cmd+K AI co-pilot** that builds graphs *and* reads your on-device logs +
+  audio diagnostics to fix "there's no sound" — reversibly, undone with plain Ctrl+Z.
+- 🩺 **Built for the stage** — an on-device DevLog and one-screen Audio-health readout; a
+  panic-safe boundary keeps your audio playing if the UI ever glitches.
+- 🎛️ **Bring your own sound** — samples, SoundFonts, Faust/code-node DSP, and your
+  installed CLAP/VST3 plugins.
+- 🔁 **Layer-based looping** — stack loops as layers, with per-layer mute/delete/effects.
+- 📴 **Offline-capable PWA** — works after first visit, no external API calls.
 
-## Features
-
-🎹 **Every instrument plays out of the box** - 171 selectable instruments, each
-backed by a distinct **procedural voice** (16 timbre families — piano, organ,
-strings, reed, mallet, bell, pluck, …) so a cello and a sax sound like
-themselves, with **zero sample downloads**. Velocity shapes brightness; plucked
-strings use the real Karplus-Strong model.
-
-🤖 **AI co-pilot that can fix your setup** - The Ctrl/Cmd+K assistant builds graphs
-*and* can read your on-device logs + audio diagnostics and change your settings
-(reversibly) — so "there's no sound" becomes a question it answers and fixes.
-One-tap **"Ask AI to fix this"** from the DevLog and the latency banner.
-
-🩺 **Built for the stage** - An on-device **DevLog** (Ctrl/Cmd+Shift+L) and a
-one-screen **Audio health** readout (Ctrl/Cmd+Shift+H) surface xruns, latency,
-and device state; a panic-safe error boundary keeps a render glitch from
-white-screening a live show (your audio keeps playing).
-
-🎛️ **Bring your own sound** - Import your own samples, load SoundFonts, author
-Faust/code-node DSP, and discover your installed **CLAP/VST3 plugins** — the
-minimal core stays tiny; everything else is a plugin.
-
-🔁 **Layer-Based Looping** - Stack loops as layers instead of overdubbing, with individual mute/delete/effects per layer
-
-🎛️ **Node-Based Interface** - Visual audio routing inspired by ComfyUI with right-click context menu
-
-🔌 **USB Audio Interface Support** - Professional low-latency audio (3-10ms with optimized setup)
-
-🎨 **Hand-Drawn Aesthetic** - Scribble/organic "Living Sketchbook" style with customizable theming
-
-⚡ **Zero-Latency Editing** - Modify parameters, add effects, and reroute nodes without audio dropouts
-
-📴 **Offline Capability** - Full PWA support (apply-on-idle updates), works offline after first visit
-
-🎚️ **Live Performance Focused** - Ghost mode (W key), laptop-first design, screen real estate optimization
+For who plays this and why, see **[PRODUCT.md](PRODUCT.md)**; for the visual system, the
+"Living Sketchbook," see **[DESIGN.md](DESIGN.md)**.
 
 ---
 
-## Quick Start
+## Build from source (developers)
+
+You only need this to hack on OpenJammer itself — players use the links above.
 
 ```bash
-# Install dependencies (bun only)
-bun install
-
-# Start development server
-bun dev
+bun install   # bun only — one toolchain, one lockfile
+bun dev        # Vite dev server, prints a localhost URL
 ```
 
-Open the printed URL (Vite's default is `http://localhost:5173`) and click
-**Start OpenJammer** to begin.
+Open the printed URL and click **Start OpenJammer**. First workflow: right-click the
+canvas → add a Keyboard node and an Instrument (e.g. Classic Piano), connect them, and
+play the Q–P row — or press **Ctrl/Cmd+K** and ask the AI to build it for you.
 
-**First workflow:**
-1. Right-click canvas → Keyboard → Add Keyboard Node
-2. Right-click canvas → Instruments → Keyboard → Classic Piano
-3. Connect Keyboard output to Piano input
-4. Press keys (Q-P row) to play! — or press **Ctrl/Cmd+K** and ask the AI to build it for you.
+> OpenJammer uses **`bun`** for every package operation — never `npm`, `yarn`, or `pnpm`
+> (one toolchain, one lockfile). See **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 ---
 
-## Browser Compatibility
+## How it works — the core
 
-| Browser | Version | Status | Notes |
-|---------|---------|--------|-------|
-| Chrome | 110+ | ✅ **Recommended** | Full support, `setSinkId()` for device selection |
-| Edge | 110+ | ✅ **Recommended** | Chromium-based, same as Chrome |
-| Firefox | Latest | ⚠️ Partial | Web Audio API supported, no device selection |
-| Safari | 15+ | ⚠️ Limited | macOS Core Audio excellent, iOS limited |
+OpenJammer is powered by **`ojcore`**: one minimal, real-time-safe **Rust** audio core
+that compiles to **native** (low-latency `cpal`, with VST3/AU/CLAP plugin hosting via a
+JUCE/CLAP host) **and** to **WebAssembly** (the zero-install AudioWorklet PWA), driven by
+one shared **React 19 + TypeScript** control plane and selected by `OJ_EXECUTOR`. The
+audio thread never allocates, locks, or blocks — a guarantee enforced mechanically in CI.
 
-**Required APIs:**
-- Web Audio API (all modern browsers)
-- AudioWorklet (custom audio processing)
-- Service Workers (offline functionality)
+**Stack:** Bun · React 19 + TypeScript · Rust `ojcore` · Zustand · Tauri (desktop) ·
+Vercel (static PWA). The crate map, build/run/test commands, and the cross-platform
+release setup live in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 
 ---
 
-## Audio Setup & USB Interfaces
-
-### Latency Optimization
-
-OpenJammer includes comprehensive latency optimizations that work immediately:
-
-- **Web Audio API latency tuning**: Interactive mode for lowest latency
-- **Low-latency microphone input**: Disable processing for 20-50ms improvement
-- **Direct output device routing**: Select specific audio interfaces (Chrome 110+)
-- **Real-time latency monitoring**: View actual latency metrics in settings
-
-**Access audio settings**: Open Settings (gear icon) → Audio tab
-
-### Recommended USB Audio Interfaces
-
-For the best jamming experience, use a USB audio interface instead of built-in audio:
-
-| Tier | Model | Price | Latency | Inputs | Notes |
-|------|-------|-------|---------|--------|-------|
-| **Budget** | PreSonus AudioBox USB 96 | ~$100 | 5-8ms | 2 | Great starter interface, MIDI I/O |
-| **Budget+** | Behringer UMC404HD | ~$170 | 6-10ms | 4 | 4 inputs, MIDAS preamps |
-| **Mid-Range** | MOTU M4 | ~$250 | **2.4ms** | 4 | Best value: ESS Sabre32 DAC, class-compliant |
-| **Mid-Range** | Focusrite Scarlett 4i4 | ~$280 | 4ms | 4 | Industry standard, excellent preamps |
-| **Guitar/Bass** | Audient iD4 MKII | ~$200 | 4ms | 2 | Class-A JFET instrument input |
-| **Professional** | RME Babyface Pro FS | ~$850 | **3ms** | 4 | Reference-quality, TotalMix FX routing |
-| **Professional** | Universal Audio Apollo Twin | ~$900 | 3-5ms | 2 | Built-in DSP for effects processing |
-
-**Recommendation**: The **MOTU M4** offers exceptional value with 2.4ms round-trip latency, professional-grade converters, and class-compliant USB (works without drivers on all platforms).
-
-### Browser Limitations
-
-**Important**: Web browsers cannot access ASIO drivers. They use:
-- **Windows**: WASAPI (10-30ms typical latency)
-- **macOS**: Core Audio (3-5ms typical latency)
-- **Linux**: ALSA/JACK (varies by configuration)
-
-This is a browser limitation, not an OpenJammer limitation. USB audio interfaces significantly reduce latency by providing better hardware buffering and drivers optimized for low-latency operation.
-
-### Setup Instructions
-
-#### 1. Connect Your USB Audio Interface
-
-- **USB 2.0/3.0**: Most interfaces work with standard USB ports
-- **USB-C**: Direct connection to modern laptops (no adapter needed for USB-C interfaces)
-- **Power**: Most bus-powered interfaces work without external power
-
-#### 2. Configure Browser Permissions
-
-1. Open OpenJammer
-2. Click "Start OpenJammer" when prompted
-3. Grant microphone permissions when browser asks
-4. Open Settings → Audio tab
-5. Select your USB interface from the device dropdown
-
-#### 3. Enable Optimizations
-
-In Settings → Audio:
-
-1. **Low Latency Mode**: Enable (disables echo cancellation - safe with USB interface in quiet room)
-2. **Sample Rate**: 48 kHz (recommended) or 96 kHz if your interface supports it
-3. **Latency Mode**: Interactive (lowest latency)
-
-**Expected Latency**:
-- Built-in audio: 30-80ms
-- USB interface (basic): 10-20ms
-- USB interface (optimized): 3-10ms
-
-You can see your actual latency in the Audio Settings panel.
-
-### Troubleshooting
-
-**Device not detected**:
-- Ensure interface is powered on and connected
-- Refresh the browser page
-- Check that interface drivers are installed (Windows may need manual drivers)
-- Try a different USB port
-
-**Audio crackling/dropouts**:
-- Increase browser buffer size (Settings → Audio → Latency Mode → Balanced)
-- Close other audio applications
-- Reduce CPU load (fewer effects/instruments)
-- Check USB cable quality (use shorter, high-quality cable)
-
-**High latency despite USB interface**:
-- Verify "Low Latency Mode" is enabled
-- Check that you selected the correct input/output devices
-- Some interfaces require configuration software (check manufacturer docs)
-- Windows: Ensure exclusive mode is enabled in Windows Sound settings
-
-**Microphone sounds echoey with Low Latency Mode**:
-- Low Latency Mode disables echo cancellation
-- Use headphones instead of speakers for monitoring
-- Or disable Low Latency Mode if jamming in acoustically treated room
-
-### OS-Specific Notes
-
-**macOS**: Generally provides the best latency performance due to Core Audio. Most interfaces work class-compliant (no drivers needed).
-
-**Windows**: WASAPI adds latency vs ASIO. USB interfaces help significantly. Some interfaces require manufacturer drivers - check support page.
-
-**Linux**: Audio setup varies by distro. JACK provides best latency but requires configuration. PulseAudio works but has higher latency. PipeWire offers good balance.
-
-### Verification
-
-After setup, check Audio Settings to verify:
-- ✅ USB interface detected (banner appears)
-- ✅ Total latency < 15ms (excellent)
-- ✅ Low Latency Mode enabled (if in quiet room)
-- ✅ Correct input/output devices selected
-
----
-
-## Vision
-
-OpenJammer is a visual node-based audio workstation inspired by ComfyUI's interface paradigm. Right-click on empty canvas space to open the context menu with all node categories. The tool prioritizes screen real estate (laptop-first design) and live editability—all parameters remain editable while audio plays without dropouts. Every transformation is lossless.
-
-## Design Aesthetic
-
-**Scribble/hand-drawn style** with cream/beige backgrounds, black hand-drawn outlines, and rounded organic shapes (see design mockups). Theming is user-customizable via a settings panel inspired by Cyberpunk 2077's in-game menu.
-
----
-
-## AI co-pilot & live debugging
-
-Press **Ctrl/Cmd+K** to open the command bar. The AI half hands a plain-language
-task to a sandboxed agent that builds and edits the canvas with the *same
-reversible graph verbs you drive by hand* — undo anything with plain **Ctrl+Z**,
-no Approve/Reject gate.
-
-Crucially, the agent can also **see what's happening and fix it**: it reads the
-on-device logs (`get_logs`), the live audio diagnostics (`get_diagnostics`), and
-your settings (`get_settings`), and can change the safe-allowlist settings
-(`update_settings`) — all reversibly. So *"I hear nothing"* becomes a question it
-answers from evidence and repairs (select your interface, lower the latency, wire
-the missing path to a speaker). See [docs/agent-tools.md](docs/agent-tools.md) and
-the [Troubleshooting with the AI](https://ponderingbgi.github.io/openjammer/guides/troubleshooting-with-the-ai/) guide.
-
-When something breaks on stage, two surfaces are always one keystroke away:
-
-- **DevLog** (`Ctrl/Cmd+Shift+L`) — the structured tail of engine xrun/node-fault/
-  MIDI/asset events and every captured `console.*` line, faceted + searchable,
-  with a one-tap **"Ask AI to fix this"**.
-- **Audio health** (`Ctrl/Cmd+Shift+H`) — a calm green/amber/red readout: is the
-  engine running, the round-trip latency, sample rate, output device, COI — with
-  Open-Settings + Ask-AI fix-it buttons.
-
-A held note beats a glitch: a render error never white-screens a show — a panic-safe
-boundary keeps your audio (which runs off the React tree) playing and offers a calm
-recovery card.
-
----
-
-## Sound & bring your own
-
-Every one of the 171 selectable instruments plays immediately — each backed by a
-distinct, deterministic **procedural voice** (no sample packs to download). The
-floor is procedural; the ceiling is yours:
-
-- **Your own samples** — drop or browse an audio file onto a Sampler node.
-- **SoundFonts (.sf2)** — the native SoundFont synth with GM program selection.
-- **Faust / code nodes** — author DSP from source (the AI can do this for you);
-  it runs on the real-time wasmtime / native kernel.
-- **Native plugins** — discover your installed **CLAP/VST3** plugins from the
-  **Plugins** panel (`Ctrl/Cmd+Shift+P`).
-
-How voices are synthesized and how to extend them:
-[docs/voice-engine.md](docs/voice-engine.md) ·
-[Instruments & sound](https://ponderingbgi.github.io/openjammer/guides/instruments-and-sound/).
-
----
-
-## Node System
-
-### Connections
-- **Blue ports**: Music/audio signals (directional)
-- **Grey ports**: Numbers/triggers/parameters (bidirectional)
-
-Keyboard outputs are grey (they send numbers). Instrument outputs are blue (they make sound).
-
-### Multi-Select & Undo
-- Drag to select multiple nodes → Backspace/Delete removes them
-- Ctrl+Z = Undo, Ctrl+Y = Redo
-
-### Batch Connecting
-Select a node and press **A** to grab all free output ports at once. They follow your cursor as a bundle and can be connected to a target node, which dynamically expands its inputs to receive them all.
-
----
-
-## Node Categories
-
-### 1. Keyboard Node
-Routes physical keyboard input to instruments.
-
-- **3 outputs** (one per keyboard row: upper Q-P, middle A-L, lower Z-M)
-- **Number row (1-9)** switches the active bank:
-  - Bank **1** = reserved for global shortcuts/building mode
-  - Banks **2-9** = assignable to Keyboard nodes
-- When spawned, auto-claims the next free bank number (displayed in node header)
-- When a bank is active, the three keyboard rows trigger notes on connected instruments
-
-### 2. Instruments
-Sound generators. Access via right-click menu categories: *Strings*, *Keyboard*, *Drums*, etc. Click the node header to open a popup with specific instrument options (Classic Piano, Cello, Saxophone, etc.).
-
-**Structure:**
-- Dynamic inputs: starts with 1, grows as connections arrive (if holding multiple connections, that many inputs appear)
-- Each input row displays: Note letter (SPN) + Offset value
-- Use +/- buttons or type directly to adjust pitch
-- 1 audio output
-
-**Special: Microphone**
-- Active by default with Mute button
-- Under Instruments category
-
-### 3. Looper
-The live performance core. Stacks layers rather than overdubbing.
-
-- **Default duration**: 10 seconds (customizable)
-- **Auto-start**: Recording begins when input signal exceeds threshold
-- **Auto-stop**: Stops if no input detected for one full loop cycle; empty loops are discarded
-- **Progress bar**: Shows current position in loop
-- **Stacking**: Each cycle creates a new row/layer
-  - Rows can be individually muted, deleted, have effects applied
-  - Rows can be dragged to other Loopers
-- **Global sync**: Loopers at same BPM/duration align perfectly regardless of start time
-- **Beat correction**: Snaps loop end to nearest beat to prevent drift
-
-### 4. Effects
-Modify audio signals. Place between Instruments→Looper or apply to specific Looper rows.
-
-Types: Distortion, Pitch Shift, Reverb, etc.
-
-Hot-swappable during playback without audio engine interruption.
-
-### 5. Amplifier
-Linear volume control.
-- 1.0 = original, 2.0 = double, 0.5 = half, 0.0 = mute
-
-### 6. Speaker
-Final output node.
-- Click "output device" label to open dropdown for selecting system audio devices
-- Speaker symbol in node body
-
-### 7. Recorder
-Captures session for post-production.
-- Records final mix or individual stems
-- Exports as .wav
-- Allows separate export of loops/instruments for DAW editing
-
----
-
-## Ghost Mode (W key)
-Toggle for live performance view:
-- All nodes fade to 10% opacity
-- Node interactions disabled (buttons/sliders)
-- Connections remain fully visible and editable
-- Input ports "glow" for easy rerouting during play
-
----
-
-## Technical Details
-
-- **Runtime**: Bun
-- **Framework**: React 19 with TypeScript (the shared control plane)
-- **Audio engine**: `ojcore` — one real-time-safe **Rust** core compiled to **native** (cpal, low-latency, CLAP/VST3 hosting) and **WebAssembly** (AudioWorklet PWA), selected by `OJ_EXECUTOR`
-- **AI**: a sandboxed Ctrl/Cmd+K agent with reversible graph + diagnostics/settings tools
-- **State Management**: Zustand
-- **Storage**: Local browser storage + JSON import/export; native SQLite/FTS5 log store
-- **Hosting**: Vercel (static PWA) + native installers
-- **Offline**: Full PWA functionality with Service Workers (apply-on-idle updates)
-
-### Architecture Goals
-
-- Clean, well-documented codebase
-- Easy community contributions
-- Scalable for future MIDI and custom node integration
-- Theming system for user-created themes
-
-### Export/Import
-
-Workflows saved as JSON files for sharing and backup.
+## Documentation
+
+Full guides, the node catalog, audio setup, and the architecture live at the
+**[OpenJammer docs](https://ponderingbgi.github.io/openjammer/)**:
+
+- **[Play in 60 seconds](https://ponderingbgi.github.io/openjammer/play/first-patch/)** — build your first instrument.
+- **[Audio setup & USB interfaces](https://ponderingbgi.github.io/openjammer/play/audio-and-latency/)** — interface picks, latency tuning, troubleshooting.
+- **[Sound & instruments](https://ponderingbgi.github.io/openjammer/play/sound-and-instruments/)** — procedural voices, samples, SoundFonts, CLAP/VST3.
+- **[Troubleshooting with the AI](https://ponderingbgi.github.io/openjammer/play/troubleshooting-with-the-ai/)** — let Ctrl/Cmd+K read your logs and fix your setup.
+- **[Architecture & real-time safety](https://ponderingbgi.github.io/openjammer/build/architecture/real-time-safety/)** — how the audio thread never blocks.
 
 ---
 
 ## Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for:
-- Development setup
-- Code guidelines
-- Pull request process
-- Testing requirements
+We welcome contributions — new nodes, instruments, effects, and themes. See
+**[CONTRIBUTING.md](CONTRIBUTING.md)** for development setup, code guidelines, the PR
+process (open PRs against `canari`), and testing requirements. The contributor covenant —
+the two beliefs, the code values, and the playbook — is in **[agents.md](agents.md)**.
 
 ---
 
 ## License
 
-OpenJammer is licensed under the [AGPL-3.0 License](LICENSE).
+OpenJammer is licensed under the **[AGPL-3.0 License](LICENSE)**:
 
-This means:
-- ✅ Free to use, modify, and distribute
-- ✅ Open source, community-driven
-- ⚠️ If you run a modified version as a web service, you must share your source code
+- ✅ Free to use, modify, and distribute.
+- ✅ Open source, community-driven.
+- ⚠️ If you run a modified version as a web service, you must share your source code.
 
 ---
 
@@ -442,6 +132,6 @@ This means:
 
 **Made with ❤️ for musicians who code and coders who make music**
 
-[Report Bug](https://github.com/PonderingBGI/openjammer/issues) · [Request Feature](https://github.com/PonderingBGI/openjammer/issues) · [Discussions](https://github.com/PonderingBGI/openjammer/discussions)
+[Report Bug](https://github.com/ponderingBGI/openjammer/issues) · [Request Feature](https://github.com/ponderingBGI/openjammer/issues) · [Discussions](https://github.com/ponderingBGI/openjammer/discussions)
 
 </div>

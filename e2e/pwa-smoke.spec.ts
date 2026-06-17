@@ -32,10 +32,12 @@ test.describe('PWA shell', () => {
         expect(hasSab, 'SharedArrayBuffer must be constructible under isolation').toBe(true);
 
         // Render-smoke: the shell put real content in #root (not a blank page),
-        // and the first-run activation CTA is visible. This catches production
-        // bundle TDZ/circular-import crashes where #root stays empty white.
+        // and the browser welcome screen's primary CTA is visible. This catches
+        // production bundle TDZ/circular-import crashes where #root stays empty white.
         await expect(page.locator('#root')).not.toBeEmpty();
-        await expect(page.getByRole('button', { name: /start openjammer/i })).toBeVisible();
+        await expect(
+            page.getByRole('button', { name: /play here in your browser/i })
+        ).toBeVisible();
         expect(pageErrors, 'no uncaught startup exceptions').toEqual([]);
     });
 });

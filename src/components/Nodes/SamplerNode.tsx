@@ -179,6 +179,7 @@ export const SamplerNode = memo(function SamplerNode({
     // Sync waveform from adapter on mount, restore buffer if needed
     useEffect(() => {
         if (!data.sampleId) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clears local waveform to mirror external sampleId being removed; runs only on that specific dep change, not every render
             setWaveformData([]);
             return;
         }

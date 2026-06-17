@@ -1,0 +1,57 @@
+---
+title: FAQ
+description: Is it free? Browser or app? Why is the browser higher latency? Where are my files saved?
+sidebar:
+  order: 8
+---
+
+## Is OpenJammer free?
+
+Yes. OpenJammer is open source under the **AGPL-3.0** license — free to use, modify, and
+distribute. (If you run a modified version as a public web service, AGPL asks you to share
+your source.) The desktop installers are hosted free on GitHub Releases.
+
+## Do I need to download anything?
+
+No — you can [play right in your browser](https://openjammer.app) with nothing to install. It
+works offline after the first visit. Download the [desktop app](/openjammer/play/install/)
+only when you want the lowest latency or to host your own VST3 / AU / CLAP plugins.
+
+## Browser or desktop app — which should I use?
+
+Start in the **browser**: it's the whole instrument, zero install, honest **~15–25 ms**
+latency — great for sketching and jamming. Move to the **desktop app** when you want native
+**< 5 ms** MIDI-to-audio or plugin hosting. See
+[Browser vs native](/openjammer/play/browser-vs-native/) for the full comparison.
+
+## Why is the browser higher latency than the app?
+
+Browsers **cannot use ASIO drivers** — they go through the OS audio layer (WASAPI on Windows,
+Core Audio on macOS, ALSA/JACK on Linux), which adds latency. The native desktop app talks to
+a small-buffer audio stream directly, which is how it reaches sub-5 ms. A USB interface
+narrows the gap in the browser. Full detail in
+[Audio setup & latency](/openjammer/play/audio-and-latency/).
+
+## Do I need a USB audio interface?
+
+No, but it's the single biggest latency improvement, especially in the browser. The built-in
+sound card is fine for trying things out; a class-compliant USB interface gets you into the
+3–10 ms range. See the [recommended interfaces](/openjammer/play/audio-and-latency/).
+
+## Do I need sample packs?
+
+No. All **171 instruments play out of the box**, each backed by a distinct procedural voice —
+zero downloads. You can still bring your own samples, SoundFonts (`.sf2`), and CLAP/VST3
+plugins when you want to. See [Sound & instruments](/openjammer/play/sound-and-instruments/).
+
+## Where are my files saved?
+
+Your patches are stored **locally** — in browser storage in the PWA, and on-device in the
+native app — and you can export/import a patch as a JSON file to share or back up. Nothing is
+uploaded to a server; core functionality needs no external API calls, which is why it works on
+a stage with no Wi-Fi.
+
+## It's not making sound — help?
+
+Walk through [Troubleshooting](/openjammer/play/troubleshooting/), or press **Ctrl/Cmd+K** and
+let the AI read your logs and [fix it for you](/openjammer/play/troubleshooting-with-the-ai/).

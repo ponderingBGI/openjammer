@@ -20,7 +20,7 @@ import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
 import { initAudioContext, isAudioReady, getLatencyMetrics } from './audio/audioContext';
-import { getExecutor } from './audio/executor';
+import { getExecutor, isTauri } from './audio/executor';
 import type { GraphNode, Connection } from './engine/types';
 import { initMidiVoiceRouting, disposeMidiVoiceRouting } from './midi';
 import { useAudioStore } from './store/audioStore';
@@ -32,7 +32,10 @@ import { applyTheme, getSavedThemeId, getThemeById } from './styles/themes';
 import './styles/global.css';
 
 function App() {
-  const [showActivation, setShowActivation] = useState(true);
+  // Native (Tauri) boots straight into a live canvas — no autoplay gate exists
+  // there because sound comes from the Rust/cpal engine over IPC, not Web Audio.
+  // The browser tier still shows the welcome screen (its gesture resumes Web Audio).
+  const [showActivation, setShowActivation] = useState(() => !isTauri());
   const [showSettings, setShowSettings] = useState(false);
   const setAudioContextReady = useAudioStore((s) => s.setAudioContextReady);
   const audioConfig = useAudioStore((s) => s.audioConfig);
@@ -352,16 +355,27 @@ function App() {
         // localStorage may be unavailable (private mode) — the hint is optional.
       }
 
-      // Get initial latency metrics
-      const metrics = getLatencyMetrics();
-      if (metrics) {
-        updateAudioMetrics({
-          ...metrics,
-          lastUpdated: Date.now()
-        });
+      // Web-Audio latency metrics are only meaningful in the browser tier; on
+      // native, latency comes from the Rust/cpal engine, not this AudioContext.
+      if (!isTauri()) {
+        const metrics = getLatencyMetrics();
+        if (metrics) {
+          updateAudioMetrics({
+            ...metrics,
+            lastUpdated: Date.now()
+          });
+        }
       }
     } catch (err) {
       console.error('Failed to initialize audio:', err);
+      // On native, sound is the Rust/cpal engine over IPC — it does NOT need the
+      // Web AudioContext. If construction failed here, still boot the engine and
+      // unlock the tools; never let a Web-Audio failure block the native canvas.
+      if (isTauri()) {
+        setAudioContextReady(true);
+        setShowActivation(false);
+        return;
+      }
       toast.error('Could not start audio', {
         description:
           'Check your browser/OS audio permissions and device, then try again. Open “Audio health” (Ctrl/Cmd+Shift+H) or ask the AI for help.',
@@ -369,15 +383,88 @@ function App() {
     }
   }, [setAudioContextReady, audioConfig, updateAudioMetrics]);
 
+  // Native (Tauri) auto-start: no autoplay gate. Run the same activation sequence
+  // on mount so the Rust engine wires up (the App-init effect keyed on
+  // isAudioContextReady fires) and getAudioContext() is non-null for the UI's
+  // decode / waveform / WAV-export paths. The AudioContext is created best-effort;
+  // on native a suspended context is fine and a throw can never block the canvas.
+  useEffect(() => {
+    if (isTauri()) {
+      void handleActivate();
+    }
+  }, [handleActivate]);
+
   return (
     <>
-      {/* Audio Activation Overlay */}
+      {/* Welcome screen (browser tier only — native auto-starts, see useState above) */}
       {showActivation && (
-        <div className="audio-activate-overlay">
-          <button className="audio-activate-btn" onClick={handleActivate}>
-            🎵 Start OpenJammer
-          </button>
-          <p>Click to enable audio (required by browsers)</p>
+        <div
+          className="oj-welcome"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="oj-welcome-title"
+          onKeyDown={(e) => {
+            // 2-element focus loop — aria-modal is asserted, so keep Tab inside.
+            if (e.key !== 'Tab') return;
+            const focusables = e.currentTarget.querySelectorAll<HTMLElement>(
+              '.oj-welcome-option'
+            );
+            if (focusables.length === 0) return;
+            const first = focusables[0];
+            const last = focusables[focusables.length - 1];
+            if (e.shiftKey && document.activeElement === first) {
+              e.preventDefault();
+              last.focus();
+            } else if (!e.shiftKey && document.activeElement === last) {
+              e.preventDefault();
+              first.focus();
+            }
+          }}
+        >
+          <div className="oj-welcome-card">
+            <h1 id="oj-welcome-title" className="oj-welcome-title">
+              OpenJammer
+            </h1>
+            <p className="oj-welcome-intro">
+              A sketchbook you can play. Pick how you want to start.
+            </p>
+
+            <button
+              type="button"
+              className="oj-welcome-option oj-welcome-option--primary"
+              onClick={handleActivate}
+              autoFocus
+            >
+              <span className="oj-welcome-option-main">
+                <span className="oj-welcome-option-label">
+                  Play here in your browser
+                </span>
+                <span className="oj-welcome-option-sub">
+                  Start instantly — honest ~15–25&nbsp;ms latency in the browser.
+                </span>
+              </span>
+              <span className="oj-welcome-option-glyph" aria-hidden="true">
+                &rarr;
+              </span>
+            </button>
+
+            <a
+              className="oj-welcome-option oj-welcome-option--secondary"
+              href="/download"
+            >
+              <span className="oj-welcome-option-main">
+                <span className="oj-welcome-option-label">
+                  Download the desktop app
+                </span>
+                <span className="oj-welcome-option-sub">
+                  Under-5&nbsp;ms MIDI→audio, plus hosted VST3 / AU / CLAP.
+                </span>
+              </span>
+              <span className="oj-welcome-option-glyph" aria-hidden="true">
+                &darr;
+              </span>
+            </a>
+          </div>
         </div>
       )}
 

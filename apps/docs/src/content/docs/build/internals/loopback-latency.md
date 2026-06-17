@@ -46,7 +46,7 @@ fast on real hardware.
 Glitches (buffer under/overruns) are surfaced through the **L2 `EventKind`**
 log channel as an xrun counter, so even without the manual loopback you can see
 whether a session stayed glitch-free in the [DevLog and on-device
-logs](/openjammer/architecture/logging/). A non-zero xrun count during the
+logs](/openjammer/build/architecture/logging/). A non-zero xrun count during the
 measurement invalidates the run — fix the buffer/threading first, then re-measure.
 
 :::caution[Current state]

@@ -54,6 +54,7 @@ export function useInstallPrompt(): UseInstallPromptResult {
   useEffect(() => {
     // Check if already installed (standalone mode)
     if (window.matchMedia('(display-mode: standalone)').matches) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing initial install state from the display-mode media query (external platform API) on mount; sanctioned sync-from-external-system pattern
       setIsInstalled(true);
       return;
     }

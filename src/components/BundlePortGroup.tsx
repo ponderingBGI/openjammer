@@ -55,6 +55,7 @@ export const BundlePortGroup = memo(function BundlePortGroup({
     // Sync local state when prop changes
     useEffect(() => {
         if (bundleInfo?.expanded !== undefined) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional prop→state sync: mirrors the controlled bundleInfo.expanded into local state, only when the prop changes
             setIsExpanded(bundleInfo.expanded);
         }
     }, [bundleInfo?.expanded]);

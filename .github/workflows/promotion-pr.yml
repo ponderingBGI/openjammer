@@ -1,0 +1,90 @@
+name: Promotion PR
+
+# A STANDING place to discuss the next release.
+#
+# Keeps one open "release candidate" PR from `canari` -> `main`, titled with the
+# version release-please will cut once it's merged. Runs on every push to canari:
+# it predicts the next version (release-please `--dry-run`, which changes nothing)
+# and creates the PR, or retitles the existing one as the version evolves. When
+# canari has no unreleased changes (e.g. right after a release) there's nothing to
+# open; the next push to canari re-opens the candidate.
+#
+# Flow: merge this (a MERGE COMMIT) to promote canari -> main; release-please then
+# opens/updates its own version PR on main, which on merge tags `v*` and ships.
+
+on:
+  push:
+    branches: [canari]
+  workflow_dispatch:
+
+# Create/edit the release-candidate PR. Read is enough for release-please's API.
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: promotion-pr
+  cancel-in-progress: true
+
+jobs:
+  promotion-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Maintain the canari -> main release-candidate PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Nothing to release until canari is ahead of main (an empty PR can't be
+          # opened anyway). This is the "right after a release" no-op case.
+          ahead=$(gh api "repos/$REPO/compare/main...canari" --jq '.ahead_by' 2>/dev/null || echo 0)
+          if [ "${ahead:-0}" -eq 0 ]; then
+            echo "canari is not ahead of main — no release candidate to maintain."
+            exit 0
+          fi
+
+          # Predict the version merging canari -> main will cut. release-please
+          # computes it from canari's conventional commits; --dry-run writes
+          # nothing. Empty when the new commits aren't release-triggering.
+          rp_out=$(bunx release-please release-pr \
+            --repo-url="$REPO" --target-branch=canari \
+            --token="$GITHUB_TOKEN" --dry-run 2>&1 || true)
+          version=$(printf '%s\n' "$rp_out" \
+            | grep -m1 -E '^title:.*release' \
+            | grep -oE '[0-9]+\.[0-9]+\.[0-9]+[A-Za-z0-9.+-]*' | head -1 || true)
+
+          if [ -n "$version" ]; then
+            title="Release v$version (canari → main)"
+          else
+            title="Promote canari → main (no release-triggering changes yet)"
+          fi
+          echo "title: $title"
+
+          body=$(mktemp)
+          {
+            echo "**Standing release candidate.** Everything on \`canari\` that isn't in a stable release yet collects here — the single place to discuss the next release."
+            echo
+            echo "- **Merge with a _merge commit_** (never squash) to promote \`canari → main\`; release-please then opens/updates its version PR on \`main\`, which on merge tags \`v*\` and ships the signed installers."
+            echo "- The title's version is what release-please will cut, recomputed automatically as \`canari\` advances."
+            echo "- After this merges, the next candidate opens once new work lands on \`canari\`."
+            echo
+            echo "🤖 Auto-maintained by \`.github/workflows/promotion-pr.yml\`."
+          } > "$body"
+
+          existing=$(gh pr list --repo "$REPO" --base main --head canari --state open \
+            --json number --jq '.[0].number // empty')
+
+          if [ -n "$existing" ]; then
+            echo "Updating PR #$existing"
+            gh pr edit "$existing" --repo "$REPO" --title "$title" --body-file "$body"
+          else
+            echo "Opening release-candidate PR"
+            gh pr create --repo "$REPO" --base main --head canari --title "$title" --body-file "$body"
+          fi
