@@ -27,6 +27,35 @@
     box-shadow: var(--shadow-menu);
 }
 
+/* Agent-pending — a node the AI agent just added in a not-yet-approved run, so you
+   watch the build happen on the real canvas. An audio-blue HARD ring (spread only,
+   blur 0 — the Hard-Shadow ethos) without moving the node (No-Surprise). The breath
+   is a state pulse, not decoration, and is stilled for reduced-motion. */
+.node.agent-pending {
+    border-color: var(--audio-connected);
+    box-shadow: var(--shadow-node),
+        0 0 0 3px color-mix(in srgb, var(--audio-connected) 45%, transparent);
+    animation: oj-agent-pending 1.2s ease-in-out infinite;
+}
+
+@keyframes oj-agent-pending {
+    0%,
+    100% {
+        box-shadow: var(--shadow-node),
+            0 0 0 2px color-mix(in srgb, var(--audio-connected) 28%, transparent);
+    }
+    50% {
+        box-shadow: var(--shadow-node),
+            0 0 0 4px color-mix(in srgb, var(--audio-connected) 55%, transparent);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .node.agent-pending {
+        animation: none;
+    }
+}
+
 /* ============================================
  * Node Header
  * ============================================ */

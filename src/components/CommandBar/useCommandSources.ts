@@ -32,6 +32,7 @@ import { useCanvasNavigationStore } from '../../store/canvasNavigationStore';
 import { registerAll } from '../../store/commandRegistry';
 import type { Action, ActionCtx, Command } from '../../store/commandRegistry';
 import { seedPaletteLearning } from '../../store/paletteLearningSeed';
+import { getInvoke } from '../../ai/tauri';
 
 // Human-readable group label per category (matches the menu's casing).
 const CATEGORY_LABEL: Record<NodeCategory, string> = {
@@ -156,6 +157,53 @@ function buildAppCommands(): Command[] {
 }
 
 /**
+ * Agent learning + CLI-parity actions (Phase 4/7). Desktop-only — gated on the
+ * capability seam (`caps.agent !== 'none'`) so they never appear in the browser.
+ * Thin wrappers over the native `ai_set_learning` / `ai_forget` commands; the
+ * persistent global brain means these manage the agent's memory across projects.
+ */
+function buildAiActions(): Action[] {
+    const invokeAi = (cmd: string, args?: Record<string, unknown>): void => {
+        const invoke = getInvoke();
+        if (!invoke) return;
+        void invoke(cmd, args ?? {});
+    };
+    const agentOnly = (ctx: ActionCtx): boolean => ctx.caps.agent !== 'none';
+    return [
+        {
+            id: 'ai.learning.enable',
+            title: 'AI: Remember my taste (learning on)',
+            group: 'AI',
+            keywords: ['ai', 'learn', 'memory', 'remember', 'persistent', 'intelligence'],
+            targets: ['global'],
+            surfaces: ['palette'],
+            enabled: agentOnly,
+            run: () => invokeAi('ai_set_learning', { enabled: true }),
+        },
+        {
+            id: 'ai.learning.disable',
+            title: 'AI: Stop learning my taste',
+            group: 'AI',
+            keywords: ['ai', 'learn', 'memory', 'stop', 'off', 'privacy'],
+            targets: ['global'],
+            surfaces: ['palette'],
+            enabled: agentOnly,
+            run: () => invokeAi('ai_set_learning', { enabled: false }),
+        },
+        {
+            id: 'ai.learning.forget',
+            title: 'AI: Forget learned taste',
+            group: 'AI',
+            keywords: ['ai', 'forget', 'memory', 'wipe', 'reset', 'clear'],
+            targets: ['global'],
+            surfaces: ['palette'],
+            enabled: agentOnly,
+            run: () => invokeAi('ai_forget'),
+        },
+    ];
+}
+
+/**
  * Register the derived command sources for as long as the command bar is
  * mounted. The registry is keyed by id, so this is safe across re-mounts.
  */
@@ -165,6 +213,10 @@ export function useCommandSources(): void {
         // platform's learning ceiling is 'pi-memory'. Additive + no-op on the
         // founder-gated empty stub, so this is always safe (never lowers a score).
         void seedPaletteLearning();
-        return registerAll([...buildNodeActions(), ...buildAppCommands()]);
+        return registerAll([
+            ...buildNodeActions(),
+            ...buildAppCommands(),
+            ...buildAiActions(),
+        ]);
     }, []);
 }

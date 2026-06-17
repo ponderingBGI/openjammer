@@ -62,6 +62,21 @@ export interface EngineCapabilities {
      * - `'local-only'` — on-device frecency only (browser, and the universal floor).
      */
     learning: 'pi-memory' | 'local-only';
+
+    /**
+     * Whether the host can OS-confine the agent subprocess (the platform CEILING).
+     * - `'host-jailed'` — the host applies an OS-level filesystem jail at spawn
+     *   (Linux Landlock / macOS Seatbelt / Windows restricted-token + Job Object),
+     *   so the agent physically cannot read/write outside the project folder + its
+     *   own memory. This is what makes "the agent can only change files in its
+     *   folder" a *real* guarantee rather than a cooperative one.
+     * - `'none'`        — no local subprocess to confine (browser).
+     *
+     * This is the static ceiling. The LIVE mode (jailed vs YOLO) is runtime state,
+     * not a capability — it lives in `useSandboxStore`. A platform that is
+     * `host-jailed` is the only one that can offer the YOLO toggle at all.
+     */
+    sandbox: 'host-jailed' | 'none';
 }
 
 /**
@@ -74,6 +89,7 @@ export const DESKTOP_CAPABILITIES: EngineCapabilities = {
     codeNodes: 'author-and-run',
     auth: 'keychain-loopback',
     learning: 'pi-memory',
+    sandbox: 'host-jailed',
 };
 
 /**
@@ -86,6 +102,7 @@ export const BROWSER_CAPABILITIES: EngineCapabilities = {
     codeNodes: 'run-only',
     auth: 'none',
     learning: 'local-only',
+    sandbox: 'none',
 };
 
 /**
@@ -112,5 +129,22 @@ export function agentTransportLabel(agent: EngineCapabilities['agent']): string 
             return 'unavailable';
         default:
             return assertNever(agent);
+    }
+}
+
+/**
+ * Whether this platform can OS-confine the agent — the exhaustive consumer of the
+ * `sandbox` axis (so a new variant fails `tsc` until handled here). `true` is the
+ * precondition for offering the YOLO toggle: a platform that cannot host-jail in
+ * the first place has nothing to drop.
+ */
+export function canHostJail(sandbox: EngineCapabilities['sandbox']): boolean {
+    switch (sandbox) {
+        case 'host-jailed':
+            return true;
+        case 'none':
+            return false;
+        default:
+            return assertNever(sandbox);
     }
 }

@@ -107,6 +107,13 @@ interface AgentSessionStore {
     transcript: TranscriptEntry[];
     /** Terminal error message, if the run failed. */
     error: string | null;
+    /**
+     * The graph node ids that existed BEFORE this run started (snapshot taken at
+     * {@link start}). Any node NOT in this set while a run is live is one the
+     * agent just added — the canvas highlights it so you watch the build happen.
+     * `null` when no run is active.
+     */
+    runBaseline: ReadonlySet<string> | null;
 
     // --- Actions ---
     /** Start a run with `backend` for `task`. Resolves when the stream ends. */
@@ -353,6 +360,7 @@ export const useAgentSessionStore = create<AgentSessionStore>((set, get) => ({
     prompt: '',
     transcript: [],
     error: null,
+    runBaseline: null,
 
     start: async (backend, task) => {
         // Clean slate for this run.
@@ -360,7 +368,9 @@ export const useAgentSessionStore = create<AgentSessionStore>((set, get) => ({
         // G2 (M3): open the collab AI frame BEFORE applying anything so the whole
         // optimistic run accumulates as one CRDT delta (no-op single-user).
         beginAiFrame();
-        set({ phase: 'running', prompt: task.prompt, transcript: [], error: null });
+        // Snapshot the pre-run graph so the canvas can highlight what the agent adds.
+        const runBaseline = new Set(useGraphStore.getState().nodes.keys());
+        set({ phase: 'running', prompt: task.prompt, transcript: [], error: null, runBaseline });
 
         try {
             for await (const event of backend.run(task)) {
@@ -421,23 +431,37 @@ export const useAgentSessionStore = create<AgentSessionStore>((set, get) => ({
         // G2: commit the accumulated AI delta as ONE collab commit.
         appliedResults = [];
         commitAiFrame();
-        set({ phase: 'idle', transcript: [], prompt: '', error: null });
+        set({ phase: 'idle', transcript: [], prompt: '', error: null, runBaseline: null });
     },
 
     reject: () => {
         revertApplied();
         // G2: store is now back to pre-run (== CRDT) — discard emits nothing.
         discardAiFrame();
-        set({ phase: 'idle', transcript: [], prompt: '', error: null });
+        set({ phase: 'idle', transcript: [], prompt: '', error: null, runBaseline: null });
     },
 
     reset: () => {
         // If a run is mid-flight or awaiting approval, reverting is the safe reset.
         revertApplied();
         discardAiFrame();
-        set({ phase: 'idle', transcript: [], prompt: '', error: null });
+        set({ phase: 'idle', transcript: [], prompt: '', error: null, runBaseline: null });
     },
 }));
+
+/**
+ * Whether `nodeId` is a node the AGENT just added in the live (not-yet-approved)
+ * run — so the canvas can highlight it as it builds. Stays a stable boolean per
+ * node so a node only re-renders when its own pending state flips.
+ */
+export function useIsAgentPending(nodeId: string): boolean {
+    return useAgentSessionStore(
+        (s) =>
+            (s.phase === 'running' || s.phase === 'awaiting-approval') &&
+            s.runBaseline != null &&
+            !s.runBaseline.has(nodeId),
+    );
+}
 
 /** Test-only: hard reset, including the module-level undo log. */
 export function _resetAgentSessionForTests(): void {
@@ -448,5 +472,6 @@ export function _resetAgentSessionForTests(): void {
         prompt: '',
         transcript: [],
         error: null,
+        runBaseline: null,
     });
 }

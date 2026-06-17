@@ -6,6 +6,7 @@ import { useCallback, useRef, useState, useMemo, useEffect, memo } from 'react';
 import type { GraphNode, Position } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
+import { useIsAgentPending } from '../../store/agentSessionStore';
 import { generateUniqueId } from '../../utils/idGenerator';
 import { InstrumentNode } from './InstrumentNode';
 import { MicrophoneNode } from './MicrophoneNode';
@@ -98,6 +99,8 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     const setHoverTarget = useCanvasStore((s) => s.setHoverTarget);
 
     const isSelected = selectedNodeIds.has(node.id);
+    // Highlighted while the AI agent's (not-yet-approved) run added this node.
+    const isAgentPending = useIsAgentPending(node.id);
     const isSchematic = SCHEMATIC_TYPES.includes(node.type);
 
     // Check if this node is being hovered while connections are active
@@ -484,7 +487,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     return (
         <div
             ref={nodeRef}
-            className={`node ${node.type} ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''}`}
+            className={`node ${node.type} ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isAgentPending ? 'agent-pending' : ''}`}
             style={{
                 left: node.position.x,
                 top: node.position.y

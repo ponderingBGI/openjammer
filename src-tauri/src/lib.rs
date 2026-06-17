@@ -14,7 +14,9 @@
 
 mod ai;
 mod auth;
+mod bridge;
 mod engine;
+mod sandbox;
 
 use std::path::PathBuf;
 
@@ -278,6 +280,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             app.manage(BackendState::new());
+            // The at-most-one warm Pi child for the session (Phase 1: instant feel).
+            app.manage(ai::WarmChildState::default());
+            // The loopback tool bridge (Phase 3: real graph reads round-trip to Pi).
+            app.manage(bridge::BridgeState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -287,6 +293,11 @@ pub fn run() {
             engine_running,
             scan_plugins,
             ai::ai_run,
+            ai::ai_command,
+            ai::ai_set_learning,
+            ai::ai_forget,
+            ai::ai_sessions,
+            bridge::ai_tool_result,
             ai_faust_compile,
             ai::author_wasm_node,
             auth::auth_status,

@@ -51,6 +51,7 @@ import { score as paletteScore } from '../../store/paletteScore';
 import { useCommandSources } from './useCommandSources';
 import { AiPanel } from './AiPanel';
 import { useAgentSessionStore } from '../../store/agentSessionStore';
+import { startBridgeListener } from '../../ai/bridgeListener';
 import './CommandBar.css';
 
 /** Bar mode: 'search' (U19, the action registry) or 'ai' (U20, the agent). */
@@ -114,6 +115,22 @@ export function CommandBar() {
     // ranking re-reads getCommands() inside the memo below.
     const [registryTick, setRegistryTick] = useState(0);
     useEffect(() => subscribe(() => setRegistryTick((t) => t + 1)), []);
+
+    // Phase 3: answer the host tool-bridge for the session — read tools return the
+    // real graph state to Pi (grounded reasoning); writes are acked. No-op in the
+    // browser (no Tauri). Started once at app root.
+    useEffect(() => {
+        let unlisten: (() => void) | null = null;
+        let cancelled = false;
+        void startBridgeListener().then((fn) => {
+            if (cancelled) fn?.();
+            else unlisten = fn;
+        });
+        return () => {
+            cancelled = true;
+            unlisten?.();
+        };
+    }, []);
 
     // The local frecency floor (M2). Re-render on changes so picks re-rank.
     const learning = usePaletteLearningStore();
@@ -277,7 +294,11 @@ export function CommandBar() {
     const grouped = groupRanked(ranked);
 
     return createPortal(
-        <div className="command-bar-overlay" onClick={close}>
+        // In AI mode the overlay is NON-BLOCKING (no scrim) so the real canvas
+        // stays visible and the agent's nodes build on it live; the rail docks
+        // left. In search mode it is the familiar centred modal over a flat ink
+        // wash. (See data-mode rules in CommandBar.css.)
+        <div className="command-bar-overlay" data-mode={mode} onClick={close}>
             <div
                 className="command-bar-container"
                 onClick={(e) => e.stopPropagation()}

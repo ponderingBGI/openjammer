@@ -19,7 +19,13 @@ import { getExecutor } from '../../audio/executor';
 import { useAgentSessionStore } from '../../store/agentSessionStore';
 import type { TranscriptEntry } from '../../store/agentSessionStore';
 import { useAuthStore } from '../../auth/authStore';
+import { useSandboxStore } from '../../store/sandboxStore';
 import { AuthChooser } from './AuthChooser';
+
+/** macOS shows ⌘; everywhere else Ctrl. (Display only; handlers accept both.) */
+const IS_MAC =
+    typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+const MOD = IS_MAC ? '⌘' : 'Ctrl';
 
 interface AiPanelProps {
     /** Prompt carried over from the search input on the Tab handoff. */
@@ -62,6 +68,16 @@ export function AiPanel({ initialPrompt, forceAuth = false, onBack, onClose }: A
     const [authDismissed, setAuthDismissed] = useState(false);
     const showAuth = available && (forceAuth ? !authDismissed : !configured);
 
+    // Sandbox (Phase 6): the live jail/YOLO mode, shown in the footer and toggled
+    // with an explicit confirm. `canYolo` is false on any platform that cannot
+    // host-jail in the first place (browser), so the toggle simply never appears.
+    const sandboxMode = useSandboxStore((s) => s.mode);
+    const projectLabel = useSandboxStore((s) => s.projectLabel);
+    const canYolo = useSandboxStore((s) => s.canYolo());
+    // Local UI: the YOLO confirmation gate and the keyboard-help popover.
+    const [yoloConfirm, setYoloConfirm] = useState(false);
+    const [helpOpen, setHelpOpen] = useState(false);
+
     // Re-derive auth status from native on mount (the key lives in the keychain,
     // not this store, so a prior session's key makes us `configured` again).
     useEffect(() => {
@@ -86,12 +102,55 @@ export function AiPanel({ initialPrompt, forceAuth = false, onBack, onClose }: A
             providerKey: auth.key,
             provider: auth.activeProvider,
             modelId: auth.modelId,
+            // Phase 6: carry the live sandbox mode so the host jails (default) or
+            // drops every guard + forwards the full env (YOLO).
+            yolo: useSandboxStore.getState().mode === 'yolo',
         });
     }, [available, configured, backend, start]);
 
     const running = phase === 'running';
     const awaitingApproval = phase === 'awaiting-approval';
     const errored = phase === 'error';
+
+    // Entering YOLO is never one keystroke: going to YOLO opens the confirm;
+    // leaving it (back to safe) is immediate and needs no gate.
+    const toggleYolo = useCallback(() => {
+        const sb = useSandboxStore.getState();
+        if (sb.mode === 'yolo') sb.exitYolo();
+        else if (sb.requestYolo()) setYoloConfirm(true);
+    }, []);
+
+    // Global hotkeys for the live agent surface (not the auth/desktop-only states):
+    //   Approve  ⌘/Ctrl+Shift+Enter   — the load-bearing instant moment
+    //   Reject   Esc (while awaiting)  — undoes the whole frame in one keystroke
+    //   YOLO     ⌘/Ctrl+Shift+Y       — explicit-confirm toggle
+    // Capture phase so Approve/Reject pre-empt the prompt input's own Esc=back.
+    useEffect(() => {
+        if (!available || showAuth) return;
+        const onKey = (e: KeyboardEvent) => {
+            const mod = e.ctrlKey || e.metaKey;
+            if (awaitingApproval && mod && e.shiftKey && e.key === 'Enter') {
+                e.preventDefault();
+                e.stopPropagation();
+                approve();
+                onClose();
+                return;
+            }
+            if (awaitingApproval && e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                reject();
+                return;
+            }
+            if (mod && e.shiftKey && e.key.toLowerCase() === 'y') {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleYolo();
+            }
+        };
+        window.addEventListener('keydown', onKey, true);
+        return () => window.removeEventListener('keydown', onKey, true);
+    }, [available, showAuth, awaitingApproval, approve, reject, onClose, toggleYolo]);
 
     return (
         <div className="command-bar-ai" data-available={available}>
@@ -110,8 +169,24 @@ export function AiPanel({ initialPrompt, forceAuth = false, onBack, onClose }: A
                     >
                         ← Search
                     </button>
-                    <span className="command-bar-ai-badge">AI</span>
+                    <div className="command-bar-ai-header-right">
+                        <button
+                            type="button"
+                            className="command-bar-ai-help-btn"
+                            onClick={() => setHelpOpen((h) => !h)}
+                            aria-label="Keyboard shortcuts"
+                            aria-expanded={helpOpen}
+                            title="Keyboard shortcuts"
+                        >
+                            ?
+                        </button>
+                        <span className="command-bar-ai-badge">AI</span>
+                    </div>
                 </div>
+            )}
+
+            {helpOpen && !showAuth && available && (
+                <KeyboardHelp onClose={() => setHelpOpen(false)} canYolo={canYolo} />
             )}
 
             {!available ? (
@@ -172,8 +247,9 @@ export function AiPanel({ initialPrompt, forceAuth = false, onBack, onClose }: A
                                 type="button"
                                 className="command-bar-ai-reject"
                                 onClick={reject}
+                                title="Reject (Esc) — undo everything the agent did"
                             >
-                                Reject
+                                Reject <kbd className="command-bar-kbd">Esc</kbd>
                             </button>
                             <button
                                 type="button"
@@ -182,13 +258,143 @@ export function AiPanel({ initialPrompt, forceAuth = false, onBack, onClose }: A
                                     approve();
                                     onClose();
                                 }}
+                                title={`Approve (${MOD}+Shift+Enter) — keep the changes`}
                             >
-                                Approve
+                                Approve{' '}
+                                <kbd className="command-bar-kbd command-bar-kbd-on-accent">
+                                    {MOD}+⇧+⏎
+                                </kbd>
                             </button>
                         </div>
                     )}
+
+                    {/*
+                     * The permission footer — always visible on the live agent
+                     * surface so the sandbox boundary is never a surprise. Signal-
+                     * Not-Brand: clay only reports the YOLO danger state, always
+                     * carrying its label.
+                     */}
+                    <div className="command-bar-ai-footer" data-mode={sandboxMode}>
+                        {sandboxMode === 'yolo' ? (
+                            <span className="command-bar-ai-sandbox command-bar-ai-sandbox-yolo">
+                                ⚠ YOLO Mode — all guards off
+                            </span>
+                        ) : (
+                            <span className="command-bar-ai-sandbox">
+                                Sandboxed&nbsp;↬&nbsp;
+                                <code>{projectLabel ? `${projectLabel}/` : 'project/'}</code>
+                            </span>
+                        )}
+                        {canYolo && (
+                            <button
+                                type="button"
+                                className="command-bar-ai-yolo-toggle"
+                                data-mode={sandboxMode}
+                                onClick={toggleYolo}
+                                title={`Toggle YOLO (${MOD}+Shift+Y)`}
+                            >
+                                {sandboxMode === 'yolo' ? 'Exit YOLO' : 'YOLO'}
+                            </button>
+                        )}
+                    </div>
+
+                    {yoloConfirm && (
+                        <YoloConfirm
+                            onCancel={() => setYoloConfirm(false)}
+                            onConfirm={() => {
+                                useSandboxStore.getState().confirmYolo();
+                                setYoloConfirm(false);
+                            }}
+                        />
+                    )}
                 </>
             )}
+        </div>
+    );
+}
+
+/**
+ * The YOLO confirmation gate. Entering YOLO is deliberately a two-step act: this
+ * spells out exactly what is being given up (the full shell + real environment)
+ * before any guard drops, and resets to safe on restart.
+ */
+function YoloConfirm({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+    const confirmRef = useRef<HTMLButtonElement>(null);
+    // Focus Cancel by default — entering YOLO should take a deliberate reach.
+    useEffect(() => {
+        confirmRef.current?.focus();
+    }, []);
+    return (
+        <div className="command-bar-yolo-confirm" role="alertdialog" aria-label="Enter YOLO mode?">
+            <p className="command-bar-yolo-title">Enter YOLO mode?</p>
+            <p className="command-bar-yolo-body">
+                The agent gets your <strong>full shell</strong> — any command, any directory,
+                and your real environment (SSH&nbsp;keys, cloud tokens). The graph
+                Approve&nbsp;/&nbsp;Reject gate stays on; everything else is off. Resets to
+                safe on restart.
+            </p>
+            <div className="command-bar-yolo-actions">
+                <button type="button" className="command-bar-ai-reject" onClick={onCancel}>
+                    Cancel
+                </button>
+                <button
+                    ref={confirmRef}
+                    type="button"
+                    className="command-bar-yolo-go"
+                    onClick={onConfirm}
+                >
+                    Enter YOLO
+                </button>
+            </div>
+        </div>
+    );
+}
+
+/** A compact keyboard-shortcut reference, dismissed with Esc or its close button. */
+function KeyboardHelp({ onClose, canYolo }: { onClose: () => void; canYolo: boolean }) {
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                onClose();
+            }
+        };
+        window.addEventListener('keydown', onKey, true);
+        return () => window.removeEventListener('keydown', onKey, true);
+    }, [onClose]);
+
+    const rows: [string, string][] = [
+        ['Tab', 'Ask AI (from search)'],
+        ['Enter', 'Send the prompt'],
+        [`${MOD}+⇧+⏎`, 'Approve the changes'],
+        ['Esc', 'Reject / back'],
+        ...(canYolo ? ([[`${MOD}+⇧+Y`, 'Toggle YOLO mode']] as [string, string][]) : []),
+    ];
+
+    return (
+        <div className="command-bar-help" role="dialog" aria-label="Keyboard shortcuts">
+            <div className="command-bar-help-head">
+                <span className="command-bar-help-title">Shortcuts</span>
+                <button
+                    type="button"
+                    className="command-bar-ai-back"
+                    onClick={onClose}
+                    aria-label="Close shortcuts"
+                >
+                    ✕
+                </button>
+            </div>
+            <dl className="command-bar-help-list">
+                {rows.map(([keys, label]) => (
+                    <div key={keys} className="command-bar-help-row">
+                        <dt>
+                            <kbd className="command-bar-kbd">{keys}</kbd>
+                        </dt>
+                        <dd>{label}</dd>
+                    </div>
+                ))}
+            </dl>
         </div>
     );
 }

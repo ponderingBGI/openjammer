@@ -281,6 +281,13 @@ export interface AgentTask {
      * configured default for the provider is used.
      */
     modelId?: string;
+    /**
+     * YOLO mode (Phase 6): when true the native host drops the OS jail + in-Pi
+     * permission-gate and forwards the full shell environment (the real Pi
+     * experience). Omitted/false = the default sandbox. Toggling it respawns the
+     * warm child. The graph Approve/Reject gate is unaffected either way.
+     */
+    yolo?: boolean;
 }
 
 /**

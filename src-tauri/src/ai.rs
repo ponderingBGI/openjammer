@@ -33,9 +33,12 @@
 //! launching user's privileges; sandboxing is the HOST's job. So OpenJammer
 //! treats Pi as an UNTRUSTED GENERATOR, never a trusted runner:
 //!
-//! * **Throwaway worktree.** Pi runs with its cwd in a fresh `git worktree`
-//!   under the OS temp dir, detached from the user's real project, and the
-//!   worktree is torn down when the run ends ([`Worktree`]).
+//! * **Persistent jailed workspace.** Pi runs with `HOME` pointed at a single
+//!   global brain (`~/.openjammer/agent/`, so its `.pi` memory/sessions/auth
+//!   accumulate and the agent learns) and its cwd at a jailed project dir beneath
+//!   it ([`AgentWorkspace`]). The OS jail (`sandbox.rs`) confines writes to those
+//!   roots; the in-Pi `permission-gate` extension (fed `OJ_PROJECT_ROOT` /
+//!   `OJ_MEMORY_ROOTS` / `OJ_KEY_VAR`) polices bash + redacts the key.
 //! * **Env allowlist.** The child starts from an EMPTY environment; we forward
 //!   only `PATH`/`HOME` (so `pi` and `git` resolve) plus the ONE provider key
 //!   the user supplied, under the var name that provider expects
@@ -61,7 +64,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -167,7 +170,10 @@ pub fn ai_run(
     provider_key: Option<String>,
     provider: Option<String>,
     model_id: Option<String>,
+    yolo: Option<bool>,
     channel: String,
+    warm: tauri::State<'_, WarmChildState>,
+    bridge: tauri::State<'_, crate::bridge::BridgeState>,
 ) -> Result<(), String> {
     // Resolve the Pi binary up front so a missing install is a clean message.
     let Some(pi) = find_pi() else {
@@ -175,24 +181,20 @@ pub fn ai_run(
         return Ok(());
     };
 
-    // A throwaway worktree confines Pi's cwd; teardown happens on drop.
-    let worktree = match Worktree::create() {
-        Ok(wt) => wt,
+    // The PERSISTENT agent workspace (Phase 1): a single global HOME "brain" whose
+    // `.pi` memory/sessions/auth survive every run (so the agent learns), plus a
+    // jailed project cwd. Replaces the per-run throwaway worktree.
+    let workspace = match AgentWorkspace::ensure() {
+        Ok(ws) => ws,
         Err(e) => {
             emit(
                 &app,
                 &channel,
-                PiStreamLine::error(format!("could not create throwaway worktree: {e}")),
+                PiStreamLine::error(format!("could not prepare the agent workspace: {e}")),
             );
             return Ok(());
         }
     };
-
-    emit(
-        &app,
-        &channel,
-        PiStreamLine::thought(format!("Starting Pi in {}", worktree.path().display())),
-    );
 
     // D6 (M7): forward the key under the ACTIVE provider's env var so Pi's
     // provider reads it. A `conflict` (Pi's own auth.json would resolve a working
@@ -211,120 +213,111 @@ pub fn ai_run(
     } else {
         provider_key.as_deref()
     };
-    let env = stripped_env_for(key_for_env, provider.as_deref());
+    let jailed = !yolo.unwrap_or(false);
 
-    let spawn = Command::new(&pi)
-        .arg("--mode")
-        .arg("rpc")
-        .current_dir(worktree.path())
-        .env_clear()
-        .envs(env)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn();
+    // JAILED (default): a STRIPPED allowlist env + the gate's jail-boundary vars.
+    // YOLO: the FULL parent environment (the real Pi experience) + the key only,
+    // and no gate vars. HOME points at the persistent global brain in BOTH modes,
+    // so the agent keeps its learned memory/sessions regardless.
+    let mut env = if jailed {
+        stripped_env_for(key_for_env, provider.as_deref())
+    } else {
+        let mut full: HashMap<String, String> = std::env::vars().collect();
+        if let Some(k) = key_for_env.filter(|k| !k.is_empty()) {
+            full.insert(provider_key_var(provider.as_deref()), k.to_string());
+        }
+        full
+    };
+    env.insert(
+        "HOME".to_string(),
+        workspace.agent_home.to_string_lossy().into_owned(),
+    );
+    // Phase 3: stand up the loopback tool bridge and hand its address + token to
+    // the graph extension, so its READ tools round-trip the REAL graph state back
+    // to Pi (writes still apply via the streamed tool-call path). Available in both
+    // modes — grounded reasoning isn't a guard YOLO should drop.
+    if let Some((addr, token)) = crate::bridge::ensure_started(&app, &bridge) {
+        env.insert("OJ_BRIDGE_ADDR".to_string(), addr);
+        env.insert("OJ_BRIDGE_TOKEN".to_string(), token);
+    }
+    if jailed {
+        // Hand the in-Pi permission-gate its write-jail (the project + the memory
+        // roots, which live under HOME outside the project) and the env var holding
+        // the secret to redact from tool output.
+        env.insert(
+            "OJ_PROJECT_ROOT".to_string(),
+            workspace.project_root.to_string_lossy().into_owned(),
+        );
+        env.insert(
+            "OJ_MEMORY_ROOTS".to_string(),
+            workspace
+                .memory_roots()
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(":"),
+        );
+        if key_for_env.is_some() {
+            env.insert("OJ_KEY_VAR".to_string(), provider_key_var(provider.as_deref()));
+        }
+    }
 
-    let mut child = match spawn {
-        Ok(c) => c,
-        Err(e) => {
-            emit(
-                &app,
-                &channel,
-                PiStreamLine::error(format!("failed to spawn `pi`: {e}")),
-            );
-            return Ok(());
+    // Ensure a WARM, configured Pi child for this provider/model, then stream the
+    // prompt against it. The child PERSISTS across prompts — the handshake and
+    // `set_model` are paid ONCE at (re)spawn, so the 2nd+ turn has no cold-start
+    // (the "instant" feel). The mutex serializes prompts (the agent is sequential).
+    let mut guard = warm.0.lock().unwrap_or_else(|e| e.into_inner());
+
+    let needs_respawn = match guard.as_mut() {
+        None => true,
+        Some(c) => {
+            c.is_dead()
+                || c.provider.as_deref() != provider.as_deref()
+                || c.model_id.as_deref() != model_id.as_deref()
+                || c.project_root != workspace.project_root
+                || c.jailed != jailed
         }
     };
-
-    let Some(mut stdin) = child.stdin.take() else {
-        emit(&app, &channel, PiStreamLine::error("pi stdin unavailable"));
-        let _ = child.kill();
-        let _ = child.wait();
-        return Ok(());
-    };
-    let Some(stdout) = child.stdout.take() else {
-        emit(&app, &channel, PiStreamLine::error("pi stdout unavailable"));
-        let _ = child.kill();
-        let _ = child.wait();
-        return Ok(());
-    };
-    let mut reader = BufReader::new(stdout);
-
-    // 1) Capability handshake: confirm Pi speaks our RPC vocabulary BEFORE we
-    //    commit a prompt. A missing/failed response => one reasoned error,
-    //    never a silent degrade of every later tool call to `thought`.
-    if let Err(e) = send_command(&mut stdin, &serde_json::json!({ "type": "get_commands" })) {
-        emit(
+    if needs_respawn {
+        // Drop (kill + wait) any stale child before standing up a fresh one.
+        drop(guard.take());
+        // Load/drop the permission-gate to match the mode BEFORE Pi reads settings.
+        configure_gate(&workspace.agent_home, jailed, &app, &channel);
+        // Install the graph-verb extension in EVERY mode (the core capability, so
+        // Pi can build the canvas); it is never dropped by YOLO.
+        let graph_pkg = graph_extension_dir().to_string_lossy().into_owned();
+        let _ = set_settings_package(&workspace.agent_home, &graph_pkg, true);
+        // The hard OS jail (Linux) — present in jailed mode, absent in YOLO.
+        let jail = if jailed {
+            Some(crate::sandbox::Jail::new(
+                workspace.project_root.clone(),
+                workspace.agent_home.clone(),
+            ))
+        } else {
+            None
+        };
+        match spawn_and_configure(
+            &pi,
+            env,
+            &workspace.project_root,
+            provider.as_deref(),
+            model_id.as_deref(),
+            jail,
             &app,
             &channel,
-            PiStreamLine::error(format!("could not talk to Pi: {e}")),
-        );
-        let _ = child.kill();
-        let _ = child.wait();
-        return Ok(());
-    }
-    match await_response(&mut reader, &mut stdin, &app, &channel, "get_commands") {
-        Ok(true) => {}
-        Ok(false) => {
-            emit(&app, &channel, PiStreamLine::error(PI_HANDSHAKE_HELP));
-            let _ = child.kill();
-            let _ = child.wait();
-            return Ok(());
-        }
-        Err(()) => {
-            emit(
-                &app,
-                &channel,
-                PiStreamLine::error("Pi closed the RPC stream during the handshake."),
-            );
-            let _ = child.wait();
-            return Ok(());
+        ) {
+            Ok(c) => *guard = Some(c),
+            Err(()) => return Ok(()), // a reasoned error line was already emitted
         }
     }
 
-    // 2) Optionally pin the model for this run (no persisted default is assumed).
-    //    A `set_model` failure is FATAL-TO-AI (typed), not silently ignored.
-    if let (Some(p), Some(m)) = (provider.as_deref(), model_id.as_deref()) {
-        let req = serde_json::json!({ "type": "set_model", "provider": p, "modelId": m });
-        if let Err(e) = send_command(&mut stdin, &req) {
-            emit(
-                &app,
-                &channel,
-                PiStreamLine::error(format!("could not set model: {e}")),
-            );
-            let _ = child.kill();
-            let _ = child.wait();
-            return Ok(());
-        }
-        match await_response(&mut reader, &mut stdin, &app, &channel, "set_model") {
-            Ok(true) => {}
-            Ok(false) => {
-                emit(
-                    &app,
-                    &channel,
-                    PiStreamLine::error(format!(
-                        "Pi rejected model {p}/{m} (provider not authenticated or model unavailable)."
-                    )),
-                );
-                let _ = child.kill();
-                let _ = child.wait();
-                return Ok(());
-            }
-            Err(()) => {
-                emit(
-                    &app,
-                    &channel,
-                    PiStreamLine::error("Pi closed the stream while setting the model."),
-                );
-                let _ = child.wait();
-                return Ok(());
-            }
-        }
-    }
+    let child = match guard.as_mut() {
+        Some(c) => c,
+        None => return Ok(()),
+    };
 
-    // 3) Send the prompt and stream until the agent finishes.
     if let Err(e) = send_command(
-        &mut stdin,
+        &mut child.stdin,
         &serde_json::json!({ "type": "prompt", "message": prompt }),
     ) {
         emit(
@@ -332,20 +325,431 @@ pub fn ai_run(
             &channel,
             PiStreamLine::error(format!("could not send prompt: {e}")),
         );
-        let _ = child.kill();
-        let _ = child.wait();
+        // A broken pipe means the child is gone; drop it so the next turn respawns.
+        drop(guard.take());
         return Ok(());
     }
 
-    stream_until_end(&mut reader, &mut stdin, &app, &channel);
+    stream_until_end(&mut child.reader, &mut child.stdin, &app, &channel);
+    // The child stays WARM for the next prompt — no kill.
+    Ok(())
+}
 
-    // Per-run spawn: once the agent has finished (or the stream closed) we are
-    // done with this Pi. Closing stdin then killing guarantees no hang waiting
-    // on a persistent RPC session. (The persistent-subprocess optimization is a
-    // later milestone.)
-    drop(stdin);
-    let _ = child.kill();
-    let _ = child.wait();
+// ============================================================================
+// Warm child (Phase 1): one long-lived Pi RPC subprocess, reused across prompts.
+// ============================================================================
+
+/// A warm, long-lived `pi --mode rpc` child reused across prompts. Spawned +
+/// handshaken + (optionally) model-pinned ONCE; each prompt streams against it and
+/// it stays alive, so the 2nd+ turn pays no cold-start (the instant feel). It is
+/// re-spawned when it dies or when the provider / model / project root changes.
+pub struct WarmChild {
+    child: Child,
+    stdin: ChildStdin,
+    reader: BufReader<ChildStdout>,
+    provider: Option<String>,
+    model_id: Option<String>,
+    project_root: PathBuf,
+    /// Whether this child was spawned jailed (gate loaded + env stripped) vs YOLO
+    /// (gate dropped + full env). A mode flip forces a respawn.
+    jailed: bool,
+}
+
+impl WarmChild {
+    /// Whether the child has exited (or we can no longer tell) → needs a respawn.
+    fn is_dead(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(Some(_)) | Err(_))
+    }
+}
+
+impl Drop for WarmChild {
+    /// Kill + reap on drop (respawn or app exit) so no Pi child is ever orphaned —
+    /// `std::process::Child` does NOT kill on drop by default.
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// Tauri-managed state holding the at-most-one warm child for the app session.
+/// The `Mutex` serializes prompts (one agent turn at a time).
+#[derive(Default)]
+pub struct WarmChildState(pub std::sync::Mutex<Option<WarmChild>>);
+
+/// Spawn a fresh Pi child, run the `get_commands` handshake, and pin the model
+/// ONCE. Emits a reasoned `error` line and returns `Err(())` on any failure (the
+/// caller then just returns `Ok(())`, surfacing the streamed error to the UI).
+fn spawn_and_configure(
+    pi: &Path,
+    env: HashMap<String, String>,
+    project_root: &Path,
+    provider: Option<&str>,
+    model_id: Option<&str>,
+    jail: Option<crate::sandbox::Jail>,
+    app: &AppHandle,
+    channel: &str,
+) -> Result<WarmChild, ()> {
+    let jailed = jail.is_some();
+    emit(
+        app,
+        channel,
+        PiStreamLine::thought(format!("Starting Pi in {}", project_root.display())),
+    );
+    if jailed && !crate::sandbox::jail_supported() {
+        // Be honest where the hard OS jail isn't wired yet (macOS/Windows): the
+        // cooperative in-Pi gate is still active, but it is not the hard guarantee.
+        emit(
+            app,
+            channel,
+            PiStreamLine::thought(
+                "note: OS-level file jail isn't available on this platform — the in-Pi permission-gate is the active layer.".to_string(),
+            ),
+        );
+    }
+
+    let mut cmd = Command::new(pi);
+    cmd.arg("--mode")
+        .arg("rpc")
+        .current_dir(project_root)
+        .env_clear()
+        .envs(env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    // The OS jail (Linux Landlock) — the hard, unbypassable boundary. A no-op in
+    // YOLO (jail = None) and on platforms without it (the in-Pi gate is the layer).
+    if let Some(j) = jail {
+        crate::sandbox::apply(&mut cmd, j);
+    }
+
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            emit(
+                app,
+                channel,
+                PiStreamLine::error(format!("failed to spawn `pi`: {e}")),
+            );
+            return Err(());
+        }
+    };
+
+    let Some(mut stdin) = child.stdin.take() else {
+        emit(app, channel, PiStreamLine::error("pi stdin unavailable"));
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(());
+    };
+    let Some(stdout) = child.stdout.take() else {
+        emit(app, channel, PiStreamLine::error("pi stdout unavailable"));
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(());
+    };
+    let mut reader = BufReader::new(stdout);
+
+    // Handshake: confirm Pi speaks our RPC vocabulary BEFORE any prompt — a
+    // missing/failed ack is one reasoned error, not a silent degrade-to-thought.
+    if let Err(e) = send_command(&mut stdin, &serde_json::json!({ "type": "get_commands" })) {
+        emit(
+            app,
+            channel,
+            PiStreamLine::error(format!("could not talk to Pi: {e}")),
+        );
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(());
+    }
+    match await_response(&mut reader, &mut stdin, app, channel, "get_commands") {
+        Ok(true) => {}
+        Ok(false) => {
+            emit(app, channel, PiStreamLine::error(PI_HANDSHAKE_HELP));
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(());
+        }
+        Err(()) => {
+            emit(
+                app,
+                channel,
+                PiStreamLine::error("Pi closed the RPC stream during the handshake."),
+            );
+            let _ = child.wait();
+            return Err(());
+        }
+    }
+
+    // Pin the model ONCE at spawn (no persisted default is assumed). A failure is
+    // FATAL-TO-AI (typed), not silently ignored.
+    if let (Some(p), Some(m)) = (provider, model_id) {
+        let req = serde_json::json!({ "type": "set_model", "provider": p, "modelId": m });
+        if let Err(e) = send_command(&mut stdin, &req) {
+            emit(
+                app,
+                channel,
+                PiStreamLine::error(format!("could not set model: {e}")),
+            );
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(());
+        }
+        match await_response(&mut reader, &mut stdin, app, channel, "set_model") {
+            Ok(true) => {}
+            Ok(false) => {
+                emit(
+                    app,
+                    channel,
+                    PiStreamLine::error(format!(
+                        "Pi rejected model {p}/{m} (provider not authenticated or model unavailable)."
+                    )),
+                );
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(());
+            }
+            Err(()) => {
+                emit(
+                    app,
+                    channel,
+                    PiStreamLine::error("Pi closed the stream while setting the model."),
+                );
+                let _ = child.wait();
+                return Err(());
+            }
+        }
+    }
+
+    Ok(WarmChild {
+        child,
+        stdin,
+        reader,
+        provider: provider.map(String::from),
+        model_id: model_id.map(String::from),
+        project_root: project_root.to_path_buf(),
+        jailed,
+    })
+}
+
+/// Where the bundled permission-gate extension lives. Overridable for packaging
+/// via `OPENJAMMER_GATE_DIR`; the dev fallback is the in-repo `pi-extensions`.
+fn gate_extension_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("OPENJAMMER_GATE_DIR") {
+        return PathBuf::from(p);
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|p| p.join("pi-extensions").join("permission-gate"))
+        .unwrap_or_else(|| PathBuf::from("pi-extensions/permission-gate"))
+}
+
+/// Where the first-party `pi-openjammer-graph` extension lives — the package that
+/// gives Pi the graph verbs (`add_node`/`add_connection`/…) so it can build the
+/// canvas. Overridable via `OPENJAMMER_GRAPH_DIR`. Installed in EVERY mode (it is
+/// the core capability, not a guard), unlike the permission-gate which YOLO drops.
+fn graph_extension_dir() -> PathBuf {
+    if let Ok(p) = std::env::var("OPENJAMMER_GRAPH_DIR") {
+        return PathBuf::from(p);
+    }
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|p| p.join("pi-openjammer-graph"))
+        .unwrap_or_else(|| PathBuf::from("pi-openjammer-graph"))
+}
+
+/// Add (`present`) or remove a `package` entry from the agent home's
+/// `settings.json` `packages[]` — the one mechanism Pi loads packages through.
+/// Shared by the permission-gate (sandbox) and pi-persistent-intelligence (learning).
+fn set_settings_package(agent_home: &Path, package: &str, present: bool) -> std::io::Result<()> {
+    let settings_path = agent_home.join(".pi").join("agent").join("settings.json");
+
+    let mut root: serde_json::Value = std::fs::read_to_string(&settings_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    let mut packages: Vec<String> = root
+        .get("packages")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let has = packages.iter().any(|p| p == package);
+    if present && !has {
+        packages.push(package.to_string());
+    } else if !present && has {
+        packages.retain(|p| p != package);
+    } else {
+        return Ok(()); // already in the desired state
+    }
+
+    root["packages"] = serde_json::json!(packages);
+    if let Some(parent) = settings_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let serialized = serde_json::to_string_pretty(&root).map_err(std::io::Error::other)?;
+    std::fs::write(&settings_path, serialized)
+}
+
+/// Make the in-Pi permission-gate ACTIVE (jailed) or DROPPED (YOLO) by editing the
+/// agent home's `settings.json` `packages[]` BEFORE the child spawns and reads it.
+/// This is what turns the verified gate policy into live enforcement — and what
+/// YOLO removes. Best-effort: a write failure is surfaced as a note, never fatal.
+fn configure_gate(agent_home: &Path, jailed: bool, app: &AppHandle, channel: &str) {
+    let gate = gate_extension_dir().to_string_lossy().into_owned();
+    if set_settings_package(agent_home, &gate, jailed).is_err() {
+        emit(
+            app,
+            channel,
+            PiStreamLine::thought("note: could not update the sandbox config".to_string()),
+        );
+    }
+}
+
+/// The pi-persistent-intelligence package the agent learns through (Phase 7).
+/// Overridable via `OPENJAMMER_PI_MEMORY_PKG` for a custom path / package name.
+fn persistent_intelligence_pkg() -> String {
+    std::env::var("OPENJAMMER_PI_MEMORY_PKG")
+        .unwrap_or_else(|_| "pi-persistent-intelligence".to_string())
+}
+
+/// Opt-in learning (Phase 7): install/remove pi-persistent-intelligence in the
+/// agent home so the agent remembers your taste across sessions (local frecency is
+/// the floor either way). A mode change takes effect on the next (re)spawn.
+#[tauri::command]
+pub fn ai_set_learning(enabled: bool) -> Result<(), String> {
+    let agent_home = AgentWorkspace::ensure().map_err(|e| e.to_string())?.agent_home;
+    set_settings_package(&agent_home, &persistent_intelligence_pkg(), enabled)
+        .map_err(|e| e.to_string())
+}
+
+/// Forget the agent's learned memory (Phase 7) — wipes the pi-memory dir, leaving
+/// auth + sessions intact. The "delete one brain" action behind a Ctrl+K command.
+#[tauri::command]
+pub fn ai_forget() -> Result<(), String> {
+    let agent_home = AgentWorkspace::ensure().map_err(|e| e.to_string())?.agent_home;
+    let mem = agent_home.join(".pi").join("agent").join("pi-memory");
+    if mem.exists() {
+        std::fs::remove_dir_all(&mem).map_err(|e| e.to_string())?;
+    }
+    std::fs::create_dir_all(&mem).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// One past session, for the Ctrl+K "Sessions" list / timeline (Phase 4). `id` is
+/// the session-store stem `switch_session` resumes by; `modifiedMs` orders them
+/// most-recent-first. Read app-side from the JSONL store (Pi's RPC exposes only
+/// linear `get_fork_messages` + `fork`, not a tree enumeration).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionInfo {
+    id: String,
+    modified_ms: u64,
+}
+
+/// List the agent's persisted sessions (newest first) from the global brain's
+/// session store, for the resume / session-tree UI.
+#[tauri::command]
+pub fn ai_sessions() -> Result<Vec<SessionInfo>, String> {
+    let agent_home = AgentWorkspace::ensure().map_err(|e| e.to_string())?.agent_home;
+    let dir = agent_home.join(".pi").join("agent").join("sessions");
+
+    let mut out = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|x| x.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let id = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default()
+                .to_string();
+            let modified_ms = entry
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            out.push(SessionInfo { id, modified_ms });
+        }
+    }
+    out.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms));
+    Ok(out)
+}
+
+/// CLI-parity seam (Phase 4): forward ONE raw RPC envelope to the warm Pi child
+/// and stream the reply on `channel`. This is the thin GUI-over-RPC bridge that
+/// gives the verbs Pi already exposes — `new_session`, `switch_session`,
+/// `fork`, `clone`, `get_state`, `set_model`, `cycle_model`, `set_thinking_level`
+/// — without reimplementing any of them. (Streaming verbs like `prompt` go through
+/// [`ai_run`]; this is for the request/response commands.)
+///
+/// `command` is the full envelope, e.g. `{ "type": "switch_session", "id": "…" }`.
+/// Requires a running warm child (start a prompt first); otherwise it surfaces a
+/// clear error rather than spawning a child with no prompt context.
+#[tauri::command]
+pub fn ai_command(
+    app: AppHandle,
+    command: serde_json::Value,
+    channel: String,
+    warm: tauri::State<'_, WarmChildState>,
+) -> Result<(), String> {
+    let cmd_name = command
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if cmd_name.is_empty() {
+        emit(
+            &app,
+            &channel,
+            PiStreamLine::error("ai_command requires a `type` field"),
+        );
+        return Ok(());
+    }
+
+    let mut guard = warm.0.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(child) = guard.as_mut() else {
+        emit(
+            &app,
+            &channel,
+            PiStreamLine::error("the AI agent isn't running yet — ask it something first."),
+        );
+        return Ok(());
+    };
+
+    if let Err(e) = send_command(&mut child.stdin, &command) {
+        emit(
+            &app,
+            &channel,
+            PiStreamLine::error(format!("could not send {cmd_name}: {e}")),
+        );
+        drop(guard.take());
+        return Ok(());
+    }
+
+    match await_response(&mut child.reader, &mut child.stdin, &app, &channel, &cmd_name) {
+        Ok(true) => emit(&app, &channel, PiStreamLine::result(format!("{cmd_name} ok"))),
+        Ok(false) => emit(
+            &app,
+            &channel,
+            PiStreamLine::error(format!("Pi rejected {cmd_name}")),
+        ),
+        Err(()) => {
+            emit(
+                &app,
+                &channel,
+                PiStreamLine::error(format!("Pi closed the stream during {cmd_name}")),
+            );
+            drop(guard.take());
+        }
+    }
     Ok(())
 }
 
@@ -568,15 +972,23 @@ fn stripped_env_for(provider_key: Option<&str>, provider: Option<&str>) -> HashM
     }
 
     if let Some(key) = provider_key.filter(|k| !k.is_empty()) {
-        let var = std::env::var("OPENJAMMER_AI_KEY_VAR").unwrap_or_else(|_| {
-            provider
-                .map(|p| crate::auth::provider_env_var(p).to_string())
-                .unwrap_or_else(|| "OPENJAMMER_PROVIDER_KEY".to_string())
-        });
-        env.insert(var, key.to_string());
+        env.insert(provider_key_var(provider), key.to_string());
     }
 
     env
+}
+
+/// Resolve the env VAR NAME the provider key is injected under — used both to
+/// inject the key (above) and to tell the in-Pi permission-gate which var holds
+/// the secret to redact (`OJ_KEY_VAR`). Order: `OPENJAMMER_AI_KEY_VAR` override →
+/// the active provider's mapping (e.g. `anthropic` → `ANTHROPIC_API_KEY`) → a
+/// generic fallback name.
+fn provider_key_var(provider: Option<&str>) -> String {
+    std::env::var("OPENJAMMER_AI_KEY_VAR").unwrap_or_else(|_| {
+        provider
+            .map(|p| crate::auth::provider_env_var(p).to_string())
+            .unwrap_or_else(|| "OPENJAMMER_PROVIDER_KEY".to_string())
+    })
 }
 
 /// Locate the `pi` binary, honouring an explicit `OPENJAMMER_PI_BIN` override
@@ -616,76 +1028,54 @@ const PI_HANDSHAKE_HELP: &str = "Pi started but did not acknowledge the RPC hand
     (`get_commands`). The installed Pi may be too old or speak a different RPC dialect. \
     Update it (`bun add -g @earendil-works/pi-coding-agent`) and try again.";
 
-/// A throwaway git worktree that Pi runs inside, removed on drop.
-///
-/// Created with `git worktree add --detach <tmp>` against the current repo when
-/// possible; if this directory is not a git repo (e.g. an installed app bundle),
-/// it falls back to a plain temp directory. Either way Pi's cwd is isolated from
-/// the user's real files.
-struct Worktree {
-    path: PathBuf,
-    /// True if created via `git worktree` (so teardown uses `git worktree remove`).
-    git_managed: bool,
+/// The PERSISTENT agent workspace (Phase 1) — replaces the per-run throwaway
+/// worktree. The agent's HOME is a single GLOBAL brain under the user's home
+/// (`~/.openjammer/agent/`) so its `.pi` memory / sessions / auth accumulate
+/// across runs and projects (the founder's "evolves & learns" folder). Pi's cwd
+/// and the write-jail boundary is a project working dir beneath it. The OS jail
+/// (`sandbox.rs`, device side) confines writes to these roots; nothing is torn
+/// down — persistence is the whole point.
+struct AgentWorkspace {
+    /// Forwarded as `HOME` → Pi reads/writes its `.pi` here (the global brain).
+    agent_home: PathBuf,
+    /// Pi's cwd and the write-jail boundary.
+    project_root: PathBuf,
 }
 
-impl Worktree {
-    fn create() -> std::io::Result<Self> {
-        let base = std::env::temp_dir().join(format!("openjammer-ai-{}", unique_suffix()));
-
-        // Try a git worktree first (keeps Pi inside a real, but disposable, repo).
-        let git_ok = Command::new("git")
-            .args(["worktree", "add", "--detach"])
-            .arg(&base)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-
-        if git_ok {
-            return Ok(Self {
-                path: base,
-                git_managed: true,
-            });
-        }
-
-        // Fallback: a plain isolated temp directory.
-        std::fs::create_dir_all(&base)?;
+impl AgentWorkspace {
+    fn ensure() -> std::io::Result<Self> {
+        let agent_home = home_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join(".openjammer")
+            .join("agent");
+        let project_root = agent_home.join("workspace");
+        // The memory + sessions dirs the persistent-intelligence package and Pi
+        // use; creating them up front keeps the gate's writable roots real.
+        let pi_agent = agent_home.join(".pi").join("agent");
+        std::fs::create_dir_all(pi_agent.join("pi-memory"))?;
+        std::fs::create_dir_all(pi_agent.join("sessions"))?;
+        std::fs::create_dir_all(&project_root)?;
         Ok(Self {
-            path: base,
-            git_managed: false,
+            agent_home,
+            project_root,
         })
     }
 
-    fn path(&self) -> &Path {
-        &self.path
+    /// The extra writable roots (besides `project_root`) the in-Pi gate must allow:
+    /// the agent's own memory + sessions live under HOME, OUTSIDE the project cwd,
+    /// so the write-jail spans both — but never the gate's own config/packages.
+    fn memory_roots(&self) -> Vec<PathBuf> {
+        let pi_agent = self.agent_home.join(".pi").join("agent");
+        vec![pi_agent.join("pi-memory"), pi_agent.join("sessions")]
     }
 }
 
-impl Drop for Worktree {
-    fn drop(&mut self) {
-        if self.git_managed {
-            let _ = Command::new("git")
-                .args(["worktree", "remove", "--force"])
-                .arg(&self.path)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
-        // Always best-effort remove the directory (covers the fallback path and
-        // any residue `git worktree remove` left behind).
-        let _ = std::fs::remove_dir_all(&self.path);
-    }
-}
-
-/// A process-unique suffix for the worktree dir name (pid + monotonic-ish nanos).
-fn unique_suffix() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    format!("{}-{}", std::process::id(), nanos)
+/// The user's home dir (`HOME` / `USERPROFILE`), for siting the persistent agent
+/// home. Falls back to the temp dir at the call site when neither is set.
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
 }
 
 /// Emit one stream line on the run channel, ignoring emit errors (a closed

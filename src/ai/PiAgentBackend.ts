@@ -129,6 +129,7 @@ export class PiAgentBackend implements AgentBackend {
             providerKey: task.providerKey ?? null,
             provider: task.provider ?? null,
             modelId: task.modelId ?? null,
+            yolo: task.yolo ?? false,
             channel,
         }).catch((err: unknown) => {
             push({ kind: 'error', message: `ai_run failed: ${describe(err)}` });

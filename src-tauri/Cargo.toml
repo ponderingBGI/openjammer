@@ -59,3 +59,6 @@ serde_json = "1.0.150"
 # webview loads the bundled frontend instead of the dev server. Tauri's CLI sets
 # it via `tauri build`; harmless in `cargo build`.
 custom-protocol = ["tauri/custom-protocol"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"

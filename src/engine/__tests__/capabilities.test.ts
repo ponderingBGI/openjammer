@@ -13,6 +13,7 @@ import {
     BROWSER_CAPABILITIES,
     DESKTOP_CAPABILITIES,
     agentTransportLabel,
+    canHostJail,
 } from '../capabilities';
 import { OjcoreNativeExecutor } from '../../audio/executor/OjcoreNativeExecutor';
 import { OjcoreWasmExecutor } from '../../audio/executor/OjcoreWasmExecutor';
@@ -24,6 +25,7 @@ describe('EngineCapabilities (M0 spine seam)', () => {
             codeNodes: 'author-and-run',
             auth: 'keychain-loopback',
             learning: 'pi-memory',
+            sandbox: 'host-jailed',
         });
     });
 
@@ -33,6 +35,7 @@ describe('EngineCapabilities (M0 spine seam)', () => {
             codeNodes: 'run-only',
             auth: 'none',
             learning: 'local-only',
+            sandbox: 'none',
         });
     });
 
@@ -53,5 +56,12 @@ describe('EngineCapabilities (M0 spine seam)', () => {
         expect(agentTransportLabel('pi-subprocess')).toMatch(/local/i);
         expect(agentTransportLabel('remote-proxy')).toMatch(/remote/i);
         expect(agentTransportLabel('none')).toMatch(/unavailable/i);
+    });
+
+    it('sandbox gating: only a host-jailed platform can offer YOLO', () => {
+        // The YOLO toggle precondition: a platform that cannot OS-confine the
+        // agent in the first place has no guards to drop.
+        expect(canHostJail(DESKTOP_CAPABILITIES.sandbox)).toBe(true);
+        expect(canHostJail(BROWSER_CAPABILITIES.sandbox)).toBe(false);
     });
 });

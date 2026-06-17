@@ -40,19 +40,63 @@ interface PiTool {
 }
 
 /**
- * Forward a tool call to the OpenJammer host and resolve with the post-state.
+ * Forward a tool call to the OpenJammer host and resolve with the post-state
+ * (D5 round-trip). The host runs a loopback HTTP bridge — its URL + a one-time
+ * token are handed to this extension via env at spawn (`OJ_BRIDGE_URL` /
+ * `OJ_BRIDGE_TOKEN`). The host applies the call through the SAME reversible
+ * graphStore verb the UI drives (optimistically, behind the single turn-end
+ * Approve/Reject) and returns `{ ok, data }`, where `data` is the real
+ * post-mutation graph summary (or the read result) so Pi reasons on ground truth.
  *
- * FOUNDER-GATED STUB: the real implementation is the host RPC bridge (Tauri
- * command / stdio channel) that hands the call to `applyToolCall` on the app side
- * and returns the graph summary. Here it throws a clear "not wired" error so a
- * misconfigured install fails loudly rather than silently no-opping.
+ * If the bridge env is absent the call fails loudly rather than silently
+ * no-opping, so a misconfigured install is obvious.
  */
 async function forward(name: string, args: Record<string, unknown>): Promise<unknown> {
-    void args;
-    throw new Error(
-        `pi-openjammer-graph: tool "${name}" is a founder-gated skeleton — ` +
-            'wire forward() to the OpenJammer host RPC bridge (see README.md).',
-    );
+    const env = (globalThis as any).process?.env ?? {};
+    const addr: string | undefined = env.OJ_BRIDGE_ADDR;
+    const token: string = env.OJ_BRIDGE_TOKEN ?? '';
+    if (!addr) {
+        throw new Error(
+            `pi-openjammer-graph: tool "${name}" cannot reach the host — ` +
+                'OJ_BRIDGE_ADDR is not set (the OpenJammer host bridge is unavailable).',
+        );
+    }
+    const lastColon = addr.lastIndexOf(':');
+    const host = addr.slice(0, lastColon);
+    const port = Number(addr.slice(lastColon + 1));
+
+    const net: any = await import('node:net');
+    return await new Promise((resolve, reject) => {
+        const sock = net.connect({ host, port }, () => {
+            sock.write(JSON.stringify({ token, name, args }) + '\n');
+        });
+        sock.setEncoding('utf8');
+        let buf = '';
+        sock.on('data', (chunk: string) => {
+            buf += chunk;
+            const nl = buf.indexOf('\n');
+            if (nl < 0) return; // wait for the full line
+            sock.end();
+            try {
+                const payload = JSON.parse(buf.slice(0, nl));
+                if (payload && payload.ok === false) {
+                    reject(
+                        new Error(
+                            typeof payload.error === 'string'
+                                ? payload.error
+                                : `tool "${name}" failed`,
+                        ),
+                    );
+                } else {
+                    // `data` is the real post-state the host computed.
+                    resolve(payload && 'data' in payload ? payload.data : payload);
+                }
+            } catch (e) {
+                reject(e);
+            }
+        });
+        sock.on('error', reject);
+    });
 }
 
 /** The graph-verb tool surface, mirroring `src/ai/tools.ts` TOOL_CATALOGUE. */
