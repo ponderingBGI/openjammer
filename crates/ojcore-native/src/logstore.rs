@@ -132,9 +132,11 @@ impl LogStore {
     /// Full-text search over message + kind, most-recent first. `query` is an
     /// FTS5 MATCH expression (e.g. `"xrun"`, `"node*"`, `"kind:NodeFault"`).
     pub fn search(&self, query: &str, limit: i64) -> rusqlite::Result<Vec<LogHit>> {
+        // NB: the FTS table is referenced unaliased — `events_fts MATCH ?` needs
+        // the table's real name in scope; aliasing it would shadow that name.
         let mut stmt = self.conn.prepare(
             "SELECT e.id, e.ts_us, e.severity, e.source, e.kind, e.message, e.corr_id
-               FROM events_fts f JOIN events e ON e.id = f.rowid
+               FROM events_fts JOIN events e ON e.id = events_fts.rowid
               WHERE events_fts MATCH ?1
               ORDER BY e.id DESC
               LIMIT ?2",
