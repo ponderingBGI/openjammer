@@ -137,7 +137,7 @@ refactors of already-green CI). Owner-flippable switches live in
 - [x] ✅ L3 SQLite/FTS5 store (native-first) + FTS5-availability smoke.
 - [x] ✅ Production COOP/COEP host config (`public/_headers`).
 - [ ] ⬜ R2 native updater (Tauri v2) — needs signing keys (owner).
-- [ ] ⬜ R3 PWA auto-update (channel-aware Workbox, apply-on-idle).
+- [x] ✅ R3 PWA auto-update: prompt-mode SW + PwaUpdatePrompt (auto-apply on idle, channel-aware prompt while audio runs), tested.
 - [ ] ⬜ R4 signing + delivery (split stable/canary minisign, `canary.yml`, dual-arch manifest union, post-publish key gate, provenance).
 - [ ] ⬜ Loopback latency automation (wire `RecorderSink` into `build_input`).
 
