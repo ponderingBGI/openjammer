@@ -3,6 +3,10 @@
 //! voices oldest-first. Exercised directly through the [`DspInstance`] surface
 //! (the same one the engine drives) plus loader/manifest sanity.
 
+// Test signal generators use std transcendentals; the libm-only guard is for the
+// deterministic DSP path, not the test reference tones.
+#![allow(clippy::disallowed_methods)]
+
 use std::sync::Arc;
 
 use ojcore::{DspInstance, PluginLoader, ProcessCtx};

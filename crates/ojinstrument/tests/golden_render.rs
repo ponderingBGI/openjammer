@@ -16,6 +16,9 @@
 //! `GraphIn -> Effect -> SpeakerOut` lets us assert the effect's exact transfer.
 //! Instruments are sources (no audio in); a `NoteOn` drives them.
 #![cfg(feature = "std")]
+// Test reference tones use std transcendentals; the libm-only guard is for the
+// deterministic DSP path, not the test fixtures.
+#![allow(clippy::disallowed_methods)]
 
 use ojcore::effects::{biquad_param, convolution_param, delay_param, waveshaper_param};
 use ojcore::{

@@ -209,6 +209,9 @@ impl AssetStore {
 
 #[cfg(test)]
 mod tests {
+    // Test signal generators may use std transcendentals — the libm-only guard
+    // is for the deterministic DSP path, not throwaway test fixtures.
+    #![allow(clippy::disallowed_methods)]
     use super::*;
 
     /// Build a deterministic test signal: a 1-channel sine-ish ramp.
