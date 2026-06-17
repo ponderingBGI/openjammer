@@ -26,6 +26,9 @@
 pub mod asset;
 pub mod host;
 pub mod latency;
+pub mod log;
+#[cfg(feature = "persist")]
+pub mod logstore;
 pub mod recorder;
 pub mod store;
 
@@ -37,6 +40,9 @@ pub use host::{
 pub use latency::{
     detect_onset, frames_to_ms, measure_round_trip_frames, ms_to_frames, LatencyEstimate,
 };
+pub use log::init_logging;
+#[cfg(feature = "persist")]
+pub use logstore::{LogHit, LogRecord, LogStore};
 pub use recorder::{Recorder, RecorderSink, DEFAULT_RING_FRAMES};
 pub use store::{content_address, AssetCatalog};
 

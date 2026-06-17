@@ -14,6 +14,17 @@ license = "AGPL-3.0-only"
 serde = { version = "1.0.228", default-features = false, features = ["derive", "alloc"] }
 libm = "0.2"
 
+# L1 — the off-RT structured logging sink (`tracing`). STD-ONLY: these land in
+# `ojcore-native` + `src-tauri` only and MUST NOT appear in any `no_std`/wasm
+# crate (`ojcore`, `ojcore-dsp`, `ojinstrument`, `ojproto`, `ojcore-wasm`). The
+# existing `cargo build -p ojcore --no-default-features` + nightly wasm CI legs
+# enforce that boundary for free. `tracing` is the off-RT backbone ONLY — never
+# called on the audio thread (foundation F-shared).
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["json", "env-filter", "fmt"] }
+tracing-appender = "0.2.3"
+tracing-log = "0.2.0"
+
 # Keep release builds tight + deny accidental panics-as-control-flow later.
 [profile.release]
 opt-level = 3
