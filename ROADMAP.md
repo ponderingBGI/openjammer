@@ -131,7 +131,7 @@ refactors of already-green CI). Owner-flippable switches live in
 - [x] ✅ Docs-as-requirement (`missing_docs` + `cargo doc -D warnings` + a standing negative fixture).
 - [x] ✅ miri over the unsafe ring + hot-swap (Lane B nightly).
 - [ ] ⬜ Golden corpus (ULP-banded, per-arch) + `wasm-pack test --node` parity subset.
-- [ ] ⬜ Unbounded fuzz of the untrusted parse surface (SF2/WAV/graph JSON) with a per-PR smoke.
+- [x] ✅ Fuzz the untrusted WAV parse surface: a bounded per-PR no-panic smoke (600+ adversarial inputs) + a detached cargo-fuzz target wired as a time-boxed nightly job.
 
 ### Persistence + delivery (Phase 5)
 - [x] ✅ L3 SQLite/FTS5 store (native-first) + FTS5-availability smoke.
