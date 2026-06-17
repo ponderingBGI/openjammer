@@ -345,13 +345,20 @@ pub fn ai_run(
         if child.current_session.as_deref() != Some(sid) {
             let req = serde_json::json!({ "type": "switch_session", "id": sid });
             if send_command(&mut child.stdin, &req).is_ok() {
-                match await_response(&mut child.reader, &mut child.stdin, &app, &channel, "switch_session") {
+                match await_response(
+                    &mut child.reader,
+                    &mut child.stdin,
+                    &app,
+                    &channel,
+                    "switch_session",
+                ) {
                     Ok(true) => child.current_session = Some(sid.to_string()),
                     Ok(false) => emit(
                         &app,
                         &channel,
                         PiStreamLine::thought(
-                            "couldn't resume the previous session — continuing in the current one.".to_string(),
+                            "couldn't resume the previous session — continuing in the current one."
+                                .to_string(),
                         ),
                     ),
                     Err(()) => {
@@ -868,7 +875,9 @@ pub struct SessionTranscript {
 /// `get_fork_messages` over RPC.)
 #[tauri::command]
 pub fn ai_session_messages(id: String) -> Result<SessionTranscript, String> {
-    let path = sessions_dir().map_err(|e| e.to_string())?.join(format!("{id}.jsonl"));
+    let path = sessions_dir()
+        .map_err(|e| e.to_string())?
+        .join(format!("{id}.jsonl"));
     let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
 
     let mut messages = Vec::new();
@@ -887,7 +896,10 @@ pub fn ai_session_messages(id: String) -> Result<SessionTranscript, String> {
             Err(_) => incomplete = true,
         }
     }
-    Ok(SessionTranscript { messages, incomplete })
+    Ok(SessionTranscript {
+        messages,
+        incomplete,
+    })
 }
 
 /// Best-effort: turn one parsed session-store JSON line into a [`DisplayMessage`].
@@ -932,11 +944,9 @@ fn extract_message_text(content: Option<&serde_json::Value>) -> String {
         Some(serde_json::Value::Array(parts)) => parts
             .iter()
             .filter_map(|p| {
-                p.as_str().map(String::from).or_else(|| {
-                    p.get("text")
-                        .and_then(|t| t.as_str())
-                        .map(String::from)
-                })
+                p.as_str()
+                    .map(String::from)
+                    .or_else(|| p.get("text").and_then(|t| t.as_str()).map(String::from))
             })
             .collect::<Vec<_>>()
             .join(""),
@@ -954,7 +964,11 @@ fn extract_message_text(content: Option<&serde_json::Value>) -> String {
 fn first_tool_name(content: Option<&serde_json::Value>) -> Option<String> {
     let parts = content?.as_array()?;
     for p in parts {
-        if let Some(name) = p.get("name").or_else(|| p.get("toolName")).and_then(|v| v.as_str()) {
+        if let Some(name) = p
+            .get("name")
+            .or_else(|| p.get("toolName"))
+            .and_then(|v| v.as_str())
+        {
             return Some(name.to_string());
         }
     }
@@ -1012,7 +1026,13 @@ pub fn ai_command(
         return Ok(());
     }
 
-    match await_response_value(&mut child.reader, &mut child.stdin, &app, &channel, &cmd_name) {
+    match await_response_value(
+        &mut child.reader,
+        &mut child.stdin,
+        &app,
+        &channel,
+        &cmd_name,
+    ) {
         Ok(value) => {
             // A session-mutating command (`new_session` / `switch_session` /
             // `get_state`) carries the active id — track + report it so the
@@ -1021,10 +1041,22 @@ pub fn ai_command(
                 child.current_session = Some(sid.clone());
                 emit(&app, &channel, PiStreamLine::session(sid));
             }
-            if value.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
-                emit(&app, &channel, PiStreamLine::result(format!("{cmd_name} ok")));
+            if value
+                .get("success")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                emit(
+                    &app,
+                    &channel,
+                    PiStreamLine::result(format!("{cmd_name} ok")),
+                );
             } else {
-                emit(&app, &channel, PiStreamLine::error(format!("Pi rejected {cmd_name}")));
+                emit(
+                    &app,
+                    &channel,
+                    PiStreamLine::error(format!("Pi rejected {cmd_name}")),
+                );
             }
         }
         Err(()) => {
@@ -1056,9 +1088,8 @@ fn await_response(
     channel: &str,
     command: &str,
 ) -> Result<bool, ()> {
-    await_response_value(reader, stdin, app, channel, command).map(|v| {
-        v.get("success").and_then(|s| s.as_bool()).unwrap_or(false)
-    })
+    await_response_value(reader, stdin, app, channel, command)
+        .map(|v| v.get("success").and_then(|s| s.as_bool()).unwrap_or(false))
 }
 
 /// As [`await_response`], but returns the WHOLE `{"type":"response",…}` object so
