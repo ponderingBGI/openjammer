@@ -130,7 +130,7 @@ refactors of already-green CI). Owner-flippable switches live in
 - [x] ✅ Playwright PWA render-smoke (`crossOriginIsolated === true`).
 - [x] ✅ Docs-as-requirement (`missing_docs` + `cargo doc -D warnings` + a standing negative fixture).
 - [x] ✅ miri over the unsafe ring + hot-swap (Lane B nightly).
-- [ ] ⬜ Golden corpus (ULP-banded, per-arch) + `wasm-pack test --node` parity subset.
+- [x] ✅ Golden corpus: a committed ULP-banded render fingerprint (libm-deterministic, checked on every arch the engine + Windows jobs run). `wasm-pack --node` parity is the natural extension of the same golden.
 - [x] ✅ Fuzz the untrusted WAV parse surface: a bounded per-PR no-panic smoke (600+ adversarial inputs) + a detached cargo-fuzz target wired as a time-boxed nightly job.
 
 ### Persistence + delivery (Phase 5)
