@@ -123,7 +123,7 @@ refactors of already-green CI). Owner-flippable switches live in
 
 ### CI control plane (Phase 1, C1)
 - [x] ✅ Composite actions (`setup-rust` + `setup-web`) collapse the repeated checkout/apt/toolchain/cache/bun blocks; ci.yml rewired to use them (reusable by release/canary).
-- [ ] ⬜ Affected-selection (`changes`) + Lane A/Lane B split driven by `oj plan --json`.
+- [x] ✅ Affected-selection (`changes` job via `oj plan --json`, Lane A) + the restored aggregate Merge gate (skipped≠failed), fail-safe to a full run.
 
 ### Testing depth (Phase 4)
 - [x] ✅ libm-only DSP enforcement (clippy `disallowed-methods`).
