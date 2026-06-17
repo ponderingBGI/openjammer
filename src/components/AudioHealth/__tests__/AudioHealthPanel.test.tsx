@@ -24,6 +24,14 @@ describe('AudioHealthPanel', () => {
         expect(screen.getByRole('dialog', { name: /audio health/i })).toBeTruthy();
     });
 
+    it('closes on Escape', () => {
+        render(<AudioHealthPanel />);
+        open();
+        expect(screen.getByRole('dialog', { name: /audio health/i })).toBeTruthy();
+        act(() => fireEvent.keyDown(window, { key: 'Escape' }));
+        expect(screen.queryByRole('dialog', { name: /audio health/i })).toBeNull();
+    });
+
     it('shows "not started" when the AudioContext is idle', () => {
         render(<AudioHealthPanel />);
         open();

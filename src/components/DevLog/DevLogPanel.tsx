@@ -98,9 +98,13 @@ function DevLogPanelInner() {
     const droppedCount = useLogStore((s) => s.droppedCount);
     const clear = useLogStore((s) => s.clear);
 
-    // Global Ctrl/Cmd+Shift+L toggle + the "Toggle DevLog" command bridge.
+    // Global Ctrl/Cmd+Shift+L toggle + Escape-to-close + the command bridge.
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setOpen((v) => (v ? false : v));
+                return;
+            }
             const isToggle = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'l';
             if (!isToggle) return;
             e.preventDefault();
@@ -158,7 +162,7 @@ function DevLogPanelInner() {
 
     return createPortal(
         <div className="devlog-overlay" onClick={() => setOpen(false)}>
-            <div className="devlog-panel" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Developer Log">
+            <div className="devlog-panel" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Developer Log">
                 {/* ── Header ─────────────────────────────────────────────── */}
                 <header className="devlog-header">
                     <span className="devlog-title">DevLog</span>
@@ -201,6 +205,8 @@ function DevLogPanelInner() {
                                 className="devlog-chip"
                                 data-level={level}
                                 data-active={activeLevels?.has(level) ?? false}
+                                aria-pressed={activeLevels?.has(level) ?? false}
+                                aria-label={`Filter by ${level} (${levelTally[level]})`}
                                 onClick={() => toggleLevel(level)}
                             >
                                 {level}
@@ -215,6 +221,8 @@ function DevLogPanelInner() {
                                     key={scope}
                                     className="devlog-chip devlog-chip-scope"
                                     data-active={activeScope === scope}
+                                    aria-pressed={activeScope === scope}
+                                    aria-label={`Filter by scope ${scope} (${count})`}
                                     onClick={() => toggleScope(scope)}
                                 >
                                     {scope}

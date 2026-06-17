@@ -57,9 +57,13 @@ export function AudioHealthPanel() {
     const device = useAudioStore((s) => s.deviceInfo);
     const config = useAudioStore((s) => s.audioConfig);
 
-    // Global toggle + the palette-command bridge.
+    // Global toggle + Escape-to-close + the palette-command bridge.
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                setOpen((v) => (v ? false : v));
+                return;
+            }
             const hit = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'h';
             if (!hit) return;
             e.preventDefault();
@@ -91,7 +95,13 @@ export function AudioHealthPanel() {
 
     return createPortal(
         <div className="ah-overlay" onClick={() => setOpen(false)}>
-            <div className="ah-panel" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Audio health">
+            <div
+                className="ah-panel"
+                onClick={(e) => e.stopPropagation()}
+                role="dialog"
+                aria-modal="true"
+                aria-label="Audio health"
+            >
                 <header className="ah-header">
                     <span className="ah-title">Audio health</span>
                     <span className="ah-spacer" />
