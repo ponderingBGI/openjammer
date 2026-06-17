@@ -12,6 +12,7 @@
  */
 
 import type { Connection, GraphNode } from '../../engine/types';
+import type { EngineCapabilities } from '../../engine/capabilities';
 import type {
     LooperHandle,
     RecorderHandle,
@@ -62,6 +63,16 @@ export interface Executor {
 
     /** Tear down subscriptions and release audio resources. */
     dispose(): void;
+
+    // --- Platform capabilities --------------------------------------------
+
+    /**
+     * The platform capability descriptor for this executor — the ONE seam all
+     * agent / code-node / auth / learning gating reads (see
+     * {@link EngineCapabilities}). Static per session: the native executor
+     * reports the desktop row, the wasm executor the browser row.
+     */
+    getCapabilities(): EngineCapabilities;
 
     // --- Note / control input ---------------------------------------------
 

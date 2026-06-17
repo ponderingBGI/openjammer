@@ -25,6 +25,7 @@
  */
 
 import type { Connection, GraphNode } from '../../engine/types';
+import { DESKTOP_CAPABILITIES, type EngineCapabilities } from '../../engine/capabilities';
 import type {
     Executor,
     ConnectionChangeCallback,
@@ -37,6 +38,11 @@ import type {
 } from './Executor';
 import { emitWithIndex, remapForBackend, type NodeIdxMap } from '../ojgraph';
 import { resolveKeyboardNotes } from '../ojgraph';
+import {
+    DEFAULT_VOICE_INSTRUMENTS,
+    getDefaultInstrumentVoice,
+    type DefaultVoice,
+} from '../defaultInstrument';
 import type {
     NodeIdx,
     OjGraph,
@@ -143,6 +149,11 @@ export class OjcoreNativeExecutor implements Executor {
         this.startMeterStream();
     }
 
+    /** The native (Tauri) capability row — the flagship. */
+    getCapabilities(): EngineCapabilities {
+        return DESKTOP_CAPABILITIES;
+    }
+
     dispose(): void {
         this.unsub?.();
         this.unsub = null;
@@ -202,20 +213,49 @@ export class OjcoreNativeExecutor implements Executor {
     /** Emit + remap + push the current graph to the native engine. */
     private pushGraph(): void {
         if (!this.getNodes || !this.getConnections) return;
-        const { graph, index } = emitWithIndex(this.getNodes(), this.getConnections());
+        // The native engine registers a WasmHost loader per AI-authored faust node
+        // (author_faust_native), so lower compiled code nodes to their real WasmHost
+        // manifest — they play the actual DSP instead of the effect fallback.
+        const { graph, index } = emitWithIndex(this.getNodes(), this.getConnections(), {
+            codeNodesAsWasmHost: true,
+        });
         this.index = index;
         // Build the reverse NodeIdx -> visual id map for routing meter frames.
         this.reverseIndex = new Map();
         for (const [id, idx] of index) this.reverseIndex.set(idx, id);
         const native = remapForBackend(graph, 'native');
-        this.sendGraph(native);
+        void this.sendGraph(native);
     }
 
-    private sendGraph(graph: OjGraph): void {
+    private async sendGraph(graph: OjGraph): Promise<void> {
         if (!this.invoke) return;
-        this.invoke('push_graph', { graph }).catch((err: unknown) => {
+        try {
+            await this.invoke('push_graph', { graph });
+        } catch (err) {
             console.error('[OjcoreNativeExecutor] push_graph failed:', err);
-        });
+            return;
+        }
+        // A UI push REPLACES the engine's kept graph, dropping any imperatively
+        // bound sample (see engine.rs push_graph), so (re)install the built-in
+        // default voice for instrument nodes that ship one. Without this a
+        // freshly-wired Keys/Piano/… node lowers to an EMPTY builtin.sampler and
+        // is silent — the note routes correctly but there is no PCM to play.
+        this.loadDefaultInstrumentVoices();
+    }
+
+    /** (Re)lower the built-in default voice into every instrument node that needs
+     *  one, so melodic instruments are playable without a user-loaded sample.
+     *  Idempotent per push; the engine sampler SR-corrects + pitches the single
+     *  tone across the keyboard. A user-bound sample later simply replaces it. */
+    private loadDefaultInstrumentVoices(): void {
+        if (!this.invoke || !this.getNodes) return;
+        let voice: DefaultVoice | null = null;
+        for (const node of this.getNodes().values()) {
+            if (!DEFAULT_VOICE_INSTRUMENTS.has(node.type)) continue;
+            if (this.index.get(node.id) === undefined) continue;
+            if (!voice) voice = getDefaultInstrumentVoice();
+            void this.loadSampleNative(node.id, voice.pcm, voice.sampleRate, voice.rootNote);
+        }
     }
 
     private send(cmd: RtCommand): void {
@@ -277,9 +317,16 @@ export class OjcoreNativeExecutor implements Executor {
     }
 
     private emitSignal(connectionId: string, level: number): void {
+        // Persist the cable pulse into the SHARED level map (connection ids and the
+        // node-meter ids the poll writes are disjoint key spaces) and emit a MERGED
+        // snapshot. NodeCanvas replaces its whole map per emit, so a single-entry
+        // emit here was clobbered by the very next `pollMeters` snapshot a frame
+        // later — the "glow dies while the key is held" bug. Mirrors
+        // OjcoreWasmExecutor.emitSignal so both backends behave identically.
+        this.levels.set(connectionId, level);
         if (this.signalCallbacks.size === 0) return;
-        const levels = new Map<string, number>([[connectionId, level]]);
-        for (const cb of this.signalCallbacks) cb(levels);
+        const snapshot = new Map(this.levels);
+        for (const cb of this.signalCallbacks) cb(snapshot);
     }
 
     // --- Speaker output ----------------------------------------------------

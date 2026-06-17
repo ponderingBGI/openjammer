@@ -36,7 +36,7 @@ use std::sync::{Arc, Mutex};
 use ojcore::meter::return_frame;
 use ojcore::{
     compile, compile_with_assets, master_param, CommandProducer, CommandQueue, CompileError,
-    Engine, MeterRing, PluginRegistry, ProgramSwap,
+    Engine, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{
     AssetCatalog, AssetError, AssetStore, AudioHost, HostError, Pcm, StreamRequest,
@@ -44,6 +44,7 @@ use ojcore_native::{
 use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
 use ojinstrument::{register_all, RegisterOpts};
 use ojproto::{AssetId, AssetRef, EngineFrame, NodeIdx, OjGraph, RtCommand};
+use ojwasm::WasmHostLoader;
 
 /// Default stream request: 48 kHz, a small buffer for low latency, stereo out,
 /// no duplex input (pure synthesis path). Matches the `<5 ms` engine target;
@@ -67,9 +68,6 @@ pub enum BackendError {
     /// The pushed graph could not be lowered (cycle / unknown manifest / no
     /// master output / dangling edge / out-of-range port).
     Compile(CompileError),
-    /// The audio host could not (re)start — typically no audio device in a
-    /// headless/CI sandbox, which is expected and non-fatal there.
-    Host(HostError),
     /// The UI->RT command ring was full; the command was dropped rather than
     /// blocking the control thread.
     RingFull,
@@ -86,7 +84,6 @@ impl std::fmt::Display for BackendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BackendError::Compile(e) => write!(f, "graph compile failed: {e}"),
-            BackendError::Host(e) => write!(f, "audio host: {e}"),
             BackendError::RingFull => write!(f, "command ring full; command dropped"),
             BackendError::PluginScan(e) => write!(f, "plugin scan failed: {e}"),
             BackendError::Asset(e) => write!(f, "asset operation failed: {e}"),
@@ -184,7 +181,14 @@ impl EngineBackend {
     /// first successful start), and control commands still validate.
     pub fn new() -> Self {
         let registry = Self::build_registry();
-        let stream = DEFAULT_STREAM;
+        // Render at the DEVICE's default sample rate, not a hardcoded 48k: a pro
+        // interface (e.g. the MOTU M4) may run at 96k, and rendering at the wrong
+        // rate plays back at the wrong pitch/tempo. The hardware is authoritative;
+        // the graph's own rate is just the UI hint (overridden per push_graph too).
+        let mut stream = DEFAULT_STREAM;
+        if let Some(rate) = ojcore_native::default_output_sample_rate() {
+            stream.sample_rate = rate;
+        }
         let swap = ProgramSwap::new();
         let meter_ring = Arc::new(MeterRing::new());
 
@@ -309,11 +313,28 @@ impl EngineBackend {
     /// goes live — the founder-verified seam that makes a serialized graph with a
     /// bound sample actually play.
     pub fn push_graph(&mut self, graph: &OjGraph) -> Result<(), BackendError> {
-        self.adopt(graph)?;
-        // Remember the live graph so a later sample bind can re-resolve + recompile
-        // it against the updated catalog without a fresh UI push.
-        self.last_graph = Some(graph.clone());
+        // Render at the device's rate (see `new`): the graph's own sample_rate is a
+        // UI hint; the hardware is authoritative, so a 96k interface plays in tune.
+        let g = self.at_device_rate(graph);
+        self.adopt(&g)?;
+        // Remember the (rate-adjusted) live graph so a later sample bind can
+        // re-resolve + recompile it against the catalog without a fresh UI push.
+        self.last_graph = Some(g);
         Ok(())
+    }
+
+    /// Clone `graph` with its `sample_rate` set to the default output device's rate
+    /// (when one is available and differs) so the engine renders in tune on hardware
+    /// that isn't 48k. Falls back to the graph's own rate when no device is present.
+    fn at_device_rate(&self, graph: &OjGraph) -> OjGraph {
+        match ojcore_native::default_output_sample_rate() {
+            Some(rate) if rate != graph.sample_rate => {
+                let mut g = graph.clone();
+                g.sample_rate = rate;
+                g
+            }
+            _ => graph.clone(),
+        }
     }
 
     /// Compile `graph` (resolving its assets through the catalog) and adopt the
@@ -353,14 +374,20 @@ impl EngineBackend {
                 self.producer = producer;
                 Ok(())
             }
-            Err(HostError::NoOutputDevice) => {
-                // No device: keep the (compiled, published) program staged and
-                // the new producer live so commands still validate. Not an error
-                // the UI must surface — it just means "engine idle, no device".
+            // ANY host-(re)start failure is NON-FATAL here, matching
+            // [`EngineBackend::new`]: the freshly compiled program is already
+            // published to the swap mailbox and the new producer is live, so
+            // commands still validate and the next `push_graph` re-attempts the
+            // start. This covers both a device-less sandbox
+            // (`HostError::NoOutputDevice`) AND a present-but-incompatible device
+            // (e.g. a default output whose WASAPI shared-mode format rejects the
+            // requested rate/buffer). The UI keeps running with the engine idle
+            // instead of surfacing a hard error the user cannot act on.
+            Err(e) => {
+                eprintln!("ojcore: audio host failed to (re)start (non-fatal): {e}");
                 self.producer = producer;
                 Ok(())
             }
-            Err(e) => Err(BackendError::Host(e)),
         }
     }
 
@@ -445,6 +472,27 @@ impl EngineBackend {
             }
         }
         Ok(id)
+    }
+
+    /// Register an AI-authored NATIVE faust code node (already compiled to a
+    /// `.dll`) under its `manifest_id`, then recompile the live graph so a node
+    /// referencing that id instantiates the native kernel. Off-RT (called from the
+    /// `author_faust_native` command). The `OutputGuard` chain wraps the kernel.
+    pub fn register_native_faust(
+        &mut self,
+        manifest_json: &str,
+        dll_path: PathBuf,
+    ) -> Result<(), String> {
+        let manifest: PluginManifest =
+            serde_json::from_str(manifest_json).map_err(|e| format!("bad manifest json: {e}"))?;
+        self.registry
+            .register(Box::new(WasmHostLoader::new_native(manifest, dll_path)));
+        // Recompile the live graph so the loader resolves + instantiates: the node
+        // may already be present (re-author), else the next `push_graph` uses it.
+        if let Some(graph) = self.last_graph.clone() {
+            self.adopt(&graph).map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     /// Bind `asset` (and its `root_note`) onto `node` in `graph`: set the node's
@@ -652,7 +700,11 @@ mod tests {
         let be = EngineBackend::new();
         // No device in CI => not running, but the producer ring is live.
         let info = be.stream_info();
-        assert_eq!(info.sample_rate, DEFAULT_STREAM.sample_rate);
+        // The engine follows the default output device's rate (e.g. 96k on a pro
+        // interface), falling back to DEFAULT_STREAM's rate when there is no device.
+        let expected_rate =
+            ojcore_native::default_output_sample_rate().unwrap_or(DEFAULT_STREAM.sample_rate);
+        assert_eq!(info.sample_rate, expected_rate);
         assert!(info.latency_ms > 0.0);
     }
 
@@ -780,7 +832,10 @@ mod tests {
         let mut be = EngineBackend::new();
         be.recorder_start(NodeIdx(4));
         let (pcm, rate) = be.recorder_stop(NodeIdx(4)).expect("capture was armed");
-        assert_eq!(rate, DEFAULT_STREAM.sample_rate);
+        // Capture rate follows the device (see backend_constructs_headless).
+        let expected_rate =
+            ojcore_native::default_output_sample_rate().unwrap_or(DEFAULT_STREAM.sample_rate);
+        assert_eq!(rate, expected_rate);
         // No engine-output tap in the sandbox, so the captured PCM is empty —
         // but the start/stop lifecycle is intact (the documented gap is the tap).
         assert!(pcm.is_empty());

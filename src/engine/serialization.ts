@@ -10,10 +10,24 @@ import type {
     SerializedConnection,
     PortDefinition
 } from './types';
-import { isPluginId } from './types';
-import { get as getNodeDefinition } from './registry';
+import { get as getNodeDefinition, isRegisteredPluginId } from './registry';
+import {
+    dspPluginIdFor,
+    getDynamicPlugin,
+    makeDspNodeDefinition,
+    registerDynamicPlugin
+} from './dynamicRegistry';
 
-const WORKFLOW_VERSION = '1.0.0';
+/**
+ * Workflow schema version. MINOR-bumped to 1.1.0 for M5 (open node identity):
+ * nodes may now carry a `pluginId` and old `effect`+`faustSource` AI nodes are
+ * MIGRATED to first-class `pluginId` nodes on import.
+ *
+ * BACKWARD COMPAT: the import compat check only rejects on a MAJOR mismatch, so
+ * every prior 1.x workflow still loads. The bump is a marker + a hook for the
+ * load-time migrate step, NOT a hard gate.
+ */
+const WORKFLOW_VERSION = '1.1.0';
 
 /**
  * Export the current graph state to a JSON-serializable workflow
@@ -28,7 +42,7 @@ export function exportWorkflow(
 
     // Serialize nodes
     nodes.forEach((node) => {
-        serializedNodes.push({
+        const serialized: SerializedNode = {
             id: node.id,
             type: node.type,
             category: node.category,
@@ -38,7 +52,13 @@ export function exportWorkflow(
             // (e.g. bundle expansions, panel ports) survive a round-trip rather
             // than being reset to the static defaultPorts on import.
             ports: JSON.parse(JSON.stringify(node.ports)) as PortDefinition[]
-        });
+        };
+        // Persist the OPEN identity (M5) when present so a dynamic node keeps its
+        // pluginId across a round-trip and re-resolves on a fresh load.
+        if (node.pluginId !== undefined) {
+            serialized.pluginId = node.pluginId;
+        }
+        serializedNodes.push(serialized);
     });
 
     // Serialize connections
@@ -86,13 +106,31 @@ export function importWorkflow(
         );
     }
 
+    // MIGRATE (M5): convert OLD-shape AI nodes to first-class pluginId nodes.
+    // A pre-M5 AI node is an `effect` carrying its Faust source (`data.faustSource`
+    // present OR `data.aiDsp` truthy) but NO pluginId. Assign the stable
+    // kernel-derived id and register a dynamic def so identity resolves — no
+    // orphaning. This mutates each serialized node in place before reconstruction.
+    workflow.nodes.forEach((serialized) => migrateLegacyDspNode(serialized));
+
     // Reconstruct nodes with ports.
-    // - Null-check (U10): drop nodes whose type is not a known plugin id rather
-    //   than constructing a node against an undefined definition.
+    // - Validity check (U10 + M5): drop a node only when neither its closed `type`
+    //   NOR its open `pluginId` resolves to a registered plugin. A node whose
+    //   identity is a REGISTERED dynamic id is KEPT.
+    // - SELF-HEALING (M5): when a node carries a pluginId that is not yet in the
+    //   dynamic registry, RE-REGISTER a dynamic def from the serialized data so
+    //   identity resolves after a fresh load (clears MISSING_DEFINITION).
     // - Prefer persisted per-instance ports over the static defaultPorts, so
     //   dynamically-grown ports survive a round-trip.
     const nodes: GraphNode[] = workflow.nodes
-        .filter((serialized) => isPluginId(serialized.type))
+        .filter((serialized) => {
+            selfHealDynamicPlugin(serialized);
+            return (
+                isRegisteredPluginId(serialized.type) ||
+                (serialized.pluginId !== undefined &&
+                    isRegisteredPluginId(serialized.pluginId))
+            );
+        })
         .map((serialized) => {
             const definition = getNodeDefinition(serialized.type);
             const ports: PortDefinition[] =
@@ -100,7 +138,7 @@ export function importWorkflow(
                     ? serialized.ports.map((port) => ({ ...port }))
                     : [...definition.defaultPorts];
 
-            return {
+            const node: GraphNode = {
                 id: serialized.id,
                 type: serialized.type,
                 category: serialized.category,
@@ -112,6 +150,11 @@ export function importWorkflow(
                 childIds: [],
                 specialNodes: []
             };
+            // Carry the OPEN identity back onto the live node (M5).
+            if (serialized.pluginId !== undefined) {
+                node.pluginId = serialized.pluginId;
+            }
+            return node;
         });
     const nodesById = new Map(nodes.map(node => [node.id, node]));
 
@@ -136,6 +179,79 @@ export function importWorkflow(
         }));
 
     return { nodes, connections };
+}
+
+// ============================================================================
+// M5 — open-identity migration + self-healing helpers
+// ============================================================================
+
+/** Read a string field off a serialized node's `data`, or undefined. */
+function dataString(serialized: SerializedNode, key: string): string | undefined {
+    const value = (serialized.data as Record<string, unknown>)[key];
+    return typeof value === 'string' ? value : undefined;
+}
+
+/**
+ * MIGRATE one OLD-shape AI node to a first-class pluginId node (M5).
+ *
+ * A pre-M5 AI DSP node is an `effect` carrying its Faust source in `data`
+ * (`faustSource` present OR `aiDsp` truthy) but with NO `pluginId`. We assign the
+ * stable kernel-derived id (`"ai.dsp." + shortHash(faustSource)`) and register a
+ * dynamic def from the node's own data, so the node resolves to its dynamic
+ * identity after load instead of being orphaned. Idempotent + no-op for every
+ * other node (built-ins, already-migrated nodes, nodes without a source).
+ */
+function migrateLegacyDspNode(serialized: SerializedNode): void {
+    if (serialized.pluginId !== undefined) return; // already first-class
+    if (serialized.type !== 'effect') return;
+
+    const faustSource = dataString(serialized, 'faustSource');
+    const isAiDsp = Boolean((serialized.data as Record<string, unknown>).aiDsp);
+    if (faustSource === undefined && !isAiDsp) return;
+
+    // Identity follows the kernel. Fall back to the node id only if a node was
+    // flagged aiDsp without a stored source (degenerate, but keeps it resolvable).
+    const kernel = faustSource ?? serialized.id;
+    const pluginId = dspPluginIdFor(kernel);
+    serialized.pluginId = pluginId;
+
+    if (!getDynamicPlugin(pluginId)) {
+        const name = dataString(serialized, 'aiDspName') ?? 'AI DSP';
+        const description = dataString(serialized, 'description');
+        registerDynamicPlugin(
+            pluginId,
+            makeDspNodeDefinition({ name, faustSource: kernel, description })
+        );
+    }
+}
+
+/**
+ * SELF-HEAL one node's OPEN identity (M5).
+ *
+ * When a node carries a `pluginId` that is NOT yet in the dynamic registry (a
+ * fresh load: the registry is empty until something re-registers), re-register a
+ * dynamic def from the node's serialized data so `resolveNodeDefinition` returns
+ * the dynamic def rather than MISSING. Keyed by the stored faust source so the
+ * SAME kernel re-resolves to the SAME identity. No-op when already registered or
+ * when the node has no pluginId.
+ */
+function selfHealDynamicPlugin(serialized: SerializedNode): void {
+    const pluginId = serialized.pluginId;
+    if (pluginId === undefined) return;
+    if (getDynamicPlugin(pluginId)) return; // already resolves
+
+    // On a normal M5 export `faustSource` is always present, so the re-derived def
+    // is keyed on the same kernel that produced `pluginId` and stays consistent.
+    // The `serialized.id` fallback is best-effort for a degenerate hand-edited file
+    // (pluginId set but faustSource stripped): the def is keyed on the node id and
+    // no longer matches `pluginId`, but identity still RESOLVES (no orphaning).
+    const faustSource = dataString(serialized, 'faustSource') ?? serialized.id;
+    const name = dataString(serialized, 'aiDspName') ?? 'AI DSP';
+    const description = dataString(serialized, 'description');
+    registerDynamicPlugin(
+        pluginId,
+        makeDspNodeDefinition({ name, faustSource, description })
+    );
 }
 
 /**

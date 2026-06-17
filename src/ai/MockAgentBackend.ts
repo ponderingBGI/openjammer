@@ -56,12 +56,16 @@ export class MockAgentBackend implements AgentBackend {
 
 /**
  * A tiny canned plan used by the browser fallback's "what AI would do" preview
- * and by tests as a representative happy path: a thought, two tool calls, and a
- * result. The tool calls use the real registry node types so they apply cleanly.
+ * and by tests as a representative happy path: a streamed (chunked) markdown
+ * answer, two tool calls, an active-session report, and a terminal result. The
+ * tool calls use the real registry node types so they apply cleanly; the thought
+ * chunks coalesce into one markdown assistant turn (exercising the chat path).
  */
 export function demoScript(prompt: string): AgentEvent[] {
     return [
-        { kind: 'thought', text: `Planning how to: ${prompt}` },
+        { kind: 'thought', text: `Here's how I'd approach **${prompt}**:\n\n` },
+        { kind: 'thought', text: '1. Add a `looper`\n2. Add a `speaker`\n3. Wire them up\n\n' },
+        { kind: 'thought', text: 'Building it now…' },
         {
             kind: 'tool-call',
             id: 'demo-1',
@@ -72,6 +76,7 @@ export function demoScript(prompt: string): AgentEvent[] {
             id: 'demo-2',
             call: { name: 'add_node', args: { type: 'speaker' } },
         },
-        { kind: 'result', summary: 'Proposed adding a looper feeding a speaker.' },
+        { kind: 'session', sessionId: 'mock-session' },
+        { kind: 'result', summary: 'Added a looper feeding a speaker.' },
     ];
 }

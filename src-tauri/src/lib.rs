@@ -13,7 +13,10 @@
 //! `manage` it as Tauri state. The commands below are the UI->RT seam.
 
 mod ai;
+mod auth;
+mod bridge;
 mod engine;
+mod sandbox;
 
 use std::path::PathBuf;
 
@@ -106,6 +109,12 @@ fn engine_running(state: tauri::State<'_, BackendState>) -> Result<bool, String>
 fn ai_faust_compile(source: String) -> Result<Option<ai::FaustCompileResult>, String> {
     ai::compile_faust(&source)
 }
+
+// `ai::author_wasm_node` (M6) is itself a `#[tauri::command]`; it is registered
+// directly in the invoke_handler below (like `ai::ai_run`). It compiles DSP source
+// via the ojfaust CLI Path B to a `.wasm` + real manifest, validates host-side
+// fail-closed, and NEVER runs the wasm (the RT host is founder-gated; see
+// `docs/code-node-abi.md`).
 
 // --- U-EXEC-PARITY: looper / sampler / recorder / metering / speaker / mic ---
 
@@ -271,6 +280,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             app.manage(BackendState::new());
+            // The at-most-one warm Pi child for the session (Phase 1: instant feel).
+            app.manage(ai::WarmChildState::default());
+            // The loopback tool bridge (Phase 3: real graph reads round-trip to Pi).
+            app.manage(bridge::BridgeState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -280,7 +293,21 @@ pub fn run() {
             engine_running,
             scan_plugins,
             ai::ai_run,
+            ai::ai_command,
+            ai::ai_set_learning,
+            ai::ai_forget,
+            ai::ai_sessions,
+            ai::ai_session_messages,
+            bridge::ai_tool_result,
             ai_faust_compile,
+            ai::author_wasm_node,
+            ai::author_faust_native,
+            auth::auth_status,
+            auth::auth_store_key,
+            auth::auth_get_key,
+            auth::auth_clear,
+            auth::auth_begin_oauth,
+            auth::auth_validate_key,
             looper_cmd,
             subscribe_meters,
             poll_meters,

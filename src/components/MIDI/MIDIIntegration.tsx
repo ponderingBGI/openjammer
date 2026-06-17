@@ -18,6 +18,7 @@ import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
 import { useMIDIConnectionToast } from './useMIDIConnectionToast';
 import { MIDIDeviceBrowser } from './MIDIDeviceBrowser';
 import { getPresetRegistry } from '../../midi';
+import { initMidiVoiceRouting, disposeMidiVoiceRouting } from '../../midi/routing';
 import type { NodeType, MIDIInputNodeData, MIDIDeviceSignature } from '../../engine/types';
 
 /**
@@ -77,8 +78,17 @@ export function MIDIIntegration() {
             initialize();
         }
 
+        // Start MIDI -> voice routing so device notes actually DRIVE instruments.
+        // This was the missing wire: the MIDIVoiceRouter is implemented + unit-
+        // tested, and `initMidiVoiceRouting` is documented as "the app calls once
+        // at startup" — but nothing called it. So a MiniLab key lit its on-screen
+        // key (via the separate midiStore subscription) yet no note reached the
+        // executor/engine: no signal glow, no sound. Idempotent; torn down below.
+        initMidiVoiceRouting();
+
         // Cleanup on unmount to prevent memory leaks and stale handlers
         return () => {
+            disposeMidiVoiceRouting();
             useMIDIStore.getState().cleanup();
         };
     }, []); // Empty deps - only run on mount/unmount, init is idempotent

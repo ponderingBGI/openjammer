@@ -6,6 +6,7 @@ import { useCallback, useRef, useState, useMemo, useEffect, memo } from 'react';
 import type { GraphNode, Position } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
+import { useIsAgentPending } from '../../store/agentSessionStore';
 import { generateUniqueId } from '../../utils/idGenerator';
 import { InstrumentNode } from './InstrumentNode';
 import { MicrophoneNode } from './MicrophoneNode';
@@ -30,7 +31,9 @@ import { MiniLab3VisualNode } from './MiniLab3VisualNode';
 import { SamplerNode } from './SamplerNode';
 import { SamplerVisualNode } from './SamplerVisualNode';
 import { AutoParamPanel } from '../params/AutoParamPanel';
-import { manifestFor } from '../../engine/manifest';
+import { manifestFor, manifestForDynamic } from '../../engine/manifest';
+import { resolveNodeDefinition } from '../../engine/registry';
+import { getDynamicPlugin } from '../../engine/dynamicRegistry';
 import './BaseNode.css';
 
 interface NodeWrapperProps {
@@ -96,6 +99,8 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     const setHoverTarget = useCanvasStore((s) => s.setHoverTarget);
 
     const isSelected = selectedNodeIds.has(node.id);
+    // Highlighted while the AI agent's (not-yet-approved) run added this node.
+    const isAgentPending = useIsAgentPending(node.id);
     const isSchematic = SCHEMATIC_TYPES.includes(node.type);
 
     // Check if this node is being hovered while connections are active
@@ -435,7 +440,29 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     const inputPorts = node.ports.filter(p => p.direction === 'input');
     const outputPorts = node.ports.filter(p => p.direction === 'output');
 
+    // M5: resolve the DISPLAY definition — prefers the OPEN dynamic plugin (set via
+    // node.pluginId) so an AI-authored node shows its own name; falls back to the
+    // closed `type` for ordinary built-ins. Title-cased type is the last resort.
+    const displayDefinition = resolveNodeDefinition(node);
+    const headerTitle =
+        node.pluginId !== undefined
+            ? displayDefinition.name
+            : node.type.charAt(0).toUpperCase() + node.type.slice(1);
+
     const renderNodeContent = () => {
+        // M6: an AI-authored code node carries an OPEN `pluginId` resolving to a
+        // dynamic plugin with `ui:'auto'` + the node's REAL compiled params. Render
+        // those via the FREE AutoParamPanel (the wasm code-node identity), instead
+        // of the bespoke EffectNode the closed `effect` type would otherwise pick.
+        if (node.pluginId !== undefined) {
+            const dynamic = getDynamicPlugin(node.pluginId);
+            if (dynamic) {
+                const dynManifest = manifestForDynamic(node.pluginId, dynamic);
+                if (dynManifest.params.length > 0) {
+                    return <AutoParamPanel node={node} manifest={dynManifest} />;
+                }
+            }
+        }
         switch (node.type) {
             case 'effect':
                 return <EffectNode node={node} />;
@@ -460,7 +487,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     return (
         <div
             ref={nodeRef}
-            className={`node ${node.type} ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''}`}
+            className={`node ${node.type} ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isAgentPending ? 'agent-pending' : ''}`}
             style={{
                 left: node.position.x,
                 top: node.position.y
@@ -471,7 +498,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
         >
             {/* Header */}
             <div className="node-header" onMouseDown={handleHeaderMouseDown}>
-                <span className="node-title">{node.type.charAt(0).toUpperCase() + node.type.slice(1)}</span>
+                <span className="node-title">{headerTitle}</span>
                 <span className="node-type">{node.category}</span>
             </div>
 

@@ -24,6 +24,7 @@
 import type { StoreApi } from 'zustand';
 import type { Connection, GraphNode } from '../engine/types';
 import { CrdtGraphProjection } from './CrdtGraphProjection';
+import type { AiCollabFrameTarget } from './aiCollabFrame';
 import {
     fromCrdtConnection,
     fromCrdtNode,
@@ -47,11 +48,18 @@ export interface BridgeGraphState {
 
 export type GraphStoreLike = StoreApi<BridgeGraphState>;
 
-export class GraphStoreBridge {
+export class GraphStoreBridge implements AiCollabFrameTarget {
     private unsubscribeStore: (() => void) | null = null;
     private unsubscribeProjection: (() => void) | null = null;
     /** Guard: true while applying a remote snapshot into the store. */
     private applyingRemote = false;
+    /**
+     * G2 guard (M3): true while an AI frame is open. Like {@link applyingRemote}
+     * it suppresses the store->CRDT subscriber, BUT it must NOT advance
+     * `lastSyncedVersion` while suppressed so the AI delta accumulates and can be
+     * pushed (commit) or dropped (discard) as ONE unit at the turn boundary.
+     */
+    private aiFrame = false;
     /** Last store version we have already pushed into the CRDT. */
     private lastSyncedVersion: number;
     private readonly store: GraphStoreLike;
@@ -82,7 +90,10 @@ export class GraphStoreBridge {
 
         // STORE -> CRDT: diff local verb results into the document.
         this.unsubscribeStore = this.store.subscribe((state: BridgeGraphState) => {
-            if (this.applyingRemote) return; // remote application, do not echo
+            // remote application, do not echo; OR an AI frame is open, in which
+            // case we accumulate the delta WITHOUT advancing lastSyncedVersion so
+            // commit/discard can push or drop it as one unit at the turn boundary.
+            if (this.applyingRemote || this.aiFrame) return;
             if (state.version === this.lastSyncedVersion) return; // no graph change
             this.lastSyncedVersion = state.version;
             this.pushStoreToCrdt(state);
@@ -193,9 +204,47 @@ export class GraphStoreBridge {
         }
     }
 
+    // ------------------------------------------------------------------------
+    // G2 — AI frame (M3): batch an optimistic AI run into ONE commit / discard
+    // ------------------------------------------------------------------------
+
+    /** Open the AI frame: the store->CRDT subscriber is suppressed; the AI delta
+     * accumulates locally (peers see nothing yet). */
+    beginAiFrame(): void {
+        this.aiFrame = true;
+    }
+
+    /**
+     * Approve path: close the frame and push the ACCUMULATED net delta as ONE
+     * commit (a single transactLocal via {@link pushStoreToCrdt}), then re-sync
+     * the high-water mark so the next local verb diffs cleanly.
+     */
+    commitAiFrame(): void {
+        this.aiFrame = false;
+        const state = this.store.getState();
+        this.pushStoreToCrdt(state);
+        this.lastSyncedVersion = state.version;
+    }
+
+    /**
+     * Reject path: close the frame WITHOUT pushing. After a Reject the store has
+     * been reverted to its pre-run state, which already equals the CRDT, so the
+     * net delta is empty — emitting the diff would be a no-op anyway. We just
+     * re-sync the high-water mark to the (reverted) version.
+     */
+    discardAiFrame(): void {
+        this.aiFrame = false;
+        this.lastSyncedVersion = this.store.getState().version;
+    }
+
     /** True while a remote snapshot is being applied (test/inspection helper). */
     isApplyingRemote(): boolean {
         return this.applyingRemote;
+    }
+
+    /** True while an AI frame is open (test/inspection helper). */
+    isAiFrameOpen(): boolean {
+        return this.aiFrame;
     }
 
     stop(): void {

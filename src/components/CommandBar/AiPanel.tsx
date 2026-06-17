@@ -1,64 +1,204 @@
 /**
- * AiPanel (U20) — the AI half of the Ctrl/Cmd+K command bar.
+ * AiPanel — the AI half of the Ctrl/Cmd+K command bar, redesigned as a chat.
  *
- * The SEARCH half (CommandBar) hands off here on Tab: the typed text becomes the
- * agent prompt. This panel:
- *   - on a non-Tauri browser, shows the "AI requires the desktop app" state and
- *     disables Enter (per the project plan: AI is NATIVE/HYBRID ONLY);
- *   - inside Tauri, runs the prompt via the {@link getAgentBackend default backend}
- *     (Pi over the Tauri rpc-subprocess) on Enter, renders the STREAMING
- *     transcript, and surfaces Approve / Reject once the agent finishes.
+ * Tab from search hands its typed text here as the first draft. This panel is a
+ * real conversation: a scrolling transcript of user + assistant turns (markdown,
+ * with quiet action chips for any graph edits), a bottom composer, and slash
+ * commands for sessions. It is the view layer over {@link useAgentSessionStore},
+ * which owns the persistent, session-aware conversation.
  *
- * The transaction (apply-on-stream, revert-on-reject) lives in
- * {@link useAgentSessionStore}; this is the view layer over it.
+ * NO Approve/Reject. The agent's edits apply live and are undone with plain
+ * Ctrl+Z (a held, believable result over a modal). Sessions:
+ *   - `/new`     starts a fresh Pi session,
+ *   - `/resume`  opens the session picker to continue a past one,
+ * and the panel auto-reattaches to the last session via the store.
+ *
+ * On a plain browser AI is disabled (DesktopOnly). Before the first run the user
+ * picks WHO PAYS in the AuthChooser. The sandbox/YOLO footer (fs/shell safety) is
+ * unchanged — it's orthogonal to the graph editing model.
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAgentBackend } from '../../ai';
+import { getExecutor } from '../../audio/executor';
 import { useAgentSessionStore } from '../../store/agentSessionStore';
-import type { TranscriptEntry } from '../../store/agentSessionStore';
+import { useAuthStore } from '../../auth/authStore';
+import { useSandboxStore } from '../../store/sandboxStore';
+import { AuthChooser } from './AuthChooser';
+import { ChatMessage } from './ChatMessage';
+import { SessionPicker } from './SessionPicker';
+
+/** macOS shows ⌘; everywhere else Ctrl. (Display only; handlers accept both.) */
+const IS_MAC =
+    typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+const MOD = IS_MAC ? '⌘' : 'Ctrl';
 
 interface AiPanelProps {
-    /** Prompt carried over from the search input on the Tab handoff. */
+    /** Draft carried over from the search input on the Tab handoff. */
     initialPrompt: string;
+    /**
+     * Force the AuthChooser even when a provider is already configured (the
+     * "Configure AI provider" action), so the user can re-pick a provider.
+     */
+    forceAuth?: boolean;
     /** Return to search mode (Esc / "Back"). */
     onBack: () => void;
-    /** Close the whole palette. */
-    onClose: () => void;
 }
 
-export function AiPanel({ initialPrompt, onBack, onClose }: AiPanelProps) {
+/** A short, friendly stem of a session id for the header chip. */
+function shortId(id: string): string {
+    return id.length > 10 ? `${id.slice(0, 8)}…` : id;
+}
+
+export function AiPanel({ initialPrompt, forceAuth = false, onBack }: AiPanelProps) {
     const phase = useAgentSessionStore((s) => s.phase);
-    const transcript = useAgentSessionStore((s) => s.transcript);
+    const messages = useAgentSessionStore((s) => s.messages);
     const error = useAgentSessionStore((s) => s.error);
-    const start = useAgentSessionStore((s) => s.start);
-    const approve = useAgentSessionStore((s) => s.approve);
-    const reject = useAgentSessionStore((s) => s.reject);
+    const sessionId = useAgentSessionStore((s) => s.sessionId);
+    const send = useAgentSessionStore((s) => s.send);
+    const newSession = useAgentSessionStore((s) => s.newSession);
 
-    const inputRef = useRef<HTMLInputElement>(null);
-    const promptRef = useRef(initialPrompt);
+    const inputRef = useRef<HTMLTextAreaElement>(null);
+    const transcriptRef = useRef<HTMLDivElement>(null);
 
-    const backend = getAgentBackend();
-    const available = backend.available();
+    const backend = useMemo(() => getAgentBackend(), []);
+    // Gate on the platform capability seam (M0): 'none' (browser) shows the
+    // desktop-only state; otherwise the agent is offered.
+    const available = getExecutor().getCapabilities().agent !== 'none';
 
-    // Focus the AI input on mount; preserve the handed-over text as the value.
-    useEffect(() => {
-        if (inputRef.current) inputRef.current.value = promptRef.current;
-        inputRef.current?.focus();
-    }, []);
+    // WHO PAYS must be configured before the composer is usable.
+    const configured = useAuthStore((s) => s.configured);
+    const refreshStatus = useAuthStore((s) => s.refreshStatus);
+    const [authDismissed, setAuthDismissed] = useState(false);
+    const showAuth = available && (forceAuth ? !authDismissed : !configured);
 
-    const runPrompt = useCallback(() => {
-        const prompt = (inputRef.current?.value ?? '').trim();
-        if (!prompt || !available) return;
-        void start(backend, { prompt });
-    }, [available, backend, start]);
+    // Sandbox (live jail/YOLO mode), shown in the footer and toggled with an
+    // explicit confirm. `canYolo` is false where host-jailing can't happen.
+    const sandboxMode = useSandboxStore((s) => s.mode);
+    const projectLabel = useSandboxStore((s) => s.projectLabel);
+    const canYolo = useSandboxStore((s) => s.canYolo());
+    const [yoloConfirm, setYoloConfirm] = useState(false);
+
+    // The composer draft + the resume sub-view.
+    const [draft, setDraft] = useState(initialPrompt);
+    const [view, setView] = useState<'chat' | 'resume'>('chat');
 
     const running = phase === 'running';
-    const awaitingApproval = phase === 'awaiting-approval';
     const errored = phase === 'error';
 
+    // Re-derive auth status from native on mount (the key lives in the keychain).
+    useEffect(() => {
+        void refreshStatus();
+    }, [refreshStatus]);
+
+    // Focus the composer when the chat is shown.
+    useEffect(() => {
+        if (available && !showAuth && view === 'chat') {
+            const el = inputRef.current;
+            if (el) {
+                el.focus();
+                el.setSelectionRange(el.value.length, el.value.length);
+            }
+        }
+    }, [available, showAuth, view]);
+
+    // Auto-stick to the bottom as turns stream in.
+    useEffect(() => {
+        const el = transcriptRef.current;
+        if (el) el.scrollTop = el.scrollHeight;
+    }, [messages]);
+
+    const runTask = useCallback(
+        (prompt: string) => {
+            if (!prompt || !available || !configured || running) return;
+            const auth = useAuthStore.getState();
+            void send(backend, {
+                prompt,
+                providerKey: auth.key,
+                provider: auth.activeProvider,
+                modelId: auth.modelId,
+                yolo: useSandboxStore.getState().mode === 'yolo',
+            });
+        },
+        [available, configured, running, backend, send],
+    );
+
+    // Submit the composer: slash commands first (`/new`, `/resume`), else send.
+    const submit = useCallback(() => {
+        const text = draft.trim();
+        if (!text) return;
+        if (text === '/new') {
+            setDraft('');
+            void newSession();
+            return;
+        }
+        if (text === '/resume') {
+            setDraft('');
+            setView('resume');
+            return;
+        }
+        setDraft('');
+        runTask(text);
+    }, [draft, newSession, runTask]);
+
+    // Entering YOLO is never one keystroke: going to YOLO opens the confirm;
+    // leaving it (back to safe) is immediate.
+    const toggleYolo = useCallback(() => {
+        const sb = useSandboxStore.getState();
+        if (sb.mode === 'yolo') sb.exitYolo();
+        else if (sb.requestYolo()) setYoloConfirm(true);
+    }, []);
+
+    // YOLO toggle hotkey (⌘/Ctrl+Shift+Y) on the live agent surface.
+    useEffect(() => {
+        if (!available || showAuth) return;
+        const onKey = (e: KeyboardEvent) => {
+            const mod = e.ctrlKey || e.metaKey;
+            if (mod && e.shiftKey && e.key.toLowerCase() === 'y') {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleYolo();
+            }
+        };
+        window.addEventListener('keydown', onKey, true);
+        return () => window.removeEventListener('keydown', onKey, true);
+    }, [available, showAuth, toggleYolo]);
+
+    if (!available) {
+        return (
+            <div className="command-bar-ai" data-available="false">
+                <DesktopOnly onBack={onBack} />
+            </div>
+        );
+    }
+
+    if (showAuth) {
+        return (
+            <div className="command-bar-ai">
+                <AuthChooser
+                    onConfigured={() => {
+                        setAuthDismissed(true);
+                        void refreshStatus();
+                    }}
+                    onBack={() => {
+                        if (forceAuth) setAuthDismissed(true);
+                        else onBack();
+                    }}
+                />
+            </div>
+        );
+    }
+
+    if (view === 'resume') {
+        return (
+            <div className="command-bar-ai">
+                <SessionPicker onResumed={() => setView('chat')} onCancel={() => setView('chat')} />
+            </div>
+        );
+    }
+
     return (
-        <div className="command-bar-ai" data-available={available}>
+        <div className="command-bar-ai">
             <div className="command-bar-ai-header">
                 <button
                     type="button"
@@ -68,99 +208,150 @@ export function AiPanel({ initialPrompt, onBack, onClose }: AiPanelProps) {
                 >
                     ← Search
                 </button>
-                <span className="command-bar-ai-badge">AI</span>
+                <div className="command-bar-ai-header-right">
+                    <span className="command-bar-ai-session" title={sessionId ?? 'New chat'}>
+                        {sessionId ? shortId(sessionId) : 'New chat'}
+                    </span>
+                    <button
+                        type="button"
+                        className="command-bar-ai-new"
+                        onClick={() => void newSession()}
+                        title="Start a new session ( /new )"
+                    >
+                        + New
+                    </button>
+                </div>
             </div>
 
-            {!available ? (
-                <DesktopOnly onClose={onClose} />
-            ) : (
-                <>
-                    <input
-                        ref={inputRef}
-                        className="command-bar-input command-bar-ai-input"
-                        placeholder="Describe what to build, then press Enter…"
-                        defaultValue={initialPrompt}
-                        disabled={running}
-                        onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                                e.preventDefault();
-                                runPrompt();
-                            } else if (e.key === 'Escape') {
-                                e.preventDefault();
-                                onBack();
-                            }
-                        }}
-                    />
-
-                    <div className="command-bar-ai-transcript">
-                        {transcript.length === 0 && !running && (
-                            <p className="command-bar-empty">
-                                Press Enter to ask the agent to build it.
-                            </p>
-                        )}
-                        {transcript.map((entry) => (
-                            <TranscriptLine key={entry.id} entry={entry} />
-                        ))}
-                        {running && (
-                            <p className="command-bar-ai-status">Agent is working…</p>
-                        )}
-                        {errored && error && (
-                            <p className="command-bar-ai-error">{error}</p>
-                        )}
+            <div className="command-bar-ai-transcript" ref={transcriptRef}>
+                {messages.length === 0 && (
+                    <div className="command-bar-ai-welcome">
+                        <p className="command-bar-ai-welcome-title">Ask, or describe what to build.</p>
+                        <p className="command-bar-ai-welcome-body">
+                            Questions get answered; build requests land on the canvas live —
+                            undo anything with <kbd className="command-bar-kbd">{MOD}+Z</kbd>.
+                            Type <code>/new</code> to start over, <code>/resume</code> to revisit a session.
+                        </p>
                     </div>
+                )}
+                {messages.map((entry) => (
+                    <ChatMessage key={entry.id} entry={entry} />
+                ))}
+                {errored && error && <p className="command-bar-ai-error">{error}</p>}
+            </div>
 
-                    {awaitingApproval && (
-                        <div className="command-bar-ai-actions">
-                            <button
-                                type="button"
-                                className="command-bar-ai-reject"
-                                onClick={reject}
-                            >
-                                Reject
-                            </button>
-                            <button
-                                type="button"
-                                className="command-bar-ai-approve"
-                                onClick={() => {
-                                    approve();
-                                    onClose();
-                                }}
-                            >
-                                Approve
-                            </button>
-                        </div>
-                    )}
-                </>
+            <div className="command-bar-ai-composer">
+                <textarea
+                    ref={inputRef}
+                    className="command-bar-ai-input"
+                    placeholder="Ask anything, or describe what to build…"
+                    value={draft}
+                    rows={1}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            submit();
+                        } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            onBack();
+                        }
+                    }}
+                />
+                <div className="command-bar-ai-composer-row">
+                    <span className="command-bar-ai-hint">
+                        {running ? 'Working…' : (
+                            <>
+                                <kbd className="command-bar-kbd">↵</kbd> send ·{' '}
+                                <kbd className="command-bar-kbd">⇧↵</kbd> newline
+                            </>
+                        )}
+                    </span>
+                    <button
+                        type="button"
+                        className="command-bar-ai-send"
+                        onClick={submit}
+                        disabled={running || !draft.trim()}
+                    >
+                        Send
+                    </button>
+                </div>
+            </div>
+
+            <div className="command-bar-ai-footer" data-mode={sandboxMode}>
+                {sandboxMode === 'yolo' ? (
+                    <span className="command-bar-ai-sandbox command-bar-ai-sandbox-yolo">
+                        ⚠ YOLO Mode — all guards off
+                    </span>
+                ) : (
+                    <span className="command-bar-ai-sandbox">
+                        Sandboxed&nbsp;↬&nbsp;
+                        <code>{projectLabel ? `${projectLabel}/` : 'project/'}</code>
+                    </span>
+                )}
+                {canYolo && (
+                    <button
+                        type="button"
+                        className="command-bar-ai-yolo-toggle"
+                        data-mode={sandboxMode}
+                        onClick={toggleYolo}
+                        title={`Toggle YOLO (${MOD}+Shift+Y)`}
+                    >
+                        {sandboxMode === 'yolo' ? 'Exit YOLO' : 'YOLO'}
+                    </button>
+                )}
+            </div>
+
+            {yoloConfirm && (
+                <YoloConfirm
+                    onCancel={() => setYoloConfirm(false)}
+                    onConfirm={() => {
+                        useSandboxStore.getState().confirmYolo();
+                        setYoloConfirm(false);
+                    }}
+                />
             )}
         </div>
     );
 }
 
-/** One transcript line, styled per event kind. */
-function TranscriptLine({ entry }: { entry: TranscriptEntry }) {
-    const { event } = entry;
-    switch (event.kind) {
-        case 'thought':
-            return <p className="command-bar-ai-thought">{event.text}</p>;
-        case 'tool-call':
-            return (
-                <p
-                    className="command-bar-ai-tool"
-                    data-ok={entry.applied !== false}
+/**
+ * The YOLO confirmation gate. Entering YOLO is deliberately a two-step act: this
+ * spells out exactly what is being given up (the full shell + real environment)
+ * before any guard drops, and resets to safe on restart.
+ */
+function YoloConfirm({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+    const confirmRef = useRef<HTMLButtonElement>(null);
+    useEffect(() => {
+        confirmRef.current?.focus();
+    }, []);
+    return (
+        <div className="command-bar-yolo-confirm" role="alertdialog" aria-label="Enter YOLO mode?">
+            <p className="command-bar-yolo-title">Enter YOLO mode?</p>
+            <p className="command-bar-yolo-body">
+                The agent gets your <strong>full shell</strong> — any command, any directory,
+                and your real environment (SSH&nbsp;keys, cloud tokens). Graph edits stay
+                undoable with {MOD}+Z; everything else is off. Resets to safe on restart.
+            </p>
+            <div className="command-bar-yolo-actions">
+                <button type="button" className="command-bar-ai-reject" onClick={onCancel}>
+                    Cancel
+                </button>
+                <button
+                    ref={confirmRef}
+                    type="button"
+                    className="command-bar-yolo-go"
+                    onClick={onConfirm}
                 >
-                    <code>{event.call.name}</code>
-                    {entry.appliedSummary ? ` — ${entry.appliedSummary}` : ''}
-                </p>
-            );
-        case 'result':
-            return <p className="command-bar-ai-result">{event.summary}</p>;
-        case 'error':
-            return <p className="command-bar-ai-error">{event.message}</p>;
-    }
+                    Enter YOLO
+                </button>
+            </div>
+        </div>
+    );
 }
 
 /** The browser fallback: AI is disabled, with a clear pointer to the desktop app. */
-function DesktopOnly({ onClose }: { onClose: () => void }) {
+function DesktopOnly({ onBack }: { onBack: () => void }) {
     return (
         <div className="command-bar-ai-desktop-only">
             <p className="command-bar-ai-desktop-title">AI requires the desktop app</p>
@@ -168,8 +359,8 @@ function DesktopOnly({ onClose }: { onClose: () => void }) {
                 The AI agent runs locally in the OpenJammer desktop app, which drives Pi
                 with your own provider key. It isn’t available in the browser.
             </p>
-            <button type="button" className="command-bar-ai-approve" onClick={onClose}>
-                Got it
+            <button type="button" className="command-bar-ai-send" onClick={onBack}>
+                Back to search
             </button>
         </div>
     );

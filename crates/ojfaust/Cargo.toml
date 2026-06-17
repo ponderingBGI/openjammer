@@ -23,8 +23,14 @@ libfaust = ["dep:libc"]
 # Host crate (std): this is off-RT-thread compilation tooling, NOT the audio
 # kernel, so it does not need `no_std`.
 #
+# `serde_json` parses the `faust -json` metadata (name/inputs/outputs/ui params)
+# for the default CLI-backed Path B. It is PURE RUST (no native toolchain), the
+# SAME crate oj-tauri already pins, so the default build still needs no native
+# dependency — only the `libfaust` feature pulls a native lib.
+serde_json = "1.0.150"
+
 # `libc` is only pulled in when the native backend is enabled, so the default
-# stub build has ZERO third-party dependencies.
+# stub build has ZERO third-party native dependencies.
 libc = { version = "0.2.180", optional = true }
 
 # NOTE: when the libfaust C-API binding path is chosen, add the build-time

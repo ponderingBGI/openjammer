@@ -20,6 +20,10 @@ export interface VoiceExecutor {
     controlDown(keyboardId: string): void;
     /** Release the control (sustain pedal) for an input node. */
     controlUp(keyboardId: string): void;
+    /** Light a connection cable to visualize signal flowing through it. */
+    activateControlSignal(connectionId: string): void;
+    /** Begin the fade-out of a connection cable's signal-flow glow. */
+    releaseControlSignal(connectionId: string): void;
 }
 
 /** A subscription handle that can be unsubscribed. */
