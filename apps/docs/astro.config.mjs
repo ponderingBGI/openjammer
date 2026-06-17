@@ -41,6 +41,7 @@ export default defineConfig({
                 }),
             ],
             sidebar: [
+                { label: 'Guides', autogenerate: { directory: 'guides' } },
                 { label: 'Architecture', autogenerate: { directory: 'architecture' } },
                 { label: 'Reference', autogenerate: { directory: 'reference' } },
                 typeDocSidebarGroup,
