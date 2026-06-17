@@ -10,6 +10,8 @@ import { Breadcrumbs } from './components/Toolbar/Breadcrumbs';
 import { HelpPanel } from './components/Toolbar/HelpPanel';
 import { SettingsPanel } from './components/Settings/SettingsPanel';
 import { CommandBar } from './components/CommandBar/CommandBar';
+import { DevLogPanel } from './components/DevLog/DevLogPanel';
+import { IssueReporter } from './components/IssueReporter/IssueReporter';
 import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
@@ -371,6 +373,13 @@ function App() {
 
       {/* Command Bar (Ctrl/Cmd+K) - owns its own toggle + open state (U19) */}
       <CommandBar />
+
+      {/* DevLog panel (L4) — the on-device structured-log surface; the AI agent
+          reads the same store. Toggled via the command palette / openjammer:toggle-devlog. */}
+      <DevLogPanel />
+
+      {/* L5 one-click "report a problem" reporter — captures a redacted log bundle. */}
+      <IssueReporter />
 
       {/* Collaboration Share/Join control + peer list (U23 — collab state plane) */}
       <CollabControl />

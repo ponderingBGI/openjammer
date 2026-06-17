@@ -54,34 +54,44 @@ export type AssetId = number;
 /**
  * The closed primitive instruction set the RT kernel matches on.
  * Rust: `enum PrimitiveKind { ... }` — wire form: bare variant-name string.
- * This union lists EVERY variant, spelled exactly as serde emits it.
+ *
+ * Declared as a `const` tuple so the {@link PrimitiveKind} type is DERIVED from
+ * it (no second hand-written list). `schemas/primitive-kinds.json` is the SSOT
+ * this tuple is pinned against by the D1 set-equality gate
+ * (`src/engine/__tests__/primitive-kinds-parity.test.ts`), which also pins the
+ * `oj-plugin-v1.json` `kind` enum and — transitively, via `wire_shapes.rs` — the
+ * Rust `ojproto::PrimitiveKind` enum. Keep in declaration order matching Rust.
  */
-export type PrimitiveKind =
+export const PRIMITIVE_KINDS = [
   // generators / instruments
-  | "Osc"
-  | "Sampler"
-  | "Sf2"
-  | "KarplusString"
+  "Osc",
+  "Sampler",
+  "Sf2",
+  "KarplusString",
   // processors
-  | "Gain"
-  | "Biquad"
-  | "Waveshaper"
-  | "Delay"
-  | "Convolution"
+  "Gain",
+  "Biquad",
+  "Waveshaper",
+  "Delay",
+  "Convolution",
   // host-bridged / extension
-  | "FaustHost"
-  | "WasmHost"
-  | "PluginHost"
+  "FaustHost",
+  "WasmHost",
+  "PluginHost",
   // routing / io
-  | "Add"
-  | "MicIn"
-  | "SpeakerOut"
-  | "GraphIn"
-  | "GraphOut"
-  | "Passthrough"
+  "Add",
+  "MicIn",
+  "SpeakerOut",
+  "GraphIn",
+  "GraphOut",
+  "Passthrough",
   // stateful (U-STATEFUL)
-  | "Looper"
-  | "Recorder";
+  "Looper",
+  "Recorder",
+] as const;
+
+/** The closed primitive-kind union, derived from {@link PRIMITIVE_KINDS}. */
+export type PrimitiveKind = (typeof PRIMITIVE_KINDS)[number];
 
 /** Edge signal kind. Rust: `enum ConnectionType { Audio, Control }` — bare string. */
 export type ConnectionType = "Audio" | "Control";
@@ -248,3 +258,96 @@ export type EngineFrame =
   | { IrAck: { ir_version: number; ok: boolean } }
   | { Beat: { bar: number; beat: number; phase: number } }
   | { Error: { code: number; message: string } };
+
+// ============================================================================
+// Structured-event taxonomy (L1/L2/L3/L4 logging spine)
+// ----------------------------------------------------------------------------
+// The off-RT, control-rate event vocabulary every log consumer reads — the
+// DevLog panel, the persistent SQLite/FTS5 store, and the AI agent's `get_logs`
+// diagnostics tool. Kept as a single SSOT here so TS and Rust (`ojproto`) never
+// drift; the Rust side pins these byte-for-byte in `wire_shapes.rs`.
+// ============================================================================
+
+/**
+ * Log severity, lowest→highest. Rust: `enum Severity` — bare variant string,
+ * exactly like `PrimitiveKind`. Verified shapes: "Trace" | "Debug" | ...
+ */
+export type Severity = "Trace" | "Debug" | "Info" | "Warn" | "Error";
+
+/** Which side of the dual-target seam emitted the event. Rust: `enum Source` — bare string. */
+export type Source = "Engine" | "Wasm" | "Ui" | "Native";
+
+/** RT fault taxonomy. Rust: `enum FaultKind` — bare string. */
+export type FaultKind = "NonFinite" | "OverBudget" | "AutoBypassed";
+
+/**
+ * The closed, versioned event taxonomy (control-rate). Rust: `enum EventKind`,
+ * EXTERNALLY tagged — unit variants are bare strings, data variants single-key
+ * objects. `Message` is the only `String`-carrying variant.
+ *
+ * Wire examples (pinned by wire_shapes.rs):
+ *   "Lifecycle"
+ *   "GraphSwap"
+ *   { "Xrun": { "dropped": 3 } }
+ *   { "NodeFault": { "node": 3, "fault": "NonFinite" } }
+ *   "RingFull"
+ *   "Asset"
+ *   "Plugin"
+ *   "Midi"
+ *   "Collab"
+ *   { "Message": { "code": 42, "text": "boom" } }
+ */
+export type EventKind =
+  | "Lifecycle"
+  | "GraphSwap"
+  | { Xrun: { dropped: number } }
+  | { NodeFault: { node: NodeIdx; fault: FaultKind } }
+  | "RingFull"
+  | "Asset"
+  | "Plugin"
+  | "Midi"
+  | "Collab"
+  | { Message: { code: number; text: string } };
+
+/**
+ * A single control-rate structured event — the off-RT decoded record every L1/
+ * L3/L4 consumer reads. Mirrors `ojproto::Event` (a plain struct → object with
+ * these fields in declaration order) and is pinned byte-for-byte by the
+ * `event_struct_shape` test in `crates/ojproto/tests/wire_shapes.rs`.
+ *
+ * Wire shape:
+ *   { "v": 1, "seq": 12, "severity": "Warn",
+ *     "kind": { "NodeFault": { "node": 3, "fault": "OverBudget" } },
+ *     "source": "Engine", "ts_us": 123456, "corr_id": 0 }
+ */
+export interface Event {
+  /** Schema version. Mirrors `ojproto::SCHEMA_VERSION` (a `u16`). */
+  v: number;
+  /** Monotonic per-source sequence number (`u32`). */
+  seq: number;
+  /** Severity. */
+  severity: Severity;
+  /** The event taxonomy payload. */
+  kind: EventKind;
+  /** Which side emitted it. */
+  source: Source;
+  /** Engine-stamped timestamp in microseconds (`u64`). */
+  ts_us: number;
+  /** Correlation id for click-to-correlate; `0` = none (`u64`). */
+  corr_id: number;
+}
+
+/**
+ * RT-safe `Copy` subset of `EventKind` that rides the ByteRing. Rust:
+ * `enum RtEvent`, EXTERNALLY tagged. Heap-free; mirrors only the three
+ * RT-emittable variants.
+ *
+ * Wire examples (pinned by wire_shapes.rs):
+ *   { "Xrun": { "dropped": 5 } }
+ *   { "NodeFault": { "node": 3, "fault": "OverBudget" } }
+ *   "RingFull"
+ */
+export type RtEvent =
+  | { Xrun: { dropped: number } }
+  | { NodeFault: { node: NodeIdx; fault: FaultKind } }
+  | "RingFull";

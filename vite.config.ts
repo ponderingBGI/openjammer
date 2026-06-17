@@ -8,8 +8,19 @@ import { VitePWA } from 'vite-plugin-pwa'
 // app boots in `tauri dev` / `vite dev`. They are build-safe too.
 import wasm from 'vite-plugin-wasm'
 import topLevelAwait from 'vite-plugin-top-level-await'
+import { readFileSync } from 'node:fs'
+
+// App version SSOT: inline package.json's version as `__APP_VERSION__` at build
+// time. The diagnostics snapshot + IssueReporter stamp every bug report with it,
+// and the AI agent's `get_diagnostics` tool reports it — one source of truth.
+const pkgVersion = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf8'),
+).version as string
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(pkgVersion),
+  },
   plugins: [
     wasm(),
     topLevelAwait(),
@@ -116,6 +127,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': '/src',
+      // The shared TS protocol package (the wire/event SSOT). Aliased so both the
+      // bare workspace specifier and app code resolve to the single source file
+      // without a build step. Mirrors the tsconfig `paths` + vitest alias.
+      '@openjammer/oj-protocol': '/packages/oj-protocol-ts/src/index.ts',
       events: 'rollup-plugin-node-polyfills/polyfills/events'
     }
   },

@@ -45,12 +45,16 @@ const ROW_HEIGHT = 28;
 const OVERSCAN = 8;
 
 /**
- * Whether the DevLog is a dev/canary surface. Vite tree-shakes the panel out of
- * a production PWA when this is false. If neither flag is set we still mount it
- * (always-available, hidden-until-toggled) — a deliberate dev-friendly default.
+ * The DevLog ships in EVERY build — including production.
+ *
+ * It is a hidden-until-toggled portal overlay (Ctrl/Cmd+Shift+L or the palette),
+ * so it costs nothing in the live UX, but it is exactly the surface a performer
+ * needs when something breaks on stage: the structured tail of engine xruns,
+ * node faults, MIDI, and asset/plugin events. The AI assistant reads the SAME
+ * {@link useLogStore} ring via its `get_logs` tool, so "help me get sound back"
+ * and "show me the logs" are the one source of truth. Shipping it everywhere is
+ * a deliberate product decision (live-debuggability > hiding the panel).
  */
-const DEVLOG_ENABLED =
-    import.meta.env.DEV || import.meta.env.VITE_OJ_CANARY === 'true' || import.meta.env.VITE_OJ_CANARY === '1';
 
 /** Format an entry timestamp as HH:MM:SS.mmm for the row time column. */
 function formatTime(ts: number): string {
@@ -63,10 +67,8 @@ function formatTime(ts: number): string {
 }
 
 export function DevLogPanel() {
-    // Gate BEFORE any hooks: a disabled build must not subscribe to the store or
-    // register global listeners. Conditional hooks are illegal, so the guard lives
-    // in this thin wrapper and all hooks live in DevLogPanelInner.
-    if (!DEVLOG_ENABLED) return null;
+    // Thin wrapper kept for parity with the CommandBar/portal pattern; the panel
+    // ships in every build (see the DEVLOG note above) and is hidden until toggled.
     return <DevLogPanelInner />;
 }
 

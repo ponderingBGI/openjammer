@@ -136,6 +136,16 @@ function buildAppCommands(): Command[] {
             run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-help')),
         },
         {
+            // The on-device structured-log surface (L4). Available in every build so
+            // a performer can pull up xruns / node faults / MIDI on stage. The AI
+            // agent reads the same store via its `get_logs` tool.
+            id: 'app.devlog.toggle',
+            title: 'Toggle DevLog',
+            group: 'App',
+            keywords: ['devlog', 'log', 'logs', 'debug', 'console', 'diagnostics', 'events', 'xrun'],
+            run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-devlog')),
+        },
+        {
             id: 'app.project.new',
             title: 'New Project',
             group: 'App',

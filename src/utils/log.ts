@@ -33,6 +33,22 @@ const CONSOLE_METHOD: Record<Severity, 'debug' | 'info' | 'warn' | 'error'> = {
 };
 
 /**
+ * The ORIGINAL console methods, captured at module load — BEFORE
+ * {@link installConsoleCapture} can patch them. The facade forwards through
+ * these (not `console`) so that:
+ *   • a `log()` call appends to the store EXACTLY ONCE (here), never again via a
+ *     patched `console`, and
+ *   • there is no infinite recursion once `console.*` is itself routed back into
+ *     the store by the capture installer.
+ */
+const ORIGINAL_CONSOLE: Record<'debug' | 'info' | 'warn' | 'error', (...a: unknown[]) => void> = {
+    debug: console.debug.bind(console),
+    info: console.info.bind(console),
+    warn: console.warn.bind(console),
+    error: console.error.bind(console),
+};
+
+/**
  * Append a structured entry to the DevLog store AND forward to the matching
  * `console.*`. The single low-level entry point; everything else is sugar.
  *
@@ -51,14 +67,15 @@ export function log(level: Severity, scope: string, message: string, fields?: Lo
         fields,
     });
 
-    // 2) Native devtools, unchanged. Forward fields only when present so the
-    //    console line stays clean for the common no-fields case.
+    // 2) Native devtools, unchanged. Forward through the CAPTURED originals (not
+    //    `console`) so an installed console-capture never re-ingests this entry.
+    //    Forward fields only when present so the line stays clean when there are none.
     const method = CONSOLE_METHOD[level];
     const prefix = `[${scope}]`;
     if (fields !== undefined) {
-        console[method](prefix, message, fields);
+        ORIGINAL_CONSOLE[method](prefix, message, fields);
     } else {
-        console[method](prefix, message);
+        ORIGINAL_CONSOLE[method](prefix, message);
     }
 }
 
@@ -105,4 +122,84 @@ export function logger(scope: string): ScopedLogger {
         warn: (message, fields) => log('Warn', scope, message, fields),
         error: (message, fields) => log('Error', scope, message, fields),
     };
+}
+
+// ============================================================================
+// Console capture — make EVERY console.* line show up in the DevLog
+// ============================================================================
+
+/** Map a captured console method onto an ojproto {@link Severity}. */
+const CAPTURE_LEVEL: Record<'log' | 'debug' | 'info' | 'warn' | 'error', Severity> = {
+    log: 'Info',
+    debug: 'Debug',
+    info: 'Info',
+    warn: 'Warn',
+    error: 'Error',
+};
+
+/** True once {@link installConsoleCapture} has patched `console` (idempotent guard). */
+let consoleCaptured = false;
+
+/**
+ * Render an arbitrary `console.*` argument list into a `(message, fields)` pair
+ * for the DevLog. Strings join into the message; the first non-string object is
+ * carried into `fields.detail` so structured payloads survive without bloating
+ * the row. Best-effort and never throws.
+ */
+function describeConsoleArgs(args: unknown[]): { message: string; fields?: LogFields } {
+    const parts: string[] = [];
+    let detail: unknown;
+    for (const a of args) {
+        if (typeof a === 'string') parts.push(a);
+        else if (typeof a === 'number' || typeof a === 'boolean' || a == null) parts.push(String(a));
+        else {
+            if (detail === undefined) detail = a;
+            try {
+                parts.push(typeof a === 'object' ? JSON.stringify(a) : String(a));
+            } catch {
+                parts.push(String(a));
+            }
+        }
+    }
+    const message = parts.join(' ').slice(0, 2000);
+    return detail !== undefined ? { message, fields: { detail } } : { message };
+}
+
+/**
+ * Route ALL raw `console.{log,debug,info,warn,error}` calls into the DevLog ring
+ * (source `"Ui"`, scope `"console"`) IN ADDITION to their normal devtools
+ * output. Call ONCE at app start (`main.tsx`). Without this the panel only sees
+ * call sites that went through the {@link log} facade; with it, every existing
+ * `console.*` in the app becomes live, faceted, searchable log content — and the
+ * AI assistant's `get_logs` tool can read it to help debug a broken setup.
+ *
+ * SAFE BY CONSTRUCTION: the facade forwards through {@link ORIGINAL_CONSOLE}, so
+ * patching `console` here can never recurse or double-append a facade entry.
+ * Idempotent — a second call is a no-op (StrictMode-safe).
+ */
+export function installConsoleCapture(): void {
+    if (consoleCaptured || typeof console === 'undefined') return;
+    consoleCaptured = true;
+
+    (['log', 'debug', 'info', 'warn', 'error'] as const).forEach((method) => {
+        const passthrough =
+            method === 'log'
+                ? ORIGINAL_CONSOLE.info
+                : ORIGINAL_CONSOLE[method as 'debug' | 'info' | 'warn' | 'error'];
+        console[method] = (...args: unknown[]): void => {
+            try {
+                const { message, fields } = describeConsoleArgs(args);
+                useLogStore.getState().append({
+                    level: CAPTURE_LEVEL[method],
+                    source: 'Ui',
+                    scope: 'console',
+                    message,
+                    ...(fields !== undefined ? { fields } : {}),
+                });
+            } catch {
+                // Logging must never break the app — swallow capture failures.
+            }
+            passthrough(...args);
+        };
+    });
 }
