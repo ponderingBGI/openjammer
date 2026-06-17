@@ -85,7 +85,6 @@ jobs:
           git add Cargo.toml package.json packages/oj-protocol-ts/package.json src-tauri/tauri.conf.json
           git commit -m "chore(release): publish ${{ steps.plan.outputs.tag }}"
           git tag -a "${{ steps.plan.outputs.tag }}" -m "OpenJammer ${{ steps.plan.outputs.tag }}"
-          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git" HEAD:main
           git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git" "${{ steps.plan.outputs.tag }}"
 
   release:
