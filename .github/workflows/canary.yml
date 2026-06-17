@@ -120,11 +120,31 @@ jobs:
           projectPath: "."
           args: ${{ matrix.args }}
 
-      - name: Attest build provenance (auditors)
+      # Build the newline-delimited subject list correctly: the previous
+      # `join(..., '\n')` emitted a LITERAL backslash-n, which the attest action
+      # read as one bogus path and failed on macOS's dual-arch multi-artifact
+      # output. Pass artifactPaths via env (no shell-quoting pitfalls) and split to
+      # real newlines with jq into a multiline step output.
+      - name: Build provenance subject list
+        id: subjects
         if: ${{ steps.tauri.outputs.artifactPaths != '' }}
+        shell: bash
+        env:
+          ARTIFACTS: ${{ steps.tauri.outputs.artifactPaths }}
+        run: |
+          {
+            echo 'paths<<OJEOF'
+            jq -r '.[]' <<< "$ARTIFACTS"
+            echo 'OJEOF'
+          } >> "$GITHUB_OUTPUT"
+      - name: Attest build provenance (auditors)
+        # Best-effort: provenance is an auditor nicety and must never fail the
+        # signed canary release.
+        if: ${{ steps.tauri.outputs.artifactPaths != '' }}
+        continue-on-error: true
         uses: actions/attest-build-provenance@v1
         with:
-          subject-path: ${{ join(fromJSON(steps.tauri.outputs.artifactPaths), '\n') }}
+          subject-path: ${{ steps.subjects.outputs.paths }}
 
   # Serialized post-publish gate: after all four platforms publish, assert the
   # canary `latest.json` carries a signature for EVERY platform key (so a partial
