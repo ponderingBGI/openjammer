@@ -100,6 +100,29 @@ jobs:
         run: |
           cargo clippy -p ojcore-native --features persist --all-targets -- -D warnings
           cargo test -p ojcore-native --features persist
+      - name: Docs gate — rustdoc warning-free + missing_docs enforced (X2)
+        # `-D warnings` promotes broken intra-doc links AND ojproto's
+        # `#![warn(missing_docs)]` to hard errors, so the public wire contract
+        # stays fully documented and link-clean.
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --no-deps
+      - name: Docs gate — negative fixture proves missing_docs actually fails
+        # A throwaway commit is not a guarantee: this standing fixture
+        # (tools/doc-fixture, excluded from the workspace) MUST fail to compile
+        # under #![deny(missing_docs)]. If it ever compiles clean, the gate has
+        # silently stopped enforcing — fail loudly.
+        run: |
+          set +e
+          out=$(cargo check --manifest-path tools/doc-fixture/Cargo.toml 2>&1)
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "::error::oj-doc-fixture compiled clean — missing_docs is NOT enforcing"; exit 1
+          fi
+          echo "$out" | grep -q "missing documentation" || {
+            echo "::error::fixture failed, but not due to missing_docs:"; echo "$out"; exit 1; }
+          echo "negative fixture correctly fails on a missing doc — gate proven"
 
   web:
     name: Web (control plane)

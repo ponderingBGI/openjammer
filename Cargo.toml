@@ -3,6 +3,10 @@ resolver = "2"
 # `crates/*` are the engine crates; `src-tauri` is the native desktop shell
 # (U22) — a workspace member so it shares the pinned deps + one Cargo.lock.
 members = ["crates/*", "src-tauri"]
+# The docs-as-requirement negative fixture is a standalone package built ONLY by
+# its dedicated CI step (which asserts it fails missing_docs); keep it out of the
+# normal workspace build.
+exclude = ["tools/doc-fixture"]
 
 [workspace.package]
 edition = "2021"
