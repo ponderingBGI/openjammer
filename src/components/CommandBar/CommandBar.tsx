@@ -172,6 +172,22 @@ export function CommandBar() {
         return () => window.removeEventListener('openjammer:configure-ai', onConfigure);
     }, [setMode]);
 
+    // "Ask the AI to fix this" — open the chat seeded with a prompt (e.g. from the
+    // DevLog / a latency banner), so a player can hand a problem to the assistant
+    // in one tap. The assistant has get_logs / get_diagnostics / update_settings,
+    // so the seed just needs to describe the symptom.
+    useEffect(() => {
+        const onAsk = (e: Event) => {
+            const detail = (e as CustomEvent<{ prompt?: string }>).detail;
+            setOpen(true);
+            setAiPrompt(detail?.prompt ?? '');
+            setForceAuth(false);
+            setMode('ai');
+        };
+        window.addEventListener('openjammer:ask-ai', onAsk);
+        return () => window.removeEventListener('openjammer:ask-ai', onAsk);
+    }, [setMode]);
+
     // Return from AI mode to search. The conversation is preserved (persisted),
     // so coming back to AI later picks up exactly where it left off.
     const backToSearch = useCallback(() => {

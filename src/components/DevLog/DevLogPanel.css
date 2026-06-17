@@ -75,6 +75,16 @@
     cursor: pointer;
 }
 
+/* The "Ask AI to fix this" action — accented so it reads as the primary helper. */
+.devlog-btn-ai {
+    background: var(--accent, var(--sketch-black));
+    color: var(--text-on-accent, #fff);
+}
+
+.devlog-btn-ai:hover {
+    filter: brightness(1.08);
+}
+
 .devlog-btn:hover {
     background: color-mix(in srgb, var(--accent-primary, var(--sketch-black)) 12%, transparent);
 }

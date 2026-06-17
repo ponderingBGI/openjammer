@@ -39,6 +39,17 @@ import './DevLogPanel.css';
 /** Severities in display order, for the level facet chips. */
 const LEVELS: readonly Severity[] = ['Trace', 'Debug', 'Info', 'Warn', 'Error'];
 
+/**
+ * The prompt the "Ask AI to fix this" button seeds the assistant with. It nudges
+ * the agent to actually USE its diagnostics tools (it has get_diagnostics /
+ * get_logs / update_settings) rather than guess.
+ */
+const ASK_AI_SEED =
+    "Something isn't working in OpenJammer. Diagnose it: call get_diagnostics and " +
+    'get_logs (filter to Warn/Error), tell me in a sentence or two what is wrong, ' +
+    'and fix it if you safely can — e.g. select the right audio device, adjust the ' +
+    'latency settings, or wire the missing path to a speaker. Keep every change reversible.';
+
 /** Fixed row height (px) used by the windowing math. Must match the CSS row height. */
 const ROW_HEIGHT = 28;
 /** Extra rows rendered above/below the viewport to keep scrolling smooth. */
@@ -161,6 +172,18 @@ function DevLogPanelInner() {
                         </span>
                     )}
                     <span className="devlog-spacer" />
+                    <button
+                        className="devlog-btn devlog-btn-ai"
+                        onClick={() => {
+                            setOpen(false);
+                            window.dispatchEvent(
+                                new CustomEvent('openjammer:ask-ai', { detail: { prompt: ASK_AI_SEED } }),
+                            );
+                        }}
+                        title="Open the AI assistant seeded to diagnose + fix this from the logs"
+                    >
+                        Ask AI to fix this
+                    </button>
                     <button className="devlog-btn" onClick={clear} title="Clear all log entries">
                         Clear
                     </button>
