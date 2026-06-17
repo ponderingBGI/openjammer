@@ -186,14 +186,32 @@ impl DspInstance for WasmHostNode {
 pub struct WasmHostLoader {
     manifest: PluginManifest,
     wasm: Vec<u8>,
+    /// `Some(dsp_struct_size)` when `wasm` is a `faust -lang wasm` module driven
+    /// via faust's NATIVE ABI (see [`crate`] docs); `None` for an `oj_*` module.
+    /// The size is faust's `-json` `"size"` (the dsp struct the host allocates).
+    faust_dsp_size: Option<usize>,
 }
 
 impl WasmHostLoader {
-    /// Build a loader for an authored module + its frozen-v1 manifest. The
+    /// Build a loader for an `oj_*`-ABI module + its frozen-v1 manifest. The
     /// manifest's `kind` should be [`PrimitiveKind::WasmHost`] and `dsp`
     /// [`DspKind::Wasm`]; the audio port counts drive the host's scratch sizing.
     pub fn new(manifest: PluginManifest, wasm: Vec<u8>) -> Self {
-        Self { manifest, wasm }
+        Self {
+            manifest,
+            wasm,
+            faust_dsp_size: None,
+        }
+    }
+
+    /// Build a loader for a `faust -lang wasm` module, driven via faust's native
+    /// ABI by a `FaustWasmKernel`. `dsp_size` is faust's `-json` `"size"`.
+    pub fn new_faust(manifest: PluginManifest, wasm: Vec<u8>, dsp_size: usize) -> Self {
+        Self {
+            manifest,
+            wasm,
+            faust_dsp_size: Some(dsp_size),
+        }
     }
 
     /// The `.wasm` bytes this loader hosts (off-RT diagnostics / re-hashing).
@@ -210,8 +228,11 @@ impl PluginLoader for WasmHostLoader {
     fn instantiate(&self, _sample_rate: f32, _max_block: usize) -> Box<dyn DspInstance> {
         let audio_in = self.manifest.ports.audio_in as usize;
         let audio_out = self.manifest.ports.audio_out as usize;
-        // The kernel is built here (off-RT); memory sizing + oj_init run in activate.
-        let kernel = build_kernel(&self.wasm, audio_in, audio_out);
+        // The kernel is built here (off-RT); memory sizing + init run in activate.
+        let kernel = match self.faust_dsp_size {
+            Some(dsp_size) => build_faust_kernel(&self.wasm, dsp_size),
+            None => build_kernel(&self.wasm, audio_in, audio_out),
+        };
         Box::new(WasmHostNode::new(kernel, audio_in, audio_out))
     }
 }
@@ -241,6 +262,18 @@ fn build_kernel(_bytes: &[u8], _audio_in: usize, _audio_out: usize) -> Option<Bo
 #[cfg(feature = "wasmtime-host")]
 fn build_kernel(bytes: &[u8], audio_in: usize, audio_out: usize) -> Option<Box<dyn Kernel>> {
     crate::backend::build_kernel(bytes, audio_in, audio_out)
+}
+
+/// Build a [`Kernel`] from a faust-native wasm module + its dsp struct size.
+/// Scaffold build (no wasmtime) → `None` (guarded passthrough).
+#[cfg(not(feature = "wasmtime-host"))]
+fn build_faust_kernel(_bytes: &[u8], _dsp_size: usize) -> Option<Box<dyn Kernel>> {
+    None
+}
+
+#[cfg(feature = "wasmtime-host")]
+fn build_faust_kernel(bytes: &[u8], dsp_size: usize) -> Option<Box<dyn Kernel>> {
+    crate::backend::build_faust_kernel(bytes, dsp_size)
 }
 
 #[cfg(test)]

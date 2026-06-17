@@ -15,7 +15,10 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::Duration;
 
-use wasmtime::{Config, Engine, Instance, Memory, Module, Store, TypedFunc};
+use wasmtime::{
+    Config, Engine, Global, GlobalType, Instance, Linker, Memory, Module, Mutability, Store,
+    TypedFunc, Val, ValType,
+};
 
 use crate::{Kernel, KernelTrap};
 
@@ -201,5 +204,232 @@ impl Kernel for WasmtimeKernel {
         // A trapped param write poisons the store; the next `process` then returns
         // Err and the host bypasses — so the result is intentionally ignored here.
         let _ = self.oj_param.call(&mut self.store, (idx as i32, value));
+    }
+}
+
+// ===========================================================================
+// FaustWasmKernel — runs faust's NATIVE wasm ABI (it does not emit `oj_*`).
+// ===========================================================================
+
+/// 8-byte-align `x` (faust's dsp struct + buffers stay naturally aligned).
+fn align8(x: usize) -> usize {
+    (x + 7) & !7
+}
+
+/// Build a [`Kernel`] from a `faust -lang wasm` module (faust's native ABI), or
+/// `None` if it can't be instantiated/driven. `dsp_size` is faust's `-json`
+/// `"size"` (the dsp struct byte size the host must allocate).
+pub(crate) fn build_faust_kernel(bytes: &[u8], dsp_size: usize) -> Option<Box<dyn Kernel>> {
+    FaustWasmKernel::new(bytes, dsp_size)
+        .ok()
+        .map(|k| Box::new(k) as Box<dyn Kernel>)
+}
+
+/// Adapts a faust wasm module to the [`Kernel`] trait. faust exports a dsp-pointer
+/// ABI (`init(dsp,sr)`, `compute(dsp,count,inputs,outputs)`,
+/// `setParamValue(dsp,index,value)`) over channel buffers reached through pointer
+/// arrays, and imports `env.memoryBase`. This wrapper supplies that import, lays
+/// the dsp struct + per-channel I/O buffers + the two pointer arrays out in fresh
+/// pages above faust's own memory, and transposes interleaved host audio ↔ faust's
+/// non-interleaved channel buffers.
+struct FaustWasmKernel {
+    store: Store<()>,
+    memory: Memory,
+    init: TypedFunc<(i32, i32), ()>,
+    compute: TypedFunc<(i32, i32, i32, i32), ()>,
+    set_param: TypedFunc<(i32, i32, f32), ()>,
+    dsp: usize,
+    dsp_size: usize,
+    num_in: usize,
+    num_out: usize,
+    /// Byte offset of the input pointer-array (one i32 per input channel).
+    in_ptrs: usize,
+    /// Byte offset of the output pointer-array.
+    out_ptrs: usize,
+    /// Byte offset of input channel buffer `i` = `in_buf0 + i*max_block*4`.
+    in_buf0: usize,
+    out_buf0: usize,
+    max_block: usize,
+    usable: bool,
+}
+
+impl FaustWasmKernel {
+    fn new(bytes: &[u8], dsp_size: usize) -> Result<Self, ()> {
+        let engine = shared_engine();
+        // NOTE: faust's `-lang wasm` output always carries a wasm exception-handling
+        // tag section, which wasmtime 45 + cranelift cannot parse/execute (see
+        // docs/code-node-abi.md), so Module::new below currently fails for faust
+        // modules → the host falls back to a guarded passthrough. This adapter is
+        // otherwise complete and runs once the toolchain supports exception wasm
+        // (or faust gains an exception-free output mode).
+        let module = Module::new(engine, bytes).map_err(|_| ())?;
+        let mut store = Store::new(engine, ());
+        store.set_epoch_deadline(EPOCH_BUDGET);
+
+        // faust imports `env.memoryBase` + `env.tableBase` (base offsets for its
+        // addresses); a standalone module wants 0 for both.
+        let mut linker = Linker::new(engine);
+        let i32_const0 = GlobalType::new(ValType::I32, Mutability::Const);
+        let mem_base = Global::new(&mut store, i32_const0.clone(), Val::I32(0)).map_err(|_| ())?;
+        linker
+            .define(&store, "env", "memoryBase", mem_base)
+            .map_err(|_| ())?;
+        let table_base = Global::new(&mut store, i32_const0, Val::I32(0)).map_err(|_| ())?;
+        linker
+            .define(&store, "env", "tableBase", table_base)
+            .map_err(|_| ())?;
+
+        let instance = linker.instantiate(&mut store, &module).map_err(|_| ())?;
+        let memory = instance.get_memory(&mut store, "memory").ok_or(())?;
+        let init = instance
+            .get_typed_func::<(i32, i32), ()>(&mut store, "init")
+            .map_err(|_| ())?;
+        let compute = instance
+            .get_typed_func::<(i32, i32, i32, i32), ()>(&mut store, "compute")
+            .map_err(|_| ())?;
+        let set_param = instance
+            .get_typed_func::<(i32, i32, f32), ()>(&mut store, "setParamValue")
+            .map_err(|_| ())?;
+        let get_num_in = instance
+            .get_typed_func::<i32, i32>(&mut store, "getNumInputs")
+            .map_err(|_| ())?;
+        let get_num_out = instance
+            .get_typed_func::<i32, i32>(&mut store, "getNumOutputs")
+            .map_err(|_| ())?;
+        // getNumInputs/Outputs return compile-time constants (the dsp arg is
+        // ignored), so they are safe to call before init with a 0 pointer.
+        let num_in = get_num_in.call(&mut store, 0).map_err(|_| ())?.max(0) as usize;
+        let num_out = get_num_out.call(&mut store, 0).map_err(|_| ())?.max(0) as usize;
+
+        Ok(Self {
+            store,
+            memory,
+            init,
+            compute,
+            set_param,
+            dsp: 0,
+            dsp_size,
+            num_in,
+            num_out,
+            in_ptrs: 0,
+            out_ptrs: 0,
+            in_buf0: 0,
+            out_buf0: 0,
+            max_block: 0,
+            usable: false,
+        })
+    }
+}
+
+impl Kernel for FaustWasmKernel {
+    fn init(&mut self, sample_rate: f32, max_block: usize) {
+        self.max_block = max_block;
+        // Lay the dsp struct + pointer arrays + per-channel I/O buffers out in fresh
+        // pages ABOVE faust's initial memory, so they never collide with faust's
+        // static data (which lives in the low pages).
+        let base = (self.memory.size(&self.store) as usize) * PAGE;
+        let dsp = align8(base);
+        let in_ptrs = align8(dsp + self.dsp_size);
+        let out_ptrs = in_ptrs + self.num_in * 4;
+        let in_buf0 = align8(out_ptrs + self.num_out * 4);
+        let out_buf0 = in_buf0 + self.num_in * max_block * 4;
+        let end = out_buf0 + self.num_out * max_block * 4;
+
+        let cur_bytes = base;
+        let grow_pages = end.saturating_sub(cur_bytes).div_ceil(PAGE);
+        if self
+            .memory
+            .grow(&mut self.store, grow_pages as u64)
+            .is_err()
+        {
+            self.usable = false;
+            return;
+        }
+        self.dsp = dsp;
+        self.in_ptrs = in_ptrs;
+        self.out_ptrs = out_ptrs;
+        self.in_buf0 = in_buf0;
+        self.out_buf0 = out_buf0;
+
+        // Write the (fixed) pointer arrays: in_ptrs[i] -> input buffer i, etc.
+        {
+            let data = self.memory.data_mut(&mut self.store);
+            for i in 0..self.num_in {
+                let p = (in_buf0 + i * max_block * 4) as i32;
+                data[in_ptrs + i * 4..in_ptrs + i * 4 + 4].copy_from_slice(&p.to_le_bytes());
+            }
+            for i in 0..self.num_out {
+                let p = (out_buf0 + i * max_block * 4) as i32;
+                data[out_ptrs + i * 4..out_ptrs + i * 4 + 4].copy_from_slice(&p.to_le_bytes());
+            }
+        }
+
+        self.store.set_epoch_deadline(EPOCH_BUDGET);
+        self.usable = self
+            .init
+            .call(&mut self.store, (self.dsp as i32, sample_rate as i32))
+            .is_ok();
+    }
+
+    fn process(&mut self, input: &[f32], output: &mut [f32], n: usize) -> Result<(), KernelTrap> {
+        if !self.usable {
+            return Err(KernelTrap);
+        }
+        let n = n.min(self.max_block);
+        // De-interleave host input -> faust's per-channel buffers.
+        {
+            let data = self.memory.data_mut(&mut self.store);
+            for ch in 0..self.num_in {
+                let buf = self.in_buf0 + ch * self.max_block * 4;
+                for f in 0..n {
+                    let s = input.get(f * self.num_in + ch).copied().unwrap_or(0.0);
+                    let off = buf + f * 4;
+                    if off + 4 > data.len() {
+                        return Err(KernelTrap);
+                    }
+                    data[off..off + 4].copy_from_slice(&s.to_le_bytes());
+                }
+            }
+        }
+
+        self.store.set_epoch_deadline(EPOCH_BUDGET);
+        self.compute
+            .call(
+                &mut self.store,
+                (
+                    self.dsp as i32,
+                    n as i32,
+                    self.in_ptrs as i32,
+                    self.out_ptrs as i32,
+                ),
+            )
+            .map_err(|_| KernelTrap)?;
+
+        // Re-interleave faust's per-channel output -> interleaved host output.
+        let data = self.memory.data(&self.store);
+        for ch in 0..self.num_out {
+            let buf = self.out_buf0 + ch * self.max_block * 4;
+            for f in 0..n {
+                let off = buf + f * 4;
+                let idx = f * self.num_out + ch;
+                if off + 4 > data.len() || idx >= output.len() {
+                    return Err(KernelTrap);
+                }
+                let mut b = [0u8; 4];
+                b.copy_from_slice(&data[off..off + 4]);
+                output[idx] = f32::from_le_bytes(b);
+            }
+        }
+        Ok(())
+    }
+
+    fn param(&mut self, idx: u16, value: f32) {
+        if !self.usable {
+            return;
+        }
+        self.store.set_epoch_deadline(EPOCH_BUDGET);
+        let _ = self
+            .set_param
+            .call(&mut self.store, (self.dsp as i32, idx as i32, value));
     }
 }

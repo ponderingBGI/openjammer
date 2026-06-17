@@ -247,8 +247,34 @@ byte size + param indices come from the faust `-json` the authoring side already
 parses (`author_wasm_node`). `build_kernel` picks the adapter by sniffing the
 module's imports/exports.
 
-### Remaining to end-to-end faust → sound
-1. `FaustWasmKernel` in `crates/ojwasm/src/backend.rs` (+ a faust-compiling test).
-2. Wire `ojwasm` into the `oj-tauri` engine/registry; `author_wasm_node` stores the
+### ⛔ BLOCKER (empirical): faust wasm uses the exception-handling proposal
+
+`FaustWasmKernel` is implemented in `crates/ojwasm/src/backend.rs` (memoryBase +
+tableBase imports, the dsp-pointer ABI, the per-channel I/O memory model), BUT it
+cannot run on the current toolchain:
+
+- **faust 2.85.5 `-lang wasm` ALWAYS emits a wasm *exception-handling* tag section**
+  (its memory-manager / bounds-check wrapper). Confirmed: default, `-exp10`, and the
+  `-mem2`/`-mem3` modes (which error) all produce a tag section.
+- **wasmtime 45 cannot run it.** `Config::wasm_exceptions` is gated behind the `gc`
+  feature + a collector (`gc-drc`); even with those enabled, the parser fails
+  (`unexpected end-of-file`) — wasmtime 45's exception support is too incomplete to
+  parse faust's module, and cranelift cannot codegen exceptions regardless.
+
+So the `oj_*` host (hand-authored Rust/AssemblyScript/WAT, no exceptions) runs
+today; the **faust path is blocked on the toolchain**, and its test is `#[ignore]`d
+(run with `--ignored` once unblocked). Realistic ways forward, in order:
+
+1. **faust → C/C++ → native dylib** (`faust -lang cpp` → MSVC → `libloading`): a
+   `NativeKernel` impl of the same `Kernel` trait. Avoids wasm + exceptions entirely;
+   MSVC is installed. The most reliable native faust→sound path — but diverges from
+   the "one wasm artifact" invariant (no browser parity for faust nodes).
+2. **libfaust JIT** (`-lang llvm` / the libfaust C API): faust → native code
+   in-process. Needs LLVM/libfaust wiring.
+3. **A newer wasmtime** once cranelift gains exception codegen, OR a wasm post-pass
+   that strips faust's exception wrapper — then `FaustWasmKernel` runs unchanged.
+
+### Remaining to end-to-end (once a faust path above is chosen)
+1. Wire `ojwasm` into the `oj-tauri` engine/registry; `author_wasm_node` stores the
    bytes (fixing the discarded-bytes gap) and registers the loader + recompiles.
-3. The 64-sample `<5 ms` benchmark on real hardware (the MOTU M4 is present).
+2. The 64-sample `<5 ms` benchmark on real hardware (the MOTU M4 is present).
