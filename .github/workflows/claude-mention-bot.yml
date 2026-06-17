@@ -6,45 +6,40 @@ on:
   pull_request_review_comment:
     types: [created]
 
+# FENCED (plan §0.6): SUGGEST/REPLY-ONLY. `contents: read` — a comment can no
+# longer drive a write token (its prior `contents: write` + auto-`git push` was an
+# RCE/prompt-injection surface: any `@claude` from anyone ran an agent with write
+# access). `pull-requests`/`issues: write` are only for posting the reply.
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
   issues: write
 
 jobs:
   respond:
-    # Only run on PRs with @claude mention
-    if: github.event.issue.pull_request && contains(github.event.comment.body, '@claude')
+    # Only on a PR comment that @-mentions claude AND comes from a TRUSTED author
+    # (OWNER/MEMBER/COLLABORATOR) — never an arbitrary fork user.
+    if: |
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '@claude') &&
+      github.actor != 'claude[bot]' &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR')
     runs-on: ubuntu-latest
 
     steps:
-      - name: Get PR branch
-        id: get-branch
-        run: |
-          # CRITICAL: issue_comment runs on default branch, not PR branch
-          # We must explicitly fetch the PR branch
-          PR_REF=$(gh pr view ${{ github.event.issue.number }} \
-            --repo ${{ github.repository }} \
-            --json headRefOid --jq '.headRefOid')
-          echo "ref=$PR_REF" >> $GITHUB_OUTPUT
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Checkout PR branch
-        # Pinned to v4.3.1 for supply chain security
+      # Checkout the repo's OWN (trusted) default branch for context only. The PR's
+      # (possibly fork-authored) head is read via the GitHub API, never checked out
+      # and executed in this secret-holding job.
+      - name: Checkout
+        # Pinned to v4.3.1 for supply chain security.
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
-          ref: ${{ steps.get-branch.outputs.ref }}
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: false
 
-      - name: Configure Git
-        run: |
-          git config user.name "claude[bot]"
-          git config user.email "claude[bot]@users.noreply.github.com"
-
-      - name: Process @claude mention
-        # Pinned to v1.0.26 for supply chain security
+      - name: Process @claude mention (suggest/reply-only)
+        # Pinned to v1.0.26 for supply chain security.
         uses: anthropics/claude-code-action@0d1933529914177075d5bc3558ae3d047f188146
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -54,65 +49,27 @@ jobs:
             --max-turns 3
           prompt: |
             You've been mentioned in a PR comment by @${{ github.event.comment.user.login }}.
+            You have READ-ONLY access — you MUST NOT commit, push, or modify any
+            files. Your only output is a reply comment.
 
-            ## Comment Context
+            ## Context
             **PR**: #${{ github.event.issue.number }}
             **Comment**: ${{ github.event.comment.body }}
             **Comment URL**: ${{ github.event.comment.html_url }}
 
-            ## Your Task
+            ## Task
 
-            1. **Understand the request**: Read the comment carefully and understand what the user is asking for
+            Understand the request, read the relevant code + the PR diff (via the
+            GitHub API), and reply helpfully:
+            - For an explanation/review/question: answer clearly, with file:line
+              references.
+            - For a requested code change: describe the SUGGESTED change as a diff
+              or code block for the human to apply — do NOT apply it yourself.
 
-            2. **Take action** based on the request type:
+            This repo is bun-only (npm/yarn are blocked by a preinstall guard); if
+            you cite commands, use `bun run lint` / `bun run test:run` / `bun run
+            build`. Do NOT run untrusted PR build/test scripts in this job.
 
-               **Code fixes/changes:**
-               - Make the requested changes to the code
-               - Run quality checks: `npm run build && npm run lint && npm run test:run`
-               - If checks pass, commit: `git add . && git commit -m "[skip ci] fix: <description>" && git push`
-               - Reply to the comment with what you did
-
-               **Code review/explanation:**
-               - Read the relevant code files
-               - Provide a clear, helpful explanation
-               - Reply to the comment with your analysis
-
-               **Questions/help:**
-               - Provide helpful guidance
-               - Link to relevant documentation if applicable
-               - Reply to the comment with your answer
-
-            3. **Reply to the user**: Always post a comment on the PR explaining:
-               - What you understood from their request
-               - What actions you took (commits, analysis, etc.)
-               - Any issues or limitations you encountered
-               - Next steps if applicable
-
-            ## Important Guidelines
-
-            - Be helpful and friendly
-            - If the request is unclear, ask for clarification
-            - Only commit code if tests pass
-            - Follow project code style from .claude/CLAUDE.md
-            - Use [skip ci] in commit messages
-            - If you can't fulfill the request, explain why
-            - Keep responses concise but complete
-
-            ## Reply Format
-
-            When posting your reply, use this format:
-
-            ```
-            Hi @username! 👋
-
-            [What you understood]
-
-            [What you did / found]
-
-            [Any issues or next steps]
-
-            ---
-            🤖 Claude Code Bot
-            ```
-
-            Now process the request and help the user!
+            Always finish by posting ONE reply comment summarizing what you
+            understood and what you suggest. Never use `git add`/`git commit`/`git
+            push`.
