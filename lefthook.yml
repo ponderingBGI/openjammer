@@ -18,8 +18,8 @@ pre-commit:
     doctor:
       run: bun scripts/oj/index.ts doctor --fix --from-files {staged_files}
       stage_fixed: true
-    # Version-sync consistency check (all four files == the release-please value).
-    # A CONSISTENCY check, never an independent SSOT — release-please owns the bump.
+    # Version-sync consistency check (all four files == the release value).
+    # A CONSISTENCY check, never an independent SSOT — release automation owns the bump.
     versions:
       run: bun scripts/oj/index.ts doctor --check version-sync
     # Credential scan. ALSO a required CI step (this local copy is early-warning).

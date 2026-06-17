@@ -1,5 +1,5 @@
 // scripts/oj/lib/ssot.ts — version-sync as a CONSISTENCY check (NEVER an
-// independent SSOT). release-please (R1) owns the version bump and writes all
+// independent SSOT). Release automation owns the version bump and writes all
 // four files in lockstep; this module only asserts the four files are EQUAL and
 // `--fix` only ALIGNS them to the chosen canonical value. It never mints a new
 // version.
@@ -76,7 +76,7 @@ export interface VersionSyncResult {
 
 /**
  * Compute sync status. Canonical is the Cargo `[workspace.package].version`
- * (the release-please seed); if Cargo is unreadable we fall back to the most
+ * (the release automation seed); if Cargo is unreadable we fall back to the most
  * common value just so --fix has a target, but inSync is computed strictly.
  */
 export async function checkVersionSync(): Promise<VersionSyncResult> {

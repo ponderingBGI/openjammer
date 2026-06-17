@@ -31,7 +31,7 @@ async function tempFixture(files: Record<string, string>): Promise<string> {
   return dir;
 }
 
-const UNIFIED = '0.1.0-alpha.2';
+const UNIFIED = '0.0.0';
 
 const CARGO = (v: string) =>
   [
@@ -76,12 +76,12 @@ test('readVersionFile parses a JSON .version line', async () => {
 test('injected drift is detected: Cargo vs package.json disagree', async () => {
   // Build two temp version files with mismatched versions and read each directly.
   const dir = await tempFixture({
-    'Cargo.toml': CARGO('0.1.0-alpha.2'),
+    'Cargo.toml': CARGO('0.0.1-canari.2'),
     'package.json': PKG('0.0.0'),
   });
   const cargo = await readVersionFile({ path: join(dir, 'Cargo.toml'), kind: 'cargo-workspace' });
   const pkg = await readVersionFile({ path: join(dir, 'package.json'), kind: 'json-version' });
-  expect(cargo.version).toBe('0.1.0-alpha.2');
+  expect(cargo.version).toBe('0.0.1-canari.2');
   expect(pkg.version).toBe('0.0.0');
   expect(cargo.version).not.toBe(pkg.version);
 
@@ -94,7 +94,7 @@ test('injected drift is detected: Cargo vs package.json disagree', async () => {
 test('line-surgical alignment preserves the Cargo comment block', async () => {
   // Simulate the --fix string transform without touching the real tree or git:
   // replace ONLY the version line, leaving comments intact.
-  const original = CARGO('0.0.0');
+  const original = CARGO('0.0.1');
   const CARGO_RE = /^version\s*=\s*"([^"]*)"/m;
   const fixed = original.replace(CARGO_RE, (whole, captured: string) =>
     whole.replace(`"${captured}"`, `"${UNIFIED}"`),
@@ -102,7 +102,7 @@ test('line-surgical alignment preserves the Cargo comment block', async () => {
   expect(fixed).toContain('# comment block that must be preserved');
   expect(fixed).toContain('# second comment line');
   expect(fixed).toContain(`version = "${UNIFIED}"`);
-  expect(fixed).not.toContain('version = "0.0.0"');
+  expect(fixed).not.toContain('version = "0.0.1"');
   // Only one line changed.
   const origLines = original.split('\n');
   const fixedLines = fixed.split('\n');

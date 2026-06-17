@@ -1,43 +1,109 @@
 name: Release
 
-# Cross-platform native installers for the OpenJammer desktop shell (U22).
-#
-# Fires on a `v*` tag push and, across a macOS / Linux / Windows matrix, runs
-# `tauri-apps/tauri-action` to build each platform's installers
-# (.dmg + .app, .deb + .AppImage, NSIS .exe) and attach them to a DRAFT
-# GitHub Release. The frontend is the existing Vite web app (built by Tauri's
-# `beforeBuildCommand`, "bun run build"); the backend is the native ojcore
-# engine compiled into the `openjammer` binary.
+# Stable releases are minted when the canari -> main promotion lands. The first
+# real stable release is v0.0.1; every automatic promotion increments patch only.
+# A manual dispatch may provide target_version (for example 0.1.0) to move to a
+# new minor line, after which automatic patch releases continue from there.
 
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target_version:
+        description: "Exact stable SemVer core to publish, e.g. 0.1.0"
+        required: false
+        type: string
 
-# Needed for tauri-action to create the GitHub Release and upload assets.
 permissions:
   contents: write
+  pull-requests: write
+
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
 
 jobs:
+  prepare:
+    name: Prepare stable version
+    if: >-
+      ${{
+        github.event_name == 'workflow_dispatch' ||
+        !startsWith(github.event.head_commit.message, 'chore(release): publish v')
+      }}
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Resolve requested stable version
+        id: request
+        env:
+          GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          DISPATCH_TARGET: ${{ inputs.target_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="${DISPATCH_TARGET:-}"
+          if [ -z "$target" ] && [ "${{ github.event_name }}" = "push" ]; then
+            pr_json="$(gh api "repos/$REPO/commits/$SHA/pulls" \
+              -H "Accept: application/vnd.github+json" 2>/dev/null || true)"
+            target="$(jq -r '.[0].body // ""' <<<"$pr_json" \
+              | sed -n 's/^oj-next-stable:[[:space:]]*//p' | head -1 || true)"
+          fi
+          echo "target_version=$target" >> "$GITHUB_OUTPUT"
+
+      - name: Compute next stable version
+        id: plan
+        env:
+          GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          bun scripts/oj/release.ts next-stable \
+            --repo "${{ github.repository }}" \
+            --target-version "${{ steps.request.outputs.target_version }}"
+
+      - name: Stamp source version
+        run: bun scripts/oj/release.ts stamp "${{ steps.plan.outputs.version }}"
+
+      - name: Commit version and tag
+        env:
+          RELEASE_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml package.json packages/oj-protocol-ts/package.json src-tauri/tauri.conf.json
+          git commit -m "chore(release): publish ${{ steps.plan.outputs.tag }}"
+          git tag -a "${{ steps.plan.outputs.tag }}" -m "OpenJammer ${{ steps.plan.outputs.tag }}"
+          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git" HEAD:main
+          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git" "${{ steps.plan.outputs.tag }}"
+
   release:
     name: Build installers (${{ matrix.platform }})
+    needs: prepare
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Apple silicon (.app/.dmg). macos-latest is arm64.
           - platform: macos-latest
             args: "--target aarch64-apple-darwin"
             piTarget: "aarch64-apple-darwin"
-          # Intel macOS (.app/.dmg).
           - platform: macos-latest
             args: "--target x86_64-apple-darwin"
             piTarget: "x86_64-apple-darwin"
-          # Linux (.deb/.AppImage).
           - platform: ubuntu-latest
             args: ""
             piTarget: "x86_64-unknown-linux-gnu"
-          # Windows (NSIS .exe).
           - platform: windows-latest
             args: ""
             piTarget: "x86_64-pc-windows-msvc"
@@ -45,6 +111,8 @@ jobs:
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - name: Linux webview build deps
         if: matrix.platform == 'ubuntu-latest'
@@ -59,18 +127,14 @@ jobs:
             libasound2-dev \
             pkg-config
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@v2
 
       - name: Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          # Cross targets so the macOS matrix can build both arches.
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
-        # src-tauri is a workspace member, so its build artifacts land in the
-        # workspace-root target/, not src-tauri/target.
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -78,12 +142,6 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
-      # Turn on signed updater artifacts (latest.json) for this stable build. The
-      # committed tauri.conf.json already carries the stable pubkey + the
-      # `releases/latest` endpoint and leaves createUpdaterArtifacts OFF (so
-      # key-less builds keep working); this flips it on. The stable signing key is
-      # the secret below; the public key is owner-pasted into tauri.conf.json
-      # (OWNER-PROVISIONING.md §3).
       - name: Stable build config (updater artifacts)
         shell: bash
         run: |
@@ -95,45 +153,35 @@ jobs:
       - name: Build + release (tauri-action)
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # The STABLE minisign key signs the update payload (tag-scoped: this
-          # workflow only ever runs on a `v*` tag, never on a PR/push job).
+          GITHUB_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           OPENJAMMER_PI_TARGET: ${{ matrix.piTarget }}
         with:
-          # Tag/release wiring. `__VERSION__` is substituted from the app config.
-          tagName: ${{ github.ref_name }}
-          releaseName: "OpenJammer ${{ github.ref_name }}"
-          releaseBody: "See the assets below to download and install OpenJammer for your platform."
-          # Auto-publish on tag (founder decision): every `v*` tag is immediately
-          # live at /releases/latest, so the download page + updater resolve at once.
+          tagName: ${{ needs.prepare.outputs.tag }}
+          releaseName: "OpenJammer ${{ needs.prepare.outputs.tag }}"
+          releaseBody: "Stable OpenJammer release ${{ needs.prepare.outputs.tag }}."
           releaseDraft: false
           prerelease: false
-          # The Tauri project lives in `src-tauri`; the frontend is the repo root
-          # Vite app, built by the config's `beforeBuildCommand` ("bun run build").
           projectPath: "."
           args: ${{ matrix.args }}
 
-  # Bake the just-published release's per-asset URLs into
-  # public/download/releases.json so the static /download page renders the
-  # newest version instantly (and survives a GitHub API outage). The page still
-  # refreshes live from the REST API at runtime, so this is purely the fast,
-  # offline-safe default. Best-effort: never fails the release.
   bake-manifest:
     name: Bake download manifest
-    needs: release
-    if: always()
+    needs: [prepare, release]
+    if: ${{ needs.prepare.result == 'success' && needs.release.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.tag }}
 
       - name: Regenerate public/download/releases.json from the latest release
         continue-on-error: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           set -uo pipefail
           api="https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest"
@@ -143,8 +191,6 @@ jobs:
             echo "Latest release not resolvable yet — leaving baked releases.json untouched."
             exit 0
           fi
-          # Re-pick assets by the SAME suffix regexes the page uses. These must be
-          # confirmed against the first published release's real assets[].name.
           out="$(printf '%s' "$rel" | jq '{
             version: .tag_name,
             platforms: {
@@ -155,29 +201,30 @@ jobs:
               "linux-x86_64-deb":     { browser_download_url: ((.assets[] | select(.name | test("_amd64\\.deb$"))        | .browser_download_url) // "https://github.com/ponderingBGI/openjammer/releases/latest") }
             }
           }' || true)"
-          if [ -z "$out" ]; then
-            echo "jq transform failed — leaving baked releases.json untouched."
-            exit 0
-          fi
+          [ -n "$out" ] || exit 0
           printf '%s\n' "$out" > public/download/releases.json
-          echo "Baked public/download/releases.json:"
-          cat public/download/releases.json
 
-      - name: Commit the refreshed manifest
+      - name: Open canari sync PR with refreshed manifest
         continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        shell: bash
         run: |
           set -uo pipefail
           if git diff --quiet -- public/download/releases.json; then
-            echo "No change to releases.json — nothing to commit."
+            echo "No manifest change."
             exit 0
           fi
+          branch="release-sync/${TAG}"
+          git switch -c "$branch"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git checkout -B "${GITHUB_REF_NAME}-baked-manifest" || true
           git add public/download/releases.json
-          git commit -m "chore(download): bake releases.json for ${GITHUB_REF_NAME}" || true
-          # Push to the repo's default branch so the next Vercel deploy ships the
-          # fresh URLs. Best-effort: a protected branch just no-ops here.
-          default_branch="$(git remote show origin | sed -n 's/.*HEAD branch: //p')"
-          git push origin "HEAD:${default_branch}" || \
-            echo "Push skipped (protected branch or no permission) — runtime REST refresh still serves newest."
+          git commit -m "chore(download): bake releases.json for ${TAG}" || exit 0
+          git push origin "HEAD:$branch"
+          gh pr create \
+            --base canari \
+            --head "$branch" \
+            --title "Sync download manifest for ${TAG}" \
+            --body "Bakes the latest stable download URLs after ${TAG}."

@@ -80,5 +80,7 @@ landlock = "0.4"
 # glitch). Owner-enabled: needs the split stable/canary minisign keys + the
 # update endpoints (OWNER-PROVISIONING.md §3) before it does anything.
 [target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
+semver = "1.0.28"
 tauri-plugin-updater = "2.10.1"
 url = "2.5.8"

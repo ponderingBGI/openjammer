@@ -328,7 +328,7 @@ export interface LogsReadResult {
 
 /** The `get_diagnostics` relay: environment + live audio facts. */
 export interface DiagnosticsReadResult {
-    /** App version (release-please SSOT). */
+    /** App version (release SSOT). */
     version: string;
     /** Release channel. */
     channel: 'dev' | 'canary' | 'stable';

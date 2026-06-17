@@ -267,7 +267,7 @@
   }
 
   function tidyEmptyPlatforms() {
-    var blocks = document.querySelectorAll('.oj-all-body .oj-plat');
+    var blocks = document.querySelectorAll('.oj-other-body .oj-plat');
     Array.prototype.forEach.call(blocks, function (block) {
       var anyVisible = block.querySelector('.oj-btn:not([hidden])');
       block.hidden = !anyVisible;
@@ -409,14 +409,19 @@
     }
   }
 
-  function collapseDetails() {
-    var d = document.getElementById('oj-all');
-    if (d) d.removeAttribute('open');
-  }
-
-  function openDetails() {
-    var d = document.getElementById('oj-all');
-    if (d) d.setAttribute('open', '');
+  // After a clean DESKTOP detect, the detected OS is shown in the primary card —
+  // drop its duplicate block from the always-visible "other platforms" list and
+  // retitle. With no usable primary (mobile / regex miss / unknown / JS-off), the
+  // list stays titled "All platforms" and shows every platform that has an asset.
+  function updateOtherPlatforms(hideOs) {
+    var title = document.getElementById('oj-other-title');
+    if (title) title.textContent = hideOs ? 'Other platforms' : 'All platforms';
+    var blocks = document.querySelectorAll('.oj-other-body .oj-plat');
+    Array.prototype.forEach.call(blocks, function (block) {
+      if (hideOs && block.getAttribute('data-os') === hideOs) {
+        block.hidden = true; // it lives in the primary card above
+      }
+    });
   }
 
   /* --------------------------------------------------------------- main */
@@ -501,13 +506,10 @@
 
     var hasPrimary = renderPrimary(detected, urls, version);
 
-    if (hasPrimary && detected.os !== 'ios' && detected.os !== 'android') {
-      // Clean detect with a real desktop card → collapse the floor.
-      collapseDetails();
-    } else {
-      // No usable primary (regex miss / unknown OS) → reveal the floor.
-      openDetails();
-    }
+    // Desktop detect with a real card → hide that OS from the "other" list (it's
+    // in the primary card). Mobile / unknown / regex miss → keep all listed.
+    var isDesktop = hasPrimary && detected.os !== 'ios' && detected.os !== 'android';
+    updateOtherPlatforms(isDesktop ? detected.os : null);
   }
 
   if (document.readyState === 'loading') {

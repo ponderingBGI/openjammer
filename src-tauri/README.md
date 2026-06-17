@@ -162,7 +162,10 @@ heavy, so CI (below) is the canonical installer build.
 
 `.github/workflows/release.yml` builds and publishes the installers:
 
-1. Push a version tag: `git tag v0.1.0 && git push origin v0.1.0`.
+1. Merge the standing `canari -> main` promotion PR. The workflow computes the
+   next patch version (`v0.0.1`, `v0.0.2`, ...), commits the four version files
+   on `main`, and tags the commit. To start a new line, run the promotion
+   workflow with `target_version=0.1.0` before merging.
 2. The workflow fans out over `macos-latest` (arm64 **and** x86_64),
    `ubuntu-latest`, and `windows-latest`, installing the Linux webview deps in
    the Ubuntu job.
@@ -172,5 +175,9 @@ heavy, so CI (below) is the canonical installer build.
    - macOS: `.app`, `.dmg`
    - Linux: `.deb`, `.AppImage`
    - Windows: `.msi`, `.exe`
-4. The artifacts are attached to a **draft** GitHub Release named
-   `OpenJammer <tag>`. Review the draft, then publish.
+4. The artifacts are attached to a published GitHub Release named
+   `OpenJammer <tag>`.
+
+Canari builds are published by `.github/workflows/canary.yml` as numbered
+prereleases like `v0.0.1-canari.1`. The `0.0.1` part is the stable version the
+current `canari -> main` promotion will publish.
