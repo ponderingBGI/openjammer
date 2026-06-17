@@ -12,7 +12,7 @@ Use this checklist to verify your node is complete and follows best practices:
 - [ ] **Type registered** - Added to `NodeType` union in `src/engine/types.ts`
 - [ ] **Registry entry** - Added to `nodeDefinitions` in `src/engine/registry.ts`
 - [ ] **Component created** - `src/components/Nodes/[Name]Node.tsx` exists
-- [ ] **NodeWrapper routing** - Case added in `src/components/Nodes/NodeWrapper.tsx`
+- [ ] **NodeWrapper routing** - Case added in `src/components/Canvas/NodeCanvas.tsx`
 - [ ] **Exported** - Added to `src/components/Nodes/index.ts`
 
 ### Naming Conventions
@@ -263,7 +263,7 @@ Add to `src/components/Nodes/index.ts`:
 export { MyNewNode } from './MyNewNode';
 ```
 
-Update `src/components/Nodes/NodeWrapper.tsx` to render your node:
+Update `src/components/Canvas/NodeCanvas.tsx` to render your node:
 
 ```typescript
 import { MyNewNode } from '../Nodes';
@@ -1009,7 +1009,7 @@ Check browser console for:
 
 **Symptom**: Node appears as blank rectangle or shows wrong component.
 
-**Fix**: Add case in `src/components/Nodes/NodeWrapper.tsx`:
+**Fix**: Add case in `src/components/Canvas/NodeCanvas.tsx`:
 ```typescript
 case 'my-node':
     return <MyNode node={node} {...handlers} />;
@@ -1127,7 +1127,7 @@ updateNodeData<MyNodeData>(node.id, { myProperty: newValue });
 3. **Use `createStandardPanels()`** for consistent panel creation
 4. **Add empty slots** with `empty-` prefix and `portHideExternalLabel`
 5. **Set visibility flags** (`showEmptyInputPorts`, `showEmptyOutputPorts`)
-6. **Create the visual component** and register it in `NodeWrapper.tsx`
+6. **Create the visual component** and register it in `NodeCanvas.tsx`
 
 ### Quick Reference: Port Direction Mapping
 

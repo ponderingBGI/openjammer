@@ -23,7 +23,6 @@
 
 import { audioBufferToWAV } from '../wav';
 import { getAudioContext } from '../audioContext';
-import { logError } from '../../utils/log';
 import type { NodeIdx } from '../../../packages/oj-protocol-ts/src/index';
 import { LooperAction } from '../../../packages/oj-protocol-ts/src/index';
 import type { RtCommand } from '../../../packages/oj-protocol-ts/src/index';
@@ -412,7 +411,7 @@ export class OjcoreRecorderHandle implements RecorderHandle {
                 sampleRate: ctx?.sampleRate ?? 48000,
             };
         } catch (err) {
-            logError('audio.recorder', 'save to project failed', { error: String(err) });
+            console.error('[OjcoreRecorderHandle] save to project failed:', err);
             return null;
         }
     }

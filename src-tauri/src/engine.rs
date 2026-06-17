@@ -30,26 +30,21 @@
 //! sample buffer ever crosses the IPC boundary — only `OjGraph` / `RtCommand`
 //! JSON (governing principle #4).
 
-use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 
-use ojcore::meter::{event_frame, return_frame};
+use ojcore::meter::return_frame;
 use ojcore::{
     compile, compile_with_assets, master_param, CommandProducer, CommandQueue, CompileError,
-    Engine, EventRing, MeterRing, PluginRegistry, ProgramSwap,
+    Engine, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{
     AssetCatalog, AssetError, AssetStore, AudioHost, HostError, Pcm, StreamRequest,
 };
 use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
 use ojinstrument::{register_all, RegisterOpts};
-use ojproto::{
-    AssetId, AssetRef, EngineFrame, Event, EventKind, NodeIdx, OjGraph, RtCommand, RtEvent,
-    Severity, Source,
-};
+use ojproto::{AssetId, AssetRef, EngineFrame, NodeIdx, OjGraph, RtCommand};
+use ojwasm::WasmHostLoader;
 
 /// Default stream request: 48 kHz, a small buffer for low latency, stereo out,
 /// no duplex input (pure synthesis path). Matches the `<5 ms` engine target;
@@ -66,19 +61,6 @@ pub const DEFAULT_STREAM: StreamRequest = StreamRequest {
 /// note/param events between two audio blocks; `RtCommand` is `Copy` and tiny.
 const COMMAND_RING_CAP: usize = 1024;
 
-/// Poll cadence (ms) of the dedicated off-RT event-drain thread. Faults arrive at
-/// block rate; ~1 ms keeps the 16 KiB event ring from overrunning between drains
-/// while staying a cheap default-priority loop (never RT-promoted). Decoupled
-/// from the 50 ms meter poll (meters tolerate lossy 20 Hz; faults do not).
-const EVENT_DRAIN_INTERVAL_MS: u64 = 1;
-
-/// Upper bound on the control-side `Event` hand-off buffer the drain thread fills
-/// and `drain_events` empties. Bounded by construction: if the UI stops polling
-/// (`poll_events`), the oldest events are dropped rather than growing without
-/// limit. Faults are rare, so this is reached only under a sustained storm with
-/// no UI consumer.
-const EVENT_BUF_CAP: usize = 8192;
-
 /// Why a backend control operation failed. Surfaces to the webview as a string
 /// (these are control-rate, off-RT errors — never raised on the audio thread).
 #[derive(Debug)]
@@ -86,9 +68,6 @@ pub enum BackendError {
     /// The pushed graph could not be lowered (cycle / unknown manifest / no
     /// master output / dangling edge / out-of-range port).
     Compile(CompileError),
-    /// The audio host could not (re)start — typically no audio device in a
-    /// headless/CI sandbox, which is expected and non-fatal there.
-    Host(HostError),
     /// The UI->RT command ring was full; the command was dropped rather than
     /// blocking the control thread.
     RingFull,
@@ -105,7 +84,6 @@ impl std::fmt::Display for BackendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BackendError::Compile(e) => write!(f, "graph compile failed: {e}"),
-            BackendError::Host(e) => write!(f, "audio host: {e}"),
             BackendError::RingFull => write!(f, "command ring full; command dropped"),
             BackendError::PluginScan(e) => write!(f, "plugin scan failed: {e}"),
             BackendError::Asset(e) => write!(f, "asset operation failed: {e}"),
@@ -163,25 +141,6 @@ pub struct EngineBackend {
     /// frames here at block end, and [`EngineBackend::drain_meters`] reads them
     /// off the control thread for the `meters` Tauri event.
     meter_ring: Arc<MeterRing>,
-    /// Control-side clone of the engine's RT -> control EVENT return ring (a
-    /// SEPARATE ring from `meter_ring` so a fault storm never evicts meters). The
-    /// matching `Arc` is attached to the engine in [`EngineBackend::new`] /
-    /// re-attached in [`EngineBackend::adopt`]; the audio thread publishes compact
-    /// [`RtEvent`] frames here on a fault. The dedicated [`event_drain_loop`]
-    /// thread is the SOLE consumer — it pops this ring, projects each event into
-    /// `tracing` (L1) and pushes it onto [`Self::event_buf`] for the UI.
-    event_ring: Arc<EventRing>,
-    /// Control-side hand-off buffer the drain thread fills with lifted [`Event`]
-    /// envelopes and [`EngineBackend::drain_events`] empties for the DevLog
-    /// (`poll_events`). Bounded at [`EVENT_BUF_CAP`] (drop-oldest). The drain
-    /// thread is the ONLY producer here and the UI poll the only consumer.
-    event_buf: Arc<Mutex<VecDeque<Event>>>,
-    /// Shutdown flag for the event-drain thread; set in [`Drop`], polled each
-    /// loop iteration so the thread exits promptly when the backend is torn down.
-    drain_stop: Arc<AtomicBool>,
-    /// Join handle for the event-drain thread, joined in [`Drop`]. `None` only if
-    /// the thread failed to spawn (logging degrades, the app still runs).
-    drain_handle: Option<JoinHandle<()>>,
     /// Whether metering is enabled (mirrored so a graph swap re-applies it).
     metering: bool,
     /// Off-RT content-addressed asset catalog (sample PCM for the sampler,
@@ -222,12 +181,16 @@ impl EngineBackend {
     /// first successful start), and control commands still validate.
     pub fn new() -> Self {
         let registry = Self::build_registry();
-        let stream = DEFAULT_STREAM;
+        // Render at the DEVICE's default sample rate, not a hardcoded 48k: a pro
+        // interface (e.g. the MOTU M4) may run at 96k, and rendering at the wrong
+        // rate plays back at the wrong pitch/tempo. The hardware is authoritative;
+        // the graph's own rate is just the UI hint (overridden per push_graph too).
+        let mut stream = DEFAULT_STREAM;
+        if let Some(rate) = ojcore_native::default_output_sample_rate() {
+            stream.sample_rate = rate;
+        }
         let swap = ProgramSwap::new();
         let meter_ring = Arc::new(MeterRing::new());
-        let event_ring = Arc::new(EventRing::new());
-        let event_buf: Arc<Mutex<VecDeque<Event>>> = Arc::new(Mutex::new(VecDeque::new()));
-        let drain_stop = Arc::new(AtomicBool::new(false));
 
         // Compile the minimal starter program (silent: a gain into the speaker).
         // `compile` only fails on a malformed graph, and ours is well-formed by
@@ -239,11 +202,6 @@ impl EngineBackend {
         // subscriber asks (zero-cost while off). The same `Arc` clone is kept on
         // the control side so `drain_meters` reads what the audio thread publishes.
         engine.attach_meter_ring(Some(Arc::clone(&meter_ring)));
-        // Attach the EVENT ring the same way. Unlike metering, event emission is
-        // always live (it is alloc-free + fault-only, gated by the `devlog`
-        // feature this crate enables on `ojcore`), so faults flow from the very
-        // first block; `drain_events` reads them off the control thread.
-        engine.attach_event_ring(Some(Arc::clone(&event_ring)));
 
         // Split a fresh command ring; the consumer moves into the audio host.
         let (producer, consumer) = CommandQueue::split(COMMAND_RING_CAP);
@@ -265,23 +223,6 @@ impl EngineBackend {
             }
         };
 
-        // Spawn the dedicated, default-priority event-drain thread (NEVER
-        // RT-promoted). It is the SOLE consumer of `event_ring`: it pops decoded
-        // faults at a ~1 ms cadence, projects each into the L1 `tracing` sink, and
-        // pushes the lifted [`Event`] onto `event_buf` for the DevLog poll. The
-        // ring + buffer + stop flag are stable for the backend's whole lifetime
-        // (a graph swap re-attaches the SAME `event_ring`), so this is spawned
-        // exactly once here and joined in [`Drop`].
-        let drain_handle = {
-            let ring = Arc::clone(&event_ring);
-            let buf = Arc::clone(&event_buf);
-            let stop = Arc::clone(&drain_stop);
-            std::thread::Builder::new()
-                .name("oj-event-drain".into())
-                .spawn(move || event_drain_loop(&ring, &buf, &stop))
-                .ok()
-        };
-
         Self {
             registry,
             host,
@@ -289,10 +230,6 @@ impl EngineBackend {
             swap,
             stream,
             meter_ring,
-            event_ring,
-            event_buf,
-            drain_stop,
-            drain_handle,
             metering: false,
             catalog: AssetCatalog::new(),
             store: AssetStore::new(),
@@ -376,11 +313,28 @@ impl EngineBackend {
     /// goes live — the founder-verified seam that makes a serialized graph with a
     /// bound sample actually play.
     pub fn push_graph(&mut self, graph: &OjGraph) -> Result<(), BackendError> {
-        self.adopt(graph)?;
-        // Remember the live graph so a later sample bind can re-resolve + recompile
-        // it against the updated catalog without a fresh UI push.
-        self.last_graph = Some(graph.clone());
+        // Render at the device's rate (see `new`): the graph's own sample_rate is a
+        // UI hint; the hardware is authoritative, so a 96k interface plays in tune.
+        let g = self.at_device_rate(graph);
+        self.adopt(&g)?;
+        // Remember the (rate-adjusted) live graph so a later sample bind can
+        // re-resolve + recompile it against the catalog without a fresh UI push.
+        self.last_graph = Some(g);
         Ok(())
+    }
+
+    /// Clone `graph` with its `sample_rate` set to the default output device's rate
+    /// (when one is available and differs) so the engine renders in tune on hardware
+    /// that isn't 48k. Falls back to the graph's own rate when no device is present.
+    fn at_device_rate(&self, graph: &OjGraph) -> OjGraph {
+        match ojcore_native::default_output_sample_rate() {
+            Some(rate) if rate != graph.sample_rate => {
+                let mut g = graph.clone();
+                g.sample_rate = rate;
+                g
+            }
+            _ => graph.clone(),
+        }
     }
 
     /// Compile `graph` (resolving its assets through the catalog) and adopt the
@@ -403,9 +357,6 @@ impl EngineBackend {
         // engine so the level stream survives a graph swap.
         engine.attach_meter_ring(Some(Arc::clone(&self.meter_ring)));
         engine.set_metering(self.metering);
-        // Re-attach the event ring too, so fault events keep flowing across the
-        // swap (events are always live — no per-subscriber toggle like metering).
-        engine.attach_event_ring(Some(Arc::clone(&self.event_ring)));
 
         // Fresh command ring for the new audio callback; the old producer (and
         // any unsent commands) is replaced.
@@ -423,14 +374,20 @@ impl EngineBackend {
                 self.producer = producer;
                 Ok(())
             }
-            Err(HostError::NoOutputDevice) => {
-                // No device: keep the (compiled, published) program staged and
-                // the new producer live so commands still validate. Not an error
-                // the UI must surface — it just means "engine idle, no device".
+            // ANY host-(re)start failure is NON-FATAL here, matching
+            // [`EngineBackend::new`]: the freshly compiled program is already
+            // published to the swap mailbox and the new producer is live, so
+            // commands still validate and the next `push_graph` re-attempts the
+            // start. This covers both a device-less sandbox
+            // (`HostError::NoOutputDevice`) AND a present-but-incompatible device
+            // (e.g. a default output whose WASAPI shared-mode format rejects the
+            // requested rate/buffer). The UI keeps running with the engine idle
+            // instead of surfacing a hard error the user cannot act on.
+            Err(e) => {
+                eprintln!("ojcore: audio host failed to (re)start (non-fatal): {e}");
                 self.producer = producer;
                 Ok(())
             }
-            Err(e) => Err(BackendError::Host(e)),
         }
     }
 
@@ -482,21 +439,6 @@ impl EngineBackend {
         out
     }
 
-    /// Drain the control-side [`Event`] hand-off buffer for the UI's DevLog
-    /// (`poll_events`). Control-rate: called on a UI-driven poll, never the audio
-    /// thread. The buffer is filled by the dedicated [`event_drain_loop`] thread
-    /// (which pops the ring, lifts each compact `RtEvent` into a full [`Event`]
-    /// envelope, and projects it into the L1 `tracing` sink); this just takes
-    /// whatever has accumulated since the last poll, in FIFO order, leaving the
-    /// buffer empty. A poisoned lock (the drain thread panicked) yields an empty
-    /// batch rather than propagating the panic to the IPC boundary.
-    pub fn drain_events(&mut self) -> Vec<Event> {
-        match self.event_buf.lock() {
-            Ok(mut buf) => buf.drain(..).collect(),
-            Err(_) => Vec::new(),
-        }
-    }
-
     /// Load decoded mono PCM as the sample for `node`'s `builtin.sampler` and
     /// make it PLAY: content-address the PCM into the [`AssetCatalog`] (the same
     /// off-RT asset pipeline a file load uses), bind the returned [`AssetId`] +
@@ -530,6 +472,27 @@ impl EngineBackend {
             }
         }
         Ok(id)
+    }
+
+    /// Register an AI-authored NATIVE faust code node (already compiled to a
+    /// `.dll`) under its `manifest_id`, then recompile the live graph so a node
+    /// referencing that id instantiates the native kernel. Off-RT (called from the
+    /// `author_faust_native` command). The `OutputGuard` chain wraps the kernel.
+    pub fn register_native_faust(
+        &mut self,
+        manifest_json: &str,
+        dll_path: PathBuf,
+    ) -> Result<(), String> {
+        let manifest: PluginManifest =
+            serde_json::from_str(manifest_json).map_err(|e| format!("bad manifest json: {e}"))?;
+        self.registry
+            .register(Box::new(WasmHostLoader::new_native(manifest, dll_path)));
+        // Recompile the live graph so the loader resolves + instantiates: the node
+        // may already be present (re-author), else the next `push_graph` uses it.
+        if let Some(graph) = self.last_graph.clone() {
+            self.adopt(&graph).map_err(|e| e.to_string())?;
+        }
+        Ok(())
     }
 
     /// Bind `asset` (and its `root_note`) onto `node` in `graph`: set the node's
@@ -707,115 +670,6 @@ impl Default for EngineBackend {
     }
 }
 
-impl Drop for EngineBackend {
-    /// Stop and join the event-drain thread so it never outlives the backend
-    /// (and never touches a freed ring). Setting the flag wakes the loop within
-    /// one ~1 ms tick; the join is therefore near-instant. A panicked drain
-    /// thread surfaces as a join `Err`, which we ignore — teardown must not panic.
-    fn drop(&mut self) {
-        self.drain_stop.store(true, Ordering::Relaxed);
-        if let Some(handle) = self.drain_handle.take() {
-            let _ = handle.join();
-        }
-    }
-}
-
-/// Control-side wall-clock timestamp in microseconds since the Unix epoch. Used
-/// to stamp the receipt time onto a lifted [`Event`] (the compact RT frame
-/// carries no clock). Off-RT only — `SystemTime::now` is never called on the
-/// audio thread.
-fn now_us() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_micros() as u64)
-        .unwrap_or(0)
-}
-
-/// Lift a compact, `Copy` [`RtEvent`] (the 16-byte subset that rides the ring)
-/// into the full off-RT [`Event`] envelope every L1/L3/L4 consumer reads,
-/// stamping the metadata the RT frame deliberately omits: a monotonic `seq`
-/// (owned by the drain thread), a severity following the fault taxonomy
-/// (`NodeFault` => `Error`; `Xrun` / `RingFull` => `Warn`), the control-side
-/// receipt `ts_us`, an [`Source::Engine`] origin, and `corr_id = 0` (no
-/// correlation id on RT faults yet). Pure — unit-tested directly.
-fn lift_event(rt: RtEvent, seq: u32, ts_us: u64) -> Event {
-    let kind = match rt {
-        RtEvent::Xrun { dropped } => EventKind::Xrun { dropped },
-        RtEvent::NodeFault { node, fault } => EventKind::NodeFault { node, fault },
-        RtEvent::RingFull => EventKind::RingFull,
-    };
-    let severity = match &kind {
-        EventKind::NodeFault { .. } => Severity::Error,
-        _ => Severity::Warn,
-    };
-    Event {
-        v: ojproto::SCHEMA_VERSION,
-        seq,
-        severity,
-        kind,
-        source: Source::Engine,
-        ts_us,
-        corr_id: 0,
-    }
-}
-
-/// Project a decoded [`Event`] into the L1 `tracing` sink (the rolling on-device
-/// NDJSON file + stderr). The `tracing` level mirrors the event's severity and
-/// the fields mirror the L2 schema — `tracing` is a *projection* of the event,
-/// never a second taxonomy. Off-RT only (the drain thread): `tracing` formats on
-/// the caller, so it must never run on the audio thread (foundation F-shared).
-fn emit_tracing(ev: &Event) {
-    // One field set, five levels: a local macro keeps the record identical across
-    // severities (the level itself must be a compile-time token for `tracing`).
-    // `kind`/`source` use the `?` (Debug) sigil so the full variant detail (node,
-    // fault, dropped count) lands in the structured record without a hand-rolled
-    // per-variant label.
-    macro_rules! record_at {
-        ($level:ident) => {
-            tracing::$level!(
-                target: "engine",
-                seq = ev.seq,
-                kind = ?ev.kind,
-                source = ?ev.source,
-                corr_id = ev.corr_id,
-                ts_us = ev.ts_us,
-                "engine event"
-            )
-        };
-    }
-    match ev.severity {
-        Severity::Trace => record_at!(trace),
-        Severity::Debug => record_at!(debug),
-        Severity::Info => record_at!(info),
-        Severity::Warn => record_at!(warn),
-        Severity::Error => record_at!(error),
-    }
-}
-
-/// The dedicated, default-priority event-drain loop (NEVER RT-promoted). The SOLE
-/// consumer of the engine's event ring: it pops decoded faults at a ~1 ms cadence
-/// ([`EVENT_DRAIN_INTERVAL_MS`]), lifts each into a full [`Event`] (monotonic
-/// `seq` owned here), projects it into the L1 `tracing` sink, and pushes it onto
-/// the bounded ([`EVENT_BUF_CAP`], drop-oldest) hand-off buffer the UI poll
-/// (`poll_events`) drains. Exits promptly when `stop` is set (checked each tick).
-fn event_drain_loop(ring: &EventRing, buf: &Mutex<VecDeque<Event>>, stop: &AtomicBool) {
-    let mut seq: u32 = 0;
-    while !stop.load(Ordering::Relaxed) {
-        event_frame::drain_events(ring, |rt| {
-            seq = seq.wrapping_add(1);
-            let ev = lift_event(rt, seq, now_us());
-            emit_tracing(&ev);
-            if let Ok(mut b) = buf.lock() {
-                if b.len() >= EVENT_BUF_CAP {
-                    b.pop_front();
-                }
-                b.push_back(ev);
-            }
-        });
-        std::thread::sleep(std::time::Duration::from_millis(EVENT_DRAIN_INTERVAL_MS));
-    }
-}
-
 /// Tauri-managed wrapper: the backend behind a `Mutex` so the IPC command
 /// handlers (which run on Tauri's worker pool) get exclusive control-rate
 /// access. Never locked from the audio thread (that thread is inside `cpal`,
@@ -846,7 +700,11 @@ mod tests {
         let be = EngineBackend::new();
         // No device in CI => not running, but the producer ring is live.
         let info = be.stream_info();
-        assert_eq!(info.sample_rate, DEFAULT_STREAM.sample_rate);
+        // The engine follows the default output device's rate (e.g. 96k on a pro
+        // interface), falling back to DEFAULT_STREAM's rate when there is no device.
+        let expected_rate =
+            ojcore_native::default_output_sample_rate().unwrap_or(DEFAULT_STREAM.sample_rate);
+        assert_eq!(info.sample_rate, expected_rate);
         assert!(info.latency_ms > 0.0);
     }
 
@@ -974,7 +832,10 @@ mod tests {
         let mut be = EngineBackend::new();
         be.recorder_start(NodeIdx(4));
         let (pcm, rate) = be.recorder_stop(NodeIdx(4)).expect("capture was armed");
-        assert_eq!(rate, DEFAULT_STREAM.sample_rate);
+        // Capture rate follows the device (see backend_constructs_headless).
+        let expected_rate =
+            ojcore_native::default_output_sample_rate().unwrap_or(DEFAULT_STREAM.sample_rate);
+        assert_eq!(rate, expected_rate);
         // No engine-output tap in the sandbox, so the captured PCM is empty —
         // but the start/stop lifecycle is intact (the documented gap is the tap).
         assert!(pcm.is_empty());
@@ -1022,93 +883,6 @@ mod tests {
             }
             other => panic!("expected Meter, got {other:?}"),
         }
-    }
-
-    /// `lift_event` (pure) maps each `RtEvent` variant to a full [`Event`]
-    /// envelope: the right kind, the fault-taxonomy severity (`NodeFault` =>
-    /// `Error`; `Xrun` / `RingFull` => `Warn`), the passed-through `seq`/`ts_us`,
-    /// the current schema, an `Engine` source, and no correlation id.
-    #[test]
-    fn lift_event_maps_kind_severity_and_metadata() {
-        use ojproto::FaultKind;
-
-        let xrun = lift_event(RtEvent::Xrun { dropped: 4 }, 1, 1_000);
-        assert_eq!(xrun.seq, 1);
-        assert_eq!(xrun.ts_us, 1_000);
-        assert_eq!(xrun.v, ojproto::SCHEMA_VERSION);
-        assert_eq!(xrun.source, Source::Engine);
-        assert_eq!(xrun.corr_id, 0);
-        assert_eq!(xrun.severity, Severity::Warn);
-        assert_eq!(xrun.kind, EventKind::Xrun { dropped: 4 });
-
-        let fault = lift_event(
-            RtEvent::NodeFault {
-                node: NodeIdx(9),
-                fault: FaultKind::OverBudget,
-            },
-            2,
-            2_000,
-        );
-        assert_eq!(fault.severity, Severity::Error);
-        assert_eq!(
-            fault.kind,
-            EventKind::NodeFault {
-                node: NodeIdx(9),
-                fault: FaultKind::OverBudget,
-            }
-        );
-
-        let ring_full = lift_event(RtEvent::RingFull, 3, 3_000);
-        assert_eq!(ring_full.severity, Severity::Warn);
-        assert_eq!(ring_full.kind, EventKind::RingFull);
-    }
-
-    /// End-to-end: events emitted onto the engine's event ring are picked up by
-    /// the dedicated drain thread and surface through `drain_events` as lifted
-    /// [`Event`] envelopes, in FIFO order with a monotonic `seq`. Exercises the
-    /// live thread (a bounded poll-wait absorbs its ~1 ms cadence on a slow CI
-    /// runner; it normally resolves on the first poll).
-    #[test]
-    fn drain_thread_surfaces_ring_events_in_order() {
-        use ojproto::FaultKind;
-        let mut be = EngineBackend::new();
-        // Emit one of each variant directly onto the ring (simulating the audio
-        // thread's fault emits). The drain thread is the sole consumer.
-        let node_fault = RtEvent::NodeFault {
-            node: NodeIdx(9),
-            fault: FaultKind::OverBudget,
-        };
-        let pushed = [RtEvent::Xrun { dropped: 4 }, node_fault, RtEvent::RingFull];
-        for &ev in &pushed {
-            assert!(event_frame::emit(&be.event_ring, ev));
-        }
-
-        // Collect across polls until the thread has delivered all three (or a
-        // generous cap elapses). The starter graph is silent + device-less, so
-        // the engine emits nothing of its own — these three are all we see.
-        let mut events: Vec<Event> = Vec::new();
-        for _ in 0..200 {
-            events.extend(be.drain_events());
-            if events.len() >= pushed.len() {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
-
-        assert_eq!(events.len(), 3, "drain thread delivered all three events");
-        assert_eq!((events[0].seq, events[1].seq, events[2].seq), (1, 2, 3));
-        assert_eq!(events[0].kind, EventKind::Xrun { dropped: 4 });
-        assert_eq!(events[0].severity, Severity::Warn);
-        assert_eq!(
-            events[1].kind,
-            EventKind::NodeFault {
-                node: NodeIdx(9),
-                fault: FaultKind::OverBudget,
-            }
-        );
-        assert_eq!(events[1].severity, Severity::Error);
-        assert_eq!(events[2].kind, EventKind::RingFull);
-        assert_eq!(events[2].severity, Severity::Warn);
     }
 
     /// Speaker / mic control methods are safe round trips and never panic.

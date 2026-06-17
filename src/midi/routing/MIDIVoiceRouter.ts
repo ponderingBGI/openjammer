@@ -38,7 +38,6 @@ import type {
 import { getPresetRegistry } from '../MIDIDevicePresets';
 import type { GraphNode, MIDIInputNodeData } from '../../engine/types';
 import type { MIDIDevicePreset, MIDIEvent, MIDINoteEvent } from '../types';
-import { logError } from '../../utils/log';
 
 /** Sustain pedal CC number. */
 const SUSTAIN_CC = 64;
@@ -124,7 +123,7 @@ export class MIDIVoiceRouter {
             try {
                 this.handleEvent(event);
             } catch (err) {
-                logError('midi', 'routing error:', { error: String(err) });
+                console.error('[MIDIVoiceRouter] routing error:', err);
             }
         });
     }
@@ -157,10 +156,32 @@ export class MIDIVoiceRouter {
         for (const voice of voices) {
             if (event.type === 'noteOn') {
                 this.executor.noteOn(voice.nodeId, voice.row, voice.keyIndex, voice.velocity);
+                // Light the cables leaving this input node so the player sees the
+                // signal flow — parity with the computer-keyboard path
+                // (audioStore.emitKeyboardSignal). A hardware device's keys map to
+                // per-note ports rather than the keyboard's tidy row ports, so we
+                // glow every outgoing cable: the honest "signal is flowing from
+                // this device" indicator, and exactly right for the common
+                // single-cable (device -> instrument) patch.
+                for (const id of this.outgoingConnectionIds(voice.nodeId)) {
+                    this.executor.activateControlSignal(id);
+                }
             } else {
                 this.executor.noteOff(voice.nodeId, voice.row, voice.keyIndex);
+                for (const id of this.outgoingConnectionIds(voice.nodeId)) {
+                    this.executor.releaseControlSignal(id);
+                }
             }
         }
+    }
+
+    /** Ids of the connections whose source is `nodeId` (the cables it feeds). */
+    private outgoingConnectionIds(nodeId: string): string[] {
+        const ids: string[] = [];
+        for (const conn of this.graph.getConnections().values()) {
+            if (conn.sourceNodeId === nodeId) ids.push(conn.id);
+        }
+        return ids;
     }
 
     private handleCCEvent(

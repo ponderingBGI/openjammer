@@ -27,7 +27,6 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { logWarn } from '../utils/log';
 
 export type SeparatorDirection = 'horizontal' | 'vertical';
 
@@ -87,10 +86,10 @@ export function usePanelResize(options: UsePanelResizeOptions): UsePanelResizeRe
   useEffect(() => {
     if (process.env.NODE_ENV === 'development' && debugMode) {
       if (mode === 'percentage' && (initialPosition < 0 || initialPosition > 1)) {
-        logWarn('ui', `Node "${nodeId}": initialPosition (${initialPosition}) should be 0-1 for percentage mode`);
+        console.warn(`[usePanelResize] Node "${nodeId}": initialPosition (${initialPosition}) should be 0-1 for percentage mode`);
       }
       if (min >= max) {
-        logWarn('ui', `Node "${nodeId}": min (${min}) >= max (${max})`);
+        console.warn(`[usePanelResize] Node "${nodeId}": min (${min}) >= max (${max})`);
       }
     }
   }, [nodeId, mode, initialPosition, min, max, debugMode]);

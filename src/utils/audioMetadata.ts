@@ -8,7 +8,6 @@
  */
 
 import { parseBlob, type IAudioMetadata } from 'music-metadata';
-import { logWarn } from './log';
 
 // ============================================================================
 // Types
@@ -78,7 +77,7 @@ export async function extractMetadata(file: File): Promise<ExtractedMetadata> {
 
     return parseAudioMetadata(metadata);
   } catch (error) {
-    logWarn('assets', `Failed to parse metadata for ${file.name}:`, { error: String(error) });
+    console.warn(`Failed to parse metadata for ${file.name}:`, error);
 
     // Return minimal metadata
     return {
@@ -141,7 +140,7 @@ export async function detectBPM(audioBuffer: AudioBuffer): Promise<number | null
     const tempo = await analyze(audioBuffer);
     return Math.round(tempo);
   } catch (error) {
-    logWarn('assets', 'BPM detection failed:', { error: String(error) });
+    console.warn('BPM detection failed:', error);
     return null;
   }
 }
@@ -158,7 +157,7 @@ export async function detectBPMFromFile(
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
     return detectBPM(audioBuffer);
   } catch (error) {
-    logWarn('assets', 'Failed to load file for BPM detection:', { error: String(error) });
+    console.warn('Failed to load file for BPM detection:', error);
     return null;
   }
 }

@@ -14,7 +14,6 @@ import {
   type LibraryItem,
 } from '../../store/libraryStore';
 import { isFileSystemAccessSupported } from '../../utils/fileSystemAccess';
-import { logWarn } from '../../utils/log';
 import { ScrollContainer } from '../common/ScrollContainer';
 import './RelinkSamplesDialog.css';
 
@@ -286,7 +285,7 @@ async function findFileInDirectory(
 ): Promise<FileSystemFileHandle | null> {
   // Prevent stack overflow on deeply nested or cyclic directories
   if (depth > MAX_SEARCH_DEPTH) {
-    logWarn('dialogs', `Max search depth ${MAX_SEARCH_DEPTH} reached`);
+    console.warn(`[RelinkSamplesDialog] Max search depth ${MAX_SEARCH_DEPTH} reached`);
     return null;
   }
 

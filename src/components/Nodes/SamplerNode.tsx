@@ -22,7 +22,6 @@ import { useAudioClipStore, getClipBuffer } from '../../store/audioClipStore';
 import { loadClipAudio } from '../../utils/clipUtils';
 import { isSamplerNodeData } from '../../engine/typeGuards';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
-import { logError } from '../../utils/log';
 
 interface SamplerNodeProps {
     node: GraphNode;
@@ -229,7 +228,7 @@ export const SamplerNode = memo(function SamplerNode({
                 }
             } catch (err) {
                 if (!aborted) {
-                    logError("nodes", "Failed to restore sample buffer:", { error: String(err) });
+                    console.error('[SamplerNode] Failed to restore sample buffer:', err);
                 }
             }
         };
@@ -268,7 +267,7 @@ export const SamplerNode = memo(function SamplerNode({
                 duration: buffer.duration
             });
         } catch (error) {
-            logError("nodes", "Failed to load clip audio:", { error: String(error) });
+            console.error('[SamplerNode] Failed to load clip audio:', error);
         }
     }, [node.id, updateNodeData, generateWaveform]);
 
@@ -335,7 +334,7 @@ export const SamplerNode = memo(function SamplerNode({
                         });
                     }
                 } catch (err) {
-                    logError("nodes", "Failed to decode audio file:", { error: String(err) });
+                    console.error('[SamplerNode] Failed to decode audio file:', err);
                 }
                 return;
             }
@@ -367,7 +366,7 @@ export const SamplerNode = memo(function SamplerNode({
                     });
                 }
             } catch (err) {
-                logError("nodes", "Failed to load library sample:", { error: String(err) });
+                console.error('[SamplerNode] Failed to load library sample:', err);
             }
         }
     }, [node.id, updateNodeData, generateWaveform]);

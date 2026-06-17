@@ -410,4 +410,42 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         unsub();
         ex.dispose();
     });
+
+    it('keeps a cable signal pulse alive across meter polls (merged snapshot)', async () => {
+        // Regression: a held note lit its cable for only a split second because the
+        // periodic meter poll emitted a node-keyed snapshot that REPLACED the
+        // connection-keyed pulse in NodeCanvas. The native executor must merge both
+        // into one shared map (like the wasm executor) so the pulse survives polls.
+        vi.useFakeTimers();
+        const graph = looperGraph();
+        const meterFrame = (node: number): EngineFrame => ({
+            Meter: { node, rms: 0.1, peak: 0.8 },
+        });
+        installMockTauri((cmd) => {
+            if (cmd === 'poll_meters') return [meterFrame(0)];
+            return undefined;
+        });
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, graph);
+
+        const received: Map<string, number>[] = [];
+        const unsub = ex.subscribeSignalLevels((levels) => received.push(levels));
+
+        // Light a cable (as a held note would) — the immediate emit carries it.
+        ex.activateControlSignal('conn-test');
+        expect(received.at(-1)!.get('conn-test')).toBe(1);
+
+        // A meter poll fires while the note is STILL held: it must not wipe the pulse.
+        await vi.advanceTimersByTimeAsync(120);
+        const afterPoll = received.at(-1)!;
+        expect(afterPoll.get('conn-test'), 'cable pulse survives the meter poll').toBe(1);
+        expect(afterPoll.get('looper-1'), 'and the meter level is merged in').toBeCloseTo(0.8, 5);
+
+        // Release zeroes the pulse (still present in the merged snapshot, just 0).
+        ex.releaseControlSignal('conn-test');
+        expect(received.at(-1)!.get('conn-test')).toBe(0);
+
+        unsub();
+        ex.dispose();
+    });
 });

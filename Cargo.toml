@@ -3,35 +3,16 @@ resolver = "2"
 # `crates/*` are the engine crates; `src-tauri` is the native desktop shell
 # (U22) — a workspace member so it shares the pinned deps + one Cargo.lock.
 members = ["crates/*", "src-tauri"]
-# The docs-as-requirement negative fixture is a standalone package built ONLY by
-# its dedicated CI step (which asserts it fails missing_docs); keep it out of the
-# normal workspace build.
-exclude = ["tools/doc-fixture"]
 
 [workspace.package]
 edition = "2021"
-# Single version SSOT — written in lockstep by release-please (the single version
-# brain) across all four files: Cargo.toml, package.json, tauri.conf.json,
-# packages/oj-protocol-ts/package.json. See release-please-config.json. Do not
-# hand-edit out of lockstep; `oj doctor --check version-sync` asserts equality.
-version = "0.1.0-alpha.2"
+version = "0.0.0"
 license = "AGPL-3.0-only"
 
 # Pinned from a fresh cargo at scaffold time (governing principle #9).
 [workspace.dependencies]
 serde = { version = "1.0.228", default-features = false, features = ["derive", "alloc"] }
 libm = "0.2"
-
-# L1 — the off-RT structured logging sink (`tracing`). STD-ONLY: these land in
-# `ojcore-native` + `src-tauri` only and MUST NOT appear in any `no_std`/wasm
-# crate (`ojcore`, `ojcore-dsp`, `ojinstrument`, `ojproto`, `ojcore-wasm`). The
-# existing `cargo build -p ojcore --no-default-features` + nightly wasm CI legs
-# enforce that boundary for free. `tracing` is the off-RT backbone ONLY — never
-# called on the audio thread (foundation F-shared).
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20", features = ["json", "env-filter", "fmt"] }
-tracing-appender = "0.2.3"
-tracing-log = "0.2.0"
 
 # Keep release builds tight + deny accidental panics-as-control-flow later.
 [profile.release]

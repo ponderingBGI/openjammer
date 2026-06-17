@@ -15,7 +15,7 @@
 
 import type { NodeDefinition, NodeType } from './types';
 import { nodeDefinitions } from './registry';
-import type { PrimitiveKind } from '@openjammer/oj-protocol';
+import { AI_MANIFEST_PARAMS_KEY } from './dynamicRegistry';
 
 // ============================================================================
 // Manifest types (mirror crates/ojcore/src/manifest.rs + oj-plugin-v1.json)
@@ -23,12 +23,27 @@ import type { PrimitiveKind } from '@openjammer/oj-protocol';
 
 /**
  * CLOSED PrimitiveKind the RT loop lowers a manifest `id` to (serde unit-variant
- * names). SINGLE-SOURCED: re-exported from `@openjammer/oj-protocol` (the wire
- * mirror of `ojproto::PrimitiveKind`, parity-gated by `wire_shapes.rs`) rather
- * than redeclared here — this file previously kept a DRIFTED copy that was
- * missing `Looper`/`Recorder`, which is what mislabeled the looper node (D1).
+ * names — must match `ojproto::PrimitiveKind` and the schema's `kind` enum).
  */
-export type { PrimitiveKind };
+export type PrimitiveKind =
+    | 'Osc'
+    | 'Sampler'
+    | 'Sf2'
+    | 'KarplusString'
+    | 'Gain'
+    | 'Biquad'
+    | 'Waveshaper'
+    | 'Delay'
+    | 'Convolution'
+    | 'FaustHost'
+    | 'WasmHost'
+    | 'PluginHost'
+    | 'Add'
+    | 'MicIn'
+    | 'SpeakerOut'
+    | 'GraphIn'
+    | 'GraphOut'
+    | 'Passthrough';
 
 /** How a node's audio is computed (selects the executor backend). Frozen v1. */
 export type DspKind = 'builtin' | 'faust' | 'wasm' | 'none';
@@ -110,7 +125,7 @@ const KIND_BY_TYPE: Partial<Record<NodeType, PrimitiveKind>> = {
     // processors
     amplifier: 'Gain',
     effect: 'Waveshaper',
-    looper: 'Looper',
+    looper: 'Delay',
     // routing / io
     add: 'Add',
     subtract: 'Add',
@@ -193,17 +208,6 @@ function rangeFor(value: number): { min: number; max: number } {
     return { min: value * 2, max: -value * 2 };
 }
 
-/**
- * Node types whose `defaultData` is bespoke-UI STATE (record flags, playhead,
- * loop lists) rather than DSP parameters — so they must NOT emit derived IR
- * params. The looper is driven entirely by `RtCommand::Looper` transport actions
- * and uses its DSP node's own defaults; deriving params from its UI fields
- * (`duration` → id 0, `currentTime` → id 1) would land on the Rust LooperNode's
- * param ids (`LOOP_SECS=0`, `WET=1`, `DRY=2`) and force `WET=0`, which silences
- * loop playback (`out = x·dry + loop·wet`). See crates/ojcore/src/looper.rs.
- */
-const UI_STATE_ONLY_NODES = new Set<NodeType>(['looper']);
-
 /** OPEN registry id for a node type (namespaced under `builtin.`). */
 export function manifestIdFor(type: NodeType): string {
     return `builtin.${type}`;
@@ -220,7 +224,7 @@ export function manifestFromDefinition(def: NodeDefinition): PluginManifest {
         name: def.name,
         dsp: dspFor(kind),
         ui: uiFor(def.type),
-        params: UI_STATE_ONLY_NODES.has(def.type) ? [] : paramsFor(def),
+        params: paramsFor(def),
         ports: portsFor(def),
     };
     if (kind !== undefined) manifest.kind = kind;
@@ -235,4 +239,30 @@ export function manifestFor(type: NodeType): PluginManifest {
 /** Every node's manifest, derived from {@link nodeDefinitions}. */
 export function allManifests(): PluginManifest[] {
     return (Object.keys(nodeDefinitions) as NodeType[]).map(manifestFor);
+}
+
+/**
+ * Build the {@link PluginManifest} for an AI-authored DYNAMIC plugin (M6).
+ *
+ * A code node's def is registered with `ui:'auto'` and carries its REAL compiled
+ * params stashed under `defaultData.aiManifestParams`
+ * ({@link AI_MANIFEST_PARAMS_KEY}); this lifts them into a manifest so
+ * {@link AutoParamPanel} renders the node's true controls. `id` is the open
+ * `ai.wasm.<hash>` / `ai.dsp.<hash>` registry key.
+ *
+ * The def's `type` stays `'effect'` (a valid closed NodeType) for execution, so
+ * we report the manifest's `kind`/`dsp` honestly as the wasm code-node lowering.
+ */
+export function manifestForDynamic(id: string, def: NodeDefinition): PluginManifest {
+    const stashed = (def.defaultData as Record<string, unknown>)[AI_MANIFEST_PARAMS_KEY];
+    const params: ParamDecl[] = Array.isArray(stashed) ? (stashed as ParamDecl[]) : [];
+    return {
+        id,
+        name: def.name,
+        kind: 'WasmHost',
+        dsp: 'wasm',
+        ui: 'auto',
+        params,
+        ports: portsFor(def),
+    };
 }

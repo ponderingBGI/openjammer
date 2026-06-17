@@ -3,10 +3,6 @@
 //! voices oldest-first. Exercised directly through the [`DspInstance`] surface
 //! (the same one the engine drives) plus loader/manifest sanity.
 
-// This is an integration TEST: its reference-signal generators use std::f32
-// transcendentals, not engine DSP, so they opt out of the libm-only guard.
-#![allow(clippy::disallowed_methods)]
-
 use std::sync::Arc;
 
 use ojcore::{DspInstance, PluginLoader, ProcessCtx};

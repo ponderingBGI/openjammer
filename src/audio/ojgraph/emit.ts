@@ -44,7 +44,14 @@
  */
 
 import type { Connection, GraphNode, NodeType, PortDefinition } from '../../engine/types';
-import { manifestFor, type ParamDecl, type PluginManifest, type PrimitiveKind } from '../../engine/manifest';
+import {
+    manifestFor,
+    manifestForDynamic,
+    type ParamDecl,
+    type PluginManifest,
+    type PrimitiveKind,
+} from '../../engine/manifest';
+import { AI_WASM_ID_PREFIX, getDynamicPlugin } from '../../engine/dynamicRegistry';
 import type {
     ConnectionType,
     IrEdge,
@@ -68,6 +75,15 @@ export interface EmitOptions {
     sampleRate?: number;
     /** Render block size (frames). Defaults to 128; the engine may override. */
     blockSize?: number;
+    /**
+     * When set, an AI-authored COMPILED code node (its `pluginId` is
+     * `ai.wasm.<hash>` with a registered dynamic def) lowers to its real `WasmHost`
+     * manifest so the engine runs the actual DSP, instead of the closed `effect`
+     * fallback. Only the NATIVE executor sets this (it registers a WasmHost loader
+     * per authored node); the browser/default path keeps the audible effect
+     * fallback, so an unrunnable `WasmHost` node never reaches a loader-less engine.
+     */
+    codeNodesAsWasmHost?: boolean;
 }
 
 /**
@@ -170,6 +186,7 @@ export function emitWithIndex(
 
     // 2) Classify every node: which become IrNodes (audio DSP/IO) vs which are
     //    structural passthroughs that get flattened.
+    const codeNodesAsWasmHost = opts.codeNodesAsWasmHost ?? false;
     const manifestByType = new Map<NodeType, PluginManifest>();
     const manifestOf = (type: NodeType): PluginManifest => {
         let m = manifestByType.get(type);
@@ -178,6 +195,20 @@ export function emitWithIndex(
             manifestByType.set(type, m);
         }
         return m;
+    };
+    /**
+     * The manifest used to BUILD a node's IrNode. An AI-authored compiled code node
+     * (`pluginId === ai.wasm.<hash>` + a registered dynamic def) resolves to its
+     * real `WasmHost` manifest WHEN `codeNodesAsWasmHost` is set, so the engine runs
+     * the actual DSP; otherwise it keeps its closed `type` (the effect fallback).
+     */
+    const manifestForNode = (node: GraphNode): PluginManifest => {
+        const pid = node.pluginId;
+        if (codeNodesAsWasmHost && pid && pid.startsWith(AI_WASM_ID_PREFIX)) {
+            const def = getDynamicPlugin(pid);
+            if (def) return manifestForDynamic(pid, def);
+        }
+        return manifestOf(node.type);
     };
     const kindOf = (type: NodeType): PrimitiveKind | undefined => manifestOf(type).kind;
 
@@ -196,7 +227,7 @@ export function emitWithIndex(
         const node = nodes.get(id);
         if (!node) continue;
         if (isStructural(node)) continue;
-        const manifest = manifestOf(node.type);
+        const manifest = manifestForNode(node);
         // kind is defined here (structural check above filters undefined kinds).
         const kind = manifest.kind as PrimitiveKind;
         emitted.set(id, { idx: nextIdx as NodeIdx, node, manifest, kind });
@@ -342,9 +373,7 @@ function portCounts(manifest: PluginManifest): { n_in: number; n_out: number } {
             minIn = 0;
             minOut = 1;
             break;
-        // Processors: one in, one out. (The looper is a stateful processor —
-        // 1-in/1-out, matching the `builtin.looper` manifest — so it MUST be
-        // grouped here, not left to the 0/0 default, which would strip its ports.)
+        // Processors: one in, one out.
         case 'Gain':
         case 'Biquad':
         case 'Waveshaper':
@@ -353,7 +382,6 @@ function portCounts(manifest: PluginManifest): { n_in: number; n_out: number } {
         case 'FaustHost':
         case 'WasmHost':
         case 'PluginHost':
-        case 'Looper':
             minIn = 1;
             minOut = 1;
             break;

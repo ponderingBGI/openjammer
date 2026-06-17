@@ -209,9 +209,6 @@ impl AssetStore {
 
 #[cfg(test)]
 mod tests {
-    // Test signal generators use std::f32 transcendentals (reference math), not
-    // engine DSP, so they opt out of the libm-only guard (clippy.toml).
-    #![allow(clippy::disallowed_methods)]
     use super::*;
 
     /// Build a deterministic test signal: a 1-channel sine-ish ramp.

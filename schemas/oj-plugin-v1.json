@@ -37,9 +37,7 @@
         "SpeakerOut",
         "GraphIn",
         "GraphOut",
-        "Passthrough",
-        "Looper",
-        "Recorder"
+        "Passthrough"
       ]
     },
     "dsp": {

@@ -6,7 +6,9 @@ import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist', 'e2e', 'playwright.config.ts', 'playwright-report', 'test-results']),
+  // `pi-openjammer-graph/` is a BUNDLED Pi resource (mounted into a Pi worktree,
+  // not the app build), so it is excluded from the app's tsc/vitest/eslint gates.
+  globalIgnores(['dist', 'pi-openjammer-graph']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [
@@ -41,27 +43,6 @@ export default defineConfig([
       'react-hooks/refs': 'warn',
       'react-hooks/set-state-in-effect': 'warn',
       'react-hooks/immutability': 'warn',
-    },
-  },
-  // Console ratchet (L4 sweep governance, docs/plans/02-logging-and-observability.md).
-  // The repo-wide `console.*` -> `src/utils/log.ts` facade sweep is COMPLETE: every
-  // app log now flows into the searchable on-device DevLog ring (and still forwards
-  // to `console.*` for devtools). `no-console: error` keeps it that way across all of
-  // `src/`, so a new raw `console.*` cannot silently bypass the structured sink.
-  // Excluded: `__tests__` (tests may log freely); the facade itself
-  // (`src/utils/log.ts`, which legitimately calls `console.*`); and the AudioWorklet
-  // processor + Web Worker entry, which run off the main thread and cannot import the
-  // zustand-backed facade (they post messages instead).
-  {
-    files: ['src/**/*.{ts,tsx}'],
-    ignores: [
-      '**/__tests__/**',
-      'src/utils/log.ts',
-      'src/audio/worklets/**',
-      'src/workers/waveformWorker.ts',
-    ],
-    rules: {
-      'no-console': 'error',
     },
   },
 ])

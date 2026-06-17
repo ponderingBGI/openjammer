@@ -8,7 +8,6 @@
 import { create } from 'zustand';
 import type { AudioClip, ClipDropTarget, Position } from '../engine/types';
 import { useLibraryStore } from './libraryStore';
-import { logError } from '../utils/log';
 
 // ============================================================================
 // Buffer Cache for Looper-originated clips (LRU implementation)
@@ -382,7 +381,7 @@ export const useAudioClipStore = create<AudioClipStore>((set, get) => ({
                     // Use skipTrash because the clip is being consumed by the node, not deleted
                     get().removeClip(clip.id, { skipTrash: true });
                 } catch (error) {
-                    logError('store', 'Failed to drop clip', { error: String(error) });
+                    console.error('Failed to drop clip:', error);
                 }
             }
         } else {

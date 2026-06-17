@@ -16,7 +16,6 @@ import { getSampleFile } from '../../store/libraryStore';
 import { getAudioContext } from '../../audio/audioContext';
 import { useScrollCapture } from '../../hooks/useScrollCapture';
 import type { ScrollData } from '../../hooks/useScrollCapture';
-import { logError } from '../../utils/log';
 import './WaveformEditorModal.css';
 
 // Preview audio state
@@ -91,7 +90,7 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
                     }
                 }
             } catch (error) {
-                logError('clips', 'Failed to load audio for editor:', { error: String(error) });
+                console.error('Failed to load audio for editor:', error);
             } finally {
                 setIsLoading(false);
             }

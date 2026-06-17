@@ -12,6 +12,7 @@ export type {
     AgentTask,
     AgentToolCall,
     AgentToolName,
+    AgentUiRequest,
     AddNodeArgs,
     RemoveNodeArgs,
     UpdateNodeDataArgs,
@@ -31,6 +32,15 @@ export {
     type NodeSnapshot,
 } from './graphAdapter';
 export { isTauri } from './tauri';
+export {
+    listSessions,
+    loadSessionMessages,
+    runCommand,
+    sessionsAvailable,
+    type SessionInfo,
+    type DisplayMessage,
+    type SessionTranscript,
+} from './piSessions';
 
 import { PiAgentBackend } from './PiAgentBackend';
 import type { AgentBackend } from './types';

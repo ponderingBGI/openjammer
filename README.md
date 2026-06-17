@@ -13,12 +13,13 @@
 </div>
 
 > **⚙️ Powered by `ojcore` — one minimal, real-time-safe Rust audio core** that compiles to **native** (low-latency, with VST3/AU/CLAP plugin hosting via a JUCE/CLAP host) **and** **WebAssembly** (the zero-install PWA), driven by one shared React control plane.
-> 📚 **Docs:** the **[documentation site](https://ponderingbgi.github.io/openjammer/)** (source in [`apps/docs`](apps/docs)) covers the real-time-safety invariant, the on-device logging model, and the channel/version model. See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the crate map + build/run/test commands.
+> See **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** for the crate map, build/run/test commands, and the cross-platform release setup.
 
 ---
 
 ## Table of Contents
 
+- [Philosophy](#philosophy)
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Browser Compatibility](#browser-compatibility)
@@ -30,6 +31,29 @@
 - [Technical Details](#technical-details)
 - [Contributing](#contributing)
 - [License](#license)
+
+---
+
+## Philosophy
+
+OpenJammer is an **instrument**, not just an app — and an instrument is judged by how it
+*feels*. Two beliefs carry the whole project:
+
+- **Perception is the medium.** A musician feels latency in their fingers and hears a
+  glitch before they read a spec. So the audio thread never blocks, editing never drops
+  a sample, and `<5ms` MIDI→audio (native) is the threshold below which the software
+  disappears and only the music is left.
+- **A minimal core, made infinite by everyone.** `ojcore` stays tiny and perfect;
+  everything else — every instrument, effect, AI node, and hosted plugin — is community
+  territory behind one shared contract. Inspired by [pi.dev](https://pi.dev): a small,
+  trustworthy core that every user makes their own.
+
+For how those beliefs become daily practice, see **[PRODUCT.md](PRODUCT.md)** (who plays
+this and why, plus the design principles and the Live Performance Rule) and
+**[DESIGN.md](DESIGN.md)** (the visual system). Contributors and the AI agent work from the
+covenant — the two beliefs, the nine code values, and the playbook — in
+**[.agent/workflows/agents.md](.agent/workflows/agents.md)** (see also
+**[CONTRIBUTING.md](CONTRIBUTING.md)**).
 
 ---
 

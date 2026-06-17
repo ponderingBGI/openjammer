@@ -5,7 +5,6 @@
 import type { GraphNode, PortDefinition, Connection, BundleInfo, BundlePortDefinition } from '../engine/types';
 import { generateUniqueId } from './idGenerator';
 import { getBundleInfo as getBundleInfoFromManager } from './bundleManager';
-import { logWarn } from './log';
 
 // ============================================================================
 // Port ID Validation
@@ -341,7 +340,7 @@ export function getBundleSizeFromSourcePort(
 ): { size: number; label: string } {
     // Validate port ID to prevent injection attacks
     if (!isValidCompositePortId(sourcePortId)) {
-        logWarn('graph', 'Invalid source port ID rejected:', { detail: sourcePortId });
+        console.warn('[portSync] Invalid source port ID rejected:', sourcePortId);
         return { size: 1, label: 'Input' };
     }
 

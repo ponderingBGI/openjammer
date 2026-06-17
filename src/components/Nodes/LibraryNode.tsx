@@ -32,7 +32,6 @@ import { usePanelResize } from '../../hooks/usePanelResize';
 import { ResizeHandles } from '../common/ResizeHandles';
 import { PanelSeparator } from '../common/PanelSeparator';
 import { ScrollContainer } from '../common/ScrollContainer';
-import { logError, logWarn } from '../../utils/log';
 
 interface LibraryNodeProps {
   node: GraphNode;
@@ -123,7 +122,7 @@ export const LibraryNode = memo(function LibraryNode({
       const lib = libraries[effectiveLibraryId];
       // If library has never been scanned (lastScanAt = 0), trigger a scan
       if (lib.lastScanAt === 0 && lib.status !== 'scanning') {
-        scanLibrary(effectiveLibraryId, false).catch((err) => logError('nodes', 'Scan failed', { error: String(err) }));
+        scanLibrary(effectiveLibraryId, false).catch(console.error);
       }
     }
   }, [effectiveLibraryId, libraries, scanLibrary]);
@@ -262,7 +261,7 @@ export const LibraryNode = memo(function LibraryNode({
       await scanLibrary(libraryId, true);
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
-        logError('nodes', 'Failed to link folder', { error: String(err) });
+        console.error('Failed to link folder:', err);
       }
     } finally {
       setIsLinking(false);
@@ -312,7 +311,7 @@ export const LibraryNode = memo(function LibraryNode({
         const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
         getExecutor().sendSampleBuffer(node.id, audioBuffer);
       } catch (err) {
-        logError('nodes', 'Failed to load item for sampler', { error: String(err) });
+        console.error('Failed to load item for sampler:', err);
         toast.error('Failed to load audio file');
       } finally {
         // Only clear loading state if this item is still loading (handle rapid clicks)
@@ -330,7 +329,7 @@ export const LibraryNode = memo(function LibraryNode({
         try {
           audioSourceRef.current.stop();
         } catch (e) {
-          if (process.env.NODE_ENV === 'development') logWarn('nodes', 'Stop failed', { error: String(e) });
+          if (process.env.NODE_ENV === 'development') console.warn('Stop failed:', e);
         }
         audioSourceRef.current = null;
       }
@@ -393,7 +392,7 @@ export const LibraryNode = memo(function LibraryNode({
         source.start();
         audioSourceRef.current = source;
       } catch (err) {
-        logError('nodes', 'Preview failed', { error: String(err) });
+        console.error('Preview failed:', err);
         // Only update state if component is still mounted
         if (isMountedRef.current) {
           setPreviewingItemId(null);
@@ -416,7 +415,7 @@ export const LibraryNode = memo(function LibraryNode({
         try {
           source.stop();
         } catch (e) {
-          if (process.env.NODE_ENV === 'development') logWarn('nodes', 'Stop failed', { error: String(e) });
+          if (process.env.NODE_ENV === 'development') console.warn('Stop failed:', e);
         }
       });
       activeSourcesRef.current.clear();
@@ -426,7 +425,7 @@ export const LibraryNode = memo(function LibraryNode({
         try {
           audioSourceRef.current.stop();
         } catch (e) {
-          if (process.env.NODE_ENV === 'development') logWarn('nodes', 'Stop failed', { error: String(e) });
+          if (process.env.NODE_ENV === 'development') console.warn('Stop failed:', e);
         }
       }
 
@@ -578,7 +577,7 @@ export const LibraryNode = memo(function LibraryNode({
           }
           return;
         } catch (err) {
-          logError('nodes', 'Failed to parse clip data', { error: String(err) });
+          console.error('[LibraryNode] Failed to parse clip data:', err);
         }
       }
 
@@ -1089,7 +1088,7 @@ export const LibraryNode = memo(function LibraryNode({
                   await permanentlyDeleteItem(item.id);
                   toast.success('Item permanently deleted');
                 } catch (error) {
-                  logError('nodes', 'Failed to delete item', { error: String(error) });
+                  console.error('Failed to delete item:', error);
                   toast.error('Failed to delete item');
                 } finally {
                   setLoadingItemId(null);
@@ -1276,7 +1275,7 @@ export const LibraryNode = memo(function LibraryNode({
                           setActiveFilterTag(null);
                           toast.success('Trash emptied');
                         } catch (error) {
-                          logError('nodes', 'Failed to empty trash', { error: String(error) });
+                          console.error('[Library] Failed to empty trash:', error);
                           toast.error('Failed to empty trash');
                         } finally {
                           setLoadingItemId(null);

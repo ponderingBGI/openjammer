@@ -26,14 +26,7 @@ tauri-build = { version = "2.6.2", features = [] }
 # `ojcore` (std) gives us compile/Engine/PluginRegistry/CommandQueue/ProgramSwap;
 # `ojcore-native` owns the cpal AudioHost; `ojinstrument` ships the Osc/Sampler/
 # Karplus loaders; `ojproto` is the control-rate IR/command wire type.
-#
-# `devlog` is enabled unconditionally: it activates the engine's RT event-emit
-# sites (`attach_event_ring` + the per-node fault emits in `ojcore::exec`), which
-# the `poll_events` bridge below drains into the DevLog. The emit path is
-# allocation-free + fault-only (CI-gated by `cargo test -p ojcore --features
-# devlog`), so it is the right always-on default for the native shell — "when
-# anything goes wrong I need to know about it" (governing logging principle).
-ojcore = { path = "../crates/ojcore", features = ["devlog"] }
+ojcore = { path = "../crates/ojcore" }
 ojcore-native = { path = "../crates/ojcore-native" }
 ojinstrument = { path = "../crates/ojinstrument" }
 ojproto = { path = "../crates/ojproto" }
@@ -52,6 +45,14 @@ ojhost = { path = "../crates/ojhost" }
 # (see crates/ojfaust/README.md). NEVER on the realtime path.
 ojfaust = { path = "../crates/ojfaust" }
 
+# --- AI code-node EXECUTION host (M6) ----------------------------------------
+# Runs AI-authored faust code nodes natively: `native-host` compiles faust to a
+# .dll (faust -lang cpp -> cl.exe) and drives it via libloading behind ojcore's
+# DspInstance, with the permanent OutputGuard chain. (The wasmtime `oj_*` sandbox
+# path is also in this crate but unused here — faust's wasm needs an exception
+# proposal wasmtime can't run; see docs/code-node-abi.md.) NATIVE-ONLY.
+ojwasm = { path = "../crates/ojwasm", features = ["native-host"] }
+
 # --- the Tauri v2 shell ------------------------------------------------------
 tauri = { version = "2.11.2", features = [] }
 tauri-plugin-opener = "2.5.4"
@@ -61,16 +62,11 @@ tauri-plugin-opener = "2.5.4"
 serde = { workspace = true, features = ["std"] }
 serde_json = "1.0.150"
 
-# L1 — the off-RT structured logging sink. `tracing` is used by the dedicated
-# event-drain thread (engine.rs) to project each decoded engine `Event` into a
-# structured record; `tracing-appender`'s `WorkerGuard` is parked in managed
-# state so the rolling NDJSON file flushes on exit. The subscriber itself is set
-# up by `ojcore_native::log::init_logging`. STD-only, never on the audio thread.
-tracing = { workspace = true }
-tracing-appender = { workspace = true }
-
 [features]
 # This feature must be enabled when building the app in production, so the
 # webview loads the bundled frontend instead of the dev server. Tauri's CLI sets
 # it via `tauri build`; harmless in `cargo build`.
 custom-protocol = ["tauri/custom-protocol"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"

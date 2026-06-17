@@ -13,7 +13,10 @@
 //! `manage` it as Tauri state. The commands below are the UI->RT seam.
 
 mod ai;
+mod auth;
+mod bridge;
 mod engine;
+mod sandbox;
 
 use std::path::PathBuf;
 
@@ -107,6 +110,12 @@ fn ai_faust_compile(source: String) -> Result<Option<ai::FaustCompileResult>, St
     ai::compile_faust(&source)
 }
 
+// `ai::author_wasm_node` (M6) is itself a `#[tauri::command]`; it is registered
+// directly in the invoke_handler below (like `ai::ai_run`). It compiles DSP source
+// via the ojfaust CLI Path B to a `.wasm` + real manifest, validates host-side
+// fail-closed, and NEVER runs the wasm (the RT host is founder-gated; see
+// `docs/code-node-abi.md`).
+
 // --- U-EXEC-PARITY: looper / sampler / recorder / metering / speaker / mic ---
 
 /// Drive a looper node's state machine: enqueue an `RtCommand::Looper` carrying
@@ -147,22 +156,6 @@ fn poll_meters(state: tauri::State<'_, BackendState>) -> Result<Vec<EngineFrame>
         .lock()
         .map_err(|_| "engine backend mutex poisoned".to_string())?
         .drain_meters())
-}
-
-/// Drain the engine's pending fault [`Event`]s (control-rate poll). Returns a
-/// batch of fully-stamped envelopes (`Xrun` / `NodeFault` / `RingFull`) the UI's
-/// DevLog ingests via `ingestEngineEvent`. Mirrors [`poll_meters`] exactly — a
-/// poll-shaped command, no event-permission setup — but reads the SEPARATE event
-/// return ring so a fault storm never starves the meter stream. The frontend
-/// polls this on a slow timer (see `OjcoreNativeExecutor`); empty batches are the
-/// common case (faults are rare), so the poll is cheap.
-#[tauri::command]
-fn poll_events(state: tauri::State<'_, BackendState>) -> Result<Vec<ojproto::Event>, String> {
-    Ok(state
-        .0
-        .lock()
-        .map_err(|_| "engine backend mutex poisoned".to_string())?
-        .drain_events())
 }
 
 /// Load decoded mono PCM as the sample for `node`'s sampler (content-addressed
@@ -275,39 +268,22 @@ fn set_mic(node: u32, enabled: bool, state: tauri::State<'_, BackendState>) -> R
     Ok(())
 }
 
-/// Parks the L1 `tracing` non-blocking file-writer flush guard for the process
-/// lifetime: when Tauri tears down managed state on exit, dropping it flushes any
-/// buffered NDJSON. Wrapped in a `Mutex` only to satisfy Tauri managed state's
-/// `Send + Sync` bound without asserting `WorkerGuard: Sync`; it is never locked.
-struct LogGuard(#[allow(dead_code)] std::sync::Mutex<tracing_appender::non_blocking::WorkerGuard>);
-
 /// Build and run the Tauri application. Shared between the desktop binary
 /// (`main.rs`) and any future mobile entry point (the Tauri convention).
 ///
-/// `setup` brings up the L1 logging sink, then constructs the native engine
-/// backend and stores it as managed state so the `#[tauri::command]`s above can
-/// borrow it. Engine construction never panics on a missing audio device (the
-/// headless/CI path) — it simply leaves the host idle until a device is present.
+/// `setup` constructs the native engine backend and stores it as managed state
+/// so the `#[tauri::command]`s above can borrow it. Engine construction never
+/// panics on a missing audio device (the headless/CI path) — it simply leaves
+/// the host idle until a device is present.
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            // L1: bring up the structured logging sink FIRST, before the engine
-            // starts, so its startup (and, with `devlog`, the event-drain
-            // thread's records) flow to the rolling on-device NDJSON file. The
-            // flush guard is parked in managed state for the process lifetime.
-            if let Ok(log_dir) = app.path().app_log_dir() {
-                if std::fs::create_dir_all(&log_dir).is_ok() {
-                    let guard = ojcore_native::init_logging(&log_dir);
-                    app.manage(LogGuard(std::sync::Mutex::new(guard)));
-                    tracing::info!(
-                        target: "openjammer",
-                        dir = %log_dir.display(),
-                        "logging initialized"
-                    );
-                }
-            }
             app.manage(BackendState::new());
+            // The at-most-one warm Pi child for the session (Phase 1: instant feel).
+            app.manage(ai::WarmChildState::default());
+            // The loopback tool bridge (Phase 3: real graph reads round-trip to Pi).
+            app.manage(bridge::BridgeState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -317,11 +293,24 @@ pub fn run() {
             engine_running,
             scan_plugins,
             ai::ai_run,
+            ai::ai_command,
+            ai::ai_set_learning,
+            ai::ai_forget,
+            ai::ai_sessions,
+            ai::ai_session_messages,
+            bridge::ai_tool_result,
             ai_faust_compile,
+            ai::author_wasm_node,
+            ai::author_faust_native,
+            auth::auth_status,
+            auth::auth_store_key,
+            auth::auth_get_key,
+            auth::auth_clear,
+            auth::auth_begin_oauth,
+            auth::auth_validate_key,
             looper_cmd,
             subscribe_meters,
             poll_meters,
-            poll_events,
             load_sample,
             recorder_start,
             recorder_stop,

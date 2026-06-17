@@ -12,10 +12,6 @@ license.workspace = true
 #   cargo build -p ojcore --no-default-features  ->  no_std core only.
 default = ["std"]
 std = ["dep:rtrb", "dep:basedrop", "dep:arc-swap"]
-# `devlog` gates the RT event-emit path (`event_frame::emit`) and its dedicated
-# assert_no_alloc gate; OFF in shipping builds (a pure dev/CI proof, no runtime
-# cost). Additive: it does not change `default` or `std`.
-devlog = []
 
 [dependencies]
 ojproto = { path = "../ojproto" }

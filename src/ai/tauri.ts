@@ -22,6 +22,8 @@ interface TauriGlobal {
             handler: (e: { payload: unknown }) => void,
         ) => Promise<() => void>;
     };
+    /** tauri-plugin-opener's global API (app sets `withGlobalTauri`). */
+    opener?: { openUrl?: (url: string) => Promise<void> };
 }
 
 function tauri(): TauriGlobal | null {
@@ -57,4 +59,26 @@ export async function listen<T>(
     const t = tauri();
     if (!t?.event?.listen) return null;
     return t.event.listen(event, (e) => handler(e.payload as T));
+}
+
+/**
+ * Open `url` in the user's DEFAULT system browser. Under Tauri this routes
+ * through the `opener` plugin (so the link leaves the webview, e.g. for the
+ * opencode Zen "Get your free key" page); in a plain browser it falls back to
+ * `window.open` with a noopener target. Best-effort: swallows errors so a failed
+ * open never throws into the auth UI.
+ */
+export async function openExternal(url: string): Promise<void> {
+    const t = tauri();
+    if (t?.opener?.openUrl) {
+        try {
+            await t.opener.openUrl(url);
+            return;
+        } catch {
+            // fall through to the window.open fallback below
+        }
+    }
+    if (typeof window !== 'undefined' && typeof window.open === 'function') {
+        window.open(url, '_blank', 'noopener,noreferrer');
+    }
 }

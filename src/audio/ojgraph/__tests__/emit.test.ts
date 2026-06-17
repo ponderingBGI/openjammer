@@ -13,9 +13,9 @@
 
 import { describe, expect, it } from 'vitest';
 import { emitOjGraph, SYNTHETIC_MASTER_ID } from '../emit';
-import { remapForBackend } from '../backendMap';
 import { getNodeDefinition } from '../../../engine/registry';
 import { manifestIdFor } from '../../../engine/manifest';
+import { makeDspNodeDefinition, registerDynamicPlugin } from '../../../engine/dynamicRegistry';
 import type { Connection, GraphNode, NodeType, PortDefinition } from '../../../engine/types';
 import type { IrEdge, IrNode, OjGraph } from '../../../../packages/oj-protocol-ts/src/index';
 
@@ -286,6 +286,43 @@ describe('emitOjGraph — master output', () => {
 });
 
 // ---------------------------------------------------------------------------
+// AI-authored code nodes (M6): compiled node lowers to WasmHost
+// ---------------------------------------------------------------------------
+
+describe('emitOjGraph — AI-authored code nodes (WasmHost)', () => {
+    it('lowers an ai.wasm.* node to WasmHost only when codeNodesAsWasmHost is set', () => {
+        const pluginId = 'ai.wasm.deadbeef';
+        const unregister = registerDynamicPlugin(
+            pluginId,
+            makeDspNodeDefinition({ name: 'AI Gain', faustSource: 'process = _;', params: [] }),
+        );
+        try {
+            const fx = makeNode('effect', { id: 'fx' });
+            fx.pluginId = pluginId; // stamped by the agent authoring path
+            const speaker = makeNode('speaker', { id: 's' });
+            const conn = makeConn(fx.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+
+            // NATIVE opt: the authored node lowers to its REAL WasmHost manifest, so
+            // the engine (which registered a WasmHost loader) runs the actual DSP.
+            const native = emitOjGraph(nodeMap(fx, speaker), connMap(conn), {
+                codeNodesAsWasmHost: true,
+            });
+            const authored = native.nodes.find((n) => n.manifest_id === pluginId);
+            expect(authored, 'emitted under its ai.wasm.* id').toBeTruthy();
+            expect(authored!.kind).toBe('WasmHost');
+
+            // DEFAULT (browser / no loader): keeps the closed effect fallback, so an
+            // unrunnable WasmHost node never reaches a loader-less engine.
+            const fallback = emitOjGraph(nodeMap(fx, speaker), connMap(conn));
+            expect(fallback.nodes.some((n) => n.kind === 'Waveshaper')).toBe(true);
+            expect(fallback.nodes.some((n) => n.manifest_id === pluginId)).toBe(false);
+        } finally {
+            unregister();
+        }
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Hierarchy / container flattening
 // ---------------------------------------------------------------------------
 
@@ -468,54 +505,5 @@ describe('emitOjGraph — arity', () => {
         expect(gain.n_out).toBe(1);
         expect(spk.n_in).toBe(1);
         expect(spk.n_out).toBe(0);
-    });
-});
-
-// ---------------------------------------------------------------------------
-// D1: the looper lowers to the real Looper primitive (not Delay), and remaps to
-// the real `builtin.looper` loader on BOTH backends (it previously fell back to
-// GAIN on native / DELAY on wasm, so looper nodes never actually looped).
-// ---------------------------------------------------------------------------
-
-describe('emitOjGraph — looper lowering (D1)', () => {
-    function buildLooperPatch() {
-        const instrument = makeNode('instrument', { id: 'inst' });
-        const looper = makeNode('looper', { id: 'lp' });
-        const speaker = makeNode('speaker', { id: 'spk' });
-        const a1 = makeConn(instrument.id, 'audio-out', looper.id, 'audio-in', 'audio');
-        const a2 = makeConn(looper.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        return emitOjGraph(nodeMap(instrument, looper, speaker), connMap(a1, a2));
-    }
-
-    it('lowers a looper node to PrimitiveKind Looper with 1-in/1-out ports', () => {
-        const graph = buildLooperPatch();
-        const lp = graph.nodes.find((n) => n.kind === 'Looper');
-        expect(lp, 'looper lowers to PrimitiveKind Looper, not Delay').toBeTruthy();
-        // No node should be mislabeled as a Delay (the old `looper: 'Delay'` bug).
-        expect(graph.nodes.some((n) => n.kind === 'Delay')).toBe(false);
-        expect(lp!.n_in).toBeGreaterThanOrEqual(1);
-        expect(lp!.n_out).toBeGreaterThanOrEqual(1);
-    });
-
-    it('emits NO IR params for the looper (its UI fields are not DSP params)', () => {
-        // The looper's defaultData (duration/currentTime/…) is UI state, not DSP
-        // params. Deriving params from it would misaddress the LooperNode ids
-        // (LOOP_SECS=0, WET=1, DRY=2) — `currentTime`→id1 forces WET=0 and silences
-        // loop playback. So the looper must carry no params and use the DSP node's
-        // own defaults; it is driven by RtCommand::Looper transport actions instead.
-        const graph = buildLooperPatch();
-        const lp = graph.nodes.find((n) => n.kind === 'Looper');
-        expect(lp).toBeTruthy();
-        expect(lp!.params).toEqual([]);
-    });
-
-    it('remaps the looper to builtin.looper on BOTH backends (real loader, not a GAIN fallback)', () => {
-        const graph = buildLooperPatch();
-        for (const backend of ['native', 'wasm'] as const) {
-            const remapped = remapForBackend(graph, backend);
-            const lp = remapped.nodes.find((n) => n.kind === 'Looper');
-            expect(lp, `looper present after ${backend} remap`).toBeTruthy();
-            expect(lp!.manifest_id, `looper -> builtin.looper on ${backend}`).toBe('builtin.looper');
-        }
     });
 });

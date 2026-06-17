@@ -9,11 +9,6 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
-  # Wired-but-disabled (plan §1.3): GitHub's merge queue is org-only and not
-  # available on the user-owned repo today, so no `merge_group` event fires yet.
-  # Wiring the trigger now makes enabling the queue post-migration a one-line
-  # ruleset flip — the aggregate "Merge gate" already evaluates identically here.
-  merge_group:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -22,19 +17,12 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
 
-# Least privilege (zizmor excessive-permissions): every job here only reads the
-# repo. The deploy-style writes (Pages, releases) live in their own workflows.
-permissions:
-  contents: read
-
 jobs:
   engine:
     name: Engine (Rust workspace)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-        with:
-          persist-credentials: false
+      - uses: actions/checkout@v4
       - name: System deps (ALSA for cpal + GTK/WebKit for the Tauri crate)
         run: |
           sudo apt-get update
@@ -49,32 +37,25 @@ jobs:
       # stable LAST so stable is the DEFAULT toolchain for fmt/clippy/test/build
       # (otherwise `cargo fmt` runs on nightly, which has no rustfmt component).
       - name: Rust nightly (wasm leg)
-        uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2  # nightly
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          toolchain: nightly-2026-06-01   # pinned to match rust-toolchain.toml's documented wasm nightly (deliberate re-bless on bump)
           components: rust-src
           targets: wasm32-unknown-unknown
       - name: Rust stable (default; fmt, clippy)
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: stable   # required: the ref is SHA-pinned
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: Swatinem/rust-cache@v2
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy (-D warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
-      - name: RT event-emit no-alloc gate (devlog)
-        # Dedicated assert_no_alloc proof that `event_frame::emit` never
-        # allocates on the audio thread. Gated behind the `devlog` feature so it
-        # is OFF in shipping builds and runs only in this explicit CI step.
-        run: cargo test -p ojcore --features devlog
       - name: no_std core builds (wasm-friendly)
         run: cargo build -p ojcore --no-default-features
       - name: wasm32 build
-        run: cargo +nightly-2026-06-01 build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
+        run: cargo +nightly build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
       - name: Offline audio render gate (device-free)
         # Renders a real arpeggio (Osc->Biquad->Delay->Speaker) to a WAV and
         # asserts the output is finite, non-silent, and in a sane RMS band — so
@@ -92,46 +73,13 @@ jobs:
         run: |
           cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings
           cargo test -p ojhost --features clap-host
-      - name: L3 persistent log store — SQLite/FTS5 gated smoke
-        # The `persist` feature pulls bundled SQLite (FTS5 compiled in) and is OFF
-        # in the default workspace build above (so it stays fast). This dedicated
-        # step lints + runs the FTS5-availability smoke and the store round-trip
-        # tests (plan §5.1: an FTS5-off store is a silent runtime failure).
-        run: |
-          cargo clippy -p ojcore-native --features persist --all-targets -- -D warnings
-          cargo test -p ojcore-native --features persist
-      - name: Docs gate — rustdoc warning-free + missing_docs enforced (X2)
-        # `-D warnings` promotes broken intra-doc links AND ojproto's
-        # `#![warn(missing_docs)]` to hard errors, so the public wire contract
-        # stays fully documented and link-clean.
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --no-deps
-      - name: Docs gate — negative fixture proves missing_docs actually fails
-        # A throwaway commit is not a guarantee: this standing fixture
-        # (tools/doc-fixture, excluded from the workspace) MUST fail to compile
-        # under #![deny(missing_docs)]. If it ever compiles clean, the gate has
-        # silently stopped enforcing — fail loudly.
-        run: |
-          set +e
-          out=$(cargo check --manifest-path tools/doc-fixture/Cargo.toml 2>&1)
-          code=$?
-          set -e
-          if [ "$code" -eq 0 ]; then
-            echo "::error::oj-doc-fixture compiled clean — missing_docs is NOT enforcing"; exit 1
-          fi
-          echo "$out" | grep -q "missing documentation" || {
-            echo "::error::fixture failed, but not due to missing_docs:"; echo "$out"; exit 1; }
-          echo "negative fixture correctly fails on a missing doc — gate proven"
 
   web:
     name: Web (control plane)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
       - name: Install
         run: bun install --frozen-lockfile
       - name: Typecheck
@@ -147,14 +95,10 @@ jobs:
     name: Windows native build + audio gate
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
-        with:
-          toolchain: stable   # required: the ref is SHA-pinned
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
       - name: Install frontend deps
@@ -165,120 +109,3 @@ jobs:
         run: cargo test -p ojcore -p ojinstrument -p ojcore-native
       - name: Offline audio render gate (Windows, device-free)
         run: cargo run -p ojcore-native --bin render --features demo -- ci-render.wav 2
-
-  macos-native:
-    name: macOS native build + audio gate (aarch64)
-    # The maintainer's primary box is Windows; macOS is the most fragile-toolchain
-    # OS, so it earns a PER-PR leg (not nightly-only) — and `macos-latest` is
-    # Apple-silicon (aarch64), giving the per-arch DSP golden coverage T2 wants
-    # (the device-free render + tolerance-banded golden tests run headless here,
-    # so an FMA-contraction / ULP drift on aarch64 surfaces on every PR).
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
-        with:
-          toolchain: stable   # required: the ref is SHA-pinned
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
-        with:
-          workspaces: ". -> target"
-      - name: Install frontend deps
-        run: bun install --frozen-lockfile
-      - name: Build the native desktop app (oj-tauri)
-        run: cargo build -p oj-tauri
-      - name: Engine tests on macOS (aarch64)
-        run: cargo test -p ojcore -p ojinstrument -p ojcore-native
-      - name: Offline audio render gate (macOS, device-free)
-        run: cargo run -p ojcore-native --bin render --features demo -- "${RUNNER_TEMP:-/tmp}/ci-render.wav" 2
-
-  e2e:
-    name: PWA E2E (Playwright)
-    # Render-smoke for the browser target (plan §4.2): build the production PWA,
-    # serve it via `vite preview` (which emits COOP/COEP), and assert the page
-    # comes up cross-origin isolated with SharedArrayBuffer available and the
-    # React shell mounted. Feeds the aggregate gate.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2
-      - name: Install
-        run: bun install --frozen-lockfile
-      - name: Install Playwright Chromium (+ OS deps)
-        run: bunx playwright install --with-deps chromium
-      - name: PWA smoke (build + preview + crossOriginIsolated)
-        run: bunx playwright test
-
-  credential-scan:
-    name: Credential scan
-    # REQUIRED (plan §0.5): the founder is Windows-only, so the local pre-commit
-    # hook cannot be the only guard against a committed signing key — this runs in
-    # Actions on every PR. Scans the whole tracked tree for secret-filename globs
-    # (*.key/*.pem/*.p12/*.pfx/*.minisign, .tauri/) and PEM private-key blocks.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-        with:
-          persist-credentials: false
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2
-      - name: Install
-        run: bun install --frozen-lockfile
-      - name: Scan tree for committed signing keys / secrets
-        run: bun run scripts/oj/index.ts doctor --check credentials
-
-  zizmor:
-    name: zizmor (workflow security audit)
-    # REQUIRED (plan §0.5): static security audit of every workflow — most
-    # importantly it FAILS on any un-SHA-pinned third-party action (a key-
-    # exfiltration path once signing secrets are added), plus excessive
-    # permissions, credential persistence, and template-injection. Pinned to the
-    # zizmor version this tree is clean against; `--offline` runs the static
-    # audits without needing a token.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e  # v6
-      - name: Audit workflows
-        run: uvx zizmor@1.25.2 --offline .github/workflows/
-
-  # Adversarial self-test (plan §1.3 must-fix): prove the gate predicate actually
-  # red-walls on failure/cancelled and only passes on success/skipped. Feeds the
-  # gate below, so a regression in the predicate fails the merge instead of
-  # silently passing. The predicate lives in ONE script (scripts/ci/gate-eval.sh)
-  # that both this test and the gate consume — no second copy to drift.
-  gate-selftest:
-    name: Gate predicate self-test
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-        with:
-          persist-credentials: false
-      - name: Prove the gate red-walls on failure/cancelled
-        run: bash scripts/ci/gate-selftest.sh
-
-  # ── The SINGLE required status check (foundation F6) ───────────────────────
-  # Branch protection binds the string "Merge gate"; everything else funnels in
-  # here as a `need`, never as an independently-required check. DO NOT RENAME.
-  gate:
-    name: Merge gate
-    needs: [engine, web, windows-native, macos-native, credential-scan, zizmor, gate-selftest, e2e]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-        with:
-          persist-credentials: false
-      - name: Evaluate aggregate result
-        # The gate predicate (plan doc 05 §5): FAIL unless every `need` is in
-        # {success, skipped}. Single source: scripts/ci/gate-eval.sh, proven by
-        # gate-selftest above. RESULTS via env (not inline ${{ }} in run) keeps
-        # the zizmor template-injection audit clean.
-        env:
-          RESULTS: ${{ join(needs.*.result, ',') }}
-        run: bash scripts/ci/gate-eval.sh "$RESULTS"

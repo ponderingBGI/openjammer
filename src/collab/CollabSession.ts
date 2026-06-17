@@ -13,6 +13,7 @@
 
 import { CrdtGraphProjection } from './CrdtGraphProjection';
 import { GraphStoreBridge, type GraphStoreLike } from './graphStoreBridge';
+import { registerAiCollabBridge, unregisterAiCollabBridge } from './aiCollabFrame';
 import { PresenceManager, makeSelfPresence } from './presence';
 import type { PeerPresence, SessionRole, SessionStatus } from './types';
 import type { Transport, TransportFrame } from './transport/Transport';
@@ -88,6 +89,11 @@ export class CollabSession {
         // The host seeds the CRDT from its current store; the guest waits to be
         // reconciled by the first remote snapshot it receives.
         this.bridge.start(this.role === 'host');
+
+        // G2 (M3): expose this bridge's AI-frame controls so the AI session store
+        // can batch an optimistic run into ONE commit / discard at the turn
+        // boundary (registry is null-safe -> single-user is unaffected).
+        registerAiCollabBridge(this.bridge);
 
         // Forward local doc updates over the transport.
         this.unsubLocalDoc = this.projection.subscribeLocalUpdates((bytes) => {
@@ -198,6 +204,7 @@ export class CollabSession {
         this.unsubLocalPresence = null;
         this.unsubPresence = null;
 
+        unregisterAiCollabBridge(this.bridge);
         this.bridge.stop();
         this.transport.close();
         this.presence.destroy();

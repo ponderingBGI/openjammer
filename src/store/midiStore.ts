@@ -12,7 +12,6 @@ import type { MIDIDeviceSignature, MIDIInputNodeData } from '../engine/types';
 // Note: This creates a circular dependency (graphStore imports midiStore)
 // but it's safe because we only use useGraphStore inside functions, not at module load time
 import { useGraphStore } from './graphStore';
-import { logError } from '../utils/log';
 
 // ============================================================================
 // Store State
@@ -181,7 +180,7 @@ export const useMIDIStore = create<MIDIStore>()(
                     try {
                         get().handleMIDIMessage(event);
                     } catch (err) {
-                        logError('store', 'Error in global MIDI callback:', { error: String(err) });
+                        console.error('[midiStore] Error in global MIDI callback:', err);
                     }
                 });
 
@@ -267,7 +266,7 @@ export const useMIDIStore = create<MIDIStore>()(
                     get().handleMIDIMessage(event);
                     callback(event);
                 } catch (err) {
-                    logError('store', 'Error in subscription callback:', { error: String(err) });
+                    console.error('[midiStore] Error in subscription callback:', err);
                 }
             });
 

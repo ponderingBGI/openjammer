@@ -9,6 +9,14 @@ export { CrdtGraphProjection, LOCAL_ORIGIN } from './CrdtGraphProjection';
 export type { ProjectionChange, ProjectionListener } from './CrdtGraphProjection';
 export { GraphStoreBridge } from './graphStoreBridge';
 export type { BridgeGraphState, GraphStoreLike } from './graphStoreBridge';
+export {
+    beginAiFrame,
+    commitAiFrame,
+    discardAiFrame,
+    registerAiCollabBridge,
+    unregisterAiCollabBridge,
+} from './aiCollabFrame';
+export type { AiCollabFrameTarget } from './aiCollabFrame';
 export { PresenceManager, makeSelfPresence, colorForPeer } from './presence';
 export type { PresenceListener } from './presence';
 export { CollabSession } from './CollabSession';

@@ -1,22 +1,18 @@
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react-swc'
 import { VitePWA } from 'vite-plugin-pwa'
-
-// App version, inlined at build time from the SSOT (package.json, written in
-// lockstep by release-please). Exposed as `__APP_VERSION__` so the UI + the
-// issue reporter (L5) report the real shipped version instead of a hand-edited
-// string that drifts.
-const APP_VERSION: string = JSON.parse(
-  readFileSync(fileURLToPath(new URL('./package.json', import.meta.url)), 'utf-8'),
-).version
+// wasm-bindgen libraries (e.g. loro-crdt, the collab CRDT) import their `.wasm`
+// via the ESM-integration proposal, which Vite's dev server can't transform on
+// its own ("ESM integration proposal for Wasm is not supported"). These two
+// plugins add that support (+ the top-level-await wasm-bindgen emits), so the
+// app boots in `tauri dev` / `vite dev`. They are build-safe too.
+import wasm from 'vite-plugin-wasm'
+import topLevelAwait from 'vite-plugin-top-level-await'
 
 export default defineConfig({
-  define: {
-    __APP_VERSION__: JSON.stringify(APP_VERSION),
-  },
   plugins: [
+    wasm(),
+    topLevelAwait(),
     react(),
     VitePWA({
       registerType: 'autoUpdate',
@@ -142,6 +138,18 @@ export default defineConfig({
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin',
       'Cross-Origin-Embedder-Policy': 'require-corp'
+    },
+    // Tauri dev: keep Vite's file watcher OUT of the Rust build output. During
+    // `tauri dev`, cargo locks `target/**/*.dll` while linking, and chokidar
+    // throws `EBUSY: resource busy or locked` watching it — which crashes the
+    // dev server and aborts the whole `beforeDevCommand`. Ignoring the Rust dirs
+    // (and the worktree's `.claude/`) makes `tauri dev` reliable on this layout.
+    // NOTE: do NOT ignore '.claude' here — this worktree itself lives under a
+    // '.claude/worktrees/…' path, so that glob would match the WHOLE project and
+    // silently disable HMR for all of src/. Only the Rust build output needs
+    // ignoring (the EBUSY culprit is target/**/*.dll while cargo links).
+    watch: {
+      ignored: ['**/target/**', '**/src-tauri/target/**']
     }
   },
   preview: {

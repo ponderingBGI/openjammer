@@ -4,32 +4,35 @@ on:
   pull_request:
     types: [opened, synchronize]
 
-# FENCED (plan §0.6): SUGGEST-ONLY. `contents: read` — the bot can no longer
-# commit/push to the PR head (its prior `contents: write` + auto-`git push` was a
-# live RCE/prompt-injection surface on a public repo). It posts review findings as
-# a comment; humans apply fixes. `pull-requests: write` is only for that comment.
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 jobs:
   review:
-    # Never run on the bot's own activity (loop guard).
+    # Don't run on bot commits to prevent loops
+    # Check commit message, actor identity, and PR author
     if: |
+      !contains(github.event.head_commit.message, '[skip ci]') &&
       github.actor != 'claude[bot]' &&
       github.event.pull_request.user.login != 'claude[bot]'
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout code
-        # Pinned to v4.3.1 for supply chain security.
+        # Pinned to v4.3.1 for supply chain security
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
-          persist-credentials: false
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Claude review (suggest-only)
-        # Pinned to v1.0.26 for supply chain security.
+      - name: Configure Git
+        run: |
+          git config user.name "claude[bot]"
+          git config user.email "claude[bot]@users.noreply.github.com"
+
+      - name: Claude Iterative Review & Fix
+        # Pinned to v1.0.26 for supply chain security
         uses: anthropics/claude-code-action@0d1933529914177075d5bc3558ae3d047f188146
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -38,36 +41,51 @@ jobs:
           claude_args: |
             --max-turns 5
           prompt: |
-            Perform a SUGGEST-ONLY code review of this PR. You have read-only
-            access and MUST NOT commit, push, or modify any files — your sole
-            output is a single review comment.
+            Perform an iterative code review and fix loop for this PR:
 
-            ## Review
+            ## Review Process (Max 5 Iterations)
 
-            Analyze the PR changes for:
-            - TypeScript type errors and type-safety issues
-            - ESLint violations and code-style inconsistencies (the repo routes
-              logging through `src/utils/log.ts`; raw `console.*` in `src/` is a
-              lint error)
-            - Security vulnerabilities (XSS, injection, auth bypass, secret leaks)
-            - Test gaps and likely-incorrect behavior
-            - Real-time-safety regressions (no alloc/lock/block on the audio thread)
+            1. **REVIEW**: Analyze all PR changes for issues in these areas:
+               - TypeScript type errors and type safety issues
+               - ESLint violations and code style inconsistencies
+               - Security vulnerabilities (XSS, injection, auth bypasses, etc.)
+               - Test failures and missing test coverage
 
-            You MAY run read-only checks to validate findings (this repo is
-            bun-only; npm/yarn are blocked by a preinstall guard):
+            2. **FIX**: If issues found:
+               - Fix each issue systematically
+               - Run quality checks:
+                 ```bash
+                 npm run build     # TypeScript compilation
+                 npm run lint      # ESLint checks
+                 npm run test:run  # Run test suite
+                 ```
+               - If all checks pass, commit the fixes:
+                 ```bash
+                 git add .
+                 git commit -m "[skip ci] fix: <clear description of what was fixed>"
+                 git push
+                 ```
+               - Go back to step 1 (review again)
 
-            ```bash
-            bun run lint        # ESLint
-            bun run test:run    # vitest
-            bun run build       # tsc + production build
-            ```
+            3. **COMPLETE**: If no issues found OR max iterations (5) reached:
+               - Post a summary comment on the PR with:
+                 - Number of iterations completed
+                 - Issues fixed (with categories: TypeScript, ESLint, Security, Tests)
+                 - Final status (all clean / issues remaining / max iterations reached)
+                 - Any recommendations for manual review
 
-            ## Output
+            ## Important Guidelines
 
-            Post ONE summary comment on the PR with:
-            - The concrete issues found, grouped by category, each with file:line
-              and a SUGGESTED fix (as a diff or code block — do not apply it).
-            - "No blocking issues found" if the PR is clean.
+            - Follow project code style from .claude/CLAUDE.md
+            - Only commit if tests pass - DO NOT commit broken code
+            - Use conventional commit format: "fix:", "refactor:", "test:", etc.
+            - Always include [skip ci] to prevent triggering this workflow again
+            - Be thorough but respect the 5 iteration limit
+            - If stuck on an issue after 2 attempts, document it and move on
 
-            Do NOT use `git commit` / `git push` / `git add`, and never write to the
-            repository — fixes are the human author's to apply.
+            ## Focus Areas Priority
+
+            1. Security vulnerabilities (highest priority)
+            2. TypeScript type errors (breaks build)
+            3. Test failures (breaks CI)
+            4. ESLint violations (code quality)

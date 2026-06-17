@@ -307,10 +307,7 @@ fn biquad_lowpass_attenuates_highs_passes_dc() {
 }
 
 /// `f32::sin` via the std lib (the test crate has std), avoiding an extra dep.
-/// This is TEST reference-signal generation, not engine DSP, so it opts out of
-/// the libm-only `disallowed_methods` guard (clippy.toml) locally.
 #[inline]
-#[allow(clippy::disallowed_methods)]
 fn core_f32_sin(x: f32) -> f32 {
     x.sin()
 }

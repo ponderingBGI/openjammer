@@ -11,7 +11,6 @@ import { getAudioContext } from '../../audio/audioContext';
 import { getExecutor } from '../../audio/executor';
 import { ScrollContainer } from '../common/ScrollContainer';
 import { detectLowLatencyDevice } from '../../utils/audioDeviceDetection';
-import { logError } from '../../utils/log';
 
 interface MicrophoneNodeProps {
     node: GraphNode;
@@ -228,7 +227,7 @@ export const MicrophoneNode = memo(function MicrophoneNode({
             setGainNode(gain);
             setAnalyserNode(analyser);
         } catch (err) {
-            logError('nodes', 'Failed to access microphone', { error: String(err) });
+            console.error('Failed to access microphone:', err);
         }
     }, [isAudioContextReady, node.id, data.isMuted, lowLatencyMode]);
 

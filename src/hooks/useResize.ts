@@ -26,7 +26,6 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useCanvasStore } from '../store/canvasStore';
-import { logWarn } from '../utils/log';
 
 // All 8 resize handle positions
 export type ResizeHandle = 'n' | 's' | 'e' | 'w' | 'nw' | 'ne' | 'sw' | 'se';
@@ -124,16 +123,16 @@ export function useResize(options: UseResizeOptions): UseResizeReturn {
   useEffect(() => {
     if (process.env.NODE_ENV === 'development' && debugMode) {
       if (!minWidth) {
-        logWarn('ui', `Node "${nodeId}": No minWidth set - node may collapse to 0px`);
+        console.warn(`[useResize] Node "${nodeId}": No minWidth set - node may collapse to 0px`);
       }
       if (!minHeight) {
-        logWarn('ui', `Node "${nodeId}": No minHeight set - node may collapse to 0px`);
+        console.warn(`[useResize] Node "${nodeId}": No minHeight set - node may collapse to 0px`);
       }
       if (initialWidth < minWidth) {
-        logWarn('ui', `Node "${nodeId}": initialWidth (${initialWidth}) < minWidth (${minWidth})`);
+        console.warn(`[useResize] Node "${nodeId}": initialWidth (${initialWidth}) < minWidth (${minWidth})`);
       }
       if (initialHeight < minHeight) {
-        logWarn('ui', `Node "${nodeId}": initialHeight (${initialHeight}) < minHeight (${minHeight})`);
+        console.warn(`[useResize] Node "${nodeId}": initialHeight (${initialHeight}) < minHeight (${minHeight})`);
       }
     }
   }, [nodeId, minWidth, minHeight, initialWidth, initialHeight, debugMode]);

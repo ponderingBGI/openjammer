@@ -1,18 +1,26 @@
 /**
- * Command sources (U19)
+ * Command sources (U19 → M4)
  *
- * Derives the initial set of {@link Command}s from existing app data and wires
+ * Derives the initial set of {@link Action}s from existing app data and wires
  * them into the {@link register registry} for the lifetime of the mounted
  * command bar:
  *
- * 1. Node-add commands — one per registered {@link nodeDefinitions} entry that
+ * 1. Node-add actions — one per registered {@link nodeDefinitions} entry that
  *    appears in a user-facing {@link menuCategories} bucket, grouped by the
  *    node's {@link NodeCategory}. (`registry.ts` is imported READ-ONLY.)
+ *    M4 promotes these from legacy zero-arg `Command`s into real {@link Action}s
+ *    offered on BOTH surfaces (`surfaces: ['palette','menu']`) with a `path` for
+ *    the menu's nested categories — so the right-click menu is a FILTERED
+ *    PROJECTION of this same registry. `run(ctx)` spawns at the menu's clicked
+ *    `ctx.point` (and inside `ctx.node`) when present, else at viewport centre.
  * 2. App actions — trivial global toggles dispatched as the same window
- *    CustomEvents the toolbar/menus already listen for (settings, help).
+ *    CustomEvents the toolbar/menus already listen for (settings, help). These
+ *    stay palette-ONLY (`surfaces: ['palette']`): the curated right-click menu
+ *    is for new users and need not surface app chrome.
  *
  * Future AI-generated nodes register through the SAME `commandRegistry`
- * singleton, so they appear here automatically without touching this file.
+ * singleton, so they appear on BOTH surfaces automatically without touching
+ * this file.
  */
 
 import { useEffect } from 'react';
@@ -22,7 +30,9 @@ import { useGraphStore } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useCanvasNavigationStore } from '../../store/canvasNavigationStore';
 import { registerAll } from '../../store/commandRegistry';
-import type { Command } from '../../store/commandRegistry';
+import type { Action, ActionCtx, Command } from '../../store/commandRegistry';
+import { seedPaletteLearning } from '../../store/paletteLearningSeed';
+import { getInvoke } from '../../ai/tauri';
 
 // Human-readable group label per category (matches the menu's casing).
 const CATEGORY_LABEL: Record<NodeCategory, string> = {
@@ -34,61 +44,80 @@ const CATEGORY_LABEL: Record<NodeCategory, string> = {
     utility: 'Utility',
 };
 
-/**
- * Spawn a new node of `type` at the centre of the current viewport, inside the
- * canvas level the user is currently viewing. Mirrors NodeCanvas's add path
- * (screen point -> canvas coords -> addNode with the active parent) without
- * importing anything from the read-only Nodes lane.
- */
-function addNodeAtViewportCenter(type: NodeType): void {
+/** The canvas-space centre of the current viewport (the palette's spawn point). */
+function viewportCenter(): Position {
     const screenCenter: Position = {
         x: window.innerWidth / 2,
         y: window.innerHeight / 2,
     };
-    const canvasPos = useCanvasStore.getState().screenToCanvas(screenCenter);
-    const parentId = useCanvasNavigationStore.getState().currentViewNodeId;
+    return useCanvasStore.getState().screenToCanvas(screenCenter);
+}
+
+/** The canvas level the user is currently viewing (the default add parent). */
+function currentParentId(): string | null {
+    return useCanvasNavigationStore.getState().currentViewNodeId;
+}
+
+/**
+ * Spawn a new node of `type` for either surface. Mirrors NodeCanvas's add path
+ * (canvas coords -> addNode with the active parent) without importing anything
+ * from the read-only Nodes lane.
+ *
+ * - Palette: `ctx.point` is undefined → spawn at the viewport centre, inside the
+ *   level the user is viewing.
+ * - Context menu (M4): `ctx.point` is the clicked canvas point; if the user
+ *   right-clicked a node, `ctx.node` is the spawn parent.
+ *
+ * RE-READs the stores at call time (mutation discipline) — never the snapshot.
+ */
+function addNodeFromCtx(type: NodeType, ctx?: ActionCtx): void {
+    const canvasPos = ctx?.point ?? viewportCenter();
+    const parentId = ctx?.node?.id ?? currentParentId();
     useGraphStore.getState().addNode(type, canvasPos, parentId);
 }
 
 /**
- * Build the node-add commands. Only node types surfaced in `menuCategories`
- * become commands — internal/visual helper types (e.g. `*-visual`,
+ * Build the node-add actions. Only node types surfaced in `menuCategories`
+ * become actions — internal/visual helper types (e.g. `*-visual`,
  * `canvas-input`) are intentionally excluded, exactly as the right-click menu
  * excludes them.
+ *
+ * Each is a real {@link Action} offered on BOTH surfaces: `targets` cover the
+ * canvas point + selection the menu carries, and `path` places it in the menu's
+ * nested category. The id stays `node.add.<type>` (so `frecencyKey === id` is
+ * unchanged across M2's learning).
  */
-function buildNodeCommands(): Command[] {
+function buildNodeActions(): Action[] {
     const userFacingTypes = new Set<NodeType>(
         menuCategories.flatMap((category) => category.items),
     );
 
-    const result: Command[] = [];
+    const result: Action[] = [];
     for (const type of userFacingTypes) {
         const def = nodeDefinitions[type];
         if (!def) continue;
+        const label = CATEGORY_LABEL[def.category] ?? def.category;
         result.push({
             id: `node.add.${type}`,
             title: `Add ${def.name}`,
-            group: CATEGORY_LABEL[def.category] ?? def.category,
+            group: label,
+            path: [label],
             keywords: [def.type, def.category, def.description, 'add', 'node', 'create'],
-            run: () => addNodeAtViewportCenter(type),
+            targets: ['global', 'canvasPoint', 'selection'],
+            surfaces: ['palette', 'menu'],
+            run: (ctx) => addNodeFromCtx(type, ctx),
         });
     }
     return result;
 }
 
 /**
- * Whether the DevLog dev/canary surface is built (mirrors DevLogPanel.tsx). When
- * false the panel renders `null`, so its command must not be registered either —
- * otherwise it is a guaranteed no-op in the palette for production users.
- */
-const DEVLOG_ENABLED =
-    import.meta.env.DEV ||
-    import.meta.env.VITE_OJ_CANARY === 'true' ||
-    import.meta.env.VITE_OJ_CANARY === '1';
-
-/**
  * App-action commands sourced from menus/keybindings where trivially available.
  * These reuse the existing window CustomEvent seam (see App.tsx / HelpPanel.tsx).
+ *
+ * Left as legacy zero-arg {@link Command}s on purpose: normalisation maps them to
+ * `surfaces: ['palette']`, so they appear ONLY in the Ctrl+K palette (the strict
+ * SUPERSET) and never clutter the curated right-click menu.
  */
 function buildAppCommands(): Command[] {
     return [
@@ -113,18 +142,64 @@ function buildAppCommands(): Command[] {
             keywords: ['new', 'project', 'create', 'file'],
             run: () => window.dispatchEvent(new CustomEvent('openjammer:new-project')),
         },
-        // Registered only where the DevLogPanel renders (dev/canary).
-        ...(DEVLOG_ENABLED
-            ? [
-                  {
-                      id: 'app.devlog.toggle',
-                      title: 'Toggle DevLog',
-                      group: 'App',
-                      keywords: ['devlog', 'log', 'logs', 'debug', 'console', 'diagnostics', 'events'],
-                      run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-devlog')),
-                  },
-              ]
-            : []),
+        {
+            // D6 (M7): the Ctrl+K-superset entry into the AuthChooser. Palette-only
+            // (a legacy Command → surfaces:['palette']) — the curated right-click
+            // menu need not surface AI provider chrome. It opens the AI path's
+            // configure flow via a window event the CommandBar listens for.
+            id: 'app.ai.configure',
+            title: 'Configure AI provider',
+            group: 'AI',
+            keywords: ['ai', 'auth', 'provider', 'key', 'login', 'opencode', 'codex', 'anthropic'],
+            run: () => window.dispatchEvent(new CustomEvent('openjammer:configure-ai')),
+        },
+    ];
+}
+
+/**
+ * Agent learning + CLI-parity actions (Phase 4/7). Desktop-only — gated on the
+ * capability seam (`caps.agent !== 'none'`) so they never appear in the browser.
+ * Thin wrappers over the native `ai_set_learning` / `ai_forget` commands; the
+ * persistent global brain means these manage the agent's memory across projects.
+ */
+function buildAiActions(): Action[] {
+    const invokeAi = (cmd: string, args?: Record<string, unknown>): void => {
+        const invoke = getInvoke();
+        if (!invoke) return;
+        void invoke(cmd, args ?? {});
+    };
+    const agentOnly = (ctx: ActionCtx): boolean => ctx.caps.agent !== 'none';
+    return [
+        {
+            id: 'ai.learning.enable',
+            title: 'AI: Remember my taste (learning on)',
+            group: 'AI',
+            keywords: ['ai', 'learn', 'memory', 'remember', 'persistent', 'intelligence'],
+            targets: ['global'],
+            surfaces: ['palette'],
+            enabled: agentOnly,
+            run: () => invokeAi('ai_set_learning', { enabled: true }),
+        },
+        {
+            id: 'ai.learning.disable',
+            title: 'AI: Stop learning my taste',
+            group: 'AI',
+            keywords: ['ai', 'learn', 'memory', 'stop', 'off', 'privacy'],
+            targets: ['global'],
+            surfaces: ['palette'],
+            enabled: agentOnly,
+            run: () => invokeAi('ai_set_learning', { enabled: false }),
+        },
+        {
+            id: 'ai.learning.forget',
+            title: 'AI: Forget learned taste',
+            group: 'AI',
+            keywords: ['ai', 'forget', 'memory', 'wipe', 'reset', 'clear'],
+            targets: ['global'],
+            surfaces: ['palette'],
+            enabled: agentOnly,
+            run: () => invokeAi('ai_forget'),
+        },
     ];
 }
 
@@ -134,6 +209,14 @@ function buildAppCommands(): Command[] {
  */
 export function useCommandSources(): void {
     useEffect(() => {
-        return registerAll([...buildNodeCommands(), ...buildAppCommands()]);
+        // D-LEARN (M7): seed the local frecency floor from Pi memory when the
+        // platform's learning ceiling is 'pi-memory'. Additive + no-op on the
+        // founder-gated empty stub, so this is always safe (never lowers a score).
+        void seedPaletteLearning();
+        return registerAll([
+            ...buildNodeActions(),
+            ...buildAppCommands(),
+            ...buildAiActions(),
+        ]);
     }, []);
 }

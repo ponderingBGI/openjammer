@@ -19,7 +19,6 @@
  */
 
 import { useRef, useEffect, useState } from 'react';
-import { logWarn } from '../utils/log';
 
 // Normalization constant (typical trackpad scroll is ~100px per gesture)
 const SCROLL_NORMALIZATION_FACTOR = 100;
@@ -195,11 +194,11 @@ export function useScrollCapture<T extends HTMLElement = HTMLElement>(
                                style.overflowX === 'auto' || style.overflowX === 'scroll';
 
             if (hasOverflow && captureRef.current) {
-                logWarn('ui',
-                    'Element has overflow scroll but capture={true} (default).\n' +
+                console.warn(
+                    '[useScrollCapture] Element has overflow scroll but capture={true} (default).\n' +
                     'This will block native scrolling inside the element.\n' +
-                    'If you want native scroll inside (e.g., dropdown), use capture={false}.',
-                    { element }
+                    'If you want native scroll inside (e.g., dropdown), use capture={false}.\n' +
+                    'Element:', element
                 );
             }
         }

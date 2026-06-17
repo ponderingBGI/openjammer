@@ -64,6 +64,17 @@ function keyboardSourcePort(keyboard: GraphNode, row: number): string | undefine
         (p) => p.direction === 'output' && p.name.toLowerCase().includes(`row ${row}`),
     );
     if (rowPort) return rowPort.id;
+    // Hardware MIDI devices (e.g. minilab-3) expose a single composite keys-bundle
+    // output (id `<panelId>:bundle-keys`, name 'Keys') rather than `bundle-out` or
+    // `Row N` ports. Match it by intent so routing stays deterministic even once
+    // the device also exposes pad/knob outputs — otherwise the "first output port"
+    // fallback below could pick a pad/knob port and silently misroute the keys.
+    const keysBundle = keyboard.ports.find(
+        (p) =>
+            p.direction === 'output' &&
+            (p.id.endsWith(':bundle-keys') || p.name.toLowerCase().includes('keys')),
+    );
+    if (keysBundle) return keysBundle.id;
     return keyboard.ports.find((p) => p.direction === 'output')?.id;
 }
 

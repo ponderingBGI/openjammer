@@ -61,13 +61,6 @@ pub struct Engine {
     /// computes meters but publishes nothing (host-side return path, std-only).
     #[cfg(feature = "std")]
     pub(crate) meter_ring: Option<alloc::sync::Arc<crate::meter::MeterRing>>,
-    /// Phase-2 (L2): optional RT -> control return ring for `RtEvent` frames. A
-    /// SEPARATE, larger ring from `meter_ring` so a fault storm never evicts
-    /// meters. Lives on the `Engine` (not the program), so it survives a program
-    /// hot-swap unchanged — the same lifecycle hazard `meter_ring` documents.
-    /// `None` => faults are detected but not emitted (the pre-devlog behaviour).
-    #[cfg(all(feature = "std", feature = "devlog"))]
-    pub(crate) event_ring: Option<alloc::sync::Arc<crate::meter::EventRing>>,
 }
 
 // The raw pointers in the scratch are only ever populated and consumed within a
@@ -96,8 +89,6 @@ impl Engine {
             watchdog: None,
             #[cfg(feature = "std")]
             meter_ring: None,
-            #[cfg(all(feature = "std", feature = "devlog"))]
-            event_ring: None,
         }
     }
 
@@ -209,24 +200,6 @@ impl Engine {
         self.meter_ring = ring;
     }
 
-    /// Phase-2 (L2): attach a RT -> control return ring for `RtEvent` frames so
-    /// the engine emits the faults it ALREADY detects (over-budget, auto-bypass,
-    /// non-finite) instead of dropping them silently. Mirrors
-    /// [`Self::attach_meter_ring`] exactly: the caller keeps a clone of the same
-    /// `Arc` and drains it off-RT; pass `None` to detach. Like the meter ring,
-    /// this lives on the `Engine` (not the program), so it survives a program
-    /// hot-swap with no re-attach — re-attaching is only needed if a NEW engine is
-    /// constructed, never on [`Self::install`].
-    ///
-    /// The emit itself is non-blocking and allocation-free (encode to a stack
-    /// buffer, then one wait-free `push`); a full ring drops the frame
-    /// (drop-on-full), which is RT-safe. Only compiled in under the `devlog`
-    /// feature.
-    #[cfg(all(feature = "std", feature = "devlog"))]
-    pub fn attach_event_ring(&mut self, ring: Option<alloc::sync::Arc<crate::meter::EventRing>>) {
-        self.event_ring = ring;
-    }
-
     /// Non-blocking publish of the current meter snapshot + transport beat onto
     /// the attached return ring. Called at block end from `process_block` when
     /// metering is on; safe to call directly too. Allocation-free: it encodes
@@ -258,27 +231,6 @@ impl Engine {
         let pos = self.transport_pos();
         let n = return_frame::encode_beat(pos.bar, pos.beat, pos.phase, &mut buf);
         let _ = ring.push(&buf[..n]);
-    }
-
-    /// Phase-2 (L2): emit an [`ojproto::RtEvent::NodeFault`] for the node in
-    /// `slot` onto the attached event ring, if any. Called from the render loop
-    /// at the fault-detection sites; a no-op when no ring is attached.
-    ///
-    /// RT-safe by construction: builds a `Copy` [`ojproto::RtEvent`] and makes a
-    /// SINGLE [`crate::meter::event_frame::emit`] call (encode into a stack buffer,
-    /// then one wait-free `push`). NO `String`/`Vec`/`format!`/alloc/lock on this
-    /// path; drop-on-full keeps it wait-free. Compiled out entirely off `devlog`.
-    ///
-    /// TODO(phase2): per-(code,node) coalescing to bound ring traffic under fault
-    /// storms (drop-on-full keeps it RT-safe meanwhile).
-    #[cfg(all(feature = "std", feature = "devlog"))]
-    #[inline]
-    fn emit_node_fault(&self, slot: usize, fault: ojproto::FaultKind) {
-        if let Some(ring) = self.event_ring.as_ref() {
-            let node = self.program.ids[slot];
-            let ev = ojproto::RtEvent::NodeFault { node, fault };
-            let _ = crate::meter::event_frame::emit(ring, ev);
-        }
     }
 
     /// Borrow the current program (e.g. to inspect node count in tests).
@@ -433,9 +385,6 @@ impl Engine {
                 let over = self.watchdog.as_mut().map(|w| w.check()).unwrap_or(false);
                 if over {
                     self.budget.over_budget[node] = true;
-                    // L2: surface the over-budget fault (devlog-gated, RT-safe).
-                    #[cfg(all(feature = "std", feature = "devlog"))]
-                    self.emit_node_fault(node, ojproto::FaultKind::OverBudget);
                     if self.watchdog.map(|w| w.auto_bypass).unwrap_or(false) {
                         // Auto-bypass the offender: zero its output this block so a
                         // runaway node degrades to silence rather than xrunning.
@@ -445,10 +394,6 @@ impl Engine {
                                 *s = 0.0;
                             }
                         }
-                        // L2: surface the auto-bypass (after the &mut out_bufs
-                        // borrow above ends), devlog-gated + RT-safe.
-                        #[cfg(all(feature = "std", feature = "devlog"))]
-                        self.emit_node_fault(node, ojproto::FaultKind::AutoBypassed);
                     }
                 }
             }
@@ -504,10 +449,6 @@ impl Engine {
         if sanitize(&mut out[..nframes]) {
             // Flag the master node so the control plane sees the garbage.
             self.budget.non_finite[self.program.master_out] = true;
-            // L2: surface the master non-finite fault (devlog-gated, RT-safe).
-            // `out` is the caller's buffer, disjoint from `&self` here.
-            #[cfg(all(feature = "std", feature = "devlog"))]
-            self.emit_node_fault(self.program.master_out, ojproto::FaultKind::NonFinite);
         }
         if self.meters.enabled {
             self.meters.master.accumulate(&out[..nframes]);
@@ -631,10 +572,6 @@ impl Engine {
         }
         if dirty {
             self.budget.non_finite[node] = true;
-            // L2: surface the non-finite fault (devlog-gated, RT-safe). The
-            // `&mut out_bufs` borrow above has ended, so `&self` here is fine.
-            #[cfg(all(feature = "std", feature = "devlog"))]
-            self.emit_node_fault(node, ojproto::FaultKind::NonFinite);
         }
     }
 

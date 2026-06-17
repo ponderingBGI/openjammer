@@ -3,7 +3,7 @@
  */
 
 import { useCallback, useRef, useState, useEffect, useMemo, memo } from 'react';
-import type { Position, NodeType, Connection } from '../../engine/types';
+import type { Position, Connection } from '../../engine/types';
 import { useGraphStore, getNodeDimensions, type NodeBounds } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useAudioStore } from '../../store/audioStore';
@@ -11,7 +11,7 @@ import { useKeybindingsStore } from '../../store/keybindingsStore';
 import { useCanvasNavigationStore } from '../../store/canvasNavigationStore';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
 import { useTransportStore } from '../../store/transportStore';
-import { getNodeDefinition } from '../../engine/registry';
+import { resolveNodeDefinition } from '../../engine/registry';
 import { getPortPosition as calculatePortPosition } from '../../utils/portPositions';
 import { getConnectionBundleCount } from '../../utils/portSync';
 import { getExecutor } from '../../audio/executor';
@@ -28,7 +28,6 @@ import { ClipDragLayer } from '../Clips/ClipDragLayer';
 import { WaveformEditorModal } from '../Clips/WaveformEditorModal';
 import { PresenceOverlay } from '../Collab/PresenceOverlay';
 import { useCollabStore } from '../../store/collabStore';
-import { logError } from '../../utils/log';
 import './NodeCanvas.css';
 
 interface SelectionBox {
@@ -154,7 +153,6 @@ export function NodeCanvas() {
         const connArray = getConnectionsAtLevel(currentViewNodeId);
         return new Map(connArray.map(c => [c.id, c]));
     }, [currentViewNodeId, getConnectionsAtLevel, allConnections]);
-    const addNode = useGraphStore((s) => s.addNode);
     const selectedConnectionIds = useGraphStore((s) => s.selectedConnectionIds);
     const selectConnection = useGraphStore((s) => s.selectConnection);
     const clearSelection = useGraphStore((s) => s.clearSelection);
@@ -256,14 +254,6 @@ export function NodeCanvas() {
     const handleContextMenu = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
     }, []);
-
-    // Handle adding a node (works at all levels - just pass parentId)
-    const handleAddNode = useCallback((type: NodeType, screenPos: Position) => {
-        const canvasPos = screenToCanvas(screenPos);
-        // With flat structure, addNode accepts parentId directly
-        // null = root level, nodeId = inside that node
-        addNode(type, canvasPos, currentViewNodeId);
-    }, [screenToCanvas, addNode, currentViewNodeId]);
 
     // Handle opening MIDI browser (when 'Midi' is selected from context menu)
     // MIDIIntegration handles the browser rendering and device selection
@@ -507,20 +497,20 @@ export function NodeCanvas() {
             // Get the full item from the library store
             const item = libraryItems[itemData.id];
             if (!item) {
-                logError('canvas', 'Library item not found:', { itemId: itemData.id });
+                console.error('Library item not found:', itemData.id);
                 return;
             }
 
             // Load the audio file and create clip
             const file = await getSampleFile(item.id);
             if (!file) {
-                logError('canvas', 'Could not load file for item:', { itemId: item.id });
+                console.error('Could not load file for item:', item.id);
                 return;
             }
 
             const ctx = getAudioContext();
             if (!ctx) {
-                logError('canvas', 'No audio context available');
+                console.error('No audio context available');
                 return;
             }
 
@@ -544,7 +534,7 @@ export function NodeCanvas() {
             // Select the new clip
             selectClip(clipId);
         } catch (err) {
-            logError('canvas', 'Failed to create clip from dropped item:', { error: String(err) });
+            console.error('Failed to create clip from dropped item:', err);
         }
     }, [libraryItems, screenToCanvas, addClip, selectClip]);
 
@@ -850,7 +840,9 @@ export function NodeCanvas() {
                     const selectedNode = useGraphStore.getState().nodes.get(selectedIds[0]);
                     if (!selectedNode) return;
 
-                    const definition = getNodeDefinition(selectedNode.type);
+                    // M5: resolve via the node's OPEN identity when set, so a
+                    // dynamic AI node honours its dynamic def's canEnter:false.
+                    const definition = resolveNodeDefinition(selectedNode);
                     const canEnter = definition.canEnter !== false;
                     const hasChildren = selectedNode.childIds && selectedNode.childIds.length > 0;
 
@@ -1279,7 +1271,6 @@ export function NodeCanvas() {
                 <ContextMenu
                     position={contextMenu}
                     onClose={() => setContextMenu(null)}
-                    onAddNode={handleAddNode}
                     onOpenMIDIBrowser={handleOpenMIDIBrowser}
                 />
             )}

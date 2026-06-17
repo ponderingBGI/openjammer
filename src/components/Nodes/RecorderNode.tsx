@@ -12,7 +12,6 @@ import { useLibraryStore } from '../../store/libraryStore';
 import { getExecutor } from '../../audio/executor';
 import { getAudioContext } from '../../audio/audioContext';
 import type { Recording as AudioRecording } from '../../audio/executor';
-import { logError } from '../../utils/log';
 
 interface RecorderNodeProps {
     node: GraphNode;
@@ -195,7 +194,7 @@ export const RecorderNode = memo(function RecorderNode({ node }: RecorderNodePro
             ));
             toast.success('Recording saved to project');
         } catch (err) {
-            logError('nodes', 'Failed to save recording:', { error: String(err) });
+            console.error('Failed to save recording:', err);
             toast.error('Failed to save recording');
         } finally {
             setIsSaving(null);

@@ -7,7 +7,6 @@
  */
 
 import { get, set, del, keys } from 'idb-keyval';
-import { logWarn } from './log';
 
 // ============================================================================
 // Type Declarations for File System Access API
@@ -117,7 +116,7 @@ export async function restoreHandle(
     const handle = await get<FileSystemDirectoryHandle>(key);
     return handle || null;
   } catch (err) {
-    logWarn('fs', 'Failed to restore handle:', { name, error: String(err) });
+    console.warn('[FileSystemAccess] Failed to restore handle:', name, err);
     return null;
   }
 }
@@ -234,7 +233,7 @@ export async function getFileByPath(
 ): Promise<FileSystemFileHandle | null> {
   // Security: Block absolute paths
   if (relativePath.startsWith('/') || relativePath.startsWith('\\')) {
-    logWarn('fs', 'Absolute path blocked:', { relativePath });
+    console.warn('Absolute path blocked:', relativePath);
     return null;
   }
 
@@ -254,7 +253,7 @@ export async function getFileByPath(
       /^[a-zA-Z]:/.test(decoded)          // Windows drive letter
     );
   })) {
-    logWarn('fs', 'Path traversal attempt blocked:', { relativePath });
+    console.warn('Path traversal attempt blocked:', relativePath);
     return null;
   }
 
@@ -308,7 +307,7 @@ export async function* walkDirectory(
 
   // Protection against infinite recursion
   if (depth > maxDepth) {
-    logWarn('fs', `Max depth ${maxDepth} reached at ${basePath}`);
+    console.warn(`Max depth ${maxDepth} reached at ${basePath}`);
     return;
   }
 

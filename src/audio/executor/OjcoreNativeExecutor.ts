@@ -25,6 +25,7 @@
  */
 
 import type { Connection, GraphNode } from '../../engine/types';
+import { DESKTOP_CAPABILITIES, type EngineCapabilities } from '../../engine/capabilities';
 import type {
     Executor,
     ConnectionChangeCallback,
@@ -37,20 +38,22 @@ import type {
 } from './Executor';
 import { emitWithIndex, remapForBackend, type NodeIdxMap } from '../ojgraph';
 import { resolveKeyboardNotes } from '../ojgraph';
+import {
+    DEFAULT_VOICE_INSTRUMENTS,
+    getDefaultInstrumentVoice,
+    type DefaultVoice,
+} from '../defaultInstrument';
 import type {
     NodeIdx,
     OjGraph,
     RtCommand,
     EngineFrame,
-    Event as EngineEvent,
 } from '../../../packages/oj-protocol-ts/src/index';
 import {
     OjcoreCapabilityRegistry,
     monoPcmToWavBlob,
     type OjcoreBridge,
 } from './ojcoreHandles';
-import { useLogStore } from '../../store/logStore';
-import { logError, logWarn } from '../../utils/log';
 
 /** Minimal shape of the Tauri global IPC bridge (`withGlobalTauri`). */
 interface TauriGlobal {
@@ -70,14 +73,6 @@ function getInvoke(): ((cmd: string, args?: Record<string, unknown>) => Promise<
 
 /** How often (ms) to poll the engine for fresh per-node meter levels. */
 const METER_POLL_MS = 50;
-
-/**
- * How often (ms) to poll the engine for fault {@link EngineEvent}s. Slower than
- * the meter poll: faults are RARE (`Xrun` / `NodeFault` / `RingFull`), so empty
- * batches are the norm and a tighter loop would just burn IPC. The engine's
- * event ring (16 KiB) absorbs a fault burst between polls without loss.
- */
-const EVENT_POLL_MS = 250;
 
 /** True when running inside a Tauri webview (the native desktop shell). */
 export function isTauri(): boolean {
@@ -109,10 +104,6 @@ export class OjcoreNativeExecutor implements Executor {
     private levels = new Map<string, number>();
     /** Interval id for the meter poll loop (engine -> UI level stream). */
     private meterPollId: number | null = null;
-    /** Interval id for the fault-event poll loop (engine -> DevLog stream). */
-    private eventPollId: number | null = null;
-    /** Guards against overlapping `poll_events` invokes (ordered DevLog ingest). */
-    private eventPollInFlight = false;
 
     /** The engine-side seam the capability handles drive (native impl). */
     private readonly bridge: OjcoreBridge = {
@@ -138,9 +129,8 @@ export class OjcoreNativeExecutor implements Executor {
         this.getConnections = getConnections;
 
         if (!this.invoke) {
-            logWarn(
-                'audio.native',
-                'Tauri global IPC bridge not found ' +
+            console.warn(
+                '[OjcoreNativeExecutor] Tauri global IPC bridge not found ' +
                     '(set app.withGlobalTauri=true in tauri.conf.json). Native audio disabled.',
             );
         }
@@ -157,12 +147,11 @@ export class OjcoreNativeExecutor implements Executor {
 
         // Begin the engine -> UI meter event stream (no-op without Tauri).
         this.startMeterStream();
-        // Begin the engine -> DevLog fault-event stream. Unlike meters this is NOT
-        // gated on a subscriber: we log every engine fault into the bounded
-        // logStore ring always (the "log everything" principle), so the DevLog and
-        // the one-click issue report have the history even if the panel was never
-        // opened. No-op without Tauri.
-        this.startEventStream();
+    }
+
+    /** The native (Tauri) capability row — the flagship. */
+    getCapabilities(): EngineCapabilities {
+        return DESKTOP_CAPABILITIES;
     }
 
     dispose(): void {
@@ -171,10 +160,6 @@ export class OjcoreNativeExecutor implements Executor {
         if (this.meterPollId !== null) {
             clearInterval(this.meterPollId);
             this.meterPollId = null;
-        }
-        if (this.eventPollId !== null) {
-            clearInterval(this.eventPollId);
-            this.eventPollId = null;
         }
         this.signalCallbacks.clear();
         this.levels.clear();
@@ -192,7 +177,7 @@ export class OjcoreNativeExecutor implements Executor {
         if (!this.invoke || this.meterPollId !== null) return;
         // Ask the backend to enable metering (zero-cost while no graph runs).
         this.invoke('subscribe_meters', {}).catch((err: unknown) => {
-            logError('audio.native', 'subscribe_meters failed', { error: String(err) });
+            console.error('[OjcoreNativeExecutor] subscribe_meters failed:', err);
         });
         this.meterPollId = window.setInterval(() => {
             void this.pollMeters();
@@ -225,65 +210,58 @@ export class OjcoreNativeExecutor implements Executor {
         }
     }
 
-    /** Begin the engine -> DevLog fault-event poll loop. Idempotent (a single
-     *  loop). No-op without Tauri. */
-    private startEventStream(): void {
-        if (!this.invoke || this.eventPollId !== null) return;
-        this.eventPollId = window.setInterval(() => {
-            void this.pollEvents();
-        }, EVENT_POLL_MS);
-    }
-
-    /** Poll the engine for pending fault events and ingest each into the DevLog
-     *  log store. Faults are rare, so most polls return an empty batch.
-     *
-     *  Overlap guard: `setInterval` fires on a fixed cadence regardless of
-     *  whether the previous invoke is still in flight. Under an IPC stall,
-     *  concurrent polls could resolve out of order and append older events after
-     *  newer ones — and unlike the order-insensitive meter snapshot, the DevLog
-     *  is an ordered append log. The `eventPollInFlight` latch keeps exactly one
-     *  poll outstanding, so ingestion order matches engine FIFO order. */
-    private async pollEvents(): Promise<void> {
-        if (!this.invoke || this.eventPollInFlight) return;
-        this.eventPollInFlight = true;
-        let events: EngineEvent[];
-        try {
-            events = (await this.invoke('poll_events', {})) as EngineEvent[];
-        } catch {
-            return; // transient; next tick retries
-        } finally {
-            this.eventPollInFlight = false;
-        }
-        if (!Array.isArray(events) || events.length === 0) return;
-        const ingest = useLogStore.getState().ingestEngineEvent;
-        for (const event of events) {
-            if (event && typeof event === 'object' && 'kind' in event) ingest(event);
-        }
-    }
-
     /** Emit + remap + push the current graph to the native engine. */
     private pushGraph(): void {
         if (!this.getNodes || !this.getConnections) return;
-        const { graph, index } = emitWithIndex(this.getNodes(), this.getConnections());
+        // The native engine registers a WasmHost loader per AI-authored faust node
+        // (author_faust_native), so lower compiled code nodes to their real WasmHost
+        // manifest — they play the actual DSP instead of the effect fallback.
+        const { graph, index } = emitWithIndex(this.getNodes(), this.getConnections(), {
+            codeNodesAsWasmHost: true,
+        });
         this.index = index;
         // Build the reverse NodeIdx -> visual id map for routing meter frames.
         this.reverseIndex = new Map();
         for (const [id, idx] of index) this.reverseIndex.set(idx, id);
         const native = remapForBackend(graph, 'native');
-        this.sendGraph(native);
+        void this.sendGraph(native);
     }
 
-    private sendGraph(graph: OjGraph): void {
+    private async sendGraph(graph: OjGraph): Promise<void> {
         if (!this.invoke) return;
-        this.invoke('push_graph', { graph }).catch((err: unknown) => {
-            logError('audio.native', 'push_graph failed', { error: String(err) });
-        });
+        try {
+            await this.invoke('push_graph', { graph });
+        } catch (err) {
+            console.error('[OjcoreNativeExecutor] push_graph failed:', err);
+            return;
+        }
+        // A UI push REPLACES the engine's kept graph, dropping any imperatively
+        // bound sample (see engine.rs push_graph), so (re)install the built-in
+        // default voice for instrument nodes that ship one. Without this a
+        // freshly-wired Keys/Piano/… node lowers to an EMPTY builtin.sampler and
+        // is silent — the note routes correctly but there is no PCM to play.
+        this.loadDefaultInstrumentVoices();
+    }
+
+    /** (Re)lower the built-in default voice into every instrument node that needs
+     *  one, so melodic instruments are playable without a user-loaded sample.
+     *  Idempotent per push; the engine sampler SR-corrects + pitches the single
+     *  tone across the keyboard. A user-bound sample later simply replaces it. */
+    private loadDefaultInstrumentVoices(): void {
+        if (!this.invoke || !this.getNodes) return;
+        let voice: DefaultVoice | null = null;
+        for (const node of this.getNodes().values()) {
+            if (!DEFAULT_VOICE_INSTRUMENTS.has(node.type)) continue;
+            if (this.index.get(node.id) === undefined) continue;
+            if (!voice) voice = getDefaultInstrumentVoice();
+            void this.loadSampleNative(node.id, voice.pcm, voice.sampleRate, voice.rootNote);
+        }
     }
 
     private send(cmd: RtCommand): void {
         if (!this.invoke) return;
         this.invoke('send_command', { cmd }).catch((err: unknown) => {
-            logError('audio.native', 'send_command failed', { error: String(err) });
+            console.error('[OjcoreNativeExecutor] send_command failed:', err);
         });
     }
 
@@ -339,9 +317,16 @@ export class OjcoreNativeExecutor implements Executor {
     }
 
     private emitSignal(connectionId: string, level: number): void {
+        // Persist the cable pulse into the SHARED level map (connection ids and the
+        // node-meter ids the poll writes are disjoint key spaces) and emit a MERGED
+        // snapshot. NodeCanvas replaces its whole map per emit, so a single-entry
+        // emit here was clobbered by the very next `pollMeters` snapshot a frame
+        // later — the "glow dies while the key is held" bug. Mirrors
+        // OjcoreWasmExecutor.emitSignal so both backends behave identically.
+        this.levels.set(connectionId, level);
         if (this.signalCallbacks.size === 0) return;
-        const levels = new Map<string, number>([[connectionId, level]]);
-        for (const cb of this.signalCallbacks) cb(levels);
+        const snapshot = new Map(this.levels);
+        for (const cb of this.signalCallbacks) cb(snapshot);
     }
 
     // --- Speaker output ----------------------------------------------------
@@ -355,13 +340,13 @@ export class OjcoreNativeExecutor implements Executor {
             volume: isMuted ? 0 : volume,
             muted: isMuted,
         }).catch((err: unknown) => {
-            logError('audio.native', 'set_speaker_volume failed', { error: String(err) });
+            console.error('[OjcoreNativeExecutor] set_speaker_volume failed:', err);
         });
     }
     setSpeakerDevice(nodeId: string, deviceId: string): void {
         if (!this.invoke) return;
         this.invoke('set_speaker_device', { nodeId, deviceId }).catch((err: unknown) => {
-            logError('audio.native', 'set_speaker_device failed', { error: String(err) });
+            console.error('[OjcoreNativeExecutor] set_speaker_device failed:', err);
         });
     }
 
@@ -386,7 +371,7 @@ export class OjcoreNativeExecutor implements Executor {
     setMicrophoneOutput(nodeId: string, _outputNode: AudioNode): void {
         if (!this.invoke) return;
         this.invoke('set_mic', { nodeId, enabled: true }).catch((err: unknown) => {
-            logError('audio.native', 'set_mic failed', { error: String(err) });
+            console.error('[OjcoreNativeExecutor] set_mic failed:', err);
         });
     }
 
@@ -453,7 +438,7 @@ export class OjcoreNativeExecutor implements Executor {
                 rootNote,
             });
         } catch (err) {
-            logError('audio.native', 'load_sample failed', { error: String(err) });
+            console.error('[OjcoreNativeExecutor] load_sample failed:', err);
         }
     }
 
@@ -463,7 +448,7 @@ export class OjcoreNativeExecutor implements Executor {
         const idx = this.index.get(nodeId);
         if (idx === undefined) return;
         this.invoke('recorder_start', { node: idx }).catch((err: unknown) => {
-            logError('audio.native', 'recorder_start failed', { error: String(err) });
+            console.error('[OjcoreNativeExecutor] recorder_start failed:', err);
         });
     }
 
@@ -483,7 +468,7 @@ export class OjcoreNativeExecutor implements Executor {
             if (!res || !res.pcm || res.pcm.length === 0) return null;
             return monoPcmToWavBlob(Float32Array.from(res.pcm), res.sampleRate);
         } catch (err) {
-            logError('audio.native', 'recorder_stop failed', { error: String(err) });
+            console.error('[OjcoreNativeExecutor] recorder_stop failed:', err);
             return null;
         }
     }

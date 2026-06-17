@@ -10,8 +10,6 @@ import { Breadcrumbs } from './components/Toolbar/Breadcrumbs';
 import { HelpPanel } from './components/Toolbar/HelpPanel';
 import { SettingsPanel } from './components/Settings/SettingsPanel';
 import { CommandBar } from './components/CommandBar/CommandBar';
-import { DevLogPanel } from './components/DevLog/DevLogPanel';
-import { IssueReporter } from './components/IssueReporter/IssueReporter';
 import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
@@ -25,7 +23,6 @@ import { useProjectStore } from './store/projectStore';
 import { useCanvasStore } from './store/canvasStore';
 import { useKeybindingsStore } from './store/keybindingsStore';
 import { applyTheme, getSavedThemeId, getThemeById } from './styles/themes';
-import { logError } from './utils/log';
 import './styles/global.css';
 
 function App() {
@@ -159,7 +156,7 @@ function App() {
           await saveProject(graphData);
           lastVersionRef.current = currentVersion;
         } catch (err) {
-          logError('app', 'autosave failed', { error: String(err) });
+          console.error('[Autosave] Failed:', err);
         } finally {
           isSavingRef.current = false;
         }
@@ -200,7 +197,7 @@ function App() {
         await saveProject(graphData);
         lastVersionRef.current = currentVersion;
       } catch (err) {
-        logError('app', 'Periodic backup failed:', { error: String(err) });
+        console.error('[Autosave] Periodic backup failed:', err);
       } finally {
         isSavingRef.current = false;
       }
@@ -240,7 +237,7 @@ function App() {
           await saveProject(graphData);
           lastVersionRef.current = currentVersion;
         } catch (err) {
-          logError('app', 'Failed on tab switch:', { error: String(err) });
+          console.error('[Autosave] Failed on tab switch:', err);
         } finally {
           isSavingRef.current = false;
         }
@@ -313,7 +310,7 @@ function App() {
           await saveProject(graphData);
           toast.success('Project saved');
         } catch (err) {
-          logError('app', 'manual save failed', { error: String(err) });
+          console.error('[Save] Failed:', err);
           toast.error(`Failed to save project: ${(err as Error).message}`);
         }
       }
@@ -343,7 +340,7 @@ function App() {
         });
       }
     } catch (err) {
-      logError('app', 'Failed to initialize audio:', { error: String(err) });
+      console.error('Failed to initialize audio:', err);
       // alert('Failed to initialize audio. Please check your browser settings.');
     }
   }, [setAudioContextReady, audioConfig, updateAudioMetrics]);
@@ -374,15 +371,6 @@ function App() {
 
       {/* Command Bar (Ctrl/Cmd+K) - owns its own toggle + open state (U19) */}
       <CommandBar />
-
-      {/* DevLog panel (Ctrl/Cmd+Shift+L) - owns its own toggle + open state (L4).
-          Mounted always; gated to dev/canary and hidden until toggled. */}
-      <DevLogPanel />
-
-      {/* One-click issue reporter (L5) - opened by the `openjammer:report-issue`
-          window event; bundles a redacted diagnostic snapshot + DevLog tail into a
-          pre-filled GitHub issue. Always available (production users report too). */}
-      <IssueReporter />
 
       {/* Collaboration Share/Join control + peer list (U23 — collab state plane) */}
       <CollabControl />
