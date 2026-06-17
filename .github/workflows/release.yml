@@ -28,15 +28,19 @@ jobs:
           # Apple silicon (.app/.dmg). macos-latest is arm64.
           - platform: macos-latest
             args: "--target aarch64-apple-darwin"
+            piTarget: "aarch64-apple-darwin"
           # Intel macOS (.app/.dmg).
           - platform: macos-latest
             args: "--target x86_64-apple-darwin"
+            piTarget: "x86_64-apple-darwin"
           # Linux (.deb/.AppImage).
           - platform: ubuntu-latest
             args: ""
+            piTarget: "x86_64-unknown-linux-gnu"
           # Windows (.msi/.exe).
           - platform: windows-latest
             args: ""
+            piTarget: "x86_64-pc-windows-msvc"
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -78,6 +82,7 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENJAMMER_PI_TARGET: ${{ matrix.piTarget }}
         with:
           # Tag/release wiring. `__VERSION__` is substituted from the app config.
           tagName: ${{ github.ref_name }}

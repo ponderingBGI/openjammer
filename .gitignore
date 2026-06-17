@@ -32,6 +32,9 @@ dist-ssr
 # Rust / Cargo (ojcore workspace)
 /target
 
+# Generated native sidecars/resources (rebuilt by bun run build:pi-runtime)
+/src-tauri/binaries
+
 # cargo-fuzz build + run artifacts (Lane B)
 /fuzz/target
 /fuzz/corpus

@@ -35,12 +35,16 @@ jobs:
         include:
           - platform: macos-latest
             args: "--target aarch64-apple-darwin"
+            piTarget: "aarch64-apple-darwin"
           - platform: macos-latest
             args: "--target x86_64-apple-darwin"
+            piTarget: "x86_64-apple-darwin"
           - platform: ubuntu-latest
             args: ""
+            piTarget: "x86_64-unknown-linux-gnu"
           - platform: windows-latest
             args: ""
+            piTarget: "x86_64-pc-windows-msvc"
     runs-on: ${{ matrix.platform }}
     outputs:
       artifacts: ${{ steps.tauri.outputs.artifactPaths }}
@@ -72,6 +76,7 @@ jobs:
           # The CANARY minisign key signs the update payload (NOT the stable key).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_CANARY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD_CANARY }}
+          OPENJAMMER_PI_TARGET: ${{ matrix.piTarget }}
         with:
           tagName: canary
           releaseName: "OpenJammer canary"

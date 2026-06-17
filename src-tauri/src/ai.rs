@@ -67,7 +67,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// One normalized line of the agent stream, mirrored 1:1 by the frontend
 /// `PiStreamLine` (`src/ai/PiAgentBackend.ts`). Serialized as the Tauri event
@@ -194,7 +194,7 @@ pub fn ai_run(
     bridge: tauri::State<'_, crate::bridge::BridgeState>,
 ) -> Result<(), String> {
     // Resolve the Pi binary up front so a missing install is a clean message.
-    let Some(pi) = find_pi() else {
+    let Some(pi) = find_pi(&app) else {
         emit(&app, &channel, PiStreamLine::error(PI_MISSING_HELP));
         return Ok(());
     };
@@ -1294,7 +1294,16 @@ fn stripped_env_for(provider_key: Option<&str>, provider: Option<&str>) -> HashM
         }
     }
     // Windows needs these to resolve binaries / the home dir.
-    for var in ["USERPROFILE", "SYSTEMROOT", "APPDATA"] {
+    for var in [
+        "USERPROFILE",
+        "SYSTEMROOT",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TEMP",
+        "TMP",
+        "COMSPEC",
+        "PATHEXT",
+    ] {
         if let Ok(val) = std::env::var(var) {
             env.insert(var.to_string(), val);
         }
@@ -1320,36 +1329,166 @@ fn provider_key_var(provider: Option<&str>) -> String {
     })
 }
 
-/// Locate the `pi` binary, honouring an explicit `OPENJAMMER_PI_BIN` override
-/// before falling back to the name on `PATH`. Returns `None` when neither
-/// resolves, so the caller can emit the install help.
-fn find_pi() -> Option<PathBuf> {
+/// Locate the Pi runtime. Resolution order:
+/// 1. `OPENJAMMER_PI_BIN` developer override;
+/// 2. OpenJammer's bundled Pi runtime copied from Tauri resources into app data;
+/// 3. the in-repo dev sidecar (`src-tauri/binaries/...`);
+/// 4. a global `pi` on PATH (developer fallback only).
+///
+/// Bundled wins over PATH so users never accidentally run an incompatible global
+/// Pi. Returns `None` only when OpenJammer's bundled runtime is missing/corrupt
+/// AND no development fallback exists.
+fn find_pi(app: &AppHandle) -> Option<PathBuf> {
     if let Ok(explicit) = std::env::var("OPENJAMMER_PI_BIN") {
         let p = PathBuf::from(&explicit);
-        if p.exists() {
+        if executable_works(&p) {
             return Some(p);
         }
     }
-    // Probe PATH with a cheap `--version`; if it runs, `pi` is callable.
-    if Command::new("pi")
+
+    if let Some(p) = installed_bundled_pi(app) {
+        return Some(p);
+    }
+
+    let dev_runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("binaries");
+    if let Some(p) = pi_in_runtime_dir(&dev_runtime) {
+        return Some(p);
+    }
+
+    // Probe PATH with a cheap `--version`; if it runs, `pi` is callable. This is
+    // intentionally last: packaged OpenJammer should be self-contained.
+    let path_pi = PathBuf::from("pi");
+    if executable_works(&path_pi) {
+        return Some(path_pi);
+    }
+    None
+}
+
+fn installed_bundled_pi(app: &AppHandle) -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var("OPENJAMMER_PI_RUNTIME_DIR") {
+        if let Some(p) = pi_in_runtime_dir(&PathBuf::from(dir)) {
+            return Some(p);
+        }
+    }
+
+    let resource_runtime = app.path().resource_dir().ok()?.join("pi-runtime");
+    if !resource_runtime.join("openjammer-pi-runtime.json").exists() {
+        return None;
+    }
+
+    let version = runtime_version(&resource_runtime).unwrap_or_else(|| "bundled".to_string());
+    let install_root = app.path().app_data_dir().ok()?.join("pi-runtime").join(version);
+    let installed_bin = install_root.join(pi_binary_name());
+
+    if !executable_works(&installed_bin) {
+        let tmp = install_root.with_extension("tmp");
+        let _ = std::fs::remove_dir_all(&tmp);
+        if copy_dir_all(&resource_runtime, &tmp).is_err() {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return None;
+        }
+        let _ = std::fs::remove_dir_all(&install_root);
+        if std::fs::rename(&tmp, &install_root).is_err() {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return None;
+        }
+        make_executable(&installed_bin);
+    }
+
+    pi_in_runtime_dir(&install_root)
+}
+
+fn pi_in_runtime_dir(dir: &Path) -> Option<PathBuf> {
+    let p = dir.join(pi_binary_name());
+    if executable_works(&p) {
+        Some(p)
+    } else {
+        None
+    }
+}
+
+fn runtime_version(dir: &Path) -> Option<String> {
+    let manifest = std::fs::read_to_string(dir.join("openjammer-pi-runtime.json")).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&manifest).ok()?;
+    json.get("version")?.as_str().map(str::to_string)
+}
+
+fn executable_works(path: &Path) -> bool {
+    if path.as_os_str() != "pi" && !path.exists() {
+        return false;
+    }
+    Command::new(path)
         .arg("--version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
-    {
-        return Some(PathBuf::from("pi"));
-    }
-    None
 }
 
-/// The actionable message shown when Pi is not installed.
-const PI_MISSING_HELP: &str = "Pi is not installed. Install the agent CLI \
-    (`bun add -g @earendil-works/pi-coding-agent`, or see github.com/earendil-works/pi) \
-    so the `pi` binary is on PATH, then configure your provider key in ~/.pi. \
-    (Set OPENJAMMER_PI_BIN to a custom path, or OPENJAMMER_AI_KEY_VAR to your \
-    provider's key variable.)";
+fn copy_dir_all(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let dest = to.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &dest)?;
+        } else {
+            std::fs::copy(entry.path(), dest)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn make_executable(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(meta) = std::fs::metadata(path) {
+        let mut perms = meta.permissions();
+        perms.set_mode(perms.mode() | 0o755);
+        let _ = std::fs::set_permissions(path, perms);
+    }
+}
+
+#[cfg(not(unix))]
+fn make_executable(_path: &Path) {}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+fn pi_binary_name() -> &'static str {
+    "openjammer-pi-x86_64-pc-windows-msvc.exe"
+}
+
+#[cfg(all(target_os = "windows", target_arch = "aarch64"))]
+fn pi_binary_name() -> &'static str {
+    "openjammer-pi-aarch64-pc-windows-msvc.exe"
+}
+
+#[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+fn pi_binary_name() -> &'static str {
+    "openjammer-pi-x86_64-apple-darwin"
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn pi_binary_name() -> &'static str {
+    "openjammer-pi-aarch64-apple-darwin"
+}
+
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+fn pi_binary_name() -> &'static str {
+    "openjammer-pi-x86_64-unknown-linux-gnu"
+}
+
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+fn pi_binary_name() -> &'static str {
+    "openjammer-pi-aarch64-unknown-linux-gnu"
+}
+
+/// The actionable message shown when OpenJammer cannot start its bundled Pi runtime.
+const PI_MISSING_HELP: &str = "OpenJammer's bundled AI runtime is missing or damaged. \
+    Reinstall OpenJammer or set OPENJAMMER_PI_BIN to a compatible Pi executable. \
+    Provider authentication is separate: choose a provider in OpenJammer or set the \
+    provider API key (OPENJAMMER_AI_KEY_VAR can override the key variable name).";
 
 /// The actionable message shown when Pi runs but never acknowledges the
 /// `get_commands` handshake (too old / a different RPC dialect).

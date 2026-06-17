@@ -6,6 +6,10 @@ import { test, expect } from '@playwright/test';
 // shell — caught on every PR, against the real built output.
 test.describe('PWA shell', () => {
     test('loads cross-origin isolated and mounts the app', async ({ page }) => {
+        const pageErrors: string[] = [];
+        page.on('pageerror', (error) => {
+            pageErrors.push(error.stack ?? error.message);
+        });
         await page.goto('/');
 
         // The React app mounts into #root (index.html).
@@ -19,8 +23,7 @@ test.describe('PWA shell', () => {
         // And SAB must actually be constructible under that isolation.
         const hasSab = await page.evaluate(() => {
             try {
-                // eslint-disable-next-line no-new
-                new SharedArrayBuffer(8);
+                void new SharedArrayBuffer(8);
                 return true;
             } catch {
                 return false;
@@ -28,7 +31,11 @@ test.describe('PWA shell', () => {
         });
         expect(hasSab, 'SharedArrayBuffer must be constructible under isolation').toBe(true);
 
-        // Render-smoke: the shell put real content in #root (not a blank page).
+        // Render-smoke: the shell put real content in #root (not a blank page),
+        // and the first-run activation CTA is visible. This catches production
+        // bundle TDZ/circular-import crashes where #root stays empty white.
         await expect(page.locator('#root')).not.toBeEmpty();
+        await expect(page.getByRole('button', { name: /start openjammer/i })).toBeVisible();
+        expect(pageErrors, 'no uncaught startup exceptions').toEqual([]);
     });
 });

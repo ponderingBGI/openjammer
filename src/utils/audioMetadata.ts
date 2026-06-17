@@ -7,7 +7,7 @@
  * - Waveform peak generation
  */
 
-import { parseBlob, type IAudioMetadata } from 'music-metadata';
+import type { IAudioMetadata } from 'music-metadata';
 
 // ============================================================================
 // Types
@@ -70,6 +70,10 @@ export interface ExtractedMetadata {
  */
 export async function extractMetadata(file: File): Promise<ExtractedMetadata> {
   try {
+    // music-metadata is large and has browser-only dependency edges that must
+    // not run during first paint. Load it only when the user imports/analyzes an
+    // audio file so a metadata-parser bundling issue cannot white-screen the app.
+    const { parseBlob } = await import('music-metadata');
     const metadata = await parseBlob(file, {
       duration: true,
       skipCovers: true, // Skip cover art for memory savings

@@ -18,7 +18,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        platform: [macos-latest, ubuntu-latest, windows-latest]
+        include:
+          - platform: macos-latest
+            piTarget: "aarch64-apple-darwin"
+          - platform: ubuntu-latest
+            piTarget: "x86_64-unknown-linux-gnu"
+          - platform: windows-latest
+            piTarget: "x86_64-pc-windows-msvc"
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +52,8 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Build the native app + installers
+        env:
+          OPENJAMMER_PI_TARGET: ${{ matrix.piTarget }}
         run: bun run tauri build
 
       - name: Upload installers
