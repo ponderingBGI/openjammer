@@ -1,12 +1,8 @@
 # Signing Root-of-Trust Runbook (`KEY-MANAGEMENT.md`)
 
-This is the **must-write-before-ship** runbook for OpenJammer's update-payload signing keys. It is the operational companion to the [`03-release-channels-and-auto-update.md`](03-release-channels-and-auto-update.md) R2/R4 designs and is the deliverable named explicitly in three places:
+This is the **must-write-before-ship** runbook for OpenJammer's update-payload signing keys. It is the operational companion to the release-channels R2/R4 designs, and it is the deliverable named explicitly across the program: the §F5 "one signing story" invariant and Open question #6 in the overview (*"A `KEY-MANAGEMENT.md` runbook — generation ceremony, dual offline backup, pubkey-overlap rotation window, break-glass via Security Advisory + manual-reinstall notice — is a must-write-before-ship deliverable for R2/R4."*), the R4 catastrophic-key-loss risk row, and the §10 "key-rotation runbook before first signed release" must-fix in the CI design.
 
-- [`00-overview.md` §F5 "One signing story"](00-overview.md#f5--one-signing-story) and [Open question #6](00-overview.md#open-questions--decisions-deferred) — *"A `KEY-MANAGEMENT.md` runbook (generation ceremony, dual offline backup, pubkey-overlap rotation window, break-glass via Security Advisory + manual-reinstall notice) is a must-write-before-ship deliverable for R2/R4."*
-- [`03-release-channels-and-auto-update.md` R4 Risks](03-release-channels-and-auto-update.md#risks--mitigations-3) — the catastrophic-key-loss row points here.
-- [`05-github-actions-ci.md` §10](05-github-actions-ci.md#10-release-path-signing-channels-and-the-draft-vs-publish-model) — the "key-rotation runbook before first signed release" must-fix points here.
-
-> **Scope:** This document governs **minisign update-payload signing only** — the ed25519 keys the Tauri v2 updater (R2) uses to authenticate downloaded installers. It does **not** cover OS-level code-signing (Windows Authenticode / SignPath Foundation, macOS Developer ID + notarization); those are a separate owned release-credentials decision tracked in [`00-overview.md` Open question #3](00-overview.md#open-questions--decisions-deferred) and [`03-...md` Open questions §1](03-release-channels-and-auto-update.md#open-questions--decisions-deferred).
+> **Scope:** This document governs **minisign update-payload signing only** — the ed25519 keys the Tauri v2 updater (R2) uses to authenticate downloaded installers. It does **not** cover OS-level code-signing (Windows Authenticode / SignPath Foundation, macOS Developer ID + notarization); those are a separate owned release-credentials decision tracked in the overview's Open question #3 and the release-channels Open questions §1.
 
 ---
 
@@ -28,7 +24,7 @@ This is the **must-write-before-ship** runbook for OpenJammer's update-payload s
 
 > **Verified:** `src-tauri/tauri.conf.json` at `9279984` has **no** `plugins` block and `app.security.csp: null` (`tauri.conf.json:24-26`); `src-tauri/src/lib.rs:271` registers **only** `tauri_plugin_opener::init()`. The updater plugin, its dependency, and the `pubkey`/`endpoints` config are R2 additions — this runbook governs the keys those additions consume, and **all of it must land before the first signed release.**
 
-> **Verified (repo-slug discrepancy — read before copy-pasting URLs):** Every committed source in the repo canonically uses the slug **`PonderingBGI/openjammer`** (`package.json:9` `repository.url`, `README.md:350`, `src/store/projectStore.ts:376`, and all `docs/plans/*.md`). The local worktree's `git remote -v` resolves to `PonderingAI/openjammer`. This runbook uses `PonderingBGI/openjammer` to stay consistent with the committed plan and the R2 endpoint (`03-...md:282`). **Confirm the live slug before provisioning keys** — the updater `endpoints` URL and the `gh attestation verify --repo` invocation must point at the real published repo, or signature verification succeeds while downloads 404.
+> **Verified (repo-slug discrepancy — read before copy-pasting URLs):** Every committed source in the repo canonically uses the slug **`PonderingBGI/openjammer`** (`package.json:9` `repository.url`, `README.md:350`, `src/store/projectStore.ts:376`, the docs site config). The local worktree's `git remote -v` resolves to `PonderingAI/openjammer`. This runbook uses `PonderingBGI/openjammer` to stay consistent with the committed plan and the R2 endpoint. **Confirm the live slug before provisioning keys** — the updater `endpoints` URL and the `gh attestation verify --repo` invocation must point at the real published repo, or signature verification succeeds while downloads 404.
 
 ---
 
@@ -44,9 +40,9 @@ Minisign is **orthogonal to OS code-signing**:
 | Windows Authenticode (SignPath Foundation) | First-install OS trust (no SmartScreen "unknown publisher") | OS-level, complements minisign | Separate release-credentials decision |
 | macOS Developer ID + notarization | Gatekeeper allows the *swapped* `.app` to launch | OS-level, **hard blocker** for macOS auto-update | Separate release-credentials decision |
 
-> **Why this distinction matters operationally:** minisign verifying a macOS `.app.tar.gz` payload does **nothing** to stop Gatekeeper from quarantining the swapped app. Per [R2's per-platform matrix](03-release-channels-and-auto-update.md#per-platform-matrix-1), the macOS updater is `cfg`-gated **off** until an Apple Developer ID is acquired. A green minisign verification is necessary but not sufficient for a working update on every platform.
+> **Why this distinction matters operationally:** minisign verifying a macOS `.app.tar.gz` payload does **nothing** to stop Gatekeeper from quarantining the swapped app. Per R2's per-platform matrix, the macOS updater is `cfg`-gated **off** until an Apple Developer ID is acquired. A green minisign verification is necessary but not sufficient for a working update on every platform.
 
-`attest-build-provenance` (SLSA) **complements** minisign for auditors and AGPL redistributors but is explicitly **not** a runtime update-acceptance control — the updater verifies the minisign signature only and has zero knowledge of attestations (see [`05-...md` §8e](05-github-actions-ci.md#8e-build-provenance-attestation--honest-framing)).
+`attest-build-provenance` (SLSA) **complements** minisign for auditors and AGPL redistributors but is explicitly **not** a runtime update-acceptance control — the updater verifies the minisign signature only and has zero knowledge of attestations (see the CI design's §8e build-provenance attestation).
 
 ```mermaid
 flowchart LR
@@ -71,7 +67,7 @@ flowchart LR
 
 ## The split-keypair model
 
-OpenJammer uses **two independent minisign ed25519 keypairs**, one per channel of the `{stable, canary}` channel model. This is the [R4 split-keys must-fix](03-release-channels-and-auto-update.md#adversarial-must-fixes-folded-in-3) and the [`00-overview.md` §F5](00-overview.md#f5--one-signing-story) invariant — restated here at the operational level because **this is the document that the generation ceremony and CI scoping must obey.**
+OpenJammer uses **two independent minisign ed25519 keypairs**, one per channel of the `{stable, canary}` channel model. This is the R4 split-keys must-fix and the overview's §F5 invariant — restated here at the operational level because **this is the document that the generation ceremony and CI scoping must obey.**
 
 | | Stable keypair | Canary keypair |
 |---|---|---|
@@ -86,7 +82,7 @@ OpenJammer uses **two independent minisign ed25519 keypairs**, one per channel o
 
 Both pubkeys are embedded **into their respective channel builds** (the stable build trusts the stable pubkey; the canary build trusts the canary pubkey). A canary build that should additionally trust the stable key for a downgrade-to-stable path is an explicit per-channel `updater_builder().endpoints()` routing concern (R2's `check_update(channel)` command), not a multi-key embed.
 
-> **Must-fix (critical):** `TAURI_SIGNING_PRIVATE_KEY` (stable) is scoped `if: startsWith(github.ref, 'refs/tags/v')` and is **never** exposed to `pull_request`, `pull_request_target`, or `push`-to-`main` jobs. This is enforced mechanically by **`zizmor`** as a required PR gate (`05-...md` §8c) — it asserts `TAURI_SIGNING_*` is never referenced under PR triggers (`secrets-on-pr` / `template-injection` audits). A leaked signing key is the single worst outcome in the entire program; this check runs on **every** workflow change, not nightly.
+> **Must-fix (critical):** `TAURI_SIGNING_PRIVATE_KEY` (stable) is scoped `if: startsWith(github.ref, 'refs/tags/v')` and is **never** exposed to `pull_request`, `pull_request_target`, or `push`-to-`main` jobs. This is enforced mechanically by **`zizmor`** as a required PR gate (CI design §8c) — it asserts `TAURI_SIGNING_*` is never referenced under PR triggers (`secrets-on-pr` / `template-injection` audits). A leaked signing key is the single worst outcome in the entire program; this check runs on **every** workflow change, not nightly.
 
 ```mermaid
 flowchart LR
@@ -117,7 +113,7 @@ flowchart LR
 
 ## Prerequisites — do these BEFORE generating any key
 
-> **Must-fix (critical) — order is load-bearing.** `bunx tauri signer generate -w openjammer.key` writes the **private key into the working tree**. The repo runs write-capable Claude bots — `claude-auto-review.yml` literally executes `git add .` (`05-...md` §9) — so an un-gitignored private key would be **auto-committed and publicly published** on the next bot run. The ignore patterns and the credential-scan gate must exist *first*.
+> **Must-fix (critical) — order is load-bearing.** `bunx tauri signer generate -w openjammer.key` writes the **private key into the working tree**. The repo runs write-capable Claude bots — `claude-auto-review.yml` literally executes `git add .` (CI design §9) — so an un-gitignored private key would be **auto-committed and publicly published** on the next bot run. The ignore patterns and the credential-scan gate must exist *first*.
 
 ### 1. `.gitignore` key patterns
 
@@ -135,7 +131,7 @@ openjammer-canary.key
 .tauri/
 ```
 
-> **Verified:** These patterns are the exact set named in [`03-...md` R4](03-release-channels-and-auto-update.md#adversarial-must-fixes-folded-in-3) and [`05-...md` §8d](05-github-actions-ci.md#8d-secret-hygiene-gitignore--required-credential-scan). `.tauri/` is included because the recommended key path below writes under `~/.tauri/`, and a developer who relocates the key into the repo's `.tauri/` would otherwise expose it.
+> **Verified:** These patterns are the exact set named in the release-channels R4 design and the CI design's §8d secret-hygiene gitignore / required credential scan. `.tauri/` is included because the recommended key path below writes under `~/.tauri/`, and a developer who relocates the key into the repo's `.tauri/` would otherwise expose it.
 
 ### 2. Required credential-scan CI step
 
@@ -146,11 +142,11 @@ A **required** CI step (a `needs` dependency of the aggregate `gate` job — **n
 
 ### 3. SHA-pin the release/signing path
 
-> **Must-fix (critical):** [`00-overview.md` Phase 0 #4](00-overview.md#phase-0--foundation-versions-toolchain-governance-security-baseline) and [`05-...md` §8c](05-github-actions-ci.md#8c-action-pinning-zizmor-dependabotyml). `release.yml` today uses **floating tags** (verified): `actions/checkout@v4` (`release.yml:43`), `oven-sh/setup-bun@v2` (`:59`), `dtolnay/rust-toolchain@stable` (`:62`), `Swatinem/rust-cache@v2` (`:70`), `tauri-apps/tauri-action@v0` (`:78`). A floating-tag action in a key-holding workflow is a **direct private-key exfiltration path** — a compromised upstream tag can read the secret. SHA-pin every third-party action **before** `TAURI_SIGNING_*` is ever stored, add `zizmor` as the required pinning gate, and add `dependabot.yml` (the `github-actions` ecosystem) to keep the pins reviewed.
+> **Must-fix (critical):** Phase 0 #4 in the overview and §8c (action pinning / `zizmor` / `dependabot.yml`) in the CI design. `release.yml` today uses **floating tags** (verified): `actions/checkout@v4` (`release.yml:43`), `oven-sh/setup-bun@v2` (`:59`), `dtolnay/rust-toolchain@stable` (`:62`), `Swatinem/rust-cache@v2` (`:70`), `tauri-apps/tauri-action@v0` (`:78`). A floating-tag action in a key-holding workflow is a **direct private-key exfiltration path** — a compromised upstream tag can read the secret. SHA-pin every third-party action **before** `TAURI_SIGNING_*` is ever stored, add `zizmor` as the required pinning gate, and add `dependabot.yml` (the `github-actions` ecosystem) to keep the pins reviewed.
 
 ### 4. Governance ON
 
-[`00-overview.md` Phase 0 #3](00-overview.md#phase-0--foundation-versions-toolchain-governance-security-baseline): `main` has **no branch protection** today and the `gate` job is not yet required. The credential-scan and post-sign verification gates are meaningless until `main` is `enforcement: active` with `required_status_checks` bound to `gate`. Flip governance on before the first signed release.
+Phase 0 #3 in the overview: `main` has **no branch protection** today and the `gate` job is not yet required. The credential-scan and post-sign verification gates are meaningless until `main` is `enforcement: active` with `required_status_checks` bound to `gate`. Flip governance on before the first signed release.
 
 **Prerequisite checklist (all must be green before key generation):**
 
@@ -208,7 +204,7 @@ Each channel build embeds **its own** pubkey in `src-tauri/tauri.conf.json` unde
 }
 ```
 
-> **Note:** Tauri's `plugins.updater.pubkey` config field accepts **one** string. It does **not** natively accept an array of public keys. This is the mechanical reason the rotation strategy below uses a transitional **build** that accepts both keys via `updater_builder().pubkey(...)` selection logic, rather than simply listing two keys in config — see [Rotation](#rotation-the-pubkey-overlap-window). The canary build's config carries the **canary** pubkey and routes to the per-build `canary.json` endpoint via R2's `check_update(channel)` command, never the moving `/latest/`.
+> **Note:** Tauri's `plugins.updater.pubkey` config field accepts **one** string. It does **not** natively accept an array of public keys. This is the mechanical reason the rotation strategy below uses a transitional **build** that accepts both keys via `updater_builder().pubkey(...)` selection logic, rather than simply listing two keys in config — see [Rotation](#rotation--the-pubkey-overlap-window). The canary build's config carries the **canary** pubkey and routes to the per-build `canary.json` endpoint via R2's `check_update(channel)` command, never the moving `/latest/`.
 
 The **public** keys are safe to commit (that is their purpose) and live in version control via `tauri.conf.json`. The **private** keys never enter the repo.
 
@@ -272,7 +268,7 @@ Back up **all four artifacts per key**: the encrypted private key file, the pass
 | Mode | Trigger | Blast radius | Response |
 |---|---|---|---|
 | **Catastrophic loss** | Private key + all backups destroyed | Cannot sign any future update on that channel; installed clients can never auto-update again | [Break-glass](#break-glass--last-resort): new key + Security Advisory + manual-reinstall notice |
-| **Exfiltration** | Private key leaked (committed, logged, stolen runner, malicious action) | Attacker can forge updates that **every** client trusting that pubkey will install and execute | Treat as active RCE: revoke at the source, [rotate](#rotation-the-pubkey-overlap-window), break-glass for the affected channel |
+| **Exfiltration** | Private key leaked (committed, logged, stolen runner, malicious action) | Attacker can forge updates that **every** client trusting that pubkey will install and execute | Treat as active RCE: revoke at the source, [rotate](#rotation--the-pubkey-overlap-window), break-glass for the affected channel |
 | **Stale committed pubkey** | Key regenerated but `tauri.conf.json` not updated | Real updates fail verification → no-update (silent) | Caught by the [post-sign verification gate](#the-post-sign-re-verification-gate-blocking) before publish |
 | **Pub/priv mismatch** | Wrong private key in CI secret | Every `.sig` fails against the committed pubkey | Same gate — **fails the release**, never ships |
 | **Canary key leak** | Canary secret exposed via push-trigger surface | **Bounded** — canary clients only; stable is unaffected (the entire reason for the split) | Rotate the canary key; stable untouched |
@@ -358,15 +354,15 @@ flowchart TD
 4. **Surface a manual-reinstall notice** to existing users — the auto-updater cannot reach them (it would verify against a key the maintainer no longer controls or trusts). Use every out-of-band channel: README banner, Discussions, and the in-app prominent banner.
 5. **For a leak:** rotate the GitHub secret immediately, audit Actions run logs for the exposure window, freeze releases until the path is clean, and destroy the compromised key everywhere it exists.
 
-> **Rotation-notice mechanism (mitigation, [R4 risk row](03-release-channels-and-auto-update.md#risks--mitigations-3)):** To make break-glass *reach* stranded clients, ship — while keys are still healthy — a small **signed-by-the-current-key** notice JSON the app periodically fetches; if present, it surfaces a prominent in-app *"critical update: download manually from `<URL>`"* banner. This converts a silent dead-end into a visible call to action. It only works if shipped **before** the incident, so it is part of the R2/R5 updater work, not the incident response.
+> **Rotation-notice mechanism (mitigation, R4 risk row):** To make break-glass *reach* stranded clients, ship — while keys are still healthy — a small **signed-by-the-current-key** notice JSON the app periodically fetches; if present, it surfaces a prominent in-app *"critical update: download manually from `<URL>`"* banner. This converts a silent dead-end into a visible call to action. It only works if shipped **before** the incident, so it is part of the R2/R5 updater work, not the incident response.
 
 ---
 
 ## The post-sign re-verification gate (blocking)
 
-> **Must-fix (high):** [`03-...md` R4](03-release-channels-and-auto-update.md#adversarial-must-fixes-folded-in-3) and [`05-...md` §10](05-github-actions-ci.md#10-release-path-signing-channels-and-the-draft-vs-publish-model). After signing, CI **re-verifies every installer's `.sig` against the public key committed in `tauri.conf.json`** and **fails the release on mismatch** — catching a pub/priv mismatch (e.g. after key regeneration where the embedded pubkey was not updated) **before publish**, never in the field. A field mismatch ships installers no client can verify; this gate is the seam that catches it.
+> **Must-fix (high):** The release-channels R4 design and the CI design's §10. After signing, CI **re-verifies every installer's `.sig` against the public key committed in `tauri.conf.json`** and **fails the release on mismatch** — catching a pub/priv mismatch (e.g. after key regeneration where the embedded pubkey was not updated) **before publish**, never in the field. A field mismatch ships installers no client can verify; this gate is the seam that catches it.
 
-The gate is a `needs` dependency feeding the aggregate `gate` job — never an independently-required check (the [`00-overview.md` §F6](00-overview.md#f6--one-required-ci-check--one-toolchain-pin--one-hook-control-plane) "one required gate" invariant). It runs after `tauri-action` signs and **before** the draft is auto-published (R1's draft-auto-publish only fires after this and the `latest.json`-completeness gate pass):
+The gate is a `needs` dependency feeding the aggregate `gate` job — never an independently-required check (the overview's §F6 "one required gate" invariant). It runs after `tauri-action` signs and **before** the draft is auto-published (R1's draft-auto-publish only fires after this and the `latest.json`-completeness gate pass):
 
 ```sh
 # Post-sign verification — one needs of `gate`, runs per installer before publish.
@@ -384,7 +380,7 @@ done
 exit $fail
 ```
 
-> **Note:** Confirm the exact `tauri signer verify` flag surface against the pinned `@tauri-apps/cli 2.11.2` at implementation time; the conceptual contract is fixed and non-negotiable — *verify every produced installer against the committed pubkey, and fail the release on any missing or mismatched `.sig`*. This is the same trust seam from both the canary and stable arms of the [R4 build-to-deliver flow](03-release-channels-and-auto-update.md#release--canary-build-to-deliver-flow).
+> **Note:** Confirm the exact `tauri signer verify` flag surface against the pinned `@tauri-apps/cli 2.11.2` at implementation time; the conceptual contract is fixed and non-negotiable — *verify every produced installer against the committed pubkey, and fail the release on any missing or mismatched `.sig`*. This is the same trust seam from both the canary and stable arms of the R4 build-to-deliver flow.
 
 This composes with the other R4 publish gates feeding `gate`:
 
@@ -397,14 +393,14 @@ This composes with the other R4 publish gates feeding `gate`:
 
 ## Bus factor & second-maintainer custody
 
-> **Must-fix (high):** [`00-overview.md` Open question #6](00-overview.md#open-questions--decisions-deferred) and [`03-...md` Open questions §4](03-release-channels-and-auto-update.md#open-questions--decisions-deferred). The signing root-of-trust is a **bus-factor-of-one** today: a single custodian holds the only copies of both private keys. minisign has no rotation, so the loss of that one person is a catastrophic, fleet-stranding event.
+> **Must-fix (high):** Open question #6 in the overview and the release-channels Open questions §4. The signing root-of-trust is a **bus-factor-of-one** today: a single custodian holds the only copies of both private keys. minisign has no rotation, so the loss of that one person is a catastrophic, fleet-stranding event.
 
 **Standing accommodations (with explicit removal triggers):**
 
 - The dual-offline-backup requirement is the *interim* bus-factor mitigation: even if the custodian is unavailable, a second party with access to a backup + passphrase can sign. Document **who** can reach each backup and how.
-- `.github/CODEOWNERS` and any bypass-actor accommodation carry explicit *"remove on second-maintainer onboarding"* TODOs (the program already tracks this pattern in [`00-overview.md` Open question #6](00-overview.md#open-questions--decisions-deferred)).
+- `.github/CODEOWNERS` and any bypass-actor accommodation carry explicit *"remove on second-maintainer onboarding"* TODOs (the program already tracks this pattern in the overview's Open question #6).
 
-**Org-migration custody handoff** ([`00-overview.md` Open question #2](00-overview.md#open-questions--decisions-deferred), [`03-...md` Open questions §4](03-release-channels-and-auto-update.md#open-questions--decisions-deferred), [`05-...md` Open question #3](05-github-actions-ci.md#open-questions--decisions-deferred)): when `PonderingBGI/openjammer` moves to an org, treat key custody as a **first-class migration deliverable**, not an afterthought:
+**Org-migration custody handoff** (the overview's Open question #2, the release-channels Open questions §4, and the CI design's Open question #3): when `PonderingBGI/openjammer` moves to an org, treat key custody as a **first-class migration deliverable**, not an afterthought:
 
 1. Re-create both signing secrets at the **org** level (or repo level under the org), with the same tag/push scoping.
 2. Confirm the embedded **stable pubkey** in `tauri.conf.json` is unchanged (the trust root must survive the move; the org migration is **not** an excuse to rotate unless rotation is independently warranted).
@@ -417,12 +413,14 @@ This composes with the other R4 publish gates feeding `gate`:
 
 | Topic | Authoritative source |
 |---|---|
-| Updater design, channel routing, audio-safe install gate | [`03-...md` R2](03-release-channels-and-auto-update.md#r2--native-desktop-auto-update-tauri-v2-first-party-updater) |
-| Artifact hosting, split keys, manifest completeness, canary immutable tag | [`03-...md` R4](03-release-channels-and-auto-update.md#r4--desktop-artifact-hosting--signing-key-management) |
-| `release-please` single version brain, draft-auto-publish | [`03-...md` R1](03-release-channels-and-auto-update.md#r1--release-please-as-the-single-version-brain--decoupled-moving-tag-canary) |
-| One signing story / split keypairs invariant | [`00-overview.md` §F5](00-overview.md#f5--one-signing-story) |
-| `zizmor`, action pinning, credential scan, provenance | [`05-...md` §8](05-github-actions-ci.md#8-security--supply-chain-suite-free-for-this-public-repo) |
-| Release-path signing & draft-vs-publish model | [`05-...md` §10](05-github-actions-ci.md#10-release-path-signing-channels-and-the-draft-vs-publish-model) |
-| Ready-to-use signed `release.yml` / `canary.yml` reference YAML (where these secrets are wired) | [`08-reference-ci-workflows.md` §5](08-reference-ci-workflows.md#5-releaseyml--signed-stable-release) |
-| Canonical vocabulary — minisign, the `{stable, canary}` channel model, signing terms | [`GLOSSARY.md`](GLOSSARY.md) |
-| OS-level signing (Authenticode / Developer ID) — out of scope here | [`03-...md` Open questions §1](03-release-channels-and-auto-update.md#open-questions--decisions-deferred) |
+| Updater design, channel routing, audio-safe install gate | R2 — native desktop auto-update (Tauri v2 first-party updater); see https://ponderingbgi.github.io/openjammer/reference/update-status/ |
+| Artifact hosting, split keys, manifest completeness, canary immutable tag | R4 — desktop artifact hosting & signing-key management |
+| `release-please` single version brain, draft-auto-publish | R1 — `release-please` as the single version brain + decoupled moving-tag canary; see https://ponderingbgi.github.io/openjammer/reference/channels-and-versions/ |
+| One signing story / split keypairs invariant | The overview's §F5 one-signing-story invariant |
+| `zizmor`, action pinning, credential scan, provenance | The CI design's §8 security & supply-chain suite |
+| Release-path signing & draft-vs-publish model | The CI design's §10 release-path signing & draft-vs-publish model |
+| Ready-to-use signed `release.yml` / `canary.yml` reference YAML (where these secrets are wired) | The reference CI workflows — §5 signed stable `release.yml` |
+| Canonical vocabulary — minisign, the `{stable, canary}` channel model, signing terms | The project glossary |
+| OS-level signing (Authenticode / Developer ID) — out of scope here | The release-channels Open questions §1 |
+| Real-time-safe install gate (audio-thread safety during update) | https://ponderingbgi.github.io/openjammer/architecture/real-time-safety/ |
+| Owner-only secret provisioning steps (GitHub secrets, signing, Apple ID) | [OWNER-PROVISIONING.md](OWNER-PROVISIONING.md) |

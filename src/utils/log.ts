@@ -7,10 +7,8 @@
  *   2. Forwards to the matching `console.*` so existing devtools / inspector
  *      behaviour is completely unchanged.
  *
- * This is the seam the repo-wide `console.*` sweep (a separate, governed
- * follow-up — see docs/plans/02-logging-and-observability.md, L4 "Sweep
- * governance") will land onto. THIS wave only provides the facade + store; it
- * does NOT rewrite existing call sites.
+ * This is the seam the repo-wide `console.*` sweep (the L4 logging design)
+ * lands onto, routing call sites through this facade instead of raw `console.*`.
  *
  * Severity is the SAME `ojproto::Severity` taxonomy the engine uses (no second
  * level vocabulary): "Trace" | "Debug" | "Info" | "Warn" | "Error". The helpers

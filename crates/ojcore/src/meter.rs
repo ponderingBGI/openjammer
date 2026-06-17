@@ -323,10 +323,9 @@ pub mod event_frame {
     /// `std`-gated like [`EventRing`](super::EventRing) so the `no_std` build is
     /// unaffected.
     ///
-    // NOTE: future unification — the plan envisions ONE `drain_frames` routing by
-    // tag (TAG_METER / TAG_BEAT / TAG_EVENT); this dedicated `drain_events` for the
-    // EventRing is the lower-risk additive step. See docs/plans/02-logging-and-
-    // observability.md (L2, "Control-side decode -> drain_frames").
+    // NOTE: future unification — the design envisions ONE `drain_frames` routing
+    // by tag (TAG_METER / TAG_BEAT / TAG_EVENT); this dedicated `drain_events` for
+    // the EventRing is the lower-risk additive step (the L2 control-side decode).
     #[cfg(feature = "std")]
     pub fn drain_events(ring: &super::EventRing, mut on_event: impl FnMut(RtEvent)) {
         let mut buf = [0u8; MAX_LEN];

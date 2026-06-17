@@ -2,7 +2,7 @@
 // FAIL if any are found. Scans staged files when in a git repo; otherwise scans
 // all tracked files (and falls back to nothing if not a repo at all). Pure TS.
 //
-// Patterns (verified against docs/plans/07-reference-configs.md §2 + the brief):
+// Patterns (the signing-key / secret set — see KEY-MANAGEMENT.md + .gitignore):
 //   - filename globs: *.key, openjammer.key, *.pem, *.p12, *.pfx, *.minisign
 //   - path prefix:    anything under .tauri/
 //   - content regex:  a `-----BEGIN ... PRIVATE KEY-----` block

@@ -3,7 +3,9 @@
 Thanks for your interest in OpenJammer! This is a quick-start for contributors.
 The full architecture, the real-time-safety invariant, the logging model, and the
 release/version model live in the **[documentation site](https://ponderingbgi.github.io/openjammer/)**
-(source in [`apps/docs`](apps/docs)); the design plans are in [`docs/plans`](docs/plans).
+(source in [`apps/docs`](apps/docs)). Operational runbooks live at the repo root:
+[`KEY-MANAGEMENT.md`](KEY-MANAGEMENT.md) (update signing) and
+[`OWNER-PROVISIONING.md`](OWNER-PROVISIONING.md) (release / deploy / governance toggles).
 
 ## What OpenJammer is
 
@@ -55,8 +57,7 @@ openjammer/
 ├── src-tauri/         # oj-tauri — the native desktop shell (control-rate IPC ↔ engine)
 ├── src/               # the React + TS control plane (canvas, nodes, stores, DevLog)
 ├── packages/          # oj-protocol-ts — the hand-maintained, parity-gated TS wire mirror
-├── apps/docs/         # the Starlight documentation site (workspace-isolated)
-└── docs/plans/        # the foundations design plans
+└── apps/docs/         # the Starlight documentation site (workspace-isolated)
 ```
 
 ## A few load-bearing invariants
