@@ -46,9 +46,10 @@ test-rt:
 nostd:
     cargo build -p ojcore --no-default-features
 
-# The ONLY ojcore-wasm compile path: nightly + -Z build-std (rust-toolchain.toml).
+# The ONLY ojcore-wasm compile path: the pinned nightly + -Z build-std. The date
+# matches rust-toolchain.toml's documented wasm nightly so local and CI agree.
 wasm:
-    cargo +nightly build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
+    cargo +nightly-2026-06-01 build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
 
 # Device-free `render` gate: render an Osc->Biquad->Delay->Speaker arpeggio to a
 # WAV and assert finite, non-silent, sane-RMS output — no audio device needed.

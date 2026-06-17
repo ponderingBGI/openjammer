@@ -46,7 +46,7 @@ jobs:
       - name: Rust nightly (wasm leg)
         uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2  # nightly
         with:
-          toolchain: nightly   # required: the ref is SHA-pinned, so the toolchain can no longer be inferred from the @tag
+          toolchain: nightly-2026-06-01   # pinned to match rust-toolchain.toml's documented wasm nightly (deliberate re-bless on bump)
           components: rust-src
           targets: wasm32-unknown-unknown
       - name: Rust stable (default; fmt, clippy)
@@ -69,7 +69,7 @@ jobs:
       - name: no_std core builds (wasm-friendly)
         run: cargo build -p ojcore --no-default-features
       - name: wasm32 build
-        run: cargo +nightly build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
+        run: cargo +nightly-2026-06-01 build -p ojcore-wasm --target wasm32-unknown-unknown -Z build-std=std,panic_abort
       - name: Offline audio render gate (device-free)
         # Renders a real arpeggio (Osc->Biquad->Delay->Speaker) to a WAV and
         # asserts the output is finite, non-silent, and in a sane RMS band — so
