@@ -67,13 +67,32 @@ impl SamplerSample {
 }
 
 /// One playback voice: a fractional read position into the shared buffer, the
-/// per-sample increment (pitch ratio), an envelope, and the velocity amplitude.
+/// per-sample increment (pitch ratio), an envelope, the velocity amplitude, and
+/// a per-voice one-pole low-pass whose cutoff is set by velocity (soft notes are
+/// darker, hard notes open up — the expressive dynamics of a real instrument).
 #[derive(Clone, Copy)]
 struct SamplerVoice {
     pos: f32,
     inc: f32,
     env: Adsr,
     amp: f32,
+    /// One-pole low-pass state (the filtered sample carried between frames).
+    lp: f32,
+    /// One-pole coefficient in `(0, 1]`: 1 = fully open (bright), lower = darker.
+    lp_coef: f32,
+}
+
+/// Map a MIDI velocity to a one-pole low-pass coefficient for the brightness
+/// map. Velocity 0..127 sweeps the cutoff exponentially from ~500 Hz (very soft,
+/// dark) up past Nyquist (full velocity, fully open). `sample_rate` is the
+/// engine SR. Pure + branch-light so it is safe on the audio thread.
+#[inline]
+fn velocity_to_lp_coef(vel: u8, sample_rate: f32) -> f32 {
+    let v = (vel as f32 / 127.0).clamp(0.0, 1.0);
+    // 500 Hz .. ~500 * 2^7 ≈ 64 kHz: above Nyquist at high velocity => fully open.
+    let cutoff = 500.0 * libm::powf(2.0, v * 7.0);
+    let coef = 1.0 - libm::expf(-2.0 * core::f32::consts::PI * cutoff / sample_rate.max(1.0));
+    coef.clamp(0.0, 1.0)
 }
 
 /// A from-scratch polyphonic sampler.
@@ -103,6 +122,8 @@ impl SamplerInstrument {
                 inc: 0.0,
                 env: Adsr::new(sr, adsr),
                 amp: 0.0,
+                lp: 0.0,
+                lp_coef: 1.0,
             }; MAX_VOICES],
             alloc: VoiceAlloc::new(),
         }
@@ -170,7 +191,9 @@ impl DspInstance for SamplerInstrument {
                 } else {
                     0.0
                 };
-                *s += sampled * g * v.amp * self.gain;
+                // Velocity brightness: one-pole low-pass (coef 1 = fully open).
+                v.lp += v.lp_coef * (sampled - v.lp);
+                *s += v.lp * g * v.amp * self.gain;
                 v.pos += v.inc;
                 // Past the end while not yet released -> let the tail release.
                 if v.pos >= n as f32 {
@@ -200,6 +223,9 @@ impl DspInstance for SamplerInstrument {
         v.pos = 0.0;
         v.inc = inc;
         v.amp = velocity_to_amp(vel).max(0.0);
+        // Velocity → brightness: soft notes get a lower low-pass cutoff.
+        v.lp = 0.0;
+        v.lp_coef = velocity_to_lp_coef(vel, self.sample_rate);
         v.env.set_params(self.adsr);
         v.env.reset();
         v.env.gate_on();
