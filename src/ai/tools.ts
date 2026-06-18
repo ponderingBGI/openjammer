@@ -454,6 +454,14 @@ export function applyToolCall(
             return applyGetSettings(env);
         case 'update_settings':
             return applyUpdateSettings(call.args, env);
+        default: {
+            const name = (call as { name?: unknown }).name;
+            return {
+                ok: false,
+                summary: `Ignored unsupported AI tool "${typeof name === 'string' ? name : 'unknown'}".`,
+                undo: NO_OP,
+            };
+        }
     }
 }
 

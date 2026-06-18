@@ -43,27 +43,37 @@ import type { Severity } from '@openjammer/oj-protocol';
  *       (and reverts) atomically.
  * NO app-code self-modify, NO raw WASM, NO running untrusted code on the RT path.
  */
-export type AgentToolName =
-    | 'add_node'
-    | 'remove_node'
-    | 'update_node_data'
-    | 'add_connection'
-    | 'remove_connection'
-    | 'author_dsp_node'
-    | 'author_code_node'
-    | 'get_graph'
-    | 'list_node_types'
-    | 'find_nodes'
-    | 'batch_apply'
-    | 'validate_plan'
-    | 'emit_plan'
+export const AGENT_TOOL_NAMES = [
+    'add_node',
+    'remove_node',
+    'update_node_data',
+    'add_connection',
+    'remove_connection',
+    'author_dsp_node',
+    'author_code_node',
+    'get_graph',
+    'list_node_types',
+    'find_nodes',
+    'batch_apply',
+    'validate_plan',
+    'emit_plan',
     // Diagnostics & settings (the "help me get it working" surface): the agent
     // can READ the on-device logs + environment and READ/WRITE the safe-allowlist
     // settings, so "why is there no sound?" becomes an answerable, fixable question.
-    | 'get_logs'
-    | 'get_diagnostics'
-    | 'get_settings'
-    | 'update_settings';
+    'get_logs',
+    'get_diagnostics',
+    'get_settings',
+    'update_settings',
+] as const;
+
+export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
+
+const AGENT_TOOL_NAME_SET: ReadonlySet<string> = new Set(AGENT_TOOL_NAMES);
+
+/** Runtime guard for Pi JSON: never trust a streamed tool name just because TS says so. */
+export function isAgentToolName(name: unknown): name is AgentToolName {
+    return typeof name === 'string' && AGENT_TOOL_NAME_SET.has(name);
+}
 
 /** Arguments for {@link AgentToolName} `add_node`. Mirrors `graphStore.addNode`. */
 export interface AddNodeArgs {

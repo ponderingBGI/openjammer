@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, within, waitFor } from '@testing-library/react';
 import { DESKTOP_CAPABILITIES } from '../../../engine/capabilities';
 
 // --- Mocks -----------------------------------------------------------------
@@ -33,7 +33,12 @@ vi.mock('../useCommandSources', () => ({
 
 // Stub the AI backend so AI mode renders without a real agent.
 vi.mock('../../../ai', () => ({
-    getAgentBackend: () => ({ name: 'stub' }),
+    getAgentBackend: () => ({
+        id: 'stub',
+        async *run() {
+            yield { kind: 'result', summary: 'done' };
+        },
+    }),
 }));
 
 // A Tauri `invoke` that reports a configured provider, so AiPanel's mount-time
@@ -73,6 +78,7 @@ import { usePaletteLearningStore } from '../../../store/paletteLearningStore';
 import { useGraphStore } from '../../../store/graphStore';
 import { useAuthStore } from '../../../auth/authStore';
 import { useCommandBarStore } from '../../../store/commandBarStore';
+import { useAgentSessionStore } from '../../../store/agentSessionStore';
 
 function makeAction(id: string, title: string, run = vi.fn()): Action {
     return {
@@ -106,6 +112,15 @@ describe('CommandBar (M2)', () => {
         // D6 (M7): a configured provider so the Tab fast-path reaches the agent
         // input (the unconfigured path routes to the AuthChooser, tested separately).
         useAuthStore.setState({ configured: true, conflict: false });
+        useAgentSessionStore.setState({
+            phase: 'idle',
+            messages: [],
+            error: null,
+            sessionId: null,
+            runBaseline: null,
+            send: vi.fn(),
+            newSession: vi.fn(),
+        });
         // The bar mode is persisted; reset to search so a prior AI-mode test
         // doesn't leak into the next render.
         useCommandBarStore.setState({ mode: 'search' });
@@ -125,7 +140,9 @@ describe('CommandBar (M2)', () => {
         expect(screen.getByText('Add Looper')).toBeInTheDocument();
     });
 
-    it('Tab from search enters AI mode (the U20 fast-path)', () => {
+    it('Tab from search sends the typed prompt to AI (the one-key fast-path)', async () => {
+        const send = vi.fn();
+        useAgentSessionStore.setState({ send });
         register(makeAction('node.add.looper', 'Add Looper'));
         render(<CommandBar />);
         openPalette();
@@ -135,11 +152,11 @@ describe('CommandBar (M2)', () => {
         fireEvent.keyDown(input, { key: 'Tab' });
 
         // AI mode shows the agent prompt input (desktop caps → agent available).
-        expect(
-            screen.getByPlaceholderText(/Describe what to build/i),
-        ).toBeInTheDocument();
+        expect(screen.getByPlaceholderText(/Ask anything/i)).toBeInTheDocument();
         // The search input is gone (we left search mode).
         expect(screen.queryByPlaceholderText(/Search commands/i)).toBeNull();
+        await waitFor(() => expect(send).toHaveBeenCalledOnce());
+        expect(send.mock.calls[0][1]).toMatchObject({ prompt: 'reverb' });
     });
 
     it('auto-highlights the AI item when there are ZERO local results (D2-A2)', () => {

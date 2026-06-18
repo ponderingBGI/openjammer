@@ -138,6 +138,16 @@
     color: var(--text-primary);
 }
 
+.oj-upd-seg-btn:disabled {
+    cursor: not-allowed;
+    color: var(--text-muted);
+}
+
+.oj-upd-seg-btn:disabled:hover {
+    background: transparent;
+    color: var(--text-muted);
+}
+
 .oj-upd-seg-btn.is-active {
     background: var(--accent-primary);
     color: var(--text-on-accent);
@@ -239,6 +249,24 @@
 
 .oj-upd-btn-danger:hover {
     background: color-mix(in srgb, var(--accent-danger) 12%, var(--bg-node));
+}
+
+.oj-upd-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.62;
+}
+
+.oj-upd-btn:disabled:hover {
+    transform: none;
+    box-shadow: none;
+}
+
+.oj-upd-manual-info {
+    padding: var(--space-sm) 0;
+}
+
+.oj-upd-card-manual {
+    background: var(--bg-secondary);
 }
 
 /* Rollback */

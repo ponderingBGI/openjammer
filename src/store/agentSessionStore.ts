@@ -300,9 +300,24 @@ function slug(name: string): string {
  * plain Ctrl+Z reverts it. We don't keep our own undo log anymore (no Reject).
  */
 function applyStreamedToolCall(call: AgentToolCall): ActionChip {
-    const store = createGraphStoreApi();
-    const result = applyToolCall(call, store, dspRegistrar, createPlanEnv(), createEnvPort());
-    return { name: call.name, summary: result.summary, ok: result.ok };
+    try {
+        const store = createGraphStoreApi();
+        const result = applyToolCall(
+            call,
+            store,
+            dspRegistrar,
+            createPlanEnv(),
+            createEnvPort(),
+        );
+        return { name: call.name, summary: result.summary, ok: result.ok };
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+            name: call.name,
+            summary: `Ignored ${call.name}: ${message}`,
+            ok: false,
+        };
+    }
 }
 
 /** Map a loaded session's display messages into renderable conversation entries. */

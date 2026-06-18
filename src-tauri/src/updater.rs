@@ -85,6 +85,61 @@ pub fn update_set_config(
     g.channel = channel;
 }
 
+fn platform_name() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "unknown"
+    }
+}
+
+fn native_update_capability() -> (&'static str, bool, Option<&'static str>) {
+    if cfg!(debug_assertions) {
+        return (
+            "dev",
+            false,
+            Some("Developer builds do not auto-update. Use a packaged release to test updates."),
+        );
+    }
+
+    if cfg!(windows) {
+        return ("nsis", true, None);
+    }
+
+    if cfg!(target_os = "linux") {
+        if std::env::var_os("APPIMAGE").is_some() {
+            return ("appimage", true, None);
+        }
+        return (
+            "linux-package",
+            false,
+            Some("This Linux install is managed manually or by your package manager."),
+        );
+    }
+
+    if cfg!(target_os = "macos") {
+        return (
+            "dmg",
+            false,
+            Some("Manual .dmg updates until OpenJammer has Apple Developer ID notarization."),
+        );
+    }
+
+    (
+        "unsupported",
+        false,
+        Some("Automatic updates are not available on this platform."),
+    )
+}
+
+fn can_native_auto_update() -> bool {
+    native_update_capability().1
+}
+
 // --- the audio-safe gate seam (channel-agnostic) -----------------------------
 
 /// Mark a downloaded + verified update as ready.
@@ -228,6 +283,9 @@ pub async fn update_check_and_stage(
     #[cfg(any(windows, target_os = "linux"))]
     {
         use tauri::Manager;
+        if !can_native_auto_update() {
+            return Ok(None);
+        }
         let Some(update) = channel_updater(&app, channel)
             .await?
             .check()
@@ -267,6 +325,9 @@ pub fn update_install_if_idle(app: tauri::AppHandle) -> Result<bool, String> {
     #[cfg(any(windows, target_os = "linux"))]
     {
         use tauri::Manager;
+        if !can_native_auto_update() {
+            return Ok(false);
+        }
         let running = app
             .state::<BackendState>()
             .0
@@ -309,8 +370,18 @@ pub struct UpdateStatus {
     /// The version held in the last-good backup, when one exists (the rollback
     /// target). Drives the "Roll back to <version>" affordance.
     pub last_good_version: Option<String>,
-    /// Whether the native updater is even available on this platform/build.
+    /// Whether the updater plugin is compiled into this platform/build.
     pub supported: bool,
+    /// Native OS reported to the UI for manual download selection.
+    pub platform: &'static str,
+    /// Native CPU arch reported to the UI for manual download selection.
+    pub arch: &'static str,
+    /// Runtime install kind (`nsis`, `appimage`, `linux-package`, `dmg`, `dev`, ...).
+    pub install_kind: &'static str,
+    /// Whether this exact platform/install kind may auto-update safely.
+    pub can_auto_update: bool,
+    /// Human-readable reason shown when auto-update is unavailable.
+    pub manual_reason: Option<&'static str>,
 }
 
 /// Report current version + pending-update + rollback state to the UI.
@@ -318,6 +389,7 @@ pub struct UpdateStatus {
 pub fn update_status(app: tauri::AppHandle) -> UpdateStatus {
     let current_version = app.package_info().version.to_string();
     let last_good_version = crate::backup::last_good_version(&app);
+    let (install_kind, can_auto_update, manual_reason) = native_update_capability();
     #[cfg(any(windows, target_os = "linux"))]
     {
         use tauri::Manager;
@@ -329,10 +401,19 @@ pub fn update_status(app: tauri::AppHandle) -> UpdateStatus {
             .and_then(|g| g.as_ref().map(|(u, _)| u.version.clone()));
         UpdateStatus {
             current_version,
-            pending: app.state::<UpdateGateState>().is_pending(),
-            pending_version,
+            pending: can_auto_update && app.state::<UpdateGateState>().is_pending(),
+            pending_version: if can_auto_update {
+                pending_version
+            } else {
+                None
+            },
             last_good_version,
             supported: true,
+            platform: platform_name(),
+            arch: std::env::consts::ARCH,
+            install_kind,
+            can_auto_update,
+            manual_reason,
         }
     }
     #[cfg(not(any(windows, target_os = "linux")))]
@@ -343,6 +424,11 @@ pub fn update_status(app: tauri::AppHandle) -> UpdateStatus {
             pending_version: None,
             last_good_version,
             supported: false,
+            platform: platform_name(),
+            arch: std::env::consts::ARCH,
+            install_kind,
+            can_auto_update,
+            manual_reason,
         }
     }
 }
@@ -354,6 +440,9 @@ pub fn update_status(app: tauri::AppHandle) -> UpdateStatus {
 #[cfg(any(windows, target_os = "linux"))]
 pub fn install_on_quit(app: &tauri::AppHandle) {
     use tauri::Manager;
+    if !can_native_auto_update() {
+        return;
+    }
     let enabled = app
         .state::<AutoUpdateConfig>()
         .0

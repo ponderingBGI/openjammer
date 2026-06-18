@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getInvoke, isTauri } from '../ai/tauri';
-import { useUpdatePreferences } from '../store/updatePreferencesStore';
+import { useUpdatePreferences, type UpdateChannel } from '../store/updatePreferencesStore';
 
 /** Mirror of the Rust `UpdateStatus`. */
 export interface UpdateStatus {
@@ -25,6 +25,16 @@ export interface UpdateStatus {
     /** Version held in the last-good backup (the rollback target), if any. */
     last_good_version: string | null;
     supported: boolean;
+    /** Native OS reported by the shell; browser builds synthesize their own copy. */
+    platform: 'windows' | 'macos' | 'linux' | 'unknown';
+    /** Native CPU arch (`x86_64`, `aarch64`, ...). */
+    arch: string;
+    /** How this copy was installed/runs: `nsis`, `appimage`, `linux-package`, `dmg`, `dev`, ... */
+    install_kind: string;
+    /** Whether the native updater may safely install on this exact platform/install kind. */
+    can_auto_update: boolean;
+    /** Human reason shown when auto-update is unavailable. */
+    manual_reason: string | null;
 }
 
 /**
@@ -71,8 +81,8 @@ export interface NativeUpdater {
     status: UpdateStatus | null;
     checking: boolean;
     error: string | null;
-    /** Check the current channel now; resolves to the available version or null. */
-    checkNow: () => Promise<string | null>;
+    /** Check `channel` now (or the current preference); resolves to the available version or null. */
+    checkNow: (channel?: UpdateChannel) => Promise<string | null>;
     /** Explicit "Update & restart now" — installs only when audio is idle. */
     installNow: () => Promise<boolean>;
     /** Restore the last-good data snapshot, then pin + turn auto-update off. */
@@ -117,14 +127,21 @@ export function useNativeUpdater(options: UseNativeUpdaterOptions = {}): NativeU
         }
     }, []);
 
-    const checkNow = useCallback(async (): Promise<string | null> => {
+    const checkNow = useCallback(async (channelOverride?: UpdateChannel): Promise<string | null> => {
         const invoke = getInvoke();
         if (!invoke) return null;
+        const channel = channelOverride ?? updateChannel;
         setChecking(true);
         setError(null);
         try {
+            // Keep native install-on-quit state in lockstep with explicit checks,
+            // including the first check immediately after the React preference changes.
+            await invoke('update_set_config', {
+                enabled: autoUpdateEnabled,
+                channel,
+            }).catch(() => {});
             const version = (await invoke('update_check_and_stage', {
-                channel: updateChannel,
+                channel,
             })) as string | null;
             if (version) {
                 // Back up the OUTGOING version's data before it installs on quit.
@@ -138,7 +155,7 @@ export function useNativeUpdater(options: UseNativeUpdaterOptions = {}): NativeU
         } finally {
             setChecking(false);
         }
-    }, [updateChannel, refreshStatus]);
+    }, [autoUpdateEnabled, updateChannel, refreshStatus]);
 
     const installNow = useCallback(async (): Promise<boolean> => {
         const invoke = getInvoke();
@@ -193,10 +210,11 @@ export function useNativeUpdater(options: UseNativeUpdaterOptions = {}): NativeU
     // auto-update is on and we aren't pinned. Skips if an update is already staged.
     // Only the background mount runs these (no duplicate intervals from the panel).
     useEffect(() => {
-        if (!background || !native || !autoUpdateEnabled || pinnedVersion) return;
+        const canAutoUpdate = status?.can_auto_update ?? false;
+        if (!background || !native || !autoUpdateEnabled || pinnedVersion || !canAutoUpdate) return;
         let cancelled = false;
         const tick = () => {
-            if (cancelled || statusRef.current?.pending) return;
+            if (cancelled || statusRef.current?.pending || !statusRef.current?.can_auto_update) return;
             void checkNow();
         };
         const initial = setTimeout(tick, INITIAL_CHECK_DELAY_MS);
@@ -206,7 +224,7 @@ export function useNativeUpdater(options: UseNativeUpdaterOptions = {}): NativeU
             clearTimeout(initial);
             clearInterval(interval);
         };
-    }, [background, native, autoUpdateEnabled, pinnedVersion, updateChannel, checkNow]);
+    }, [background, native, autoUpdateEnabled, pinnedVersion, updateChannel, status?.can_auto_update, checkNow]);
 
     return {
         supported: native && (status?.supported ?? true),

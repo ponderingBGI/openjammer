@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { isTauri } from '../ai/tauri';
 
 // ============================================================================
 // Types
@@ -157,8 +158,10 @@ export function useServiceWorker(): UseServiceWorkerResult {
   const [offlineReady, setOfflineReady] = useState(false);
   const [needRefresh, setNeedRefresh] = useState(false);
   const [updateSW, setUpdateSW] = useState<(() => void) | null>(null);
+  const native = isTauri();
 
   useEffect(() => {
+    if (native) return;
     // Dynamic import to avoid issues during SSR/testing
     import('virtual:pwa-register').then(({ registerSW }) => {
       const update = registerSW({
@@ -179,7 +182,7 @@ export function useServiceWorker(): UseServiceWorkerResult {
     }).catch(() => {
       // PWA not available (dev mode or unsupported)
     });
-  }, []);
+  }, [native]);
 
   const updateServiceWorker = useCallback(() => {
     if (updateSW) {

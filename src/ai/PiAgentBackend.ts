@@ -22,6 +22,7 @@
  */
 
 import { getInvoke, isTauri, listen } from './tauri';
+import { isAgentToolName } from './types';
 import type {
     AgentBackend,
     AgentEvent,
@@ -60,11 +61,17 @@ function newRunChannel(): string {
 /** Normalize a raw Pi line into a typed {@link AgentEvent}. */
 function toAgentEvent(line: PiStreamLine): AgentEvent {
     switch (line.kind) {
-        case 'tool-call':
-            if (line.call) {
-                return { kind: 'tool-call', call: line.call, id: line.id ?? '' };
+        case 'tool-call': {
+            const call = line.call as Partial<AgentToolCall> | undefined;
+            if (call && isAgentToolName(call.name)) {
+                return { kind: 'tool-call', call: call as AgentToolCall, id: line.id ?? '' };
             }
-            return { kind: 'thought', text: 'malformed tool-call line (ignored)' };
+            const name = typeof call?.name === 'string' ? call.name : 'unknown';
+            return {
+                kind: 'thought',
+                text: `Ignored unsupported Pi tool "${name}". OpenJammer only applies canvas graph tools.\n`,
+            };
+        }
         case 'result':
             return { kind: 'result', summary: line.text ?? 'Done.' };
         case 'error':
