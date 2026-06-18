@@ -27,7 +27,7 @@ jobs:
       version: ${{ steps.canari.outputs.version }}
       tag: ${{ steps.canari.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
@@ -99,7 +99,7 @@ jobs:
     outputs:
       artifacts: ${{ steps.tauri.outputs.artifactPaths }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.sha }}
 
@@ -160,7 +160,7 @@ jobs:
       - name: Attest build provenance
         if: ${{ steps.tauri.outputs.artifactPaths != '' }}
         continue-on-error: true
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: ${{ steps.subjects.outputs.paths }}
 

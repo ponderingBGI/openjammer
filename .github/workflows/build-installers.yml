@@ -27,7 +27,7 @@ jobs:
             piTarget: "x86_64-pc-windows-msvc"
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Linux webview build deps
         if: matrix.platform == 'ubuntu-latest'
@@ -57,7 +57,7 @@ jobs:
         run: bun run tauri build
 
       - name: Upload installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: openjammer-${{ matrix.platform }}
           path: |

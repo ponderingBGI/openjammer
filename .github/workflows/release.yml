@@ -32,7 +32,7 @@ jobs:
       version: ${{ steps.mode.outputs.version || steps.plan.outputs.version }}
       tag: ${{ steps.mode.outputs.tag || steps.plan.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
           token: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
@@ -184,7 +184,7 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ needs.prepare.outputs.tag }}
 
@@ -249,7 +249,7 @@ jobs:
       contents: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: canari
 
