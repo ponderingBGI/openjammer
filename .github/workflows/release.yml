@@ -25,16 +25,12 @@ concurrency:
 
 jobs:
   prepare:
-    name: Prepare stable version
-    if: >-
-      ${{
-        github.event_name == 'workflow_dispatch' ||
-        !startsWith(github.event.head_commit.message, 'chore(release): publish v')
-      }}
+    name: Prepare stable release
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.plan.outputs.version }}
-      tag: ${{ steps.plan.outputs.tag }}
+      mode: ${{ steps.mode.outputs.mode }}
+      version: ${{ steps.mode.outputs.version || steps.plan.outputs.version }}
+      tag: ${{ steps.mode.outputs.tag || steps.plan.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,7 +39,26 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
 
+      - name: Resolve release mode
+        id: mode
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$COMMIT_MESSAGE" =~ ^chore\(release\):\ publish\ v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            version="${BASH_REMATCH[1]}"
+            {
+              echo "mode=publish"
+              echo "version=$version"
+              echo "tag=v$version"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "mode=prepare-pr" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Resolve requested stable version
+        if: ${{ steps.mode.outputs.mode == 'prepare-pr' }}
         id: request
         env:
           GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
@@ -63,6 +78,7 @@ jobs:
           echo "target_version=$target" >> "$GITHUB_OUTPUT"
 
       - name: Compute next stable version
+        if: ${{ steps.mode.outputs.mode == 'prepare-pr' }}
         id: plan
         env:
           GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
@@ -72,9 +88,48 @@ jobs:
             --target-version "${{ steps.request.outputs.target_version }}"
 
       - name: Stamp source version
+        if: ${{ steps.mode.outputs.mode == 'prepare-pr' }}
         run: bun scripts/oj/release.ts stamp "${{ steps.plan.outputs.version }}"
 
-      - name: Commit version and tag
+      - name: Open protected release version PR
+        if: ${{ steps.mode.outputs.mode == 'prepare-pr' }}
+        env:
+          GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.plan.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="release/publish-${TAG}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml package.json packages/oj-protocol-ts/package.json src-tauri/tauri.conf.json
+          if git diff --cached --quiet; then
+            echo "Version files are already stamped for ${TAG}."
+            exit 0
+          fi
+          git switch -c "$branch"
+          git commit -m "chore(release): publish ${TAG}"
+          git push --force-with-lease origin "HEAD:$branch"
+          existing="$(gh pr list --base main --head "$branch" --state open \
+            --json number --jq '.[0].number // empty')"
+          body="Stamps OpenJammer source versions for ${TAG}. Merging this PR publishes the stable release."
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "chore(release): publish ${TAG}" --body "$body"
+            pr="$existing"
+          else
+            pr_url="$(gh pr create --base main --head "$branch" \
+              --title "chore(release): publish ${TAG}" \
+              --body "$body")"
+            pr="${pr_url##*/}"
+          fi
+          gh pr merge "$pr" --squash --auto --subject "chore(release): publish ${TAG}" || true
+
+      - name: Validate stamped source version
+        if: ${{ steps.mode.outputs.mode == 'publish' }}
+        run: bun scripts/oj/index.ts doctor --check version-sync
+
+      - name: Create stable tag
+        if: ${{ steps.mode.outputs.mode == 'publish' }}
         env:
           RELEASE_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         shell: bash
@@ -82,14 +137,13 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml package.json packages/oj-protocol-ts/package.json src-tauri/tauri.conf.json
-          git commit -m "chore(release): publish ${{ steps.plan.outputs.tag }}"
-          git tag -a "${{ steps.plan.outputs.tag }}" -m "OpenJammer ${{ steps.plan.outputs.tag }}"
-          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git" "${{ steps.plan.outputs.tag }}"
+          git tag -a "${{ steps.mode.outputs.tag }}" -m "OpenJammer ${{ steps.mode.outputs.tag }}"
+          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git" "${{ steps.mode.outputs.tag }}"
 
   release:
     name: Build installers (${{ matrix.platform }})
     needs: prepare
+    if: ${{ needs.prepare.outputs.mode == 'publish' }}
     strategy:
       fail-fast: false
       matrix:
@@ -168,7 +222,7 @@ jobs:
   bake-manifest:
     name: Bake download manifest
     needs: [prepare, release]
-    if: ${{ needs.prepare.result == 'success' && needs.release.result == 'success' }}
+    if: ${{ needs.prepare.outputs.mode == 'publish' && needs.release.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
