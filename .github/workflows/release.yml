@@ -247,10 +247,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.prepare.outputs.tag }}
+          ref: canari
 
       - name: Regenerate public/download/releases.json from the latest release
         continue-on-error: true
@@ -296,7 +297,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add public/download/releases.json
           git commit -m "chore(download): bake releases.json for ${TAG}" || exit 0
-          git push origin "HEAD:$branch"
+          git push --force origin "HEAD:$branch"
           gh pr create \
             --base canari \
             --head "$branch" \
