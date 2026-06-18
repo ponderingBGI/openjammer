@@ -110,7 +110,7 @@ jobs:
           fi
           git switch -c "$branch"
           git commit -m "chore(release): publish ${TAG}"
-          git push --force-with-lease \
+          git push --force \
             "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git" \
             "HEAD:$branch"
           existing="$(gh pr list --base main --head "$branch" --state open \
