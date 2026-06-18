@@ -1,6 +1,6 @@
 {
   "name": "@openjammer/oj-protocol",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Hand-maintained TypeScript mirror of the ojproto UI<->engine wire contract. Kept honest by crates/ojproto/tests/wire_shapes.rs.",
   "license": "AGPL-3.0-only",
   "type": "module",
