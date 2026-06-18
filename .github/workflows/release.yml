@@ -28,7 +28,7 @@ jobs:
     name: Prepare stable release
     runs-on: ubuntu-latest
     outputs:
-      mode: ${{ steps.mode.outputs.mode }}
+      mode: ${{ steps.existing.outputs.mode || steps.mode.outputs.mode }}
       version: ${{ steps.mode.outputs.version || steps.plan.outputs.version }}
       tag: ${{ steps.mode.outputs.tag || steps.plan.outputs.tag }}
     steps:
@@ -46,7 +46,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$COMMIT_MESSAGE" =~ ^chore\(release\):\ publish\ v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+          subject="${COMMIT_MESSAGE%%$'\n'*}"
+          if [[ "$subject" =~ ^chore\(release\):\ publish\ v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
             version="${BASH_REMATCH[1]}"
             {
               echo "mode=publish"
@@ -91,8 +92,28 @@ jobs:
         if: ${{ steps.mode.outputs.mode == 'prepare-pr' }}
         run: bun scripts/oj/release.ts stamp "${{ steps.plan.outputs.version }}"
 
-      - name: Open protected release version PR
+      - name: Detect already-stamped unpublished release
         if: ${{ steps.mode.outputs.mode == 'prepare-pr' }}
+        id: existing
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git add Cargo.toml package.json packages/oj-protocol-ts/package.json src-tauri/tauri.conf.json
+          if ! git diff --cached --quiet; then
+            echo "mode=prepare-pr" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "mode=prepare-pr" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Version files are already stamped for ${TAG}; publishing from current HEAD."
+          echo "mode=publish" >> "$GITHUB_OUTPUT"
+
+      - name: Open protected release version PR
+        if: ${{ steps.mode.outputs.mode == 'prepare-pr' && steps.existing.outputs.mode != 'publish' }}
         env:
           GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           RELEASE_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
@@ -103,11 +124,6 @@ jobs:
           branch="release/publish-${TAG}"
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Cargo.toml package.json packages/oj-protocol-ts/package.json src-tauri/tauri.conf.json
-          if git diff --cached --quiet; then
-            echo "Version files are already stamped for ${TAG}."
-            exit 0
-          fi
           git switch -c "$branch"
           git commit -m "chore(release): publish ${TAG}"
           git push --force \
@@ -128,11 +144,11 @@ jobs:
           gh pr merge "$pr" --squash --auto --subject "chore(release): publish ${TAG}" || true
 
       - name: Validate stamped source version
-        if: ${{ steps.mode.outputs.mode == 'publish' }}
+        if: ${{ steps.mode.outputs.mode == 'publish' || steps.existing.outputs.mode == 'publish' }}
         run: bun scripts/oj/index.ts doctor --check version-sync
 
       - name: Create stable tag
-        if: ${{ steps.mode.outputs.mode == 'publish' }}
+        if: ${{ steps.mode.outputs.mode == 'publish' || steps.existing.outputs.mode == 'publish' }}
         env:
           RELEASE_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
         shell: bash
@@ -140,8 +156,10 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${{ steps.mode.outputs.tag }}" -m "OpenJammer ${{ steps.mode.outputs.tag }}"
-          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git" "${{ steps.mode.outputs.tag }}"
+          git tag -a "${{ steps.mode.outputs.tag || steps.plan.outputs.tag }}" \
+            -m "OpenJammer ${{ steps.mode.outputs.tag || steps.plan.outputs.tag }}"
+          git push "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git" \
+            "${{ steps.mode.outputs.tag || steps.plan.outputs.tag }}"
 
   release:
     name: Build installers (${{ matrix.platform }})
