@@ -95,6 +95,7 @@ jobs:
         if: ${{ steps.mode.outputs.mode == 'prepare-pr' }}
         env:
           GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.plan.outputs.tag }}
         shell: bash
         run: |
@@ -109,7 +110,9 @@ jobs:
           fi
           git switch -c "$branch"
           git commit -m "chore(release): publish ${TAG}"
-          git push --force-with-lease origin "HEAD:$branch"
+          git push --force-with-lease \
+            "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git" \
+            "HEAD:$branch"
           existing="$(gh pr list --base main --head "$branch" --state open \
             --json number --jq '.[0].number // empty')"
           body="Stamps OpenJammer source versions for ${TAG}. Merging this PR publishes the stable release."
