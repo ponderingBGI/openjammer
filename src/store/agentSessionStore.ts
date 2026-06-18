@@ -148,7 +148,15 @@ interface AgentSessionStore {
 
 /** Read tools are introspection, not actions — they get no chip (keeps a chat
  * answer clean; the real read round-trip to Pi is the host bridge's job). */
-const SILENT_TOOLS = new Set(['get_graph', 'list_node_types', 'find_nodes', 'validate_plan']);
+const SILENT_TOOLS = new Set([
+    'get_graph',
+    'list_node_types',
+    'find_nodes',
+    'validate_plan',
+    'get_logs',
+    'get_diagnostics',
+    'get_settings',
+]);
 
 /** Max conversation entries kept in localStorage (older history still lives in
  * Pi's session and is reloadable via `/resume`). */
@@ -300,9 +308,24 @@ function slug(name: string): string {
  * plain Ctrl+Z reverts it. We don't keep our own undo log anymore (no Reject).
  */
 function applyStreamedToolCall(call: AgentToolCall): ActionChip {
-    const store = createGraphStoreApi();
-    const result = applyToolCall(call, store, dspRegistrar, createPlanEnv(), createEnvPort());
-    return { name: call.name, summary: result.summary, ok: result.ok };
+    try {
+        const store = createGraphStoreApi();
+        const result = applyToolCall(
+            call,
+            store,
+            dspRegistrar,
+            createPlanEnv(),
+            createEnvPort(),
+        );
+        return { name: call.name, summary: result.summary, ok: result.ok };
+    } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+            name: call.name,
+            summary: `Ignored ${call.name}: ${message}`,
+            ok: false,
+        };
+    }
 }
 
 /** Map a loaded session's display messages into renderable conversation entries. */

@@ -306,7 +306,7 @@ pub fn ai_run(
         configure_gate(&workspace.agent_home, jailed, &app, &channel);
         // Install the graph-verb extension in EVERY mode (the core capability, so
         // Pi can build the canvas); it is never dropped by YOLO.
-        let graph_pkg = graph_extension_dir().to_string_lossy().into_owned();
+        let graph_pkg = graph_extension_dir(&app).to_string_lossy().into_owned();
         let _ = set_settings_package(&workspace.agent_home, &graph_pkg, true);
         // The hard OS jail (Linux) — present in jailed mode, absent in YOLO.
         let jail = if jailed {
@@ -615,9 +615,15 @@ fn spawn_and_configure(
 
 /// Where the bundled permission-gate extension lives. Overridable for packaging
 /// via `OPENJAMMER_GATE_DIR`; the dev fallback is the in-repo `pi-extensions`.
-fn gate_extension_dir() -> PathBuf {
+fn gate_extension_dir(app: &AppHandle) -> PathBuf {
     if let Ok(p) = std::env::var("OPENJAMMER_GATE_DIR") {
         return PathBuf::from(p);
+    }
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join("pi-extensions").join("permission-gate");
+        if bundled.exists() {
+            return bundled;
+        }
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -629,14 +635,40 @@ fn gate_extension_dir() -> PathBuf {
 /// gives Pi the graph verbs (`add_node`/`add_connection`/…) so it can build the
 /// canvas. Overridable via `OPENJAMMER_GRAPH_DIR`. Installed in EVERY mode (it is
 /// the core capability, not a guard), unlike the permission-gate which YOLO drops.
-fn graph_extension_dir() -> PathBuf {
+fn graph_extension_dir(app: &AppHandle) -> PathBuf {
     if let Ok(p) = std::env::var("OPENJAMMER_GRAPH_DIR") {
         return PathBuf::from(p);
+    }
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join("pi-openjammer-graph");
+        if bundled.exists() {
+            return bundled;
+        }
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .map(|p| p.join("pi-openjammer-graph"))
         .unwrap_or_else(|| PathBuf::from("pi-openjammer-graph"))
+}
+
+fn same_openjammer_package_family(existing: &str, package: &str) -> bool {
+    fn normalized(s: &str) -> String {
+        s.replace('\\', "/").trim_end_matches('/').to_string()
+    }
+    let existing = normalized(existing);
+    let package = normalized(package);
+
+    fn ends_with_path_segment(path: &str, segment: &str) -> bool {
+        path.strip_suffix(segment)
+            .is_some_and(|prefix| prefix.is_empty() || prefix.ends_with('/'))
+    }
+
+    for marker in ["pi-openjammer-graph", "permission-gate"] {
+        if ends_with_path_segment(&package, marker) && ends_with_path_segment(&existing, marker) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Add (`present`) or remove a `package` entry from the agent home's
@@ -660,12 +692,23 @@ fn set_settings_package(agent_home: &Path, package: &str, present: bool) -> std:
         })
         .unwrap_or_default();
 
+    // Installer paths can change across app versions. Keep only the current
+    // OpenJammer package path for this package family so stale resource paths do
+    // not duplicate tools or keep the old permission gate active in YOLO.
+    let before_prune = packages.len();
+    packages.retain(|p| p == package || !same_openjammer_package_family(p, package));
+    let mut changed = packages.len() != before_prune;
+
     let has = packages.iter().any(|p| p == package);
     if present && !has {
         packages.push(package.to_string());
+        changed = true;
     } else if !present && has {
         packages.retain(|p| p != package);
-    } else {
+        changed = true;
+    }
+
+    if !changed {
         return Ok(()); // already in the desired state
     }
 
@@ -682,7 +725,7 @@ fn set_settings_package(agent_home: &Path, package: &str, present: bool) -> std:
 /// This is what turns the verified gate policy into live enforcement — and what
 /// YOLO removes. Best-effort: a write failure is surfaced as a note, never fatal.
 fn configure_gate(agent_home: &Path, jailed: bool, app: &AppHandle, channel: &str) {
-    let gate = gate_extension_dir().to_string_lossy().into_owned();
+    let gate = gate_extension_dir(app).to_string_lossy().into_owned();
     if set_settings_package(agent_home, &gate, jailed).is_err() {
         emit(
             app,
@@ -1196,6 +1239,33 @@ fn is_blocking_dialog(method: &str) -> bool {
     matches!(method, "select" | "confirm" | "input" | "editor")
 }
 
+/// The only Pi tools OpenJammer's webview is allowed to interpret as canvas
+/// graph verbs. Generic Pi tools (`read`, `bash`, `edit`, …) may run inside Pi,
+/// especially in YOLO, but they must NEVER be routed into `applyToolCall`.
+const OPENJAMMER_TOOL_NAMES: &[&str] = &[
+    "add_node",
+    "remove_node",
+    "update_node_data",
+    "add_connection",
+    "remove_connection",
+    "author_dsp_node",
+    "author_code_node",
+    "get_graph",
+    "list_node_types",
+    "find_nodes",
+    "batch_apply",
+    "validate_plan",
+    "emit_plan",
+    "get_logs",
+    "get_diagnostics",
+    "get_settings",
+    "update_settings",
+];
+
+fn is_openjammer_tool(name: &str) -> bool {
+    OPENJAMMER_TOOL_NAMES.contains(&name)
+}
+
 /// Translate one Pi RPC event into an optional [`PiStreamLine`]. `None` means
 /// the event carries no transcript signal (lifecycle / partial / housekeeping)
 /// and is intentionally dropped rather than degraded to a noisy `thought`.
@@ -1205,6 +1275,9 @@ fn parse_pi_event(value: &serde_json::Value) -> Option<PiStreamLine> {
         // The executed tool call (final args) → forward as `tool-call`.
         "tool_execution_start" => {
             let name = value.get("toolName").and_then(|v| v.as_str()).unwrap_or("");
+            if !is_openjammer_tool(name) {
+                return None;
+            }
             let args = value
                 .get("args")
                 .cloned()
@@ -2050,6 +2123,26 @@ mod tests {
         assert_eq!(none_env.get("ANTHROPIC_API_KEY"), None);
     }
 
+    #[test]
+    fn openjammer_package_family_matches_across_install_paths() {
+        assert!(same_openjammer_package_family(
+            r#"C:\Program Files\OpenJammer\resources\pi-openjammer-graph"#,
+            r#"C:\Users\u\AppData\Local\OpenJammer\resources\pi-openjammer-graph"#,
+        ));
+        assert!(same_openjammer_package_family(
+            "/old/resources/pi-extensions/permission-gate/",
+            "/new/resources/pi-extensions/permission-gate",
+        ));
+        assert!(!same_openjammer_package_family(
+            "pi-persistent-intelligence",
+            "/new/resources/pi-openjammer-graph",
+        ));
+        assert!(!same_openjammer_package_family(
+            "/old/resources/not-pi-openjammer-graph",
+            "/new/resources/pi-openjammer-graph",
+        ));
+    }
+
     // ---- RPC event mapping (the M1 "transport truth") ----------------------
 
     #[test]
@@ -2064,6 +2157,15 @@ mod tests {
         let call = line.call.expect("call present");
         assert_eq!(call["name"], "add_node");
         assert_eq!(call["args"]["type"], "looper");
+    }
+
+    #[test]
+    fn unsupported_tool_execution_start_is_skipped() {
+        let value: serde_json::Value = serde_json::from_str(
+            r#"{"type":"tool_execution_start","toolCallId":"call_1","toolName":"read","args":{"path":"Cargo.toml"}}"#,
+        )
+        .unwrap();
+        assert!(parse_pi_event(&value).is_none());
     }
 
     #[test]

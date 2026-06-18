@@ -32,7 +32,9 @@
     "shortDescription": "Node-driven music creation for live performance.",
     "longDescription": "OpenJammer is a node-based music creation tool for live performance. This native desktop build runs the low-latency Rust ojcore engine behind the existing web UI.",
     "resources": {
-      "binaries/": "pi-runtime/"
+      "binaries/": "pi-runtime/",
+      "../pi-openjammer-graph/": "pi-openjammer-graph/",
+      "../pi-extensions/permission-gate/": "pi-extensions/permission-gate/"
     },
     "icon": [
       "icons/32x32.png",

@@ -10,11 +10,11 @@
  * DESIGN PRINCIPLES (from the project plan):
  * - The agent is an UNTRUSTED GENERATOR, never a trusted runner. It only ever
  *   EMITS {@link AgentToolCall}s — declarative descriptions of graph mutations
- *   or Faust authoring. NOTHING here executes anything; applying a tool call is
- *   a separate, reviewable step (see {@link applyToolCall} in `./tools`).
- * - Every run is TRANSACTIONAL/REVERSIBLE: the session snapshots the graph
- *   before applying, streams a transcript, and gates the result behind an
- *   explicit Approve / Reject (see `../store/agentSessionStore`).
+ *   or Faust authoring. NOTHING here executes arbitrary code; applying a tool
+ *   call is centralized in {@link applyToolCall} in `./tools`.
+ * - Every run is LIVE/REVERSIBLE: the session applies allowlisted graph verbs as
+ *   they stream, records them through normal graph history, and the player can
+ *   undo with plain Ctrl+Z (see `../store/agentSessionStore`).
  * - AI is NATIVE/HYBRID ONLY. In a plain browser the Tab->AI path is disabled
  *   ("AI requires the desktop app"); only inside Tauri does the Rust backend
  *   spawn Pi. {@link AgentBackend.available} reports which we're in.
@@ -43,27 +43,37 @@ import type { Severity } from '@openjammer/oj-protocol';
  *       (and reverts) atomically.
  * NO app-code self-modify, NO raw WASM, NO running untrusted code on the RT path.
  */
-export type AgentToolName =
-    | 'add_node'
-    | 'remove_node'
-    | 'update_node_data'
-    | 'add_connection'
-    | 'remove_connection'
-    | 'author_dsp_node'
-    | 'author_code_node'
-    | 'get_graph'
-    | 'list_node_types'
-    | 'find_nodes'
-    | 'batch_apply'
-    | 'validate_plan'
-    | 'emit_plan'
+export const AGENT_TOOL_NAMES = [
+    'add_node',
+    'remove_node',
+    'update_node_data',
+    'add_connection',
+    'remove_connection',
+    'author_dsp_node',
+    'author_code_node',
+    'get_graph',
+    'list_node_types',
+    'find_nodes',
+    'batch_apply',
+    'validate_plan',
+    'emit_plan',
     // Diagnostics & settings (the "help me get it working" surface): the agent
     // can READ the on-device logs + environment and READ/WRITE the safe-allowlist
     // settings, so "why is there no sound?" becomes an answerable, fixable question.
-    | 'get_logs'
-    | 'get_diagnostics'
-    | 'get_settings'
-    | 'update_settings';
+    'get_logs',
+    'get_diagnostics',
+    'get_settings',
+    'update_settings',
+] as const;
+
+export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
+
+const AGENT_TOOL_NAME_SET: ReadonlySet<string> = new Set(AGENT_TOOL_NAMES);
+
+/** Runtime guard for Pi JSON: never trust a streamed tool name just because TS says so. */
+export function isAgentToolName(name: unknown): name is AgentToolName {
+    return typeof name === 'string' && AGENT_TOOL_NAME_SET.has(name);
+}
 
 /** Arguments for {@link AgentToolName} `add_node`. Mirrors `graphStore.addNode`. */
 export interface AddNodeArgs {
@@ -183,7 +193,7 @@ export interface FindNodesArgs {
  * Arguments for `batch_apply` (M3): an ORDERED list of MUTATION sub-calls applied
  * as ONE reversible frame. ALL-OR-NOTHING (D3-A1 fail-closed): if any sub-call
  * fails, the whole frame is reverted. A nested `batch_apply` is rejected (no
- * recursion). The single frame is ONE undo on Reject.
+ * recursion). The single frame is one coherent undoable edit.
  */
 export interface BatchApplyArgs {
     /** The sub-calls to run in order (each a normal {@link AgentToolCall}). */
@@ -300,7 +310,8 @@ export type AgentToolCall =
 /**
  * One streamed event from a running agent. The backend yields these as the
  * model "thinks", calls tools, and finishes. The UI renders them as a live
- * transcript; tool-call events are also collected so Approve can apply them.
+ * transcript; tool-call events are applied immediately through the allowlisted
+ * graph-tool path.
  */
 /**
  * A UI request surfaced from a Pi extension dialog (`extension_ui_request`):
@@ -317,7 +328,7 @@ export interface AgentUiRequest {
 export type AgentEvent =
     /** Free-form reasoning / narration text from the model. */
     | { kind: 'thought'; text: string }
-    /** A proposed tool call. NOT yet applied — staged for Approve/Reject. */
+    /** An allowlisted OpenJammer tool call to apply through the reversible graph path. */
     | { kind: 'tool-call'; call: AgentToolCall; id: string }
     /** A terminal success: the agent finished proposing its plan. */
     | { kind: 'result'; summary: string }
@@ -367,7 +378,8 @@ export interface AgentTask {
      * YOLO mode (Phase 6): when true the native host drops the OS jail + in-Pi
      * permission-gate and forwards the full shell environment (the real Pi
      * experience). Omitted/false = the default sandbox. Toggling it respawns the
-     * warm child. The graph Approve/Reject gate is unaffected either way.
+     * warm child. The OpenJammer graph-tool allowlist and undoable apply path are
+     * unaffected either way.
      */
     yolo?: boolean;
     /**

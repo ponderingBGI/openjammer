@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
 import { DESKTOP_CAPABILITIES } from '../../../engine/capabilities';
 
 vi.mock('../../../audio/executor', () => ({
@@ -31,8 +31,8 @@ import { useAuthStore } from '../../../auth/authStore';
 import { useSandboxStore } from '../../../store/sandboxStore';
 import { useAgentSessionStore, type ConversationEntry } from '../../../store/agentSessionStore';
 
-function renderPanel(onBack = vi.fn()) {
-    return { onBack, ...render(<AiPanel initialPrompt="" onBack={onBack} />) };
+function renderPanel(onBack = vi.fn(), props: Partial<Parameters<typeof AiPanel>[0]> = {}) {
+    return { onBack, ...render(<AiPanel initialPrompt="" onBack={onBack} {...props} />) };
 }
 
 describe('AiPanel chat', () => {
@@ -78,6 +78,15 @@ describe('AiPanel chat', () => {
         fireEvent.keyDown(input, { key: 'Enter' });
         expect(send).toHaveBeenCalledOnce();
         expect(send.mock.calls[0][1]).toMatchObject({ prompt: 'make a drone' });
+    });
+
+    it('auto-sends the initial prompt when Tab hands it off', async () => {
+        const send = vi.fn();
+        useAgentSessionStore.setState({ send });
+        renderPanel(vi.fn(), { initialPrompt: 'create an echo node', autoSendInitial: true });
+        await waitFor(() => expect(send).toHaveBeenCalledOnce());
+        expect(send.mock.calls[0][1]).toMatchObject({ prompt: 'create an echo node' });
+        expect(screen.getByPlaceholderText(/Ask anything/i)).toHaveValue('');
     });
 
     it('Shift+Enter does NOT send (newline)', () => {

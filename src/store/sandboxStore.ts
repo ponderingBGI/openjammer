@@ -17,8 +17,8 @@
  * - **Explicit entry.** {@link requestYolo} does NOT flip the mode; it returns
  *   whether a confirm is warranted. Only {@link confirmYolo} actually enters YOLO,
  *   so the UI must route through an explicit confirmation.
- * - **The graph gate is untouched.** YOLO removes FS/shell/env guards only; the
- *   AI graph-edit Approve/Reject transaction stays on in both modes.
+ * - **The graph boundary is untouched.** YOLO removes FS/shell/env guards only;
+ *   AI edits still go through OpenJammer's allowlisted, undoable graph verbs.
  */
 
 import { create } from 'zustand';

@@ -1,0 +1,9 @@
+{
+  "name": "openjammer-permission-gate",
+  "private": true,
+  "type": "module",
+  "keywords": ["pi-package", "openjammer"],
+  "pi": {
+    "extensions": ["./index.mjs"]
+  }
+}

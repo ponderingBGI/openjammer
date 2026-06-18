@@ -16,7 +16,7 @@
  * registers the source-fallback plugin SYNCHRONOUSLY (undo works immediately) and
  * UPGRADES it in place when the native author resolves: same registration slot,
  * re-keyed to `ai.wasm.<hash>` with the compiled params. The returned `dispose`
- * tears down whatever is currently registered, so Reject is always clean.
+ * tears down whatever is currently registered, so undo/cleanup is always clean.
  *
  * FOUNDER-GATED: `author_wasm_node` authors + validates the `.wasm` ONLY; nothing
  * here runs it on the audio thread (the wasm RT host is founder-gated — see

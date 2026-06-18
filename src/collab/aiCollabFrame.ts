@@ -1,20 +1,15 @@
 /**
  * G2 — AI-collab frame guard (M3).
  *
- * An AI run applies many graphStore verbs OPTIMISTICALLY (the user sees the graph
- * build live), then the SINGLE Approve/Reject at the turn boundary decides their
- * fate. In a collab session that is a problem: without a guard, EACH optimistic
- * verb would diff into the CRDT and broadcast to peers, so a later Reject would
- * have to "un-broadcast" — and peers would have already seen the speculative
- * graph flicker in and out.
+ * An AI run applies many graphStore verbs live (the user sees the graph build),
+ * but peers should not see a half-built patch one verb at a time. Without a
+ * guard, EACH streamed AI verb would diff into the CRDT and broadcast separately.
  *
  * The fix is an AI FRAME: while the frame is open the store->CRDT subscriber is
  * suppressed (the AI delta accumulates locally, peers see nothing). At the turn
- * boundary:
- *   • Approve -> commitAiFrame(): push the ACCUMULATED net delta as ONE commit.
- *   • Reject  -> discardAiFrame(): the store has been reverted to its pre-run
- *     state (== the CRDT), so we emit NOTHING and just re-sync the high-water
- *     mark.
+ * boundary `commitAiFrame()` pushes the accumulated net delta as ONE commit. If a
+ * run is abandoned after manually reverting to the pre-run graph, `discardAiFrame()`
+ * emits nothing and just re-syncs the high-water mark.
  *
  * This module is a tiny MODULE-LEVEL REGISTRY of the active bridge's frame
  * controls so the AI session store (which has no handle to the live bridge) can

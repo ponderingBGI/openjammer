@@ -400,7 +400,7 @@ describe('GraphStoreBridge AI frame (G2)', () => {
         });
 
         bridge.beginAiFrame();
-        // Apply then fully UNDO the verbs (simulating an optimistic run + Reject).
+        // Apply then fully UNDO the verbs (simulating an abandoned AI run).
         addNodeVerb(store, 'ai-1');
         addNodeVerb(store, 'ai-2');
         removeNodeVerb(store, 'ai-2');

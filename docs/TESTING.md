@@ -53,8 +53,8 @@ Without it, AI-authored Faust source is stored against the node for later compil
 ## 5. Ctrl+K AI (Pi)
 Install Pi (`bun add -g @earendil-works/pi-coding-agent`; `pi --version`), set ONE
 provider key (in `~/.pi`, or via the env var the app forwards). Ctrl+K → type a
-prompt → **Tab** → the agent builds/edits nodes; review Approve/Reject. Browser
-shows “AI requires the desktop app”.
+prompt → **Tab** → the agent builds/edits nodes live; use plain Ctrl+Z to undo.
+Browser shows “AI requires the desktop app”.
 
 ## 6. LAN collaboration
 Open two clients, host/join a session (share the code), confirm live patch edits +

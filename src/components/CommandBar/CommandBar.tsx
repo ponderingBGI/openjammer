@@ -10,9 +10,9 @@
  * TWO MODES:
  * - 'search' (U19): the action registry, ranked HERE (M2), not by cmdk.
  * - 'ai' (U20): press Tab from search to hand the typed text to the AI agent.
- *   The agent half renders in {@link AiPanel}: a streaming transcript with an
- *   Approve / Reject transaction, or the "AI requires the desktop app" state in
- *   a plain browser.
+ *   The agent half renders in {@link AiPanel}: a streaming transcript whose
+ *   OpenJammer edits apply live as undoable graph actions, or the "AI requires
+ *   the desktop app" state in a plain browser.
  *
  * M2 — the palette OWNS its ordering:
  * - `shouldFilter={false}`: cmdk no longer filters/ranks; this file does.
@@ -100,6 +100,9 @@ export function CommandBar() {
     const setMode = useCommandBarStore((s) => s.setMode);
     // Text carried from the search input into AI mode on the Tab handoff.
     const [aiPrompt, setAiPrompt] = useState('');
+    // When true, the AI panel sends `aiPrompt` as soon as it is ready. This is
+    // the Tab contract: type → Tab → agent starts, no second Enter required.
+    const [aiAutoSend, setAiAutoSend] = useState(false);
     // D6 (M7): when entering AI mode via "Configure AI provider", force the
     // AuthChooser even if a provider is already configured (so it can be changed).
     const [forceAuth, setForceAuth] = useState(false);
@@ -148,16 +151,21 @@ export function CommandBar() {
         setOpen(false);
         setSearch('');
         setAiPrompt('');
+        setAiAutoSend(false);
         setForceAuth(false);
         setValue('');
     }, []);
 
     // Hand the typed text off to AI mode (Tab from search, or the "Ask AI" item).
-    const enterAiMode = useCallback(() => {
-        setAiPrompt(search);
-        setForceAuth(false);
-        setMode('ai');
-    }, [search, setMode]);
+    const enterAiMode = useCallback(
+        (autoSend = false) => {
+            setAiPrompt(search);
+            setAiAutoSend(autoSend && search.trim().length > 0);
+            setForceAuth(false);
+            setMode('ai');
+        },
+        [search, setMode],
+    );
 
     // D6 (M7): the "Configure AI provider" action opens AI mode straight into the
     // AuthChooser (forceAuth), so a configured user can still re-pick a provider.
@@ -165,6 +173,7 @@ export function CommandBar() {
         const onConfigure = () => {
             setOpen(true);
             setAiPrompt('');
+            setAiAutoSend(false);
             setForceAuth(true);
             setMode('ai');
         };
@@ -180,7 +189,9 @@ export function CommandBar() {
         const onAsk = (e: Event) => {
             const detail = (e as CustomEvent<{ prompt?: string }>).detail;
             setOpen(true);
-            setAiPrompt(detail?.prompt ?? '');
+            const prompt = detail?.prompt ?? '';
+            setAiPrompt(prompt);
+            setAiAutoSend(prompt.trim().length > 0);
             setForceAuth(false);
             setMode('ai');
         };
@@ -191,6 +202,7 @@ export function CommandBar() {
     // Return from AI mode to search. The conversation is preserved (persisted),
     // so coming back to AI later picks up exactly where it left off.
     const backToSearch = useCallback(() => {
+        setAiAutoSend(false);
         setMode('search');
     }, [setMode]);
 
@@ -328,7 +340,9 @@ export function CommandBar() {
             >
                 {mode === 'ai' ? (
                     <AiPanel
+                        key={`${aiPrompt}:${aiAutoSend ? 'send' : 'draft'}:${forceAuth ? 'auth' : 'chat'}`}
                         initialPrompt={aiPrompt}
+                        autoSendInitial={aiAutoSend}
                         forceAuth={forceAuth}
                         onBack={backToSearch}
                     />
@@ -351,9 +365,10 @@ export function CommandBar() {
                                     e.preventDefault();
                                     close();
                                 } else if (e.key === 'Tab') {
-                                    // Tab hands the typed text off to the AI agent.
+                                    // Tab is the fast path: if there is text,
+                                    // send it immediately; empty Tab just opens chat.
                                     e.preventDefault();
-                                    enterAiMode();
+                                    enterAiMode(search.trim().length > 0);
                                 }
                             }}
                         />
@@ -395,7 +410,7 @@ export function CommandBar() {
                                     value={AI_ITEM_VALUE}
                                     keywords={['ai', 'ask', 'agent', search]}
                                     className="command-bar-item command-bar-item-ai"
-                                    onSelect={enterAiMode}
+                                    onSelect={() => enterAiMode(search.trim().length > 0)}
                                     disabled={!aiEnabled}
                                 >
                                     {search.trim()

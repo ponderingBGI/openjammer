@@ -36,6 +36,8 @@ const MOD = IS_MAC ? '⌘' : 'Ctrl';
 interface AiPanelProps {
     /** Draft carried over from the search input on the Tab handoff. */
     initialPrompt: string;
+    /** Send the initial prompt automatically once auth/platform gates are ready. */
+    autoSendInitial?: boolean;
     /**
      * Force the AuthChooser even when a provider is already configured (the
      * "Configure AI provider" action), so the user can re-pick a provider.
@@ -50,7 +52,12 @@ function shortId(id: string): string {
     return id.length > 10 ? `${id.slice(0, 8)}…` : id;
 }
 
-export function AiPanel({ initialPrompt, forceAuth = false, onBack }: AiPanelProps) {
+export function AiPanel({
+    initialPrompt,
+    autoSendInitial = false,
+    forceAuth = false,
+    onBack,
+}: AiPanelProps) {
     const phase = useAgentSessionStore((s) => s.phase);
     const messages = useAgentSessionStore((s) => s.messages);
     const error = useAgentSessionStore((s) => s.error);
@@ -60,6 +67,7 @@ export function AiPanel({ initialPrompt, forceAuth = false, onBack }: AiPanelPro
 
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const transcriptRef = useRef<HTMLDivElement>(null);
+    const autoSentRef = useRef(false);
 
     const backend = useMemo(() => getAgentBackend(), []);
     // Gate on the platform capability seam (M0): 'none' (browser) shows the
@@ -80,7 +88,7 @@ export function AiPanel({ initialPrompt, forceAuth = false, onBack }: AiPanelPro
     const [yoloConfirm, setYoloConfirm] = useState(false);
 
     // The composer draft + the resume sub-view.
-    const [draft, setDraft] = useState(initialPrompt);
+    const [draft, setDraft] = useState(autoSendInitial ? '' : initialPrompt);
     const [view, setView] = useState<'chat' | 'resume'>('chat');
 
     const running = phase === 'running';
@@ -110,7 +118,7 @@ export function AiPanel({ initialPrompt, forceAuth = false, onBack }: AiPanelPro
 
     const runTask = useCallback(
         (prompt: string) => {
-            if (!prompt || !available || !configured || running) return;
+            if (!prompt || !available || !configured || running) return false;
             const auth = useAuthStore.getState();
             void send(backend, {
                 prompt,
@@ -119,6 +127,7 @@ export function AiPanel({ initialPrompt, forceAuth = false, onBack }: AiPanelPro
                 modelId: auth.modelId,
                 yolo: useSandboxStore.getState().mode === 'yolo',
             });
+            return true;
         },
         [available, configured, running, backend, send],
     );
@@ -137,9 +146,16 @@ export function AiPanel({ initialPrompt, forceAuth = false, onBack }: AiPanelPro
             setView('resume');
             return;
         }
-        setDraft('');
-        runTask(text);
+        if (runTask(text)) setDraft('');
     }, [draft, newSession, runTask]);
+
+    // Tab from search is a one-keystroke send. If auth is still in front, this
+    // waits until the chooser is done, then sends exactly once.
+    useEffect(() => {
+        const text = initialPrompt.trim();
+        if (!autoSendInitial || autoSentRef.current || !text || showAuth || view !== 'chat') return;
+        if (runTask(text)) autoSentRef.current = true;
+    }, [autoSendInitial, initialPrompt, runTask, showAuth, view]);
 
     // Entering YOLO is never one keystroke: going to YOLO opens the confirm;
     // leaving it (back to safe) is immediate.
