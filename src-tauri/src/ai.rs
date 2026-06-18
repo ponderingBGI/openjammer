@@ -658,8 +658,13 @@ fn same_openjammer_package_family(existing: &str, package: &str) -> bool {
     let existing = normalized(existing);
     let package = normalized(package);
 
+    fn ends_with_path_segment(path: &str, segment: &str) -> bool {
+        path.strip_suffix(segment)
+            .is_some_and(|prefix| prefix.is_empty() || prefix.ends_with('/'))
+    }
+
     for marker in ["pi-openjammer-graph", "permission-gate"] {
-        if package.ends_with(marker) && existing.ends_with(marker) {
+        if ends_with_path_segment(&package, marker) && ends_with_path_segment(&existing, marker) {
             return true;
         }
     }
@@ -2130,6 +2135,10 @@ mod tests {
         ));
         assert!(!same_openjammer_package_family(
             "pi-persistent-intelligence",
+            "/new/resources/pi-openjammer-graph",
+        ));
+        assert!(!same_openjammer_package_family(
+            "/old/resources/not-pi-openjammer-graph",
             "/new/resources/pi-openjammer-graph",
         ));
     }

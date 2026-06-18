@@ -98,14 +98,14 @@ The agent is also a **second pair of hands on the controls**: it can read the
 on-device logs and the live environment, and read/write a **safe allowlist** of
 settings — so "there's no sound" becomes a question it can answer from evidence
 and then *fix*. The reads are side-effect-free; `update_settings` goes through the
-exact store verbs the Settings panel uses and is **reversible** (Ctrl+Z / Reject
-restores the previous values). It can never reach past what a user clicking the
-Settings panel can do.
+exact store verbs the Settings panel uses and is **reversible** (Ctrl+Z restores
+the previous values). It can never reach past what a user clicking the Settings
+panel can do.
 
 - **get_logs** — Read the on-device DevLog tail (newest first), optionally filtered by `levels`, `scope`, `search`, and `limit`. Side-effect-free. This is how you SEE engine xruns, node faults, MIDI, asset/plugin events, and every console line — diagnose "no sound" from evidence, not guesses.
 - **get_diagnostics** — Read the environment + live audio snapshot: app version/channel/executor, cross-origin isolation, platform, whether the AudioContext is running, the measured round-trip latency, sample rate, and the selected output device. Side-effect-free. Call it first when the user says something is broken.
 - **get_settings** — Read the user-facing settings you may change: audio sample rate, latency hint, low-latency mode, input/output device, theme, and default velocity. Side-effect-free.
-- **update_settings** — Change settings via a `patch` over the safe allowlist (sampleRate, latencyHint, lowLatencyMode, outputDeviceId, inputDeviceId, themeId, defaultVelocity). Unknown keys are ignored; the change is REVERSIBLE (Ctrl+Z / Reject restores the previous values). Use it to FIX a setup — e.g. select the USB interface or switch to the interactive latency hint.
+- **update_settings** — Change settings via a `patch` over the safe allowlist (sampleRate, latencyHint, lowLatencyMode, outputDeviceId, inputDeviceId, themeId, defaultVelocity). Unknown keys are ignored; the change is REVERSIBLE (Ctrl+Z restores the previous values). Use it to FIX a setup — e.g. select the USB interface or switch to the interactive latency hint.
 
 **A worked "get sound back" loop.** When a player says *"I hear nothing"*: call
 `get_diagnostics` (is the AudioContext even running? is the round-trip latency

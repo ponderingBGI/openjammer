@@ -105,7 +105,7 @@ export function AuthChooser({ onConfigured, onBack }: AuthChooserProps) {
             </div>
             <p className="command-bar-auth-intro">
                 Choose who pays for the AI agent. This only sets the provider — every edit
-                still applies behind your Approve / Reject.
+                is still an undoable OpenJammer canvas action.
             </p>
             <Command label="Choose AI provider" value={value} onValueChange={setValue} loop>
                 {/*

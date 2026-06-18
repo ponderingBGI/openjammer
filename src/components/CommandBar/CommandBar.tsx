@@ -10,9 +10,9 @@
  * TWO MODES:
  * - 'search' (U19): the action registry, ranked HERE (M2), not by cmdk.
  * - 'ai' (U20): press Tab from search to hand the typed text to the AI agent.
- *   The agent half renders in {@link AiPanel}: a streaming transcript with an
- *   Approve / Reject transaction, or the "AI requires the desktop app" state in
- *   a plain browser.
+ *   The agent half renders in {@link AiPanel}: a streaming transcript whose
+ *   OpenJammer edits apply live as undoable graph actions, or the "AI requires
+ *   the desktop app" state in a plain browser.
  *
  * M2 — the palette OWNS its ordering:
  * - `shouldFilter={false}`: cmdk no longer filters/ranks; this file does.

@@ -10,9 +10,9 @@
  * the worst a user clicking around the canvas can do, and every step is undoable.
  *
  * Each {@link applyToolCall} returns an {@link AppliedToolResult} carrying an
- * `undo()` closure, so the session can REVERT the whole batch on Reject without
- * relying on the global history stack. (Graph history is also pushed by the
- * verbs themselves; the explicit undo keeps Reject deterministic and local.)
+ * `undo()` closure. Batch/plan tools use those closures internally for
+ * all-or-nothing rollback, while normal live edits also enter the graph history
+ * so the player can revert with plain Ctrl+Z.
  *
  * The DSP-authoring tool (`author_dsp_node`) is the one tool that does NOT add a
  * node directly: it registers a command-palette entry for the authored DSP node
@@ -178,7 +178,7 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'Change settings via a `patch` over the safe allowlist (sampleRate, ' +
             'latencyHint, lowLatencyMode, outputDeviceId, inputDeviceId, themeId, ' +
             'defaultVelocity). Unknown keys are ignored; the change is REVERSIBLE ' +
-            '(Ctrl+Z / Reject restores the previous values). Use it to FIX a setup — ' +
+            '(Ctrl+Z restores the previous values). Use it to FIX a setup — ' +
             'e.g. select the USB interface or switch to the interactive latency hint.',
     },
 ];
@@ -961,8 +961,8 @@ function applyGetSettings(env?: AgentEnvPort): AppliedToolResult {
  *
  * The port validates the patch against the safe allowlist and returns the
  * applied keys + the post-patch settings + an `undo` that restores the previous
- * values — so this tool is exactly as reversible as a graph edit (Ctrl+Z /
- * Reject). A patch that changes nothing is a successful no-op.
+ * values — so this tool is exactly as reversible as a graph edit (Ctrl+Z).
+ * A patch that changes nothing is a successful no-op.
  */
 function applyUpdateSettings(args: UpdateSettingsArgs, env?: AgentEnvPort): AppliedToolResult {
     if (!env) {

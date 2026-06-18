@@ -12,7 +12,7 @@
  *     native side) and is forwarded transiently to Pi; it never touches this store
  *     or localStorage.
  *   - Auth resolves only WHO PAYS. It does NOT grant the agent any new power —
- *     tool calls still apply-with-undo behind Approve / Reject.
+ *     tool calls still go through OpenJammer's allowlisted, undoable graph path.
  *   - Browser / `caps.auth === 'none'`: every action is a safe no-op and
  *     `configured` stays false (the honest "AI requires the desktop app" path).
  *

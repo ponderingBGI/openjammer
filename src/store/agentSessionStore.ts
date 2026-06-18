@@ -148,7 +148,15 @@ interface AgentSessionStore {
 
 /** Read tools are introspection, not actions — they get no chip (keeps a chat
  * answer clean; the real read round-trip to Pi is the host bridge's job). */
-const SILENT_TOOLS = new Set(['get_graph', 'list_node_types', 'find_nodes', 'validate_plan']);
+const SILENT_TOOLS = new Set([
+    'get_graph',
+    'list_node_types',
+    'find_nodes',
+    'validate_plan',
+    'get_logs',
+    'get_diagnostics',
+    'get_settings',
+]);
 
 /** Max conversation entries kept in localStorage (older history still lives in
  * Pi's session and is reloadable via `/resume`). */

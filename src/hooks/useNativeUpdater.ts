@@ -210,12 +210,16 @@ export function useNativeUpdater(options: UseNativeUpdaterOptions = {}): NativeU
     // auto-update is on and we aren't pinned. Skips if an update is already staged.
     // Only the background mount runs these (no duplicate intervals from the panel).
     useEffect(() => {
-        const canAutoUpdate = status?.can_auto_update ?? false;
-        if (!background || !native || !autoUpdateEnabled || pinnedVersion || !canAutoUpdate) return;
+        if (!background || !native || !autoUpdateEnabled || pinnedVersion) return;
         let cancelled = false;
         const tick = () => {
-            if (cancelled || statusRef.current?.pending || !statusRef.current?.can_auto_update) return;
-            void checkNow();
+            void (async () => {
+                if (cancelled) return;
+                if (!statusRef.current) await refreshStatus();
+                const latest = statusRef.current;
+                if (cancelled || latest?.pending || !latest?.can_auto_update) return;
+                await checkNow();
+            })();
         };
         const initial = setTimeout(tick, INITIAL_CHECK_DELAY_MS);
         const interval = setInterval(tick, CHECK_INTERVAL_MS);
@@ -224,7 +228,7 @@ export function useNativeUpdater(options: UseNativeUpdaterOptions = {}): NativeU
             clearTimeout(initial);
             clearInterval(interval);
         };
-    }, [background, native, autoUpdateEnabled, pinnedVersion, updateChannel, status?.can_auto_update, checkNow]);
+    }, [background, native, autoUpdateEnabled, pinnedVersion, updateChannel, checkNow, refreshStatus]);
 
     return {
         supported: native && (status?.supported ?? true),

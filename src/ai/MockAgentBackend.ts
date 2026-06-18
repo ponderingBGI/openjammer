@@ -3,8 +3,8 @@
  *
  * Pi is NOT installed in this sandbox and there is no provider key, so the whole
  * integration is built to compile + type-check + unit-test with Pi MOCKED. This
- * backend proves the tool-call -> graphStore-verb path and the Approve/Reject
- * transaction without any subprocess, network, or model.
+ * backend proves the tool-call -> graphStore-verb path without any subprocess,
+ * network, or model.
  *
  * It is also handy in real use as a deterministic demo: pass a fixed `script`
  * and it yields those events with optional delays, exactly like a streaming

@@ -11,9 +11,10 @@
  *   3. invokes `ai_run`, and
  *   4. yields normalized {@link AgentEvent}s until a terminal event arrives.
  *
- * Pi is an UNTRUSTED GENERATOR: nothing here executes its tool calls. We only
- * forward them upward as `tool-call` events; the session decides whether to
- * apply them, gated by Approve/Reject.
+ * Pi is an UNTRUSTED GENERATOR: nothing here executes arbitrary code. We only
+ * forward allowlisted OpenJammer graph verbs upward as `tool-call` events; the
+ * session applies them through the same undoable store actions the user drives by
+ * hand.
  *
  * When Pi is not installed / not configured, the Rust side returns an error,
  * which is surfaced as a single terminal `error` event (never a throw). When NOT

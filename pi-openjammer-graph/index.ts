@@ -38,23 +38,52 @@ async function forward(name: string, args: JsonObject): Promise<unknown> {
     const lastColon = addr.lastIndexOf(':');
     const host = addr.slice(0, lastColon);
     const port = Number(addr.slice(lastColon + 1));
+    if (lastColon <= 0 || !host || !Number.isInteger(port) || port <= 0) {
+        throw new Error(`pi-openjammer-graph: invalid OJ_BRIDGE_ADDR "${addr}".`);
+    }
     const net: any = await import('node:net');
 
     return await new Promise((resolve, reject) => {
         const sock = net.connect({ host, port }, () => {
             sock.write(JSON.stringify({ token, name, args }) + '\n');
         });
+
+        let settled = false;
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+
+        const settle = (fn: () => void) => {
+            if (settled) return;
+            settled = true;
+            if (timeout) clearTimeout(timeout);
+            fn();
+        };
+        const fail = (err: unknown) => {
+            settle(() => {
+                sock.destroy();
+                reject(err instanceof Error ? err : new Error(String(err)));
+            });
+        };
+        const succeed = (value: unknown) => {
+            settle(() => {
+                sock.end();
+                resolve(value);
+            });
+        };
+
+        timeout = setTimeout(() => {
+            fail(new Error(`tool "${name}" timed out waiting for OpenJammer host bridge`));
+        }, 10_000);
+
         sock.setEncoding('utf8');
         let buf = '';
         sock.on('data', (chunk: string) => {
             buf += chunk;
             const nl = buf.indexOf('\n');
             if (nl < 0) return;
-            sock.end();
             try {
                 const payload = JSON.parse(buf.slice(0, nl));
                 if (payload && payload.ok === false) {
-                    reject(
+                    fail(
                         new Error(
                             typeof payload.error === 'string'
                                 ? payload.error
@@ -62,13 +91,16 @@ async function forward(name: string, args: JsonObject): Promise<unknown> {
                         ),
                     );
                 } else {
-                    resolve(payload && 'data' in payload ? payload.data : payload);
+                    succeed(payload && 'data' in payload ? payload.data : payload);
                 }
             } catch (e) {
-                reject(e);
+                fail(e);
             }
         });
-        sock.on('error', reject);
+        sock.on('close', () => {
+            fail(new Error(`tool "${name}" bridge closed before returning a full response`));
+        });
+        sock.on('error', fail);
     });
 }
 
