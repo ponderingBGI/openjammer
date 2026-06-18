@@ -1,6 +1,6 @@
 {
   "name": "openjammer",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Browser-based node-driven music creation tool for live performance",
   "license": "AGPL-3.0",
   "author": "OpenJammer Contributors",
