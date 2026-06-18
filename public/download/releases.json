@@ -1,21 +1,20 @@
 {
-  "_comment": "Deploy-time-baked default render + offline/rate-limit safety net. No release is published yet, so every URL points at the GitHub /releases/latest web alias (which 302s to the newest release once one exists, and is a benign landing page until then) and the version is the placeholder 'alpha'. The CI step in .github/workflows/release.yml overwrites this file with real per-asset browser_download_urls + the real tag the first time a v* tag publishes; download.js then upgrades it live at runtime via the GitHub REST API. download.js MUST tolerate this placeholder gracefully (it treats any URL containing '/releases/latest' as 'not yet a real asset' and falls through to the <details> floor for that target).",
-  "version": "alpha",
+  "version": "v0.0.1",
   "platforms": {
     "darwin-aarch64": {
-      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/latest"
+      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.1/OpenJammer_0.0.1_aarch64.dmg"
     },
     "darwin-x86_64": {
-      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/latest"
+      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.1/OpenJammer_0.0.1_x64.dmg"
     },
     "windows-x86_64": {
-      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/latest"
+      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.1/OpenJammer_0.0.1_x64-setup.exe"
     },
     "linux-x86_64-appimage": {
-      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/latest"
+      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.1/OpenJammer_0.0.1_amd64.AppImage"
     },
     "linux-x86_64-deb": {
-      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/latest"
+      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.1/OpenJammer_0.0.1_amd64.deb"
     }
   }
 }
