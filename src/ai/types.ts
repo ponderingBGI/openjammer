@@ -371,6 +371,10 @@ export interface AgentTask {
      * Forwarded transiently so Pi can list/select models across configured providers.
      */
     providerKeys?: Record<string, string>;
+    /** OpenAI-compatible base URLs configured for this app session, keyed by provider id. */
+    providerBaseUrls?: Record<string, string>;
+    /** Custom model ids configured/typed for this app session, keyed by provider id. */
+    providerCustomModels?: Record<string, string[]>;
     /**
      * The active provider id (e.g. `'opencode'`). Selects the env var the key is
      * forwarded under (see `ai.rs` `provider_env_var`); omitted → Pi's own config.

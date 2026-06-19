@@ -76,6 +76,8 @@ interface AuthStoreState {
     providerKeys: Record<string, string>;
     /** BYO OpenAI-compatible base URLs by provider, IN MEMORY only. */
     providerBaseUrls: Record<string, string>;
+    /** Custom model ids typed/selected for a provider, IN MEMORY only. */
+    providerCustomModels: Record<string, string[]>;
     /** Provider ids that currently have an in-memory key. */
     configuredProviderIds: string[];
     /** Derived from `auth_status` (or an in-memory key): a key is available. */
@@ -102,6 +104,8 @@ interface AuthStoreState {
     clear: () => Promise<void>;
     /** Set the active provider + optional model locally (persisted; no key). */
     setProvider: (provider: string, modelId?: string) => void;
+    /** Remember a custom model id for a provider in memory only. */
+    addCustomModel: (provider: string, modelId: string) => void;
 }
 
 // ============================================================================
@@ -138,6 +142,7 @@ export const useAuthStore = create<AuthStoreState>()(
             baseUrl: undefined,
             providerKeys: {},
             providerBaseUrls: {},
+            providerCustomModels: {},
             configuredProviderIds: [],
             configured: false,
             conflict: false,
@@ -245,6 +250,7 @@ export const useAuthStore = create<AuthStoreState>()(
                     baseUrl: undefined,
                     providerKeys: {},
                     providerBaseUrls: {},
+                    providerCustomModels: {},
                     configuredProviderIds: [],
                     configured: false,
                     conflict: false,
@@ -259,6 +265,21 @@ export const useAuthStore = create<AuthStoreState>()(
                     modelId: modelId ?? (provider === state.activeProvider ? state.modelId : undefined),
                     key: state.providerKeys[provider] ?? state.key,
                     baseUrl,
+                });
+            },
+
+            addCustomModel: (provider, modelId) => {
+                const trimmed = modelId.trim();
+                if (!trimmed) return;
+                set((state) => {
+                    const existing = state.providerCustomModels[provider] ?? [];
+                    if (existing.includes(trimmed)) return state;
+                    return {
+                        providerCustomModels: {
+                            ...state.providerCustomModels,
+                            [provider]: [...existing, trimmed],
+                        },
+                    };
                 });
             },
         }),

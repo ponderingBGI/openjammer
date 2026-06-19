@@ -678,6 +678,11 @@
     border-color: color-mix(in srgb, var(--accent-success) 65%, var(--sketch-black));
 }
 
+.command-bar-model-row:disabled {
+    cursor: wait;
+    opacity: 0.72;
+}
+
 .command-bar-model-main {
     display: flex;
     flex-direction: column;
@@ -935,6 +940,20 @@
 
 /* The permission footer — always visible on the live agent surface so the jail
    boundary is never a surprise. Mono, because it states an exact path/state. */
+.command-bar-ai-thinking {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px 6px;
+    border: 1px solid var(--sketch-black);
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--bg-node) 88%, var(--accent, var(--sketch-black)) 12%);
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}
+
 .command-bar-ai-footer {
     display: flex;
     align-items: center;

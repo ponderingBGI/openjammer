@@ -142,6 +142,8 @@ export class PiAgentBackend implements AgentBackend {
             prompt: task.prompt,
             providerKey: task.providerKey ?? null,
             providerKeys: task.providerKeys ?? null,
+            providerBaseUrls: task.providerBaseUrls ?? null,
+            providerCustomModels: task.providerCustomModels ?? null,
             provider: task.provider ?? null,
             modelId: task.modelId ?? null,
             yolo: task.yolo ?? false,

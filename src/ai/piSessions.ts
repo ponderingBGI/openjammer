@@ -35,6 +35,8 @@ export interface DisplayMessage {
 export interface PiCommandRuntime {
     providerKey?: string;
     providerKeys?: Record<string, string>;
+    providerBaseUrls?: Record<string, string>;
+    providerCustomModels?: Record<string, string[]>;
     provider?: string;
     modelId?: string;
     yolo?: boolean;
@@ -135,6 +137,8 @@ export async function runCommand(
         channel,
         providerKey: runtime.providerKey ?? null,
         providerKeys: runtime.providerKeys ?? null,
+        providerBaseUrls: runtime.providerBaseUrls ?? null,
+        providerCustomModels: runtime.providerCustomModels ?? null,
         provider: runtime.provider ?? null,
         modelId: runtime.modelId ?? null,
         yolo: runtime.yolo ?? false,

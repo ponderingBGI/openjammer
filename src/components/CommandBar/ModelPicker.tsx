@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { providerTitle } from '../../auth/providers';
 import { useAuthStore } from '../../auth/authStore';
 import {
-    getState,
     listAvailableModels,
     setModel,
     type PiCommandRuntime,
@@ -16,6 +15,8 @@ interface ModelPickerProps {
     onCancel: () => void;
 }
 
+type DisplayModel = PiModel & { manual?: boolean; instant?: boolean };
+
 function modelKey(model: PiModel): string {
     return `${model.provider}/${model.id}`;
 }
@@ -28,28 +29,62 @@ function modelSupportsReasoning(model: PiModel): boolean {
     return !!model.reasoning;
 }
 
-function filterModels(models: readonly PiModel[], query: string): PiModel[] {
+function filterModels(models: readonly DisplayModel[], query: string): DisplayModel[] {
     const q = query.trim().toLowerCase();
     if (!q) return [...models];
     return models.filter((model) => {
         const haystack = `${model.provider} ${model.id} ${model.name ?? ''} ${model.provider}/${model.id}`.toLowerCase();
-        return haystack.includes(q);
+        return haystack.includes(q) || model.manual;
     });
+}
+
+function mergeModels(...groups: readonly DisplayModel[][]): DisplayModel[] {
+    const byKey = new Map<string, DisplayModel>();
+    for (const group of groups) {
+        for (const model of group) {
+            if (!byKey.has(modelKey(model))) byKey.set(modelKey(model), model);
+        }
+    }
+    return Array.from(byKey.values());
+}
+
+function configuredProviderSet(
+    providerKeys: Record<string, string>,
+    configuredProviderIds: readonly string[],
+    configured: boolean,
+    activeProvider?: string,
+): Set<string> {
+    const ids = new Set(configuredProviderIds);
+    Object.keys(providerKeys).forEach((id) => ids.add(id));
+    if (configured && activeProvider) ids.add(activeProvider);
+    return ids;
 }
 
 export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }: ModelPickerProps) {
     const activeProvider = useAuthStore((s) => s.activeProvider);
     const activeModelId = useAuthStore((s) => s.modelId);
+    const configured = useAuthStore((s) => s.configured);
+    const configuredProviderIds = useAuthStore((s) => s.configuredProviderIds);
+    const providerKeys = useAuthStore((s) => s.providerKeys);
+    const providerBaseUrls = useAuthStore((s) => s.providerBaseUrls);
+    const providerCustomModels = useAuthStore((s) => s.providerCustomModels);
     const setProvider = useAuthStore((s) => s.setProvider);
+    const addCustomModel = useAuthStore((s) => s.addCustomModel);
     const inputRef = useRef<HTMLInputElement>(null);
 
+    const configuredProviders = useMemo(
+        () => configuredProviderSet(providerKeys, configuredProviderIds, configured, activeProvider),
+        [activeProvider, configured, configuredProviderIds, providerKeys],
+    );
+
     const [query, setQuery] = useState(initialQuery);
-    const [models, setModels] = useState<PiModel[]>([]);
+    const [remoteModels, setRemoteModels] = useState<DisplayModel[]>([]);
     const [currentKey, setCurrentKey] = useState<string | null>(
         activeProvider && activeModelId ? `${activeProvider}/${activeModelId}` : null,
     );
     const [selectedIndex, setSelectedIndex] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [selectingKey, setSelectingKey] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
@@ -58,23 +93,10 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
 
     useEffect(() => {
         let live = true;
-        void Promise.all([listAvailableModels(runtime()), getState(runtime())])
-            .then(([available, state]) => {
+        void listAvailableModels(runtime())
+            .then((available) => {
                 if (!live) return;
-                const stateModel = state.data && typeof state.data === 'object'
-                    ? (state.data as { model?: unknown }).model
-                    : null;
-                if (stateModel && typeof stateModel === 'object') {
-                    const m = stateModel as { provider?: unknown; id?: unknown; modelId?: unknown };
-                    const provider = typeof m.provider === 'string' ? m.provider : null;
-                    const id = typeof m.id === 'string'
-                        ? m.id
-                        : typeof m.modelId === 'string'
-                            ? m.modelId
-                            : null;
-                    if (provider && id) setCurrentKey(`${provider}/${id}`);
-                }
-                setModels(available);
+                setRemoteModels(available.filter((model) => configuredProviders.has(model.provider)));
                 setLoading(false);
             })
             .catch((err: unknown) => {
@@ -85,36 +107,76 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
         return () => {
             live = false;
         };
-    }, [runtime]);
+    }, [configuredProviders, runtime]);
+
+    const instantModels = useMemo<DisplayModel[]>(() => {
+        const out: DisplayModel[] = [];
+        if (activeProvider && activeModelId && configuredProviders.has(activeProvider)) {
+            out.push({ provider: activeProvider, id: activeModelId, instant: true });
+        }
+        for (const [provider, models] of Object.entries(providerCustomModels)) {
+            if (!configuredProviders.has(provider)) continue;
+            for (const id of models) out.push({ provider, id, instant: true });
+        }
+        return out;
+    }, [activeModelId, activeProvider, configuredProviders, providerCustomModels]);
 
     const sorted = useMemo(() => {
-        return [...models].sort((a, b) => {
+        return mergeModels(remoteModels, instantModels).sort((a, b) => {
             const aCurrent = modelKey(a) === currentKey;
             const bCurrent = modelKey(b) === currentKey;
             if (aCurrent && !bCurrent) return -1;
             if (!aCurrent && bCurrent) return 1;
+            if (a.manual && !b.manual) return -1;
+            if (!a.manual && b.manual) return 1;
             const providerDelta = a.provider.localeCompare(b.provider);
             if (providerDelta !== 0) return providerDelta;
             return a.id.localeCompare(b.id);
         });
-    }, [currentKey, models]);
+    }, [currentKey, instantModels, remoteModels]);
 
-    const filtered = useMemo(() => filterModels(sorted, query), [query, sorted]);
+    const manualProvider = activeProvider && configuredProviders.has(activeProvider) ? activeProvider : undefined;
+    const manualId = query.trim();
+    const manualRow = useMemo<DisplayModel[]>(() => (
+        manualProvider && manualId
+            ? [{ provider: manualProvider, id: manualId, name: `Use “${manualId}”`, manual: true }]
+            : []
+    ), [manualId, manualProvider]);
+
+    const filtered = useMemo(() => {
+        const actual = filterModels(sorted, query).filter((model) => !model.manual);
+        const hasExact = actual.some((model) => model.id === manualId && model.provider === manualProvider);
+        return mergeModels(hasExact ? [] : manualRow, actual);
+    }, [manualId, manualProvider, manualRow, query, sorted]);
     const selected = filtered[Math.min(selectedIndex, Math.max(0, filtered.length - 1))];
 
-    const choose = async (model: PiModel | undefined) => {
-        if (!model) return;
-        setLoading(true);
-        const res = await setModel(model.provider, model.id, runtime());
-        setLoading(false);
+    const choose = async (model: DisplayModel | undefined) => {
+        if (!model || selectingKey) return;
+        const key = modelKey(model);
+        setSelectingKey(key);
+        const baseRuntime = runtime();
+        const providerCustom = new Set(baseRuntime.providerCustomModels?.[model.provider] ?? []);
+        if (model.manual) providerCustom.add(model.id);
+        const nextRuntime: PiCommandRuntime = {
+            ...baseRuntime,
+            providerCustomModels: {
+                ...(baseRuntime.providerCustomModels ?? {}),
+                [model.provider]: Array.from(providerCustom),
+            },
+        };
+        const res = await setModel(model.provider, model.id, nextRuntime);
+        setSelectingKey(null);
         if (!res.ok) {
             setError(`Pi could not switch to ${model.provider}/${model.id}.`);
             return;
         }
+        if (model.manual) addCustomModel(model.provider, model.id);
         setProvider(model.provider, model.id);
-        setCurrentKey(modelKey(model));
+        setCurrentKey(key);
         onSelected(`Model: ${providerTitle(model.provider)} / ${model.id}`);
     };
+
+    const configuredLabel = Array.from(configuredProviders).map(providerTitle).join(', ') || 'none';
 
     return (
         <div className="command-bar-models">
@@ -131,14 +193,16 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
             </div>
 
             <div className="command-bar-models-help">
-                <span>Models come from Pi’s configured providers.</span>
-                <span>↑↓ choose · Enter switch · Esc back</span>
+                <span>Showing configured providers only: {configuredLabel}</span>
+                <span>Type a custom model id · ↑↓ choose · Enter switch · Esc back</span>
             </div>
 
             <input
                 ref={inputRef}
                 className="command-bar-input command-bar-models-input"
-                placeholder="Filter models… e.g. opus, gpt, zen"
+                placeholder={providerBaseUrls[activeProvider ?? '']
+                    ? 'Filter or type a custom model id…'
+                    : 'Filter configured models…'}
                 value={query}
                 onChange={(e) => {
                     setQuery(e.target.value);
@@ -162,25 +226,31 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
             />
 
             <div className="command-bar-models-list" role="listbox" aria-label="Available models">
-                {loading && <div className="command-bar-models-empty">Starting Pi and loading models…</div>}
-                {!loading && error && <div className="command-bar-ai-error">{error}</div>}
+                {loading && (
+                    <div className="command-bar-models-empty">Loading configured provider models…</div>
+                )}
+                {error && <div className="command-bar-ai-error">{error}</div>}
                 {!loading && !error && filtered.length === 0 && (
                     <div className="command-bar-models-empty">
-                        No models found. Use <code>/provider</code> to configure another provider.
+                        {configuredProviders.size === 0
+                            ? <>No providers configured. Use <code>/provider</code> first.</>
+                            : <>No configured-provider models found. Type a model id to add a custom one.</>}
                     </div>
                 )}
-                {!loading && !error && filtered.map((model, index) => {
+                {!error && filtered.map((model, index) => {
                     const isCurrent = modelKey(model) === currentKey;
                     const isSelected = index === selectedIndex;
+                    const isSelecting = selectingKey === modelKey(model);
                     return (
                         <button
-                            key={modelKey(model)}
+                            key={`${model.manual ? 'manual:' : ''}${modelKey(model)}`}
                             type="button"
                             className="command-bar-model-row"
                             data-selected={isSelected}
                             data-current={isCurrent}
                             role="option"
                             aria-selected={isSelected}
+                            disabled={!!selectingKey}
                             onMouseEnter={() => setSelectedIndex(index)}
                             onClick={() => void choose(model)}
                         >
@@ -190,8 +260,11 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
                             </span>
                             <span className="command-bar-model-meta">
                                 <span>{providerTitle(model.provider)}</span>
+                                {model.manual && <span>add custom</span>}
+                                {model.instant && !model.manual && <span>session</span>}
                                 {modelSupportsReasoning(model) && <span>reasoning</span>}
                                 {isCurrent && <strong>current ✓</strong>}
+                                {isSelecting && <span>switching…</span>}
                             </span>
                         </button>
                     );

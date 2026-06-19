@@ -18,7 +18,7 @@
  * unchanged — it's orthogonal to the graph editing model.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { getAgentBackend } from '../../ai';
 import { getExecutor } from '../../audio/executor';
 import {
@@ -147,6 +147,8 @@ export function AiPanel({
     const [draft, setDraft] = useState(autoSendInitial ? '' : initialPrompt);
     const [view, setView] = useState<'chat' | 'resume' | 'models'>('chat');
     const [modelQuery, setModelQuery] = useState('');
+    const [thinkingLevel, setThinkingLevel] = useState('auto');
+    const [thinkingBusy, setThinkingBusy] = useState(false);
     const [commandNotice, setCommandNotice] = useState<string | null>(null);
     const [dynamicCommands, setDynamicCommands] = useState<AiSlashCommand[]>([]);
     const [commandsLoadedFor, setCommandsLoadedFor] = useState<string | null>(null);
@@ -202,6 +204,8 @@ export function AiPanel({
         return {
             providerKey: activeProvider ? auth.providerKeys[activeProvider] ?? auth.key : auth.key,
             providerKeys: auth.providerKeys,
+            providerBaseUrls: auth.providerBaseUrls,
+            providerCustomModels: auth.providerCustomModels,
             provider: activeProvider,
             modelId: auth.modelId,
             yolo: useSandboxStore.getState().mode === 'yolo',
@@ -368,21 +372,35 @@ export function AiPanel({
     );
 
     const cycleReasoning = useCallback(async () => {
-        setCommandNotice(null);
+        if (thinkingBusy) return;
+        setThinkingBusy(true);
+        setThinkingLevel('changing…');
+        setCommandNotice('Changing reasoning level…');
         const res = await cycleThinkingLevel(getPiRuntime());
+        setThinkingBusy(false);
         if (!res.ok) {
-            setCommandNotice('Pi is not ready to change reasoning yet.');
+            setThinkingLevel('unavailable');
+            setCommandNotice('Pi could not change reasoning yet. Try again after selecting a model.');
             return;
         }
         const level = res.data && typeof res.data === 'object'
             ? (res.data as { level?: unknown }).level
             : null;
-        setCommandNotice(
-            typeof level === 'string'
-                ? `Thinking level: ${level}`
-                : 'Current model does not support reasoning.',
-        );
-    }, [getPiRuntime]);
+        if (typeof level === 'string') {
+            setThinkingLevel(level);
+            setCommandNotice(`Thinking level: ${level}`);
+        } else {
+            setThinkingLevel('unsupported');
+            setCommandNotice('Current model does not support reasoning.');
+        }
+    }, [getPiRuntime, thinkingBusy]);
+
+    const onChatKeyDownCapture = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+        if (e.key !== 'Tab' || !e.shiftKey) return;
+        e.preventDefault();
+        e.stopPropagation();
+        void cycleReasoning();
+    }, [cycleReasoning]);
 
     // Submit the composer: slash commands first, else send.
     const submit = useCallback(() => {
@@ -484,7 +502,7 @@ export function AiPanel({
     }
 
     return (
-        <div className="command-bar-ai">
+        <div className="command-bar-ai" onKeyDownCapture={onChatKeyDownCapture}>
             <div className="command-bar-ai-header">
                 <button
                     type="button"
@@ -615,7 +633,8 @@ export function AiPanel({
                             <>
                                 <kbd className="command-bar-kbd">↵</kbd> send ·{' '}
                                 <kbd className="command-bar-kbd">⇧↵</kbd> newline ·{' '}
-                                <kbd className="command-bar-kbd">⇧⇥</kbd> reasoning
+                                <kbd className="command-bar-kbd">⇧⇥</kbd> reasoning ·{' '}
+                                <span className="command-bar-ai-thinking">Thinking: {thinkingLevel}</span>
                             </>
                         )}
                     </span>
@@ -641,6 +660,9 @@ export function AiPanel({
                         <code>{projectLabel ? `${projectLabel}/` : 'project/'}</code>
                     </span>
                 )}
+                <span className="command-bar-ai-thinking" aria-live="polite">
+                    Thinking: {thinkingLevel}
+                </span>
                 {canYolo && (
                     <button
                         type="button"

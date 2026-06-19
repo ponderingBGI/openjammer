@@ -3,8 +3,8 @@
 //!
 //! TRANSPORT: `rpc-subprocess`. This module owns the `ai_run` Tauri command. It
 //! spawns Pi (`pi --mode rpc`, github.com/earendil-works/pi) as a SUBPROCESS,
-//! confined to a THROWAWAY git worktree with a STRIPPED env that forwards ONLY
-//! the user's one configured provider key, speaks Pi's LF-delimited JSONL RPC,
+//! confined to a persistent jailed workspace with a STRIPPED env that forwards ONLY
+//! the user's configured provider keys, speaks Pi's LF-delimited JSONL RPC,
 //! normalizes each event to a [`PiStreamLine`], and re-emits it to the webview as
 //! a Tauri event on a per-run channel. The frontend ([`src/ai/PiAgentBackend.ts`])
 //! turns those into the streamed transcript and reversible live graph edits.
@@ -215,6 +215,8 @@ pub fn ai_run(
     prompt: String,
     provider_key: Option<String>,
     provider_keys: Option<HashMap<String, String>>,
+    provider_base_urls: Option<HashMap<String, String>>,
+    provider_custom_models: Option<HashMap<String, Vec<String>>>,
     provider: Option<String>,
     model_id: Option<String>,
     yolo: Option<bool>,
@@ -257,7 +259,26 @@ pub fn ai_run(
         provider_keys.as_ref(),
     );
     let filtered_provider_key_entries = filter_conflicting_provider_keys(provider_key_entries);
-    let auth_fingerprint = auth_fingerprint(&filtered_provider_key_entries);
+    let provider_base_urls = sanitized_provider_base_urls(provider_base_urls.as_ref());
+    let provider_custom_models = sanitized_provider_custom_models(provider_custom_models.as_ref());
+    if write_openjammer_models_json(
+        &workspace.agent_home,
+        &provider_base_urls,
+        &provider_custom_models,
+    )
+    .is_err()
+    {
+        emit(
+            &app,
+            &channel,
+            PiStreamLine::thought("note: could not update custom model config"),
+        );
+    }
+    let auth_fingerprint = runtime_fingerprint(
+        &filtered_provider_key_entries,
+        &provider_base_urls,
+        &provider_custom_models,
+    );
     let jailed = !yolo.unwrap_or(false);
 
     // JAILED (default): a STRIPPED allowlist env + the gate's jail-boundary vars.
@@ -549,6 +570,153 @@ fn auth_fingerprint(keys: &HashMap<String, String>) -> String {
         bytes.push(0xff);
     }
     fnv1a_hex(&bytes)
+}
+
+fn sanitized_provider_base_urls(
+    provider_base_urls: Option<&HashMap<String, String>>,
+) -> HashMap<String, String> {
+    provider_base_urls
+        .into_iter()
+        .flat_map(|m| m.iter())
+        .filter_map(|(provider, url)| {
+            let provider = provider.trim();
+            let url = url.trim();
+            if provider.is_empty() || url.is_empty() {
+                None
+            } else {
+                Some((provider.to_string(), url.to_string()))
+            }
+        })
+        .collect()
+}
+
+fn sanitized_provider_custom_models(
+    provider_custom_models: Option<&HashMap<String, Vec<String>>>,
+) -> HashMap<String, Vec<String>> {
+    let mut out = HashMap::new();
+    for (provider, models) in provider_custom_models.into_iter().flat_map(|m| m.iter()) {
+        let provider = provider.trim();
+        if provider.is_empty() {
+            continue;
+        }
+        let mut ids = models
+            .iter()
+            .map(|id| id.trim())
+            .filter(|id| !id.is_empty())
+            .map(String::from)
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids.dedup();
+        if !ids.is_empty() {
+            out.insert(provider.to_string(), ids);
+        }
+    }
+    out
+}
+
+fn model_config_fingerprint(
+    base_urls: &HashMap<String, String>,
+    custom_models: &HashMap<String, Vec<String>>,
+) -> String {
+    let mut bytes = Vec::new();
+    let mut urls = base_urls.iter().collect::<Vec<_>>();
+    urls.sort_by(|a, b| a.0.cmp(b.0));
+    for (provider, url) in urls {
+        bytes.extend_from_slice(provider.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(url.as_bytes());
+        bytes.push(0xfe);
+    }
+    let mut models = custom_models.iter().collect::<Vec<_>>();
+    models.sort_by(|a, b| a.0.cmp(b.0));
+    for (provider, ids) in models {
+        bytes.extend_from_slice(provider.as_bytes());
+        bytes.push(0);
+        for id in ids {
+            bytes.extend_from_slice(id.as_bytes());
+            bytes.push(0xfd);
+        }
+    }
+    fnv1a_hex(&bytes)
+}
+
+fn runtime_fingerprint(
+    keys: &HashMap<String, String>,
+    base_urls: &HashMap<String, String>,
+    custom_models: &HashMap<String, Vec<String>>,
+) -> String {
+    format!(
+        "{}:{}",
+        auth_fingerprint(keys),
+        model_config_fingerprint(base_urls, custom_models),
+    )
+}
+
+fn write_openjammer_models_json(
+    agent_home: &Path,
+    base_urls: &HashMap<String, String>,
+    custom_models: &HashMap<String, Vec<String>>,
+) -> std::io::Result<()> {
+    if base_urls.is_empty() && custom_models.is_empty() {
+        return Ok(());
+    }
+    let models_path = agent_home.join(".pi").join("agent").join("models.json");
+    let mut root: serde_json::Value = std::fs::read_to_string(&models_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !root.is_object() {
+        root = serde_json::json!({});
+    }
+    if !root.get("providers").is_some_and(|v| v.is_object()) {
+        root["providers"] = serde_json::json!({});
+    }
+
+    for provider in base_urls
+        .keys()
+        .chain(custom_models.keys())
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        let provider = provider.as_str();
+        if !root["providers"]
+            .get(provider)
+            .is_some_and(|v| v.is_object())
+        {
+            root["providers"][provider] = serde_json::json!({});
+        }
+        let entry = &mut root["providers"][provider];
+        if let Some(base_url) = base_urls.get(provider) {
+            entry["baseUrl"] = serde_json::json!(base_url);
+            entry["api"] = serde_json::json!("openai-completions");
+            entry["apiKey"] = serde_json::json!(format!("${}", provider_key_var(Some(provider))));
+            if base_url.contains("openrouter.ai") {
+                entry["compat"] = serde_json::json!({ "thinkingFormat": "openrouter" });
+            }
+        }
+        if let Some(ids) = custom_models.get(provider) {
+            let mut existing = entry
+                .get("models")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let mut seen = existing
+                .iter()
+                .filter_map(|v| v.get("id").and_then(|id| id.as_str()).map(String::from))
+                .collect::<std::collections::BTreeSet<_>>();
+            for id in ids {
+                if seen.insert(id.clone()) {
+                    existing.push(serde_json::json!({ "id": id, "name": id }));
+                }
+            }
+            entry["models"] = serde_json::Value::Array(existing);
+        }
+    }
+
+    if let Some(parent) = models_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let serialized = serde_json::to_string_pretty(&root).map_err(std::io::Error::other)?;
+    std::fs::write(models_path, serialized)
 }
 
 /// Spawn a fresh Pi child, run the `get_commands` handshake, and pin the model
@@ -1133,6 +1301,8 @@ pub fn ai_command(
     channel: String,
     provider_key: Option<String>,
     provider_keys: Option<HashMap<String, String>>,
+    provider_base_urls: Option<HashMap<String, String>>,
+    provider_custom_models: Option<HashMap<String, Vec<String>>>,
     provider: Option<String>,
     model_id: Option<String>,
     yolo: Option<bool>,
@@ -1174,7 +1344,26 @@ pub fn ai_command(
         provider_keys.as_ref(),
     );
     let filtered_provider_key_entries = filter_conflicting_provider_keys(provider_key_entries);
-    let auth_fingerprint = auth_fingerprint(&filtered_provider_key_entries);
+    let provider_base_urls = sanitized_provider_base_urls(provider_base_urls.as_ref());
+    let provider_custom_models = sanitized_provider_custom_models(provider_custom_models.as_ref());
+    if write_openjammer_models_json(
+        &workspace.agent_home,
+        &provider_base_urls,
+        &provider_custom_models,
+    )
+    .is_err()
+    {
+        emit(
+            &app,
+            &channel,
+            PiStreamLine::thought("note: could not update custom model config"),
+        );
+    }
+    let auth_fingerprint = runtime_fingerprint(
+        &filtered_provider_key_entries,
+        &provider_base_urls,
+        &provider_custom_models,
+    );
     let jailed = !yolo.unwrap_or(false);
     let mut env = env_for_provider_keys(jailed, &filtered_provider_key_entries);
     env.insert(
@@ -2365,6 +2554,37 @@ mod tests {
             vec!["OPENAI_API_KEY", "OPENCODE_API_KEY"],
         );
         assert_eq!(auth_fingerprint(&keys), auth_fingerprint(&keys));
+    }
+
+    #[test]
+    fn writes_custom_openai_compatible_models_json() {
+        let dir = std::env::temp_dir().join(format!(
+            "openjammer-models-json-test-{}",
+            std::process::id(),
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let base_urls = HashMap::from([(
+            "openai".to_string(),
+            "https://openrouter.ai/api/v1".to_string(),
+        )]);
+        let custom_models = HashMap::from([(
+            "openai".to_string(),
+            vec!["anthropic/claude-sonnet-4".to_string()],
+        )]);
+
+        write_openjammer_models_json(&dir, &base_urls, &custom_models).expect("write models");
+
+        let path = dir.join(".pi").join("agent").join("models.json");
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let provider = &json["providers"]["openai"];
+        assert_eq!(provider["baseUrl"], "https://openrouter.ai/api/v1");
+        assert_eq!(provider["apiKey"], "$OPENAI_API_KEY");
+        assert_eq!(provider["api"], "openai-completions");
+        assert_eq!(provider["compat"]["thinkingFormat"], "openrouter");
+        assert_eq!(provider["models"][0]["id"], "anthropic/claude-sonnet-4");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

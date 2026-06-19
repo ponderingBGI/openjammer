@@ -239,6 +239,18 @@ function ProviderDetail({
                 </p>
             )}
 
+            {provider.id === 'openrouter' && (
+                <p className="command-bar-auth-hint">
+                    Paste an OpenRouter key. Then use <code>/models</code> to pick only OpenRouter models.
+                </p>
+            )}
+
+            {isOpenAiCompatible && (
+                <p className="command-bar-auth-hint">
+                    Paste a base URL + key. In <code>/models</code>, type a model id and press Enter to add it.
+                </p>
+            )}
+
             {isOAuth ? (
                 <button
                     type="button"

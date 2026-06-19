@@ -30,6 +30,11 @@ export const AI_PROVIDERS: readonly ProviderOption[] = [
         subtitle: 'API key — billed per token, NOT your Pro/Max plan',
     },
     {
+        id: 'openrouter',
+        title: 'OpenRouter',
+        subtitle: 'API key — broad OpenAI-compatible model marketplace',
+    },
+    {
         id: 'openai',
         title: 'BYO OpenAI-compatible',
         subtitle: 'Your own base URL + API key',

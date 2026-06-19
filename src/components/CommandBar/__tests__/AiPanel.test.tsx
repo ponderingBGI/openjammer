@@ -17,6 +17,10 @@ if (!Element.prototype.scrollIntoView) {
     Element.prototype.scrollIntoView = () => {};
 }
 
+const authStatusMock = vi.hoisted(() => ({
+    activeProvider: 'opencode',
+}));
+
 const piSessionsMock = vi.hoisted(() => ({
     runCommand: vi.fn(async () => ({ ok: true })),
     listSlashCommands: vi.fn(async () => [] as Array<{ name: string; description?: string; source: 'extension' | 'prompt' | 'skill' }>),
@@ -51,7 +55,7 @@ vi.mock('../../../ai/tauri', () => ({
     isTauri: () => true,
     getInvoke: () => (cmd: string) =>
         cmd === 'auth_status'
-            ? Promise.resolve({ configured: true, activeProvider: 'opencode', conflict: false })
+            ? Promise.resolve({ configured: true, activeProvider: authStatusMock.activeProvider, conflict: false })
             : Promise.resolve({}),
     listen: () => Promise.resolve(() => {}),
     openExternal: vi.fn(),
@@ -69,12 +73,14 @@ function renderPanel(onBack = vi.fn(), props: Partial<Parameters<typeof AiPanel>
 describe('AiPanel chat', () => {
     beforeEach(() => {
         cleanup();
+        authStatusMock.activeProvider = 'opencode';
         useAuthStore.setState({
             activeProvider: 'opencode',
             modelId: 'zen',
             key: 'sk-opencode-test-key',
             providerKeys: { opencode: 'sk-opencode-test-key' },
             providerBaseUrls: {},
+            providerCustomModels: {},
             configuredProviderIds: ['opencode'],
             configured: true,
             conflict: false,
@@ -205,19 +211,51 @@ describe('AiPanel chat', () => {
         expect(screen.getByText(/Already configured/i)).toBeInTheDocument();
     });
 
-    it('/model opens the Pi model picker and selecting a model updates Pi', async () => {
+    it('/model only shows configured providers and selecting one updates Pi', async () => {
         renderPanel();
         const input = screen.getByPlaceholderText(/Ask anything/i);
-        fireEvent.change(input, { target: { value: '/model gpt' } });
+        fireEvent.change(input, { target: { value: '/model' } });
         fireEvent.keyDown(input, { key: 'Enter' });
         expect(await screen.findByText(/Choose model/i)).toBeInTheDocument();
-        fireEvent.click(await screen.findByText('GPT-4o'));
+        expect(screen.getByText(/Showing configured providers only: opencode Zen/i)).toBeInTheDocument();
+        expect(screen.queryByText('GPT-4o')).not.toBeInTheDocument();
+        fireEvent.click(await screen.findByText('Zen'));
         await waitFor(() => expect(piSessionsMock.setModel).toHaveBeenCalledWith(
-            'openai',
-            'gpt-4o',
+            'opencode',
+            'zen',
             expect.objectContaining({ providerKeys: { opencode: 'sk-opencode-test-key' } }),
         ));
-        expect(await screen.findByText(/Model: BYO OpenAI-compatible \/ gpt-4o/i)).toBeInTheDocument();
+        expect(await screen.findByText(/Model: opencode Zen \/ zen/i)).toBeInTheDocument();
+    });
+
+    it('/models can add a typed custom OpenAI-compatible model id', async () => {
+        authStatusMock.activeProvider = 'openai';
+        useAuthStore.setState({
+            activeProvider: 'openai',
+            modelId: undefined,
+            key: 'sk-openrouter-test-key',
+            providerKeys: { openai: 'sk-openrouter-test-key' },
+            providerBaseUrls: { openai: 'https://openrouter.ai/api/v1' },
+            providerCustomModels: {},
+            configuredProviderIds: ['openai'],
+            configured: true,
+            conflict: false,
+        });
+        piSessionsMock.listAvailableModels.mockResolvedValue([]);
+        renderPanel();
+        const input = screen.getByPlaceholderText(/Ask anything/i);
+        fireEvent.change(input, { target: { value: '/models anthropic/claude-sonnet-4' } });
+        fireEvent.keyDown(input, { key: 'Enter' });
+        expect(await screen.findByText(/Use “anthropic\/claude-sonnet-4”/i)).toBeInTheDocument();
+        fireEvent.click(screen.getByText(/Use “anthropic\/claude-sonnet-4”/i));
+        await waitFor(() => expect(piSessionsMock.setModel).toHaveBeenCalledWith(
+            'openai',
+            'anthropic/claude-sonnet-4',
+            expect.objectContaining({
+                providerBaseUrls: { openai: 'https://openrouter.ai/api/v1' },
+                providerCustomModels: { openai: ['anthropic/claude-sonnet-4'] },
+            }),
+        ));
     });
 
     it('Shift+Tab cycles the Pi reasoning level', async () => {
@@ -226,6 +264,7 @@ describe('AiPanel chat', () => {
         fireEvent.keyDown(input, { key: 'Tab', shiftKey: true });
         await waitFor(() => expect(piSessionsMock.cycleThinkingLevel).toHaveBeenCalledOnce());
         expect(await screen.findByText(/Thinking level: medium/i)).toBeInTheDocument();
+        expect(screen.getAllByText(/Thinking: medium/i).length).toBeGreaterThan(0);
     });
 
     it('app slash commands can open OpenJammer chrome and close the palette', () => {
