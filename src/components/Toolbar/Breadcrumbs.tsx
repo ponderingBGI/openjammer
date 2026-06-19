@@ -9,6 +9,7 @@ import { useCallback } from 'react';
 import { useCanvasNavigationStore } from '../../store/canvasNavigationStore';
 import { getNodeDefinition } from '../../engine/registry';
 import type { GraphNode } from '../../engine/types';
+import { Button } from '@openjammer/oj-ui';
 import './Breadcrumbs.css';
 
 /**
@@ -70,13 +71,14 @@ export function Breadcrumbs() {
     return (
         <div className="breadcrumbs">
             {/* Root level (main) */}
-            <button
-                className="breadcrumb-item breadcrumb-clickable"
+            <Button
+                variant="ghost"
+                className="breadcrumb-item"
                 onClick={() => exitToRoot()}
                 title="Go to main canvas"
             >
                 main
-            </button>
+            </Button>
 
             {/* Path segments */}
             {path.map((node, index) => {
@@ -91,13 +93,14 @@ export function Breadcrumbs() {
                             </span>
                         ) : (
                             // Previous level - clickable
-                            <button
-                                className="breadcrumb-item breadcrumb-clickable"
+                            <Button
+                                variant="ghost"
+                                className="breadcrumb-item"
                                 onClick={() => navigateToLevel(index)}
                                 title={`Go to ${displayName}`}
                             >
                                 {displayName}
-                            </button>
+                            </Button>
                         )}
                     </span>
                 );

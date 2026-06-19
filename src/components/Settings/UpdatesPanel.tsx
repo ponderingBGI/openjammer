@@ -7,6 +7,7 @@
  * manual download button, so Settings never hides the path to Stable/Canari.
  */
 
+import { Button } from '@openjammer/oj-ui';
 import { useState } from 'react';
 
 import { isTauri, openExternal } from '../../ai/tauri';
@@ -219,9 +220,9 @@ export function UpdatesPanel() {
                         <strong>Pinned to <code className="oj-upd-ver">{pinnedVersion}</code></strong>
                         <p>Auto-update is off after a rollback. Resume when you’re ready.</p>
                     </div>
-                    <button className="oj-upd-btn" onClick={resumeUpdates}>
+                    <Button variant="secondary" onClick={resumeUpdates}>
                         Resume updates
-                    </button>
+                    </Button>
                 </div>
             )}
 
@@ -235,13 +236,14 @@ export function UpdatesPanel() {
                 <div className="oj-upd-state">
                     {statusText}
                     {autoUpdateAvailable && !checking && (
-                        <button
-                            className="oj-upd-linkbtn oj-upd-check"
+                        <Button
+                            variant="link"
+                            className="oj-upd-check"
                             onClick={() => void checkNow(updateChannel)}
                             disabled={!!pinnedVersion}
                         >
                             Check now
-                        </button>
+                        </Button>
                     )}
                 </div>
             </div>
@@ -299,9 +301,9 @@ export function UpdatesPanel() {
                         or a stale shortcut that still launches an old copy.
                     </p>
                 </div>
-                <button className="oj-upd-btn" disabled={manualOpening} onClick={() => void handleManualDownload()}>
+                <Button variant="secondary" disabled={manualOpening} onClick={() => void handleManualDownload()}>
                     {manualOpening ? 'Opening…' : `Download ${channelLabel(updateChannel)}`}
-                </button>
+                </Button>
             </div>
 
             {pending && pendingVersion ? (
@@ -314,9 +316,9 @@ export function UpdatesPanel() {
                         <p>It’ll install automatically when you quit — or get it now.</p>
                         {installNote && <p className="oj-upd-installnote">{installNote}</p>}
                     </div>
-                    <button className="oj-upd-btn oj-upd-btn-primary" onClick={() => void handleInstallNow()}>
+                    <Button variant="primary" onClick={() => void handleInstallNow()}>
                         Update &amp; restart now
-                    </button>
+                    </Button>
                 </div>
             ) : updateChannel === 'stable' && isCanariBuild ? (
                 <p className="oj-upd-desc oj-upd-ahead">
@@ -328,12 +330,12 @@ export function UpdatesPanel() {
             {lastGood && !pinnedVersion && (
                 <div className="oj-upd-rollback">
                     {!confirmingRollback ? (
-                        <button
-                            className="oj-upd-btn oj-upd-btn-danger"
+                        <Button
+                            variant="danger"
                             onClick={() => setConfirmingRollback(true)}
                         >
                             Roll back to <code className="oj-upd-ver">{lastGood}</code>
-                        </button>
+                        </Button>
                     ) : (
                         <div className="oj-upd-confirm">
                             <p>
@@ -341,24 +343,24 @@ export function UpdatesPanel() {
                                 update and turns auto-update off, so the bad build can’t come back.
                                 Restart OpenJammer afterwards to finish. To revert the app itself,
                                 reinstall <code className="oj-upd-ver">{lastGood}</code> from the{' '}
-                                <button
-                                    className="oj-upd-linkbtn"
+                                <Button
+                                    variant="link"
                                     onClick={() => void openExternal(RELEASES_URL)}
                                 >
                                     releases page
-                                </button>
+                                </Button>
                                 .
                             </p>
                             <div className="oj-upd-confirm-actions">
-                                <button
-                                    className="oj-upd-btn oj-upd-btn-danger"
+                                <Button
+                                    variant="danger"
                                     onClick={() => void handleRollback()}
                                 >
                                     Yes, roll back
-                                </button>
-                                <button className="oj-upd-btn" onClick={() => setConfirmingRollback(false)}>
+                                </Button>
+                                <Button variant="secondary" onClick={() => setConfirmingRollback(false)}>
                                     Cancel
-                                </button>
+                                </Button>
                             </div>
                         </div>
                     )}

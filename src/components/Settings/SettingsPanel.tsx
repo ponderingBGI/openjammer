@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '@openjammer/oj-ui';
 import { themes, applyTheme, getThemeById, getSavedThemeId, saveThemeId } from '@openjammer/oj-tokens';
 import { KeybindingsPanel } from './KeybindingsPanel';
 import { AudioSettingsPanel } from './AudioSettingsPanel';
@@ -25,25 +26,23 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             <div className="minimal-settings-container" onClick={e => e.stopPropagation()}>
                 <div className="minimal-settings-header">
                     <h2>Settings</h2>
-                    <button
-                        onClick={onClose}
-                        style={{ background: 'none', border: 'none', fontSize: '1.2rem', cursor: 'pointer' }}
-                    >
+                    <Button variant="ghost" iconOnly onClick={onClose}>
                         ✕
-                    </button>
+                    </Button>
                 </div>
 
                 <div className="minimal-settings-content">
                     {/* Sidebar */}
                     <div className="minimal-sidebar">
                         {['graphics', 'keybindings', 'audio', 'updates', 'about'].map(tab => (
-                            <button
+                            <Button
                                 key={tab}
+                                variant="ghost"
                                 className={`minimal-tab-btn ${activeTab === tab ? 'active' : ''}`}
                                 onClick={() => setActiveTab(tab)}
                             >
                                 {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                            </button>
+                            </Button>
                         ))}
                     </div>
 

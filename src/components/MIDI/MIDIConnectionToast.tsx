@@ -8,6 +8,7 @@
  * - Accessibility (role="alert", aria-live)
  */
 
+import { Button } from '@openjammer/oj-ui';
 import type { MIDIDeviceInfo, MIDIDevicePreset } from '../../midi/types';
 import './MIDIConnectionToast.css';
 
@@ -54,14 +55,15 @@ export function MIDIConnectionToast({
             {/* Header with dismiss button */}
             <div className="midi-connection-toast-header">
                 <div className="midi-connection-toast-header-left" />
-                <button
+                <Button
+                    variant="ghost"
+                    iconOnly
                     className="midi-connection-toast-dismiss"
                     onClick={onDismiss}
                     aria-label="Dismiss notification"
-                    type="button"
                 >
                     &times;
-                </button>
+                </Button>
             </div>
 
             {/* Content area */}
@@ -90,20 +92,20 @@ export function MIDIConnectionToast({
 
             {/* Actions */}
             <div className="midi-connection-toast-actions">
-                <button
-                    className="midi-connection-toast-btn midi-connection-toast-btn-primary"
+                <Button
+                    variant="primary"
+                    className="midi-connection-toast-btn"
                     onClick={onAdd}
-                    type="button"
                 >
                     Add Device
-                </button>
-                <button
-                    className="midi-connection-toast-btn midi-connection-toast-btn-secondary"
+                </Button>
+                <Button
+                    variant="secondary"
+                    className="midi-connection-toast-btn"
                     onClick={onBrowse}
-                    type="button"
                 >
                     Browse
-                </button>
+                </Button>
             </div>
         </div>
     );

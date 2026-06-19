@@ -5,6 +5,7 @@ import { GuideStep, type StepStatus } from '../GuideStep';
 import { GuideInfoBox } from '../GuideInfoBox';
 import { GuideTester, type TestResult } from '../GuideTester';
 import { useLowLatencyGuide } from '../../../store/guideStore';
+import { Button } from '@openjammer/oj-ui';
 import {
   detectPlatform,
   type Platform,
@@ -176,13 +177,13 @@ export function LowLatencyGuide() {
       subtitle="Optimize your audio for real-time performance"
       footer={
         <div className="guide-footer-actions">
-          <button className="guide-btn secondary" onClick={guide.reset}>
+          <Button variant="secondary" onClick={guide.reset}>
             Reset Progress
-          </button>
+          </Button>
           {completedSteps.length === totalSteps && (
-            <button className="guide-btn success" onClick={guide.close}>
+            <Button variant="success" onClick={guide.close}>
               Done
-            </button>
+            </Button>
           )}
         </div>
       }
@@ -395,21 +396,21 @@ export function LowLatencyGuide() {
             </ol>
 
             <div className="guide-step-actions">
-              <button
-                className="guide-btn primary"
+              <Button
+                variant="primary"
                 onClick={() => guide.markStepCompleted(STEP_IDS.DRIVER)}
               >
                 I've installed the drivers
-              </button>
-              <button
-                className="guide-btn secondary"
+              </Button>
+              <Button
+                variant="secondary"
                 onClick={() => {
                   guide.setStepStatus(STEP_IDS.DRIVER, 'skipped');
                   guide.markStepCompleted(STEP_IDS.DRIVER);
                 }}
               >
                 Skip (using built-in audio)
-              </button>
+              </Button>
             </div>
           </GuideStep>
         )}
@@ -444,12 +445,12 @@ export function LowLatencyGuide() {
             </ul>
 
             <div className="guide-step-actions">
-              <button
-                className="guide-btn primary"
+              <Button
+                variant="primary"
                 onClick={() => guide.markStepCompleted(STEP_IDS.DRIVER)}
               >
                 Continue
-              </button>
+              </Button>
             </div>
           </GuideStep>
         )}
@@ -552,12 +553,12 @@ export function LowLatencyGuide() {
             )}
 
             <div className="guide-step-actions">
-              <button
-                className="guide-btn primary"
+              <Button
+                variant="primary"
                 onClick={() => guide.markStepCompleted(STEP_IDS.OPTIMIZATION)}
               >
                 I've optimized my system
-              </button>
+              </Button>
             </div>
           </GuideStep>
         )}

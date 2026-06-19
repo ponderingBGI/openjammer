@@ -10,6 +10,7 @@ import { reinitAudioContext, getLatencyMetrics, startLatencyMonitoring } from '.
 import { getExecutor } from '../../audio/executor';
 import { LowLatencyGuide } from '../Guides';
 import { useLowLatencyGuide } from '../../store/guideStore';
+import { Button, Select } from '@openjammer/oj-ui';
 import './AudioSettingsPanel.css';
 
 // Friendly messages for each latency classification
@@ -119,7 +120,8 @@ export function AudioSettingsPanel() {
     return (
         <div className="audio-settings-panel">
             {/* Low Latency Setup Guide Button */}
-            <button
+            <Button
+                variant="ghost"
                 className="guide-launch-btn"
                 onClick={lowLatencyGuide.open}
             >
@@ -131,7 +133,7 @@ export function AudioSettingsPanel() {
                 <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="arrow-icon">
                     <polyline points="9 18 15 12 9 6" />
                 </svg>
-            </button>
+            </Button>
 
             {/* Low Latency Guide Modal */}
             <LowLatencyGuide />
@@ -234,7 +236,7 @@ export function AudioSettingsPanel() {
                 {/* Sample Rate */}
                 <div className="setting-group">
                     <label>Sample Rate</label>
-                    <select
+                    <Select
                         value={pendingConfig.sampleRate}
                         onChange={(e) => setPendingConfig({
                             ...pendingConfig,
@@ -244,7 +246,7 @@ export function AudioSettingsPanel() {
                         <option value={44100}>44.1 kHz (CD Quality)</option>
                         <option value={48000}>48 kHz (Recommended)</option>
                         <option value={96000}>96 kHz (High Quality)</option>
-                    </select>
+                    </Select>
                     <p className="setting-description">
                         Higher sample rates provide better audio quality but increase CPU usage.
                     </p>
@@ -253,7 +255,7 @@ export function AudioSettingsPanel() {
                 {/* Latency Hint */}
                 <div className="setting-group">
                     <label>Latency Mode</label>
-                    <select
+                    <Select
                         value={pendingConfig.latencyHint}
                         onChange={(e) => setPendingConfig({
                             ...pendingConfig,
@@ -263,7 +265,7 @@ export function AudioSettingsPanel() {
                         <option value="interactive">Interactive (Lowest Latency)</option>
                         <option value="balanced">Balanced</option>
                         <option value="playback">Playback (Highest Quality)</option>
-                    </select>
+                    </Select>
                     <p className="setting-description">
                         Interactive mode minimizes latency for live performance.
                     </p>
@@ -291,13 +293,14 @@ export function AudioSettingsPanel() {
 
                 {/* Apply Button */}
                 {hasChanges && (
-                    <button
+                    <Button
+                        variant="primary"
                         className="apply-config-btn"
                         onClick={handleApplyConfig}
                         disabled={isRestarting}
                     >
                         {isRestarting ? 'Restarting Audio...' : 'Apply Changes'}
-                    </button>
+                    </Button>
                 )}
             </div>
 
