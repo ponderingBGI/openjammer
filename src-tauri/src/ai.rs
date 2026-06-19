@@ -1610,6 +1610,167 @@ fn ai_command_blocking(
     Ok(())
 }
 
+/// Pre-warm the Pi child on intent (the frontend calls this when the user enters
+/// AI mode), so the FIRST real prompt pays NO cold start — spawn, handshake, and
+/// `set_model` are already done. Runs the SAME spawn/configure path as [`ai_run`]
+/// / [`ai_command`] but sends no command. IDEMPOTENT: if a warm child already
+/// matches this runtime's fingerprint it returns at once, so re-entering AI mode
+/// is free. Off the UI/IPC thread like every other `ai_*`. The frontend gates it
+/// on configured + capable, so the search-only / pure-instrument majority never
+/// spawns Pi; the single idle child is reaped on the next respawn or app exit.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn ai_prewarm(
+    app: AppHandle,
+    provider_key: Option<String>,
+    provider_keys: Option<HashMap<String, String>>,
+    provider_base_urls: Option<HashMap<String, String>>,
+    provider_custom_models: Option<HashMap<String, Vec<String>>>,
+    provider: Option<String>,
+    model_id: Option<String>,
+    yolo: Option<bool>,
+) -> Result<(), String> {
+    let app_for_thread = app.clone();
+    std::thread::spawn(move || {
+        let warm = app_for_thread.state::<WarmChildState>();
+        let bridge = app_for_thread.state::<crate::bridge::BridgeState>();
+        ai_prewarm_blocking(
+            app_for_thread.clone(),
+            provider_key,
+            provider_keys,
+            provider_base_urls,
+            provider_custom_models,
+            provider,
+            model_id,
+            yolo,
+            warm,
+            bridge,
+        );
+    });
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ai_prewarm_blocking(
+    app: AppHandle,
+    provider_key: Option<String>,
+    provider_keys: Option<HashMap<String, String>>,
+    provider_base_urls: Option<HashMap<String, String>>,
+    provider_custom_models: Option<HashMap<String, Vec<String>>>,
+    provider: Option<String>,
+    model_id: Option<String>,
+    yolo: Option<bool>,
+    warm: tauri::State<'_, WarmChildState>,
+    bridge: tauri::State<'_, crate::bridge::BridgeState>,
+) {
+    // Best-effort + silent: status/errors go to an internal channel the frontend
+    // does not subscribe to, so a failed prewarm just means the first prompt pays
+    // the cold start it would have paid anyway.
+    const CHANNEL: &str = "oj-ai-prewarm";
+    let Some(pi) = find_pi(&app) else {
+        return;
+    };
+    let Ok(workspace) = AgentWorkspace::ensure() else {
+        return;
+    };
+
+    let provider_key_entries = collect_provider_key_entries(
+        provider_key.as_deref(),
+        provider.as_deref(),
+        provider_keys.as_ref(),
+    );
+    let filtered_provider_key_entries = filter_conflicting_provider_keys(provider_key_entries);
+    let provider_base_urls = sanitized_provider_base_urls(provider_base_urls.as_ref());
+    let provider_custom_models = sanitized_provider_custom_models(provider_custom_models.as_ref());
+    let _ = write_openjammer_models_json(
+        &workspace.agent_home,
+        &provider_base_urls,
+        &provider_custom_models,
+    );
+    let auth_fingerprint = runtime_fingerprint(
+        &filtered_provider_key_entries,
+        &provider_base_urls,
+        &provider_custom_models,
+    );
+    let jailed = !yolo.unwrap_or(false);
+    let mut env = env_for_provider_keys(jailed, &filtered_provider_key_entries);
+    env.insert(
+        "HOME".to_string(),
+        workspace.agent_home.to_string_lossy().into_owned(),
+    );
+    if let Some((addr, token)) = crate::bridge::ensure_started(&app, &bridge) {
+        env.insert("OJ_BRIDGE_ADDR".to_string(), addr);
+        env.insert("OJ_BRIDGE_TOKEN".to_string(), token);
+    }
+    if jailed {
+        env.insert(
+            "OJ_PROJECT_ROOT".to_string(),
+            workspace.project_root.to_string_lossy().into_owned(),
+        );
+        env.insert(
+            "OJ_MEMORY_ROOTS".to_string(),
+            workspace
+                .memory_roots()
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(":"),
+        );
+        let key_vars = provider_key_vars(&filtered_provider_key_entries);
+        if let Some(active_key_var) = provider
+            .as_deref()
+            .map(|p| provider_key_var(Some(p)))
+            .filter(|v| key_vars.iter().any(|k| k == v))
+        {
+            env.insert("OJ_KEY_VAR".to_string(), active_key_var);
+        }
+        if !key_vars.is_empty() {
+            env.insert("OJ_KEY_VARS".to_string(), key_vars.join(":"));
+        }
+    }
+
+    let mut guard = warm.0.lock().unwrap_or_else(|e| e.into_inner());
+    let needs_respawn = match guard.as_mut() {
+        None => true,
+        Some(c) => {
+            c.is_dead()
+                || c.provider.as_deref() != provider.as_deref()
+                || c.model_id.as_deref() != model_id.as_deref()
+                || c.project_root != workspace.project_root
+                || c.jailed != jailed
+                || c.auth_fingerprint != auth_fingerprint
+        }
+    };
+    if !needs_respawn {
+        return; // already warm and matching this runtime — nothing to do.
+    }
+    drop(guard.take());
+    configure_gate(&workspace.agent_home, jailed, &app, CHANNEL);
+    let graph_pkg = graph_extension_dir(&app).to_string_lossy().into_owned();
+    let _ = set_settings_package(&workspace.agent_home, &graph_pkg, true);
+    let jail = if jailed {
+        Some(crate::sandbox::Jail::new(
+            workspace.project_root.clone(),
+            workspace.agent_home.clone(),
+        ))
+    } else {
+        None
+    };
+    if let Ok(child) = spawn_and_configure(
+        &pi,
+        env,
+        &workspace.project_root,
+        provider.as_deref(),
+        model_id.as_deref(),
+        auth_fingerprint,
+        jail,
+        &app,
+        CHANNEL,
+    ) {
+        *guard = Some(child);
+    }
+}
+
 /// Drop the warm Pi child so the next prompt respawns and reloads settings,
 /// bundled packages, extensions, skills, and prompt templates.
 #[tauri::command]

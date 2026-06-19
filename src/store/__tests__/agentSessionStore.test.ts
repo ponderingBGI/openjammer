@@ -233,6 +233,36 @@ describe('agentSessionStore chat', () => {
         expect(useAgentSessionStore.getState().sessionId).toBeNull();
     });
 
+    it('rewindTo() truncates to before a turn and returns its prompt to edit', async () => {
+        useAgentSessionStore.setState({
+            messages: [
+                { id: 'u1', role: 'user', text: 'add a keyboard' },
+                { id: 'a1', role: 'assistant', markdown: 'Added.', actions: [], streaming: false },
+                { id: 'u2', role: 'user', text: 'add a revrb' },
+                { id: 'a2', role: 'assistant', markdown: 'Hmm.', actions: [], streaming: false },
+            ],
+            sessionId: 'old-session',
+        });
+        const prompt = await useAgentSessionStore.getState().rewindTo(2);
+        expect(prompt).toBe('add a revrb');
+        expect(useAgentSessionStore.getState().messages.map((m) => m.id)).toEqual(['u1', 'a1']);
+        // A fresh Pi session continues from here (no warm child in tests → null).
+        expect(useAgentSessionStore.getState().sessionId).toBeNull();
+    });
+
+    it('rewindTo() is conversation-only — the canvas is left untouched', async () => {
+        await useAgentSessionStore
+            .getState()
+            .send(new MockAgentBackend({ script: addTwoNodesScript }), { prompt: 'build' });
+        const builtNodes = rootNodeCount();
+        expect(builtNodes).toBeGreaterThan(0);
+
+        await useAgentSessionStore.getState().rewindTo(0);
+        expect(useAgentSessionStore.getState().messages).toHaveLength(0);
+        // The nodes the agent built remain; Ctrl+Z (not rewind) reverts them.
+        expect(rootNodeCount()).toBe(builtNodes);
+    });
+
     it('persists the conversation to localStorage', async () => {
         await useAgentSessionStore
             .getState()

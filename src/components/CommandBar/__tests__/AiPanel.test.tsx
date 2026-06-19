@@ -32,6 +32,7 @@ const piSessionsMock = vi.hoisted(() => ({
     setModel: vi.fn(async () => ({ ok: true })),
     setThinkingLevel: vi.fn(async () => ({ ok: true })),
     restartAgent: vi.fn(async () => true),
+    prewarmAgent: vi.fn(async () => {}),
     listSessions: vi.fn(async () => []),
     loadSessionMessages: vi.fn(async () => ({ messages: [], incomplete: false })),
 }));
@@ -48,6 +49,7 @@ vi.mock('../../../ai/piSessions', () => ({
     setModel: piSessionsMock.setModel,
     setThinkingLevel: piSessionsMock.setThinkingLevel,
     restartAgent: piSessionsMock.restartAgent,
+    prewarmAgent: piSessionsMock.prewarmAgent,
     listSessions: piSessionsMock.listSessions,
     loadSessionMessages: piSessionsMock.loadSessionMessages,
 }));
@@ -115,6 +117,53 @@ describe('AiPanel chat', () => {
         renderPanel();
         expect(screen.getByPlaceholderText(/Ask anything/i)).toBeInTheDocument();
         expect(screen.getByText(/describe what to build/i)).toBeInTheDocument();
+    });
+
+    it('prewarms the Pi child once on entering AI mode when configured', () => {
+        piSessionsMock.prewarmAgent.mockClear();
+        renderPanel();
+        expect(piSessionsMock.prewarmAgent).toHaveBeenCalledTimes(1);
+    });
+
+    it('offers tappable starter chips on a new chat and sends one on click', () => {
+        const send = vi.fn();
+        useAgentSessionStore.setState({ send });
+        const { container } = renderPanel();
+        const chips = container.querySelectorAll('.command-bar-ai-welcome-chip');
+        expect(chips.length).toBeGreaterThan(0);
+        fireEvent.click(chips[0]);
+        expect(send).toHaveBeenCalledOnce();
+        const sent = send.mock.calls[0][1] as { prompt: string };
+        expect(typeof sent.prompt).toBe('string');
+        expect(sent.prompt.length).toBeGreaterThan(0);
+    });
+
+    it('hides the starter chips once the conversation has started', () => {
+        useAgentSessionStore.setState({ messages: [{ id: 'u1', role: 'user', text: 'hi' }] });
+        const { container } = renderPanel();
+        expect(container.querySelectorAll('.command-bar-ai-welcome-chip').length).toBe(0);
+    });
+
+    it('Ctrl+↑ opens rewind; picking a prompt truncates and pre-fills the composer', async () => {
+        useAgentSessionStore.setState({
+            messages: [
+                { id: 'u1', role: 'user', text: 'add a keyboard' },
+                { id: 'a1', role: 'assistant', markdown: 'ok', actions: [], streaming: false },
+                { id: 'u2', role: 'user', text: 'add a revrb' },
+                { id: 'a2', role: 'assistant', markdown: 'ok', actions: [], streaming: false },
+            ],
+        });
+        renderPanel();
+        const input = screen.getByPlaceholderText(/Ask anything/i);
+        fireEvent.keyDown(input, { key: 'ArrowUp', ctrlKey: true });
+        // The rewind picker lists prior prompts.
+        expect(screen.getByText('add a revrb')).toBeInTheDocument();
+        fireEvent.click(screen.getByText('add a keyboard'));
+        await waitFor(() => {
+            expect((screen.getByPlaceholderText(/Ask anything/i) as HTMLTextAreaElement).value).toBe('add a keyboard');
+        });
+        // Truncated to before that turn (conversation-only; canvas untouched).
+        expect(useAgentSessionStore.getState().messages).toHaveLength(0);
     });
 
     it('renders the existing conversation from the store', () => {
@@ -264,8 +313,12 @@ describe('AiPanel chat', () => {
         renderPanel();
         const input = screen.getByPlaceholderText(/Ask anything/i);
         fireEvent.keyDown(input, { key: 'Tab', shiftKey: true });
-        expect(screen.getByText(/Thinking level: high/i)).toBeInTheDocument();
-        expect(screen.getAllByText(/Thinking: high/i).length).toBeGreaterThan(0);
+        // Single source of truth: the level shows exactly once (no transcript
+        // toast, no duplicate composer-hint copy) and is its own clickable control.
+        expect(screen.getAllByText(/Thinking: high/i)).toHaveLength(1);
+        expect(
+            screen.getByRole('button', { name: /Reasoning level: high/i }),
+        ).toBeInTheDocument();
         expect(piSessionsMock.setThinkingLevel).not.toHaveBeenCalled();
 
         fireEvent.change(input, { target: { value: 'make a drone' } });

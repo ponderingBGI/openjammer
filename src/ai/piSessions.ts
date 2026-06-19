@@ -182,6 +182,30 @@ export async function setModel(
 
 export type PiThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
+/**
+ * Pre-spawn the warm Pi child on intent (entering AI mode) so the first prompt
+ * has no cold start. Fire-and-forget and idempotent; a no-op in the browser or
+ * when nothing is configured yet. Pass the SAME runtime the next prompt will use
+ * so the warm child's fingerprint matches and is reused rather than respawned.
+ */
+export async function prewarmAgent(runtime: PiCommandRuntime = {}): Promise<void> {
+    const invoke = getInvoke();
+    if (!invoke) return;
+    try {
+        await invoke('ai_prewarm', {
+            providerKey: runtime.providerKey ?? null,
+            providerKeys: runtime.providerKeys ?? null,
+            providerBaseUrls: runtime.providerBaseUrls ?? null,
+            providerCustomModels: runtime.providerCustomModels ?? null,
+            provider: runtime.provider ?? null,
+            modelId: runtime.modelId ?? null,
+            yolo: runtime.yolo ?? false,
+        });
+    } catch {
+        // Best-effort: a failed prewarm just means the first prompt pays cold start.
+    }
+}
+
 /** Kill the warm child so the next prompt reloads Pi resources. */
 export async function restartAgent(): Promise<boolean> {
     const invoke = getInvoke();

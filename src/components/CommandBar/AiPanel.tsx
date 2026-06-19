@@ -29,12 +29,15 @@ import {
 } from '../../ai/slashCommands';
 import {
     listSlashCommands,
+    prewarmAgent,
     restartAgent,
     runCommand,
     type PiCommandRuntime,
     type PiThinkingLevel,
 } from '../../ai/piSessions';
-import { useAgentSessionStore } from '../../store/agentSessionStore';
+import { useAgentSessionStore, type ConversationEntry } from '../../store/agentSessionStore';
+import { catalogFingerprint, useModelCatalogStore } from '../../store/modelCatalogStore';
+import { useGraphStore } from '../../store/graphStore';
 import { useAuthStore } from '../../auth/authStore';
 import { useSandboxStore } from '../../store/sandboxStore';
 import { AuthChooser } from './AuthChooser';
@@ -92,6 +95,49 @@ function nextThinkingLevel(current: PiThinkingLevel): PiThinkingLevel {
     return THINKING_LEVELS[(index + 1) % THINKING_LEVELS.length];
 }
 
+interface StarterChip {
+    label: string;
+    prompt: string;
+}
+
+/**
+ * First-run starter chips, adapted to what's already on the canvas. Shown ONLY in
+ * the empty/new-chat state and gone the instant the first turn lands — they teach
+ * a newcomer what the copilot can do, then get out of the flow.
+ */
+function starterChips(nodeCount: number, hasOutput: boolean): StarterChip[] {
+    if (nodeCount === 0) {
+        return [
+            { label: 'Build a synth I can play', prompt: 'Build a simple synth I can play with a keyboard, wired to the speakers.' },
+            { label: 'Make a lo-fi loop', prompt: 'Build a simple lo-fi loop patch I can jam over.' },
+            { label: 'What can you do?', prompt: 'What can you do in OpenJammer? Show me a few patches you could build.' },
+        ];
+    }
+    if (!hasOutput) {
+        return [
+            { label: 'Connect to the speakers', prompt: 'Wire my current sound to the speakers so I can hear it.' },
+            { label: 'Add an echo', prompt: 'Add an echo effect to my current sound.' },
+            { label: "What's missing here?", prompt: "Look at my canvas and tell me what's missing to make sound." },
+        ];
+    }
+    return [
+        { label: 'Add reverb', prompt: 'Add a reverb after my current sound.' },
+        { label: 'Make it lo-fi', prompt: 'Make my current patch sound lo-fi.' },
+        { label: 'Suggest an effect', prompt: 'Suggest and add one effect that would improve this patch.' },
+    ];
+}
+
+/** The catalog-cache key for the current provider config (see modelCatalogStore). */
+function currentCatalogBuster(): string {
+    const auth = useAuthStore.getState();
+    return catalogFingerprint({
+        providerKeys: auth.providerKeys,
+        providerBaseUrls: auth.providerBaseUrls,
+        providerCustomModels: auth.providerCustomModels,
+        provider: auth.activeProvider,
+    });
+}
+
 function formatSessionState(data: unknown): string {
     const state = data && typeof data === 'object' ? data as Record<string, unknown> : {};
     const sessionId = typeof state.sessionId === 'string' ? state.sessionId : 'unknown';
@@ -126,11 +172,17 @@ export function AiPanel({
     const sessionId = useAgentSessionStore((s) => s.sessionId);
     const send = useAgentSessionStore((s) => s.send);
     const newSession = useAgentSessionStore((s) => s.newSession);
+    const rewindTo = useAgentSessionStore((s) => s.rewindTo);
 
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const transcriptRef = useRef<HTMLDivElement>(null);
     const autoSentRef = useRef(false);
     const thinkingLevelRef = useRef<PiThinkingLevel>('medium');
+    // The single reasoning control (footer pill). We pulse it in place on change
+    // instead of pushing a transcript toast — report without stealing focus.
+    const reasoningPillRef = useRef<HTMLButtonElement>(null);
+    // Fire the Pi prewarm at most once per panel mount.
+    const prewarmedRef = useRef(false);
 
     const backend = useMemo(() => getAgentBackend(), []);
     // Gate on the platform capability seam (M0): 'none' (browser) shows the
@@ -153,11 +205,15 @@ export function AiPanel({
 
     // The composer draft + the resume sub-view.
     const [draft, setDraft] = useState(autoSendInitial ? '' : initialPrompt);
-    const [view, setView] = useState<'chat' | 'resume' | 'models'>('chat');
+    const [view, setView] = useState<'chat' | 'resume' | 'models' | 'rewind'>('chat');
     const [modelQuery, setModelQuery] = useState('');
     const [thinkingLevel, setThinkingLevel] = useState<PiThinkingLevel>('medium');
     const [commandNotice, setCommandNotice] = useState<string | null>(null);
-    const [dynamicCommands, setDynamicCommands] = useState<AiSlashCommand[]>([]);
+    // Seed the dynamic Pi commands from the persisted catalog so the slash menu is
+    // complete on the FIRST '/'; the effect below revalidates once Pi is warm.
+    const [dynamicCommands, setDynamicCommands] = useState<AiSlashCommand[]>(() =>
+        useModelCatalogStore.getState().commandsFor(currentCatalogBuster()).map(fromPiSlashCommand),
+    );
     const [commandsLoadedFor, setCommandsLoadedFor] = useState<string | null>(null);
     const [slashDismissed, setSlashDismissed] = useState(false);
     const [slashIndex, setSlashIndex] = useState(0);
@@ -176,6 +232,22 @@ export function AiPanel({
         return filterSlashCommands(Array.from(byName.values()), slashQuery);
     }, [dynamicCommands, slashQuery]);
     const selectedSlashCommand = slashCommands[Math.min(slashIndex, Math.max(0, slashCommands.length - 1))];
+
+    // Canvas shape for the first-run chips — a stable string so it never churns
+    // renders. Only read while the welcome state is visible (no messages yet).
+    const canvasShape = useGraphStore((s) => {
+        let count = 0;
+        let hasOutput = false;
+        for (const node of s.nodes.values()) {
+            count += 1;
+            if (node.type === 'speaker') hasOutput = true;
+        }
+        return `${count}:${hasOutput ? 1 : 0}`;
+    });
+    const starters = useMemo(() => {
+        const [count, out] = canvasShape.split(':');
+        return starterChips(Number(count), out === '1');
+    }, [canvasShape]);
 
     // Re-derive auth status from native on mount (the key lives in the keychain).
     useEffect(() => {
@@ -220,6 +292,17 @@ export function AiPanel({
         };
     }, []);
 
+    // Pre-spawn the warm Pi child on intent (entering AI mode) so the first prompt
+    // streams with no cold start. Gated on configured + capable, so the search-only
+    // / pure-instrument majority never forks Pi; idempotent native-side, and we
+    // guard to fire once per mount.
+    useEffect(() => {
+        if (prewarmedRef.current) return;
+        if (!available || showAuth || !configured || view !== 'chat') return;
+        prewarmedRef.current = true;
+        void prewarmAgent(getPiRuntime());
+    }, [available, showAuth, configured, view, getPiRuntime]);
+
     useEffect(() => {
         if (!slashActive || commandsLoaded) return;
         let live = true;
@@ -227,6 +310,8 @@ export function AiPanel({
             if (!live) return;
             setDynamicCommands(commands.map(fromPiSlashCommand));
             setCommandsLoadedFor(commandContext);
+            // Write-through so the next session's first '/' is instant.
+            useModelCatalogStore.getState().setCommands(currentCatalogBuster(), commands);
         });
         return () => {
             live = false;
@@ -244,6 +329,15 @@ export function AiPanel({
         },
         [available, configured, running, backend, send, getPiRuntime],
     );
+
+    // Command notices are transient acknowledgements (named a session, copied an
+    // answer, …). Auto-dismiss so they never stick above the transcript across
+    // turns — the focus-stealing staleness the reasoning toast used to cause.
+    useEffect(() => {
+        if (!commandNotice) return;
+        const t = window.setTimeout(() => setCommandNotice(null), 8000);
+        return () => window.clearTimeout(t);
+    }, [commandNotice]);
 
     const executeSlashCommand = useCallback(
         async (command: AiSlashCommand, args: string) => {
@@ -352,6 +446,8 @@ export function AiPanel({
                     if (ok) {
                         setDynamicCommands([]);
                         setCommandsLoadedFor(null);
+                        // A reloaded Pi re-discovers its commands; drop the cache too.
+                        useModelCatalogStore.getState().clearCommands();
                     }
                     setCommandNotice(ok ? 'Pi will reload on the next prompt.' : 'Could not restart Pi from here.');
                     return;
@@ -385,8 +481,18 @@ export function AiPanel({
         // This is the musician-facing path: update the visible state synchronously.
         // The next agent turn carries this level in its run payload and applies it
         // before the prompt, so Shift+Tab never waits for a Pi subprocess round-trip.
+        // Both writes happen here so the displayed level and the sent level (read
+        // from the ref in getPiRuntime) can never diverge.
         setThinkingLevel(nextLevel);
-        setCommandNotice(`Thinking level: ${nextLevel}`);
+        // Pulse the one reasoning pill in place — restart the CSS animation by
+        // clearing then re-setting the attribute after a forced reflow. No toast,
+        // no autoscroll, calm during a live set (honors prefers-reduced-motion).
+        const pill = reasoningPillRef.current;
+        if (pill) {
+            pill.removeAttribute('data-pulse');
+            void pill.offsetWidth;
+            pill.setAttribute('data-pulse', 'true');
+        }
     }, []);
 
     const onChatKeyDownCapture = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -409,6 +515,8 @@ export function AiPanel({
             void executeSlashCommand(command, slashArgs);
             return;
         }
+        // A new turn supersedes any lingering slash-command acknowledgement.
+        setCommandNotice(null);
         if (runTask(text)) setDraft('');
     }, [draft, executeSlashCommand, runTask, selectedSlashCommand, slashArgs, slashQuery]);
 
@@ -495,6 +603,26 @@ export function AiPanel({
         );
     }
 
+    if (view === 'rewind') {
+        return (
+            <div className="command-bar-ai">
+                <RewindPicker
+                    messages={messages}
+                    onCancel={() => setView('chat')}
+                    onPick={(index) => {
+                        void rewindTo(index).then((text) => {
+                            setDraft(text);
+                            setView('chat');
+                            setCommandNotice(
+                                'Rewound here — edit and send. Your canvas is unchanged; Ctrl+Z reverts what the agent built.',
+                            );
+                        });
+                    }}
+                />
+            </div>
+        );
+    }
+
     return (
         <div className="command-bar-ai" onKeyDownCapture={onChatKeyDownCapture}>
             <div className="command-bar-ai-header">
@@ -510,6 +638,16 @@ export function AiPanel({
                     <span className="command-bar-ai-session" title={sessionId ?? 'New chat'}>
                         {sessionId ? shortId(sessionId) : 'New chat'}
                     </span>
+                    {messages.some((m) => m.role === 'user') && (
+                        <button
+                            type="button"
+                            className="command-bar-ai-rewind"
+                            onClick={() => setView('rewind')}
+                            title={`Rewind & edit an earlier prompt (${MOD}+↑)`}
+                        >
+                            ↺ Rewind
+                        </button>
+                    )}
                     <button
                         type="button"
                         className="command-bar-ai-new"
@@ -538,8 +676,25 @@ export function AiPanel({
                         <p className="command-bar-ai-welcome-body">
                             Questions get answered; build requests land on the canvas live —
                             undo anything with <kbd className="command-bar-kbd">{MOD}+Z</kbd>.
-                            Type <code>/new</code> to start over, <code>/resume</code> to revisit a session.
+                            Type <code>/new</code> to start over, <code>/resume</code> to revisit a session,
+                            or press <kbd className="command-bar-kbd">{MOD}+↑</kbd> to edit an earlier prompt.
                         </p>
+                        <div className="command-bar-ai-welcome-chips">
+                            {starters.map((chip) => (
+                                <button
+                                    key={chip.label}
+                                    type="button"
+                                    className="command-bar-ai-welcome-chip"
+                                    disabled={running}
+                                    onClick={() => {
+                                        setCommandNotice(null);
+                                        if (runTask(chip.prompt)) setDraft('');
+                                    }}
+                                >
+                                    {chip.label}
+                                </button>
+                            ))}
+                        </div>
                     </div>
                 )}
                 {messages.map((entry) => (
@@ -557,6 +712,12 @@ export function AiPanel({
                     rows={1}
                     onChange={(e) => updateDraft(e.target.value)}
                     onKeyDown={(e) => {
+                        if ((e.metaKey || e.ctrlKey) && e.key === 'ArrowUp' && !slashActive) {
+                            // Rewind & edit an earlier prompt (no-op with no history).
+                            e.preventDefault();
+                            if (messages.some((m) => m.role === 'user')) setView('rewind');
+                            return;
+                        }
                         if (slashActive && e.key === 'ArrowDown') {
                             e.preventDefault();
                             setSlashIndex((i) => Math.min(i + 1, Math.max(0, slashCommands.length - 1)));
@@ -594,7 +755,9 @@ export function AiPanel({
                     <div className="command-bar-ai-slash" id="command-bar-ai-slash-menu" role="listbox">
                         <div className="command-bar-ai-slash-head">
                             <span>Slash commands</span>
-                            {!commandsLoaded && <span>Pi commands load after the agent starts</span>}
+                            {!commandsLoaded && dynamicCommands.length === 0 && (
+                                <span>Pi commands load after the agent starts</span>
+                            )}
                         </div>
                         {slashCommands.length === 0 ? (
                             <div className="command-bar-ai-slash-empty">No command matches /{slashQuery}</div>
@@ -626,9 +789,7 @@ export function AiPanel({
                         {running ? 'Working…' : (
                             <>
                                 <kbd className="command-bar-kbd">↵</kbd> send ·{' '}
-                                <kbd className="command-bar-kbd">⇧↵</kbd> newline ·{' '}
-                                <kbd className="command-bar-kbd">⇧⇥</kbd> reasoning ·{' '}
-                                <span className="command-bar-ai-thinking">Thinking: {thinkingLevel}</span>
+                                <kbd className="command-bar-kbd">⇧↵</kbd> newline
                             </>
                         )}
                     </span>
@@ -654,9 +815,17 @@ export function AiPanel({
                         <code>{projectLabel ? `${projectLabel}/` : 'project/'}</code>
                     </span>
                 )}
-                <span className="command-bar-ai-thinking" aria-live="polite">
+                <button
+                    type="button"
+                    ref={reasoningPillRef}
+                    className="command-bar-ai-thinking"
+                    onClick={cycleReasoning}
+                    title={`Reasoning · ⇧⇥ — tap to cycle`}
+                    aria-live="polite"
+                    aria-label={`Reasoning level: ${thinkingLevel}. Activate to cycle.`}
+                >
                     Thinking: {thinkingLevel}
-                </span>
+                </button>
                 {canYolo && (
                     <button
                         type="button"
@@ -680,6 +849,98 @@ export function AiPanel({
                 />
             )}
         </div>
+    );
+}
+
+/**
+ * Rewind & edit: pick an earlier prompt to continue from. Lists the prior USER
+ * turns (newest first); choosing one truncates the conversation to before it and
+ * lifts its text into the composer to edit. Conversation-only — the canvas never
+ * moves; Ctrl+Z stays the way to revert what the agent built.
+ */
+function RewindPicker({
+    messages,
+    onPick,
+    onCancel,
+}: {
+    messages: ConversationEntry[];
+    onPick: (index: number) => void;
+    onCancel: () => void;
+}) {
+    const turns = useMemo(() => {
+        const out: { index: number; text: string }[] = [];
+        messages.forEach((m, i) => {
+            if (m.role === 'user') out.push({ index: i, text: m.text });
+        });
+        return out.reverse();
+    }, [messages]);
+    const [sel, setSel] = useState(0);
+    const listRef = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+        listRef.current?.focus();
+    }, []);
+
+    return (
+        <>
+            <div className="command-bar-ai-header">
+                <button
+                    type="button"
+                    className="command-bar-ai-back"
+                    onClick={onCancel}
+                    aria-label="Back to chat"
+                >
+                    ← Chat
+                </button>
+                <span className="command-bar-ai-badge">Rewind &amp; edit</span>
+            </div>
+            <div className="command-bar-models-help">
+                <span>Pick a prompt to edit and continue from. Your canvas stays put — {MOD}+Z reverts what the agent built.</span>
+                <span>↑↓ choose · Enter edit · Esc back</span>
+            </div>
+            {turns.length === 0 ? (
+                <div className="command-bar-ai-welcome">
+                    <p className="command-bar-ai-welcome-body">No earlier prompts to rewind to yet.</p>
+                </div>
+            ) : (
+                <div
+                    className="command-bar-rewind-list"
+                    role="listbox"
+                    tabIndex={0}
+                    ref={listRef}
+                    aria-label="Earlier prompts"
+                    onKeyDown={(e) => {
+                        if (e.key === 'ArrowDown') {
+                            e.preventDefault();
+                            setSel((i) => Math.min(i + 1, turns.length - 1));
+                        } else if (e.key === 'ArrowUp') {
+                            e.preventDefault();
+                            setSel((i) => Math.max(0, i - 1));
+                        } else if (e.key === 'Enter') {
+                            e.preventDefault();
+                            onPick(turns[sel].index);
+                        } else if (e.key === 'Escape') {
+                            e.preventDefault();
+                            onCancel();
+                        }
+                    }}
+                >
+                    {turns.map((turn, i) => (
+                        <button
+                            key={turn.index}
+                            type="button"
+                            className="command-bar-rewind-row"
+                            data-selected={i === sel}
+                            role="option"
+                            aria-selected={i === sel}
+                            onMouseEnter={() => setSel(i)}
+                            onClick={() => onPick(turn.index)}
+                        >
+                            {turn.text}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </>
     );
 }
 

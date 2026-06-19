@@ -7,6 +7,7 @@ import {
     type PiCommandRuntime,
     type PiModel,
 } from '../../ai/piSessions';
+import { catalogFingerprint, useModelCatalogStore } from '../../store/modelCatalogStore';
 
 interface ModelPickerProps {
     runtime: () => PiCommandRuntime;
@@ -19,6 +20,11 @@ type DisplayModel = PiModel & { manual?: boolean; instant?: boolean };
 
 function modelKey(model: PiModel): string {
     return `${model.provider}/${model.id}`;
+}
+
+/** The stable identity of a rendered row (manual rows share a model key). */
+function rowKey(model: DisplayModel): string {
+    return `${model.manual ? 'manual:' : ''}${model.provider}/${model.id}`;
 }
 
 function modelLabel(model: PiModel): string {
@@ -77,15 +83,38 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
         [activeProvider, configured, configuredProviderIds, providerKeys],
     );
 
+    // Opaque cache key for the model catalog (see modelCatalogStore). Changes when
+    // the configured providers / base URLs / custom models change.
+    const buster = useMemo(
+        () => catalogFingerprint({ providerKeys, providerBaseUrls, providerCustomModels, provider: activeProvider }),
+        [activeProvider, providerBaseUrls, providerCustomModels, providerKeys],
+    );
+
     const [query, setQuery] = useState(initialQuery);
-    const [remoteModels, setRemoteModels] = useState<DisplayModel[]>([]);
+    // Seed synchronously from the persisted catalog so a repeat open paints with
+    // zero latency; the effect below revalidates underneath (stale-while-revalidate).
+    const [remoteModels, setRemoteModels] = useState<DisplayModel[]>(() =>
+        useModelCatalogStore.getState().modelsFor(buster).filter((m) => configuredProviders.has(m.provider)),
+    );
     const [currentKey, setCurrentKey] = useState<string | null>(
         activeProvider && activeModelId ? `${activeProvider}/${activeModelId}` : null,
     );
-    const [selectedIndex, setSelectedIndex] = useState(0);
-    const [loading, setLoading] = useState(true);
+    // The highlight tracks the model's IDENTITY (rowKey), never a raw index — a
+    // background revalidate must not slide a different model under the user's Enter.
+    const [selectedKey, setSelectedKey] = useState<string | null>(null);
+    // Only show a spinner when we have nothing cached to render.
+    const [loading, setLoading] = useState(() => useModelCatalogStore.getState().modelsFor(buster).length === 0);
     const [selectingKey, setSelectingKey] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+
+    // Component liveness, so an in-flight setModel never setState after unmount.
+    const liveRef = useRef(true);
+    useEffect(() => {
+        liveRef.current = true;
+        return () => {
+            liveRef.current = false;
+        };
+    }, []);
 
     useEffect(() => {
         inputRef.current?.focus();
@@ -98,6 +127,8 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
                 if (!live) return;
                 setRemoteModels(available.filter((model) => configuredProviders.has(model.provider)));
                 setLoading(false);
+                // Write-through the fresh list; the store slims it to identity fields.
+                useModelCatalogStore.getState().setModels(buster, available);
             })
             .catch((err: unknown) => {
                 if (!live) return;
@@ -107,7 +138,7 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
         return () => {
             live = false;
         };
-    }, [configuredProviders, runtime]);
+    }, [buster, configuredProviders, runtime]);
 
     const instantModels = useMemo<DisplayModel[]>(() => {
         const out: DisplayModel[] = [];
@@ -148,7 +179,20 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
         const hasExact = actual.some((model) => model.id === manualId && model.provider === manualProvider);
         return mergeModels(hasExact ? [] : manualRow, actual);
     }, [manualId, manualProvider, manualRow, query, sorted]);
-    const selected = filtered[Math.min(selectedIndex, Math.max(0, filtered.length - 1))];
+    // Resolve the highlight to a live index by identity; default to the top row.
+    const selectedIdx = useMemo(() => {
+        if (filtered.length === 0) return -1;
+        const i = selectedKey ? filtered.findIndex((m) => rowKey(m) === selectedKey) : -1;
+        return i >= 0 ? i : 0;
+    }, [filtered, selectedKey]);
+    const selected = selectedIdx >= 0 ? filtered[selectedIdx] : undefined;
+
+    const moveSelection = (delta: number) => {
+        if (filtered.length === 0) return;
+        const base = selectedIdx >= 0 ? selectedIdx : 0;
+        const next = Math.min(filtered.length - 1, Math.max(0, base + delta));
+        setSelectedKey(rowKey(filtered[next]));
+    };
 
     const choose = async (model: DisplayModel | undefined) => {
         if (!model || selectingKey) return;
@@ -165,6 +209,7 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
             },
         };
         const res = await setModel(model.provider, model.id, nextRuntime);
+        if (!liveRef.current) return;
         setSelectingKey(null);
         if (!res.ok) {
             setError(`Pi could not switch to ${model.provider}/${model.id}.`);
@@ -206,15 +251,15 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
                 value={query}
                 onChange={(e) => {
                     setQuery(e.target.value);
-                    setSelectedIndex(0);
+                    setSelectedKey(null);
                 }}
                 onKeyDown={(e) => {
                     if (e.key === 'ArrowDown') {
                         e.preventDefault();
-                        setSelectedIndex((i) => Math.min(i + 1, Math.max(0, filtered.length - 1)));
+                        moveSelection(1);
                     } else if (e.key === 'ArrowUp') {
                         e.preventDefault();
-                        setSelectedIndex((i) => Math.max(0, i - 1));
+                        moveSelection(-1);
                     } else if (e.key === 'Enter') {
                         e.preventDefault();
                         void choose(selected);
@@ -239,7 +284,7 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
                 )}
                 {!error && filtered.map((model, index) => {
                     const isCurrent = modelKey(model) === currentKey;
-                    const isSelected = index === selectedIndex;
+                    const isSelected = index === selectedIdx;
                     const isSelecting = selectingKey === modelKey(model);
                     return (
                         <button
@@ -251,7 +296,7 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
                             role="option"
                             aria-selected={isSelected}
                             disabled={!!selectingKey}
-                            onMouseEnter={() => setSelectedIndex(index)}
+                            onMouseEnter={() => setSelectedKey(rowKey(model))}
                             onClick={() => void choose(model)}
                         >
                             <span className="command-bar-model-main">
