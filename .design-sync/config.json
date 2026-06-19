@@ -3,7 +3,17 @@
   "shape": "package",
   "pkg": "@openjammer/oj-ui",
   "globalName": "OjUi",
-  "tokensGlob": ["../../.design-sync/oj-tokens.css"],
-  "extraFonts": ["../../src/styles/fonts.css"],
+  "cssEntry": "oj-tokens.css",
+  "extraFonts": [
+    "../../.design-sync/fonts.css",
+    "../../public/fonts/caveat-regular.woff2",
+    "../../public/fonts/caveat-bold.woff2",
+    "../../public/fonts/inter-regular.woff2",
+    "../../public/fonts/inter-medium.woff2",
+    "../../public/fonts/inter-semibold.woff2",
+    "../../public/fonts/inter-bold.woff2",
+    "../../public/fonts/jetbrains-mono-regular.woff2",
+    "../../public/fonts/jetbrains-mono-medium.woff2"
+  ],
   "readmeHeader": ".design-sync/conventions.md"
 }
