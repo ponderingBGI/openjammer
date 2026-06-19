@@ -1,0 +1,63 @@
+/*
+ * EditableLabel — inline rename. The resting label is the Caveat voice
+ * (Caveat-Is-the-Voice); the edit field reuses the Input primitive. No layout
+ * shift on hover/focus (No-Surprise): feedback is background and border only.
+ * Styled solely via semantic tokens.
+ */
+.oj-editable-label {
+    display: inline-flex;
+    min-width: 0;
+}
+
+.oj-editable-label--center {
+    justify-content: center;
+    text-align: center;
+}
+
+/* Resting label — the hand-drawn name, click target for rename. */
+.oj-editable-label__text {
+    display: inline-block;
+    max-width: 100%;
+    padding: var(--space-xs) var(--space-sm);
+    border: var(--border-sketch-width) solid transparent;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-sketch);
+    font-size: var(--text-md);
+    color: var(--text-primary);
+    cursor: text;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.oj-editable-label__text:hover {
+    background: var(--bg-tertiary);
+}
+
+/* Keyboard focus on the rename target — accent border, no glow (Hard-Shadow). */
+.oj-editable-label__text:focus-visible {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.oj-editable-label--center .oj-editable-label__text {
+    text-align: center;
+}
+
+/* Empty value — the placeholder hint reads as muted, never as a real name. */
+.oj-editable-label__text.is-placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Edit field — the Input primitive sized to the label, sketch voice (not mono:
+   a name is read as words, not digit-by-digit, so it stays Caveat). */
+.oj-editable-label__input {
+    font-family: var(--font-sketch);
+    font-size: var(--text-md);
+}
+
+.oj-editable-label--center .oj-editable-label__input {
+    text-align: center;
+}

@@ -1,0 +1,51 @@
+/*
+ * Waveform — a pure-SVG trace of audio samples/peaks. The stroke carries the
+ * audio-out wiring color (Port-Color-Is-Meaning); while recording it shifts to
+ * the danger token with NO blur (Hard-Shadow Rule). The playhead is a thin
+ * accent line, the center axis a faint subtle hairline. Styled only via
+ * semantic tokens — no literal colors, no gradient, no glow — so it follows the
+ * active theme.
+ */
+.oj-waveform {
+    display: block;
+    width: 100%;
+}
+
+.oj-waveform__svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+
+/* The waveform itself: audio-out blue, the signal that carries sound. */
+.oj-waveform__trace {
+    fill: none;
+    stroke: var(--audio-output);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    /* preserveAspectRatio=none scales x/y unequally; keep strokes a true,
+       undistorted width regardless of the box's aspect ratio. */
+    vector-effect: non-scaling-stroke;
+    transition: stroke var(--transition-fast);
+}
+
+/* Recording tints the trace danger — a hard color shift, never a glow. */
+.oj-waveform.is-recording .oj-waveform__trace {
+    stroke: var(--accent-danger);
+}
+
+/* Playhead: a thin accent line marking the playback position. */
+.oj-waveform__playhead {
+    stroke: var(--accent-primary);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+}
+
+/* Center axis: faint hairline, the zero-crossing reference. */
+.oj-waveform__center {
+    stroke: var(--border-subtle);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+}

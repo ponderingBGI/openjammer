@@ -1,0 +1,71 @@
+/*
+ * DeviceSelect — DESIGN.md §5. An audio-device picker: a node-fill Button
+ * trigger over a Surface-backed popover list. Styled only via semantic tokens
+ * (no literal colors), so it follows the active theme. The list rides the
+ * popover layer and lifts on the hard, blur-free menu shadow (Hard-Shadow).
+ * A low-latency device carries a lightning bolt beside its name, never on the
+ * surface itself (Signal-Not-Brand).
+ */
+.oj-device-select {
+    position: relative;
+    display: inline-flex;
+}
+
+/* Trigger — a full-width node Button laying out label · bolt · caret. */
+.oj-device-select__trigger {
+    width: 100%;
+    gap: var(--space-xs);
+    justify-content: space-between;
+}
+
+/* The device name — clipped, never wrapping, so the trigger keeps its size
+   (No-Surprise: no reflow as labels change). */
+.oj-device-select__label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+}
+
+/* Caret sits to the trailing edge and never shrinks. */
+.oj-device-select__caret {
+    flex: none;
+    color: var(--text-muted);
+}
+
+/* The fast-path bolt on the trigger reads in the accent — its name beside it
+   carries the meaning (Signal-Not-Brand). */
+.oj-device-select__trigger-bolt {
+    flex: none;
+    color: var(--accent-primary);
+}
+
+/* Popover list — anchored under the trigger, lifted on the menu Surface. */
+.oj-device-select__list {
+    position: absolute;
+    top: calc(100% + var(--space-xs));
+    left: 0;
+    right: 0;
+    display: flex;
+    flex-direction: column;
+    min-width: 100%;
+    padding: var(--space-xs);
+    gap: 1px;
+}
+
+/* Each device is a ghost Button row: full width, label · trailing bolt. The
+   ghost variant already gives a bg-only hover with no lift (No-Surprise). */
+.oj-device-select__option {
+    width: 100%;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    border-radius: var(--radius-sm);
+}
+
+/* The list bolt rides its row's text color so it flips with the selected
+   (is-active) fill — the device name beside it is the signal. */
+.oj-device-select__option-bolt {
+    flex: none;
+}

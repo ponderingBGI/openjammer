@@ -1,0 +1,8 @@
+/*
+ * IconButton — a square single-glyph button. Button + iconOnly already supply
+ * the box, border, fill, and press physics; this class only guarantees the
+ * glyph sits dead-centre regardless of how the icon node lays itself out.
+ */
+.oj-icon-btn {
+    line-height: 0;
+}

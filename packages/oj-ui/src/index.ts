@@ -98,3 +98,53 @@ export {
     IconLinux,
 } from './components/Icons/Icons';
 export type { IconProps } from './components/Icons/Icons';
+
+// ── Composites ───────────────────────────────────────────────────────────────
+export { IconButton } from './components/IconButton/IconButton';
+export type { IconButtonProps, IconButtonVariant } from './components/IconButton/IconButton';
+
+export { Modal } from './components/Modal/Modal';
+export type { ModalProps, ModalAlign, ModalSize } from './components/Modal/Modal';
+
+export { PanelHeader } from './components/PanelHeader/PanelHeader';
+export type { PanelHeaderProps } from './components/PanelHeader/PanelHeader';
+
+export { Menu, MenuItem, MenuCategory, MenuSeparator } from './components/Menu/Menu';
+export type {
+    MenuProps,
+    MenuItemProps,
+    MenuCategoryProps,
+    MenuSeparatorProps,
+} from './components/Menu/Menu';
+
+export { PortRow } from './components/PortRow/PortRow';
+export type { PortRowProps } from './components/PortRow/PortRow';
+
+export { NodeFrame } from './components/NodeFrame/NodeFrame';
+export type { NodeFrameProps, NodeFramePosition } from './components/NodeFrame/NodeFrame';
+
+export { EditableLabel } from './components/EditableLabel/EditableLabel';
+export type { EditableLabelProps } from './components/EditableLabel/EditableLabel';
+
+export { ValueScrubber } from './components/ValueScrubber/ValueScrubber';
+export type { ValueScrubberProps } from './components/ValueScrubber/ValueScrubber';
+
+export { Cable } from './components/Cable/Cable';
+export type { CableProps, CableKind } from './components/Cable/Cable';
+export { cablePath } from './components/Cable/cablePath';
+export type { CablePoint } from './components/Cable/cablePath';
+
+export { Waveform } from './components/Waveform/Waveform';
+export type { WaveformProps } from './components/Waveform/Waveform';
+
+export { WaveformView } from './components/WaveformView/WaveformView';
+export type { WaveformViewProps } from './components/WaveformView/WaveformView';
+
+export { DeviceSelect } from './components/DeviceSelect/DeviceSelect';
+export type { DeviceSelectProps, DeviceSelectItem } from './components/DeviceSelect/DeviceSelect';
+
+export { KeyTile } from './components/KeyTile/KeyTile';
+export type { KeyTileProps, KeyTileVariant } from './components/KeyTile/KeyTile';
+
+export { Banner } from './components/Banner/Banner';
+export type { BannerProps, BannerTone } from './components/Banner/Banner';

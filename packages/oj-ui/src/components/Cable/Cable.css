@@ -1,0 +1,80 @@
+/*
+ * Cable — the wire between two ports (DESIGN.md §2 Wiring, Port-Color-Is-Meaning).
+ * Stroke color is the signal type, never decoration: audio blue, control grey,
+ * universal violet. signalLevel (--oj-cable-signal, 0..1) lifts stroke-width and
+ * opacity so a hot cable reads as alive — width and opacity only, no blur
+ * (Hard-Shadow Rule: SVG glow would be a soft filter, which this system forbids).
+ */
+.oj-cable {
+    --oj-cable-signal: 0;
+    fill: none;
+    stroke: var(--control-connection);
+    stroke-width: calc(3px + var(--oj-cable-signal) * 3px);
+    stroke-linecap: round;
+    opacity: calc(0.7 + var(--oj-cable-signal) * 0.3);
+    /* The stroke is the click target; the rest of the SVG stays transparent. */
+    pointer-events: stroke;
+    cursor: pointer;
+    /* Transition ONLY the discrete color change (hover/select). stroke-width and
+       opacity are driven by --oj-cable-signal, which updates every rAF frame on
+       the live canvas — transitioning them would fire a tween per frame. They
+       update instantly (cheap) so the audio-critical signal path stays free. */
+    transition: stroke var(--transition-fast);
+}
+
+/* Wiring colors — the legend. The type is the source of truth. */
+.oj-cable--audio {
+    stroke: var(--audio-connection);
+}
+
+.oj-cable--control {
+    stroke: var(--control-connection);
+}
+
+.oj-cable--universal {
+    stroke: var(--universal-connection);
+}
+
+/* Selected — brighten to the kind's connected color and thicken (No-Surprise:
+   the change is color + width, no reflow). Universal has no separate connected
+   token, so it keeps its connection color and reads through the heavier weight. */
+.oj-cable.is-selected {
+    stroke-width: calc(5px + var(--oj-cable-signal) * 2px);
+}
+
+.oj-cable--audio.is-selected {
+    stroke: var(--audio-connected);
+}
+
+.oj-cable--control.is-selected {
+    stroke: var(--control-connected);
+}
+
+.oj-cable--universal.is-selected {
+    stroke: var(--universal-connection);
+}
+
+/* Hover — a touch heavier so the cable answers the pointer before a click. */
+.oj-cable:hover {
+    stroke-width: calc(5px + var(--oj-cable-signal) * 2px);
+}
+
+/* Bundled — one cable standing in for several; drawn heavier so the eye reads
+   it as a thicker rope of signal. */
+.oj-cable.is-bundled {
+    stroke-width: calc(5px + var(--oj-cable-signal) * 5px);
+}
+
+.oj-cable.is-bundled:hover,
+.oj-cable.is-bundled.is-selected {
+    stroke-width: calc(7px + var(--oj-cable-signal) * 4px);
+}
+
+/* Temp — an in-progress drag from a port to the cursor. Dashed and lighter so
+   it reads as pending, not yet committed (Honest-Interfaces). */
+.oj-cable.is-temp {
+    stroke-dasharray: 6 4;
+    opacity: 0.6;
+    pointer-events: none;
+    cursor: default;
+}
