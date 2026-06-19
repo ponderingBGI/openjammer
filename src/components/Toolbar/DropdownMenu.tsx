@@ -12,6 +12,7 @@
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { Button } from '@openjammer/oj-ui';
 import './DropdownMenu.css';
 
 /**
@@ -185,8 +186,9 @@ export function DropdownMenu({ label, items, disabled = false }: DropdownMenuPro
 
     return (
         <div className="dropdown-menu" ref={menuRef}>
-            <button
+            <Button
                 ref={triggerRef}
+                variant="ghost"
                 className={`dropdown-trigger ${isOpen ? 'dropdown-trigger-open' : ''}`}
                 onClick={toggle}
                 disabled={disabled}
@@ -195,7 +197,7 @@ export function DropdownMenu({ label, items, disabled = false }: DropdownMenuPro
             >
                 {label}
                 <span className="dropdown-chevron">▾</span>
-            </button>
+            </Button>
 
             {isOpen && (
                 <div

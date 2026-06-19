@@ -75,17 +75,9 @@ export function HelpPanel() {
         <div className={`help-panel ${isModeUnassigned ? 'help-panel-warning' : ''}`}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3>🎹 OpenJammer</h3>
-                <button
-                    onClick={handleClose}
-                    style={{
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-muted)',
-                        cursor: 'pointer'
-                    }}
-                >
+                <Button variant="ghost" iconOnly onClick={handleClose} style={{ color: 'var(--text-muted)' }}>
                     ✕
-                </button>
+                </Button>
             </div>
 
             {/* Mode Indicator */}
