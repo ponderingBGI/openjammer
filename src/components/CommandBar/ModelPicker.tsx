@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Button } from '@openjammer/oj-ui';
 import { providerTitle } from '../../auth/providers';
 import { useAuthStore } from '../../auth/authStore';
 import {
@@ -226,14 +227,14 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
     return (
         <div className="command-bar-models">
             <div className="command-bar-ai-header">
-                <button
-                    type="button"
+                <Button
+                    variant="ghost"
                     className="command-bar-ai-back"
                     onClick={onCancel}
                     aria-label="Back to chat"
                 >
                     ← Chat
-                </button>
+                </Button>
                 <span className="command-bar-ai-badge">Choose model</span>
             </div>
 

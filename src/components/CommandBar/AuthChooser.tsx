@@ -25,6 +25,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { Command } from 'cmdk';
+import { Button, Input } from '@openjammer/oj-ui';
 import { useAuthStore } from '../../auth/authStore';
 import { AI_PROVIDERS, providerTitle, type ProviderOption } from '../../auth/providers';
 import { openExternal } from '../../ai/tauri';
@@ -66,14 +67,13 @@ export function AuthChooser({ onConfigured, onBack }: AuthChooserProps) {
     return (
         <div className="command-bar-auth" data-testid="auth-chooser">
             <div className="command-bar-ai-header">
-                <button
-                    type="button"
-                    className="command-bar-ai-back"
+                <Button
+                    variant="ghost"
                     onClick={onBack}
                     aria-label="Back to search"
                 >
                     ← Search
-                </button>
+                </Button>
                 <span className="command-bar-ai-badge">Configure AI provider</span>
             </div>
             {configured && activeProvider ? (
@@ -199,14 +199,13 @@ function ProviderDetail({
     return (
         <div className="command-bar-auth" data-testid="auth-detail">
             <div className="command-bar-ai-header">
-                <button
-                    type="button"
-                    className="command-bar-ai-back"
+                <Button
+                    variant="ghost"
                     onClick={onCancel}
                     aria-label="Back to providers"
                 >
                     ← Providers
-                </button>
+                </Button>
                 <span className="command-bar-ai-badge">{provider.title}</span>
             </div>
 
@@ -218,13 +217,13 @@ function ProviderDetail({
 
             {isZen && (
                 <>
-                    <button
-                        type="button"
+                    <Button
+                        variant="link"
                         className="command-bar-auth-link"
                         onClick={() => void openExternal(OPENCODE_AUTH_URL)}
                     >
                         Get your free key →
-                    </button>
+                    </Button>
                     {/* NON-DISMISSIBLE data-training notice (free period). */}
                     <p className="command-bar-auth-notice" role="note">
                         During its free period, collected data may be used to improve the
@@ -252,28 +251,27 @@ function ProviderDetail({
             )}
 
             {isOAuth ? (
-                <button
-                    type="button"
-                    className="command-bar-ai-approve"
+                <Button
+                    variant="primary"
                     onClick={() => void startOAuth()}
                     disabled={busy}
                 >
                     Sign in with Codex
-                </button>
+                </Button>
             ) : (
                 <>
                     {isOpenAiCompatible && (
-                        <input
-                            className="command-bar-input command-bar-auth-input"
+                        <Input
+                            className="command-bar-auth-input"
                             placeholder="Base URL (e.g. https://api.example.com/v1)"
                             value={baseUrl}
                             onChange={(e) => setBaseUrl(e.target.value)}
                             disabled={busy}
                         />
                     )}
-                    <input
+                    <Input
                         autoFocus
-                        className="command-bar-input command-bar-auth-input"
+                        className="command-bar-auth-input"
                         type="password"
                         placeholder="Paste your API key, then press Enter…"
                         value={key}
@@ -289,14 +287,13 @@ function ProviderDetail({
                             }
                         }}
                     />
-                    <button
-                        type="button"
-                        className="command-bar-ai-approve"
+                    <Button
+                        variant="primary"
                         onClick={() => void submitKey()}
                         disabled={busy || !key.trim()}
                     >
                         Save key
-                    </button>
+                    </Button>
                 </>
             )}
 

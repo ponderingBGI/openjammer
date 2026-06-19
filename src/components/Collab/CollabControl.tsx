@@ -16,6 +16,7 @@
  */
 
 import { useState } from 'react';
+import { Button, Input, Select } from '@openjammer/oj-ui';
 import { useCollabStore, type TransportKind } from '../../store/collabStore';
 import { WebRTCSignaling } from './WebRTCSignaling';
 import './CollabControl.css';
@@ -91,7 +92,7 @@ export function CollabControl() {
 
                             <label className="collab-field">
                                 <span>Your name</span>
-                                <input
+                                <Input
                                     type="text"
                                     value={name}
                                     placeholder="Anonymous"
@@ -101,23 +102,23 @@ export function CollabControl() {
 
                             <label className="collab-field">
                                 <span>Link</span>
-                                <select
+                                <Select
                                     value={transport}
                                     onChange={(e) => setTransport(e.target.value as TransportKind)}
                                 >
                                     <option value="broadcast-channel">Same browser (tabs)</option>
                                     <option value="webrtc-manual">LAN / peer (WebRTC)</option>
-                                </select>
+                                </Select>
                             </label>
 
-                            <button className="collab-primary" onClick={handleHost} disabled={busy}>
+                            <Button variant="primary" onClick={handleHost} disabled={busy}>
                                 Host new session
-                            </button>
+                            </Button>
 
                             <div className="collab-divider"><span>or</span></div>
 
                             <div className="collab-join-row">
-                                <input
+                                <Input
                                     type="text"
                                     className="collab-code-input"
                                     value={joinCode}
@@ -126,9 +127,9 @@ export function CollabControl() {
                                     onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
                                     onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
                                 />
-                                <button className="collab-secondary" onClick={handleJoin} disabled={busy || !joinCode.trim()}>
+                                <Button variant="primary" onClick={handleJoin} disabled={busy || !joinCode.trim()}>
                                     Join
-                                </button>
+                                </Button>
                             </div>
 
                             {error && <p className="collab-error">{error}</p>}
@@ -137,9 +138,9 @@ export function CollabControl() {
                         <>
                             <div className="collab-session-head">
                                 <h3 className="collab-panel-title">Session {sessionCode}</h3>
-                                <button className="collab-copy" onClick={handleCopy}>
+                                <Button variant="ghost" onClick={handleCopy}>
                                     {copied ? 'Copied!' : 'Copy code'}
-                                </button>
+                                </Button>
                             </div>
                             <p className="collab-transport">via {transportLabel}</p>
 
@@ -163,9 +164,9 @@ export function CollabControl() {
                                 )}
                             </ul>
 
-                            <button className="collab-leave" onClick={leaveSession}>
+                            <Button variant="danger" onClick={leaveSession}>
                                 Leave session
-                            </button>
+                            </Button>
                         </>
                     )}
                 </div>

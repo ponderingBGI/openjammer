@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes } from 'react';
+import { forwardRef, type ButtonHTMLAttributes } from 'react';
 import './Button.css';
 
 export type ButtonVariant =
@@ -29,14 +29,10 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
  * hover and presses on click (DESIGN.md §5). Theme-agnostic: styled entirely
  * via semantic CSS variables, so it restyles with the active theme.
  */
-export function Button({
-    variant = 'node',
-    active = false,
-    iconOnly = false,
-    className,
-    type = 'button',
-    ...rest
-}: ButtonProps) {
+export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+    { variant = 'node', active = false, iconOnly = false, className, type = 'button', ...rest },
+    ref,
+) {
     const classes = [
         'oj-btn',
         variant !== 'node' && `oj-btn--${variant}`,
@@ -47,5 +43,5 @@ export function Button({
         .filter(Boolean)
         .join(' ');
 
-    return <button type={type} className={classes} {...rest} />;
-}
+    return <button ref={ref} type={type} className={classes} {...rest} />;
+});

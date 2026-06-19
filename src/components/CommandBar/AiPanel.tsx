@@ -19,6 +19,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { Button } from '@openjammer/oj-ui';
 import { getAgentBackend } from '../../ai';
 import { getExecutor } from '../../audio/executor';
 import {
@@ -626,36 +627,33 @@ export function AiPanel({
     return (
         <div className="command-bar-ai" onKeyDownCapture={onChatKeyDownCapture}>
             <div className="command-bar-ai-header">
-                <button
-                    type="button"
-                    className="command-bar-ai-back"
+                <Button
+                    variant="ghost"
                     onClick={onBack}
                     aria-label="Back to search"
                 >
                     ← Search
-                </button>
+                </Button>
                 <div className="command-bar-ai-header-right">
                     <span className="command-bar-ai-session" title={sessionId ?? 'New chat'}>
                         {sessionId ? shortId(sessionId) : 'New chat'}
                     </span>
                     {messages.some((m) => m.role === 'user') && (
-                        <button
-                            type="button"
-                            className="command-bar-ai-rewind"
+                        <Button
+                            variant="ghost"
                             onClick={() => setView('rewind')}
                             title={`Rewind & edit an earlier prompt (${MOD}+↑)`}
                         >
                             ↺ Rewind
-                        </button>
+                        </Button>
                     )}
-                    <button
-                        type="button"
-                        className="command-bar-ai-new"
+                    <Button
+                        variant="ghost"
                         onClick={() => void newSession()}
                         title="Start a new session ( /new )"
                     >
                         + New
-                    </button>
+                    </Button>
                 </div>
             </div>
 
@@ -681,9 +679,9 @@ export function AiPanel({
                         </p>
                         <div className="command-bar-ai-welcome-chips">
                             {starters.map((chip) => (
-                                <button
+                                <Button
                                     key={chip.label}
-                                    type="button"
+                                    variant="secondary"
                                     className="command-bar-ai-welcome-chip"
                                     disabled={running}
                                     onClick={() => {
@@ -692,7 +690,7 @@ export function AiPanel({
                                     }}
                                 >
                                     {chip.label}
-                                </button>
+                                </Button>
                             ))}
                         </div>
                     </div>
@@ -793,14 +791,13 @@ export function AiPanel({
                             </>
                         )}
                     </span>
-                    <button
-                        type="button"
-                        className="command-bar-ai-send"
+                    <Button
+                        variant="primary"
                         onClick={submit}
                         disabled={running || !draft.trim()}
                     >
                         Send
-                    </button>
+                    </Button>
                 </div>
             </div>
 
@@ -883,14 +880,13 @@ function RewindPicker({
     return (
         <>
             <div className="command-bar-ai-header">
-                <button
-                    type="button"
-                    className="command-bar-ai-back"
+                <Button
+                    variant="ghost"
                     onClick={onCancel}
                     aria-label="Back to chat"
                 >
                     ← Chat
-                </button>
+                </Button>
                 <span className="command-bar-ai-badge">Rewind &amp; edit</span>
             </div>
             <div className="command-bar-models-help">
@@ -963,17 +959,16 @@ function YoloConfirm({ onCancel, onConfirm }: { onCancel: () => void; onConfirm:
                 undoable with {MOD}+Z; everything else is off. Resets to safe on restart.
             </p>
             <div className="command-bar-yolo-actions">
-                <button type="button" className="command-bar-ai-reject" onClick={onCancel}>
+                <Button variant="ghost" onClick={onCancel}>
                     Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                     ref={confirmRef}
-                    type="button"
-                    className="command-bar-yolo-go"
+                    variant="primary"
                     onClick={onConfirm}
                 >
                     Enter YOLO
-                </button>
+                </Button>
             </div>
         </div>
     );
@@ -988,9 +983,9 @@ function DesktopOnly({ onBack }: { onBack: () => void }) {
                 The AI agent runs locally in the OpenJammer desktop app, which drives Pi
                 with your own provider key. It isn’t available in the browser.
             </p>
-            <button type="button" className="command-bar-ai-send" onClick={onBack}>
+            <Button variant="primary" onClick={onBack}>
                 Back to search
-            </button>
+            </Button>
         </div>
     );
 }
