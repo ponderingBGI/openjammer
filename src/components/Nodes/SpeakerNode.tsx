@@ -16,6 +16,7 @@ import {
     getBestOutputDevice,
     detectLowLatencyDevice
 } from '../../utils/audioDeviceDetection';
+import { Port } from '@openjammer/oj-ui';
 
 interface SpeakerNodeProps {
     node: GraphNode;
@@ -225,16 +226,24 @@ export const SpeakerNode = memo(function SpeakerNode({
                 {/* Input Port - positioned in top left corner under header */}
                 {inputPort && (
                     <div
-                        className={`speaker-input-port ${hasConnection?.(inputPort.id) ? 'connected' : ''}`}
-                        data-node-id={node.id}
-                        data-port-id={inputPort.id}
-                        data-port-type={inputPort.type}
-                        onMouseDown={(e) => handlePortMouseDown?.(inputPort.id, e)}
-                        onMouseUp={(e) => handlePortMouseUp?.(inputPort.id, e)}
-                        onMouseEnter={() => handlePortMouseEnter?.(inputPort.id)}
-                        onMouseLeave={handlePortMouseLeave}
-                        title={inputPort.name}
-                    />
+                        className="speaker-input-port-wrapper"
+                        style={{ position: 'absolute', left: 'var(--space-sm)', top: 'var(--space-sm)' }}
+                    >
+                        <Port
+                            kind="audio"
+                            direction="input"
+                            connected={!!hasConnection?.(inputPort.id)}
+                            style={{ width: '14px', height: '14px' }}
+                            data-node-id={node.id}
+                            data-port-id={inputPort.id}
+                            data-port-type={inputPort.type}
+                            onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(inputPort.id, e); }}
+                            onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(inputPort.id, e); }}
+                            onMouseEnter={() => handlePortMouseEnter?.(inputPort.id)}
+                            onMouseLeave={handlePortMouseLeave}
+                            title={inputPort.name}
+                        />
+                    </div>
                 )}
 
                 {/* Speaker Symbol with Mute Button */}

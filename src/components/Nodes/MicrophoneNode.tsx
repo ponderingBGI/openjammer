@@ -11,6 +11,7 @@ import { getAudioContext } from '../../audio/audioContext';
 import { getExecutor } from '../../audio/executor';
 import { ScrollContainer } from '../common/ScrollContainer';
 import { detectLowLatencyDevice } from '../../utils/audioDeviceDetection';
+import { Port } from '@openjammer/oj-ui';
 
 interface MicrophoneNodeProps {
     node: GraphNode;
@@ -461,12 +462,15 @@ export const MicrophoneNode = memo(function MicrophoneNode({
                     </div>
 
                     {/* Output Port */}
-                    <div
-                        className={`mic-output-port ${hasConnection(outputPortId) ? 'connected' : ''}`}
+                    <Port
+                        kind="audio"
+                        direction="output"
+                        connected={hasConnection(outputPortId)}
+                        style={{ marginLeft: 'auto' }}
                         data-node-id={node.id}
                         data-port-id={outputPortId}
-                        onMouseDown={(e) => handlePortMouseDown?.(outputPortId, e)}
-                        onMouseUp={(e) => handlePortMouseUp?.(outputPortId, e)}
+                        onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(outputPortId, e); }}
+                        onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(outputPortId, e); }}
                         onMouseEnter={() => handlePortMouseEnter?.(outputPortId)}
                         onMouseLeave={handlePortMouseLeave}
                     />

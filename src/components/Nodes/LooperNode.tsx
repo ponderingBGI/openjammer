@@ -18,6 +18,7 @@ import { useScrollCapture } from '../../hooks/useScrollCapture';
 import type { ScrollData } from '../../hooks/useScrollCapture';
 import { ScrollContainer } from '../common/ScrollContainer';
 import { toast } from 'sonner';
+import { Port } from '@openjammer/oj-ui';
 
 // Type for library store functions to use in refs
 type SaveAudioToLibraryFn = (buffer: AudioBuffer, name: string, tags?: string[]) => Promise<string | null>;
@@ -477,15 +478,20 @@ export const LooperNode = memo(function LooperNode({
 
             {/* Main row: Audio In - Duration - Audio Out */}
             <div className="looper-main-row">
-                <div
-                    className={`looper-input-port ${hasConnection(inputPortId) ? 'connected' : ''}`}
-                    onMouseDown={(e) => handlePortMouseDown?.(inputPortId, e)}
-                    onMouseUp={(e) => handlePortMouseUp?.(inputPortId, e)}
-                    onMouseEnter={() => handlePortMouseEnter?.(inputPortId)}
-                    onMouseLeave={handlePortMouseLeave}
-                    data-node-id={node.id}
-                    data-port-id={inputPortId}
-                />
+                <div style={{ position: 'absolute', left: 0, top: '50%', transform: 'translate(-50%, -50%)' }}>
+                    <Port
+                        kind="audio"
+                        direction="input"
+                        connected={hasConnection(inputPortId)}
+                        style={{ width: '14px', height: '14px' }}
+                        data-node-id={node.id}
+                        data-port-id={inputPortId}
+                        onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(inputPortId, e); }}
+                        onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(inputPortId, e); }}
+                        onMouseEnter={() => handlePortMouseEnter?.(inputPortId)}
+                        onMouseLeave={handlePortMouseLeave}
+                    />
+                </div>
                 <div className="looper-duration-container">
                     {isEditingDuration ? (
                         <input
@@ -511,15 +517,20 @@ export const LooperNode = memo(function LooperNode({
                     )}
                     {!isInfinite && <span className="looper-duration-unit">s</span>}
                 </div>
-                <div
-                    className={`looper-output-port ${hasConnection(outputPortId) ? 'connected' : ''}`}
-                    onMouseDown={(e) => handlePortMouseDown?.(outputPortId, e)}
-                    onMouseUp={(e) => handlePortMouseUp?.(outputPortId, e)}
-                    onMouseEnter={() => handlePortMouseEnter?.(outputPortId)}
-                    onMouseLeave={handlePortMouseLeave}
-                    data-node-id={node.id}
-                    data-port-id={outputPortId}
-                />
+                <div style={{ position: 'absolute', right: 0, top: '50%', transform: 'translate(50%, -50%)' }}>
+                    <Port
+                        kind="audio"
+                        direction="output"
+                        connected={hasConnection(outputPortId)}
+                        style={{ width: '14px', height: '14px' }}
+                        data-node-id={node.id}
+                        data-port-id={outputPortId}
+                        onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(outputPortId, e); }}
+                        onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(outputPortId, e); }}
+                        onMouseEnter={() => handlePortMouseEnter?.(outputPortId)}
+                        onMouseLeave={handlePortMouseLeave}
+                    />
+                </div>
             </div>
 
             {/* Active recording waveform with playhead */}

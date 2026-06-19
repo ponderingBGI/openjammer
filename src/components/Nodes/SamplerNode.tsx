@@ -22,6 +22,7 @@ import { useAudioClipStore, getClipBuffer } from '../../store/audioClipStore';
 import { loadClipAudio } from '../../utils/clipUtils';
 import { isSamplerNodeData } from '../../engine/typeGuards';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
+import { Port } from '@openjammer/oj-ui';
 
 interface SamplerNodeProps {
     node: GraphNode;
@@ -461,48 +462,38 @@ export const SamplerNode = memo(function SamplerNode({
         >
             {/* Left side input port */}
             {bundleInPort && (
-                <div
+                <Port
+                    kind="control"
+                    direction="input"
+                    connected={!!hasConnection?.(bundleInPort.id) || hasRows}
                     className={`sampler-side-port input ${hasConnection?.(bundleInPort.id) || hasRows ? 'connected' : ''}`}
+                    style={{ width: '14px', height: '14px' }}
                     data-node-id={node.id}
                     data-port-id={bundleInPort.id}
-                    onMouseDown={(e) => { e.stopPropagation(); handlePortMouseDown?.(bundleInPort.id, e); }}
-                    onMouseUp={(e) => handlePortMouseUp?.(bundleInPort.id, e)}
+                    data-port-type="control"
+                    onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(bundleInPort.id, e); }}
+                    onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(bundleInPort.id, e)}
                     onMouseEnter={() => handlePortMouseEnter?.(bundleInPort.id)}
                     onMouseLeave={handlePortMouseLeave}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handlePortMouseDown?.(bundleInPort.id, e as unknown as React.MouseEvent);
-                        }
-                    }}
-                    tabIndex={0}
-                    role="button"
-                    aria-label="Control input port"
                     title="Control input"
                 />
             )}
 
             {/* Right side output port */}
             {audioOutPort && (
-                <div
+                <Port
+                    kind="audio"
+                    direction="output"
+                    connected={!!hasConnection?.(audioOutPort.id)}
                     className={`sampler-side-port output ${hasConnection?.(audioOutPort.id) ? 'connected' : ''}`}
+                    style={{ width: '14px', height: '14px' }}
                     data-node-id={node.id}
                     data-port-id={audioOutPort.id}
-                    onMouseDown={(e) => { e.stopPropagation(); handlePortMouseDown?.(audioOutPort.id, e); }}
-                    onMouseUp={(e) => handlePortMouseUp?.(audioOutPort.id, e)}
+                    data-port-type="audio"
+                    onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(audioOutPort.id, e); }}
+                    onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(audioOutPort.id, e)}
                     onMouseEnter={() => handlePortMouseEnter?.(audioOutPort.id)}
                     onMouseLeave={handlePortMouseLeave}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handlePortMouseDown?.(audioOutPort.id, e as unknown as React.MouseEvent);
-                        }
-                    }}
-                    tabIndex={0}
-                    role="button"
-                    aria-label="Audio output port"
                     title="Audio output"
                 />
             )}
