@@ -1769,28 +1769,6 @@
     align-items: center;
 }
 
-.canvas-io-node .port-dot {
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    border: 3px solid var(--sketch-black);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-}
-
-.canvas-io-node.canvas-input .port-dot {
-    background: var(--control-output);
-}
-
-.canvas-io-node.canvas-output .port-dot {
-    background: var(--control-input);
-}
-
-.canvas-io-node .port-dot:hover {
-    transform: scale(1.2);
-    box-shadow: 0 0 8px currentColor;
-}
-
 .canvas-io-node .io-name-field {
     width: 100%;
     text-align: center;
@@ -2328,34 +2306,7 @@
     border-style: solid !important;
 }
 
-/* ============================================
- * Universal (Rainbow) Ports
- * Used by Add/Subtract nodes - adapt to connected type
- * ============================================ */
-.port-dot.universal {
-    background: linear-gradient(135deg, #FF6B6B, #FFE66D, #4ECB71, #4DB8FF, #9B59B6);
-    background-size: 200% 200%;
-    animation: rainbow-shift 3s ease infinite;
-}
-
-.port-dot.universal.connected {
-    animation: none;
-}
-
-/* When resolved to audio type */
-.port-dot.universal.resolved-audio {
-    background: var(--audio-connected);
-    box-shadow: 0 0 8px var(--audio-connected);
-    animation: none;
-}
-
-/* When resolved to control type */
-.port-dot.universal.resolved-control {
-    background: var(--control-connected);
-    box-shadow: 0 0 8px var(--control-connected);
-    animation: none;
-}
-
+/* Rainbow shift for the input/output panel universal port markers. */
 @keyframes rainbow-shift {
     0% { background-position: 0% 50%; }
     50% { background-position: 100% 50%; }
@@ -2509,21 +2460,6 @@
     font-size: var(--text-xs);
     color: var(--accent-danger);
     margin-left: var(--space-xs);
-}
-
-/* Math node port dots */
-.math-node .port-dot {
-    width: 16px;
-    height: 16px;
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: 50%;
-    cursor: crosshair;
-    transition: all var(--transition-fast);
-}
-
-.math-node .port-dot:hover {
-    transform: scale(1.2);
-    filter: brightness(1.1);
 }
 
 /* ============================================

@@ -99,8 +99,7 @@
     pointer-events: none;
 }
 
-/* Ports remain visible and glowing in ghost mode (legacy .port-dot + oj-ui .oj-port) */
-.node-canvas.ghost-mode .port-dot,
+/* Ports remain visible and glowing in ghost mode */
 .node-canvas.ghost-mode .oj-port {
     opacity: 1;
     pointer-events: auto;
