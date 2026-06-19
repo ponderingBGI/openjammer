@@ -25,6 +25,8 @@
     "build": "tsc -b && vite build",
     "build:pi-runtime": "bun scripts/build-pi-runtime.ts",
     "tokens": "bun ./packages/oj-tokens/build.mjs",
+    "ladle": "ladle serve",
+    "ladle:build": "ladle build",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
@@ -55,6 +57,7 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.79.6",
     "@eslint/js": "^9.39.1",
+    "@ladle/react": "^5.1.1",
     "@playwright/test": "^1.61.0",
     "@tauri-apps/cli": "2.11.2",
     "@testing-library/jest-dom": "^6.9.1",

@@ -20,6 +20,8 @@ export default defineConfig([
     'apps/docs/dist/**',
     'pi-openjammer-graph/**',
     '.claude/**',
+    // Ladle catalog config/provider — dev tooling, not app source.
+    '.ladle/**',
   ]),
   {
     files: ['**/*.{ts,tsx}'],
@@ -55,6 +57,15 @@ export default defineConfig([
       'react-hooks/refs': 'warn',
       'react-hooks/set-state-in-effect': 'warn',
       'react-hooks/immutability': 'warn',
+    },
+  },
+  {
+    // Ladle stories export a default meta object + named story components,
+    // which trips react-refresh's only-export-components. Stories are not part
+    // of the HMR component graph, so the rule does not apply.
+    files: ['**/*.stories.tsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
     },
   },
 ])

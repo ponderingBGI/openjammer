@@ -57,6 +57,9 @@ dist-ssr
 test-results/
 playwright-report/
 
+# Ladle component-catalog build output
+.ladle/build/
+
 # Update-signing key material — NEVER commit (RCE-grade). Private keys live only
 # on the maintainer's offline backups + in GitHub Actions secrets. Public `.pub`
 # keys are embedded directly in tauri.conf.json / updater.rs instead.
