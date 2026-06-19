@@ -1,0 +1,45 @@
+[
+  {
+    "id": "primitives",
+    "name": "Primitives",
+    "group": "Foundation",
+    "selectedTokenSets": {
+      "primitive": "enabled"
+    },
+    "$figmaStyleReferences": {},
+    "$figmaVariableReferences": {}
+  },
+  {
+    "id": "cream",
+    "name": "Cream",
+    "group": "Theme",
+    "selectedTokenSets": {
+      "primitive": "source",
+      "themes/cream": "enabled"
+    },
+    "$figmaStyleReferences": {},
+    "$figmaVariableReferences": {}
+  },
+  {
+    "id": "cyberpunk",
+    "name": "Cyberpunk",
+    "group": "Theme",
+    "selectedTokenSets": {
+      "primitive": "source",
+      "themes/cyberpunk": "enabled"
+    },
+    "$figmaStyleReferences": {},
+    "$figmaVariableReferences": {}
+  },
+  {
+    "id": "midnight",
+    "name": "Midnight",
+    "group": "Theme",
+    "selectedTokenSets": {
+      "primitive": "source",
+      "themes/midnight": "enabled"
+    },
+    "$figmaStyleReferences": {},
+    "$figmaVariableReferences": {}
+  }
+]
