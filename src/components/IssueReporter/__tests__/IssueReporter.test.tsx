@@ -35,7 +35,7 @@ describe('IssueReporter', () => {
 
         expect(screen.getByRole('dialog', { name: /report a problem/i })).toBeInTheDocument();
 
-        const preview = document.querySelector('.issue-preview');
+        const preview = document.querySelector('.oj-code');
         expect(preview).toBeTruthy();
         expect(preview?.textContent).toContain('## Environment');
         // The seeded secret + home path are redacted in the rendered preview.
@@ -50,8 +50,12 @@ describe('IssueReporter', () => {
     it('closes on Escape', () => {
         render(<IssueReporter />);
         fireEvent(window, new CustomEvent('openjammer:report-issue'));
-        expect(screen.getByRole('dialog')).toBeInTheDocument();
-        fireEvent.keyDown(window, { key: 'Escape' });
+        const dialog = screen.getByRole('dialog');
+        expect(dialog).toBeInTheDocument();
+        // Focus is trapped inside the Modal, so a real Escape originates within
+        // the dialog and bubbles to the Modal's handler (vs the old global window
+        // listener). Fire it from the dialog to reflect that.
+        fireEvent.keyDown(dialog, { key: 'Escape' });
         expect(screen.queryByRole('dialog')).toBeNull();
     });
 });
