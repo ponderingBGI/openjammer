@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react';
 import { useAudioStore } from '../store/audioStore';
 import { diagnoseLatency, shouldShowLatencyWarning } from '../utils/latencyDiagnostics';
+import { Banner, Button, IconWarning } from '@openjammer/oj-ui';
 import './LatencyWarningBanner.css';
 
 // Local storage key for dismissed timestamp
@@ -108,28 +109,25 @@ export function LatencyWarningBanner({ onOpenSettings }: LatencyWarningBannerPro
 
     return (
         <div className="latency-warning-banner">
-            <div className="warning-icon">
-                <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
-                    <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/>
-                </svg>
-            </div>
-            <div className="warning-content">
-                <div className="warning-title">High Audio Latency Detected</div>
-                <div className="warning-message">
-                    {primaryIssue?.issue || 'Your audio latency may affect live playing experience.'}
-                </div>
-            </div>
-            <div className="warning-actions">
-                <button className="warning-btn primary" onClick={handleFixNow}>
-                    Fix Now
-                </button>
-                <button className="warning-btn secondary" onClick={handleAskAi}>
-                    Ask AI
-                </button>
-                <button className="warning-btn secondary" onClick={handleDismiss}>
-                    Dismiss
-                </button>
-            </div>
+            <Banner
+                tone="warning"
+                icon={<IconWarning />}
+                title="High Audio Latency Detected"
+                message={primaryIssue?.issue || 'Your audio latency may affect live playing experience.'}
+                actions={
+                    <>
+                        <Button variant="primary" onClick={handleFixNow}>
+                            Fix Now
+                        </Button>
+                        <Button variant="secondary" onClick={handleAskAi}>
+                            Ask AI
+                        </Button>
+                        <Button variant="secondary" onClick={handleDismiss}>
+                            Dismiss
+                        </Button>
+                    </>
+                }
+            />
         </div>
     );
 }
