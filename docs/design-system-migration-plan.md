@@ -9,6 +9,22 @@ The non-negotiable invariant for every increment: **GREEN (typecheck + lint + te
 
 ---
 
+## STATUS (updated as increments land)
+
+**DONE + committed + green** (oj-ui typecheck, app build, lint, 1091 tests, e2e PWA smoke, Ladle build — each slice also live-verified in-browser):
+- **Phase 0–2** — tokens unified (`@openjammer/oj-tokens`, DTCG → Style Dictionary, no-op), 37-component `@openjammer/oj-ui` (each story + test), Ladle catalog with theme switcher.
+- **Phase 3.1** — dead code removed. **3.2** — all overlays → `Modal`/`PanelHeader`/`Banner`.
+- **Phase 3.3** — standard node → `NodeFrame`/`NodeShell`/`Port`/`PortRow`; cables → `Cable`.
+- **Phase 3.4** — **the whole node system is now 0-legacy.** Every schematic family's ports → `Port`/`PortRow`/`KeyTile` (incl. the rainbow-universal treatment taught to `Port`); in-node controls → `Slider`/`Button`/`Select`/`ValueScrubber`; the control-active highlight is a real `Port active` state (`.oj-port.is-active`). Reaper #9a–#9d removed **every** dead legacy node class — `.port-dot`/`.node-btn`/`.port*` twins, 21 faceplate port-markers, `.port-circle-marker`/`.control-active`, and 46 dead node-content classes (`SchematicNodes.css` 4138 → 2923 lines). The canvas hit-test union lists only mounted classes. No deleted class is referenced by any CSS or tsx. Method: quote-agnostic "appears-nowhere" scan + parallel-Opus hunt-then-adversarial-refute workflow (KEEP-on-doubt) + brace-aware parser (drop a rule only when every comma-segment involves a dead class) + diff review + live smoke.
+
+**REMAINING — human/designer-gated only** (held deliberately; doing them now would violate the no-op rule or create parallel paths):
+- **3.5 / 3.6 leaf rewires** of bespoke chrome buttons (Settings/Toolbar/Guides, ~81 raw `<button>`): oj-ui `Button` imposes the `.oj-btn` look, which *differs* from each feature's bespoke CSS — so a swap is a visual **redesign**, not a no-op. That decision (what a chrome button looks like in the new language) is the designer's, in Phase 4's new theme. `AppErrorBoundary`/`KeybindingsErrorBoundary` stay self-contained (panic-safe) by design.
+- **`SchematicNodes.css` literal-color/animation tokenization** — choosing each color's semantic role affects all themes; Phase 4 designer work, not a mechanical no-op.
+- **Phases 4–6** (below): the new default theme, Figma Variables/Tokens Studio sync, Code Connect (needs Figma node IDs), and the `claude.ai/design` `/design-sync` run (external auth + publishing — needs the user's go-ahead). Designer arrives ~2026-06-22.
+- **On-hardware live-audio acceptance** — incl. the MIDIVisual port (needs a MIDI device to instantiate; static-verified only).
+
+---
+
 ## 1. COMPONENT TAXONOMY
 
 ### 1.0 Existing primitives (extend, never fork)
