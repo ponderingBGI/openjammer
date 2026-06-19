@@ -13,7 +13,7 @@ import { nodeDefinitions } from '../../engine/registry';
 import { InstrumentLoader } from '../../audio/instrumentCatalog';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
 import { ScrollContainer } from '../common/ScrollContainer';
-import { Port } from '@openjammer/oj-ui';
+import { Port, ValueScrubber } from '@openjammer/oj-ui';
 
 interface InstrumentNodeProps {
     node: GraphNode;
@@ -138,13 +138,27 @@ const ScrollableRowValue = memo(function ScrollableRowValue({
         capture: true,
     });
 
+    // Commit an inline edit (click-to-type). The scroll path only ever lands on
+    // the step grid, so the typed value must too: reject non-finite input, snap
+    // to the same grid, then clamp. Without this, typing e.g. "3.7" into a
+    // note/octave field would store a fractional index (NOTE_NAMES[3.7] → undefined).
+    const handleCommit = useCallback((newValue: number) => {
+        if (!Number.isFinite(newValue)) return;
+        const snapped = Math.round((newValue - min) / step) * step + min;
+        const clamped = Math.max(min, Math.min(max, snapped));
+        if (clamped !== value) {
+            onChange(clamped);
+        }
+    }, [value, onChange, min, max, step]);
+
     return (
-        <span
-            ref={ref}
-            className={className}
-            title={title}
-        >
-            {format(value)}
+        <span ref={ref} title={title}>
+            <ValueScrubber
+                value={value}
+                display={format(value)}
+                onCommit={handleCommit}
+                className={className}
+            />
         </span>
     );
 });

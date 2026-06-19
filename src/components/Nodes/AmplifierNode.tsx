@@ -5,6 +5,7 @@
 import { useCallback } from 'react';
 import type { GraphNode, AmplifierNodeData } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
+import { Button, Slider } from '@openjammer/oj-ui';
 
 interface AmplifierNodeProps {
     node: GraphNode;
@@ -21,8 +22,7 @@ export function AmplifierNode({ node }: AmplifierNodeProps) {
     const displayDb = isFinite(gainDb) ? gainDb.toFixed(1) : '-∞';
 
     // Update gain
-    const handleGainChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        const newGain = parseFloat(e.target.value);
+    const handleGainChange = useCallback((newGain: number) => {
         updateNodeData<AmplifierNodeData>(node.id, { gain: newGain });
     }, [node.id, updateNodeData]);
 
@@ -58,11 +58,11 @@ export function AmplifierNode({ node }: AmplifierNodeProps) {
 
             {/* Gain Slider */}
             <div className="node-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                <input
-                    type="range"
-                    min="-2"
-                    max="4"
-                    step="0.1"
+                <Slider
+                    aria-label="Gain"
+                    min={-2}
+                    max={4}
+                    step={0.1}
                     value={gain}
                     onChange={handleGainChange}
                     style={{ width: '100%' }}
@@ -81,34 +81,38 @@ export function AmplifierNode({ node }: AmplifierNodeProps) {
 
             {/* Preset Buttons */}
             <div className="node-controls" style={{ flexWrap: 'wrap' }}>
-                <button
-                    className={`node-btn ${gain === 0.5 ? 'active' : 'node-btn-secondary'}`}
+                <Button
+                    variant={gain === 0.5 ? 'node' : 'secondary'}
+                    active={gain === 0.5}
                     onClick={() => handlePreset(0.5)}
                     style={{ flex: '1 0 45%' }}
                 >
                     0.5x
-                </button>
-                <button
-                    className={`node-btn ${gain === 1 ? 'active' : 'node-btn-secondary'}`}
+                </Button>
+                <Button
+                    variant={gain === 1 ? 'node' : 'secondary'}
+                    active={gain === 1}
                     onClick={() => handlePreset(1)}
                     style={{ flex: '1 0 45%' }}
                 >
                     1x
-                </button>
-                <button
-                    className={`node-btn ${gain === 2 ? 'active' : 'node-btn-secondary'}`}
+                </Button>
+                <Button
+                    variant={gain === 2 ? 'node' : 'secondary'}
+                    active={gain === 2}
                     onClick={() => handlePreset(2)}
                     style={{ flex: '1 0 45%' }}
                 >
                     2x
-                </button>
-                <button
-                    className={`node-btn ${gain === 0 ? 'active' : 'node-btn-secondary'}`}
+                </Button>
+                <Button
+                    variant={gain === 0 ? 'node' : 'secondary'}
+                    active={gain === 0}
                     onClick={() => handlePreset(0)}
                     style={{ flex: '1 0 45%' }}
                 >
                     Mute
-                </button>
+                </Button>
             </div>
         </div>
     );

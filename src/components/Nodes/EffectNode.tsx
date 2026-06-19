@@ -5,6 +5,7 @@
 import { useCallback, useMemo } from 'react';
 import type { GraphNode, EffectNodeData, EffectType } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
+import { Select, Slider } from '@openjammer/oj-ui';
 
 interface EffectNodeProps {
     node: GraphNode;
@@ -63,7 +64,7 @@ export function EffectNode({ node }: EffectNodeProps) {
         <div className="effect-node">
             {/* Effect Type Selector */}
             <div className="node-row">
-                <select
+                <Select
                     className="node-select"
                     value={effectType}
                     onChange={handleTypeChange}
@@ -71,7 +72,7 @@ export function EffectNode({ node }: EffectNodeProps) {
                     {EFFECT_OPTIONS.map(opt => (
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
-                </select>
+                </Select>
             </div>
 
             {/* Effect Parameters */}
@@ -89,13 +90,13 @@ export function EffectNode({ node }: EffectNodeProps) {
                                 {typeof value === 'number' ? value.toFixed(2) : value}
                             </span>
                         </div>
-                        <input
-                            type="range"
+                        <Slider
+                            aria-label={param}
                             min={config?.min ?? 0}
                             max={config?.max ?? 1}
                             step={config?.step ?? 0.1}
                             value={value}
-                            onChange={(e) => handleParamChange(param, parseFloat(e.target.value))}
+                            onChange={(v) => handleParamChange(param, v)}
                             style={{ width: '100%' }}
                         />
                     </div>

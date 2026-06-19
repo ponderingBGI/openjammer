@@ -15,6 +15,7 @@
  */
 
 import { useCallback } from 'react';
+import { Slider } from '@openjammer/oj-ui';
 import type { GraphNode, NodeData } from '../../engine/types';
 import type { ParamDecl, PluginManifest } from '../../engine/manifest';
 import { useGraphStore } from '../../store/graphStore';
@@ -40,8 +41,7 @@ function ParamRow({ node, param }: { node: GraphNode; param: ParamDecl }) {
     const value = typeof stored === 'number' && Number.isFinite(stored) ? stored : param.default;
 
     const handleChange = useCallback(
-        (e: React.ChangeEvent<HTMLInputElement>) => {
-            const next = parseFloat(e.target.value);
+        (next: number) => {
             if (Number.isNaN(next)) return;
             updateNodeData<NodeData>(node.id, { [param.name]: next });
         },
@@ -56,8 +56,8 @@ function ParamRow({ node, param }: { node: GraphNode; param: ParamDecl }) {
                     {value.toFixed(2)}
                 </span>
             </div>
-            <input
-                type="range"
+            <Slider
+                aria-label={param.name}
                 min={param.min}
                 max={param.max}
                 step={stepFor(param)}
