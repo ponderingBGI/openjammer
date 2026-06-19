@@ -5,7 +5,7 @@ import { AudioSettingsPanel } from './AudioSettingsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { AboutPanel } from './AboutPanel';
 import { ScrollContainer } from '../common/ScrollContainer';
-import '../Nodes/SchematicNodes.css';
+import './SettingsPanel.css';
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
     const [activeTab, setActiveTab] = useState('graphics');

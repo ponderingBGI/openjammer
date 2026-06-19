@@ -1,0 +1,180 @@
+/* Settings + About panel chrome.
+   Relocated out of the shared SchematicNodes.css node stylesheet, where it was
+   a foreign Settings island. Imported by SettingsPanel.tsx + AboutPanel.tsx.
+   (Phase 3.3 #3 — Settings CSS exile.) */
+
+/* ============================================
+ * Settings Panel (Updated for Sketch Theme)
+ * ============================================ */
+.minimal-settings-overlay {
+    position: fixed;
+    inset: 0;
+    background: color-mix(in srgb, var(--sketch-black) 30%, transparent);
+    backdrop-filter: blur(4px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 2000;
+}
+
+.minimal-settings-container {
+    background: var(--bg-node);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-xl);
+    width: 600px;
+    height: 500px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    color: var(--text-primary);
+    box-shadow: var(--shadow-menu);
+}
+
+.minimal-settings-header {
+    padding: var(--space-lg);
+    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.minimal-settings-header h2 {
+    margin: 0;
+    font-family: var(--font-sketch);
+    font-size: var(--text-xl);
+    font-weight: 700;
+}
+
+.minimal-settings-content {
+    flex: 1;
+    display: flex;
+    min-height: 0; /* Required for child overflow-y: auto to work in flex container */
+    overflow: hidden;
+}
+
+.minimal-sidebar {
+    width: 180px;
+    border-right: 1px solid var(--border-subtle);
+    padding: var(--space-md) 0;
+}
+
+.minimal-tab-btn {
+    width: 100%;
+    text-align: left;
+    padding: var(--space-sm) var(--space-lg);
+    background: none;
+    border: none;
+    font-family: var(--font-sketch);
+    font-size: var(--text-md);
+    font-weight: 500;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all var(--transition-fast);
+}
+
+.minimal-tab-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.minimal-tab-btn.active {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    border-right: 3px solid var(--sketch-black);
+}
+
+.minimal-main {
+    flex: 1;
+    padding: var(--space-lg);
+    overflow-y: auto;
+    min-height: 0; /* Required for overflow to work in flex container */
+}
+
+.minimal-theme-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: var(--space-md);
+}
+
+.minimal-theme-card {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.minimal-theme-card:hover {
+    border-color: var(--sketch-light);
+    background: var(--bg-tertiary);
+}
+
+.minimal-theme-card.active {
+    border-color: var(--sketch-black);
+    border-width: var(--border-sketch-width);
+    background: var(--bg-canvas);
+}
+
+/* About Panel */
+.about-panel {
+    padding: var(--space-md);
+}
+
+.about-header {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+}
+
+.about-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.about-version {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+}
+
+.about-description {
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: var(--space-lg);
+}
+
+.about-links {
+    margin-bottom: var(--space-lg);
+}
+
+.about-github-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    text-decoration: none;
+    font-weight: 500;
+    transition: all var(--transition-fast);
+}
+
+.about-github-link:hover {
+    border-color: var(--sketch-black);
+    background: var(--bg-canvas);
+}
+
+.about-license {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.about-license-label {
+    font-weight: 500;
+}
