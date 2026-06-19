@@ -1,0 +1,19 @@
+/* Field — labeled control group. Label uses the Caveat voice (DESIGN.md §3). */
+.oj-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    margin-bottom: var(--space-sm);
+}
+
+.oj-field--row {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.oj-field__label {
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+}

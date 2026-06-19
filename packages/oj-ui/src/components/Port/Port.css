@@ -1,0 +1,49 @@
+/*
+ * Port — DESIGN.md §5. 16px circle, 2px ink border, filled by wiring color;
+ * hover scales 1.25x; connected brightens with an 8px colored glow (the one
+ * place a soft glow is allowed — it signals a live connection, which is meaning).
+ */
+.oj-port {
+    display: inline-block;
+    width: var(--port-size);
+    height: var(--port-size);
+    border-radius: 50%;
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    background: var(--bg-canvas);
+    cursor: crosshair;
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast),
+        background var(--transition-fast);
+}
+
+.oj-port:hover {
+    transform: scale(1.25);
+    background: var(--bg-tertiary);
+}
+
+.oj-port--audio-input {
+    background: var(--audio-input);
+}
+
+.oj-port--audio-output {
+    background: var(--audio-output);
+}
+
+.oj-port--control-input {
+    background: var(--control-input);
+}
+
+.oj-port--control-output {
+    background: var(--control-output);
+}
+
+.oj-port--audio-input.is-connected,
+.oj-port--audio-output.is-connected {
+    background: var(--audio-connected);
+    box-shadow: 0 0 8px var(--audio-connected);
+}
+
+.oj-port--control-input.is-connected,
+.oj-port--control-output.is-connected {
+    background: var(--control-connected);
+    box-shadow: 0 0 8px var(--control-connected);
+}

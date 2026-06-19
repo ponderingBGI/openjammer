@@ -1,0 +1,66 @@
+/*
+ * Button — DESIGN.md §5. 2px ink border, 10px radius, Caveat label; lifts on
+ * hover, presses on click. Styled only via semantic tokens (no literal colors),
+ * so it follows the active theme. Text on filled variants uses --text-on-accent
+ * (the token meant for exactly this), which is correct per-theme rather than a
+ * hardcoded white.
+ */
+.oj-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-xs) var(--space-sm);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-md);
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    background: var(--bg-node);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background var(--transition-fast), transform var(--transition-fast),
+        box-shadow var(--transition-fast);
+}
+
+.oj-btn:hover {
+    background: var(--bg-tertiary);
+    transform: translateY(-1px);
+}
+
+.oj-btn:active {
+    transform: translateY(1px);
+}
+
+.oj-btn--primary {
+    background: var(--accent-primary);
+    color: var(--text-on-accent);
+}
+
+.oj-btn--primary:hover {
+    background: var(--accent-secondary);
+}
+
+.oj-btn--secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.oj-btn--secondary:hover {
+    background: var(--bg-canvas-alt);
+    color: var(--text-primary);
+}
+
+.oj-btn--success {
+    background: var(--accent-success);
+    color: var(--text-on-accent);
+}
+
+.oj-btn--danger {
+    background: var(--accent-danger);
+    color: var(--text-on-accent);
+}
+
+.oj-btn.is-active {
+    background: var(--accent-success);
+    color: var(--text-on-accent);
+}

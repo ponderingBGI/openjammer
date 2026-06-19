@@ -1,0 +1,16 @@
+/* Input — DESIGN.md §5 Inputs/Fields. Numeric/exact values use mono. */
+.oj-input {
+    width: 100%;
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--bg-canvas);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    font-family: var(--font-mono);
+}
+
+.oj-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}

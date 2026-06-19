@@ -12,7 +12,8 @@
     "baseUrl": ".",
     "paths": {
       "@openjammer/oj-protocol": ["./packages/oj-protocol-ts/src/index.ts"],
-      "@openjammer/oj-tokens": ["./packages/oj-tokens/src/index.ts"]
+      "@openjammer/oj-tokens": ["./packages/oj-tokens/src/index.ts"],
+      "@openjammer/oj-ui": ["./packages/oj-ui/src/index.ts"]
     },
 
     /* Bundler mode */

@@ -1,0 +1,58 @@
+/*
+ * NodeShell — DESIGN.md §5 The Node. White card, 2px ink border, 14px radius,
+ * hard node-rest shadow; paper-panel header with a grab cursor. Positioning is
+ * the canvas's job, so this shell is deliberately NOT absolutely positioned.
+ */
+.oj-node {
+    min-width: var(--node-min-width);
+    background: var(--bg-node);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-node);
+    user-select: none;
+    transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.oj-node.is-selected {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-node),
+        0 0 0 3px color-mix(in srgb, var(--accent-primary) 25%, transparent);
+}
+
+.oj-node.is-dragging {
+    opacity: 0.95;
+    cursor: grabbing;
+    box-shadow: var(--shadow-menu);
+}
+
+.oj-node__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-node-header);
+    border-bottom: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    cursor: grab;
+}
+
+.oj-node__header:active {
+    cursor: grabbing;
+}
+
+.oj-node__title {
+    font-family: var(--font-sketch);
+    font-weight: 600;
+    font-size: var(--text-lg);
+    color: var(--text-primary);
+}
+
+.oj-node__type {
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+}
+
+.oj-node__content {
+    padding: var(--space-md);
+}
