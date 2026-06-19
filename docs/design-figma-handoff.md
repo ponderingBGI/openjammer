@@ -88,6 +88,12 @@ Port-color meaning is load-bearing: **audio = blue, control = grey, universal = 
 - ✅ Figma file created + **69 Variables** (Primitives + Theme×3 modes), scoped + `var()` code syntax.
 - ✅ Tokens Studio sync files committed (`$metadata.json`, `$themes.json`) — token leg ready.
 - ✅ claude.ai/design has all 53 components (the visual spec).
-- ⏳ The **53 Figma component masters** — the designer's craft, built on the variables above
-  (or I can build a set of exemplars to use as a template — ask).
-- ⏳ **Code Connect** mappings — once the Figma components exist.
+- ✅ **All 53 Figma component masters built** — across pages Primitives / Composites / Icons,
+  every fill, padding, radius, stroke, and font-size **bound to the Variables above** (so a
+  Theme-mode switch in Figma restyles them, exactly like the app). Build scripts are committed
+  under `.design-sync/figma-scripts/` (re-runnable). **The designer's job is now polish, not
+  build**: a few tall variant-sets overlap their neighbours (fixed-grid placement — just drag
+  apart), `IconLinux` / `IconWindows` have approximated glyph paths to redraw, and a handful of
+  state-fills (e.g. Surface "lifted") want an eye. Everything is real, named, and token-bound.
+- ⏳ **Code Connect** mappings — the Figma components now exist, so this is the next step
+  (Dev Mode → "Connect to code", or `@figma/code-connect` → `packages/oj-ui/src/components/<Name>`).

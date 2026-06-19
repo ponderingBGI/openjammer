@@ -1,9 +1,10 @@
 # Figma component build-scripts (oj-ui → Figma library)
 
-Auto-authored (one per component) from the oj-ui source by a parallel workflow, to be run via
-the Figma MCP `use_figma` tool into the **OpenJammer oj-ui Library** file
+Auto-authored (one per component) from the oj-ui source by a parallel workflow, then **executed**
+into the **OpenJammer oj-ui Library** Figma file via the Figma MCP `use_figma` tool
 (`ayHEMsJL1BPhvTYWi1CFJs`) on top of the already-created Variables (Primitives + Theme×3 modes).
 
+**STATUS: all 53 components are now BUILT in Figma** (these scripts are kept for re-runs / reference).
 Each script builds ONE component as a Figma component/variant-set, every visual property bound
 to the design-system Variables. Run sequentially (Figma mutations must not be parallel). `ok` =
 passed an automated sanity review; `flagged` = the reviewer noted a design-fidelity gap or a
