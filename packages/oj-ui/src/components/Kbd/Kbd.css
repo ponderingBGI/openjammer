@@ -1,0 +1,29 @@
+/*
+ * Kbd — a keyboard-key glyph. Mono keycap ("read this literally", the
+ * Mono-Means-Exact rule), faint --bg-tertiary fill, hairline --border-subtle,
+ * small radius. Styled only via semantic tokens (no literal colors), so it
+ * follows the active theme. The `custom` tint signals a remapped binding via
+ * --accent-secondary — color carries a meaning, so it pairs with the changed
+ * label it sits beside (Signal-Not-Brand).
+ */
+.oj-kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-xs) var(--space-sm);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: 1;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* Custom — a remapped binding. Accent tint + matching border so a changed key
+   reads as deliberate, never stock. */
+.oj-kbd--custom {
+    border-color: var(--accent-secondary);
+    color: var(--accent-secondary);
+}

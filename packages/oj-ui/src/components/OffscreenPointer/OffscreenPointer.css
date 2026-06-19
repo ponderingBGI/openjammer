@@ -1,0 +1,47 @@
+/*
+ * OffscreenPointer — a floating, inked "jump back" affordance. Replicates the
+ * Button look (2px ink border, Caveat label, hard offset shadow) without
+ * importing Button. Styled only via semantic tokens (no literal colours, no
+ * raw px). Per DESIGN.md Hard-Shadow the shadow never blurs, and per No-Surprise
+ * hover/press feedback is colour/border + a <=4px transform — the box never
+ * resizes or reflows. The arrow alone rotates to face the offscreen content.
+ */
+.oj-offscreen-pointer {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-lg);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-lg);
+    background: var(--bg-node);
+    color: var(--text-primary);
+    cursor: pointer;
+    box-shadow: var(--shadow-menu);
+    transition: background var(--transition-fast), border-color var(--transition-fast),
+        transform var(--transition-fast);
+}
+
+.oj-offscreen-pointer:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+    transform: translateY(-2px);
+}
+
+.oj-offscreen-pointer:active {
+    transform: translateY(1px);
+}
+
+/* The glyph is the only thing that turns — the box stays fixed (No-Surprise). */
+.oj-offscreen-pointer__arrow {
+    font-family: var(--font-sketch);
+    font-size: var(--text-2xl);
+    line-height: 1;
+    transform: rotate(var(--oj-pointer-rotation, 0deg));
+}
+
+.oj-offscreen-pointer__label {
+    font-family: var(--font-sketch);
+    font-size: var(--text-md);
+    color: var(--text-secondary);
+}

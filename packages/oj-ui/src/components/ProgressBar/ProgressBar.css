@@ -1,0 +1,36 @@
+/*
+ * ProgressBar — a determinate bar. The track is a hairlined recessed channel
+ * (--bg-tertiary + 1px --sketch-light); the fill is a SOLID tone token, never a
+ * gradient (Signal-Not-Brand). Styled only via semantic tokens (no literal
+ * colors), so it follows the active theme. Replaces .node-progress and the old
+ * gradient .guide-progress-fill.
+ */
+.oj-progress {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--sketch-light);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.oj-progress__fill {
+    height: 100%;
+    background: var(--accent-primary);
+    /* Only the fill width animates; the track never moves or reflows
+       (No-Surprise). The bar's own box stays fixed. */
+    transition: width var(--transition-fast) linear;
+}
+
+/* Tone fills carry machine state (Signal-Not-Brand). Solid, never gradient. */
+.oj-progress--success .oj-progress__fill {
+    background: var(--accent-success);
+}
+
+.oj-progress--warning .oj-progress__fill {
+    background: var(--accent-warning);
+}
+
+.oj-progress--danger .oj-progress__fill {
+    background: var(--accent-danger);
+}
