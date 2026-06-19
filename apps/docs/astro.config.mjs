@@ -84,6 +84,10 @@ export default defineConfig({
                         'build/contributing',
                     ],
                 },
+                {
+                    label: 'Design system',
+                    items: [{ label: 'The 3-way sync', slug: 'design-system/three-way-sync' }],
+                },
             ],
         }),
     ],

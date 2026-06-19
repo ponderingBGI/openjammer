@@ -20,20 +20,9 @@ in **no static CSS**. `packages/oj-ui/oj-tokens.css` is a generated **static sna
 default "cream" theme** (oj-tokens primitives from `dist/variables.css` + the cream semantic
 colors as a `:root` block). It's wired via `cfg.cssEntry` (PKG_DIR-bounded), which appends it
 to `_ds_bundle.css` so the `styles.css` closure defines every `--token` the components read.
-**Regenerate after `bun run tokens` (or any theme/token edit)** with the generator below, else
-the synced cards drift from the app's look:
-
-```python
-# run from repo root; rewrites packages/oj-ui/oj-tokens.css from the cream theme
-import re
-prims=open("packages/oj-tokens/dist/variables.css").read()
-ts=open("packages/oj-tokens/src/generated/themes.ts").read()
-body=re.search(r'"id":\s*"cream".*?"colors":\s*\{(.*?)\}\s*\}', ts, re.S).group(1)
-pairs=re.findall(r'"(\w+)":\s*"([^"]+)"', body)
-kebab=lambda s: re.sub(r'([a-z0-9])([A-Z])', r'\1-\2', s).lower()
-root=":root {\n"+"\n".join(f"    --{kebab(k)}: {v};" for k,v in pairs)+"\n}\n"
-open("packages/oj-ui/oj-tokens.css","w").write(prims.rstrip()+"\n\n/* cream theme semantic colors (static snapshot for design-sync) */\n"+root)
-```
+**It is now emitted automatically by `bun run tokens`** (packages/oj-tokens/build.mjs step 3,
+alongside variables.css + themes.ts) — no manual step, and the CI drift guard catches a stale
+snapshot. Re-run `/design-sync` after a token change so claude.ai/design gets the new values.
 
 ## Fonts
 `.design-sync/fonts.css` re-declares the 8 self-hosted woff2 with **relative `./` URLs** (the
@@ -49,10 +38,9 @@ oj-ui adds a brand font family, add its woff2 to `public/fonts/`, a `@font-face`
 - All 53 components render clean (0 bad/thin); 117 cells graded good.
 
 ## Re-sync risks (watch-list)
-- **oj-tokens.css is a manual cream snapshot** — it does NOT auto-update when the DTCG tokens
-  change; re-run the generator above before a re-sync or the cards lag the app's look. (Only the
-  *default* theme is captured; other themes aren't synced — by design, claude.ai/design renders
-  one theme.)
+- **oj-tokens.css is auto-generated** by `bun run tokens` (build.mjs step 3) — just run it before
+  a re-sync (the CI drift guard enforces it). Only the *default* (cream) theme is snapshotted —
+  other themes aren't synced, by design: claude.ai/design renders one theme.
 - **fonts.css is hand-maintained** (relative-URL twin of the app's font faces) — keep it in step
   if font families change.
 - **DesignSync `localDir` gotcha**: the tool resolves relative paths against the persisted shell

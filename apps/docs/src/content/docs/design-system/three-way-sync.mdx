@@ -1,0 +1,178 @@
+---
+title: The 3-way sync — design ↔ code ↔ Claude Design
+description: How OpenJammer keeps the codebase, claude.ai/design, and Figma in lockstep — and the seamless path from a design idea to production that a technical designer can drive end-to-end.
+---
+
+import { Steps, Aside, CardGrid, Card, LinkCard, Badge } from '@astrojs/starlight/components';
+
+OpenJammer's look lives in **one component library** (`@openjammer/oj-ui`) and **one set of
+design tokens** (`packages/oj-tokens`). Three surfaces consume them — your **code**, the
+**claude.ai/design** agent, and **Figma**. This page is the contract for keeping them in
+lockstep and the playbook for taking an idea from a sketch to shipped, without anyone ever
+hand-copying a value or starting from a stale design.
+
+<Aside type="tip" title="The one promise">
+A relatively-technical designer can own the whole path — design → variations → working feel →
+production PR — and a developer reviews the PR (or takes over the code step). No step requires
+hand-syncing; the machine regenerates everything from one source.
+</Aside>
+
+## The model: one source of truth per concern
+
+It is **not** a triangle of equal peers. Two different things flow two different ways.
+
+```
+              ┌─ Style Dictionary ───→  CODE        (oj-ui reads var(--…))
+ TOKENS ──────┼─ Tokens Studio (Git) ⇄  FIGMA Variables     ← the only TWO-WAY leg
+ (DTCG, the   └─ design-sync ─────────→  claude.ai/design
+  one source)
+
+ COMPONENTS ──┬─ design-sync ──────────→ claude.ai/design          (automatic)
+ (oj-ui code, └─ designer builds masters → FIGMA  ──(Code Connect)──→ links back to code
+  the source)
+```
+
+- **Tokens** (color, spacing, radius, type, shadows) have one home: the DTCG JSON in
+  `packages/oj-tokens/tokens/`. Everything else *derives* from it. The **Figma leg is
+  bidirectional** — a designer can change a token in Figma and it flows back to the repo.
+- **Components** have one home: the **code** (`oj-ui`). The Figma component masters are design
+  representations that *match* the code; **Code Connect** links them so Figma's Dev Mode shows
+  the real snippet. They do **not** flow back into code — a component change is a code change.
+
+<Aside type="caution" title="The rule that prevents 90% of drift">
+**Tokens are two-way. Components are not.** Restyling (color/spacing/type) flows through the
+token leg and needs no code change. A *structural* or *new* component is always authored in
+code — Figma and Claude Design are where you design and prove it first, not where it ships from.
+</Aside>
+
+## Two workflows — pick by what you're changing
+
+### A. Restyle — "make it look different" (tokens)
+
+The fully-automated path. Use it for any color, spacing, radius, type, or theme change —
+including authoring the **new default theme**.
+
+<Steps>
+
+1. **Pull, then edit in Figma.** In the **Tokens Studio** plugin, hit **Pull** first (always —
+   this is what stops you starting from a stale design), then change token values, or edit the
+   DTCG directly in the repo.
+
+2. **Push from Tokens Studio** to the `figma/tokens` branch. That single push is the only manual step.
+
+3. **CI takes over.** [`figma-tokens-sync.yml`](https://github.com/ponderingBGI/openjammer/blob/main/.github/workflows/figma-tokens-sync.yml)
+   runs `bun run tokens`, which regenerates **every** artifact from the pushed DTCG, commits
+   them back, and opens (or refreshes) **one PR into `canari`**.
+
+4. **Review & merge.** Anyone — including the designer — reviews the token diff and merges. A
+   developer can glance at it first. Merging applies the change to the app immediately.
+
+5. **Propagate to Claude Design.** A maintainer re-runs `/design-sync` so claude.ai/design
+   shows the new look. (Components are untouched — they read only semantic tokens.)
+
+</Steps>
+
+<Aside type="note">
+Because every component reads **only** semantic tokens, flipping the **new default theme** is a
+values-only change — one token PR restyles the code, Figma, *and* Claude Design with zero
+component rewrites. That is the entire reason the system is token-first.
+</Aside>
+
+### B. Build — "a new node or a fundamental new component"
+
+Design and prove it in the visual tools first, then bring it into code. This is the seamless
+design→production path.
+
+<Steps>
+
+1. **Design in Figma.** Build the component master (or node) using the **library Variables** —
+   bind fills, spacing, radius, and type to tokens, never hardcode. Use the existing components
+   as parts where you can.
+
+2. **Bring it into Claude Design.** In claude.ai/design, compose it into real screens, spin up
+   **variations**, and test the **functionality and feel** with the real components until it's
+   right. This is where the idea becomes a working interaction, not just a picture.
+
+3. **Into code, as a PR.** Implement it in `oj-ui` (a new component, the same `PluginManifest` +
+   `DspInstance` shape for a node) on a branch → **PR to `canari`**. A technical designer can
+   open the PR; a **developer reviews it, or takes over from the Claude-Design→code step**.
+
+4. **Re-align the surfaces.** Once merged: `/design-sync` refreshes Claude Design, and
+   **Code Connect** links the new Figma master to the new code component (Dev Mode shows the
+   real snippet).
+
+</Steps>
+
+<Aside type="caution" title="Why Figma/Claude Design come first for new things">
+Designing the feel *before* writing code is cheap and fast; rewriting a shipped component is
+not. Figma proves the look, Claude Design proves the interaction — then code ships it once,
+right. The reverse (build in code, redesign later) is the expensive path we're avoiding.
+</Aside>
+
+## Where each surface fits
+
+<CardGrid>
+  <Card title="Code — oj-ui + oj-tokens" icon="seti:typescript">
+    The source of truth for **component behavior** and the **token values**. Everything else
+    derives from here. A maintainer owns merges to `canari`.
+  </Card>
+  <Card title="Figma" icon="figma">
+    Where the **look** is designed: token Variables (two-way via Tokens Studio) and the
+    component **masters**. The designer's home. Linked to code via Code Connect.
+  </Card>
+  <Card title="claude.ai/design" icon="puzzle">
+    Where ideas become **working, varied, testable** UI built from the real components — the
+    proving ground between a Figma sketch and a code PR.
+  </Card>
+</CardGrid>
+
+## Anti-drift — the rules that make it safe
+
+The whole point is that you never start from an old design or hand-copy a value. These are the
+guarantees:
+
+- **One command regenerates everything.** `bun run tokens` emits `variables.css`,
+  `themes.ts`, **and** the design-sync snapshot (`oj-ui/oj-tokens.css`) from the same DTCG.
+  There is no second place to update.
+- **Generated files are never hand-edited.** Edit the DTCG (or Figma via Tokens Studio). CI
+  re-runs `bun run tokens` and **fails the PR if any generated artifact still differs** — a
+  stale or hand-edited file can't merge.
+- **Always Pull before you edit in Figma.** Tokens Studio's Git sync means the repo is the
+  truth; Pull first and you're never editing a stale snapshot. (The auto-PR closes the loop the
+  other way.)
+- **The sync anchor catches component drift.** `/design-sync` records content hashes
+  (`_ds_sync.json`); a re-sync re-verifies and re-uploads only what changed, so Claude Design
+  can't silently rot.
+- **Components flow one way.** Because Figma/Claude Design never write component *code*, there's
+  no merge conflict between a designer's Figma edit and an engineer's code — the code is
+  authoritative, Figma matches it via Code Connect.
+
+## One-time setup
+
+<Steps>
+
+1. **Tokens Studio → repo.** Install *Tokens Studio for Figma* → Settings → Sync providers →
+   **GitHub** → a PAT with Code read+write → folder `packages/oj-tokens/tokens`, branch
+   `figma/tokens`, **token format: W3C DTCG**. Pull. You get a **Primitives** collection and a
+   **Theme** collection with **Cream / Cyberpunk / Midnight** modes (already defined by
+   `$metadata.json` / `$themes.json` in that folder).
+
+2. **Code Connect.** For each Figma component, map it to its `oj-ui` code via Dev Mode
+   (Library → "Connect components to code") or the `@figma/code-connect` CLI. Publish; Dev Mode
+   then shows the real `oj-ui` snippet.
+
+3. **Claude Design.** The library is already synced (`/design-sync`). Re-run it after any merged
+   token or component change to keep it current.
+
+</Steps>
+
+## Who does what
+
+| Step | Designer (technical) | Developer |
+| --- | --- | --- |
+| Restyle (tokens) | Edits + pushes from Figma; merges the auto-PR | Optional glance at the token diff |
+| New look / theme | Authors the values | Merges; re-runs `/design-sync` |
+| New component / node | Designs in Figma → proves in Claude Design → opens the code PR | **Reviews the PR, or takes over the Claude-Design→code step** |
+| Releasing to `main` | — | Owns `canari → main` promotion |
+
+<LinkCard title="Designer handoff details" href="https://github.com/ponderingBGI/openjammer/blob/main/docs/design-figma-handoff.md" description="The day-one checklist, the FigJam-vs-design-file note, and the full component inventory." />

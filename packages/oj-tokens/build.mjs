@@ -1,9 +1,15 @@
 /**
- * oj-tokens build — compiles the DTCG sources in `tokens/` into the two
- * artifacts the runtime consumes:
+ * oj-tokens build — compiles the DTCG sources in `tokens/` into the artifacts
+ * downstream consumers need:
  *
- *   dist/variables.css        the theme-invariant primitives, on :root
- *   src/generated/themes.ts   the per-theme color registry (typed)
+ *   dist/variables.css         the theme-invariant primitives, on :root
+ *   src/generated/themes.ts    the per-theme color registry (typed)
+ *   ../oj-ui/oj-tokens.css      the default (cream) theme as a STATIC :root block
+ *                              (primitives + semantic colors) — design-sync's
+ *                              preview cards render statically, so they need the
+ *                              colors applyTheme would otherwise inject at runtime.
+ *                              Emitting it here keeps `bun run tokens` the single
+ *                              source for every token artifact (no manual step → no drift).
  *
  * Run via the repo root: `bun run tokens`. Output is deterministic (no
  * timestamps), so CI can drift-guard it with `git diff --exit-code`.
@@ -107,6 +113,28 @@ const ts =
 await fs.mkdir(r('src/generated'), { recursive: true });
 await fs.writeFile(r('src/generated/themes.ts'), ts, 'utf8');
 
+// 3) Design-sync static snapshot -> ../oj-ui/oj-tokens.css -------------------
+// The semantic colors are applied at runtime by applyTheme, so they live in no
+// static stylesheet. design-sync's preview cards render statically and need them,
+// so emit the default (cream) theme's colors as a :root block appended to the
+// primitives. Regenerated here so a single `bun run tokens` keeps it in lockstep
+// with the rest — the CI drift guard then makes a stale snapshot impossible.
+const camelToKebab = (s) => s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+const creamRoot =
+    ':root {\n' +
+    Object.entries(themeColors.cream)
+        .map(([k, v]) => `    --${camelToKebab(k)}: ${v};`)
+        .join('\n') +
+    '\n}\n';
+const ojTokensCss =
+    CSS_HEADER +
+    css.trimStart().trimEnd() +
+    '\n\n/* Default "cream" theme semantic colors as a static :root block — the app\n' +
+    '   applies these at runtime via applyTheme; design-sync preview cards need them\n' +
+    '   statically (wired via cfg.cssEntry). */\n' +
+    creamRoot;
+await fs.writeFile(r('../oj-ui/oj-tokens.css'), ojTokensCss, 'utf8');
+
 console.log(
-    `oj-tokens: built dist/variables.css and src/generated/themes.ts (${THEMES.length} themes)`,
+    `oj-tokens: built dist/variables.css, src/generated/themes.ts, oj-ui/oj-tokens.css (${THEMES.length} themes)`,
 );

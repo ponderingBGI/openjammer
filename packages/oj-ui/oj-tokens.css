@@ -41,11 +41,9 @@
   --z-top: 10000;
 }
 
-/* GENERATED for design-sync — the default 'cream' theme's semantic color tokens
-   as a static :root block (the app applies these at runtime via applyTheme;
-   the design-sync preview cards need them statically). Regenerate by re-running
-   the generator in .design-sync/NOTES.md after `bun run tokens`. */
-
+/* Default "cream" theme semantic colors as a static :root block — the app
+   applies these at runtime via applyTheme; design-sync preview cards need them
+   statically (wired via cfg.cssEntry). */
 :root {
     --bg-primary: #F5F0E8;
     --bg-secondary: #EDE8DF;
