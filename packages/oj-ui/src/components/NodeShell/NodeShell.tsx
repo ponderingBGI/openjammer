@@ -13,14 +13,20 @@ export interface NodeShellProps extends Omit<HTMLAttributes<HTMLDivElement>, 'ti
     agentPending?: boolean;
     /** Props for the draggable header strip (e.g. drag handlers, `cursor`). */
     headerProps?: HTMLAttributes<HTMLDivElement>;
+    /** Left-rail input ports — compose `PortRow side="input"`. Edge-anchored,
+     *  rendered full-bleed (outside the content padding) so dots hug the card edge. */
+    inputs?: ReactNode;
+    /** Right-rail output ports — compose `PortRow side="output"`. Edge-anchored. */
+    outputs?: ReactNode;
     children: ReactNode;
 }
 
 /**
  * The signature node card: white surface, 2px ink border, 14px radius, hard
- * offset shadow, with a paper-panel header (title + muted type) and a content
- * area (DESIGN.md §5 The Node). Layout-agnostic — the canvas positions it; this
- * only owns the chrome. Theme-agnostic (semantic tokens only).
+ * offset shadow, a paper-panel header (title + muted type), the left/right port
+ * rails hugging the edges, and a padded content area (DESIGN.md §5 The Node).
+ * Layout-agnostic — the canvas positions it (compose with NodeFrame); this owns
+ * the chrome. Theme-agnostic (semantic tokens only).
  */
 export function NodeShell({
     title,
@@ -29,6 +35,8 @@ export function NodeShell({
     dragging = false,
     agentPending = false,
     headerProps,
+    inputs,
+    outputs,
     className,
     children,
     ...rest
@@ -48,6 +56,12 @@ export function NodeShell({
                 <span className="oj-node__title">{title}</span>
                 {nodeType != null && <span className="oj-node__type">{nodeType}</span>}
             </div>
+            {(inputs != null || outputs != null) && (
+                <div className="oj-node__ports">
+                    <div className="oj-node__ports-left">{inputs}</div>
+                    <div className="oj-node__ports-right">{outputs}</div>
+                </div>
+            )}
             <div className="oj-node__content">{children}</div>
         </div>
     );

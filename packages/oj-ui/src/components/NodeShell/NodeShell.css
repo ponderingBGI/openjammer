@@ -85,3 +85,28 @@
 .oj-node__content {
     padding: var(--space-md);
 }
+
+/* Port rails — full-bleed (outside the content padding) so the dots hug the
+   card's left/right edges, the wiring border a performer connects to. */
+.oj-node__ports {
+    display: flex;
+    justify-content: space-between;
+    padding: var(--space-sm) 0;
+}
+
+.oj-node__ports-left,
+.oj-node__ports-right {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.oj-node__ports-left {
+    align-items: flex-start;
+    padding-left: var(--space-sm);
+}
+
+.oj-node__ports-right {
+    align-items: flex-end;
+    padding-right: var(--space-sm);
+}

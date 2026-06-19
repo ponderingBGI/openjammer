@@ -34,6 +34,7 @@ import { AutoParamPanel } from '../params/AutoParamPanel';
 import { manifestFor, manifestForDynamic } from '../../engine/manifest';
 import { resolveNodeDefinition } from '../../engine/registry';
 import { getDynamicPlugin } from '../../engine/dynamicRegistry';
+import { NodeFrame, NodeShell, PortRow } from '@openjammer/oj-ui';
 import './BaseNode.css';
 
 interface NodeWrapperProps {
@@ -66,7 +67,6 @@ const SCHEMATIC_TYPES = [
 ];
 
 export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps) {
-    const nodeRef = useRef<HTMLDivElement>(null);
     const [isDragging, setIsDragging] = useState(false);
     const dragStart = useRef<Position>({ x: 0, y: 0 });
     const nodeStart = useRef<Position>({ x: 0, y: 0 });
@@ -484,71 +484,45 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
         }
     };
 
+    const renderPort = (port: GraphNode['ports'][number], side: 'input' | 'output') => (
+        <PortRow
+            key={port.id}
+            side={side}
+            kind={port.type === 'audio' ? 'audio' : 'control'}
+            connected={hasConnection(port.id)}
+            hideLabel={!!port.hideExternalLabel}
+            label={port.name}
+            data-node-id={node.id}
+            data-port-id={port.id}
+            data-port-type={port.type}
+            onMouseDown={(e: React.MouseEvent) => handlePortMouseDown(port.id, e)}
+            onMouseUp={(e: React.MouseEvent) => handlePortMouseUp(port.id, e)}
+            onMouseEnter={() => handlePortMouseEnter(port.id)}
+            onMouseLeave={handlePortMouseLeave}
+        />
+    );
+
     return (
-        <div
-            ref={nodeRef}
-            className={`node ${node.type} ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isAgentPending ? 'agent-pending' : ''}`}
-            style={{
-                left: node.position.x,
-                top: node.position.y
-            }}
+        <NodeFrame
+            position={node.position}
+            dragging={isDragging}
+            className={`node ${node.type}`}
             onClick={(e) => e.stopPropagation()}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}
         >
-            {/* Header */}
-            <div className="node-header" onMouseDown={handleHeaderMouseDown}>
-                <span className="node-title">{headerTitle}</span>
-                <span className="node-type">{node.category}</span>
-            </div>
-
-            {/* Ports */}
-            <div className="node-ports">
-                <div className="node-ports-left">
-                    {inputPorts.map((port) => (
-                        <div
-                            key={port.id}
-                            className={`port port-input`}
-                            onMouseDown={(e) => handlePortMouseDown(port.id, e)}
-                            onMouseUp={(e) => handlePortMouseUp(port.id, e)}
-                            onMouseEnter={() => handlePortMouseEnter(port.id)}
-                            onMouseLeave={handlePortMouseLeave}
-                        >
-                            <div
-                                className={`port-dot ${port.type === 'audio' ? 'audio-input' : 'control'} ${hasConnection(port.id) ? 'connected' : ''}`}
-                                data-node-id={node.id}
-                                data-port-id={port.id}
-                            />
-                            {!port.hideExternalLabel && <span className="port-label">{port.name}</span>}
-                        </div>
-                    ))}
-                </div>
-
-                <div className="node-ports-right">
-                    {outputPorts.map((port) => (
-                        <div
-                            key={port.id}
-                            className={`port port-output`}
-                            onMouseDown={(e) => handlePortMouseDown(port.id, e)}
-                            onMouseUp={(e) => handlePortMouseUp(port.id, e)}
-                            onMouseEnter={() => handlePortMouseEnter(port.id)}
-                            onMouseLeave={handlePortMouseLeave}
-                        >
-                            {!port.hideExternalLabel && <span className="port-label">{port.name}</span>}
-                            <div
-                                className={`port-dot ${port.type === 'audio' ? 'audio-output' : 'control'} ${hasConnection(port.id) ? 'connected' : ''}`}
-                                data-node-id={node.id}
-                                data-port-id={port.id}
-                            />
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            {/* Content */}
-            <div className="node-content">
+            <NodeShell
+                title={headerTitle}
+                nodeType={node.category}
+                selected={isSelected}
+                dragging={isDragging}
+                agentPending={isAgentPending}
+                headerProps={{ onMouseDown: handleHeaderMouseDown }}
+                inputs={inputPorts.map((port) => renderPort(port, 'input'))}
+                outputs={outputPorts.map((port) => renderPort(port, 'output'))}
+            >
                 {renderNodeContent()}
-            </div>
-        </div>
+            </NodeShell>
+        </NodeFrame>
     );
 });
