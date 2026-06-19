@@ -1,0 +1,9 @@
+{
+  "projectId": "53cf9a90-d179-4e3f-8413-58b270fff363",
+  "shape": "package",
+  "pkg": "@openjammer/oj-ui",
+  "globalName": "OjUi",
+  "tokensGlob": ["../../.design-sync/oj-tokens.css"],
+  "extraFonts": ["../../src/styles/fonts.css"],
+  "readmeHeader": ".design-sync/conventions.md"
+}
