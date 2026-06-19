@@ -12,6 +12,7 @@
 import { useEffect, memo } from 'react';
 import { useAudioStore } from '../../store/audioStore';
 import type { GraphNode, KeyboardNodeData } from '../../engine/types';
+import { Port } from '@openjammer/oj-ui';
 
 interface KeyboardNodeProps {
     node: GraphNode;
@@ -79,22 +80,32 @@ export const KeyboardNode = memo(function KeyboardNode({
             {/* Body - Show auto-generated ports from internal canvas */}
             <div className="keyboard-schematic-body">
                 {/* Render ports dynamically (auto-synced from internal canvas-input/output nodes) */}
-                {node.ports.map((port) => (
-                    <div key={port.id} className={`port-row ${port.direction}`}>
-                        <span className="port-label">{port.name}</span>
-                        <div
-                            className={`port-circle-marker ${port.type}-port ${port.direction}-port ${hasConnection?.(port.id) ? 'connected' : ''} ${port.id === 'control' && isActive && controlDown ? 'control-active' : ''}`}
-                            data-node-id={node.id}
-                            data-port-id={port.id}
-                            data-port-type={port.type}
-                            onMouseDown={(e) => handlePortMouseDown?.(port.id, e)}
-                            onMouseUp={(e) => handlePortMouseUp?.(port.id, e)}
-                            onMouseEnter={() => handlePortMouseEnter?.(port.id)}
-                            onMouseLeave={handlePortMouseLeave}
-                            title={port.name}
-                        />
-                    </div>
-                ))}
+                {node.ports.map((port) => {
+                    const isControlActive = port.id === 'control' && isActive && controlDown;
+                    return (
+                        <div key={port.id} className={`port-row ${port.direction}`}>
+                            <span className="port-label">{port.name}</span>
+                            <Port
+                                kind={port.type}
+                                direction={port.direction}
+                                connected={!!hasConnection?.(port.id)}
+                                {...(port.type === 'universal' && port.resolvedType
+                                    ? { resolvedKind: port.resolvedType }
+                                    : {})}
+                                className={isControlActive ? 'port-circle-marker control-active' : undefined}
+                                style={{ width: 20, height: 20 }}
+                                data-node-id={node.id}
+                                data-port-id={port.id}
+                                data-port-type={port.type}
+                                onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(port.id, e)}
+                                onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(port.id, e)}
+                                onMouseEnter={() => handlePortMouseEnter?.(port.id)}
+                                onMouseLeave={handlePortMouseLeave}
+                                title={port.name}
+                            />
+                        </div>
+                    );
+                })}
             </div>
 
             {/* Active indicator */}

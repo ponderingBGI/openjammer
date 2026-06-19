@@ -13,6 +13,7 @@ import { nodeDefinitions } from '../../engine/registry';
 import { InstrumentLoader } from '../../audio/instrumentCatalog';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
 import { ScrollContainer } from '../common/ScrollContainer';
+import { Port } from '@openjammer/oj-ui';
 
 interface InstrumentNodeProps {
     node: GraphNode;
@@ -540,8 +541,11 @@ export const InstrumentNode = memo(function InstrumentNode({
                         /* Empty state - use memoized port */
                         emptyStatePort && (
                             <div className="instrument-row-simple empty-state">
-                                <div
+                                <Port
+                                    kind="control"
+                                    direction="input"
                                     className="bundle-input-port empty"
+                                    style={{ width: '12px', height: '12px' }}
                                     data-node-id={node.id}
                                     data-port-id={emptyStatePort.id}
                                     onMouseDown={(e) => handlePortMouseDown?.(emptyStatePort.id, e)}
@@ -562,8 +566,12 @@ export const InstrumentNode = memo(function InstrumentNode({
                                 return (
                                     <div key={row.rowId} className={`instrument-row-simple ${index > 0 ? 'with-divider' : ''} ${isPedal ? 'pedal-row' : ''}`}>
                                         {/* Input port for this row's bundle */}
-                                        <div
+                                        <Port
+                                            kind="control"
+                                            direction="input"
+                                            connected={!!(rowPort && hasConnection?.(rowPort.id))}
                                             className={`bundle-input-port ${isPedal ? 'pedal' : ''} ${rowPort && hasConnection?.(rowPort.id) ? 'connected' : ''}`}
+                                            style={{ width: '12px', height: '12px' }}
                                             data-node-id={node.id}
                                             data-port-id={rowPort?.id || 'bundle-in'}
                                             onMouseDown={(e) => handlePortMouseDown?.(rowPort?.id || 'bundle-in', e)}
@@ -614,8 +622,11 @@ export const InstrumentNode = memo(function InstrumentNode({
                             {/* Empty row for adding new connections - use memoized port */}
                             {availableNewRowPort && (
                                 <div className="instrument-row-simple empty-row with-divider">
-                                    <div
+                                    <Port
+                                        kind="control"
+                                        direction="input"
                                         className="bundle-input-port empty"
+                                        style={{ width: '12px', height: '12px' }}
                                         data-node-id={node.id}
                                         data-port-id={availableNewRowPort.id}
                                         onMouseDown={(e) => handlePortMouseDown?.(availableNewRowPort.id, e)}
@@ -632,8 +643,12 @@ export const InstrumentNode = memo(function InstrumentNode({
 
                 {/* Output port on right bottom */}
                 {outputPort && (
-                    <div
+                    <Port
+                        kind="audio"
+                        direction="output"
+                        connected={!!hasConnection?.(outputPort.id)}
                         className={`instrument-output-port ${hasConnection?.(outputPort.id) ? 'connected' : ''}`}
+                        style={{ width: '16px', height: '16px' }}
                         data-node-id={node.id}
                         data-port-id={outputPort.id}
                         onMouseDown={(e) => handlePortMouseDown?.(outputPort.id, e)}
