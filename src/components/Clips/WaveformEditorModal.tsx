@@ -16,7 +16,7 @@ import { getSampleFile } from '../../store/libraryStore';
 import { getAudioContext } from '../../audio/audioContext';
 import { useScrollCapture } from '../../hooks/useScrollCapture';
 import type { ScrollData } from '../../hooks/useScrollCapture';
-import { Button } from '@openjammer/oj-ui';
+import { Button, Slider } from '@openjammer/oj-ui';
 import './WaveformEditorModal.css';
 
 // Preview audio state
@@ -624,14 +624,13 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
                     </Button>
                     <div className="waveform-editor-zoom-track">
                         <span className="waveform-editor-zoom-label">−</span>
-                        <input
-                            type="range"
-                            min="1"
-                            max="20"
-                            step="0.1"
+                        <Slider
+                            aria-label="Zoom"
+                            min={1}
+                            max={20}
+                            step={0.1}
                             value={zoom}
-                            onChange={(e) => {
-                                const newZoom = parseFloat(e.target.value);
+                            onChange={(newZoom) => {
                                 const oldVisibleRange = 1 / zoom;
                                 const newVisibleRange = 1 / newZoom;
                                 const viewCenter = scrollOffset + oldVisibleRange / 2;

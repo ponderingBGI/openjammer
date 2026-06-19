@@ -7,7 +7,7 @@
  * manual download button, so Settings never hides the path to Stable/Canari.
  */
 
-import { Button } from '@openjammer/oj-ui';
+import { Button, Toggle } from '@openjammer/oj-ui';
 import { useState } from 'react';
 
 import { isTauri, openExternal } from '../../ai/tauri';
@@ -250,15 +250,12 @@ export function UpdatesPanel() {
 
             {autoUpdateAvailable ? (
                 <div className="oj-upd-row">
-                    <label className="oj-upd-toggle">
-                        <input
-                            type="checkbox"
-                            checked={autoUpdateEnabled}
-                            disabled={!!pinnedVersion}
-                            onChange={(e) => setAutoUpdateEnabled(e.target.checked)}
-                        />
-                        <span>Keep OpenJammer up to date automatically</span>
-                    </label>
+                    <Toggle
+                        label="Keep OpenJammer up to date automatically"
+                        checked={autoUpdateEnabled}
+                        disabled={!!pinnedVersion}
+                        onChange={setAutoUpdateEnabled}
+                    />
                     <p className="oj-upd-desc">
                         Updates download in the background and install when you quit. You’re never
                         interrupted mid-session.

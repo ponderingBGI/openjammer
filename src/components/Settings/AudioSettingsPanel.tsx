@@ -10,7 +10,7 @@ import { reinitAudioContext, getLatencyMetrics, startLatencyMonitoring } from '.
 import { getExecutor } from '../../audio/executor';
 import { LowLatencyGuide } from '../Guides';
 import { useLowLatencyGuide } from '../../store/guideStore';
-import { Button, Select } from '@openjammer/oj-ui';
+import { Button, Select, Toggle } from '@openjammer/oj-ui';
 import './AudioSettingsPanel.css';
 
 // Friendly messages for each latency classification
@@ -273,17 +273,14 @@ export function AudioSettingsPanel() {
 
                 {/* Low Latency Mode Toggle */}
                 <div className="setting-group">
-                    <label className="toggle-label">
-                        <input
-                            type="checkbox"
-                            checked={pendingConfig.lowLatencyMode}
-                            onChange={(e) => setPendingConfig({
-                                ...pendingConfig,
-                                lowLatencyMode: e.target.checked
-                            })}
-                        />
-                        <span>Low Latency Mode</span>
-                    </label>
+                    <Toggle
+                        label="Low Latency Mode"
+                        checked={pendingConfig.lowLatencyMode}
+                        onChange={(checked) => setPendingConfig({
+                            ...pendingConfig,
+                            lowLatencyMode: checked
+                        })}
+                    />
                     <p className="setting-description">
                         Disables echo cancellation, noise suppression, and auto gain control
                         for microphone input. Reduces latency by 20-50ms.
