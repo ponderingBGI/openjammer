@@ -4,8 +4,7 @@ import './KeyTile.css';
 
 export type KeyTileVariant = 'key' | 'pad' | 'black' | 'white';
 
-export interface KeyTileProps
-    extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'title'> {
+export interface KeyTileProps extends ButtonHTMLAttributes<HTMLButtonElement> {
     /** The key/pad's name (a note name, drum label, or glyph) — Caveat voice. */
     label?: ReactNode;
     /** Pressed / lit — the tile brightens with the accent (no blur). */

@@ -20,6 +20,7 @@ import type { GraphNode, SamplerNodeData, SamplerRow } from '../../engine/types'
 import { useGraphStore } from '../../store/graphStore';
 import { isSamplerNodeData } from '../../engine/typeGuards';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
+import { Port } from '@openjammer/oj-ui';
 import './SamplerVisual.css';
 
 /**
@@ -169,15 +170,18 @@ export const SamplerVisualNode = memo(function SamplerVisualNode({
 
                 {/* Placeholder row for new connections */}
                 <div className={`sampler-placeholder-row ${rows.length > 0 ? '' : 'first-row'}`}>
-                    <div
-                        className="sampler-placeholder-port"
+                    <Port
+                        kind="control"
+                        direction="input"
+                        placeholder
+                        style={{ width: 12, height: 12 }}
                         data-node-id={node.id}
                         data-port-id={placeholderPortId}
-                        onMouseDown={(e) => handlePortMouseDown?.(placeholderPortId, e)}
-                        onMouseUp={(e) => handlePortMouseUp?.(placeholderPortId, e)}
+                        onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(placeholderPortId, e)}
+                        onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(placeholderPortId, e)}
                         onMouseEnter={() => handlePortMouseEnter?.(placeholderPortId)}
                         onMouseLeave={handlePortMouseLeave}
-                        onKeyDown={(e) => {
+                        onKeyDown={(e: React.KeyboardEvent) => {
                             if (e.key === 'Enter' || e.key === ' ') {
                                 e.preventDefault();
                                 e.stopPropagation();
@@ -276,16 +280,19 @@ const RowWithPorts = memo(function RowWithPorts({
                     const keyLabel = `Key ${index + 1}: +${semitonesFromRoot.toFixed(1)} semitones`;
 
                     return (
-                        <div
+                        <Port
                             key={index}
-                            className={`sampler-key-port ${isConnected ? 'connected' : ''}`}
+                            kind="control"
+                            direction="input"
+                            connected={isConnected}
+                            style={{ width: 12, height: 12 }}
                             data-node-id={nodeId}
                             data-port-id={portId}
-                            onMouseDown={(e) => handlePortMouseDown?.(portId, e)}
-                            onMouseUp={(e) => handlePortMouseUp?.(portId, e)}
+                            onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(portId, e)}
+                            onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(portId, e)}
                             onMouseEnter={() => handlePortMouseEnter?.(portId)}
                             onMouseLeave={handlePortMouseLeave}
-                            onKeyDown={(e) => {
+                            onKeyDown={(e: React.KeyboardEvent) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
                                     e.preventDefault();
                                     e.stopPropagation();

@@ -9,7 +9,13 @@
 import { useAudioStore } from '../../store/audioStore';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
 import type { GraphNode } from '../../engine/types';
+import { KeyTile } from '@openjammer/oj-ui';
 import './SchematicNodes.css';
+
+// Lock each KeyTile to the original square-key footprint (visual no-op vs the
+// legacy 50x50 .keyboard-visual-key). The spacebar keeps its wide 300px form.
+const KEY_SIZE: React.CSSProperties = { width: 50, height: 50 };
+const SPACEBAR_SIZE: React.CSSProperties = { width: 300, height: 50 };
 
 interface KeyboardVisualNodeProps {
     node: GraphNode;
@@ -92,9 +98,14 @@ export function KeyboardVisualNode({
         const isConnected = hasConnection?.(portId);
 
         return (
-            <div
+            <KeyTile
                 key={portId}
-                className={`keyboard-visual-key ${isActive ? 'active' : ''}`}
+                variant="key"
+                label={key}
+                active={isActive}
+                connected={!!isConnected}
+                className="keyboard-visual-key"
+                style={KEY_SIZE}
                 title={`${key} → ${portId}`}
                 data-node-id={node.id}
                 data-port-id={portId}
@@ -103,12 +114,7 @@ export function KeyboardVisualNode({
                 onMouseUp={(e) => handlePortMouseUp?.(portId, e)}
                 onMouseEnter={() => handlePortMouseEnter?.(portId)}
                 onMouseLeave={handlePortMouseLeave}
-            >
-                <span className="key-label">{key}</span>
-                <div
-                    className={`key-port-marker control-port output-port ${isConnected ? 'connected' : ''}`}
-                />
-            </div>
+            />
         );
     };
 
@@ -146,8 +152,13 @@ export function KeyboardVisualNode({
 
                 {/* Spacebar */}
                 <div className="keyboard-row row-space">
-                    <div
-                        className={`keyboard-visual-key spacebar ${isSpaceActive() ? 'active' : ''}`}
+                    <KeyTile
+                        variant="key"
+                        label="SPACE"
+                        active={isSpaceActive()}
+                        connected={!!hasConnection?.('key-space')}
+                        className="keyboard-visual-key spacebar"
+                        style={SPACEBAR_SIZE}
                         title="Space → key-space"
                         data-node-id={node.id}
                         data-port-id="key-space"
@@ -156,12 +167,7 @@ export function KeyboardVisualNode({
                         onMouseUp={(e) => handlePortMouseUp?.('key-space', e)}
                         onMouseEnter={() => handlePortMouseEnter?.('key-space')}
                         onMouseLeave={handlePortMouseLeave}
-                    >
-                        <span className="key-label">SPACE</span>
-                        <div
-                            className={`key-port-marker control-port output-port ${hasConnection?.('key-space') ? 'connected' : ''}`}
-                        />
-                    </div>
+                    />
                 </div>
             </div>
         </div>
