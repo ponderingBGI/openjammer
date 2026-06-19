@@ -27,6 +27,8 @@
     "tokens": "bun ./packages/oj-tokens/build.mjs",
     "ladle": "ladle serve",
     "ladle:build": "ladle build",
+    "gen:component-map": "ladle build >/dev/null 2>&1 && bun scripts/oj/index.ts design map",
+    "design:status": "bun scripts/oj/index.ts design status",
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest",
