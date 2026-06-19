@@ -28,11 +28,11 @@ import {
     type AiSlashCommand,
 } from '../../ai/slashCommands';
 import {
-    cycleThinkingLevel,
     listSlashCommands,
     restartAgent,
     runCommand,
     type PiCommandRuntime,
+    type PiThinkingLevel,
 } from '../../ai/piSessions';
 import { useAgentSessionStore } from '../../store/agentSessionStore';
 import { useAuthStore } from '../../auth/authStore';
@@ -85,6 +85,13 @@ function sourceLabel(source: AiSlashCommand['source']): string {
     return 'Skill';
 }
 
+const THINKING_LEVELS: readonly PiThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high'];
+
+function nextThinkingLevel(current: PiThinkingLevel): PiThinkingLevel {
+    const index = THINKING_LEVELS.indexOf(current);
+    return THINKING_LEVELS[(index + 1) % THINKING_LEVELS.length];
+}
+
 function formatSessionState(data: unknown): string {
     const state = data && typeof data === 'object' ? data as Record<string, unknown> : {};
     const sessionId = typeof state.sessionId === 'string' ? state.sessionId : 'unknown';
@@ -123,6 +130,7 @@ export function AiPanel({
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const transcriptRef = useRef<HTMLDivElement>(null);
     const autoSentRef = useRef(false);
+    const thinkingLevelRef = useRef<PiThinkingLevel>('medium');
 
     const backend = useMemo(() => getAgentBackend(), []);
     // Gate on the platform capability seam (M0): 'none' (browser) shows the
@@ -147,8 +155,7 @@ export function AiPanel({
     const [draft, setDraft] = useState(autoSendInitial ? '' : initialPrompt);
     const [view, setView] = useState<'chat' | 'resume' | 'models'>('chat');
     const [modelQuery, setModelQuery] = useState('');
-    const [thinkingLevel, setThinkingLevel] = useState('auto');
-    const [thinkingBusy, setThinkingBusy] = useState(false);
+    const [thinkingLevel, setThinkingLevel] = useState<PiThinkingLevel>('medium');
     const [commandNotice, setCommandNotice] = useState<string | null>(null);
     const [dynamicCommands, setDynamicCommands] = useState<AiSlashCommand[]>([]);
     const [commandsLoadedFor, setCommandsLoadedFor] = useState<string | null>(null);
@@ -208,6 +215,7 @@ export function AiPanel({
             providerCustomModels: auth.providerCustomModels,
             provider: activeProvider,
             modelId: auth.modelId,
+            thinkingLevel: thinkingLevelRef.current,
             yolo: useSandboxStore.getState().mode === 'yolo',
         };
     }, []);
@@ -371,29 +379,15 @@ export function AiPanel({
         [getPiRuntime, newSession, onClose, runTask],
     );
 
-    const cycleReasoning = useCallback(async () => {
-        if (thinkingBusy) return;
-        setThinkingBusy(true);
-        setThinkingLevel('changing…');
-        setCommandNotice('Changing reasoning level…');
-        const res = await cycleThinkingLevel(getPiRuntime());
-        setThinkingBusy(false);
-        if (!res.ok) {
-            setThinkingLevel('unavailable');
-            setCommandNotice('Pi could not change reasoning yet. Try again after selecting a model.');
-            return;
-        }
-        const level = res.data && typeof res.data === 'object'
-            ? (res.data as { level?: unknown }).level
-            : null;
-        if (typeof level === 'string') {
-            setThinkingLevel(level);
-            setCommandNotice(`Thinking level: ${level}`);
-        } else {
-            setThinkingLevel('unsupported');
-            setCommandNotice('Current model does not support reasoning.');
-        }
-    }, [getPiRuntime, thinkingBusy]);
+    const cycleReasoning = useCallback(() => {
+        const nextLevel = nextThinkingLevel(thinkingLevelRef.current);
+        thinkingLevelRef.current = nextLevel;
+        // This is the musician-facing path: update the visible state synchronously.
+        // The next agent turn carries this level in its run payload and applies it
+        // before the prompt, so Shift+Tab never waits for a Pi subprocess round-trip.
+        setThinkingLevel(nextLevel);
+        setCommandNotice(`Thinking level: ${nextLevel}`);
+    }, []);
 
     const onChatKeyDownCapture = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
         if (e.key !== 'Tab' || !e.shiftKey) return;

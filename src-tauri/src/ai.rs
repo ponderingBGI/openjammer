@@ -219,6 +219,7 @@ pub fn ai_run(
     provider_custom_models: Option<HashMap<String, Vec<String>>>,
     provider: Option<String>,
     model_id: Option<String>,
+    thinking_level: Option<String>,
     yolo: Option<bool>,
     // When present, resume this Pi session (so the run continues that
     // conversation's context); when absent, Pi uses/creates its current session
@@ -422,6 +423,11 @@ pub fn ai_run(
         }
     }
 
+    if apply_thinking_level_if_needed(child, thinking_level.as_deref(), &app, &channel).is_err() {
+        drop(guard.take());
+        return Ok(());
+    }
+
     if let Err(e) = send_command(
         &mut child.stdin,
         &serde_json::json!({ "type": "prompt", "message": prompt }),
@@ -477,6 +483,8 @@ pub struct WarmChild {
     jailed: bool,
     /// Fingerprint of forwarded provider keys. A provider/key change forces a respawn.
     auth_fingerprint: String,
+    /// Last thinking level successfully applied to this warm child.
+    thinking_level: Option<String>,
     /// The Pi session this child is currently on, tracked so a session change
     /// `switch_session`es the live child instead of respawning, and so the active
     /// id can be reported back to the frontend for persistence / reattach.
@@ -873,6 +881,7 @@ fn spawn_and_configure(
         project_root: project_root.to_path_buf(),
         jailed,
         auth_fingerprint,
+        thinking_level: None,
         // A fresh child starts on Pi's own current/auto session; the first run
         // resolves + reports the real id (or switches to a requested one).
         current_session: None,
@@ -1305,6 +1314,7 @@ pub fn ai_command(
     provider_custom_models: Option<HashMap<String, Vec<String>>>,
     provider: Option<String>,
     model_id: Option<String>,
+    thinking_level: Option<String>,
     yolo: Option<bool>,
     warm: tauri::State<'_, WarmChildState>,
     bridge: tauri::State<'_, crate::bridge::BridgeState>,
@@ -1365,6 +1375,7 @@ pub fn ai_command(
         &provider_custom_models,
     );
     let jailed = !yolo.unwrap_or(false);
+    let _runtime_thinking_level = sanitize_thinking_level(thinking_level.as_deref());
     let mut env = env_for_provider_keys(jailed, &filtered_provider_key_entries);
     env.insert(
         "HOME".to_string(),
@@ -1485,6 +1496,11 @@ pub fn ai_command(
                         .get("modelId")
                         .and_then(|v| v.as_str())
                         .map(String::from);
+                } else if cmd_name == "set_thinking_level" {
+                    child.thinking_level = command
+                        .get("level")
+                        .and_then(|v| v.as_str())
+                        .and_then(|level| sanitize_thinking_level(Some(level)));
                 }
                 let data = value.get("data").cloned();
                 emit(
@@ -1518,6 +1534,71 @@ pub fn ai_command(
 pub fn ai_restart(warm: tauri::State<'_, WarmChildState>) -> Result<(), String> {
     drop(warm.0.lock().unwrap_or_else(|e| e.into_inner()).take());
     Ok(())
+}
+
+fn valid_thinking_level(level: &str) -> bool {
+    matches!(
+        level,
+        "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    )
+}
+
+fn sanitize_thinking_level(level: Option<&str>) -> Option<String> {
+    level
+        .map(str::trim)
+        .filter(|level| valid_thinking_level(level))
+        .map(String::from)
+}
+
+fn apply_thinking_level_if_needed(
+    child: &mut WarmChild,
+    level: Option<&str>,
+    app: &AppHandle,
+    channel: &str,
+) -> Result<(), ()> {
+    let Some(level) = sanitize_thinking_level(level) else {
+        return Ok(());
+    };
+    if child.thinking_level.as_deref() == Some(level.as_str()) {
+        return Ok(());
+    }
+    let req = serde_json::json!({ "type": "set_thinking_level", "level": level.as_str() });
+    if send_command(&mut child.stdin, &req).is_err() {
+        emit(
+            app,
+            channel,
+            PiStreamLine::error("could not send thinking-level change"),
+        );
+        return Err(());
+    }
+    match await_response(
+        &mut child.reader,
+        &mut child.stdin,
+        app,
+        channel,
+        "set_thinking_level",
+    ) {
+        Ok(true) => {
+            child.thinking_level = Some(level);
+            Ok(())
+        }
+        Ok(false) => {
+            emit(
+                app,
+                channel,
+                PiStreamLine::thought("Pi rejected the selected thinking level"),
+            );
+            Ok(())
+        }
+        Err(()) => {
+            emit(
+                app,
+                channel,
+                PiStreamLine::error("Pi closed the stream while setting thinking level."),
+            );
+            Err(())
+        }
+    }
 }
 
 /// Write one JSON command to Pi's stdin (LF-framed) and flush.

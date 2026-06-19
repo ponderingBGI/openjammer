@@ -146,6 +146,7 @@ export class PiAgentBackend implements AgentBackend {
             providerCustomModels: task.providerCustomModels ?? null,
             provider: task.provider ?? null,
             modelId: task.modelId ?? null,
+            thinkingLevel: task.thinkingLevel ?? null,
             yolo: task.yolo ?? false,
             sessionId: task.sessionId ?? null,
             channel,

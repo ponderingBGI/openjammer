@@ -385,6 +385,8 @@ export interface AgentTask {
      * configured default for the provider is used.
      */
     modelId?: string;
+    /** Desired Pi thinking/reasoning level for the next turn. Updated locally by Shift+Tab. */
+    thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
     /**
      * YOLO mode (Phase 6): when true the native host drops the OS jail + in-Pi
      * permission-gate and forwards the full shell environment (the real Pi

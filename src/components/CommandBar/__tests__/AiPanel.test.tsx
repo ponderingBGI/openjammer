@@ -30,7 +30,7 @@ const piSessionsMock = vi.hoisted(() => ({
         { provider: 'openai', id: 'gpt-4o', name: 'GPT-4o', reasoning: true },
     ]),
     setModel: vi.fn(async () => ({ ok: true })),
-    cycleThinkingLevel: vi.fn(async () => ({ ok: true, data: { level: 'medium' } })),
+    setThinkingLevel: vi.fn(async () => ({ ok: true })),
     restartAgent: vi.fn(async () => true),
     listSessions: vi.fn(async () => []),
     loadSessionMessages: vi.fn(async () => ({ messages: [], incomplete: false })),
@@ -46,7 +46,7 @@ vi.mock('../../../ai/piSessions', () => ({
     getState: piSessionsMock.getState,
     listAvailableModels: piSessionsMock.listAvailableModels,
     setModel: piSessionsMock.setModel,
-    cycleThinkingLevel: piSessionsMock.cycleThinkingLevel,
+    setThinkingLevel: piSessionsMock.setThinkingLevel,
     restartAgent: piSessionsMock.restartAgent,
     listSessions: piSessionsMock.listSessions,
     loadSessionMessages: piSessionsMock.loadSessionMessages,
@@ -94,7 +94,7 @@ describe('AiPanel chat', () => {
             { provider: 'openai', id: 'gpt-4o', name: 'GPT-4o', reasoning: true },
         ]);
         piSessionsMock.setModel.mockResolvedValue({ ok: true });
-        piSessionsMock.cycleThinkingLevel.mockResolvedValue({ ok: true, data: { level: 'medium' } });
+        piSessionsMock.setThinkingLevel.mockResolvedValue({ ok: true });
         piSessionsMock.restartAgent.mockResolvedValue(true);
         piSessionsMock.listSessions.mockResolvedValue([]);
         piSessionsMock.loadSessionMessages.mockResolvedValue({ messages: [], incomplete: false });
@@ -258,13 +258,23 @@ describe('AiPanel chat', () => {
         ));
     });
 
-    it('Shift+Tab cycles the Pi reasoning level', async () => {
+    it('Shift+Tab changes the visible reasoning level immediately and the next prompt carries it', () => {
+        const send = vi.fn();
+        useAgentSessionStore.setState({ send });
         renderPanel();
         const input = screen.getByPlaceholderText(/Ask anything/i);
         fireEvent.keyDown(input, { key: 'Tab', shiftKey: true });
-        await waitFor(() => expect(piSessionsMock.cycleThinkingLevel).toHaveBeenCalledOnce());
-        expect(await screen.findByText(/Thinking level: medium/i)).toBeInTheDocument();
-        expect(screen.getAllByText(/Thinking: medium/i).length).toBeGreaterThan(0);
+        expect(screen.getByText(/Thinking level: high/i)).toBeInTheDocument();
+        expect(screen.getAllByText(/Thinking: high/i).length).toBeGreaterThan(0);
+        expect(piSessionsMock.setThinkingLevel).not.toHaveBeenCalled();
+
+        fireEvent.change(input, { target: { value: 'make a drone' } });
+        fireEvent.keyDown(input, { key: 'Enter' });
+        expect(send).toHaveBeenCalledOnce();
+        expect(send.mock.calls[0][1]).toMatchObject({
+            prompt: 'make a drone',
+            thinkingLevel: 'high',
+        });
     });
 
     it('app slash commands can open OpenJammer chrome and close the palette', () => {

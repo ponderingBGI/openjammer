@@ -39,6 +39,7 @@ export interface PiCommandRuntime {
     providerCustomModels?: Record<string, string[]>;
     provider?: string;
     modelId?: string;
+    thinkingLevel?: PiThinkingLevel;
     yolo?: boolean;
 }
 
@@ -141,6 +142,7 @@ export async function runCommand(
         providerCustomModels: runtime.providerCustomModels ?? null,
         provider: runtime.provider ?? null,
         modelId: runtime.modelId ?? null,
+        thinkingLevel: runtime.thinkingLevel ?? null,
         yolo: runtime.yolo ?? false,
     }).catch(() => settle(false));
 
@@ -178,9 +180,7 @@ export async function setModel(
     return runCommand({ type: 'set_model', provider, modelId }, runtime);
 }
 
-export async function cycleThinkingLevel(runtime?: PiCommandRuntime): Promise<{ ok: boolean; data?: unknown }> {
-    return runCommand({ type: 'cycle_thinking_level' }, runtime);
-}
+export type PiThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
 
 /** Kill the warm child so the next prompt reloads Pi resources. */
 export async function restartAgent(): Promise<boolean> {
