@@ -85,18 +85,23 @@ Dev $25; Ent Full $90 / Dev $35; View seats free. Pricing changes periodically �
    the free path) → **folder** path `packages/oj-tokens/tokens`, branch `canari`, **token format:
    W3C DTCG**. Pull. The repo already has `$metadata.json` + `$themes.json` defining the sets/themes,
    so the plugin creates: a **Primitives** collection + a **Theme** collection with **Cream /
-   Cyberpunk / Midnight** modes. *(Verify the collection/mode mapping on first pull and adjust
-   in-plugin if needed; then "Export to Figma Variables".)* The variables I already created match
-   this — reconcile rather than duplicate. Remember the folder sync is **read-only on free** — Pull
-   and Apply themes here; you don't push token edits back (those are repo PRs).
+   Cyberpunk / Midnight** modes. *(The 69 variables + 3 modes already exist in the file — Pull just
+   to confirm the mapping matches; reconcile rather than duplicate. "Export to Figma Variables" is a
+   Tokens Studio **Pro** action and isn't needed on the free path.)* Remember the folder sync is
+   **read-only on free** — Pull and Apply themes here; you don't push token edits back (those are
+   repo PRs).
 2. **Components → Figma.** For each component: build the master with auto-layout, **bind every
    visual property to the variables** (fills → `color/*`, padding/gap → `space/*`, radius →
    `radius/*`, type → `text/*` + `font/*`, border → `border/sketch-width` + `color/sketch-black`),
    and create its variant set. Use the **live previews at the claude.ai/design project** as the
    visual spec, and each component's `.d.ts` (in the repo / synced) as the prop contract.
-3. **Code Connect.** In Dev Mode, Library → "Connect components to code", or the
-   `@figma/code-connect` CLI / the `figma-code-connect` skill: map each Figma component → its
-   `packages/oj-ui/src/components/<Name>` path. Publish. Dev Mode then shows real oj-ui code.
+3. **Find the code (no Code Connect on free).** Code Connect (live code snippets in Dev Mode) needs
+   an **Org/Enterprise** plan, so it stays dormant — the 53 `.figma.tsx` mappings are already
+   committed and publish automatically the moment a sponsored plan adds `FIGMA_ACCESS_TOKEN`. On the
+   free path the bridge is instead: the generated **"Find the code"** docs index (component ↔ code ↔
+   Ladle ↔ Figma ↔ Claude Design), and the in-house **"stamp code links"** Figma plugin
+   (`packages/oj-figma-plugin/`) — run it once to write each component's import line + source/live
+   links into its Figma description, visible in the Assets panel **without Dev Mode**.
 
 ## Component inventory (53 — the build list)
 

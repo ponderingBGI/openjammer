@@ -22,6 +22,9 @@ export default defineConfig([
     '.claude/**',
     // Ladle catalog config/provider — dev tooling, not app source.
     '.ladle/**',
+    // Persisted use_figma build snippets — pasted into the Figma plugin runtime
+    // (top-level `await`/`return` by design), not standalone JS modules.
+    '.design-sync/figma-scripts/**',
   ]),
   {
     files: ['**/*.{ts,tsx}'],
