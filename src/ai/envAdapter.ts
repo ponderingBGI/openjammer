@@ -27,7 +27,7 @@ import {
 import { useAudioStore } from '../store/audioStore';
 import { gatherDiagnostics } from '../utils/diagnostics';
 import { redactText, redactValue } from '../utils/redact';
-import { applyTheme, getSavedThemeId, getThemeById, saveThemeId } from '../styles/themes';
+import { applyTheme, getSavedThemeId, getThemeById, saveThemeId } from '@openjammer/oj-tokens';
 import type {
     AgentEnvPort,
     DiagnosticsReadResult,

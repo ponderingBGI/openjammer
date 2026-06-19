@@ -28,7 +28,7 @@ import { useGraphStore } from './store/graphStore';
 import { useProjectStore } from './store/projectStore';
 import { useCanvasStore } from './store/canvasStore';
 import { useKeybindingsStore } from './store/keybindingsStore';
-import { applyTheme, getSavedThemeId, getThemeById } from './styles/themes';
+import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens';
 import { isEditableTarget } from './utils/editableTarget';
 import './styles/global.css';
 

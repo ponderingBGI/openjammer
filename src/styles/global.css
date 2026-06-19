@@ -3,8 +3,10 @@
  */
 
 @import './fonts.css';
-@import './variables.css';
 @import './sketch-effects.css';
+/* Design-token primitives (--space-*, --radius-*, --text-*, fonts, etc.) are
+   generated into @openjammer/oj-tokens and imported in main.tsx. Theme colors
+   (--bg-*, --text-*, --accent-*, port colors) are set at runtime by applyTheme. */
 
 *,
 *::before,

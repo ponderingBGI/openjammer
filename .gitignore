@@ -18,6 +18,11 @@ dist
 dist-ssr
 *.local
 
+# oj-tokens ships its generated outputs (drift-guarded by `bun run tokens`);
+# keep them tracked even though the bare `dist` rule above would ignore them.
+!/packages/oj-tokens/dist
+!/packages/oj-tokens/dist/**
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

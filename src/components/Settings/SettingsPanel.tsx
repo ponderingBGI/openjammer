@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { themes, applyTheme, getThemeById, getSavedThemeId, saveThemeId } from '../../styles/themes';
+import { themes, applyTheme, getThemeById, getSavedThemeId, saveThemeId } from '@openjammer/oj-tokens';
 import { KeybindingsPanel } from './KeybindingsPanel';
 import { AudioSettingsPanel } from './AudioSettingsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
