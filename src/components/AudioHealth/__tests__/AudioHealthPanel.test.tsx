@@ -27,8 +27,12 @@ describe('AudioHealthPanel', () => {
     it('closes on Escape', () => {
         render(<AudioHealthPanel />);
         open();
-        expect(screen.getByRole('dialog', { name: /audio health/i })).toBeTruthy();
-        act(() => fireEvent.keyDown(window, { key: 'Escape' }));
+        const dialog = screen.getByRole('dialog', { name: /audio health/i });
+        expect(dialog).toBeTruthy();
+        // Focus is trapped inside the Modal, so a real Escape originates within
+        // the dialog and bubbles to the Modal's handler (vs the old global window
+        // listener). Fire it from the dialog to reflect that.
+        act(() => fireEvent.keyDown(dialog, { key: 'Escape' }));
         expect(screen.queryByRole('dialog', { name: /audio health/i })).toBeNull();
     });
 

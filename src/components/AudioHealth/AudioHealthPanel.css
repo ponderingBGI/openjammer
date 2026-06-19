@@ -1,43 +1,8 @@
-/* AudioHealthPanel (§4) — reuses the repo's design tokens + the DevLog/CommandBar
-   portal-overlay conventions. A calm at-a-glance status readout. */
-
-.ah-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding-top: 12vh;
-    background: color-mix(in srgb, var(--sketch-black) 24%, transparent);
-}
-
-.ah-panel {
-    width: min(440px, calc(100vw - var(--space-lg)));
-    background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-menu);
-    color: var(--text-primary);
-    overflow: hidden;
-}
-
-.ah-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-md);
-    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
-}
-
-.ah-title {
-    font-family: var(--font-sketch);
-    font-size: var(--text-lg);
-}
-
-.ah-spacer {
-    flex: 1;
-}
+/* AudioHealthPanel (§4) — inner-content layout only. The overlay chrome
+   (scrim/panel), the header strip, the status dots, and the action buttons are
+   all oj-ui primitives (Modal/PanelHeader/StatusDot/Button), which own their
+   tokens. This file is just the rows readout + footer row. A calm at-a-glance
+   status panel. */
 
 .ah-rows {
     padding: var(--space-sm) var(--space-md);
@@ -51,27 +16,6 @@
     align-items: center;
     gap: var(--space-sm);
     padding: var(--space-xs) 0;
-}
-
-.ah-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    border: 1.5px solid var(--sketch-black);
-    flex-shrink: 0;
-    background: var(--text-muted);
-}
-.ah-dot[data-status='ok'] {
-    background: var(--accent-success);
-}
-.ah-dot[data-status='warn'] {
-    background: var(--accent-warning);
-}
-.ah-dot[data-status='bad'] {
-    background: var(--accent-danger);
-}
-.ah-dot[data-status='idle'] {
-    background: var(--text-muted);
 }
 
 .ah-label {
@@ -94,27 +38,6 @@
     border-top: var(--border-sketch-width) solid var(--sketch-black);
 }
 
-.ah-btn {
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    padding: var(--space-xs) var(--space-sm);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-sm);
-    background: var(--bg-node);
-    color: var(--text-primary);
-    cursor: pointer;
-}
-
-.ah-btn-primary {
+.ah-footer__btn {
     flex: 1;
-}
-
-.ah-btn-ai {
-    flex: 1;
-    background: var(--accent, var(--sketch-black));
-    color: var(--text-on-accent, #fff);
-}
-
-.ah-btn:hover {
-    filter: brightness(1.06);
 }
