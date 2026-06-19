@@ -87,3 +87,30 @@
     border-style: dashed;
     cursor: copy;
 }
+
+/* Active — a control port firing right now (e.g. a held control key on a
+   keyboard). Success-green fill + the one sanctioned live glow + a brief pulse;
+   a performance signal you read mid-set (DESIGN.md §5). Stilled for reduced motion. */
+.oj-port.is-active {
+    background: var(--accent-success);
+    box-shadow: 0 0 10px var(--accent-success);
+    animation: oj-port-active-pulse 0.3s ease-in-out;
+}
+
+@keyframes oj-port-active-pulse {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.2);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .oj-port.is-active {
+        animation: none;
+    }
+}

@@ -319,65 +319,6 @@
 }
 
 
-/* Keyboard output ports - control (light grey) */
-.port-circle-marker {
-    width: 20px;
-    height: 20px;
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: 50%;
-    background: var(--control-output);
-    cursor: crosshair;
-    transition: all var(--transition-fast);
-}
-
-/* Explicitly style control ports as grey */
-.port-circle-marker.control-port {
-    background: var(--control-output);
-}
-
-.port-circle-marker.control-port.input-port {
-    background: var(--control-input);
-}
-
-.port-circle-marker:hover {
-    background: var(--control-output);
-    transform: scale(1.15);
-    filter: brightness(1.1);
-}
-
-.port-circle-marker.control-port:hover {
-    background: var(--control-output);
-    filter: brightness(1.2);
-}
-
-.port-circle-marker.connected {
-    background: var(--control-connected);
-    box-shadow: 0 0 6px var(--control-connected);
-}
-
-.port-circle-marker.control-port.connected {
-    background: var(--control-connected);
-    box-shadow: 0 0 6px var(--control-connected);
-}
-
-
-/* Control port styling */
-.port-circle-marker.control-port {
-    background: var(--control-output);
-}
-
-.port-circle-marker.control-active {
-    background: var(--accent-success);
-    box-shadow: 0 0 10px var(--accent-success);
-    animation: control-pulse 0.3s ease-in-out;
-}
-
-@keyframes control-pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.2); }
-    100% { transform: scale(1); }
-}
-
 /* ============================================
  * Instrument Node
  * ============================================ */
@@ -1439,20 +1380,6 @@
     text-align: center;
 }
 
-.port-circle-marker.key-port {
-    width: 18px;
-    height: 18px;
-    background: var(--control-output);
-}
-
-.port-circle-marker.key-port:hover {
-    transform: scale(1.15);
-}
-
-.port-circle-marker.key-port.connected {
-    background: var(--control-connected);
-    box-shadow: 0 0 6px var(--control-connected);
-}
 
 .collapse-btn {
     margin-top: var(--space-md);

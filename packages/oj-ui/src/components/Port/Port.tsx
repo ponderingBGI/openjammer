@@ -18,6 +18,10 @@ export interface PortProps extends HTMLAttributes<HTMLSpanElement> {
     resolvedKind?: PortKind;
     /** A faint, dashed "add a port" slot. */
     placeholder?: boolean;
+    /** This control port is firing right now (e.g. a held control key) — a live
+     *  performance signal: success-green with the one sanctioned glow + a brief
+     *  pulse. */
+    active?: boolean;
 }
 
 /**
@@ -33,6 +37,7 @@ export function Port({
     connected = false,
     resolvedKind,
     placeholder = false,
+    active = false,
     className,
     ...rest
 }: PortProps) {
@@ -44,6 +49,7 @@ export function Port({
             : direction && `oj-port--${colorKind}-${direction}`,
         connected && 'is-connected',
         placeholder && 'is-placeholder',
+        active && 'is-active',
         className,
     ]
         .filter(Boolean)

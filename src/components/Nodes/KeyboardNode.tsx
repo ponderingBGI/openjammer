@@ -92,7 +92,7 @@ export const KeyboardNode = memo(function KeyboardNode({
                                 {...(port.type === 'universal' && port.resolvedType
                                     ? { resolvedKind: port.resolvedType }
                                     : {})}
-                                className={isControlActive ? 'port-circle-marker control-active' : undefined}
+                                active={isControlActive}
                                 style={{ width: 20, height: 20 }}
                                 data-node-id={node.id}
                                 data-port-id={port.id}

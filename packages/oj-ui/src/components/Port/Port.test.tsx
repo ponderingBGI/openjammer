@@ -43,4 +43,9 @@ describe('Port', () => {
         const { container } = render(<Port kind="universal" placeholder />);
         expect(container.querySelector('span')!.className).toContain('is-placeholder');
     });
+
+    it('marks an active (firing) control port', () => {
+        const { container } = render(<Port kind="control" direction="output" active />);
+        expect(container.querySelector('span')!.className).toContain('is-active');
+    });
 });

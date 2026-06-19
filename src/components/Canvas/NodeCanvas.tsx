@@ -241,7 +241,7 @@ export function NodeCanvas() {
         const isNodeOrPort = (e.target as HTMLElement).closest(
             '.node, .schematic-node, .oj-node-frame, .oj-node, ' +
                 '.oj-port, .oj-port-row, ' +
-                '.port-circle-marker, .output-port'
+                '.output-port'
         );
         if (e.button === 0 && !isNodeOrPort) {
             clearSelection();
