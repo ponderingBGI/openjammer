@@ -622,6 +622,116 @@
     cursor: default;
 }
 
+.command-bar-models {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.command-bar-models-help {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-lg);
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+}
+
+.command-bar-models-input {
+    margin: 0 var(--space-lg) var(--space-sm);
+    width: auto;
+}
+
+.command-bar-models-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+    max-height: 360px;
+    overflow-y: auto;
+    padding: 0 var(--space-lg) var(--space-md);
+}
+
+.command-bar-model-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-md);
+    width: 100%;
+    padding: var(--space-sm);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+}
+
+.command-bar-model-row[data-selected='true'],
+.command-bar-model-row:hover {
+    border-color: color-mix(in srgb, var(--accent, var(--sketch-black)) 35%, transparent);
+    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 10%, transparent);
+}
+
+.command-bar-model-row[data-current='true'] {
+    border-color: color-mix(in srgb, var(--accent-success) 65%, var(--sketch-black));
+}
+
+.command-bar-model-main {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.command-bar-model-name {
+    overflow: hidden;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.command-bar-model-main code {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.command-bar-model-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+}
+
+.command-bar-model-meta span,
+.command-bar-model-meta strong {
+    padding: 1px 6px;
+    border: 1px solid var(--sketch-black);
+    border-radius: var(--radius-pill);
+    background: var(--bg-node);
+    color: inherit;
+    font-weight: 600;
+}
+
+.command-bar-model-meta strong {
+    color: var(--accent-success);
+}
+
+.command-bar-models-empty {
+    padding: var(--space-md) var(--space-sm);
+    color: var(--text-muted);
+    font-size: var(--text-sm);
+}
+
 /* The /resume session picker — reuses the palette list, with age + id columns. */
 .command-bar-sessions {
     display: flex;
@@ -701,6 +811,27 @@
     line-height: 1.4;
 }
 
+.command-bar-auth-configured {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    margin: var(--space-sm) var(--space-lg);
+    padding: var(--space-xs) var(--space-sm);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--accent-success, var(--accent)) 12%, var(--bg-node));
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+}
+
+.command-bar-auth-configured span:last-child {
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+}
+
 .command-bar-auth-item {
     display: flex;
     flex-direction: column;
@@ -709,8 +840,21 @@
 }
 
 .command-bar-auth-item-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
     font-weight: 700;
     font-size: var(--text-md);
+}
+
+.command-bar-auth-configured-mark {
+    padding: 1px 6px;
+    border: 1px solid var(--sketch-black);
+    border-radius: var(--radius-pill);
+    background: var(--bg-node);
+    color: var(--accent-success, var(--accent));
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
 }
 
 .command-bar-auth-item-subtitle {

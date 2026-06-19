@@ -367,6 +367,11 @@ export interface AgentTask {
      */
     providerKey?: string;
     /**
+     * All provider API keys configured for this app session, keyed by provider id.
+     * Forwarded transiently so Pi can list/select models across configured providers.
+     */
+    providerKeys?: Record<string, string>;
+    /**
      * The active provider id (e.g. `'opencode'`). Selects the env var the key is
      * forwarded under (see `ai.rs` `provider_env_var`); omitted → Pi's own config.
      */

@@ -38,11 +38,11 @@
 //!   accumulate and the agent learns) and its cwd at a jailed project dir beneath
 //!   it ([`AgentWorkspace`]). The OS jail (`sandbox.rs`) confines writes to those
 //!   roots; the in-Pi `permission-gate` extension (fed `OJ_PROJECT_ROOT` /
-//!   `OJ_MEMORY_ROOTS` / `OJ_KEY_VAR`) polices bash + redacts the key.
+//!   `OJ_MEMORY_ROOTS` / `OJ_KEY_VAR(S)`) polices bash + redacts keys.
 //! * **Env allowlist.** The child starts from an EMPTY environment; we forward
-//!   only `PATH`/`HOME` (so `pi` and `git` resolve) plus the ONE provider key
-//!   the user supplied, under the var name that provider expects
-//!   ([`stripped_env`]). Every other secret in the parent env is dropped.
+//!   only `PATH`/`HOME` (so `pi` and `git` resolve) plus the configured provider
+//!   keys the user supplied, each under the var name that provider expects. Every
+//!   other secret in the parent env is dropped.
 //! * **No key storage.** The key is passed transiently to the child and never
 //!   written to disk by OpenJammer.
 //! * **Tool calls are forwarded, not executed here.** Graph mutations are
@@ -214,6 +214,7 @@ pub fn ai_run(
     app: AppHandle,
     prompt: String,
     provider_key: Option<String>,
+    provider_keys: Option<HashMap<String, String>>,
     provider: Option<String>,
     model_id: Option<String>,
     yolo: Option<bool>,
@@ -246,38 +247,24 @@ pub fn ai_run(
         }
     };
 
-    // D6 (M7): forward the key under the ACTIVE provider's env var so Pi's
-    // provider reads it. A `conflict` (Pi's own auth.json would resolve a working
-    // key) means we must NOT also inject ours — defer to Pi's resolution. The key
-    // SOURCE is still the provider_key param / env (keychain is founder-gated).
-    let conflict = provider
-        .as_deref()
-        .map(|p| {
-            crate::auth::auth_status(Some(p.to_string()))
-                .map(|s| s.conflict)
-                .unwrap_or(false)
-        })
-        .unwrap_or(false);
-    let key_for_env = if conflict {
-        None
-    } else {
-        provider_key.as_deref()
-    };
+    // D6 (M7): forward every configured provider key under that provider's env
+    // var so Pi's own model registry can list/select models across providers.
+    // Conflicts still defer to Pi's own auth.json for that provider. Keys are
+    // transient process env only; OpenJammer never persists them.
+    let provider_key_entries = collect_provider_key_entries(
+        provider_key.as_deref(),
+        provider.as_deref(),
+        provider_keys.as_ref(),
+    );
+    let filtered_provider_key_entries = filter_conflicting_provider_keys(provider_key_entries);
+    let auth_fingerprint = auth_fingerprint(&filtered_provider_key_entries);
     let jailed = !yolo.unwrap_or(false);
 
     // JAILED (default): a STRIPPED allowlist env + the gate's jail-boundary vars.
-    // YOLO: the FULL parent environment (the real Pi experience) + the key only,
+    // YOLO: the FULL parent environment (the real Pi experience) + provider keys,
     // and no gate vars. HOME points at the persistent global brain in BOTH modes,
     // so the agent keeps its learned memory/sessions regardless.
-    let mut env = if jailed {
-        stripped_env_for(key_for_env, provider.as_deref())
-    } else {
-        let mut full: HashMap<String, String> = std::env::vars().collect();
-        if let Some(k) = key_for_env.filter(|k| !k.is_empty()) {
-            full.insert(provider_key_var(provider.as_deref()), k.to_string());
-        }
-        full
-    };
+    let mut env = env_for_provider_keys(jailed, &filtered_provider_key_entries);
     env.insert(
         "HOME".to_string(),
         workspace.agent_home.to_string_lossy().into_owned(),
@@ -307,11 +294,16 @@ pub fn ai_run(
                 .collect::<Vec<_>>()
                 .join(":"),
         );
-        if key_for_env.is_some() {
-            env.insert(
-                "OJ_KEY_VAR".to_string(),
-                provider_key_var(provider.as_deref()),
-            );
+        let key_vars = provider_key_vars(&filtered_provider_key_entries);
+        if let Some(active_key_var) = provider
+            .as_deref()
+            .map(|p| provider_key_var(Some(p)))
+            .filter(|v| key_vars.iter().any(|k| k == v))
+        {
+            env.insert("OJ_KEY_VAR".to_string(), active_key_var);
+        }
+        if !key_vars.is_empty() {
+            env.insert("OJ_KEY_VARS".to_string(), key_vars.join(":"));
         }
     }
 
@@ -329,6 +321,7 @@ pub fn ai_run(
                 || c.model_id.as_deref() != model_id.as_deref()
                 || c.project_root != workspace.project_root
                 || c.jailed != jailed
+                || c.auth_fingerprint != auth_fingerprint
         }
     };
     if needs_respawn {
@@ -355,6 +348,7 @@ pub fn ai_run(
             &workspace.project_root,
             provider.as_deref(),
             model_id.as_deref(),
+            auth_fingerprint,
             jail,
             &app,
             &channel,
@@ -460,6 +454,8 @@ pub struct WarmChild {
     /// Whether this child was spawned jailed (gate loaded + env stripped) vs YOLO
     /// (gate dropped + full env). A mode flip forces a respawn.
     jailed: bool,
+    /// Fingerprint of forwarded provider keys. A provider/key change forces a respawn.
+    auth_fingerprint: String,
     /// The Pi session this child is currently on, tracked so a session change
     /// `switch_session`es the live child instead of respawning, and so the active
     /// id can be reported back to the frontend for persistence / reattach.
@@ -487,6 +483,74 @@ impl Drop for WarmChild {
 #[derive(Default)]
 pub struct WarmChildState(pub std::sync::Mutex<Option<WarmChild>>);
 
+fn collect_provider_key_entries(
+    provider_key: Option<&str>,
+    provider: Option<&str>,
+    provider_keys: Option<&HashMap<String, String>>,
+) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    if let Some(keys) = provider_keys {
+        for (provider, key) in keys {
+            if !provider.trim().is_empty() && !key.trim().is_empty() {
+                out.insert(provider.trim().to_string(), key.to_string());
+            }
+        }
+    }
+    if let Some(key) = provider_key.filter(|k| !k.trim().is_empty()) {
+        out.insert(provider.unwrap_or_default().to_string(), key.to_string());
+    }
+    out
+}
+
+fn filter_conflicting_provider_keys(keys: HashMap<String, String>) -> HashMap<String, String> {
+    keys.into_iter()
+        .filter(|(provider, _)| {
+            provider.is_empty()
+                || !crate::auth::auth_status(Some(provider.clone()))
+                    .map(|s| s.conflict)
+                    .unwrap_or(false)
+        })
+        .collect()
+}
+
+fn provider_key_vars(keys: &HashMap<String, String>) -> Vec<String> {
+    let mut vars = keys
+        .keys()
+        .map(|provider| provider_key_var((!provider.is_empty()).then_some(provider.as_str())))
+        .collect::<Vec<_>>();
+    vars.sort();
+    vars.dedup();
+    vars
+}
+
+fn env_for_provider_keys(jailed: bool, keys: &HashMap<String, String>) -> HashMap<String, String> {
+    let mut env = if jailed {
+        stripped_env_for(None, None)
+    } else {
+        std::env::vars().collect()
+    };
+    for (provider, key) in keys {
+        env.insert(
+            provider_key_var((!provider.is_empty()).then_some(provider.as_str())),
+            key.to_string(),
+        );
+    }
+    env
+}
+
+fn auth_fingerprint(keys: &HashMap<String, String>) -> String {
+    let mut pairs = keys.iter().collect::<Vec<_>>();
+    pairs.sort_by(|a, b| a.0.cmp(b.0));
+    let mut bytes = Vec::new();
+    for (provider, key) in pairs {
+        bytes.extend_from_slice(provider.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(key.as_bytes());
+        bytes.push(0xff);
+    }
+    fnv1a_hex(&bytes)
+}
+
 /// Spawn a fresh Pi child, run the `get_commands` handshake, and pin the model
 /// ONCE. Emits a reasoned `error` line and returns `Err(())` on any failure (the
 /// caller then just returns `Ok(())`, surfacing the streamed error to the UI).
@@ -497,6 +561,7 @@ fn spawn_and_configure(
     project_root: &Path,
     provider: Option<&str>,
     model_id: Option<&str>,
+    auth_fingerprint: String,
     jail: Option<crate::sandbox::Jail>,
     app: &AppHandle,
     channel: &str,
@@ -639,6 +704,7 @@ fn spawn_and_configure(
         model_id: model_id.map(String::from),
         project_root: project_root.to_path_buf(),
         jailed,
+        auth_fingerprint,
         // A fresh child starts on Pi's own current/auto session; the first run
         // resolves + reports the real id (or switches to a requested one).
         current_session: None,
@@ -1065,7 +1131,13 @@ pub fn ai_command(
     app: AppHandle,
     command: serde_json::Value,
     channel: String,
+    provider_key: Option<String>,
+    provider_keys: Option<HashMap<String, String>>,
+    provider: Option<String>,
+    model_id: Option<String>,
+    yolo: Option<bool>,
     warm: tauri::State<'_, WarmChildState>,
+    bridge: tauri::State<'_, crate::bridge::BridgeState>,
 ) -> Result<(), String> {
     let cmd_name = command
         .get("type")
@@ -1081,13 +1153,107 @@ pub fn ai_command(
         return Ok(());
     }
 
+    let Some(pi) = find_pi(&app) else {
+        emit(&app, &channel, PiStreamLine::error(PI_MISSING_HELP));
+        return Ok(());
+    };
+    let workspace = match AgentWorkspace::ensure() {
+        Ok(ws) => ws,
+        Err(e) => {
+            emit(
+                &app,
+                &channel,
+                PiStreamLine::error(format!("could not prepare the agent workspace: {e}")),
+            );
+            return Ok(());
+        }
+    };
+    let provider_key_entries = collect_provider_key_entries(
+        provider_key.as_deref(),
+        provider.as_deref(),
+        provider_keys.as_ref(),
+    );
+    let filtered_provider_key_entries = filter_conflicting_provider_keys(provider_key_entries);
+    let auth_fingerprint = auth_fingerprint(&filtered_provider_key_entries);
+    let jailed = !yolo.unwrap_or(false);
+    let mut env = env_for_provider_keys(jailed, &filtered_provider_key_entries);
+    env.insert(
+        "HOME".to_string(),
+        workspace.agent_home.to_string_lossy().into_owned(),
+    );
+    if let Some((addr, token)) = crate::bridge::ensure_started(&app, &bridge) {
+        env.insert("OJ_BRIDGE_ADDR".to_string(), addr);
+        env.insert("OJ_BRIDGE_TOKEN".to_string(), token);
+    }
+    if jailed {
+        env.insert(
+            "OJ_PROJECT_ROOT".to_string(),
+            workspace.project_root.to_string_lossy().into_owned(),
+        );
+        env.insert(
+            "OJ_MEMORY_ROOTS".to_string(),
+            workspace
+                .memory_roots()
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(":"),
+        );
+        let key_vars = provider_key_vars(&filtered_provider_key_entries);
+        if let Some(active_key_var) = provider
+            .as_deref()
+            .map(|p| provider_key_var(Some(p)))
+            .filter(|v| key_vars.iter().any(|k| k == v))
+        {
+            env.insert("OJ_KEY_VAR".to_string(), active_key_var);
+        }
+        if !key_vars.is_empty() {
+            env.insert("OJ_KEY_VARS".to_string(), key_vars.join(":"));
+        }
+    }
+
     let mut guard = warm.0.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(child) = guard.as_mut() else {
-        emit(
+    let needs_respawn = match guard.as_mut() {
+        None => true,
+        Some(c) => {
+            c.is_dead()
+                || c.provider.as_deref() != provider.as_deref()
+                || c.model_id.as_deref() != model_id.as_deref()
+                || c.project_root != workspace.project_root
+                || c.jailed != jailed
+                || c.auth_fingerprint != auth_fingerprint
+        }
+    };
+    if needs_respawn {
+        drop(guard.take());
+        configure_gate(&workspace.agent_home, jailed, &app, &channel);
+        let graph_pkg = graph_extension_dir(&app).to_string_lossy().into_owned();
+        let _ = set_settings_package(&workspace.agent_home, &graph_pkg, true);
+        let jail = if jailed {
+            Some(crate::sandbox::Jail::new(
+                workspace.project_root.clone(),
+                workspace.agent_home.clone(),
+            ))
+        } else {
+            None
+        };
+        match spawn_and_configure(
+            &pi,
+            env,
+            &workspace.project_root,
+            provider.as_deref(),
+            model_id.as_deref(),
+            auth_fingerprint,
+            jail,
             &app,
             &channel,
-            PiStreamLine::error("the AI agent isn't running yet — ask it something first."),
-        );
+        ) {
+            Ok(c) => *guard = Some(c),
+            Err(()) => return Ok(()),
+        }
+    }
+
+    let Some(child) = guard.as_mut() else {
         return Ok(());
     };
 
@@ -1121,6 +1287,16 @@ pub fn ai_command(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false)
             {
+                if cmd_name == "set_model" {
+                    child.provider = command
+                        .get("provider")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    child.model_id = command
+                        .get("modelId")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                }
                 let data = value.get("data").cloned();
                 emit(
                     &app,
@@ -2162,6 +2338,33 @@ mod tests {
         // No conflict-side key (None) injects nothing under the provider var.
         let none_env = stripped_env_for(None, Some("anthropic"));
         assert_eq!(none_env.get("ANTHROPIC_API_KEY"), None);
+    }
+
+    #[test]
+    fn env_for_provider_keys_forwards_multiple_configured_providers() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("OPENJAMMER_AI_KEY_VAR");
+        let keys = HashMap::from([
+            ("opencode".to_string(), "sk-zen".to_string()),
+            ("openai".to_string(), "sk-openai".to_string()),
+        ]);
+
+        let env = env_for_provider_keys(true, &keys);
+
+        assert_eq!(
+            env.get("OPENCODE_API_KEY").map(String::as_str),
+            Some("sk-zen")
+        );
+        assert_eq!(
+            env.get("OPENAI_API_KEY").map(String::as_str),
+            Some("sk-openai"),
+        );
+        assert!(!env.contains_key("ANTHROPIC_API_KEY"));
+        assert_eq!(
+            provider_key_vars(&keys),
+            vec!["OPENAI_API_KEY", "OPENCODE_API_KEY"],
+        );
+        assert_eq!(auth_fingerprint(&keys), auth_fingerprint(&keys));
     }
 
     #[test]

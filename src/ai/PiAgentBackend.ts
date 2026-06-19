@@ -141,6 +141,7 @@ export class PiAgentBackend implements AgentBackend {
         invoke('ai_run', {
             prompt: task.prompt,
             providerKey: task.providerKey ?? null,
+            providerKeys: task.providerKeys ?? null,
             provider: task.provider ?? null,
             modelId: task.modelId ?? null,
             yolo: task.yolo ?? false,

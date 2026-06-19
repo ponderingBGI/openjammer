@@ -63,8 +63,14 @@ export const BUILTIN_AI_SLASH_COMMANDS: readonly AiSlashCommand[] = [
     },
     {
         name: 'login',
-        description: 'Configure who pays for the AI agent.',
+        description: 'Alias for /provider — configure who pays for the AI agent.',
         source: 'pi',
+        local: true,
+    },
+    {
+        name: 'provider',
+        description: 'Configure or replace an AI provider key.',
+        source: 'openjammer',
         local: true,
     },
     {
@@ -75,8 +81,16 @@ export const BUILTIN_AI_SLASH_COMMANDS: readonly AiSlashCommand[] = [
     },
     {
         name: 'model',
-        description: 'Change the AI provider / model OpenJammer sends to Pi.',
+        description: 'Open Pi’s model picker.',
         source: 'pi',
+        argsHint: '[search]',
+        local: true,
+    },
+    {
+        name: 'models',
+        description: 'Open Pi’s model picker.',
+        source: 'openjammer',
+        argsHint: '[search]',
         local: true,
     },
     {

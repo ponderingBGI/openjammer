@@ -23,6 +23,7 @@ import { useAudioClipStore } from '../../store/audioClipStore';
 import { useLibraryStore, getSampleFile } from '../../store/libraryStore';
 import { createClipFromSample, generateWaveformPeaksAsync } from '../../utils/clipUtils';
 import { getAudioContext } from '../../audio/audioContext';
+import { isEditableTarget } from '../../utils/editableTarget';
 import { AudioClipVisual } from '../Clips/AudioClipVisual';
 import { ClipDragLayer } from '../Clips/ClipDragLayer';
 import { WaveformEditorModal } from '../Clips/WaveformEditorModal';
@@ -580,8 +581,9 @@ export function NodeCanvas() {
         const { emitKeyboardSignal, releaseKeyboardSignal } = useAudioStore.getState();
 
         function handleKeyDown(e: KeyboardEvent) {
-            // Skip if typing in input
-            if ((e.target as HTMLElement).tagName === 'INPUT') return;
+            // Skip if typing in an editable control. Backspace/Delete must edit text,
+            // not delete canvas nodes, while focus is in the AI composer or any textarea.
+            if (isEditableTarget(e.target)) return;
 
             // ESC Key - Unified escape behavior (works in all modes)
             if (e.key === 'Escape') {
@@ -890,8 +892,8 @@ export function NodeCanvas() {
         }
 
         function handleKeyUp(e: KeyboardEvent) {
-            // Skip if typing in input
-            if ((e.target as HTMLElement).tagName === 'INPUT') return;
+            // Skip if typing in an editable control.
+            if (isEditableTarget(e.target)) return;
 
             const key = e.key.toLowerCase();
 

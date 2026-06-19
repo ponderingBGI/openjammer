@@ -8,9 +8,9 @@
  *
  * HARD INVARIANTS (project plan):
  *   - NEVER persist the provider KEY. We persist ONLY `activeProvider` + `modelId`
- *     (see the `partialize` below). The key lives in the OS keychain (founder-gated
- *     native side) and is forwarded transiently to Pi; it never touches this store
- *     or localStorage.
+ *     (see the `partialize` below). Session keys live only in memory (or the OS
+ *     keychain in founder builds) and are forwarded transiently to Pi; they never
+ *     touch localStorage.
  *   - Auth resolves only WHO PAYS. It does NOT grant the agent any new power —
  *     tool calls still go through OpenJammer's allowlisted, undoable graph path.
  *   - Browser / `caps.auth === 'none'`: every action is a safe no-op and
@@ -70,8 +70,14 @@ interface AuthStoreState {
      * makes "paste a key → use the agent" work today without the keychain plugin.
      */
     key?: string;
-    /** BYO OpenAI-compatible base URL (in-memory, transient — never persisted). */
+    /** BYO OpenAI-compatible base URL for the active provider (in-memory, transient). */
     baseUrl?: string;
+    /** Provider API keys held IN MEMORY for this session ONLY — never persisted. */
+    providerKeys: Record<string, string>;
+    /** BYO OpenAI-compatible base URLs by provider, IN MEMORY only. */
+    providerBaseUrls: Record<string, string>;
+    /** Provider ids that currently have an in-memory key. */
+    configuredProviderIds: string[];
     /** Derived from `auth_status` (or an in-memory key): a key is available. */
     configured: boolean;
     /** True when Pi's auth.json would resolve a conflicting working key (D6-A1). */
@@ -130,13 +136,16 @@ export const useAuthStore = create<AuthStoreState>()(
             modelId: undefined,
             key: undefined,
             baseUrl: undefined,
+            providerKeys: {},
+            providerBaseUrls: {},
+            configuredProviderIds: [],
             configured: false,
             conflict: false,
 
             refreshStatus: async () => {
                 // An in-memory key (pasted this session) keeps us configured even
                 // though the keychain SOURCE is founder-gated.
-                const haveKey = () => !!get().key;
+                const haveKey = () => Object.keys(get().providerKeys).length > 0 || !!get().key;
                 if (!authAvailable()) {
                     set({ configured: haveKey(), conflict: false });
                     return;
@@ -150,13 +159,17 @@ export const useAuthStore = create<AuthStoreState>()(
                     const status = (await invoke('auth_status', {
                         provider: get().activeProvider,
                     })) as NativeAuthStatus;
+                    const activeProvider = status.activeProvider ?? get().activeProvider;
+                    const configuredProviderIds = new Set(get().configuredProviderIds);
+                    if (status.configured && activeProvider) configuredProviderIds.add(activeProvider);
                     set({
                         configured: haveKey() || !!status.configured,
                         conflict: !!status.conflict,
+                        configuredProviderIds: Array.from(configuredProviderIds),
                         // Adopt the native view of provider/model when it reports one
                         // (e.g. a key already in the keychain from a prior session),
                         // but keep our persisted choice when native is silent.
-                        activeProvider: status.activeProvider ?? get().activeProvider,
+                        activeProvider,
                         modelId: status.modelId ?? get().modelId,
                     });
                 } catch {
@@ -186,7 +199,22 @@ export const useAuthStore = create<AuthStoreState>()(
                 // run — never persisted to disk (OS-keychain persistence is the
                 // founder-gated upgrade). This makes "paste a key → use the agent"
                 // work today without the keychain plugin.
-                set({ key, baseUrl, activeProvider: provider, configured: true });
+                set((state) => {
+                    const providerKeys = { ...state.providerKeys, [provider]: key };
+                    const providerBaseUrls = { ...state.providerBaseUrls };
+                    if (baseUrl) providerBaseUrls[provider] = baseUrl;
+                    else delete providerBaseUrls[provider];
+                    return {
+                        key,
+                        baseUrl,
+                        providerKeys,
+                        providerBaseUrls,
+                        configuredProviderIds: Object.keys(providerKeys),
+                        activeProvider: provider,
+                        modelId: provider === state.activeProvider ? state.modelId : undefined,
+                        configured: true,
+                    };
+                });
                 return { ok: true };
             },
 
@@ -212,18 +240,33 @@ export const useAuthStore = create<AuthStoreState>()(
                         // Best-effort: still reset local state below.
                     }
                 }
-                set({ key: undefined, baseUrl: undefined, configured: false, conflict: false });
+                set({
+                    key: undefined,
+                    baseUrl: undefined,
+                    providerKeys: {},
+                    providerBaseUrls: {},
+                    configuredProviderIds: [],
+                    configured: false,
+                    conflict: false,
+                });
             },
 
             setProvider: (provider, modelId) => {
-                set({ activeProvider: provider, modelId: modelId ?? get().modelId });
+                const state = get();
+                const baseUrl = state.providerBaseUrls[provider];
+                set({
+                    activeProvider: provider,
+                    modelId: modelId ?? (provider === state.activeProvider ? state.modelId : undefined),
+                    key: state.providerKeys[provider] ?? state.key,
+                    baseUrl,
+                });
             },
         }),
         {
             name: STORAGE_NAME,
-            // CRITICAL: persist provider + model ONLY — NEVER the key (it is never
-            // in this store anyway) and NOT the derived `configured`/`conflict`
-            // (re-derived from native `auth_status` on each session).
+            // CRITICAL: persist provider + model ONLY — NEVER session keys/base URLs
+            // and NOT the derived `configured`/`conflict` (re-derived from native
+            // `auth_status` on each session).
             partialize: (state) => ({
                 activeProvider: state.activeProvider,
                 modelId: state.modelId,

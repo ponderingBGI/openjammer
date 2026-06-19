@@ -27,13 +27,20 @@ import {
     fromPiSlashCommand,
     type AiSlashCommand,
 } from '../../ai/slashCommands';
-import { listSlashCommands, restartAgent, runCommand } from '../../ai/piSessions';
+import {
+    cycleThinkingLevel,
+    listSlashCommands,
+    restartAgent,
+    runCommand,
+    type PiCommandRuntime,
+} from '../../ai/piSessions';
 import { useAgentSessionStore } from '../../store/agentSessionStore';
 import { useAuthStore } from '../../auth/authStore';
 import { useSandboxStore } from '../../store/sandboxStore';
 import { AuthChooser } from './AuthChooser';
 import { ChatMessage } from './ChatMessage';
 import { SessionPicker } from './SessionPicker';
+import { ModelPicker } from './ModelPicker';
 
 /** macOS shows ⌘; everywhere else Ctrl. (Display only; handlers accept both.) */
 const IS_MAC =
@@ -138,7 +145,8 @@ export function AiPanel({
 
     // The composer draft + the resume sub-view.
     const [draft, setDraft] = useState(autoSendInitial ? '' : initialPrompt);
-    const [view, setView] = useState<'chat' | 'resume'>('chat');
+    const [view, setView] = useState<'chat' | 'resume' | 'models'>('chat');
+    const [modelQuery, setModelQuery] = useState('');
     const [commandNotice, setCommandNotice] = useState<string | null>(null);
     const [dynamicCommands, setDynamicCommands] = useState<AiSlashCommand[]>([]);
     const [commandsLoadedFor, setCommandsLoadedFor] = useState<string | null>(null);
@@ -188,10 +196,22 @@ export function AiPanel({
         if (!value.startsWith('/')) setSlashDismissed(false);
     }, []);
 
+    const getPiRuntime = useCallback((): PiCommandRuntime => {
+        const auth = useAuthStore.getState();
+        const activeProvider = auth.activeProvider;
+        return {
+            providerKey: activeProvider ? auth.providerKeys[activeProvider] ?? auth.key : auth.key,
+            providerKeys: auth.providerKeys,
+            provider: activeProvider,
+            modelId: auth.modelId,
+            yolo: useSandboxStore.getState().mode === 'yolo',
+        };
+    }, []);
+
     useEffect(() => {
         if (!slashActive || commandsLoaded) return;
         let live = true;
-        void listSlashCommands().then((commands) => {
+        void listSlashCommands(getPiRuntime()).then((commands) => {
             if (!live) return;
             setDynamicCommands(commands.map(fromPiSlashCommand));
             setCommandsLoadedFor(commandContext);
@@ -199,22 +219,18 @@ export function AiPanel({
         return () => {
             live = false;
         };
-    }, [slashActive, commandsLoaded, commandContext]);
+    }, [slashActive, commandsLoaded, commandContext, getPiRuntime]);
 
     const runTask = useCallback(
         (prompt: string) => {
             if (!prompt || !available || !configured || running) return false;
-            const auth = useAuthStore.getState();
             void send(backend, {
                 prompt,
-                providerKey: auth.key,
-                provider: auth.activeProvider,
-                modelId: auth.modelId,
-                yolo: useSandboxStore.getState().mode === 'yolo',
+                ...getPiRuntime(),
             });
             return true;
         },
-        [available, configured, running, backend, send],
+        [available, configured, running, backend, send, getPiRuntime],
     );
 
     const executeSlashCommand = useCallback(
@@ -246,13 +262,13 @@ export function AiPanel({
                         return;
                     }
                     setDraft('');
-                    const res = await runCommand({ type: 'set_session_name', name: trimmedArgs });
+                    const res = await runCommand({ type: 'set_session_name', name: trimmedArgs }, getPiRuntime());
                     setCommandNotice(res.ok ? `Session named “${trimmedArgs}”.` : 'Pi is not ready to name the session yet. Ask it something first.');
                     return;
                 }
                 case 'session': {
                     setDraft('');
-                    const res = await runCommand({ type: 'get_state' });
+                    const res = await runCommand({ type: 'get_state' }, getPiRuntime());
                     setCommandNotice(res.ok ? formatSessionState(res.data) : 'Pi is not running yet — ask it something first.');
                     return;
                 }
@@ -261,7 +277,7 @@ export function AiPanel({
                     const res = await runCommand({
                         type: 'compact',
                         ...(trimmedArgs ? { customInstructions: trimmedArgs } : {}),
-                    });
+                    }, getPiRuntime());
                     const summary = res.data && typeof res.data === 'object'
                         ? (res.data as { summary?: unknown }).summary
                         : null;
@@ -282,10 +298,16 @@ export function AiPanel({
                     return;
                 }
                 case 'login':
-                case 'model':
+                case 'provider':
                     setDraft('');
                     setAuthDismissed(false);
                     setLocalForceAuth(true);
+                    return;
+                case 'model':
+                case 'models':
+                    setDraft('');
+                    setModelQuery(trimmedArgs);
+                    setView('models');
                     return;
                 case 'logout':
                     setDraft('');
@@ -342,8 +364,25 @@ export function AiPanel({
                     setCommandNotice(`/${command.name} is not wired in OpenJammer yet.`);
             }
         },
-        [newSession, onClose, runTask],
+        [getPiRuntime, newSession, onClose, runTask],
     );
+
+    const cycleReasoning = useCallback(async () => {
+        setCommandNotice(null);
+        const res = await cycleThinkingLevel(getPiRuntime());
+        if (!res.ok) {
+            setCommandNotice('Pi is not ready to change reasoning yet.');
+            return;
+        }
+        const level = res.data && typeof res.data === 'object'
+            ? (res.data as { level?: unknown }).level
+            : null;
+        setCommandNotice(
+            typeof level === 'string'
+                ? `Thinking level: ${level}`
+                : 'Current model does not support reasoning.',
+        );
+    }, [getPiRuntime]);
 
     // Submit the composer: slash commands first, else send.
     const submit = useCallback(() => {
@@ -428,6 +467,22 @@ export function AiPanel({
         );
     }
 
+    if (view === 'models') {
+        return (
+            <div className="command-bar-ai">
+                <ModelPicker
+                    runtime={getPiRuntime}
+                    initialQuery={modelQuery}
+                    onSelected={(message) => {
+                        setCommandNotice(message);
+                        setView('chat');
+                    }}
+                    onCancel={() => setView('chat')}
+                />
+            </div>
+        );
+    }
+
     return (
         <div className="command-bar-ai">
             <div className="command-bar-ai-header">
@@ -500,7 +555,12 @@ export function AiPanel({
                             setSlashIndex((i) => Math.max(0, i - 1));
                             return;
                         }
-                        if (slashActive && e.key === 'Tab' && selectedSlashCommand) {
+                        if (e.key === 'Tab' && e.shiftKey && !slashActive) {
+                            e.preventDefault();
+                            void cycleReasoning();
+                            return;
+                        }
+                        if (slashActive && e.key === 'Tab' && !e.shiftKey && selectedSlashCommand) {
                             e.preventDefault();
                             updateDraft(`/${selectedSlashCommand.name}${selectedSlashCommand.argsHint ? ' ' : ''}`);
                             setSlashDismissed(!!selectedSlashCommand.argsHint);
@@ -554,7 +614,8 @@ export function AiPanel({
                         {running ? 'Working…' : (
                             <>
                                 <kbd className="command-bar-kbd">↵</kbd> send ·{' '}
-                                <kbd className="command-bar-kbd">⇧↵</kbd> newline
+                                <kbd className="command-bar-kbd">⇧↵</kbd> newline ·{' '}
+                                <kbd className="command-bar-kbd">⇧⇥</kbd> reasoning
                             </>
                         )}
                     </span>

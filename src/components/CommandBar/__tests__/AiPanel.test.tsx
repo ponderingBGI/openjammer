@@ -12,9 +12,21 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import { DESKTOP_CAPABILITIES } from '../../../engine/capabilities';
 
+// jsdom lacks scrollIntoView, which cmdk calls when the provider chooser opens.
+if (!Element.prototype.scrollIntoView) {
+    Element.prototype.scrollIntoView = () => {};
+}
+
 const piSessionsMock = vi.hoisted(() => ({
     runCommand: vi.fn(async () => ({ ok: true })),
     listSlashCommands: vi.fn(async () => [] as Array<{ name: string; description?: string; source: 'extension' | 'prompt' | 'skill' }>),
+    getState: vi.fn(async () => ({ ok: true, data: { model: { provider: 'opencode', id: 'zen' } } })),
+    listAvailableModels: vi.fn(async () => [
+        { provider: 'opencode', id: 'zen', name: 'Zen' },
+        { provider: 'openai', id: 'gpt-4o', name: 'GPT-4o', reasoning: true },
+    ]),
+    setModel: vi.fn(async () => ({ ok: true })),
+    cycleThinkingLevel: vi.fn(async () => ({ ok: true, data: { level: 'medium' } })),
     restartAgent: vi.fn(async () => true),
     listSessions: vi.fn(async () => []),
     loadSessionMessages: vi.fn(async () => ({ messages: [], incomplete: false })),
@@ -27,6 +39,10 @@ vi.mock('../../../ai', () => ({ getAgentBackend: () => ({ id: 'stub' }) }));
 vi.mock('../../../ai/piSessions', () => ({
     runCommand: piSessionsMock.runCommand,
     listSlashCommands: piSessionsMock.listSlashCommands,
+    getState: piSessionsMock.getState,
+    listAvailableModels: piSessionsMock.listAvailableModels,
+    setModel: piSessionsMock.setModel,
+    cycleThinkingLevel: piSessionsMock.cycleThinkingLevel,
     restartAgent: piSessionsMock.restartAgent,
     listSessions: piSessionsMock.listSessions,
     loadSessionMessages: piSessionsMock.loadSessionMessages,
@@ -53,10 +69,26 @@ function renderPanel(onBack = vi.fn(), props: Partial<Parameters<typeof AiPanel>
 describe('AiPanel chat', () => {
     beforeEach(() => {
         cleanup();
-        useAuthStore.setState({ configured: true, conflict: false });
+        useAuthStore.setState({
+            activeProvider: 'opencode',
+            modelId: 'zen',
+            key: 'sk-opencode-test-key',
+            providerKeys: { opencode: 'sk-opencode-test-key' },
+            providerBaseUrls: {},
+            configuredProviderIds: ['opencode'],
+            configured: true,
+            conflict: false,
+        });
         useSandboxStore.setState({ mode: 'jailed', projectLabel: 'MyProject' });
         piSessionsMock.runCommand.mockResolvedValue({ ok: true });
         piSessionsMock.listSlashCommands.mockImplementation(() => new Promise(() => {}));
+        piSessionsMock.getState.mockResolvedValue({ ok: true, data: { model: { provider: 'opencode', id: 'zen' } } });
+        piSessionsMock.listAvailableModels.mockResolvedValue([
+            { provider: 'opencode', id: 'zen', name: 'Zen' },
+            { provider: 'openai', id: 'gpt-4o', name: 'GPT-4o', reasoning: true },
+        ]);
+        piSessionsMock.setModel.mockResolvedValue({ ok: true });
+        piSessionsMock.cycleThinkingLevel.mockResolvedValue({ ok: true, data: { level: 'medium' } });
         piSessionsMock.restartAgent.mockResolvedValue(true);
         piSessionsMock.listSessions.mockResolvedValue([]);
         piSessionsMock.loadSessionMessages.mockResolvedValue({ messages: [], incomplete: false });
@@ -161,6 +193,39 @@ describe('AiPanel chat', () => {
         useAgentSessionStore.setState({ runtimeStatus: 'Starting Pi in C:/agent/workspace' });
         renderPanel();
         expect(screen.getByRole('status')).toHaveTextContent('Starting Pi');
+    });
+
+    it('/provider opens the provider chooser with the configured provider marked', async () => {
+        renderPanel();
+        const input = screen.getByPlaceholderText(/Ask anything/i);
+        fireEvent.change(input, { target: { value: '/provider' } });
+        fireEvent.keyDown(input, { key: 'Enter' });
+        expect(await screen.findByText(/Configured:/i)).toBeInTheDocument();
+        expect(screen.getAllByText(/opencode Zen/i).length).toBeGreaterThan(0);
+        expect(screen.getByText(/Already configured/i)).toBeInTheDocument();
+    });
+
+    it('/model opens the Pi model picker and selecting a model updates Pi', async () => {
+        renderPanel();
+        const input = screen.getByPlaceholderText(/Ask anything/i);
+        fireEvent.change(input, { target: { value: '/model gpt' } });
+        fireEvent.keyDown(input, { key: 'Enter' });
+        expect(await screen.findByText(/Choose model/i)).toBeInTheDocument();
+        fireEvent.click(await screen.findByText('GPT-4o'));
+        await waitFor(() => expect(piSessionsMock.setModel).toHaveBeenCalledWith(
+            'openai',
+            'gpt-4o',
+            expect.objectContaining({ providerKeys: { opencode: 'sk-opencode-test-key' } }),
+        ));
+        expect(await screen.findByText(/Model: BYO OpenAI-compatible \/ gpt-4o/i)).toBeInTheDocument();
+    });
+
+    it('Shift+Tab cycles the Pi reasoning level', async () => {
+        renderPanel();
+        const input = screen.getByPlaceholderText(/Ask anything/i);
+        fireEvent.keyDown(input, { key: 'Tab', shiftKey: true });
+        await waitFor(() => expect(piSessionsMock.cycleThinkingLevel).toHaveBeenCalledOnce());
+        expect(await screen.findByText(/Thinking level: medium/i)).toBeInTheDocument();
     });
 
     it('app slash commands can open OpenJammer chrome and close the palette', () => {

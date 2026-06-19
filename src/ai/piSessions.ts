@@ -32,6 +32,14 @@ export interface DisplayMessage {
     tool?: string;
 }
 
+export interface PiCommandRuntime {
+    providerKey?: string;
+    providerKeys?: Record<string, string>;
+    provider?: string;
+    modelId?: string;
+    yolo?: boolean;
+}
+
 /** One slash command Pi says is available via `get_commands`. */
 export interface PiSlashCommand {
     name: string;
@@ -39,6 +47,15 @@ export interface PiSlashCommand {
     source: 'extension' | 'prompt' | 'skill';
     location?: 'user' | 'project' | 'path';
     path?: string;
+}
+
+export interface PiModel {
+    provider: string;
+    id: string;
+    name?: string;
+    reasoning?: unknown;
+    api?: string;
+    [key: string]: unknown;
 }
 
 /** A loaded session transcript; `incomplete` flags unparseable lines. */
@@ -92,6 +109,7 @@ function newCmdChannel(): string {
  */
 export async function runCommand(
     envelope: Record<string, unknown>,
+    runtime: PiCommandRuntime = {},
 ): Promise<{ ok: boolean; sessionId?: string; data?: unknown }> {
     const invoke = getInvoke();
     if (!invoke) return { ok: false };
@@ -112,7 +130,15 @@ export async function runCommand(
         } else if (line.kind === 'error') settle(false);
     });
 
-    invoke('ai_command', { command: envelope, channel }).catch(() => settle(false));
+    invoke('ai_command', {
+        command: envelope,
+        channel,
+        providerKey: runtime.providerKey ?? null,
+        providerKeys: runtime.providerKeys ?? null,
+        provider: runtime.provider ?? null,
+        modelId: runtime.modelId ?? null,
+        yolo: runtime.yolo ?? false,
+    }).catch(() => settle(false));
 
     const ok = await done;
     unlisten?.();
@@ -120,12 +146,36 @@ export async function runCommand(
 }
 
 /** Ask the warm Pi child for dynamic slash commands (extensions, prompts, skills). */
-export async function listSlashCommands(): Promise<PiSlashCommand[]> {
-    const res = await runCommand({ type: 'get_commands' });
+export async function listSlashCommands(runtime?: PiCommandRuntime): Promise<PiSlashCommand[]> {
+    const res = await runCommand({ type: 'get_commands' }, runtime);
     if (!res.ok || !res.data || typeof res.data !== 'object') return [];
     const commands = (res.data as { commands?: unknown }).commands;
     if (!Array.isArray(commands)) return [];
     return commands.filter(isPiSlashCommand);
+}
+
+export async function getState(runtime?: PiCommandRuntime): Promise<{ ok: boolean; data?: unknown }> {
+    return runCommand({ type: 'get_state' }, runtime);
+}
+
+export async function listAvailableModels(runtime?: PiCommandRuntime): Promise<PiModel[]> {
+    const res = await runCommand({ type: 'get_available_models' }, runtime);
+    if (!res.ok || !res.data || typeof res.data !== 'object') return [];
+    const models = (res.data as { models?: unknown }).models;
+    if (!Array.isArray(models)) return [];
+    return models.filter(isPiModel);
+}
+
+export async function setModel(
+    provider: string,
+    modelId: string,
+    runtime?: PiCommandRuntime,
+): Promise<{ ok: boolean; data?: unknown }> {
+    return runCommand({ type: 'set_model', provider, modelId }, runtime);
+}
+
+export async function cycleThinkingLevel(runtime?: PiCommandRuntime): Promise<{ ok: boolean; data?: unknown }> {
+    return runCommand({ type: 'cycle_thinking_level' }, runtime);
 }
 
 /** Kill the warm child so the next prompt reloads Pi resources. */
@@ -147,4 +197,10 @@ function isPiSlashCommand(value: unknown): value is PiSlashCommand {
         typeof v.name === 'string' &&
         (v.source === 'extension' || v.source === 'prompt' || v.source === 'skill')
     );
+}
+
+function isPiModel(value: unknown): value is PiModel {
+    if (!value || typeof value !== 'object') return false;
+    const v = value as { provider?: unknown; id?: unknown };
+    return typeof v.provider === 'string' && typeof v.id === 'string';
 }

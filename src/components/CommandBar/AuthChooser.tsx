@@ -23,47 +23,11 @@
  * ({@link useAuthStore}) NEVER persists the key.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { Command } from 'cmdk';
 import { useAuthStore } from '../../auth/authStore';
+import { AI_PROVIDERS, providerTitle, type ProviderOption } from '../../auth/providers';
 import { openExternal } from '../../ai/tauri';
-
-/** A selectable provider row. */
-interface ProviderOption {
-    /** Stable provider id (matches the store + the Rust env-var mapping). */
-    id: string;
-    /** Display title. */
-    title: string;
-    /** Short subtitle shown under the title. */
-    subtitle: string;
-}
-
-/**
- * The offered providers, in display order. opencode Zen is FIRST so it is the
- * default highlight. Claude Pro/Max subscription OAuth is deliberately ABSENT.
- */
-const PROVIDERS: readonly ProviderOption[] = [
-    {
-        id: 'opencode',
-        title: 'opencode Zen',
-        subtitle: 'Free key — recommended to get started',
-    },
-    {
-        id: 'codex',
-        title: 'Codex (OAuth)',
-        subtitle: 'Sign in with your subscription — the clean subscription path',
-    },
-    {
-        id: 'anthropic',
-        title: 'Anthropic',
-        subtitle: 'API key — billed per token, NOT your Pro/Max plan',
-    },
-    {
-        id: 'openai',
-        title: 'BYO OpenAI-compatible',
-        subtitle: 'Your own base URL + API key',
-    },
-];
 
 /** The opencode Zen free-key page opened in the system browser. */
 const OPENCODE_AUTH_URL = 'https://opencode.ai/auth';
@@ -77,8 +41,17 @@ interface AuthChooserProps {
 
 export function AuthChooser({ onConfigured, onBack }: AuthChooserProps) {
     // The currently expanded provider (its detail panel is shown). Null = the list.
+    const activeProvider = useAuthStore((s) => s.activeProvider);
+    const configured = useAuthStore((s) => s.configured);
+    const configuredProviderIds = useAuthStore((s) => s.configuredProviderIds);
+    const configuredProviders = useMemo(() => {
+        const ids = new Set(configuredProviderIds);
+        if (configured && activeProvider) ids.add(activeProvider);
+        return ids;
+    }, [activeProvider, configured, configuredProviderIds]);
+    const initialProvider = activeProvider ?? AI_PROVIDERS[0].id;
     const [selected, setSelected] = useState<ProviderOption | null>(null);
-    const [value, setValue] = useState(PROVIDERS[0].id); // default highlight = opencode Zen
+    const [value, setValue] = useState(initialProvider); // default highlight = active provider or opencode Zen
 
     if (selected) {
         return (
@@ -103,10 +76,17 @@ export function AuthChooser({ onConfigured, onBack }: AuthChooserProps) {
                 </button>
                 <span className="command-bar-ai-badge">Configure AI provider</span>
             </div>
-            <p className="command-bar-auth-intro">
-                Choose who pays for the AI agent. This only sets the provider — every edit
-                is still an undoable OpenJammer canvas action.
-            </p>
+            {configured && activeProvider ? (
+                <div className="command-bar-auth-configured" role="status">
+                    <span>Configured: <strong>{providerTitle(activeProvider)}</strong></span>
+                    <span>Esc keeps it · Enter reconfigures the highlighted provider</span>
+                </div>
+            ) : (
+                <p className="command-bar-auth-intro">
+                    Choose who pays for the AI agent. This only sets the provider — every edit
+                    is still an undoable OpenJammer canvas action.
+                </p>
+            )}
             <Command label="Choose AI provider" value={value} onValueChange={setValue} loop>
                 {/*
                  * cmdk drives ↑/↓ navigation + Enter through its INPUT; without one
@@ -128,7 +108,7 @@ export function AuthChooser({ onConfigured, onBack }: AuthChooserProps) {
                     <Command.Empty className="command-bar-empty">
                         No providers match.
                     </Command.Empty>
-                    {PROVIDERS.map((p) => (
+                    {AI_PROVIDERS.map((p) => (
                         <Command.Item
                             key={p.id}
                             value={p.id}
@@ -136,8 +116,17 @@ export function AuthChooser({ onConfigured, onBack }: AuthChooserProps) {
                             className="command-bar-item command-bar-auth-item"
                             onSelect={() => setSelected(p)}
                         >
-                            <span className="command-bar-auth-item-title">{p.title}</span>
-                            <span className="command-bar-auth-item-subtitle">{p.subtitle}</span>
+                            <span className="command-bar-auth-item-title">
+                                {p.title}
+                                {configuredProviders.has(p.id) && (
+                                    <span className="command-bar-auth-configured-mark">configured</span>
+                                )}
+                            </span>
+                            <span className="command-bar-auth-item-subtitle">
+                                {configuredProviders.has(p.id)
+                                    ? 'Already configured — press Enter to replace the key'
+                                    : p.subtitle}
+                            </span>
                         </Command.Item>
                     ))}
                 </Command.List>
@@ -160,6 +149,7 @@ function ProviderDetail({
     const validateKey = useAuthStore((s) => s.validateKey);
     const beginOAuth = useAuthStore((s) => s.beginOAuth);
     const setProvider = useAuthStore((s) => s.setProvider);
+    const configured = useAuthStore((s) => s.configuredProviderIds.includes(provider.id) || (s.configured && s.activeProvider === provider.id));
 
     const [key, setKey] = useState('');
     const [baseUrl, setBaseUrl] = useState('');
@@ -219,6 +209,12 @@ function ProviderDetail({
                 </button>
                 <span className="command-bar-ai-badge">{provider.title}</span>
             </div>
+
+            {configured && (
+                <p className="command-bar-auth-hint">
+                    {provider.title} is already configured. Press Esc to keep it, or enter a new key to replace it.
+                </p>
+            )}
 
             {isZen && (
                 <>
