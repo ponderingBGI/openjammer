@@ -2,7 +2,7 @@
  * Node Canvas - Main canvas with pan/zoom, box selection, and node rendering
  */
 
-import { useCallback, useRef, useState, useEffect, useMemo, memo } from 'react';
+import { useCallback, useRef, useState, useEffect, useMemo } from 'react';
 import type { Position, Connection } from '../../engine/types';
 import { useGraphStore, getNodeDimensions, type NodeBounds } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -18,6 +18,7 @@ import { getExecutor } from '../../audio/executor';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
 import { ContextMenu } from './ContextMenu';
 import { NodeWrapper } from '../Nodes/NodeWrapper';
+import { Cable } from '@openjammer/oj-ui';
 import { useMIDIStore } from '../../store/midiStore';
 import { useAudioClipStore } from '../../store/audioClipStore';
 import { useLibraryStore, getSampleFile } from '../../store/libraryStore';
@@ -37,61 +38,6 @@ interface SelectionBox {
     currentX: number;
     currentY: number;
 }
-
-/** Props for the memoized ConnectionPath component */
-interface ConnectionPathProps {
-    conn: Connection;
-    path: string;
-    isSelected: boolean;
-    isBundled: boolean;
-    bundleCount: number;
-    signalLevel: number;
-    onSelect: (connId: string) => void;
-}
-
-/**
- * Memoized connection path component - only re-renders when connection changes
- * or signal level changes by more than 1%
- */
-const ConnectionPath = memo(function ConnectionPath({
-    conn,
-    path,
-    isSelected,
-    isBundled,
-    bundleCount,
-    signalLevel,
-    onSelect
-}: ConnectionPathProps) {
-    const signalStyle = {
-        '--signal-level': signalLevel.toFixed(3)
-    } as React.CSSProperties;
-
-    return (
-        <g>
-            <path
-                d={path}
-                data-connection-id={conn.id}
-                className={`connection-line ${conn.type} ${isSelected ? 'selected' : ''} ${isBundled ? 'bundled' : ''}`}
-                style={signalStyle}
-                onClick={(e) => {
-                    e.stopPropagation();
-                    onSelect(conn.id);
-                }}
-            />
-            {isBundled && (
-                <title>{`Bundle (${bundleCount} connections)`}</title>
-            )}
-        </g>
-    );
-}, (prev, next) => {
-    // Custom comparison: skip re-render if signal level changed by less than 1%
-    return prev.conn.id === next.conn.id &&
-           prev.path === next.path &&
-           prev.isSelected === next.isSelected &&
-           prev.isBundled === next.isBundled &&
-           prev.bundleCount === next.bundleCount &&
-           Math.abs(prev.signalLevel - next.signalLevel) < 0.01;
-});
 
 export function NodeCanvas() {
     const canvasRef = useRef<HTMLDivElement>(null);
@@ -1031,36 +977,28 @@ export function NodeCanvas() {
 
         if (!startPos || !endPos) return null;
 
-        const dx = endPos.x - startPos.x;
-        const controlOffset = Math.min(Math.abs(dx) / 2, 100);
-
-        const path = `M ${startPos.x} ${startPos.y}
-                  C ${startPos.x + controlOffset} ${startPos.y},
-                    ${endPos.x - controlOffset} ${endPos.y},
-                    ${endPos.x} ${endPos.y}`;
-
         const isSelected = selectedConnectionIds.has(conn.id);
 
         // Auto-detect bundle status from internal wiring
         const bundleCount = getConnectionBundleCount(conn, allNodes, allConnections);
         const isBundled = bundleCount > 1;
 
-        // Get signal level for visualization (works for all connection types)
-        // Audio: uses "sourceNodeId->targetNodeId" key from RMS analyzer
-        // Control: uses connection ID directly from control signal tracking
+        // Signal level for visualization — Cable maps it to width/opacity/glow.
+        // Audio: "sourceNodeId->targetNodeId" RMS key; control: connection ID.
         const audioConnectionKey = `${conn.sourceNodeId}->${conn.targetNodeId}`;
         const signalLevel = signalLevels.get(audioConnectionKey) ?? signalLevels.get(conn.id) ?? 0;
 
         return (
-            <ConnectionPath
+            <Cable
                 key={conn.id}
-                conn={conn}
-                path={path}
-                isSelected={isSelected}
-                isBundled={isBundled}
+                start={startPos}
+                end={endPos}
+                kind={conn.type}
+                selected={isSelected}
+                bundled={isBundled}
                 bundleCount={bundleCount}
                 signalLevel={signalLevel}
-                onSelect={selectConnection}
+                onSelect={() => selectConnection(conn.id)}
             />
         );
         // eslint-disable-next-line react-hooks/exhaustive-deps -- portLayoutVersion is a deliberate cache-bust: getPortPosition reads the portPositionCache ref (untracked), so this callback must change identity when the cache is invalidated after DOM paint, or cables render with stale anchor positions
@@ -1079,22 +1017,16 @@ export function NodeCanvas() {
                     const startPos = getPortPosition(source.nodeId, source.portId);
                     if (!startPos) return null;
 
-                    const targetX = endPos.x;
+                    // Fan multiple sources out vertically toward the cursor.
                     const targetY = endPos.y + (index * 10);
 
-                    const dx = targetX - startPos.x;
-                    const controlOffset = Math.min(Math.abs(dx) / 2, 100);
-
-                    const path = `M ${startPos.x} ${startPos.y} 
-                              C ${startPos.x + controlOffset} ${startPos.y},
-                                ${targetX - controlOffset} ${targetY},
-                                ${targetX} ${targetY}`;
-
                     return (
-                        <path
+                        <Cable
                             key={`${source.nodeId}-${source.portId}`}
-                            d={path}
-                            className={`connection-line control connection-temp`}
+                            temp
+                            kind="control"
+                            start={startPos}
+                            end={{ x: endPos.x, y: targetY }}
                         />
                     );
                 })}

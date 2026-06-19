@@ -21,8 +21,8 @@ export interface CableProps
     bundled?: boolean;
     /** How many connections the bundle represents (for the hover `<title>`). */
     bundleCount?: number;
-    /** Live signal RMS, 0..1 — subtly raises stroke-width and opacity so a hot
-     *  cable reads as alive. No blur (Hard-Shadow): width and opacity only. */
+    /** Live signal RMS, 0..1 — raises stroke-width, opacity, and the soft
+     *  live-connection glow (DESIGN.md §5 exception) so a hot cable reads as alive. */
     signalLevel?: number;
     /** In-progress drag from a port to the cursor — drawn dashed. */
     temp?: boolean;

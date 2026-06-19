@@ -45,96 +45,12 @@
 }
 
 /* ============================================================================
-   Connection Lines - Universal Signal-Based Visualization
-
-   All connections use --signal-level (0-1) CSS variable for visual feedback:
-   - Audio connections: driven by RMS amplitude from AnalyserNode
-   - Control connections: driven by key/pedal activity
-   - More signal = thicker wire + more glow (like VCV Rack, TouchDesigner)
+   Cables — now the oj-ui <Cable> component (packages/oj-ui/src/components/Cable),
+   whose CSS owns all wire styling: signal-reactive width/opacity/glow (the
+   DESIGN.md §5 live-connection exception — "more signal = thicker, brighter
+   wire"), selected, bundled, and the temp drag. Only the ghost-mode cable
+   overrides below remain here, re-pointed to .oj-cable.
    ============================================================================ */
-
-.connection-line {
-    fill: none;
-    stroke-linecap: round;
-    pointer-events: stroke;
-    cursor: pointer;
-    /* Fallback stroke in case CSS variables aren't loaded */
-    stroke: #888;
-
-    /* Universal signal level variable (0-1) */
-    --signal-level: 0;
-
-    /* Base stroke width with signal boost: 3px -> 6px at full signal */
-    stroke-width: calc(3px + var(--signal-level) * 3px);
-
-    /* Base opacity with signal boost: 0.7 -> 1.0 at full signal */
-    opacity: calc(0.7 + var(--signal-level) * 0.3);
-
-    /* Glow effect based on signal level (uses currentColor from stroke) */
-    filter: drop-shadow(0 0 calc(var(--signal-level) * 6px) currentColor);
-
-    /* Fast attack (30ms), CSS handles the interpolation */
-    transition: stroke-width 0.03s ease-out, opacity 0.03s ease-out, filter 0.03s ease-out;
-}
-
-.connection-line:hover {
-    stroke-width: calc(5px + var(--signal-level) * 2px);
-}
-
-/* Type-specific colors (glow inherits from stroke via currentColor) */
-.connection-line.audio {
-    stroke: var(--audio-connection);
-}
-
-.connection-line.control {
-    stroke: var(--control-connection);
-}
-
-.connection-line.universal {
-    stroke: var(--universal-connection, #888);
-}
-
-.connection-line.selected {
-    stroke-width: calc(5px + var(--signal-level) * 2px);
-    filter: drop-shadow(0 0 8px currentColor) drop-shadow(0 0 16px currentColor);
-    animation: selected-glow 1s ease-in-out infinite alternate;
-}
-
-@keyframes selected-glow {
-    0% { filter: drop-shadow(0 0 6px currentColor) drop-shadow(0 0 12px currentColor); }
-    100% { filter: drop-shadow(0 0 10px currentColor) drop-shadow(0 0 20px currentColor); }
-}
-
-/* Bundled connections - higher base values for visibility */
-.connection-line.bundled {
-    /* Thicker base: 5px -> 10px at full signal */
-    stroke-width: calc(5px + var(--signal-level) * 5px);
-    /* Always have some glow for bundles, more when active */
-    filter: drop-shadow(0 0 calc(3px + var(--signal-level) * 10px) currentColor);
-}
-
-.connection-line.bundled:hover {
-    stroke-width: calc(7px + var(--signal-level) * 4px);
-    filter: drop-shadow(0 0 calc(5px + var(--signal-level) * 8px) currentColor);
-}
-
-.connection-line.bundled.selected {
-    stroke-width: calc(7px + var(--signal-level) * 4px);
-    filter: drop-shadow(0 0 10px currentColor) drop-shadow(0 0 18px currentColor);
-}
-
-.connection-temp {
-    pointer-events: none;
-    stroke-dasharray: 5 5;
-    animation: dash 0.5s linear infinite;
-    will-change: stroke-dashoffset;
-}
-
-@keyframes dash {
-    to {
-        stroke-dashoffset: -10;
-    }
-}
 
 .nodes-layer {
     position: absolute;
@@ -193,18 +109,18 @@
 }
 
 /* Connections fully visible and on top in ghost mode */
-.node-canvas.ghost-mode .connection-line {
+.node-canvas.ghost-mode .oj-cable {
     pointer-events: stroke;
     stroke-width: 4;
     opacity: 1 !important; /* Override any signal-based opacity */
     filter: drop-shadow(0 0 4px currentColor); /* Add glow for visibility */
 }
 
-.node-canvas.ghost-mode .connection-line.audio {
+.node-canvas.ghost-mode .oj-cable--audio {
     filter: drop-shadow(0 0 6px var(--audio-connection));
 }
 
-.node-canvas.ghost-mode .connection-line.control {
+.node-canvas.ghost-mode .oj-cable--control {
     filter: drop-shadow(0 0 6px var(--control-connection));
 }
 
