@@ -1,16 +1,22 @@
-# Figma → canari, automatically.
+# Figma → canari, automatically.  ⚠ UPGRADE PATH, NOT THE FREE DEFAULT.
 #
-# The designer edits tokens in Figma and pushes them from the Tokens Studio plugin
-# to a `figma/tokens` (or `figma-sync/*`) branch — that push is the only manual act.
-# This workflow then does the rest so nobody hand-edits generated code or hunts for drift:
+# This is the *Figma→repo write-back* leg. It only fires when someone PUSHES tokens to a
+# `figma/tokens` (or `figma-sync/*`) branch from the Tokens Studio plugin — and pushing our
+# MULTI-FILE token folder requires **Tokens Studio Pro** (the free tier can pull/theme-switch/
+# apply our folder, but cannot push it back). So on the free/Education stack this workflow is
+# dormant by design: no one can populate the trigger branch, so it never runs.
+#
+# THE FREE DEFAULT is code-first: edit the DTCG in `packages/oj-tokens/tokens/` and open a PR;
+# `tokens.yml` auto-rebuilds the artifacts. See apps/docs → "Design system" → "The 3-way sync".
+#
+# When a designer DOES push (Tokens Studio Pro), this does the rest so nobody hand-edits
+# generated code or hunts for drift:
 #   1. rebuilds EVERY token artifact from the pushed DTCG (`bun run tokens` — variables.css,
 #      themes.ts, and the design-sync snapshot) and commits the result back to the branch,
 #   2. fails loudly if the working tree still drifts after a rebuild (a hand-edited artifact),
 #   3. opens/refreshes a single PR into `canari` so anyone — including the designer — can
 #      review the token diff and merge to apply it across code, the app, and the next sync.
-#
-# See apps/docs → "Design system" → "The 3-way sync" for the full model.
-name: Figma tokens → canari PR
+name: Figma tokens → canari PR (Tokens Studio Pro write-back)
 
 on:
   push:

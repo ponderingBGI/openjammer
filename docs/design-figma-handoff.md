@@ -22,14 +22,19 @@ There is **one source of truth per concern**, fanned out to the three surfaces:
 ### Tokens → one source: the repo's DTCG files (`packages/oj-tokens/tokens/`)
 - **→ code**: Style Dictionary (`bun run tokens`) → `dist/variables.css` + `themes.ts`.
 - **→ claude.ai/design**: the design-sync (a static cream snapshot ships in the bundle).
-- **→ Figma**: **Tokens Studio** plugin Git-syncs those exact DTCG files ↔ **Figma Variables**
-  (two-way). This is the genuinely bidirectional leg — a designer can tweak a token in Figma,
-  push, and it lands as a commit that rebuilds code + the sync.
+- **→ Figma**: **Tokens Studio** plugin Git-syncs those exact DTCG files → **Figma Variables**.
+  On the **free** tier this leg is **one-way (pull-only)**: Tokens Studio's multi-file *folder*
+  sync — which is what our `tokens/` directory uses (`$metadata.json` / `$themes.json`) — supports
+  **pull**, not push. A designer **Pulls** the latest tokens, switches the Theme mode, and
+  **Applies** them; they **cannot push token edits back from Figma**. Tokens are authored in the
+  repo as PRs (a true Figma → repo write-back would need **Tokens Studio Pro** *and* tokens to be
+  authored in Figma — neither is our path today).
 - *(Already seeded:* I built the Figma Variables directly — 2 collections, 69 variables, 3 theme
-  modes. Tokens Studio then maintains them in step with the repo going forward.)*
+  modes. Tokens Studio then keeps them in step by pulling from the repo going forward.)*
 
 ### Components → one source: the code (`packages/oj-ui`)
-- **→ claude.ai/design**: done — 53 components synced, live + browsable.
+- **→ claude.ai/design**: done — **53 components** synced, live + browsable (32 of them also have
+  a Ladle story today; the rest are covered by the claude.ai/design previews).
 - **→ Figma**: the **designer builds the Figma components** (the visual masters), using the
   claude.ai/design previews + the variables as reference. There is **no reliable automatic
   code→Figma component generation** — Figma components are design artifacts. (A plugin like
@@ -39,27 +44,51 @@ There is **one source of truth per concern**, fanned out to the three surfaces:
   Figma Dev Mode shows the real code + feeds AI agents the right snippet. Components flow
   design→Figma (authoring) + a code link back; they do **not** sync visually both ways.
 
-**In one line:** tokens sync automatically (Tokens Studio); components are authored in Figma by
-the designer against the code + claude.ai/design, then linked to code via Code Connect.
+**In one line:** tokens are authored in the repo and **mirror one-way into Figma** (Tokens Studio
+Pull); components are authored in Figma by the designer against the code + claude.ai/design, then
+linked to code via Code Connect.
 
-## Seat requirement
+## Plan & seat — what we have, what's gated
 
-Building/editing in Figma needs a **Full or Dev seat** (View seats are read-only and capped at
-~6 MCP calls/month). The "openjammer" team currently shows Milo on a **View** seat — but the
-**Education/student tier grants edit access in practice** (verified: file + variables created
-fine). The designer will have their own Full/Dev seat. If you hit limits building more, upgrade
-the seat on the team.
+The OpenJammer file currently runs on **Education = Professional**, with a **Dev seat** (not a
+View seat). On that tier **Dev Mode, library publishing, and up to 10 variable modes all work** —
+verified: the file, the 69 variables, and the 3 theme modes were all created fine. The **only**
+things OpenJammer wants that Professional does *not* grant are **Code Connect** (Dev-Mode code
+snippets), **native branching**, and the **REST Variables write API** — all Organization/Enterprise.
+
+Education is a **personal** student/educator grant (SheerID, re-verified annually); it is **not**
+available to an open-source project as an entity. The system is built to **degrade, not break**:
+if the grant lapses the file drops to **Starter**, the three Theme modes become **read-only** (the
+data is safe, editing is frozen), and the code-first token path keeps working untouched — it never
+depended on Figma writing anything. A durable **paid Professional Dev seat (~$12/mo, re-check
+[figma.com/pricing](https://www.figma.com/pricing/))** restores the same capabilities permanently
+if you want insurance against a lapse.
+
+| Capability | Starter (Free) | Professional | Organization | Enterprise |
+| --- | --- | --- | --- | --- |
+| Publish team libraries | No | Yes | Yes | Yes |
+| Dev Mode (inspect) | No | Yes (Full/Dev seat) | Yes | Yes |
+| Code Connect (code snippets in Dev Mode) | No | No | Yes | Yes |
+| Branching & merging | No | No | Yes | Yes |
+| Variable modes per collection | 1 (effectively none) | up to 10 | up to 20 | unlimited |
+| REST Variables API (write, headless CI) | No | No | No | Yes |
+| Version history | 30 days | unlimited | unlimited | unlimited |
+
+*(Pricing, USD/annual, checked 2026-06-20: Pro Full $16 / Dev $12 / Collab $3; Org Full $55 /
+Dev $25; Ent Full $90 / Dev $35; View seats free. Pricing changes periodically — re-check
+[figma.com/pricing](https://www.figma.com/pricing/).)*
 
 ## Day-one checklist for the designer
 
-1. **Tokens → Figma Variables (Tokens Studio).** Install the *Tokens Studio for Figma* plugin →
-   Settings → Sync providers → **GitHub** → PAT (Code read+write) → **folder** path
-   `packages/oj-tokens/tokens`, branch `feat/design-system`, **token format: W3C DTCG**. Pull.
-   The repo already has `$metadata.json` + `$themes.json` defining the sets/themes, so the plugin
-   creates: a **Primitives** collection + a **Theme** collection with **Cream / Cyberpunk /
-   Midnight** modes. *(Verify the collection/mode mapping on first pull and adjust in-plugin if
-   needed; then "Export to Figma Variables".)* The variables I already created match this — reconcile
-   rather than duplicate.
+1. **Tokens → Figma Variables (Tokens Studio, pull-only on free).** Install the *Tokens Studio for
+   Figma* plugin → Settings → Sync providers → **GitHub** → PAT (Code **read** access is enough on
+   the free path) → **folder** path `packages/oj-tokens/tokens`, branch `canari`, **token format:
+   W3C DTCG**. Pull. The repo already has `$metadata.json` + `$themes.json` defining the sets/themes,
+   so the plugin creates: a **Primitives** collection + a **Theme** collection with **Cream /
+   Cyberpunk / Midnight** modes. *(Verify the collection/mode mapping on first pull and adjust
+   in-plugin if needed; then "Export to Figma Variables".)* The variables I already created match
+   this — reconcile rather than duplicate. Remember the folder sync is **read-only on free** — Pull
+   and Apply themes here; you don't push token edits back (those are repo PRs).
 2. **Components → Figma.** For each component: build the master with auto-layout, **bind every
    visual property to the variables** (fills → `color/*`, padding/gap → `space/*`, radius →
    `radius/*`, type → `text/*` + `font/*`, border → `border/sketch-width` + `color/sketch-black`),
@@ -95,11 +124,13 @@ Port-color meaning is load-bearing: **audio = blue, control = grey, universal = 
   build**: a few tall variant-sets overlap their neighbours (fixed-grid placement — just drag
   apart), `IconLinux` / `IconWindows` have approximated glyph paths to redraw, and a handful of
   state-fills (e.g. Surface "lifted") want an eye. Everything is real, named, and token-bound.
-- ✅ **Code Connect mappings written + automated** — all 53 as committed `.figma.tsx`
-  (`packages/oj-ui/src/components/**`, parse-validated, snippets → `@openjammer/oj-ui`). PRs
-  validate them; merges to `canari` publish via `code-connect.yml`.
-  ⏳ Three one-time human steps before snippets show in Dev Mode: **publish the oj-ui library**
-  in Figma, an **Org/Enterprise plan** (Code Connect isn't on Free/Pro/Edu), and the
-  **`FIGMA_ACCESS_TOKEN`** repo secret. Until then the publish step skips cleanly.
+- ✅ **Code Connect mappings written + automated** — **53 mappings across 37 committed
+  `.figma.tsx` files** (`packages/oj-ui/src/components/**`; multi-export files like Menu/Icons hold
+  several), parse-validated, snippets → `@openjammer/oj-ui`. PRs validate them; merges to `canari`
+  publish via `code-connect.yml`.
+  ⏳ Three one-time human steps before snippets show in Dev Mode, all at the **Organization/
+  Enterprise** rung: **publish the oj-ui library** in Figma, an **Org/Enterprise plan** (Code
+  Connect isn't on Starter/Professional/Education), and the **`FIGMA_ACCESS_TOKEN`** repo secret.
+  Until then the publish step skips cleanly.
 - ✅ **`bun run tokens` is no longer a thing humans run** — `tokens.yml` auto-rebuilds + commits
   token artifacts on any token PR.
