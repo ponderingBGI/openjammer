@@ -7,7 +7,7 @@
 //! the user's one configured provider key, speaks Pi's LF-delimited JSONL RPC,
 //! normalizes each event to a [`PiStreamLine`], and re-emits it to the webview as
 //! a Tauri event on a per-run channel. The frontend ([`src/ai/PiAgentBackend.ts`])
-//! turns those into the streamed transcript and the Approve/Reject transaction.
+//! turns those into the streamed transcript and reversible live graph edits.
 //!
 //! # RPC protocol (pi.dev `rpc.md`) — M1 "transport truth"
 //!
@@ -46,7 +46,7 @@
 //! * **No key storage.** The key is passed transiently to the child and never
 //!   written to disk by OpenJammer.
 //! * **Tool calls are forwarded, not executed here.** Graph mutations are
-//!   surfaced to the frontend and only applied behind the user's Approve.
+//!   surfaced to the frontend as reversible live edits that undo with Ctrl+Z.
 //! * **Blocking extension dialogs are auto-cancelled.** M1 surfaces an
 //!   `extension_ui_request` as a `ui-request` event but does not yet drive an
 //!   interactive reply; to keep a run from hanging on a dialog we never answer,
@@ -75,9 +75,9 @@ use tauri::{AppHandle, Emitter, Manager};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PiStreamLine {
-    /// `"thought" | "tool-call" | "result" | "error" | "ui-request"`.
+    /// `"thought" | "status" | "tool-call" | "result" | "error" | "ui-request" | "session"`.
     pub kind: String,
-    /// Present for `thought` / `result` / `error`.
+    /// Present for `thought` / `status` / `result` / `error`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     /// Present for `tool-call`: `{ "name": <toolName>, "args": <args> }`,
@@ -91,6 +91,10 @@ pub struct PiStreamLine {
     /// title, options, …) for the frontend to render.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<serde_json::Value>,
+    /// Present for command results that carry structured data (`get_state`,
+    /// `get_commands`, `compact`, …).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
 }
 
 impl PiStreamLine {
@@ -101,6 +105,18 @@ impl PiStreamLine {
             call: None,
             id: None,
             request: None,
+            data: None,
+        }
+    }
+
+    fn status(text: impl Into<String>) -> Self {
+        Self {
+            kind: "status".into(),
+            text: Some(text.into()),
+            call: None,
+            id: None,
+            request: None,
+            data: None,
         }
     }
 
@@ -111,6 +127,18 @@ impl PiStreamLine {
             call: None,
             id: None,
             request: None,
+            data: None,
+        }
+    }
+
+    fn result_with_data(text: impl Into<String>, data: Option<serde_json::Value>) -> Self {
+        Self {
+            kind: "result".into(),
+            text: Some(text.into()),
+            call: None,
+            id: None,
+            request: None,
+            data,
         }
     }
 
@@ -121,6 +149,7 @@ impl PiStreamLine {
             call: None,
             id: None,
             request: None,
+            data: None,
         }
     }
 
@@ -132,6 +161,7 @@ impl PiStreamLine {
             call: Some(serde_json::json!({ "name": name, "args": args })),
             id,
             request: None,
+            data: None,
         }
     }
 
@@ -145,6 +175,7 @@ impl PiStreamLine {
             call: None,
             id: None,
             request: None,
+            data: None,
         }
     }
 
@@ -160,6 +191,7 @@ impl PiStreamLine {
             call: None,
             id,
             request: Some(request),
+            data: None,
         }
     }
 }
@@ -473,7 +505,7 @@ fn spawn_and_configure(
     emit(
         app,
         channel,
-        PiStreamLine::thought(format!("Starting Pi in {}", project_root.display())),
+        PiStreamLine::status(format!("Starting Pi in {}", project_root.display())),
     );
     if jailed && !crate::sandbox::jail_supported() {
         // Be honest where the hard OS jail isn't wired yet (macOS/Windows): the
@@ -481,8 +513,8 @@ fn spawn_and_configure(
         emit(
             app,
             channel,
-            PiStreamLine::thought(
-                "note: OS-level file jail isn't available on this platform — the in-Pi permission-gate is the active layer.".to_string(),
+            PiStreamLine::status(
+                "OS-level file jail isn't available on this platform — the in-Pi permission-gate is the active layer.".to_string(),
             ),
         );
     }
@@ -857,8 +889,8 @@ fn extract_session_id(value: &serde_json::Value) -> Option<String> {
             }
         }
     }
-    // Some shapes nest it under a `state` / `session` object.
-    for outer in ["state", "session"] {
+    // Some shapes nest it under a `data` / `state` / `session` object.
+    for outer in ["data", "state", "session"] {
         if let Some(obj) = value.get(outer) {
             if let Some(s) = extract_session_id(obj) {
                 return Some(s);
@@ -1089,10 +1121,11 @@ pub fn ai_command(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false)
             {
+                let data = value.get("data").cloned();
                 emit(
                     &app,
                     &channel,
-                    PiStreamLine::result(format!("{cmd_name} ok")),
+                    PiStreamLine::result_with_data(format!("{cmd_name} ok"), data),
                 );
             } else {
                 emit(
@@ -1111,6 +1144,14 @@ pub fn ai_command(
             drop(guard.take());
         }
     }
+    Ok(())
+}
+
+/// Drop the warm Pi child so the next prompt respawns and reloads settings,
+/// bundled packages, extensions, skills, and prompt templates.
+#[tauri::command]
+pub fn ai_restart(warm: tauri::State<'_, WarmChildState>) -> Result<(), String> {
+    drop(warm.0.lock().unwrap_or_else(|e| e.into_inner()).take());
     Ok(())
 }
 

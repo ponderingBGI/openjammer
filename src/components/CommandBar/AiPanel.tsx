@@ -21,6 +21,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getAgentBackend } from '../../ai';
 import { getExecutor } from '../../audio/executor';
+import {
+    BUILTIN_AI_SLASH_COMMANDS,
+    filterSlashCommands,
+    fromPiSlashCommand,
+    type AiSlashCommand,
+} from '../../ai/slashCommands';
+import { listSlashCommands, restartAgent, runCommand } from '../../ai/piSessions';
 import { useAgentSessionStore } from '../../store/agentSessionStore';
 import { useAuthStore } from '../../auth/authStore';
 import { useSandboxStore } from '../../store/sandboxStore';
@@ -45,6 +52,8 @@ interface AiPanelProps {
     forceAuth?: boolean;
     /** Return to search mode (Esc / "Back"). */
     onBack: () => void;
+    /** Close the command bar entirely (used by slash commands that open app UI). */
+    onClose?: () => void;
 }
 
 /** A short, friendly stem of a session id for the header chip. */
@@ -52,15 +61,54 @@ function shortId(id: string): string {
     return id.length > 10 ? `${id.slice(0, 8)}…` : id;
 }
 
+function slashParts(text: string): { query: string; args: string } {
+    const body = text.startsWith('/') ? text.slice(1) : text;
+    const match = body.match(/^(\S*)(?:\s+([\s\S]*))?$/);
+    return {
+        query: match?.[1] ?? '',
+        args: match?.[2] ?? '',
+    };
+}
+
+function sourceLabel(source: AiSlashCommand['source']): string {
+    if (source === 'pi') return 'Pi';
+    if (source === 'openjammer') return 'OpenJammer';
+    if (source === 'extension') return 'Extension';
+    if (source === 'prompt') return 'Prompt';
+    return 'Skill';
+}
+
+function formatSessionState(data: unknown): string {
+    const state = data && typeof data === 'object' ? data as Record<string, unknown> : {};
+    const sessionId = typeof state.sessionId === 'string' ? state.sessionId : 'unknown';
+    const sessionName = typeof state.sessionName === 'string' ? state.sessionName : 'untitled';
+    const messageCount = typeof state.messageCount === 'number' ? state.messageCount : 0;
+    const model = state.model && typeof state.model === 'object' ? state.model as Record<string, unknown> : null;
+    const modelName = model
+        ? [model.provider, model.id ?? model.modelId].filter((x) => typeof x === 'string').join('/')
+        : 'default';
+    return `Session ${shortId(sessionId)} · ${sessionName} · ${messageCount} messages · ${modelName}`;
+}
+
+function lastAssistantText(messages: ReturnType<typeof useAgentSessionStore.getState>['messages']): string | null {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+        const entry = messages[i];
+        if (entry?.role === 'assistant' && entry.markdown.trim()) return entry.markdown.trim();
+    }
+    return null;
+}
+
 export function AiPanel({
     initialPrompt,
     autoSendInitial = false,
     forceAuth = false,
     onBack,
+    onClose,
 }: AiPanelProps) {
     const phase = useAgentSessionStore((s) => s.phase);
     const messages = useAgentSessionStore((s) => s.messages);
     const error = useAgentSessionStore((s) => s.error);
+    const runtimeStatus = useAgentSessionStore((s) => s.runtimeStatus);
     const sessionId = useAgentSessionStore((s) => s.sessionId);
     const send = useAgentSessionStore((s) => s.send);
     const newSession = useAgentSessionStore((s) => s.newSession);
@@ -78,7 +126,8 @@ export function AiPanel({
     const configured = useAuthStore((s) => s.configured);
     const refreshStatus = useAuthStore((s) => s.refreshStatus);
     const [authDismissed, setAuthDismissed] = useState(false);
-    const showAuth = available && (forceAuth ? !authDismissed : !configured);
+    const [localForceAuth, setLocalForceAuth] = useState(false);
+    const showAuth = available && ((forceAuth || localForceAuth) ? !authDismissed : !configured);
 
     // Sandbox (live jail/YOLO mode), shown in the footer and toggled with an
     // explicit confirm. `canYolo` is false where host-jailing can't happen.
@@ -90,9 +139,26 @@ export function AiPanel({
     // The composer draft + the resume sub-view.
     const [draft, setDraft] = useState(autoSendInitial ? '' : initialPrompt);
     const [view, setView] = useState<'chat' | 'resume'>('chat');
+    const [commandNotice, setCommandNotice] = useState<string | null>(null);
+    const [dynamicCommands, setDynamicCommands] = useState<AiSlashCommand[]>([]);
+    const [commandsLoadedFor, setCommandsLoadedFor] = useState<string | null>(null);
+    const [slashDismissed, setSlashDismissed] = useState(false);
+    const [slashIndex, setSlashIndex] = useState(0);
 
     const running = phase === 'running';
     const errored = phase === 'error';
+    const commandContext = `${sessionId ?? 'new'}:${phase}`;
+    const commandsLoaded = commandsLoadedFor === commandContext;
+    const slashActive = draft.startsWith('/') && view === 'chat' && !slashDismissed;
+    const { query: slashQuery, args: slashArgs } = slashParts(draft);
+    const slashCommands = useMemo(() => {
+        const byName = new Map<string, AiSlashCommand>();
+        for (const command of [...BUILTIN_AI_SLASH_COMMANDS, ...dynamicCommands]) {
+            if (!byName.has(command.name)) byName.set(command.name, command);
+        }
+        return filterSlashCommands(Array.from(byName.values()), slashQuery);
+    }, [dynamicCommands, slashQuery]);
+    const selectedSlashCommand = slashCommands[Math.min(slashIndex, Math.max(0, slashCommands.length - 1))];
 
     // Re-derive auth status from native on mount (the key lives in the keychain).
     useEffect(() => {
@@ -116,6 +182,25 @@ export function AiPanel({
         if (el) el.scrollTop = el.scrollHeight;
     }, [messages]);
 
+    const updateDraft = useCallback((value: string) => {
+        setDraft(value);
+        setSlashIndex(0);
+        if (!value.startsWith('/')) setSlashDismissed(false);
+    }, []);
+
+    useEffect(() => {
+        if (!slashActive || commandsLoaded) return;
+        let live = true;
+        void listSlashCommands().then((commands) => {
+            if (!live) return;
+            setDynamicCommands(commands.map(fromPiSlashCommand));
+            setCommandsLoadedFor(commandContext);
+        });
+        return () => {
+            live = false;
+        };
+    }, [slashActive, commandsLoaded, commandContext]);
+
     const runTask = useCallback(
         (prompt: string) => {
             if (!prompt || !available || !configured || running) return false;
@@ -132,22 +217,149 @@ export function AiPanel({
         [available, configured, running, backend, send],
     );
 
-    // Submit the composer: slash commands first (`/new`, `/resume`), else send.
+    const executeSlashCommand = useCallback(
+        async (command: AiSlashCommand, args: string) => {
+            const trimmedArgs = args.trim();
+            setCommandNotice(null);
+            setSlashDismissed(false);
+
+            if (!command.local) {
+                const prompt = `/${command.name}${trimmedArgs ? ` ${trimmedArgs}` : ''}`;
+                if (runTask(prompt)) setDraft('');
+                return;
+            }
+
+            switch (command.name) {
+                case 'new': {
+                    setDraft('');
+                    await newSession();
+                    setCommandNotice('Started a fresh Pi session.');
+                    return;
+                }
+                case 'resume':
+                    setDraft('');
+                    setView('resume');
+                    return;
+                case 'name': {
+                    if (!trimmedArgs) {
+                        setCommandNotice('Type a name after /name, for example: /name stage patch');
+                        return;
+                    }
+                    setDraft('');
+                    const res = await runCommand({ type: 'set_session_name', name: trimmedArgs });
+                    setCommandNotice(res.ok ? `Session named “${trimmedArgs}”.` : 'Pi is not ready to name the session yet. Ask it something first.');
+                    return;
+                }
+                case 'session': {
+                    setDraft('');
+                    const res = await runCommand({ type: 'get_state' });
+                    setCommandNotice(res.ok ? formatSessionState(res.data) : 'Pi is not running yet — ask it something first.');
+                    return;
+                }
+                case 'compact': {
+                    setDraft('');
+                    const res = await runCommand({
+                        type: 'compact',
+                        ...(trimmedArgs ? { customInstructions: trimmedArgs } : {}),
+                    });
+                    const summary = res.data && typeof res.data === 'object'
+                        ? (res.data as { summary?: unknown }).summary
+                        : null;
+                    setCommandNotice(res.ok
+                        ? `Compacted context.${typeof summary === 'string' && summary ? ` ${summary}` : ''}`
+                        : 'Could not compact yet — Pi may not be running.');
+                    return;
+                }
+                case 'copy': {
+                    const text = lastAssistantText(useAgentSessionStore.getState().messages);
+                    if (!text) {
+                        setCommandNotice('No assistant answer to copy yet.');
+                        return;
+                    }
+                    setDraft('');
+                    await navigator.clipboard?.writeText(text);
+                    setCommandNotice('Copied the last assistant answer.');
+                    return;
+                }
+                case 'login':
+                case 'model':
+                    setDraft('');
+                    setAuthDismissed(false);
+                    setLocalForceAuth(true);
+                    return;
+                case 'logout':
+                    setDraft('');
+                    await useAuthStore.getState().clear();
+                    setCommandNotice('Cleared the current in-app AI provider key.');
+                    return;
+                case 'settings':
+                    setDraft('');
+                    window.dispatchEvent(new CustomEvent('openjammer:toggle-settings'));
+                    onClose?.();
+                    return;
+                case 'hotkeys':
+                    setDraft('');
+                    window.dispatchEvent(new CustomEvent('openjammer:toggle-help'));
+                    onClose?.();
+                    return;
+                case 'logs':
+                    setDraft('');
+                    window.dispatchEvent(new CustomEvent('openjammer:toggle-devlog'));
+                    onClose?.();
+                    return;
+                case 'diagnostics':
+                    setDraft('');
+                    window.dispatchEvent(new CustomEvent('openjammer:toggle-audio-health'));
+                    onClose?.();
+                    return;
+                case 'reload': {
+                    setDraft('');
+                    const ok = await restartAgent();
+                    if (ok) {
+                        setDynamicCommands([]);
+                        setCommandsLoadedFor(null);
+                    }
+                    setCommandNotice(ok ? 'Pi will reload on the next prompt.' : 'Could not restart Pi from here.');
+                    return;
+                }
+                case 'yolo': {
+                    setDraft('');
+                    if (useSandboxStore.getState().mode === 'yolo') {
+                        setCommandNotice('YOLO mode is already active.');
+                    } else if (useSandboxStore.getState().requestYolo()) {
+                        setYoloConfirm(true);
+                    } else {
+                        setCommandNotice('YOLO is unavailable on this platform.');
+                    }
+                    return;
+                }
+                case 'safe':
+                    setDraft('');
+                    useSandboxStore.getState().exitYolo();
+                    setCommandNotice('Returned to the default sandboxed Pi mode.');
+                    return;
+                default:
+                    setCommandNotice(`/${command.name} is not wired in OpenJammer yet.`);
+            }
+        },
+        [newSession, onClose, runTask],
+    );
+
+    // Submit the composer: slash commands first, else send.
     const submit = useCallback(() => {
         const text = draft.trim();
         if (!text) return;
-        if (text === '/new') {
-            setDraft('');
-            void newSession();
-            return;
-        }
-        if (text === '/resume') {
-            setDraft('');
-            setView('resume');
+        if (text.startsWith('/')) {
+            const command = selectedSlashCommand;
+            if (!command) {
+                setCommandNotice(`No slash command matches “/${slashQuery}”.`);
+                return;
+            }
+            void executeSlashCommand(command, slashArgs);
             return;
         }
         if (runTask(text)) setDraft('');
-    }, [draft, newSession, runTask]);
+    }, [draft, executeSlashCommand, runTask, selectedSlashCommand, slashArgs, slashQuery]);
 
     // Tab from search is a one-keystroke send. If auth is still in front, this
     // waits until the chooser is done, then sends exactly once.
@@ -194,11 +406,14 @@ export function AiPanel({
                 <AuthChooser
                     onConfigured={() => {
                         setAuthDismissed(true);
+                        setLocalForceAuth(false);
                         void refreshStatus();
                     }}
                     onBack={() => {
-                        if (forceAuth) setAuthDismissed(true);
-                        else onBack();
+                        if (forceAuth || localForceAuth) {
+                            setAuthDismissed(true);
+                            setLocalForceAuth(false);
+                        } else onBack();
                     }}
                 />
             </div>
@@ -240,6 +455,16 @@ export function AiPanel({
             </div>
 
             <div className="command-bar-ai-transcript" ref={transcriptRef}>
+                {runtimeStatus && (
+                    <div className="command-bar-ai-runtime" role="status">
+                        {runtimeStatus}
+                    </div>
+                )}
+                {commandNotice && (
+                    <div className="command-bar-ai-notice" role="status">
+                        {commandNotice}
+                    </div>
+                )}
                 {messages.length === 0 && (
                     <div className="command-bar-ai-welcome">
                         <p className="command-bar-ai-welcome-title">Ask, or describe what to build.</p>
@@ -263,17 +488,67 @@ export function AiPanel({
                     placeholder="Ask anything, or describe what to build…"
                     value={draft}
                     rows={1}
-                    onChange={(e) => setDraft(e.target.value)}
+                    onChange={(e) => updateDraft(e.target.value)}
                     onKeyDown={(e) => {
+                        if (slashActive && e.key === 'ArrowDown') {
+                            e.preventDefault();
+                            setSlashIndex((i) => Math.min(i + 1, Math.max(0, slashCommands.length - 1)));
+                            return;
+                        }
+                        if (slashActive && e.key === 'ArrowUp') {
+                            e.preventDefault();
+                            setSlashIndex((i) => Math.max(0, i - 1));
+                            return;
+                        }
+                        if (slashActive && e.key === 'Tab' && selectedSlashCommand) {
+                            e.preventDefault();
+                            updateDraft(`/${selectedSlashCommand.name}${selectedSlashCommand.argsHint ? ' ' : ''}`);
+                            setSlashDismissed(!!selectedSlashCommand.argsHint);
+                            return;
+                        }
                         if (e.key === 'Enter' && !e.shiftKey) {
                             e.preventDefault();
                             submit();
                         } else if (e.key === 'Escape') {
                             e.preventDefault();
-                            onBack();
+                            if (slashActive) setSlashDismissed(true);
+                            else onBack();
                         }
                     }}
+                    aria-expanded={slashActive}
+                    aria-controls={slashActive ? 'command-bar-ai-slash-menu' : undefined}
                 />
+                {slashActive && (
+                    <div className="command-bar-ai-slash" id="command-bar-ai-slash-menu" role="listbox">
+                        <div className="command-bar-ai-slash-head">
+                            <span>Slash commands</span>
+                            {!commandsLoaded && <span>Pi commands load after the agent starts</span>}
+                        </div>
+                        {slashCommands.length === 0 ? (
+                            <div className="command-bar-ai-slash-empty">No command matches /{slashQuery}</div>
+                        ) : (
+                            slashCommands.map((command, index) => (
+                                <button
+                                    type="button"
+                                    key={`${command.source}:${command.name}`}
+                                    className="command-bar-ai-slash-item"
+                                    data-selected={index === slashIndex}
+                                    role="option"
+                                    aria-selected={index === slashIndex}
+                                    onMouseEnter={() => setSlashIndex(index)}
+                                    onClick={() => void executeSlashCommand(command, slashArgs)}
+                                >
+                                    <span className="command-bar-ai-slash-main">
+                                        <code>/{command.name}</code>
+                                        {command.argsHint && <span>{command.argsHint}</span>}
+                                    </span>
+                                    <span className="command-bar-ai-slash-desc">{command.description}</span>
+                                    <span className="command-bar-ai-slash-source">{sourceLabel(command.source)}</span>
+                                </button>
+                            ))
+                        )}
+                    </div>
+                )}
                 <div className="command-bar-ai-composer-row">
                     <span className="command-bar-ai-hint">
                         {running ? 'Working…' : (

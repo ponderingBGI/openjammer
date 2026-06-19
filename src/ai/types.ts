@@ -328,6 +328,8 @@ export interface AgentUiRequest {
 export type AgentEvent =
     /** Free-form reasoning / narration text from the model. */
     | { kind: 'thought'; text: string }
+    /** Operational status from the Pi runtime; rendered as chrome, not transcript prose. */
+    | { kind: 'status'; message: string }
     /** An allowlisted OpenJammer tool call to apply through the reversible graph path. */
     | { kind: 'tool-call'; call: AgentToolCall; id: string }
     /** A terminal success: the agent finished proposing its plan. */

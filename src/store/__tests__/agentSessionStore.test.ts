@@ -119,6 +119,17 @@ describe('agentSessionStore chat', () => {
         expect(rootNodeCount()).toBe(before);
     });
 
+    it('keeps runtime status out of assistant markdown', async () => {
+        const script: AgentEvent[] = [
+            { kind: 'status', message: 'Starting Pi in C:/agent/workspace' },
+            { kind: 'thought', text: 'Hello!' },
+            { kind: 'result', summary: 'done' },
+        ];
+        await useAgentSessionStore.getState().send(new MockAgentBackend({ script }), { prompt: 'q' });
+        expect(lastAssistant().markdown).toBe('Hello!');
+        expect(useAgentSessionStore.getState().runtimeStatus).toBeNull();
+    });
+
     it('coalesces multiple thought deltas into one assistant markdown', async () => {
         const script: AgentEvent[] = [
             { kind: 'thought', text: 'Step one. ' },

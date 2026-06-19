@@ -39,8 +39,8 @@ import type {
  * serialization in `src-tauri/src/ai.rs`.
  */
 export interface PiStreamLine {
-    kind: 'thought' | 'tool-call' | 'result' | 'error' | 'ui-request' | 'session';
-    /** Present for `thought` / `result` / `error`; the session id for `session`. */
+    kind: 'thought' | 'status' | 'tool-call' | 'result' | 'error' | 'ui-request' | 'session';
+    /** Present for `thought` / `status` / `result` / `error`; the session id for `session`. */
     text?: string;
     /** Present for `tool-call`: the proposed call. */
     call?: AgentToolCall;
@@ -48,6 +48,8 @@ export interface PiStreamLine {
     id?: string;
     /** Present for `ui-request`: the raw extension UI request payload. */
     request?: AgentUiRequest;
+    /** Present for command responses with structured payloads. */
+    data?: unknown;
 }
 
 let runCounter = 0;
@@ -73,6 +75,8 @@ function toAgentEvent(line: PiStreamLine): AgentEvent {
                 text: `Ignored unsupported Pi tool "${name}". OpenJammer only applies canvas graph tools.\n`,
             };
         }
+        case 'status':
+            return { kind: 'status', message: line.text ?? '' };
         case 'result':
             return { kind: 'result', summary: line.text ?? 'Done.' };
         case 'error':

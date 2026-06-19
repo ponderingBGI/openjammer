@@ -9,13 +9,28 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import { DESKTOP_CAPABILITIES } from '../../../engine/capabilities';
+
+const piSessionsMock = vi.hoisted(() => ({
+    runCommand: vi.fn(async () => ({ ok: true })),
+    listSlashCommands: vi.fn(async () => [] as Array<{ name: string; description?: string; source: 'extension' | 'prompt' | 'skill' }>),
+    restartAgent: vi.fn(async () => true),
+    listSessions: vi.fn(async () => []),
+    loadSessionMessages: vi.fn(async () => ({ messages: [], incomplete: false })),
+}));
 
 vi.mock('../../../audio/executor', () => ({
     getExecutor: () => ({ getCapabilities: () => DESKTOP_CAPABILITIES }),
 }));
 vi.mock('../../../ai', () => ({ getAgentBackend: () => ({ id: 'stub' }) }));
+vi.mock('../../../ai/piSessions', () => ({
+    runCommand: piSessionsMock.runCommand,
+    listSlashCommands: piSessionsMock.listSlashCommands,
+    restartAgent: piSessionsMock.restartAgent,
+    listSessions: piSessionsMock.listSessions,
+    loadSessionMessages: piSessionsMock.loadSessionMessages,
+}));
 vi.mock('../../../ai/tauri', () => ({
     isTauri: () => true,
     getInvoke: () => (cmd: string) =>
@@ -40,10 +55,16 @@ describe('AiPanel chat', () => {
         cleanup();
         useAuthStore.setState({ configured: true, conflict: false });
         useSandboxStore.setState({ mode: 'jailed', projectLabel: 'MyProject' });
+        piSessionsMock.runCommand.mockResolvedValue({ ok: true });
+        piSessionsMock.listSlashCommands.mockImplementation(() => new Promise(() => {}));
+        piSessionsMock.restartAgent.mockResolvedValue(true);
+        piSessionsMock.listSessions.mockResolvedValue([]);
+        piSessionsMock.loadSessionMessages.mockResolvedValue({ messages: [], incomplete: false });
         useAgentSessionStore.setState({
             phase: 'idle',
             messages: [],
             error: null,
+            runtimeStatus: null,
             sessionId: null,
             runBaseline: null,
             send: vi.fn(),
@@ -99,7 +120,7 @@ describe('AiPanel chat', () => {
         expect(send).not.toHaveBeenCalled();
     });
 
-    it('the /new slash command starts a new session instead of sending', () => {
+    it('the /new slash command starts a new session instead of sending', async () => {
         const send = vi.fn();
         const newSession = vi.fn();
         useAgentSessionStore.setState({ send, newSession });
@@ -107,8 +128,52 @@ describe('AiPanel chat', () => {
         const input = screen.getByPlaceholderText(/Ask anything/i);
         fireEvent.change(input, { target: { value: '/new' } });
         fireEvent.keyDown(input, { key: 'Enter' });
+        await screen.findByText(/Started a fresh Pi session/i);
         expect(newSession).toHaveBeenCalledOnce();
         expect(send).not.toHaveBeenCalled();
+    });
+
+    it('typing / opens a command menu with built-in commands', () => {
+        renderPanel();
+        const input = screen.getByPlaceholderText(/Ask anything/i);
+        fireEvent.change(input, { target: { value: '/' } });
+        const menu = within(screen.getByRole('listbox'));
+        expect(menu.getByText('/new')).toBeInTheDocument();
+        expect(menu.getByText('/session')).toBeInTheDocument();
+    });
+
+    it('merges dynamic Pi commands into the slash menu and forwards them as prompts', async () => {
+        const send = vi.fn();
+        useAgentSessionStore.setState({ send });
+        piSessionsMock.listSlashCommands.mockResolvedValue([
+            { name: 'deploy', description: 'Deploy the patch', source: 'prompt' as const },
+        ]);
+        renderPanel();
+        const input = screen.getByPlaceholderText(/Ask anything/i);
+        fireEvent.change(input, { target: { value: '/dep prod' } });
+        expect(await screen.findByText('/deploy')).toBeInTheDocument();
+        fireEvent.keyDown(input, { key: 'Enter' });
+        await waitFor(() => expect(send).toHaveBeenCalledOnce());
+        expect(send.mock.calls[0][1]).toMatchObject({ prompt: '/deploy prod' });
+    });
+
+    it('renders runtime status outside assistant markdown', () => {
+        useAgentSessionStore.setState({ runtimeStatus: 'Starting Pi in C:/agent/workspace' });
+        renderPanel();
+        expect(screen.getByRole('status')).toHaveTextContent('Starting Pi');
+    });
+
+    it('app slash commands can open OpenJammer chrome and close the palette', () => {
+        const onClose = vi.fn();
+        const onHotkeys = vi.fn();
+        window.addEventListener('openjammer:toggle-help', onHotkeys);
+        renderPanel(vi.fn(), { onClose });
+        const input = screen.getByPlaceholderText(/Ask anything/i);
+        fireEvent.change(input, { target: { value: '/hotkeys' } });
+        fireEvent.keyDown(input, { key: 'Enter' });
+        expect(onHotkeys).toHaveBeenCalledOnce();
+        expect(onClose).toHaveBeenCalledOnce();
+        window.removeEventListener('openjammer:toggle-help', onHotkeys);
     });
 
     it('the + New button starts a new session', () => {

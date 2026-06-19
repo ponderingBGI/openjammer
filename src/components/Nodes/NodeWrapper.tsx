@@ -99,7 +99,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     const setHoverTarget = useCanvasStore((s) => s.setHoverTarget);
 
     const isSelected = selectedNodeIds.has(node.id);
-    // Highlighted while the AI agent's (not-yet-approved) run added this node.
+    // Highlighted while the AI agent's live run has just added this node.
     const isAgentPending = useIsAgentPending(node.id);
     const isSchematic = SCHEMATIC_TYPES.includes(node.type);
 

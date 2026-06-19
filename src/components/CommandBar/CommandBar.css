@@ -459,6 +459,25 @@
     color: var(--accent-danger);
 }
 
+.command-bar-ai-runtime,
+.command-bar-ai-notice {
+    align-self: flex-start;
+    max-width: 64ch;
+    padding: 3px var(--space-sm);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    line-height: 1.35;
+}
+
+.command-bar-ai-runtime {
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+}
+
 /* The composer — a growing textarea + a send row, docked at the bottom. */
 .command-bar-ai-composer {
     display: flex;
@@ -486,6 +505,81 @@
 
 .command-bar-ai-input::placeholder {
     color: var(--text-muted);
+}
+
+.command-bar-ai-slash {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: var(--space-xs);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-md);
+    background: var(--bg-node);
+    box-shadow: var(--shadow-sketch);
+}
+
+.command-bar-ai-slash-head,
+.command-bar-ai-slash-empty {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    padding: 2px var(--space-xs) var(--space-xs);
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+}
+
+.command-bar-ai-slash-item {
+    display: grid;
+    grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.4fr) auto;
+    align-items: center;
+    gap: var(--space-sm);
+    width: 100%;
+    padding: var(--space-xs) var(--space-sm);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+}
+
+.command-bar-ai-slash-item[data-selected='true'],
+.command-bar-ai-slash-item:hover {
+    border-color: color-mix(in srgb, var(--accent, var(--sketch-black)) 35%, transparent);
+    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 10%, transparent);
+}
+
+.command-bar-ai-slash-main {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-xs);
+    min-width: 0;
+}
+
+.command-bar-ai-slash-main code {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-primary);
+}
+
+.command-bar-ai-slash-main span,
+.command-bar-ai-slash-source {
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+}
+
+.command-bar-ai-slash-desc {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .command-bar-ai-composer-row {

@@ -121,6 +121,8 @@ interface AgentSessionStore {
     phase: AgentPhase;
     /** Terminal error message, if the last turn failed. */
     error: string | null;
+    /** Transient Pi/runtime status (startup, sandbox note), rendered outside the transcript. */
+    runtimeStatus: string | null;
     /**
      * The graph node ids that existed BEFORE the in-flight turn (snapshot at
      * {@link send}). A node NOT in this set while a turn is live is one the agent
@@ -365,6 +367,7 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
             messages: [],
             phase: 'idle',
             error: null,
+            runtimeStatus: null,
             runBaseline: null,
 
             send: async (backend, task) => {
@@ -385,6 +388,7 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
                     messages: [...s.messages, userEntry, assistantEntry],
                     phase: 'running',
                     error: null,
+                    runtimeStatus: null,
                     runBaseline,
                 }));
 
@@ -399,7 +403,7 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
                 const finish = (next: Partial<AgentSessionStore>) => {
                     patch((a) => ({ ...a, streaming: false }));
                     commitAiFrame();
-                    set({ runBaseline: null, ...next });
+                    set({ runBaseline: null, runtimeStatus: null, ...next });
                 };
 
                 try {
@@ -410,6 +414,9 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
                         switch (event.kind) {
                             case 'thought':
                                 patch((a) => ({ ...a, markdown: a.markdown + event.text }));
+                                break;
+                            case 'status':
+                                set({ runtimeStatus: event.message });
                                 break;
                             case 'tool-call': {
                                 const chip = applyStreamedToolCall(event.call);
@@ -444,7 +451,7 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
             },
 
             newSession: async () => {
-                set({ messages: [], phase: 'idle', error: null, runBaseline: null });
+                set({ messages: [], phase: 'idle', error: null, runtimeStatus: null, runBaseline: null });
                 // Reset the live child if one is warm; capture the fresh id. With no
                 // warm child this no-ops and the next send spawns a fresh session.
                 const res = await runCommand({ type: 'new_session' });
@@ -458,6 +465,7 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
                     messages: toConversationEntries(transcript.messages),
                     phase: 'idle',
                     error: null,
+                    runtimeStatus: null,
                     runBaseline: null,
                 });
                 return { incomplete: transcript.incomplete };
@@ -471,6 +479,7 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
                     messages: [],
                     phase: 'idle',
                     error: null,
+                    runtimeStatus: null,
                     runBaseline: null,
                 });
             },
@@ -513,6 +522,7 @@ export function _resetAgentSessionForTests(): void {
         messages: [],
         phase: 'idle',
         error: null,
+        runtimeStatus: null,
         runBaseline: null,
     });
 }
