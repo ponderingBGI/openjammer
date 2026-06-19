@@ -134,9 +134,11 @@ guarantees:
 - **One command regenerates everything.** `bun run tokens` emits `variables.css`,
   `themes.ts`, **and** the design-sync snapshot (`oj-ui/oj-tokens.css`) from the same DTCG.
   There is no second place to update.
-- **Generated files are never hand-edited.** Edit the DTCG (or Figma via Tokens Studio). CI
-  re-runs `bun run tokens` and **fails the PR if any generated artifact still differs** — a
-  stale or hand-edited file can't merge.
+- **You never run `bun run tokens` by hand.** A PR that touches the DTCG triggers
+  [`tokens.yml`](https://github.com/ponderingBGI/openjammer/blob/main/.github/workflows/tokens.yml),
+  which rebuilds every artifact and **commits the result straight back onto the PR branch**
+  (fork PRs, which CI can't push to, get a hard "run it locally" failure instead). So a stale or
+  hand-edited generated file simply can't survive a PR.
 - **Always Pull before you edit in Figma.** Tokens Studio's Git sync means the repo is the
   truth; Pull first and you're never editing a stale snapshot. (The auto-PR closes the loop the
   other way.)
@@ -157,9 +159,14 @@ guarantees:
    **Theme** collection with **Cream / Cyberpunk / Midnight** modes (already defined by
    `$metadata.json` / `$themes.json` in that folder).
 
-2. **Code Connect.** For each Figma component, map it to its `oj-ui` code via Dev Mode
-   (Library → "Connect components to code") or the `@figma/code-connect` CLI. Publish; Dev Mode
-   then shows the real `oj-ui` snippet.
+2. **Code Connect — mappings already written, publish is automated.** All 53 components have
+   committed `.figma.tsx` mappings (`packages/oj-ui/src/components/**`, snippets rewritten to
+   `@openjammer/oj-ui` via `figma.config.json`). A PR validates them; merging to `canari`
+   **publishes them to Figma automatically** ([`code-connect.yml`](https://github.com/ponderingBGI/openjammer/blob/main/.github/workflows/code-connect.yml)).
+   Three one-time human prerequisites: **publish the oj-ui library** in Figma (Code Connect only
+   maps published components), an **Org/Enterprise plan** (Code Connect isn't on Free/Pro/Edu),
+   and a repo secret **`FIGMA_ACCESS_TOKEN`**. Until the token exists the publish step skips
+   cleanly. Enrich the auto-generated examples over time — the node links are already correct.
 
 3. **Claude Design.** The library is already synced (`/design-sync`). Re-run it after any merged
    token or component change to keep it current.

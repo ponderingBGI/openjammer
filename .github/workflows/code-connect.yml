@@ -1,0 +1,64 @@
+# Code Connect — keep Figma's Dev Mode showing the real oj-ui snippet.
+#
+# The .figma.tsx mappings (packages/oj-ui/src/components/**) link each Figma component to its
+# oj-ui code. On a PR we VALIDATE them (parse must be clean — a broken/renamed mapping fails the
+# PR). On merge to canari we PUBLISH them to Figma automatically, so nobody runs the CLI by hand.
+#
+# One-time human prerequisites (see apps/docs → Design system → The 3-way sync):
+#   1. Publish the oj-ui library in Figma (team library) — Code Connect only maps published comps.
+#   2. Code Connect requires a Figma Organization/Enterprise plan.
+#   3. Add a repo secret FIGMA_ACCESS_TOKEN (a Figma personal access token with Code Connect write).
+# Until the token exists, the publish step skips cleanly instead of failing.
+name: Code Connect
+
+on:
+  pull_request:
+    paths:
+      - 'packages/oj-ui/src/components/**/*.figma.tsx'
+      - 'figma.config.json'
+  push:
+    branches: [canari, main]
+    paths:
+      - 'packages/oj-ui/src/components/**/*.figma.tsx'
+      - 'figma.config.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Parse + validate the Code Connect mappings
+        run: |
+          out="$(bunx figma connect parse 2>&1)" || { echo "$out" | tail -20; exit 1; }
+          if echo "$out" | grep -qiE "could not be resolved|error"; then
+            echo "::error::Code Connect mappings failed to parse:"
+            echo "$out" | grep -iE "could not be resolved|error" | head
+            exit 1
+          fi
+          n="$(echo "$out" | grep -c '"figmaNode"')"
+          echo "✓ $n Code Connect mappings parsed cleanly."
+
+  publish:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Publish Code Connect to Figma
+        env:
+          FIGMA_ACCESS_TOKEN: ${{ secrets.FIGMA_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$FIGMA_ACCESS_TOKEN" ]; then
+            echo "::warning::FIGMA_ACCESS_TOKEN not set — skipping Code Connect publish. Add it in Settings → Secrets and Variables → Actions to enable (needs a Figma Org/Enterprise plan + a published library)."
+            exit 0
+          fi
+          bunx figma connect publish
+          echo "Published Code Connect mappings to Figma."

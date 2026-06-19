@@ -95,5 +95,11 @@ Port-color meaning is load-bearing: **audio = blue, control = grey, universal = 
   build**: a few tall variant-sets overlap their neighbours (fixed-grid placement — just drag
   apart), `IconLinux` / `IconWindows` have approximated glyph paths to redraw, and a handful of
   state-fills (e.g. Surface "lifted") want an eye. Everything is real, named, and token-bound.
-- ⏳ **Code Connect** mappings — the Figma components now exist, so this is the next step
-  (Dev Mode → "Connect to code", or `@figma/code-connect` → `packages/oj-ui/src/components/<Name>`).
+- ✅ **Code Connect mappings written + automated** — all 53 as committed `.figma.tsx`
+  (`packages/oj-ui/src/components/**`, parse-validated, snippets → `@openjammer/oj-ui`). PRs
+  validate them; merges to `canari` publish via `code-connect.yml`.
+  ⏳ Three one-time human steps before snippets show in Dev Mode: **publish the oj-ui library**
+  in Figma, an **Org/Enterprise plan** (Code Connect isn't on Free/Pro/Edu), and the
+  **`FIGMA_ACCESS_TOKEN`** repo secret. Until then the publish step skips cleanly.
+- ✅ **`bun run tokens` is no longer a thing humans run** — `tokens.yml` auto-rebuilds + commits
+  token artifacts on any token PR.
