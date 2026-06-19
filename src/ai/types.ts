@@ -328,6 +328,8 @@ export interface AgentUiRequest {
 export type AgentEvent =
     /** Free-form reasoning / narration text from the model. */
     | { kind: 'thought'; text: string }
+    /** Operational status from the Pi runtime; rendered as chrome, not transcript prose. */
+    | { kind: 'status'; message: string }
     /** An allowlisted OpenJammer tool call to apply through the reversible graph path. */
     | { kind: 'tool-call'; call: AgentToolCall; id: string }
     /** A terminal success: the agent finished proposing its plan. */
@@ -365,6 +367,15 @@ export interface AgentTask {
      */
     providerKey?: string;
     /**
+     * All provider API keys configured for this app session, keyed by provider id.
+     * Forwarded transiently so Pi can list/select models across configured providers.
+     */
+    providerKeys?: Record<string, string>;
+    /** OpenAI-compatible base URLs configured for this app session, keyed by provider id. */
+    providerBaseUrls?: Record<string, string>;
+    /** Custom model ids configured/typed for this app session, keyed by provider id. */
+    providerCustomModels?: Record<string, string[]>;
+    /**
      * The active provider id (e.g. `'opencode'`). Selects the env var the key is
      * forwarded under (see `ai.rs` `provider_env_var`); omitted → Pi's own config.
      */
@@ -374,6 +385,8 @@ export interface AgentTask {
      * configured default for the provider is used.
      */
     modelId?: string;
+    /** Desired Pi thinking/reasoning level for the next turn. Updated locally by Shift+Tab. */
+    thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
     /**
      * YOLO mode (Phase 6): when true the native host drops the OS jail + in-Pi
      * permission-gate and forwards the full shell environment (the real Pi

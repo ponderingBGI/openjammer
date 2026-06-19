@@ -27,7 +27,7 @@
     box-shadow: var(--shadow-menu);
 }
 
-/* Agent-pending — a node the AI agent just added in a not-yet-approved run, so you
+/* Agent-pending — a node the AI agent just added in a live reversible run, so you
    watch the build happen on the real canvas. An audio-blue HARD ring (spread only,
    blur 0 — the Hard-Shadow ethos) without moving the node (No-Surprise). The breath
    is a state pulse, not decoration, and is stilled for reduced-motion. */

@@ -345,6 +345,7 @@ export function CommandBar() {
                         autoSendInitial={aiAutoSend}
                         forceAuth={forceAuth}
                         onBack={backToSearch}
+                        onClose={close}
                     />
                 ) : (
                     <Command

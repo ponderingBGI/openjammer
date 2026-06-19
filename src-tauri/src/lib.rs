@@ -358,6 +358,8 @@ pub fn run() {
             scan_plugins,
             ai::ai_run,
             ai::ai_command,
+            ai::ai_prewarm,
+            ai::ai_restart,
             ai::ai_set_learning,
             ai::ai_forget,
             ai::ai_sessions,

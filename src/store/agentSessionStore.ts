@@ -121,6 +121,8 @@ interface AgentSessionStore {
     phase: AgentPhase;
     /** Terminal error message, if the last turn failed. */
     error: string | null;
+    /** Transient Pi/runtime status (startup, sandbox note), rendered outside the transcript. */
+    runtimeStatus: string | null;
     /**
      * The graph node ids that existed BEFORE the in-flight turn (snapshot at
      * {@link send}). A node NOT in this set while a turn is live is one the agent
@@ -134,6 +136,14 @@ interface AgentSessionStore {
     send: (backend: AgentBackend, task: AgentTask) => Promise<void>;
     /** Start a fresh Pi session (`/new`): clears the conversation. */
     newSession: () => Promise<void>;
+    /**
+     * Rewind & edit: truncate the conversation to BEFORE `index`, start a fresh Pi
+     * session continuing from there, and return the prompt text at `index` so the
+     * composer can pre-fill it for editing. CONVERSATION-ONLY: the canvas is never
+     * touched — Ctrl+Z stays the way to revert what the agent built. Returns '' if
+     * the index isn't a user turn.
+     */
+    rewindTo: (index: number) => Promise<string>;
     /** Resume a prior session by id (`/resume`): loads its history + continues it. */
     resumeSession: (id: string) => Promise<{ incomplete: boolean }>;
     /** List persisted sessions (newest first) for the resume picker. */
@@ -365,6 +375,7 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
             messages: [],
             phase: 'idle',
             error: null,
+            runtimeStatus: null,
             runBaseline: null,
 
             send: async (backend, task) => {
@@ -385,6 +396,7 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
                     messages: [...s.messages, userEntry, assistantEntry],
                     phase: 'running',
                     error: null,
+                    runtimeStatus: null,
                     runBaseline,
                 }));
 
@@ -399,7 +411,7 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
                 const finish = (next: Partial<AgentSessionStore>) => {
                     patch((a) => ({ ...a, streaming: false }));
                     commitAiFrame();
-                    set({ runBaseline: null, ...next });
+                    set({ runBaseline: null, runtimeStatus: null, ...next });
                 };
 
                 try {
@@ -410,6 +422,9 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
                         switch (event.kind) {
                             case 'thought':
                                 patch((a) => ({ ...a, markdown: a.markdown + event.text }));
+                                break;
+                            case 'status':
+                                set({ runtimeStatus: event.message });
                                 break;
                             case 'tool-call': {
                                 const chip = applyStreamedToolCall(event.call);
@@ -444,11 +459,34 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
             },
 
             newSession: async () => {
-                set({ messages: [], phase: 'idle', error: null, runBaseline: null });
+                set({ messages: [], phase: 'idle', error: null, runtimeStatus: null, runBaseline: null });
                 // Reset the live child if one is warm; capture the fresh id. With no
                 // warm child this no-ops and the next send spawns a fresh session.
                 const res = await runCommand({ type: 'new_session' });
                 set({ sessionId: res.sessionId ?? null });
+            },
+
+            rewindTo: async (index) => {
+                const msgs = get().messages;
+                const target = msgs[index];
+                const prompt = target && target.role === 'user' ? target.text : '';
+                // Keep the visible history BEFORE the chosen turn; the chosen prompt
+                // is lifted into the composer to edit. The canvas is left exactly as
+                // it is — a held note beats a glitch — so a rewind never yanks sound
+                // mid-set; Ctrl+Z is the (separate) way to revert agent graph edits.
+                set({
+                    messages: msgs.slice(0, index),
+                    phase: 'idle',
+                    error: null,
+                    runtimeStatus: null,
+                    runBaseline: null,
+                });
+                // Continue from here in a fresh Pi session. The next turn re-grounds
+                // on the LIVE canvas (the grounding extension re-injects the canvas
+                // digest on session_start), so the agent is never stale after a rewind.
+                const res = await runCommand({ type: 'new_session' });
+                set({ sessionId: res.sessionId ?? null });
+                return prompt;
             },
 
             resumeSession: async (id) => {
@@ -458,6 +496,7 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
                     messages: toConversationEntries(transcript.messages),
                     phase: 'idle',
                     error: null,
+                    runtimeStatus: null,
                     runBaseline: null,
                 });
                 return { incomplete: transcript.incomplete };
@@ -471,6 +510,7 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
                     messages: [],
                     phase: 'idle',
                     error: null,
+                    runtimeStatus: null,
                     runBaseline: null,
                 });
             },
@@ -513,6 +553,7 @@ export function _resetAgentSessionForTests(): void {
         messages: [],
         phase: 'idle',
         error: null,
+        runtimeStatus: null,
         runBaseline: null,
     });
 }

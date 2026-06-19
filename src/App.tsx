@@ -29,6 +29,7 @@ import { useProjectStore } from './store/projectStore';
 import { useCanvasStore } from './store/canvasStore';
 import { useKeybindingsStore } from './store/keybindingsStore';
 import { applyTheme, getSavedThemeId, getThemeById } from './styles/themes';
+import { isEditableTarget } from './utils/editableTarget';
 import './styles/global.css';
 
 function App() {
@@ -289,8 +290,8 @@ function App() {
     const { matchesAction } = useKeybindingsStore.getState();
 
     const handleKeyDown = async (e: KeyboardEvent) => {
-      // Skip if typing in input
-      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+      // Skip if typing in an editable control.
+      if (isEditableTarget(e.target)) return;
 
       // Handle Ctrl+S / Cmd+S - Save project
       if (matchesAction(e, 'file.save')) {

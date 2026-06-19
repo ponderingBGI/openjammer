@@ -216,6 +216,66 @@
     box-shadow: none;
 }
 
+/* Rewind affordance — quiet sibling of "+ New"; opens the rewind/edit picker. */
+.command-bar-ai-rewind {
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    background: var(--bg-node);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-sm);
+    padding: 1px 8px;
+    cursor: pointer;
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.command-bar-ai-rewind:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-sketch);
+}
+
+.command-bar-ai-rewind:active {
+    transform: translateY(1px);
+    box-shadow: none;
+}
+
+/* Rewind picker: prior prompts, newest first, one per row. */
+.command-bar-rewind-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+    max-height: 360px;
+    overflow-y: auto;
+    padding: 0 var(--space-lg) var(--space-md);
+}
+
+.command-bar-rewind-list:focus-visible {
+    outline: none;
+}
+
+.command-bar-rewind-row {
+    width: 100%;
+    padding: var(--space-sm);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-primary);
+    font-family: var(--font-sketch);
+    font-size: var(--text-md);
+    cursor: pointer;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.command-bar-rewind-row[data-selected='true'],
+.command-bar-rewind-row:hover {
+    border-color: color-mix(in srgb, var(--accent, var(--sketch-black)) 35%, transparent);
+    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 10%, transparent);
+}
+
 /* The conversation: turns separated by generous rhythm, auto-stick to bottom. */
 .command-bar-ai-transcript {
     flex: 1;
@@ -251,6 +311,47 @@
     background: color-mix(in srgb, var(--sketch-black) 8%, transparent);
     padding: 1px 4px;
     border-radius: var(--radius-sm);
+}
+
+/* First-run starter chips — tappable, canvas-aware, gone once the chat starts. */
+.command-bar-ai-welcome-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    margin-top: var(--space-md);
+}
+
+.command-bar-ai-welcome-chip {
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    padding: 2px var(--space-md);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-pill);
+    background: var(--bg-node);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.command-bar-ai-welcome-chip:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-menu);
+}
+
+.command-bar-ai-welcome-chip:focus-visible {
+    outline: var(--border-sketch-width) solid var(--accent, var(--sketch-black));
+    outline-offset: 2px;
+}
+
+.command-bar-ai-welcome-chip:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .command-bar-ai-welcome-chip:hover {
+        transform: none;
+    }
 }
 
 /* One turn. */
@@ -459,6 +560,25 @@
     color: var(--accent-danger);
 }
 
+.command-bar-ai-runtime,
+.command-bar-ai-notice {
+    align-self: flex-start;
+    max-width: 64ch;
+    padding: 3px var(--space-sm);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    line-height: 1.35;
+}
+
+.command-bar-ai-runtime {
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+}
+
 /* The composer — a growing textarea + a send row, docked at the bottom. */
 .command-bar-ai-composer {
     display: flex;
@@ -486,6 +606,81 @@
 
 .command-bar-ai-input::placeholder {
     color: var(--text-muted);
+}
+
+.command-bar-ai-slash {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: var(--space-xs);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-md);
+    background: var(--bg-node);
+    box-shadow: var(--shadow-sketch);
+}
+
+.command-bar-ai-slash-head,
+.command-bar-ai-slash-empty {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    padding: 2px var(--space-xs) var(--space-xs);
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+}
+
+.command-bar-ai-slash-item {
+    display: grid;
+    grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.4fr) auto;
+    align-items: center;
+    gap: var(--space-sm);
+    width: 100%;
+    padding: var(--space-xs) var(--space-sm);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+}
+
+.command-bar-ai-slash-item[data-selected='true'],
+.command-bar-ai-slash-item:hover {
+    border-color: color-mix(in srgb, var(--accent, var(--sketch-black)) 35%, transparent);
+    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 10%, transparent);
+}
+
+.command-bar-ai-slash-main {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-xs);
+    min-width: 0;
+}
+
+.command-bar-ai-slash-main code {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-primary);
+}
+
+.command-bar-ai-slash-main span,
+.command-bar-ai-slash-source {
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+}
+
+.command-bar-ai-slash-desc {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .command-bar-ai-composer-row {
@@ -526,6 +721,121 @@
 .command-bar-ai-send:disabled {
     opacity: 0.5;
     cursor: default;
+}
+
+.command-bar-models {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.command-bar-models-help {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-lg);
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+}
+
+.command-bar-models-input {
+    margin: 0 var(--space-lg) var(--space-sm);
+    width: auto;
+}
+
+.command-bar-models-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-height: 0;
+    max-height: 360px;
+    overflow-y: auto;
+    padding: 0 var(--space-lg) var(--space-md);
+}
+
+.command-bar-model-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-md);
+    width: 100%;
+    padding: var(--space-sm);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+}
+
+.command-bar-model-row[data-selected='true'],
+.command-bar-model-row:hover {
+    border-color: color-mix(in srgb, var(--accent, var(--sketch-black)) 35%, transparent);
+    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 10%, transparent);
+}
+
+.command-bar-model-row[data-current='true'] {
+    border-color: color-mix(in srgb, var(--accent-success) 65%, var(--sketch-black));
+}
+
+.command-bar-model-row:disabled {
+    cursor: wait;
+    opacity: 0.72;
+}
+
+.command-bar-model-main {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+}
+
+.command-bar-model-name {
+    overflow: hidden;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.command-bar-model-main code {
+    overflow: hidden;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.command-bar-model-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+}
+
+.command-bar-model-meta span,
+.command-bar-model-meta strong {
+    padding: 1px 6px;
+    border: 1px solid var(--sketch-black);
+    border-radius: var(--radius-pill);
+    background: var(--bg-node);
+    color: inherit;
+    font-weight: 600;
+}
+
+.command-bar-model-meta strong {
+    color: var(--accent-success);
+}
+
+.command-bar-models-empty {
+    padding: var(--space-md) var(--space-sm);
+    color: var(--text-muted);
+    font-size: var(--text-sm);
 }
 
 /* The /resume session picker — reuses the palette list, with age + id columns. */
@@ -607,6 +917,27 @@
     line-height: 1.4;
 }
 
+.command-bar-auth-configured {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    margin: var(--space-sm) var(--space-lg);
+    padding: var(--space-xs) var(--space-sm);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--accent-success, var(--accent)) 12%, var(--bg-node));
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+}
+
+.command-bar-auth-configured span:last-child {
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+}
+
 .command-bar-auth-item {
     display: flex;
     flex-direction: column;
@@ -615,8 +946,21 @@
 }
 
 .command-bar-auth-item-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
     font-weight: 700;
     font-size: var(--text-md);
+}
+
+.command-bar-auth-configured-mark {
+    padding: 1px 6px;
+    border: 1px solid var(--sketch-black);
+    border-radius: var(--radius-pill);
+    background: var(--bg-node);
+    color: var(--accent-success, var(--accent));
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
 }
 
 .command-bar-auth-item-subtitle {
@@ -697,6 +1041,58 @@
 
 /* The permission footer — always visible on the live agent surface so the jail
    boundary is never a surprise. Mono, because it states an exact path/state. */
+/* The single reasoning control. It is the live indicator AND its own button —
+   click (or ⇧⇥) to cycle. State is shown exactly once, at its point of control. */
+.command-bar-ai-thinking {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 1px 6px;
+    border: 1px solid var(--sketch-black);
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--bg-node) 88%, var(--accent, var(--sketch-black)) 12%);
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    appearance: none;
+    cursor: pointer;
+    transition: transform var(--transition-fast), color var(--transition-fast);
+}
+
+button.command-bar-ai-thinking:hover {
+    color: var(--text-secondary);
+    transform: translateY(-1px);
+}
+
+button.command-bar-ai-thinking:focus-visible {
+    outline: var(--border-sketch-width) solid var(--accent, var(--sketch-black));
+    outline-offset: 2px;
+}
+
+/* One-shot confirm pulse on change — opacity + a ≤1px lift, no blur, ~160ms.
+   Restarted imperatively (clear → reflow → set data-pulse) in cycleReasoning. */
+.command-bar-ai-thinking[data-pulse='true'] {
+    animation: oj-reasoning-pulse 160ms ease-out;
+}
+
+@keyframes oj-reasoning-pulse {
+    from {
+        opacity: 0.55;
+        transform: translateY(1px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .command-bar-ai-thinking[data-pulse='true'] {
+        animation: none;
+    }
+}
+
 .command-bar-ai-footer {
     display: flex;
     align-items: center;

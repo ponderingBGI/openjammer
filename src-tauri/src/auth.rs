@@ -93,6 +93,7 @@ pub fn provider_env_var(provider: &str) -> &'static str {
     match provider {
         "opencode" => "OPENCODE_API_KEY",
         "openai" => "OPENAI_API_KEY",
+        "openrouter" => "OPENROUTER_API_KEY",
         "anthropic" => "ANTHROPIC_API_KEY",
         _ => "OPENJAMMER_PROVIDER_KEY",
     }
@@ -415,6 +416,7 @@ mod tests {
     fn provider_env_var_maps_known_providers() {
         assert_eq!(provider_env_var("opencode"), "OPENCODE_API_KEY");
         assert_eq!(provider_env_var("openai"), "OPENAI_API_KEY");
+        assert_eq!(provider_env_var("openrouter"), "OPENROUTER_API_KEY");
         assert_eq!(provider_env_var("anthropic"), "ANTHROPIC_API_KEY");
         // Unknown → the generic fallback so a BYO endpoint still resolves.
         assert_eq!(provider_env_var("byo"), "OPENJAMMER_PROVIDER_KEY");

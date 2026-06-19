@@ -145,7 +145,61 @@ const REUSE_FIRST = [
     'Use get_graph or find_nodes before mutating an existing OpenJammer canvas; reuse existing keyboard/speaker nodes instead of duplicating them.',
     'Use emit_plan or batch_apply for multi-step OpenJammer builds so the whole patch lands as one coherent edit.',
     'OpenJammer graph tools are the only tools that change the canvas; do not use file-editing tools to build a musical patch.',
+    'Never ask the user something a read (get_graph, find_nodes, list_node_types) could answer — investigate first; ask only as a genuine last resort.',
 ];
+
+/**
+ * The OpenJammer copilot identity. Appended (chained, never replacing) to Pi's
+ * system prompt on every turn via {@link before_agent_start}, so the agent is THE
+ * OpenJammer professional from byte one — not a generic coding CLI that asks
+ * "an echo node for what?". The reversible-verb + sandbox boundary is named as
+ * the LICENSE to be bold; the hard rule (investigate first, ask only as a last
+ * resort) is the antidote to needless clarifying questions.
+ */
+const PERSONA = [
+    "You are OpenJammer's in-instrument copilot — the expert on this node-graph MUSIC instrument that people play live (keyboards, instruments, samplers, loopers, effects and speakers wired into sound). You are NOT a generic coding CLI: \"make an echo node\" means add an echo effect to the canvas, never write a program.",
+    'You change the canvas ONLY through OpenJammer\'s reversible graph verbs (add_node, add_connection, update_node_data, author_code_node, …). Every edit is one plain Ctrl+Z step for the player and runs inside an OS/Pi sandbox — so be BOLD: design the patch and build it, do not ask permission to act.',
+    "Investigate before you ask. Call get_graph / find_nodes / list_node_types and infer the musician's intent from what is already on the canvas. Figure out everything you can on your own; ask the user ONLY when you genuinely cannot resolve it after investigating, and make every question feel necessary. Never ask what a read could answer.",
+    'Prefer musical defaults and a held, believable result over a clarifying question. Reuse existing nodes instead of duplicating them. Ports: audio = blue (sound), technical = grey (numbers/triggers). When no built-in node can do the job, author_code_node is the last resort.',
+].join('\n\n');
+
+/** Race a host bridge read against a short cap so the first turn never stalls on
+ * a slow/absent bridge — the agent can still call get_graph itself. */
+async function quickGraph(): Promise<unknown | null> {
+    try {
+        return await Promise.race([
+            forward('get_graph', {}),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 1500)),
+        ]);
+    } catch {
+        return null;
+    }
+}
+
+/** A compact, cheap canvas summary so the agent is never blind on turn one.
+ * Returns null for an empty canvas (nothing to ground — build from scratch). */
+function buildCanvasDigest(graph: unknown): string | null {
+    const g = graph as { nodes?: unknown; connections?: unknown } | null;
+    const nodes = Array.isArray(g?.nodes) ? (g!.nodes as Array<{ id?: unknown; type?: unknown }>) : [];
+    if (nodes.length === 0) return null;
+    const connections = Array.isArray(g?.connections) ? g!.connections : [];
+    const counts = new Map<string, number>();
+    for (const n of nodes) {
+        const t = typeof n?.type === 'string' ? n.type : 'unknown';
+        counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    const typeSummary = Array.from(counts.entries()).map(([t, c]) => `${t}×${c}`).join(', ');
+    const list = nodes
+        .slice(0, 24)
+        .map((n) => `${typeof n?.id === 'string' ? n.id : '?'}(${typeof n?.type === 'string' ? n.type : '?'})`)
+        .join(', ');
+    const more = nodes.length > 24 ? `, …(+${nodes.length - 24} more)` : '';
+    return [
+        `Live OpenJammer canvas right now: ${nodes.length} node(s) — ${typeSummary}; ${connections.length} connection(s).`,
+        `Nodes: ${list}${more}.`,
+        'Build on these existing nodes and ids; call get_graph or find_nodes for full detail before editing.',
+    ].join('\n');
+}
 
 export default function register(pi: ExtensionAPI): void {
     registerGraphTool(pi, {
@@ -317,5 +371,43 @@ export default function register(pi: ExtensionAPI): void {
         description: 'Apply an allowlisted, reversible OpenJammer settings patch.',
         promptSnippet: 'Change safe OpenJammer settings to fix setup issues',
         parameters: Type.Object({ patch: JsonRecord }),
+    });
+
+    // Re-ground on the first turn of every session. session_start fires for
+    // startup / new / resume / fork — a resumed or forked session may show a
+    // different canvas, so each is treated as a fresh "first turn".
+    let pendingDigest = true;
+    pi.on('session_start', () => {
+        pendingDigest = true;
+    });
+
+    // Make the agent THE OpenJammer professional from byte one: append the
+    // persona to Pi's system prompt every turn (chained — Pi keeps owning the
+    // prompt), and inject a compact live-canvas digest ONCE per session so it is
+    // never blind on turn one. Both are invisible (system-prompt only), so the
+    // transcript stays clean — "report without stealing focus".
+    pi.on('before_agent_start', async (event) => {
+        let digest: string | null = null;
+        if (pendingDigest) {
+            pendingDigest = false;
+            const graph = await quickGraph();
+            digest = buildCanvasDigest(graph);
+        }
+        const additions = digest ? `${PERSONA}\n\n${digest}` : PERSONA;
+        const systemPrompt = `${event.systemPrompt}\n\n${additions}`;
+
+        // Dev-only self-check: the founder-gated preamble (docs/agent-tools.md §7)
+        // can't be CI-asserted, so when OJ_AGENT_DEBUG is set we surface — on
+        // stderr, never the JSONL stdout protocol — that the append actually
+        // landed, with how many chars it added.
+        const env = (globalThis as any).process?.env ?? {};
+        if (env.OJ_AGENT_DEBUG) {
+            console.error(
+                `[pi-openjammer-graph] system prompt +${systemPrompt.length - event.systemPrompt.length} chars` +
+                    ` (persona${digest ? ' + canvas digest' : ''})`,
+            );
+        }
+
+        return { systemPrompt };
     });
 }
