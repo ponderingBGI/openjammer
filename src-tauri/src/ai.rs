@@ -226,6 +226,48 @@ pub fn ai_run(
     // and we report the active id back so the frontend can persist it.
     session_id: Option<String>,
     channel: String,
+) -> Result<(), String> {
+    // Do not run Pi on the Tauri IPC/UI thread. A long agent turn (code search,
+    // subprocess startup, model listing) otherwise makes Windows mark the app
+    // "Not responding" and desaturate the window.
+    let app_for_thread = app.clone();
+    std::thread::spawn(move || {
+        let warm = app_for_thread.state::<WarmChildState>();
+        let bridge = app_for_thread.state::<crate::bridge::BridgeState>();
+        let _ = ai_run_blocking(
+            app_for_thread.clone(),
+            prompt,
+            provider_key,
+            provider_keys,
+            provider_base_urls,
+            provider_custom_models,
+            provider,
+            model_id,
+            thinking_level,
+            yolo,
+            session_id,
+            channel,
+            warm,
+            bridge,
+        );
+    });
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ai_run_blocking(
+    app: AppHandle,
+    prompt: String,
+    provider_key: Option<String>,
+    provider_keys: Option<HashMap<String, String>>,
+    provider_base_urls: Option<HashMap<String, String>>,
+    provider_custom_models: Option<HashMap<String, Vec<String>>>,
+    provider: Option<String>,
+    model_id: Option<String>,
+    thinking_level: Option<String>,
+    yolo: Option<bool>,
+    session_id: Option<String>,
+    channel: String,
     warm: tauri::State<'_, WarmChildState>,
     bridge: tauri::State<'_, crate::bridge::BridgeState>,
 ) -> Result<(), String> {
@@ -1304,7 +1346,47 @@ fn first_tool_name(content: Option<&serde_json::Value>) -> Option<String> {
 /// Requires a running warm child (start a prompt first); otherwise it surfaces a
 /// clear error rather than spawning a child with no prompt context.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn ai_command(
+    app: AppHandle,
+    command: serde_json::Value,
+    channel: String,
+    provider_key: Option<String>,
+    provider_keys: Option<HashMap<String, String>>,
+    provider_base_urls: Option<HashMap<String, String>>,
+    provider_custom_models: Option<HashMap<String, Vec<String>>>,
+    provider: Option<String>,
+    model_id: Option<String>,
+    thinking_level: Option<String>,
+    yolo: Option<bool>,
+) -> Result<(), String> {
+    // Same rule as ai_run: command RPC may spawn/configure/read Pi, so it must
+    // not occupy the native UI/IPC thread while the frontend waits on events.
+    let app_for_thread = app.clone();
+    std::thread::spawn(move || {
+        let warm = app_for_thread.state::<WarmChildState>();
+        let bridge = app_for_thread.state::<crate::bridge::BridgeState>();
+        let _ = ai_command_blocking(
+            app_for_thread.clone(),
+            command,
+            channel,
+            provider_key,
+            provider_keys,
+            provider_base_urls,
+            provider_custom_models,
+            provider,
+            model_id,
+            thinking_level,
+            yolo,
+            warm,
+            bridge,
+        );
+    });
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ai_command_blocking(
     app: AppHandle,
     command: serde_json::Value,
     channel: String,
