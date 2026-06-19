@@ -272,7 +272,9 @@ export function NodeCanvas() {
             setRightClickStart({ x: e.clientX, y: e.clientY });
             rightClickMoved.current = false;
             // Check if clicking on empty canvas (not on a node)
-            const isOnNode = (e.target as HTMLElement).closest('.node, .schematic-node');
+            const isOnNode = (e.target as HTMLElement).closest(
+                '.node, .schematic-node, .oj-node-frame, .oj-node',
+            );
             rightClickOnCanvas.current = !isOnNode;
             return;
         }
@@ -287,8 +289,13 @@ export function NodeCanvas() {
 
         // Left click on empty canvas - start box selection
         // Check for all node and port classes (standard and schematic)
+        // The union must always be EVERY node-root + port class currently mounted on
+        // the canvas (Invariant B). oj-ui classes are added additively as nodes migrate;
+        // legacy classes are dropped only after their last emitter is gone.
         const isNodeOrPort = (e.target as HTMLElement).closest(
-            '.node, .schematic-node, .port, .port-dot, .port-circle-marker, .note-input-port, .output-port, .speaker-input-port'
+            '.node, .schematic-node, .oj-node-frame, .oj-node, ' +
+                '.port, .oj-port, .oj-port-row, ' +
+                '.port-dot, .port-circle-marker, .note-input-port, .output-port, .speaker-input-port'
         );
         if (e.button === 0 && !isNodeOrPort) {
             clearSelection();
