@@ -32,4 +32,11 @@
   --shadow-menu: 3px 4px 0 rgba(0, 0, 0, 0.15);
   --shadow-sketch: 2px 2px 0 var(--sketch-black);
   --border-sketch-width: 2px;
+  --overlay-scrim: rgba(0, 0, 0, 0.45);
+  --z-node: 10;
+  --z-panel: 100;
+  --z-popover: 1000;
+  --z-modal: 2000;
+  --z-toast: 3000;
+  --z-top: 10000;
 }
