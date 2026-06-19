@@ -8,6 +8,9 @@ export interface NodeShellProps extends Omit<HTMLAttributes<HTMLDivElement>, 'ti
     nodeType?: ReactNode;
     selected?: boolean;
     dragging?: boolean;
+    /** The AI agent just added this node in a not-yet-undone run — shows the
+     *  audio-blue live-build ring (a state pulse, stilled for reduced-motion). */
+    agentPending?: boolean;
     /** Props for the draggable header strip (e.g. drag handlers, `cursor`). */
     headerProps?: HTMLAttributes<HTMLDivElement>;
     children: ReactNode;
@@ -24,6 +27,7 @@ export function NodeShell({
     nodeType,
     selected = false,
     dragging = false,
+    agentPending = false,
     headerProps,
     className,
     children,
@@ -33,6 +37,7 @@ export function NodeShell({
         'oj-node',
         selected && 'is-selected',
         dragging && 'is-dragging',
+        agentPending && 'is-agent-pending',
         className,
     ]
         .filter(Boolean)

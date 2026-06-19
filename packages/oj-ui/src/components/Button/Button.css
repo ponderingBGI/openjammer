@@ -64,3 +64,46 @@
     background: var(--accent-success);
     color: var(--text-on-accent);
 }
+
+/* Ghost — borderless trigger (toolbar/menu). No lift (No-Surprise): the bg
+   shift is the feedback, matching the menu triggers it replaces. */
+.oj-btn--ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--text-primary);
+}
+
+.oj-btn--ghost:hover {
+    background: var(--bg-tertiary);
+    transform: none;
+}
+
+.oj-btn--ghost:active {
+    transform: none;
+}
+
+/* Link — text-only affordance; no fill, no lift, underline on hover. */
+.oj-btn--link {
+    background: transparent;
+    border-color: transparent;
+    color: var(--accent-primary);
+    padding-left: 0;
+    padding-right: 0;
+}
+
+.oj-btn--link:hover {
+    background: transparent;
+    text-decoration: underline;
+    transform: none;
+}
+
+.oj-btn--link:active {
+    transform: none;
+}
+
+/* Icon-only — square, equal padding around a single glyph. */
+.oj-btn--icon-only {
+    padding: var(--space-xs);
+    aspect-ratio: 1 / 1;
+    min-width: 0;
+}

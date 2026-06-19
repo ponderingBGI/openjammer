@@ -25,6 +25,35 @@
     box-shadow: var(--shadow-menu);
 }
 
+/* Agent-pending — the AI just added this node (not yet undone), shown on the
+   live canvas. An audio-blue HARD ring (spread only, blur 0 — Hard-Shadow),
+   without moving the node (No-Surprise). The breath is a state pulse, stilled
+   for reduced motion. */
+.oj-node.is-agent-pending {
+    border-color: var(--audio-connected);
+    box-shadow: var(--shadow-node),
+        0 0 0 3px color-mix(in srgb, var(--audio-connected) 45%, transparent);
+    animation: oj-agent-pending 1.2s ease-in-out infinite;
+}
+
+@keyframes oj-agent-pending {
+    0%,
+    100% {
+        box-shadow: var(--shadow-node),
+            0 0 0 2px color-mix(in srgb, var(--audio-connected) 28%, transparent);
+    }
+    50% {
+        box-shadow: var(--shadow-node),
+            0 0 0 4px color-mix(in srgb, var(--audio-connected) 55%, transparent);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .oj-node.is-agent-pending {
+        animation: none;
+    }
+}
+
 .oj-node__header {
     display: flex;
     align-items: center;

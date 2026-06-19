@@ -47,3 +47,19 @@
     background: var(--control-connected);
     box-shadow: 0 0 8px var(--control-connected);
 }
+
+.oj-port--universal {
+    background: var(--universal-port);
+}
+
+.oj-port--universal.is-connected {
+    background: var(--universal-connection);
+    box-shadow: 0 0 8px var(--universal-connection);
+}
+
+/* A faint dashed slot inviting a new connection (e.g. a node's "+ port"). */
+.oj-port.is-placeholder {
+    opacity: 0.4;
+    border-style: dashed;
+    cursor: copy;
+}
