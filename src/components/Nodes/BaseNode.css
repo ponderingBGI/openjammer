@@ -2,19 +2,19 @@
  * BaseNode.css - Hand-drawn sketch theme for nodes
  */
 
-/* The node card (.node container + selected/dragging/agent-pending states), its
-   header (title/type), content, and the left/right port rails are now the oj-ui
+/* The node card (container + selected/dragging/agent-pending states), its header
+   (title/type), content, and the left/right port rails are now the oj-ui
    NodeFrame + NodeShell (packages/oj-ui/src/components/{NodeFrame,NodeShell}).
-   NodeFrame keeps the legacy `.node`/`<type>` class for the canvas hit-test +
-   ghost-mode dim (Invariant B) but carries NO chrome — NodeShell (.oj-node) owns
-   the card, header, rails, and the agent-pending ring.
+   NodeFrame keeps the legacy node-root class for the canvas hit-test + ghost-mode
+   dim (Invariant B) but carries NO chrome — NodeShell owns the card, header,
+   rails, and the agent-pending ring.
 
-   The port DOM (the `.port` wrapper, `.port-dot` marker, and its input/output/
-   audio/control/connected variants) is now the oj-ui <Port>/<PortRow>; only
-   `.port-label` survives here — the standalone name span a few schematic nodes
-   still render beside their <Port> dots. */
+   The whole port DOM (wrapper, dot marker, and its input/output/audio/control/
+   connected variants) is now the oj-ui Port/PortRow; only the port label below
+   survives here — the standalone name span a few schematic nodes still render
+   beside their Port dots. */
 
-/* Port label — the name span schematic nodes render beside an oj-ui <Port>. */
+/* Port label — the name span schematic nodes render beside an oj-ui Port. */
 .port-label {
     font-family: var(--font-sketch);
     font-size: var(--text-sm);
