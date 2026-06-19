@@ -240,8 +240,7 @@ export function NodeCanvas() {
         // legacy classes are dropped only after their last emitter is gone.
         const isNodeOrPort = (e.target as HTMLElement).closest(
             '.node, .schematic-node, .oj-node-frame, .oj-node, ' +
-                '.oj-port, .oj-port-row, ' +
-                '.output-port'
+                '.oj-port, .oj-port-row'
         );
         if (e.button === 0 && !isNodeOrPort) {
             clearSelection();

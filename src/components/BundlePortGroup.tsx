@@ -9,6 +9,7 @@
  */
 
 import { useState, useCallback, useEffect, memo } from 'react';
+import { Port } from '@openjammer/oj-ui';
 import type { BundlePortDefinition } from '../engine/types';
 import { ScrollContainer } from './common/ScrollContainer';
 import './BundlePortGroup.css';
@@ -99,8 +100,11 @@ export const BundlePortGroup = memo(function BundlePortGroup({
                     )}
 
                     {/* Port marker */}
-                    <div
-                        className={`bundle-port-marker ${port.type}-port ${port.direction}-port ${isConnected ? 'connected' : ''}`}
+                    <Port
+                        kind={port.type}
+                        direction={port.direction}
+                        connected={!!isConnected}
+                        style={{ width: 14, height: 14 }}
                         data-node-id={nodeId}
                         data-port-id={port.id}
                         data-port-type={port.type}
@@ -164,8 +168,11 @@ export const BundlePortGroup = memo(function BundlePortGroup({
                 )}
 
                 {/* Main bundle port marker */}
-                <div
-                    className={`bundle-port-marker ${port.type}-port ${port.direction}-port ${isConnected ? 'connected' : ''}`}
+                <Port
+                    kind={port.type}
+                    direction={port.direction}
+                    connected={!!isConnected}
+                    style={{ width: 12, height: 12 }}
                     data-node-id={nodeId}
                     data-port-id={port.id}
                     data-port-type={port.type}
@@ -217,7 +224,7 @@ export const BundlePortGroup = memo(function BundlePortGroup({
 
                         {/* Channel port marker (visual only in expanded view) */}
                         <div
-                            className={`bundle-channel-marker ${port.type}-port ${port.direction}-port`}
+                            className={`bundle-channel-marker ${port.type}-port`}
                             data-channel-id={channel.id}
                             role="button"
                             tabIndex={0}

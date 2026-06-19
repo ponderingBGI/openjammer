@@ -456,27 +456,6 @@
 }
 
 
-/* Instrument output port - audio (dark blue, sends audio to speaker) */
-.output-port {
-    width: 16px;
-    height: 16px;
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: 50%;
-    background: var(--audio-output);
-    cursor: crosshair;
-    transition: all var(--transition-fast);
-}
-
-.output-port:hover {
-    transform: scale(1.2);
-    filter: brightness(1.2);
-}
-
-.output-port.connected {
-    background: var(--audio-connected);
-    box-shadow: 0 0 6px var(--audio-connected);
-}
-
 /* ============================================
  * Instrument Selector Dropdown (no overlay)
  * ============================================ */
@@ -1370,30 +1349,6 @@
     background: var(--sketch-grid);
 }
 
-/* Port marker - rainbow when unconnected to show universal compatibility */
-.output-panel-port-marker {
-    width: 14px;
-    height: 14px;
-    min-width: 14px;
-    border: 2px solid var(--sketch-black);
-    border-radius: 50%;
-    background: linear-gradient(135deg, #FF6B6B, #FFE66D, #4ECB71, #4DB8FF, #9B59B6);
-    background-size: 200% 200%;
-    animation: rainbow-shift 3s ease infinite;
-    cursor: crosshair;
-    transition: transform var(--transition-fast), filter var(--transition-fast);
-}
-
-.output-panel-port-marker:hover {
-    transform: scale(1.2);
-    filter: brightness(1.1);
-}
-
-.output-panel-port-marker.connected {
-    background: var(--control-connected);
-    box-shadow: 0 0 4px var(--control-connected);
-    animation: none;
-}
 
 /* Label */
 .output-panel-label {
@@ -1442,10 +1397,6 @@
     outline-offset: 1px;
 }
 
-.output-panel-port-marker:focus {
-    outline: 2px solid var(--accent-primary);
-    outline-offset: 2px;
-}
 
 /* ============================================================================
    INPUT PANEL NODE - Multi-port input panel with editable labels
@@ -1529,30 +1480,6 @@
     background: rgba(0, 0, 0, 0.05);
 }
 
-/* Port marker on right side - rainbow when unconnected to show universal compatibility */
-.input-panel-port-marker {
-    width: 14px;
-    height: 14px;
-    min-width: 14px;
-    border: 2px solid var(--sketch-black);
-    border-radius: 50%;
-    background: linear-gradient(135deg, #FF6B6B, #FFE66D, #4ECB71, #4DB8FF, #9B59B6);
-    background-size: 200% 200%;
-    animation: rainbow-shift 3s ease infinite;
-    cursor: crosshair;
-    transition: transform var(--transition-fast), filter var(--transition-fast);
-}
-
-.input-panel-port-marker:hover {
-    transform: scale(1.2);
-    filter: brightness(1.1);
-}
-
-.input-panel-port-marker.connected {
-    background: var(--control-connected);
-    box-shadow: 0 0 4px var(--control-connected);
-    animation: none;
-}
 
 /* Label on left side */
 .input-panel-label {
@@ -1603,10 +1530,6 @@
     outline-offset: 1px;
 }
 
-.input-panel-port-marker:focus {
-    outline: 2px solid var(--accent-primary);
-    outline-offset: 2px;
-}
 
 /* ============================================
  * Empty Slot Styling - "Always one empty port"
@@ -1630,22 +1553,6 @@
     font-size: var(--text-xs, 11px);
 }
 
-.empty-slot-marker {
-    border-style: dashed !important;
-    opacity: 0.7;
-}
-
-.empty-slot-marker:hover {
-    opacity: 1;
-    border-style: solid !important;
-}
-
-/* Rainbow shift for the input/output panel universal port markers. */
-@keyframes rainbow-shift {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
-}
 
 /* ============================================
  * Container Node - Empty grouping node

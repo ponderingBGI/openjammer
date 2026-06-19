@@ -9,6 +9,7 @@
  */
 
 import { useState, useCallback, useMemo, memo } from 'react';
+import { Port } from '@openjammer/oj-ui';
 import type { GraphNode, BundlePortDefinition } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
@@ -234,8 +235,11 @@ export const InputPanelNode = memo(function InputPanelNode({
                                     )}
 
                                     {/* Port marker on RIGHT */}
-                                    <div
-                                        className={`input-panel-port-marker ${port.type}-port output-port ${isConnected ? 'connected' : ''}`}
+                                    <Port
+                                        kind={port.type}
+                                        direction="output"
+                                        connected={isConnected}
+                                        style={{ width: 14, height: 14 }}
                                         data-node-id={node.id}
                                         data-port-id={port.id}
                                         data-port-type={port.type}
@@ -263,8 +267,11 @@ export const InputPanelNode = memo(function InputPanelNode({
                                 <span className="input-panel-label empty-slot-label">
                                     + Add input
                                 </span>
-                                <div
-                                    className={`input-panel-port-marker ${emptySlotPort.type}-port output-port empty-slot-marker`}
+                                <Port
+                                    kind={emptySlotPort.type}
+                                    direction="output"
+                                    placeholder
+                                    style={{ width: 14, height: 14 }}
                                     data-node-id={node.id}
                                     data-port-id={emptySlotPort.id}
                                     data-port-type={emptySlotPort.type}
