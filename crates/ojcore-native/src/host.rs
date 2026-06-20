@@ -26,6 +26,7 @@ use cpal::{BufferSize, SampleFormat, Stream, StreamConfig};
 
 use ojcore::{CommandConsumer, Engine, ProgramSwapRx};
 
+use crate::device::{classify, device_fault_channel, DeviceFault, DeviceFaultRx};
 use crate::recorder::RecorderSink;
 
 /// The minimal slice of [`Engine`] the audio callback needs. Abstracting it lets
@@ -274,6 +275,10 @@ pub struct AudioHost {
     /// thread) and polled+cleared by the control thread to trigger an off-RT
     /// rebuild. Cloned out via [`AudioHost::fault_signal`].
     fault: StreamFault,
+    /// Off-RT drain for device-edge faults the output error callback classifies
+    /// (device removed, backend error). Lets the control plane SEE a silent stop
+    /// instead of it vanishing into a dead `eprintln!` (Track A P0a).
+    device_faults: DeviceFaultRx,
 }
 
 /// The default output device's default sample rate (Hz), or `None` when there is
@@ -329,6 +334,19 @@ impl AudioHost {
     /// thread; the rebuild path uses `fault_signal().take()` to read-and-clear.
     pub fn faulted(&self) -> bool {
         self.fault.is_set()
+    }
+
+    /// Drain any device-edge faults the output error callback reported since the
+    /// last poll (oldest first). The control plane calls this off-RT — e.g. to
+    /// surface a non-focus-stealing "device removed" indicator and, later, to
+    /// drive recovery. Returns immediately when there is nothing pending.
+    pub fn drain_device_faults(&mut self, sink: impl FnMut(DeviceFault)) {
+        self.device_faults.drain(sink);
+    }
+
+    /// Pop a single pending device fault, if any (off-RT).
+    pub fn poll_device_fault(&mut self) -> Option<DeviceFault> {
+        self.device_faults.try_recv()
     }
 
     /// Open the stream(s) and start rendering `engine` through the callback.
@@ -456,16 +474,19 @@ impl AudioHost {
         // drive the off-RT rebuild. The render data callback never touches it.
         let fault = StreamFault::new();
         let err_fault = fault.clone();
+        // Device-fault mailbox: the output error callback classifies a cpal error
+        // and publishes a typed fault the control plane can drain off-RT, instead
+        // of the silent stop a bare `eprintln!` left behind (Track A P0a). `cap`
+        // is generous; faults are coalescable so a full ring is harmless.
+        let (mut fault_tx, fault_rx) = device_fault_channel(16);
         let err_fn = move |e: cpal::Error| {
-            // CPAL-ERROR-THREAD CONTRACT: ONE relaxed atomic store, then nothing
-            // that could block. A `StreamError` here means the device was
-            // yanked/disabled/reconfigured and the running stream is dead; we flag
-            // it so the control thread rebuilds off the audio path. The eprintln is
-            // diagnostic only and runs AFTER the store so the signal is never
-            // delayed by I/O (and this is cpal's error thread, never the render
-            // thread, so it cannot glitch audio).
+            // CPAL-ERROR-THREAD CONTRACT: one atomic store plus one bounded,
+            // wait-free mailbox push. Stream rebuild remains owned by the control
+            // thread; the typed fault is for observation/supervision.
             err_fault.mark();
-            eprintln!("audio output stream error (flagged for rebuild): {e}");
+            let fault = classify(is_device_absent(&e));
+            fault_tx.push(fault);
+            eprintln!("audio output stream error (flagged for rebuild): {e} (device fault: {fault:?})");
         };
 
         let output = device
@@ -503,6 +524,7 @@ impl AudioHost {
             _input: input,
             config,
             fault,
+            device_faults: fault_rx,
         })
     }
 

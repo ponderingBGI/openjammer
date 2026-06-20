@@ -24,6 +24,7 @@
 //! audio device available" cleanly, and the device-requiring test is `#[ignore]`d.
 
 pub mod asset;
+pub mod device;
 pub mod host;
 pub mod latency;
 pub mod log;
@@ -34,6 +35,10 @@ pub mod store;
 pub mod update_gate;
 
 pub use asset::{AssetError, AssetStore, Pcm};
+pub use device::{
+    classify as classify_device_fault, device_fault_channel, DeviceFault, DeviceFaultRx,
+    DeviceFaultTx,
+};
 pub use host::{
     default_output_sample_rate, render_block, AudioHost, BlockProcessor, HostError, StreamFault,
     StreamRequest, DEFAULT_RUN,
