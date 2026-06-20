@@ -265,8 +265,8 @@ fn set_speaker_device(
         .0
         .lock()
         .map_err(|_| "engine backend mutex poisoned".to_string())?
-        .set_speaker_device(NodeIdx(node), &device_id);
-    Ok(())
+        .set_speaker_device(NodeIdx(node), &device_id)
+        .map_err(|e| e.to_string())
 }
 
 /// Enable mic capture into `node`'s input bus.
@@ -276,8 +276,8 @@ fn set_mic(node: u32, enabled: bool, state: tauri::State<'_, BackendState>) -> R
         .0
         .lock()
         .map_err(|_| "engine backend mutex poisoned".to_string())?
-        .set_mic(NodeIdx(node), enabled);
-    Ok(())
+        .set_mic(NodeIdx(node), enabled)
+        .map_err(|e| e.to_string())
 }
 
 /// Snapshot the current user data before an update installs — the frontend passes
@@ -353,6 +353,11 @@ pub fn run() {
     let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
     #[cfg(any(windows, target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    // Justified panic (Phase-4 scoped panic guard): top-level app bring-up. A
+    // failure to generate the Tauri context / start the event loop is a fatal
+    // startup bug with no recoverable in-app fallback — there is no instrument yet
+    // to keep playing — so a clear panic at the entry point is the honest outcome.
+    #[allow(clippy::expect_used)]
     builder
         // Ableton-style install-after-close: if the user has auto-update on and
         // a verified update is staged, apply it silently on the way out (no
@@ -372,15 +377,31 @@ pub fn run() {
             // control thread + this panic hook); the audio callback never touches
             // it. Best-effort: if the log dir is unavailable we skip the file sink
             // rather than fail startup.
+            let mut log_dir_for_store: Option<std::path::PathBuf> = None;
             if let Ok(log_dir) = app.path().app_log_dir() {
                 if std::fs::create_dir_all(&log_dir).is_ok() {
                     let guard = ojcore_native::init_logging(&log_dir);
                     app.manage(LogGuard(guard));
                     install_panic_hook();
+                    log_dir_for_store = Some(log_dir);
                 }
             }
 
-            app.manage(BackendState::new());
+            // Build the backend, then attach the L3 durable LOCAL log store
+            // (SQLite/FTS5) under the same log dir. This is the queryable history
+            // tail; the NDJSON file above remains the post-crash SSOT. LOCAL-ONLY,
+            // fed only off the audio thread (the control-side event drain). A failed
+            // open is non-fatal — the instrument keeps running without the tail.
+            let backend = BackendState::new();
+            if let Some(log_dir) = log_dir_for_store {
+                let path = log_dir.join("openjammer-events.sqlite");
+                if let Ok(mut be) = backend.0.lock() {
+                    if let Err(e) = be.attach_log_store(&path) {
+                        tracing::warn!(target: "engine", "log store unavailable: {e}");
+                    }
+                }
+            }
+            app.manage(backend);
             // The at-most-one warm Pi child for the session (Phase 1: instant feel).
             app.manage(ai::WarmChildState::default());
             // The loopback tool bridge (Phase 3: real graph reads round-trip to Pi).

@@ -39,7 +39,8 @@ use ojcore::{
     Engine, EventRing, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{
-    AssetCatalog, AssetError, AssetStore, AudioHost, HostError, Pcm, StreamRequest,
+    AssetCatalog, AssetError, AssetStore, AudioHost, HostError, LogRecord, LogStore, Pcm,
+    StreamRequest,
 };
 use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
 use ojinstrument::{register_all, RegisterOpts};
@@ -81,6 +82,12 @@ pub enum BackendError {
     Asset(AssetError),
     /// A capability command referenced a node id not present in the live graph.
     UnknownNode(u32),
+    /// A control command is not yet routable on the native host (e.g. per-node
+    /// output-device selection / mic capture). Surfaced HONESTLY rather than
+    /// silently succeeding: the cpal stream re-open / duplex-input routing is a
+    /// later (device-rebuild) wave, so the UI must not report success while the
+    /// engine keeps rendering to the default device. Carries what was requested.
+    NotRoutable(&'static str),
 }
 
 impl std::fmt::Display for BackendError {
@@ -91,6 +98,9 @@ impl std::fmt::Display for BackendError {
             BackendError::PluginScan(e) => write!(f, "plugin scan failed: {e}"),
             BackendError::Asset(e) => write!(f, "asset operation failed: {e}"),
             BackendError::UnknownNode(n) => write!(f, "unknown node id {n} in live graph"),
+            BackendError::NotRoutable(what) => {
+                write!(f, "{what} is not yet routable on the native host")
+            }
         }
     }
 }
@@ -175,6 +185,13 @@ pub struct EngineBackend {
     /// graph against the updated [`AssetCatalog`]. `None` until the first
     /// `push_graph` (the starter graph runs but is not stored).
     last_graph: Option<OjGraph>,
+    /// The L3 durable LOCAL log store (SQLite + FTS5), the queryable tail of the
+    /// fault trail. `None` until [`attach_log_store`] wires one (the Tauri shell
+    /// opens it under the platform log dir in `setup`); never network, never the
+    /// post-crash SSOT (the NDJSON file is). Fed ONLY here, on the control thread,
+    /// from [`drain_events`] — never the audio callback. A write failure is
+    /// swallowed (best-effort durability must never take the instrument down).
+    log_store: Option<LogStore>,
 }
 
 /// State of one recorder capture for a node.
@@ -212,6 +229,9 @@ impl EngineBackend {
         // Compile the minimal starter program (silent: a gain into the speaker).
         // `compile` only fails on a malformed graph, and ours is well-formed by
         // construction, so a failure here is a build-time bug, not a runtime one.
+        // Justified panic (Phase-4 scoped panic guard): the precondition is a
+        // compile-time invariant, not runtime input — an `Err` here is unreachable.
+        #[allow(clippy::expect_used)]
         let program =
             compile(&Self::starter_graph(stream), &registry).expect("starter graph compiles");
         let mut engine = Engine::new(program);
@@ -265,7 +285,20 @@ impl EngineBackend {
             store: AssetStore::new(),
             captures: std::collections::HashMap::new(),
             last_graph: None,
+            log_store: None,
         }
+    }
+
+    /// Attach the L3 durable LOCAL log store (SQLite/FTS5) opened at `path`. Called
+    /// once from the Tauri `setup` hook with a file under the platform log dir, so
+    /// the off-RT event drain ([`drain_events`]) gets a queryable durable tail
+    /// alongside the NDJSON post-crash record. LOCAL-ONLY. A failure to open is
+    /// non-fatal: the backend keeps running with `log_store: None` (the NDJSON
+    /// SSOT is unaffected), and the error is returned so the caller can log it.
+    pub fn attach_log_store(&mut self, path: &std::path::Path) -> Result<(), String> {
+        let store = LogStore::open(path).map_err(|e| e.to_string())?;
+        self.log_store = Some(store);
+        Ok(())
     }
 
     /// Register the FULL native built-in set through the ONE shared path
@@ -352,11 +385,70 @@ impl EngineBackend {
         // match what the callback feeds — otherwise a block_size < chunk would
         // leave a stale tail. render_block still chunks the larger device period.
         g.block_size = self.stream.buffer_frames;
+        // SAMPLE-BINDING SINGLE OWNER. A fresh UI push carries no imperatively
+        // bound sample (a `load_sample` mutates only the engine's kept graph, never
+        // the UI's), so a naive clobber would silently drop a user-loaded sample on
+        // the very next edit — a native↔wasm divergence the wasm path doesn't have.
+        // Forward-merge the prior per-node sample binding (its `AssetRef` + the
+        // sampler root-note param) from `last_graph` onto the incoming graph so a
+        // bound sample survives subsequent edits. The ENGINE is the one owner of
+        // this mapping; no second owner in TS.
+        if let Some(prev) = self.last_graph.as_ref() {
+            Self::forward_merge_sample_bindings(prev, &mut g);
+        }
         self.adopt(&g)?;
-        // Remember the (rate-adjusted) live graph so a later sample bind can
-        // re-resolve + recompile it against the catalog without a fresh UI push.
+        // Remember the (rate-adjusted, binding-merged) live graph so a later sample
+        // bind can re-resolve + recompile it against the catalog without a fresh
+        // UI push, and so the NEXT push forward-merges from it in turn.
         self.last_graph = Some(g);
         Ok(())
+    }
+
+    /// Carry forward the per-node sample binding (the slot-0 [`AssetRef`] and the
+    /// sampler root-note param) from the previously adopted `prev` graph onto the
+    /// freshly pushed `next` graph, for every node id present in both that still
+    /// exists in `next`. This is the single-owner persistence seam: a UI push
+    /// never carries an imperatively bound sample (that lives only in the engine's
+    /// kept graph), so without this merge the next edit would clobber it.
+    ///
+    /// Only nodes whose `next` slot-0 binding is empty are merged — a UI push that
+    /// deliberately carries its own slot-0 asset (e.g. a serialized project with a
+    /// baked sample) is authoritative and is left untouched. Off-RT, pure data.
+    fn forward_merge_sample_bindings(prev: &OjGraph, next: &mut OjGraph) {
+        use ojinstrument::SAMPLER_PCM_PARAM;
+        use ojproto::Param;
+        for node in next.nodes.iter_mut() {
+            // The prior binding for this exact node id, if any.
+            let Some(prev_node) = prev.nodes.iter().find(|n| n.id == node.id) else {
+                continue;
+            };
+            let Some(prev_asset) = prev_node.assets.iter().find(|a| a.slot == 0) else {
+                continue;
+            };
+            // Respect an explicit slot-0 binding already on the incoming node.
+            if node.assets.iter().any(|a| a.slot == 0) {
+                continue;
+            }
+            node.assets.push(AssetRef {
+                slot: 0,
+                asset: prev_asset.asset,
+            });
+            // Carry the root-note param too, so the merged sample keeps its pitch
+            // mapping. Only fill it when the incoming node hasn't set its own.
+            if let Some(prev_root) = prev_node
+                .params
+                .iter()
+                .find(|p| p.id == SAMPLER_PCM_PARAM)
+                .map(|p| p.value)
+            {
+                if !node.params.iter().any(|p| p.id == SAMPLER_PCM_PARAM) {
+                    node.params.push(Param {
+                        id: SAMPLER_PCM_PARAM,
+                        value: prev_root,
+                    });
+                }
+            }
+        }
     }
 
     /// Clone `graph` with its `sample_rate` set to the default output device's rate
@@ -512,7 +604,39 @@ impl EngineBackend {
             self.event_seq = self.event_seq.wrapping_add(1);
             out.push(lift_event(rt, self.event_seq, now_us()));
         });
+        // L3 durable LOCAL tail: append every drained event to the SQLite/FTS5 store
+        // (the queryable history). This is the SINGLE off-RT ingest site — the same
+        // control thread that drains the RT ring also writes the store, so there is
+        // no second owner and the audio callback never touches I/O. Best-effort:
+        // a write failure is swallowed so durability never takes the instrument
+        // down (the NDJSON file remains the post-crash SSOT regardless).
+        if let Some(store) = self.log_store.as_ref() {
+            for ev in &out {
+                Self::persist_event(store, ev);
+            }
+        }
         out
+    }
+
+    /// Append one drained [`Event`] to the L3 [`LogStore`] as a [`LogRecord`].
+    /// Renders the closed event taxonomy into the store's already-shaped fields
+    /// (severity/source/kind variant names + a human message + structured JSON).
+    /// Off-RT only (control thread). Errors are intentionally swallowed.
+    fn persist_event(store: &LogStore, ev: &Event) {
+        let severity = severity_name(ev.severity);
+        let source = source_name(ev.source);
+        let (kind, message, fields) = render_event_kind(&ev.kind);
+        let rec = LogRecord {
+            ts_us: ev.ts_us.min(i64::MAX as u64) as i64,
+            seq: i64::from(ev.seq),
+            severity,
+            source,
+            kind,
+            message: &message,
+            corr_id: ev.corr_id.min(i64::MAX as u64) as i64,
+            fields_json: fields.as_deref(),
+        };
+        let _ = store.insert(&rec);
     }
 
     /// Load decoded mono PCM as the sample for `node`'s `builtin.sampler` and
@@ -670,16 +794,26 @@ impl EngineBackend {
     }
 
     /// Route a speaker node to an output device id. Device selection is a host
-    /// (cpal) concern; v1 records the request (the host renders to the default
-    /// device). Surfaced for round-trip parity with the Web Audio path.
-    pub fn set_speaker_device(&mut self, _node: NodeIdx, _device_id: &str) {
-        // TODO(native-parity): re-open the cpal stream on the chosen device.
+    /// (cpal) concern: it requires re-opening the cpal stream on the chosen
+    /// device, which is deferred to the device-rebuild wave (after human stage
+    /// testing). Until then this is HONEST — it returns [`BackendError::NotRoutable`]
+    /// rather than silently succeeding while the engine keeps rendering to the
+    /// default device (a UI-vs-reality lie). The executor `.catch` routes the
+    /// error into the log store so the performer sees the truth.
+    pub fn set_speaker_device(
+        &mut self,
+        _node: NodeIdx,
+        _device_id: &str,
+    ) -> Result<(), BackendError> {
+        Err(BackendError::NotRoutable("output device selection"))
     }
 
-    /// Enable mic capture into `node`'s input bus. Requires the duplex input
-    /// stream; v1 records the request (the host opens output-only by default).
-    pub fn set_mic(&mut self, _node: NodeIdx, _enabled: bool) {
-        // TODO(native-parity): open the duplex input + route it to the node bus.
+    /// Enable mic capture into `node`'s input bus. Requires opening the duplex
+    /// input stream and routing it to the node bus — deferred to the same
+    /// device-rebuild wave. HONEST until then: returns [`BackendError::NotRoutable`]
+    /// rather than reporting a mic that isn't actually captured.
+    pub fn set_mic(&mut self, _node: NodeIdx, _enabled: bool) -> Result<(), BackendError> {
+        Err(BackendError::NotRoutable("mic capture"))
     }
 
     /// Scan `dirs` for hostable third-party plugins (VST3 / CLAP, + AU on
@@ -779,6 +913,59 @@ fn now_us() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_micros().min(u128::from(u64::MAX)) as u64)
         .unwrap_or(0)
+}
+
+/// The stable variant name for a [`Severity`] (mirrors the bare-string serde the
+/// `LogStore` columns expect: `Trace|Debug|Info|Warn|Error`).
+fn severity_name(s: Severity) -> &'static str {
+    match s {
+        Severity::Trace => "Trace",
+        Severity::Debug => "Debug",
+        Severity::Info => "Info",
+        Severity::Warn => "Warn",
+        Severity::Error => "Error",
+    }
+}
+
+/// The stable variant name for a [`Source`] (`Engine|Wasm|Ui|Native`).
+fn source_name(s: Source) -> &'static str {
+    match s {
+        Source::Engine => "Engine",
+        Source::Wasm => "Wasm",
+        Source::Ui => "Ui",
+        Source::Native => "Native",
+    }
+}
+
+/// Render an [`EventKind`] into the `LogStore` triple: the variant name, a
+/// human-readable message, and an optional JSON blob of the structured fields.
+/// Pure, off-RT; keeps the SQLite tail self-describing without coupling the store
+/// to `ojproto`.
+fn render_event_kind(kind: &EventKind) -> (&'static str, String, Option<String>) {
+    match kind {
+        EventKind::Lifecycle => ("Lifecycle", "lifecycle event".into(), None),
+        EventKind::GraphSwap => ("GraphSwap", "graph hot-swap landed".into(), None),
+        EventKind::Xrun { dropped } => (
+            "Xrun",
+            format!("xrun: {dropped} frame(s) dropped"),
+            Some(format!("{{\"dropped\":{dropped}}}")),
+        ),
+        EventKind::NodeFault { node, fault } => (
+            "NodeFault",
+            format!("node {} fault: {fault:?}", node.0),
+            Some(format!("{{\"node\":{},\"fault\":\"{fault:?}\"}}", node.0)),
+        ),
+        EventKind::RingFull => ("RingFull", "event ring overflowed".into(), None),
+        EventKind::Asset => ("Asset", "asset event".into(), None),
+        EventKind::Plugin => ("Plugin", "plugin event".into(), None),
+        EventKind::Midi => ("Midi", "midi event".into(), None),
+        EventKind::Collab => ("Collab", "collab event".into(), None),
+        EventKind::Message { code, text } => (
+            "Message",
+            text.clone(),
+            Some(format!("{{\"code\":{code}}}")),
+        ),
+    }
 }
 
 fn lift_event(rt: RtEvent, seq: u32, ts_us: u64) -> Event {
@@ -999,17 +1186,25 @@ mod tests {
         }
     }
 
-    /// Speaker / mic control methods are safe round trips and never panic.
-    /// `set_speaker_volume` now enqueues real `SetParam`s (volume + mute) onto the
-    /// live ring; device / mic remain documented host-side gaps.
+    /// Speaker volume is a real round trip; device / mic are HONEST `NotRoutable`
+    /// errors rather than silent UI-vs-reality lies (the cpal re-open / duplex
+    /// input is the deferred device-rebuild wave).
     #[test]
-    fn speaker_and_mic_controls_do_not_panic() {
+    fn speaker_and_mic_controls_are_honest() {
         let mut be = EngineBackend::new();
         // Two SetParams (volume, mute) enqueue cleanly on the live ring.
         be.set_speaker_volume(NodeIdx(1), 0.7, false)
             .expect("speaker volume enqueues");
-        be.set_speaker_device(NodeIdx(1), "device-2");
-        be.set_mic(NodeIdx(1), true);
+        // Device selection / mic capture are not yet routable on native: they
+        // report the truth instead of silently succeeding.
+        assert!(matches!(
+            be.set_speaker_device(NodeIdx(1), "device-2"),
+            Err(BackendError::NotRoutable(_))
+        ));
+        assert!(matches!(
+            be.set_mic(NodeIdx(1), true),
+            Err(BackendError::NotRoutable(_))
+        ));
     }
 
     /// `load_sample` with a previously pushed graph binds the asset to the
@@ -1080,5 +1275,151 @@ mod tests {
                 .any(|p| p.id == SAMPLER_PCM_PARAM && p.value == 60.0),
             "root note not bound"
         );
+    }
+
+    /// Build a Sampler(1) -> SpeakerOut(2) graph (no asset bound) for the
+    /// forward-merge tests.
+    fn sampler_graph() -> OjGraph {
+        use ojinstrument::SAMPLER_ID;
+        use ojproto::{ConnectionType, IrEdge, IrNode, PrimitiveKind};
+        OjGraph {
+            ir_version: ojproto::SCHEMA_VERSION,
+            sample_rate: 48_000,
+            block_size: 64,
+            nodes: vec![
+                IrNode {
+                    id: NodeIdx(1),
+                    manifest_id: SAMPLER_ID.into(),
+                    kind: PrimitiveKind::Sampler,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 0,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(2),
+                    manifest_id: ojcore::SPEAKER_OUT_ID.into(),
+                    kind: PrimitiveKind::SpeakerOut,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 0,
+                },
+            ],
+            edges: vec![IrEdge {
+                from_node: NodeIdx(1),
+                from_port: 0,
+                to_node: NodeIdx(2),
+                to_port: 0,
+                kind: ConnectionType::Audio,
+            }],
+            schedule: vec![],
+        }
+    }
+
+    /// SINGLE-OWNER FORWARD-MERGE: a sample bound via `load_sample` SURVIVES a
+    /// subsequent UI `push_graph` (which carries no asset). Before the fix the
+    /// push clobbered `last_graph` and silently dropped the sample on the next
+    /// edit; now the engine forward-merges the prior binding, with no second owner
+    /// in TS. This is the native↔wasm parity the plan calls out.
+    #[test]
+    fn pushed_graph_preserves_bound_sample() {
+        use ojinstrument::SAMPLER_PCM_PARAM;
+
+        let mut be = EngineBackend::new();
+        be.push_graph(&sampler_graph()).expect("initial push");
+
+        // Imperatively bind a sample to the sampler node (the engine-only mapping).
+        let pcm = vec![0.0f32, 0.5, -0.5, 0.25];
+        let id = be
+            .load_sample(NodeIdx(1), pcm.clone(), 48_000, 60)
+            .expect("sample binds");
+
+        // A FRESH UI push of the same topology (no asset on the wire) must NOT drop
+        // the binding — the forward-merge carries it onto the new kept graph.
+        be.push_graph(&sampler_graph()).expect("re-push");
+
+        let g = be.last_graph.as_ref().expect("graph kept");
+        let sampler = g.nodes.iter().find(|n| n.id == NodeIdx(1)).unwrap();
+        assert!(
+            sampler.assets.iter().any(|a| a.slot == 0 && a.asset == id),
+            "bound sample dropped by re-push (forward-merge failed)"
+        );
+        assert!(
+            sampler
+                .params
+                .iter()
+                .any(|p| p.id == SAMPLER_PCM_PARAM && p.value == 60.0),
+            "root note dropped by re-push"
+        );
+    }
+
+    /// The forward-merge yields to an EXPLICIT slot-0 binding on the incoming push
+    /// (a serialized project that bakes its own sample stays authoritative).
+    #[test]
+    fn explicit_push_binding_overrides_merge() {
+        let mut be = EngineBackend::new();
+        be.push_graph(&sampler_graph()).expect("initial push");
+        let first = be
+            .load_sample(NodeIdx(1), vec![0.1f32, 0.2], 48_000, 60)
+            .expect("first sample binds");
+
+        // Push a graph that ALREADY carries its own slot-0 asset on node 1.
+        let other = be
+            .catalog
+            .insert(Pcm {
+                samples: vec![0.9f32, -0.9],
+                channels: 1,
+                sample_rate: 48_000,
+            })
+            .expect("store second asset");
+        assert_ne!(first, other, "distinct assets");
+        let mut g = sampler_graph();
+        g.nodes[0].assets.push(AssetRef {
+            slot: 0,
+            asset: other,
+        });
+        be.push_graph(&g).expect("push with explicit binding");
+
+        let kept = be.last_graph.as_ref().unwrap();
+        let sampler = kept.nodes.iter().find(|n| n.id == NodeIdx(1)).unwrap();
+        let slot0 = sampler.assets.iter().find(|a| a.slot == 0).unwrap();
+        assert_eq!(
+            slot0.asset, other,
+            "explicit push binding must win over the merged one"
+        );
+    }
+
+    /// The L3 SQLite/FTS5 log store ingests drained events off-RT: after attaching
+    /// a store and draining a synthesized device-loss `Lifecycle`, the row is
+    /// queryable. Proves the dormant store is now WIRED (code-value #8).
+    #[test]
+    fn drain_events_persists_into_log_store() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("oj-logstore-test-{}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+
+        let mut be = EngineBackend::new();
+        be.attach_log_store(&path).expect("store opens");
+
+        // Synthesize a control-side Lifecycle event and drain it.
+        be.emit_lifecycle("simulated device loss".into());
+        let drained = be.drain_events();
+        assert!(
+            drained.iter().any(|e| e.kind == EventKind::Lifecycle),
+            "lifecycle event drained"
+        );
+
+        // The store now holds the durable tail; it is searchable by kind.
+        let store = be.log_store.as_ref().expect("store attached");
+        assert_eq!(store.count().unwrap(), drained.len() as i64);
+        let hits = store.search("Lifecycle", 10).unwrap();
+        assert!(
+            hits.iter().any(|h| h.kind == "Lifecycle"),
+            "lifecycle row searchable in the SQLite tail"
+        );
+
+        drop(be);
+        let _ = std::fs::remove_file(&path);
     }
 }

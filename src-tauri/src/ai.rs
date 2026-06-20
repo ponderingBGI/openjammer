@@ -531,6 +531,14 @@ pub struct WarmChild {
     /// `switch_session`es the live child instead of respawning, and so the active
     /// id can be reported back to the frontend for persistence / reattach.
     current_session: Option<String>,
+    /// Windows ONLY: the kill-on-close Job Object the child (and its descendants)
+    /// were adopted into. Held for the child's whole life; dropping it here reaps
+    /// the WHOLE process tree, closing the orphan gap a bare `Child::kill()` leaves
+    /// on Windows. `None` if the job couldn't be created (best-effort fallback).
+    // Never read by name — it is an RAII reap guard whose only job is `Drop`.
+    #[cfg(windows)]
+    #[allow(dead_code)]
+    job: Option<JobObject>,
 }
 
 impl WarmChild {
@@ -542,10 +550,15 @@ impl WarmChild {
 
 impl Drop for WarmChild {
     /// Kill + reap on drop (respawn or app exit) so no Pi child is ever orphaned —
-    /// `std::process::Child` does NOT kill on drop by default.
+    /// `std::process::Child` does NOT kill on drop by default. On Windows the Job
+    /// Object (dropped right after, see field order) additionally reaps any
+    /// DESCENDANTS Pi spawned, which a single-handle `kill()` cannot reach.
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        // The `job` field then drops, closing the kill-on-close job and reaping the
+        // rest of the tree (Windows). Field drop order is declaration order, so the
+        // explicit kill+wait above runs first; the job is the backstop for orphans.
     }
 }
 
@@ -769,6 +782,114 @@ fn write_openjammer_models_json(
     std::fs::write(models_path, serialized)
 }
 
+// ============================================================================
+// Windows process hygiene — reliable whole-tree reap + no console flash.
+// ============================================================================
+//
+// On stage two Windows-specific things bite: (1) `Child::kill()` is a single
+// `TerminateProcess` on the Pi handle, so any descendants Pi spawned (node, git,
+// a provider helper) are ORPHANED and linger after a respawn/quit; (2) spawning a
+// console subprocess without `CREATE_NO_WINDOW` flashes a console window in front
+// of the performer. We fix both: a Windows **Job Object** with
+// `KILL_ON_JOB_CLOSE` adopts the whole tree, so dropping the job handle (on a
+// respawn, on `WarmChild::drop`, or on app exit) reaps every descendant reliably;
+// `CREATE_NO_WINDOW` suppresses the flash (matching `updater.rs`). Both are
+// CONTROL-PLANE only (off the audio RT path). Non-Windows is unaffected.
+
+/// The `CREATE_NO_WINDOW` process creation flag — no console window flashes when
+/// the Pi child (a console program) is spawned. Same constant `updater.rs` uses.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// An owned Windows Job Object that whole-tree-reaps the process(es) assigned to
+/// it when its handle closes. Configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+/// so that closing the handle (on `Drop`) terminates every still-living process in
+/// the job — the Pi child AND any descendants it spawned — closing the orphan gap
+/// `Child::kill()` leaves on Windows.
+#[cfg(windows)]
+struct JobObject(windows_sys::Win32::Foundation::HANDLE);
+
+// The job handle is only ever created, assigned to once, and closed on drop, all
+// from the control thread that owns the `WarmChild`. The raw `HANDLE` (a pointer)
+// is not `Send` by default; this wrapper is moved into `WarmChild`, which crosses
+// threads via Tauri managed state, so assert it is safe to send (we never share it
+// concurrently — Win32 job handles are process-global and the ops we call are
+// thread-safe).
+#[cfg(windows)]
+unsafe impl Send for JobObject {}
+
+#[cfg(windows)]
+impl JobObject {
+    /// Create a kill-on-close job. Returns `None` if the OS refuses (best-effort:
+    /// a missing job degrades to today's single-process kill, never a failed spawn).
+    fn create_kill_on_close() -> Option<Self> {
+        use windows_sys::Win32::System::JobObjects::{
+            CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+
+        // SAFETY: a null name + null security attributes is the documented way to
+        // create an anonymous job; the returned handle is checked below.
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() {
+            return None;
+        }
+        let job = JobObject(handle);
+
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `info` is a fully-initialized POD of the matching class size; the
+        // handle is valid (checked above).
+        let ok = unsafe {
+            SetInformationJobObject(
+                job.0,
+                JobObjectExtendedLimitInformation,
+                std::ptr::addr_of!(info) as *const core::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if ok == 0 {
+            return None; // `job` drops here, closing the handle.
+        }
+        Some(job)
+    }
+
+    /// Adopt `child` (and thus its future descendants) into the job. Best-effort.
+    fn assign(&self, child: &Child) -> bool {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+
+        let process = child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+        // SAFETY: `self.0` is a live job handle; `process` is the child's live
+        // process handle owned by `Child` for the duration of this call.
+        unsafe { AssignProcessToJobObject(self.0, process) != 0 }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for JobObject {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        // Closing the only handle to a KILL_ON_JOB_CLOSE job terminates every
+        // process still inside it — the whole Pi tree — then frees the job.
+        // SAFETY: `self.0` is a valid handle this type uniquely owns.
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
+/// Apply Windows-only spawn hygiene to `cmd`: suppress the console-window flash.
+/// (Tree-reap is handled post-spawn by [`JobObject`].) A no-op on other targets.
+#[cfg(windows)]
+fn apply_windows_spawn_hygiene(cmd: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn apply_windows_spawn_hygiene(_cmd: &mut Command) {}
+
 /// Spawn a fresh Pi child, run the `get_commands` handshake, and pin the model
 /// ONCE. Emits a reasoned `error` line and returns `Err(())` on any failure (the
 /// caller then just returns `Ok(())`, surfacing the streamed error to the UI).
@@ -816,6 +937,8 @@ fn spawn_and_configure(
     if let Some(j) = jail {
         crate::sandbox::apply(&mut cmd, j);
     }
+    // Windows: no console-window flash on stage (CREATE_NO_WINDOW). No-op elsewhere.
+    apply_windows_spawn_hygiene(&mut cmd);
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -827,6 +950,20 @@ fn spawn_and_configure(
             );
             return Err(());
         }
+    };
+
+    // Windows: adopt the child into a kill-on-close Job Object BEFORE it spawns its
+    // own descendants, so dropping the job (respawn / WarmChild::drop / app exit)
+    // reaps the WHOLE Pi tree — not just the one process `Child::kill()` reaches.
+    // Best-effort: if the job can't be created/assigned we keep the child and fall
+    // back to today's single-process kill rather than failing the spawn.
+    #[cfg(windows)]
+    let job = {
+        let job = JobObject::create_kill_on_close();
+        if let Some(j) = job.as_ref() {
+            let _ = j.assign(&child);
+        }
+        job
     };
 
     let Some(mut stdin) = child.stdin.take() else {
@@ -927,6 +1064,8 @@ fn spawn_and_configure(
         // A fresh child starts on Pi's own current/auto session; the first run
         // resolves + reports the real id (or switches to a requested one).
         current_session: None,
+        #[cfg(windows)]
+        job,
     })
 }
 

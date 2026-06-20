@@ -410,11 +410,14 @@ export class OjcoreNativeExecutor implements Executor {
         if (useEngineHealthStore.getState().health === 'IDLE') {
             setEngineHealth('DEGRADED', 'engine active');
         }
-        // A UI push REPLACES the engine's kept graph, dropping any imperatively
-        // bound sample (see engine.rs push_graph), so (re)install the built-in
-        // default voice for instrument nodes that ship one. Without this a
-        // freshly-wired Keys/Piano/… node lowers to an EMPTY builtin.sampler and
-        // is silent — the note routes correctly but there is no PCM to play.
+        // Install the built-in default voice for instrument nodes that ship one,
+        // so a freshly-wired Keys/Piano/… node has PCM to play (an empty
+        // builtin.sampler is silent — the note routes but there is nothing to
+        // sound). The ENGINE now forward-merges a bound sample across pushes
+        // (engine.rs push_graph: single-owner persistence), so a plain re-push no
+        // longer drops the binding and `boundVoiceKey` keeps this to a no-op unless
+        // the instrument's voice family actually changed. We are NOT a second owner
+        // of sample persistence — this only seeds/changes the DEFAULT voice.
         this.loadDefaultInstrumentVoices();
     }
 

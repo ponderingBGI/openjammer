@@ -120,3 +120,28 @@ upstream-only (never downgrades). See
   sandbox is device-less and can only print the buffering floor.
 - **Live Faust / AI DSP:** install `libfaust` (+ LLVM), build `ojfaust` with
   `--features libfaust`.
+
+## Migration debt (tracked, not silently kept)
+
+Code-value #8 says *every production line is used* — so the per-OS code that is
+compiled-but-dormant today is listed here rather than left to rot unnoticed. Each
+item is an honest gap with a defined unblock, not a permanent twin. Remove the row
+when the gap closes.
+
+- **macOS native updater — compiled-off.** `src-tauri/src/updater.rs` is gated to
+  `cfg(any(windows, target_os = "linux"))`; on macOS the updater commands exist as
+  inert no-ops so the `invoke_handler` list stays platform-uniform, and Mac ships a
+  manual `.dmg`. *Reason:* without an Apple Developer ID + notarization, Gatekeeper
+  quarantines a self-swapped `.app`. *Unblock:* Apple notarization
+  (OWNER-PROVISIONING.md §4), then drop the `cfg` exclusion.
+- **Windows/macOS sandbox `Jail` — constructed but unenforced.** `src-tauri/src/sandbox.rs`
+  builds a `Jail` (writable/readable roots) in every jailed run, but only the
+  **Linux** path enforces it (Landlock via `pre_exec`); on Windows/macOS `apply()`
+  is a no-op and `jail_supported()` reports `false`, so the in-Pi permission-gate is
+  the only active layer there. The `Jail` fields read as dead code off Linux (hence
+  the `#[allow(dead_code)]`). *Unblock:* a Windows restricted-token + Job Object
+  confinement and a macOS Seatbelt profile; until then the gap is surfaced honestly
+  at spawn time ("OS-level file jail isn't available on this platform"). *Note:* the
+  Windows **Job Object** added for Pi process-tree reaping (`ai.rs`) is a
+  lifecycle/orphan-reap mechanism only — it is **not** the filesystem jail and does
+  not close this row.
