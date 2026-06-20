@@ -477,16 +477,19 @@ impl Engine {
             #[cfg(feature = "std")]
             self.emit_node_fault(self.program.master_out, ojproto::FaultKind::NonFinite);
         }
-        // NOTE (Track A P0b — founder decision #1): wire the shared
-        // `ojcore_dsp::guards::soft_limit` (LIMITER_CEILING = 0.999) over
-        // `out[..nframes]` HERE, after sanitize and before metering, to brickwall
-        // the master so summed over-unity graphs can never clip the device. It is
-        // deliberately NOT applied in this PR: the committed golden fingerprints
-        // (e.g. OSC440_GOLDEN reaches ~0.98, above the 0.4995 knee) must be
-        // RE-CAPTURED by running `cargo test -p ojinstrument` once the limiter is
-        // live, which this authoring environment cannot do. Landing it then is a
-        // ~6-line change plus a golden refresh. Until then the master TRUE-PEAK
-        // oracle stays finiteness-only (see the plan's oracle set).
+        // Master brickwall limiter (Track A P0b — founder decision #1): keep the
+        // FINAL output within +/-0.999 (`LIMITER_CEILING`) so summed over-unity
+        // graphs can never clip the device — the last line of defence the performer
+        // actually hears. Applied AFTER `sanitize` (so a master-level NaN/Inf is
+        // still flagged + reported, not silently swallowed) and BEFORE metering (so
+        // the meter reflects what is truly heard). Reuses the shared `ojcore-dsp`
+        // kernel — the same soft knee the per-graph guard chain uses — rather than
+        // forking a second limiter. The linear region (|x| <= ceiling/2 = 0.4995)
+        // passes through untouched, so quiet/normal graphs stay bit-identical; the
+        // committed golden fingerprints were re-captured for the limited chain.
+        for o in out.iter_mut().take(nframes) {
+            *o = ojcore_dsp::guards::soft_limit(*o);
+        }
         if self.meters.enabled {
             self.meters.master.accumulate(&out[..nframes]);
         }
