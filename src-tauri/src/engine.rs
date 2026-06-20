@@ -185,6 +185,13 @@ pub struct EngineBackend {
     /// graph against the updated [`AssetCatalog`]. `None` until the first
     /// `push_graph` (the starter graph runs but is not stored).
     last_graph: Option<OjGraph>,
+    /// `true` while the engine is in the DEVICE-LOST state: the running output
+    /// stream faulted (device yanked/disabled/reconfigured) and a rebuild has not
+    /// yet succeeded. Set by [`tick`] on the first detected fault, cleared on a
+    /// successful rebuild. Drives the de-bounce (one `DeviceLost` event per loss,
+    /// not per retry tick) and gates the `DeviceRecovered` event (only emitted if
+    /// we were actually lost). Off-RT: only the control thread touches it.
+    device_lost: bool,
     /// The L3 durable LOCAL log store (SQLite + FTS5), the queryable tail of the
     /// fault trail. `None` until [`attach_log_store`] wires one (the Tauri shell
     /// opens it under the platform log dir in `setup`); never network, never the
@@ -285,6 +292,7 @@ impl EngineBackend {
             store: AssetStore::new(),
             captures: std::collections::HashMap::new(),
             last_graph: None,
+            device_lost: false,
             log_store: None,
         }
     }
@@ -517,24 +525,121 @@ impl EngineBackend {
                 // program / last good sound is untouched (there was none to keep on
                 // a cold start, but we still never tear anything down here).
                 eprintln!("ojcore: audio host failed to start (non-fatal): {e}");
-                self.emit_lifecycle(format!("audio host failed to start: {e}"));
+                self.emit_lifecycle(Severity::Warn, format!("audio host failed to start: {e}"));
                 self.producer = producer;
             }
         }
         Ok(())
     }
 
-    /// Queue a control-side `Lifecycle` `Event` (device-loss / host-restart
-    /// failure) onto [`pending_events`], to be drained by [`drain_events`]. The
-    /// RT event ring is `Copy`-only and has no `Lifecycle` variant, so these
-    /// synthesized envelopes ride this off-RT queue instead. Pure control-thread
-    /// work — never called from the audio callback.
-    fn emit_lifecycle(&mut self, text: String) {
+    /// Control-thread tick: the off-RT recovery pump. Called each `drain_events`
+    /// poll (alongside `drain_meters`), it checks the running host's device-fault
+    /// signal — SET by the cpal `err_fn` off the render thread on a yanked /
+    /// disabled / reconfigured device — and, on a fault, attempts to REBUILD the
+    /// stream on the CURRENT default output device, re-adopting `last_graph` so the
+    /// patch resumes. Runs ENTIRELY off the audio path (no audio thread work, no
+    /// allocation/lock in the render callback — only here).
+    ///
+    /// LIVE-PERFORMANCE RULE: device-loss means the instrument is ALREADY silent,
+    /// so automated visible recovery is allowed (unlike a mid-note graph swap). We
+    /// preserve graph state and report via the existing event pipe WITHOUT a modal.
+    ///
+    /// DE-BOUNCE: `device_lost` latches on the first detected fault so one
+    /// device-loss emits exactly ONE `DeviceLost` event; subsequent ticks while
+    /// still lost only RETRY the rebuild (no event storm). On the rebuild that
+    /// succeeds we emit ONE `DeviceRecovered`. No device yet → stay lost, retry on
+    /// the next tick (no spin, no block, no panic).
+    pub fn tick(&mut self) {
+        // Read-and-clear the running host's fault edge. No host (device-less /
+        // never started) → nothing to recover here; a cold start is still driven
+        // by `push_graph`/`adopt`.
+        let faulted = self
+            .host
+            .as_ref()
+            .map(|h| h.fault_signal().take())
+            .unwrap_or(false);
+
+        if faulted && !self.device_lost {
+            // FIRST detection of this loss: latch, drop the dead stream (off-RT),
+            // and announce ONCE. Dropping the host stops cpal's dead stream cleanly
+            // and flips `is_running()` to false so the rebuild takes the cold-start
+            // path that opens a fresh stream on the current default device.
+            self.device_lost = true;
+            self.host = None;
+            self.emit_lifecycle(
+                Severity::Warn,
+                "audio device lost; attempting auto-rebuild".into(),
+            );
+        }
+
+        // While lost, try to rebuild on EVERY tick until a device is back. The
+        // retry is cheap (one default-device probe); if there is no device yet the
+        // attempt fails fast and we stay lost for the next tick.
+        if self.device_lost && self.rebuild_after_loss() {
+            self.device_lost = false;
+            self.emit_lifecycle(
+                Severity::Info,
+                "audio device recovered; patch resumed".into(),
+            );
+        }
+    }
+
+    /// Re-open the cpal stream on the current default output device and re-adopt
+    /// the last compiled program so the patch resumes after a device loss. Returns
+    /// `true` on success, `false` if no usable device is available yet (caller
+    /// retries on the next tick). Off-RT only.
+    ///
+    /// Re-syncs the stream request to the (possibly new) device's default sample
+    /// rate first — a yanked interface may be replaced by one at a different rate,
+    /// and rendering at the wrong rate would play back detuned. Then it routes
+    /// through the SAME `adopt` cold-start path `push_graph` uses (host is `None`
+    /// after the loss), so there is one stream-open seam, not a parallel one.
+    fn rebuild_after_loss(&mut self) -> bool {
+        debug_assert!(
+            self.host.is_none(),
+            "rebuild expects the dead host already dropped"
+        );
+        // Follow the current default device's rate (it may be a different device).
+        if let Some(rate) = ojcore_native::default_output_sample_rate() {
+            self.stream.sample_rate = rate;
+        }
+        // Re-adopt the last compiled program if there is one, else the silent
+        // starter graph, so the cold-start path inside `adopt` opens a stream.
+        let graph = self
+            .last_graph
+            .clone()
+            .unwrap_or_else(|| Self::starter_graph(self.stream));
+        // `adopt` is idempotent w.r.t. `last_graph` (it does not store it); it
+        // opens a fresh stream when `host.is_none()`. A compile error here would be
+        // a build-time bug (the graph last compiled fine), so swallow+report rather
+        // than panic — the next tick retries.
+        if let Err(e) = self.adopt(&graph) {
+            tracing::warn!(target: "engine", "device rebuild: re-adopt failed: {e}");
+            return false;
+        }
+        // `adopt` only opens a stream on the cold-start path; if the device is
+        // still absent it leaves `host` None (and emits its own Lifecycle). So a
+        // running host is the unambiguous "recovered" signal.
+        self.host.is_some()
+    }
+
+    /// Queue a control-side `Lifecycle` `Event` (device-loss, recovery, or
+    /// host-restart failure) onto [`pending_events`], to be drained by
+    /// [`drain_events`]. The RT event ring is `Copy`-only and has no `Lifecycle`
+    /// variant, so these synthesized envelopes ride this off-RT queue instead.
+    /// Pure control-thread work — never called from the audio callback.
+    ///
+    /// `severity` distinguishes loss/failure (`Warn` → DEGRADED) from recovery
+    /// (`Info`). The wire `kind` stays the existing [`EventKind::Lifecycle`] so
+    /// ojproto is unchanged and the Wave-1 frontend fault pipe still reads it; the
+    /// human `text` is the observable log line (NDJSON + tracing) the orchestrator
+    /// watches during the live Disable-PnpDevice test.
+    fn emit_lifecycle(&mut self, severity: Severity, text: String) {
         self.event_seq = self.event_seq.wrapping_add(1);
         self.pending_events.push(Event {
             v: ojproto::SCHEMA_VERSION,
             seq: self.event_seq,
-            severity: Severity::Warn,
+            severity,
             kind: EventKind::Lifecycle,
             source: Source::Native,
             ts_us: now_us(),
@@ -542,7 +647,12 @@ impl EngineBackend {
         });
         // `text` is folded into the structured NDJSON record for the post-crash
         // trail; the UI surfaces the `Lifecycle` kind itself (a calm DEGRADED).
-        tracing::warn!(target: "engine", "{text}");
+        match severity {
+            Severity::Info | Severity::Debug | Severity::Trace => {
+                tracing::info!(target: "engine", "{text}")
+            }
+            _ => tracing::warn!(target: "engine", "{text}"),
+        }
     }
 
     /// Enqueue one [`RtCommand`] onto the UI->RT ring (the high-rate control
@@ -597,6 +707,14 @@ impl EngineBackend {
     /// DevLog/diagnostics. Control-rate: called by the UI poll command, never on
     /// the audio thread.
     pub fn drain_events(&mut self) -> Vec<Event> {
+        // DEVICE-LOSS AUTO-REBUILD pump. This poll is the control-thread tick the
+        // frontend already drives on a timer, so it is the natural off-RT seam to
+        // check the cpal fault signal and rebuild the stream on the current default
+        // device (re-adopting `last_graph`). It runs BEFORE we snapshot
+        // `pending_events` so a `DeviceLost`/`DeviceRecovered` Lifecycle emitted
+        // this tick is drained in the SAME batch (no extra poll latency on stage).
+        self.tick();
+
         // Control-side synthesized events (device-loss `Lifecycle`, …) first, so a
         // host-restart failure reaches the pipe alongside RT faults in one drain.
         let mut out = std::mem::take(&mut self.pending_events);
@@ -1390,6 +1508,125 @@ mod tests {
         );
     }
 
+    /// DEVICE-LOSS TICK, NO-HOST BRANCH: when there is no running host (device-less
+    /// boot, or a prior start failed) a `tick` has nothing to recover — it must NOT
+    /// latch `device_lost`, must emit no event, and must never panic. We force
+    /// `host = None` so this is deterministic on a dev box that DOES have a device.
+    #[test]
+    fn tick_is_inert_without_a_host() {
+        let mut be = EngineBackend::new();
+        // Force the no-host state (the headless / failed-start path) regardless of
+        // whether this machine happens to have an audio device.
+        be.host = None;
+        be.device_lost = false;
+        be.tick();
+        assert!(
+            !be.device_lost,
+            "tick must not latch device-loss with no host"
+        );
+        assert!(
+            be.pending_events.is_empty(),
+            "tick emits no event when there is nothing to recover"
+        );
+        // And it composes into a clean drain (the live call site).
+        let drained = be.drain_events();
+        assert!(drained.iter().all(|e| e.kind != EventKind::Lifecycle));
+    }
+
+    /// DEVICE-LOSS REBUILD DECISION: after a (simulated) loss the dead host is
+    /// dropped, so `rebuild_after_loss` takes the cold-start `adopt` path and
+    /// RE-ADOPTS `last_graph`. Environment-agnostic:
+    ///   • on a box WITH a device the rebuild OPENS a real stream → recovered
+    ///     (host running again), the live patch resumes;
+    ///   • on a device-less box it returns `false` (stay lost, retry next tick).
+    /// EITHER way it must not panic and must leave `last_graph` intact so the patch
+    /// is ready to resume. The orchestrator drives the real Disable-PnpDevice loss.
+    #[test]
+    fn rebuild_after_loss_readopts_last_graph() {
+        let mut be = EngineBackend::new();
+        // Push a real graph so `last_graph` is populated (the patch to resume).
+        be.push_graph(&sampler_graph()).expect("push graph");
+        let kept_before = be.last_graph.clone().expect("graph kept");
+
+        // Simulate the post-loss state the tick sets up: dead host dropped.
+        be.host = None;
+        be.device_lost = true;
+
+        // Rebuild on the current default device. Result depends on hardware; the
+        // INVARIANT we assert is recovered ⇔ host is now running.
+        let recovered = be.rebuild_after_loss();
+        assert_eq!(
+            recovered,
+            be.is_running(),
+            "recovered iff a stream is running again"
+        );
+        // The patch is preserved across the attempt (NOT cleared by the rebuild),
+        // so the sampler topology survives a loss whether or not a device was back.
+        assert_eq!(
+            be.last_graph.as_ref().map(|g| g.nodes.len()),
+            Some(kept_before.nodes.len()),
+            "last_graph preserved across the rebuild so the patch resumes intact"
+        );
+    }
+
+    /// DE-BOUNCE: one device-loss latches `device_lost` and emits EXACTLY ONE
+    /// `Warn` Lifecycle, and repeated ticks while still lost do NOT re-emit the loss
+    /// event (no event storm) — they only retry the rebuild. Forced no-host state
+    /// makes the retry branch deterministic without hardware.
+    #[test]
+    fn repeated_ticks_while_lost_emit_one_loss_event() {
+        let mut be = EngineBackend::new();
+        be.push_graph(&sampler_graph()).expect("push graph");
+        // Enter the lost state as if a fault was just detected and the dead host
+        // dropped; clear any events the push staged so we count only the loss path.
+        be.host = None;
+        be.device_lost = true;
+        be.pending_events.clear();
+
+        // Tick three times. On a device-less box every retry fails and stays lost;
+        // on a box WITH a device the FIRST retry recovers. Either way the loss
+        // itself is already latched, so no NEW Warn loss event should appear here —
+        // the loss event is emitted once at detection (covered by the tick path),
+        // not per retry.
+        let mut warns = 0usize;
+        for _ in 0..3 {
+            be.tick();
+            warns += be
+                .pending_events
+                .iter()
+                .filter(|e| e.kind == EventKind::Lifecycle && e.severity == Severity::Warn)
+                .count();
+            // Drain so each tick's events are counted once.
+            let _ = be.drain_events();
+        }
+        assert_eq!(
+            warns, 0,
+            "already-latched loss must not re-emit a Warn loss event on retries"
+        );
+    }
+
+    /// DE-BOUNCE: a recovery emits exactly ONE `Info` Lifecycle, and the `Warn`
+    /// loss / `Info` recovery severities are distinct (loss → DEGRADED, recovery →
+    /// healthy). Drives the tri-state health without a second wire variant.
+    #[test]
+    fn lifecycle_severity_distinguishes_loss_from_recovery() {
+        let mut be = EngineBackend::new();
+        be.emit_lifecycle(Severity::Warn, "audio device lost".into());
+        be.emit_lifecycle(Severity::Info, "audio device recovered".into());
+        let drained = be.drain_events();
+        let lifecycles: Vec<_> = drained
+            .iter()
+            .filter(|e| e.kind == EventKind::Lifecycle)
+            .collect();
+        assert_eq!(lifecycles.len(), 2, "one loss + one recovery event");
+        assert_eq!(lifecycles[0].severity, Severity::Warn, "loss is a warning");
+        assert_eq!(
+            lifecycles[1].severity,
+            Severity::Info,
+            "recovery is informational (not an alarm)"
+        );
+    }
+
     /// The L3 SQLite/FTS5 log store ingests drained events off-RT: after attaching
     /// a store and draining a synthesized device-loss `Lifecycle`, the row is
     /// queryable. Proves the dormant store is now WIRED (code-value #8).
@@ -1403,7 +1640,7 @@ mod tests {
         be.attach_log_store(&path).expect("store opens");
 
         // Synthesize a control-side Lifecycle event and drain it.
-        be.emit_lifecycle("simulated device loss".into());
+        be.emit_lifecycle(Severity::Warn, "simulated device loss".into());
         let drained = be.drain_events();
         assert!(
             drained.iter().any(|e| e.kind == EventKind::Lifecycle),

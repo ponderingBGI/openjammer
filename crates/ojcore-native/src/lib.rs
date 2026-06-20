@@ -35,8 +35,8 @@ pub mod update_gate;
 
 pub use asset::{AssetError, AssetStore, Pcm};
 pub use host::{
-    default_output_sample_rate, render_block, AudioHost, BlockProcessor, HostError, StreamRequest,
-    DEFAULT_RUN,
+    default_output_sample_rate, render_block, AudioHost, BlockProcessor, HostError, StreamFault,
+    StreamRequest, DEFAULT_RUN,
 };
 pub use latency::{
     detect_onset, frames_to_ms, measure_round_trip_frames, ms_to_frames, LatencyEstimate,
