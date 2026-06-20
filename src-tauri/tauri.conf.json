@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "identifier": "in.lionman.openjammer",
   "build": {
-    "beforeDevCommand": "bun run build:pi-runtime && bun run dev",
+    "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "bun run build:pi-runtime && bun run build",
     "frontendDist": "../dist"
@@ -51,7 +51,7 @@
         "https://github.com/ponderingBGI/openjammer/releases/latest/download/latest.json"
       ],
       "windows": {
-        "installMode": "passive"
+        "installMode": "quiet"
       }
     }
   }

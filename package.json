@@ -22,6 +22,8 @@
   "scripts": {
     "preinstall": "node -e \"if(!process.env.npm_execpath?.includes('bun')){console.error('\\x1b[31mError: Use bun to install dependencies.\\nRun: bun install\\x1b[0m');process.exit(1)}\"",
     "dev": "vite",
+    "dev:native": "bun scripts/oj/index.ts dev",
+    "oj": "bun scripts/oj/index.ts",
     "build": "tsc -b && vite build",
     "build:pi-runtime": "bun scripts/build-pi-runtime.ts",
     "tokens": "bun ./packages/oj-tokens/build.mjs",

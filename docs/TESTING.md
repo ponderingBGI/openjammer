@@ -32,7 +32,7 @@ claim.
 
 ## 2. Native audio + instruments + MIDI
 ```bash
-bun run tauri dev      # or launch the installed app
+bun run dev:native     # one-command native loop (alias: just dev) — or launch the installed app
 ```
 - Build `keyboard → instrument → effect → speaker`. Play the Arturia → sound, low latency.
 - Verify looper (record/overdub/clear), recorder (capture → WAV), sampler (load a
