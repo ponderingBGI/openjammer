@@ -30,6 +30,8 @@
  */
 
 import {
+    lazy,
+    Suspense,
     useCallback,
     useEffect,
     useLayoutEffect,
@@ -49,7 +51,17 @@ import { buildPaletteCtx } from '../../store/actionContext';
 import { usePaletteLearningStore } from '../../store/paletteLearningStore';
 import { score as paletteScore } from '../../store/paletteScore';
 import { useCommandSources } from './useCommandSources';
-import { AiPanel } from './AiPanel';
+// The AI half (AiPanel + the Pi agent backend + the markdown renderer it pulls
+// in) is the single heaviest non-first-paint subtree. It only renders in 'ai'
+// mode, so it is code-split behind a real dynamic import: the command palette
+// (and its global Ctrl+K hotkey, owned by THIS eagerly-loaded component) is
+// untouched, and the AI chunk loads the first time a performer presses Tab /
+// asks the agent. Splitting here — a true async boundary Rollup orders for us —
+// avoids the production-only circular-init crash that manual vendor chunking of
+// app modules caused (see vite.config.ts), and keeps the entry chunk lean.
+const AiPanel = lazy(() =>
+    import('./AiPanel').then((m) => ({ default: m.AiPanel })),
+);
 import { useCommandBarStore } from '../../store/commandBarStore';
 import { startBridgeListener } from '../../ai/bridgeListener';
 import './CommandBar.css';
@@ -339,14 +351,16 @@ export function CommandBar() {
                 data-mode={mode}
             >
                 {mode === 'ai' ? (
-                    <AiPanel
-                        key={`${aiPrompt}:${aiAutoSend ? 'send' : 'draft'}:${forceAuth ? 'auth' : 'chat'}`}
-                        initialPrompt={aiPrompt}
-                        autoSendInitial={aiAutoSend}
-                        forceAuth={forceAuth}
-                        onBack={backToSearch}
-                        onClose={close}
-                    />
+                    <Suspense fallback={null}>
+                        <AiPanel
+                            key={`${aiPrompt}:${aiAutoSend ? 'send' : 'draft'}:${forceAuth ? 'auth' : 'chat'}`}
+                            initialPrompt={aiPrompt}
+                            autoSendInitial={aiAutoSend}
+                            forceAuth={forceAuth}
+                            onBack={backToSearch}
+                            onClose={close}
+                        />
+                    </Suspense>
                 ) : (
                     <Command
                         label="Command Palette"

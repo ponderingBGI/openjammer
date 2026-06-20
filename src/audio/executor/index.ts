@@ -4,7 +4,10 @@
  * ojcore is now the ONE audio engine. `OJ_EXECUTOR` only selects WHICH ojcore
  * transport drives the app:
  *   • `ojcore-native` — the native Rust ojcore engine over Tauri IPC (the
- *                       sub-5ms path; auto-selected when running under Tauri).
+ *                       low-latency path — device-dependent: sub-5 ms when the
+ *                       device grants a small 64-frame buffer (measured ~1.3 ms on
+ *                       a Windows test machine), ~10 ms+ when it forces a larger
+ *                       period; auto-selected when running under Tauri).
  *   • `ojcore-wasm`   — the same ojcore engine compiled to wasm + AudioWorklet
  *                       (the browser default).
  *

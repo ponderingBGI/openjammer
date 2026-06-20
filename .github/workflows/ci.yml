@@ -165,8 +165,28 @@ jobs:
         run: bun run lint
       - name: Test
         run: bun run test:run
-      - name: Build
-        run: bun run build
+      # Build-warning gate: the production build must emit ZERO warnings. A clean
+      # build is part of the covenant — a chunk-size, browserslist, or deprecation
+      # notice is cosmetic noise that erodes trust and, left unchecked, creeps back.
+      # We capture the FULL build output (stdout+stderr), then fail if any known
+      # warning signature appears. This is fail-closed by signature, not a blanket
+      # "any line with 'warn'": we match the specific notices Vite/Rollup/browserslist
+      # emit so a legitimate filename containing "warning" can't false-trip it.
+      #   - chunk-size .......... "(!) Some chunks are larger than" / "larger than N kB"
+      #   - browserslist ........ "Browserslist: browsers data" / "is N months old"
+      #   - rollup/vite warns ... lines beginning with "warning" or "(!)"
+      #   - deprecations ........ "deprecat" (DEP00xx, "is deprecated", etc.)
+      # The build still writes dist/ for the e2e step below.
+      - name: Build (zero-warning gate)
+        shell: bash
+        run: |
+          set -o pipefail
+          bun run build 2>&1 | tee build.log
+          if grep -niE 'Some chunks are larger than|larger than [0-9]+ ?kB|Browserslist: browsers data|caniuse-lite\) is [0-9]+ months? old|months? old\. Please run|^[[:space:]]*\(!\)|^[[:space:]]*warning|deprecat' build.log; then
+            echo "::error::Production build emitted a warning (see matched lines above). Fix it honestly — do NOT raise the chunk-size limit or silence browserslist without verifying the data is already at the latest published version."
+            exit 1
+          fi
+          echo "Build emitted zero warnings — gate GREEN."
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
       - name: Production PWA smoke test

@@ -152,7 +152,14 @@ describe('CommandBar (M2)', () => {
         fireEvent.keyDown(input, { key: 'Tab' });
 
         // AI mode shows the agent prompt input (desktop caps → agent available).
-        expect(screen.getByPlaceholderText(/Ask anything/i)).toBeInTheDocument();
+        // AiPanel is now code-split (lazy + Suspense), so it mounts asynchronously and
+        // its dynamic import resolves the real (heavy) module graph in jsdom (~1s).
+        // Await its appearance with a generous timeout so the full suite's parallel
+        // load can't tip it over the default 1s wait. (Production hides this cost
+        // behind the PWA precache; this latitude is purely a test-environment one.)
+        expect(
+            await screen.findByPlaceholderText(/Ask anything/i, undefined, { timeout: 5000 }),
+        ).toBeInTheDocument();
         // The search input is gone (we left search mode).
         expect(screen.queryByPlaceholderText(/Search commands/i)).toBeNull();
         await waitFor(() => expect(send).toHaveBeenCalledOnce());

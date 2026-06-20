@@ -73,6 +73,18 @@ export async function extractMetadata(file: File): Promise<ExtractedMetadata> {
     // music-metadata is large and has browser-only dependency edges that must
     // not run during first paint. Load it only when the user imports/analyzes an
     // audio file so a metadata-parser bundling issue cannot white-screen the app.
+    //
+    // Deprecation note ("Synchronous XMLHttpRequest on the main thread"): the
+    // warning some browsers (Firefox) emit on metadata parse originates DEEP
+    // inside a music-metadata transitive dependency, not in our call here — there
+    // is no async option we can pass to silence it. It does NOT fire at startup
+    // (this import is lazy) and only on the user's own file import, off the audio
+    // path. The clean fix is to run metadata parsing in a Web Worker (the
+    // waveform path already does, see waveformWorkerClient); that is tracked as
+    // remaining hygiene debt rather than forced here, because moving the parser
+    // off-thread is a larger change than this cosmetic sweep and risks the
+    // browser-only dependency edges noted above. The e2e console allowlist
+    // tolerates this specific warning (e2e/pwa-smoke.spec.ts WARN_ALLOWLIST).
     const { parseBlob } = await import('music-metadata');
     const metadata = await parseBlob(file, {
       duration: true,

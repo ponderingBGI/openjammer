@@ -1,5 +1,10 @@
 /**
- * OjcoreNativeExecutor (U17) — the native, sub-5ms audio path.
+ * OjcoreNativeExecutor (U17) — the native, low-latency audio path.
+ *
+ * Latency honesty: on Windows over WASAPI-shared (the default cpal path) this is
+ * realistically ~10 ms+, NOT sub-5 ms. True sub-5 ms needs WASAPI-exclusive or
+ * ASIO, which OpenJammer does not yet route — so we never advertise the native
+ * tier as sub-5 ms. (The audio health dot tooltip carries the same honest tier.)
  *
  * When OpenJammer runs inside the Tauri desktop shell, audio is rendered by the
  * native Rust `ojcore` engine on a small-buffer cpal stream (the founder's MOTU

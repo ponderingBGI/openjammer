@@ -2,13 +2,22 @@
  * OpenJammer - Node-based music generation tool
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { Toaster, toast } from 'sonner';
 import { NodeCanvas } from './components/Canvas/NodeCanvas';
 import { Toolbar } from './components/Toolbar/Toolbar';
 import { Breadcrumbs } from './components/Toolbar/Breadcrumbs';
 import { HelpPanel } from './components/Toolbar/HelpPanel';
-import { SettingsPanel } from './components/Settings/SettingsPanel';
+// The full settings surface (panels, guides, the low-latency walkthrough) is a
+// modal opened on demand — never part of first paint. Code-split it behind a
+// real dynamic import so its weight stays out of the entry chunk; it is already
+// rendered only when `showSettings` is true, so the Suspense fallback is never
+// seen on the hot path (it loads the first time the gear is opened).
+const SettingsPanel = lazy(() =>
+    import('./components/Settings/SettingsPanel').then((m) => ({
+        default: m.SettingsPanel,
+    })),
+);
 import { CommandBar } from './components/CommandBar/CommandBar';
 import { DevLogPanel } from './components/DevLog/DevLogPanel';
 import { IssueReporter } from './components/IssueReporter/IssueReporter';
@@ -484,7 +493,11 @@ function App() {
       </div>
 
       {/* Settings Panel */}
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+      {showSettings && (
+        <Suspense fallback={null}>
+          <SettingsPanel onClose={() => setShowSettings(false)} />
+        </Suspense>
+      )}
 
       {/* Command Bar (Ctrl/Cmd+K) - owns its own toggle + open state (U19) */}
       <CommandBar />

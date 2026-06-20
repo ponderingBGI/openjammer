@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 import {
     useAgentSessionStore,
     useIsAgentPending,
@@ -29,10 +29,14 @@ describe('useIsAgentPending', () => {
 
     it('clears when the turn finishes (phase leaves running)', () => {
         useAgentSessionStore.setState({ phase: 'running', runBaseline: new Set() });
-        expect(renderHook(() => useIsAgentPending('x')).result.current).toBe(true);
+        const { result } = renderHook(() => useIsAgentPending('x'));
+        expect(result.current).toBe(true);
 
-        // The turn settles → no more highlight.
-        useAgentSessionStore.setState({ phase: 'idle', runBaseline: null });
-        expect(renderHook(() => useIsAgentPending('x')).result.current).toBe(false);
+        // The turn settles → no more highlight. The mounted hook re-renders from
+        // this store update, so it must run inside act() (no React act() warning).
+        act(() => {
+            useAgentSessionStore.setState({ phase: 'idle', runBaseline: null });
+        });
+        expect(result.current).toBe(false);
     });
 });
