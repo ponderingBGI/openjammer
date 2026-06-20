@@ -27,3 +27,4 @@ arc-swap = { version = "1.9.1", optional = true }   # lock-free atomic program p
 
 [dev-dependencies]
 assert_no_alloc = "1.1.2"                            # proves the hot loop allocates zero bytes
+proptest = "1"                                        # property tests over compile() (Track A P0a)
