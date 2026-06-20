@@ -22,7 +22,7 @@ use std::time::Duration;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, SampleFormat, Stream, StreamConfig};
 
-use ojcore::{CommandConsumer, Engine};
+use ojcore::{CommandConsumer, Engine, ProgramSwapRx};
 
 use crate::recorder::RecorderSink;
 
@@ -90,6 +90,35 @@ pub fn render_block<P: BlockProcessor>(
     for s in data[total_frames * channels..].iter_mut() {
         *s = 0.0;
     }
+}
+
+/// Promote the calling (audio callback) thread to realtime scheduling, once per
+/// stream. Non-fatal: audio still plays without it, just without the scheduling
+/// guarantee.
+///
+/// WINDOWS: cpal's WASAPI backend already registers the render thread with the
+/// MMCSS "Pro Audio" task, so a SECOND `AvSetMmThreadCharacteristics` from
+/// `audio_thread_priority` is redundant and fails (the source of the repeated
+/// `(1552)` errors). We therefore skip the manual promotion on Windows and rely
+/// on cpal's. (True sub-5ms still needs WASAPI-exclusive/ASIO — a device-config
+/// concern, not this scheduling call.)
+///
+/// LINUX / macOS: cpal does not promote, so we do it here (SCHED_FIFO / the
+/// POSIX RT path inside `audio_thread_priority`).
+#[cfg(not(target_os = "windows"))]
+fn promote_audio_thread(buffer_frames: u32, sample_rate: u32) {
+    match audio_thread_priority::promote_current_thread_to_real_time(buffer_frames, sample_rate) {
+        Ok(_handle) => {}
+        // The returned handle only matters for an explicit `demote`; we never
+        // demote (the thread is RT for the stream's whole life, torn down with
+        // the process), so we drop it.
+        Err(e) => eprintln!("ojcore: RT thread-priority not granted (non-fatal): {e}"),
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn promote_audio_thread(_buffer_frames: u32, _sample_rate: u32) {
+    // No-op: cpal already MMCSS-promotes the WASAPI render thread (see fn docs).
 }
 
 /// How to open the stream. A tiny, explicit request rather than guessing from
@@ -247,7 +276,22 @@ impl AudioHost {
         engine: Engine,
         rx: CommandConsumer,
     ) -> Result<Self, HostError> {
-        Self::start_inner(req, engine, rx, None)
+        Self::start_inner(req, engine, rx, None, None)
+    }
+
+    /// Like [`start`](Self::start) but the callback also adopts hot-swapped
+    /// programs published into `swap_rx` at each block boundary — so a UI graph
+    /// edit becomes a lock-free in-callback program swap with NO stream
+    /// teardown/restart (the live path, [`crate`] consumer: `src-tauri`'s
+    /// `EngineBackend`). The displaced program is dropped off the audio thread
+    /// (see [`ProgramSwapRx::install_into`]).
+    pub fn start_with_swap(
+        req: StreamRequest,
+        engine: Engine,
+        rx: CommandConsumer,
+        swap_rx: ProgramSwapRx,
+    ) -> Result<Self, HostError> {
+        Self::start_inner(req, engine, rx, None, Some(swap_rx))
     }
 
     /// Like [`start`](Self::start) but the duplex input is captured into
@@ -260,7 +304,7 @@ impl AudioHost {
         rx: CommandConsumer,
         capture: RecorderSink,
     ) -> Result<Self, HostError> {
-        Self::start_inner(req, engine, rx, Some(capture))
+        Self::start_inner(req, engine, rx, Some(capture), None)
     }
 
     fn start_inner(
@@ -268,6 +312,7 @@ impl AudioHost {
         mut engine: Engine,
         mut rx: CommandConsumer,
         input_capture: Option<RecorderSink>,
+        swap_rx: Option<ProgramSwapRx>,
     ) -> Result<Self, HostError> {
         let host = cpal::default_host();
         let device = host
@@ -349,19 +394,17 @@ impl AudioHost {
                 move |data: &mut [f32], _info: &cpal::OutputCallbackInfo| {
                     if !promoted {
                         promoted = true;
-                        // Promote THIS (audio callback) thread to realtime. A
-                        // failure is non-fatal: audio still plays, just without
-                        // the scheduling guarantee. The returned handle only
-                        // matters for an explicit `demote`; we never demote (the
-                        // thread stays realtime for the stream's whole life and
-                        // is torn down with the process), so we drop it.
-                        match audio_thread_priority::promote_current_thread_to_real_time(
-                            buffer_frames,
-                            sample_rate,
-                        ) {
-                            Ok(_handle) => {}
-                            Err(e) => eprintln!("RT priority promotion failed (non-fatal): {e}"),
-                        }
+                        promote_audio_thread(buffer_frames, sample_rate);
+                    }
+                    // Adopt a hot-swapped program (if one was published) at the
+                    // block boundary, BEFORE rendering. Lock-free; the displaced
+                    // program is dropped off-thread (basedrop). `install` may grow
+                    // the engine's per-node tables here — a block-boundary
+                    // allocation the engine contract explicitly sanctions (see
+                    // `Engine::install`), distinct from the strictly alloc-free
+                    // `process_block` hot path.
+                    if let Some(swap) = swap_rx.as_ref() {
+                        swap.install_into(&mut engine);
                     }
                     render_block(&mut engine, &mut rx, data, ch, &mut mono);
                 },

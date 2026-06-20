@@ -119,7 +119,7 @@ pub use meter::{EventRing, MeterRing};
 #[cfg(feature = "std")]
 pub use resilience::Watchdog;
 #[cfg(feature = "std")]
-pub use swap::ProgramSwap;
+pub use swap::{ProgramSwap, ProgramSwapRx};
 
 #[cfg(test)]
 mod tests {

@@ -40,41 +40,17 @@ struct RtProgram(CompiledProgram);
 // SAFETY: see `RtProgram` docs — exclusive-transfer use makes `Sync` sound.
 unsafe impl Sync for RtProgram {}
 
-/// A lock-free publish mailbox for the current [`CompiledProgram`] plus the
-/// deferred-drop collector that reclaims displaced programs off the audio
-/// thread.
-pub struct ProgramSwap {
-    /// Newest published-but-not-yet-installed program (the mailbox). `None`
-    /// once the audio thread has adopted it, or before the first publish.
-    pending: ArcSwapOption<RtProgram>,
-    collector: Collector,
+/// The AUDIO-THREAD end of a [`ProgramSwap`]: a clone-cheap, `Send` handle that
+/// installs the newest published program into the engine and defers the old
+/// program's drop. Move one into the cpal callback (via [`ProgramSwap::rx`]); the
+/// control thread keeps the [`ProgramSwap`] for `publish`/`collect`.
+#[derive(Clone)]
+pub struct ProgramSwapRx {
+    pending: Arc<ArcSwapOption<RtProgram>>,
     handle: Handle,
 }
 
-impl ProgramSwap {
-    /// A new, empty swap. Nothing is pending until the first [`Self::publish`].
-    pub fn new() -> Self {
-        let collector = Collector::new();
-        let handle = collector.handle();
-        Self {
-            pending: ArcSwapOption::empty(),
-            collector,
-            handle,
-        }
-    }
-
-    /// Publish `program` as the newest pending program (call off the audio
-    /// thread). If a previously published program was still un-installed, it is
-    /// superseded and dropped here on this (off-RT) thread.
-    pub fn publish(&self, program: CompiledProgram) {
-        self.pending.store(Some(Arc::new(RtProgram(program))));
-    }
-
-    /// Whether a freshly published program is waiting to be installed.
-    pub fn has_pending(&self) -> bool {
-        self.pending.load().is_some()
-    }
-
+impl ProgramSwapRx {
     /// Adopt the newest published program into `engine` (call from the audio
     /// thread, at a block boundary). Returns `true` if a swap happened.
     ///
@@ -103,6 +79,67 @@ impl ProgramSwap {
         // this `Owned` here does NOT run the program's destructor inline.
         drop(Owned::new(&self.handle, old));
         true
+    }
+
+    /// Whether a freshly published program is waiting to be installed.
+    pub fn has_pending(&self) -> bool {
+        self.pending.load().is_some()
+    }
+}
+
+/// A lock-free publish mailbox for the current [`CompiledProgram`] plus the
+/// deferred-drop collector that reclaims displaced programs off the audio
+/// thread. The control thread holds this; the audio thread holds a
+/// [`ProgramSwapRx`] from [`Self::rx`].
+pub struct ProgramSwap {
+    /// Newest published-but-not-yet-installed program (the mailbox). `None`
+    /// once the audio thread has adopted it, or before the first publish. An
+    /// `Arc` so the audio-thread [`ProgramSwapRx`] shares the SAME mailbox.
+    pending: Arc<ArcSwapOption<RtProgram>>,
+    collector: Collector,
+    handle: Handle,
+}
+
+impl ProgramSwap {
+    /// A new, empty swap. Nothing is pending until the first [`Self::publish`].
+    pub fn new() -> Self {
+        let collector = Collector::new();
+        let handle = collector.handle();
+        Self {
+            pending: Arc::new(ArcSwapOption::empty()),
+            collector,
+            handle,
+        }
+    }
+
+    /// Publish `program` as the newest pending program (call off the audio
+    /// thread). If a previously published program was still un-installed, it is
+    /// superseded and dropped here on this (off-RT) thread.
+    pub fn publish(&self, program: CompiledProgram) {
+        self.pending.store(Some(Arc::new(RtProgram(program))));
+    }
+
+    /// Whether a freshly published program is waiting to be installed.
+    pub fn has_pending(&self) -> bool {
+        self.pending.load().is_some()
+    }
+
+    /// The audio-thread handle that installs published programs. Clone/move one
+    /// into the audio callback; the same lock-free mailbox is shared, so a
+    /// [`Self::publish`] from the control thread is seen by `install_into`.
+    pub fn rx(&self) -> ProgramSwapRx {
+        ProgramSwapRx {
+            pending: Arc::clone(&self.pending),
+            handle: self.handle.clone(),
+        }
+    }
+
+    /// Adopt the newest published program into `engine`. Convenience that
+    /// forwards to a [`ProgramSwapRx`]; real hosts move an `rx()` into the audio
+    /// callback and call [`ProgramSwapRx::install_into`] there. Single-threaded
+    /// callers (tests) can use this directly.
+    pub fn install_into(&self, engine: &mut Engine) -> bool {
+        self.rx().install_into(engine)
     }
 
     /// Run pending deferred drops (call off the audio thread). Returns how many
