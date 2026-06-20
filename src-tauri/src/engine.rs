@@ -208,19 +208,28 @@ impl EngineBackend {
         let program =
             compile(&Self::starter_graph(stream), &registry).expect("starter graph compiles");
         let mut engine = Engine::new(program);
-        // Attach the control-side meter ring up front; metering stays OFF until a
-        // subscriber asks (zero-cost while off). The same `Arc` clone is kept on
-        // the control side so `drain_meters` reads what the audio thread publishes.
+        // Attach the control-side meter ring up front. The same `Arc` clone is
+        // kept on the control side so `drain_meters` reads what the audio thread
+        // publishes.
         engine.attach_meter_ring(Some(Arc::clone(&meter_ring)));
         engine.attach_event_ring(Some(Arc::clone(&event_ring)));
+        // Metering is enabled for the engine's whole life. With publish-only graph
+        // swaps the engine INSTANCE persists inside the audio callback, so we can
+        // no longer flip its flag from the control thread on the next push (the
+        // old rebuild-per-push path did that). The UI meters continuously anyway;
+        // while unsubscribed the only cost is a bounded ring push per block whose
+        // frames simply drop undrained. (`enable_metering` keeps its flag for API
+        // compatibility but no longer gates the live engine.)
+        engine.set_metering(true);
 
         // Split a fresh command ring; the consumer moves into the audio host.
         let (producer, consumer) = CommandQueue::split(COMMAND_RING_CAP);
 
         // Try to start audio. No device => keep the backend alive without a host
         // (the expected sandbox path); any other host error is also non-fatal
-        // here — the next `push_graph` re-attempts the start.
-        let host = match AudioHost::start(stream, engine, consumer) {
+        // here — the next `push_graph` re-attempts the start. The host adopts
+        // UI graph edits in-callback via the swap mailbox (no stream restart).
+        let host = match AudioHost::start_with_swap(stream, engine, consumer, swap.rx()) {
             Ok(h) => Some(h),
             Err(HostError::NoOutputDevice) => {
                 eprintln!(
@@ -328,7 +337,13 @@ impl EngineBackend {
     pub fn push_graph(&mut self, graph: &OjGraph) -> Result<(), BackendError> {
         // Render at the device's rate (see `new`): the graph's own sample_rate is a
         // UI hint; the hardware is authoritative, so a 96k interface plays in tune.
-        let g = self.at_device_rate(graph);
+        let mut g = self.at_device_rate(graph);
+        // Pin the engine block to the host's render chunk (the callback's `mono`
+        // size = stream.buffer_frames). With publish-only swaps the stream is no
+        // longer restarted per push, so the compiled program's block_size must
+        // match what the callback feeds — otherwise a block_size < chunk would
+        // leave a stale tail. render_block still chunks the larger device period.
+        g.block_size = self.stream.buffer_frames;
         self.adopt(&g)?;
         // Remember the (rate-adjusted) live graph so a later sample bind can
         // re-resolve + recompile it against the catalog without a fresh UI push.
@@ -353,56 +368,52 @@ impl EngineBackend {
     /// Compile `graph` (resolving its assets through the catalog) and adopt the
     /// fresh program into the running engine. Shared by [`push_graph`] and the
     /// sample-bind path; does NOT itself store `last_graph` (the caller decides).
+    ///
+    /// PUBLISH-ONLY: when a host is already running we compile the program and
+    /// PUBLISH it into the swap mailbox; the audio callback installs it in-place
+    /// at the next block boundary via [`ProgramSwapRx::install_into`] — NO cpal
+    /// stream teardown/restart, so editing the graph never glitches the audio
+    /// (a held note survives the swap). We then `collect()` the displaced
+    /// program off the audio thread. The host + command ring persist across
+    /// pushes; the stream keeps its negotiated rate/buffer.
+    ///
+    /// When no host is running yet (device absent at boot, or a prior start
+    /// failed), we start one now around this program — subsequent edits hot-swap.
     fn adopt(&mut self, graph: &OjGraph) -> Result<(), BackendError> {
-        // Compile once; reuse the program for both the swap publish and the
-        // fresh engine. `CompiledProgram` is not `Clone`, so we compile twice
-        // from the same graph: one program to publish, one to run. Both are
-        // off-RT allocations, and both resolve assets through the catalog so the
-        // staged and the running program are byte-for-byte the same.
-        let published = compile_with_assets(graph, &self.registry, &self.catalog)
-            .map_err(BackendError::Compile)?;
-        self.swap.publish(published);
-
         let program = compile_with_assets(graph, &self.registry, &self.catalog)
             .map_err(BackendError::Compile)?;
+
+        if self.host.is_some() {
+            // Live: hand the program to the audio thread (lock-free) and reclaim
+            // the program it displaces (off-RT deferred drop).
+            self.swap.publish(program);
+            self.swap.collect();
+            return Ok(());
+        }
+
+        // Cold start: build the persistent engine around this program and open
+        // the stream with the swap mailbox wired into the callback.
         let mut engine = Engine::new(program);
-        // Re-attach the meter ring + re-apply the metering toggle to the fresh
-        // engine so the level stream survives a graph swap.
         engine.attach_meter_ring(Some(Arc::clone(&self.meter_ring)));
         engine.attach_event_ring(Some(Arc::clone(&self.event_ring)));
-        engine.set_metering(self.metering);
-
-        // Fresh command ring for the new audio callback; the old producer (and
-        // any unsent commands) is replaced.
+        engine.set_metering(true); // always-on; see `new()`.
         let (producer, consumer) = CommandQueue::split(COMMAND_RING_CAP);
 
-        // Update the stream request to the graph's rate/block before restart.
-        self.stream.sample_rate = graph.sample_rate;
-        self.stream.buffer_frames = graph.block_size;
-
-        // Drop the old host first (stops the old stream), then start the new one.
-        self.host = None;
-        match AudioHost::start(self.stream, engine, consumer) {
+        // ANY start failure is NON-FATAL (matching [`EngineBackend::new`]): the
+        // producer is live so commands still validate, and the next `push_graph`
+        // re-attempts the start. Covers a device-less sandbox AND a present-but-
+        // incompatible default output.
+        match AudioHost::start_with_swap(self.stream, engine, consumer, self.swap.rx()) {
             Ok(h) => {
                 self.host = Some(h);
                 self.producer = producer;
-                Ok(())
             }
-            // ANY host-(re)start failure is NON-FATAL here, matching
-            // [`EngineBackend::new`]: the freshly compiled program is already
-            // published to the swap mailbox and the new producer is live, so
-            // commands still validate and the next `push_graph` re-attempts the
-            // start. This covers both a device-less sandbox
-            // (`HostError::NoOutputDevice`) AND a present-but-incompatible device
-            // (e.g. a default output whose WASAPI shared-mode format rejects the
-            // requested rate/buffer). The UI keeps running with the engine idle
-            // instead of surfacing a hard error the user cannot act on.
             Err(e) => {
-                eprintln!("ojcore: audio host failed to (re)start (non-fatal): {e}");
+                eprintln!("ojcore: audio host failed to start (non-fatal): {e}");
                 self.producer = producer;
-                Ok(())
             }
         }
+        Ok(())
     }
 
     /// Enqueue one [`RtCommand`] onto the UI->RT ring (the high-rate control

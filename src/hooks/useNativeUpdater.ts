@@ -2,14 +2,15 @@
  * Native auto-update orchestration (desktop only).
  *
  * Drives the Rust updater commands from React: mirrors the persisted preference
- * into the shell (so install-on-quit knows what to do), runs quiet background
+ * into the shell (so install-after-close knows what to do), runs quiet background
  * checks on the selected channel, and exposes explicit actions for the Settings →
  * Updates panel. In a plain browser every call is a no-op (`isTauri()` is false);
  * the browser PWA keeps its own service-worker update path.
  *
  * Quiet by design (the Live Performance Rule): a found update downloads in the
- * background and installs on quit. Nothing surfaces mid-session — the only
- * explicit "get it now" lives in Settings (notably right after a channel switch).
+ * background and installs silently after OpenJammer closes. The app never
+ * reopens itself from that automatic path — the only explicit "get it now" lives
+ * in Settings (notably right after a channel switch).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -134,7 +135,7 @@ export function useNativeUpdater(options: UseNativeUpdaterOptions = {}): NativeU
         setChecking(true);
         setError(null);
         try {
-            // Keep native install-on-quit state in lockstep with explicit checks,
+            // Keep native install-after-close state in lockstep with explicit checks,
             // including the first check immediately after the React preference changes.
             await invoke('update_set_config', {
                 enabled: autoUpdateEnabled,
@@ -144,7 +145,7 @@ export function useNativeUpdater(options: UseNativeUpdaterOptions = {}): NativeU
                 channel,
             })) as string | null;
             if (version) {
-                // Back up the OUTGOING version's data before it installs on quit.
+                // Back up the OUTGOING version's data before it installs after close.
                 await invoke('update_backup', { webviewState: exportWebviewState() }).catch(() => {});
             }
             await refreshStatus();
@@ -189,7 +190,7 @@ export function useNativeUpdater(options: UseNativeUpdaterOptions = {}): NativeU
         }
     }, [pinTo, refreshStatus]);
 
-    // Mirror the preference into the native shell (drives install-on-quit).
+    // Mirror the preference into the native shell (drives install-after-close).
     // Owned by the background mount so it tracks every toggle/channel change.
     useEffect(() => {
         if (!background) return;

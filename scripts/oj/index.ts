@@ -6,7 +6,7 @@
 //   oj preflight  [--json] [--affected] [--plan] [--base <ref>]
 //   oj plan       [--json] [--base <ref>]
 //   oj scaffold   <node|dsp-kernel> ...     (STUB, exit 2)
-//   oj dev        ...                        (STUB, exit 2)
+//   oj dev        [--engine] [tauri-flags…]  (native dev loop; --engine = bacon inner-loop)
 //   oj design     <map|status> [--json]      (design-system bridge: component-map + sync health)
 //
 // Shared lib/ (git, cache, ssot, report) means version-sync logic lives ONCE.
@@ -19,6 +19,7 @@ import { plan } from './plan';
 import { scaffold } from './scaffold';
 import { dev } from './dev';
 import { design } from './design';
+import { setup } from './setup';
 
 interface ParsedFlags {
   json: boolean;
@@ -26,6 +27,10 @@ interface ParsedFlags {
   affected: boolean;
   plan: boolean;
   fromFiles: boolean;
+  install: boolean;
+  yes: boolean;
+  dryRun: boolean;
+  wasm: boolean;
   check?: string;
   base?: string;
   /** Positional / passthrough args after flags are consumed. */
@@ -39,6 +44,10 @@ function parseFlags(argv: string[]): ParsedFlags {
     affected: false,
     plan: false,
     fromFiles: false,
+    install: false,
+    yes: false,
+    dryRun: false,
+    wasm: false,
     rest: [],
   };
 
@@ -59,6 +68,19 @@ function parseFlags(argv: string[]): ParsedFlags {
         break;
       case '--from-files':
         f.fromFiles = true;
+        break;
+      case '--install':
+        f.install = true;
+        break;
+      case '--yes':
+      case '-y':
+        f.yes = true;
+        break;
+      case '--dry-run':
+        f.dryRun = true;
+        break;
+      case '--wasm':
+        f.wasm = true;
         break;
       case '--check': {
         const v = argv[i + 1];
@@ -91,10 +113,16 @@ function usage(): void {
       '  oj preflight [--json] [--affected] [--plan] [--base <ref>]',
       '  oj plan      [--json] [--base <ref>]',
       '  oj scaffold  <node|dsp-kernel> ...   (not yet implemented)',
-      '  oj dev       ...                      (not yet implemented)',
+      '  oj dev       [--engine] [tauri-flags...]',
+      '  oj setup     [--install] [--yes] [--dry-run] [--wasm] [--json]',
       '',
-      'doctor checks: version-sync, credentials, coi-headers, docs-accuracy,',
-      '               toolchain, protocol-mirror, node-registry, ssot-set-equality',
+      'oj dev: one-command native loop (Vite HMR + ojcore-native engine, unified',
+      '        logs, clean Ctrl+C). --engine runs the windowless bacon inner-loop.',
+      'oj setup: detect + install the native build prerequisites (Rust, MSVC/WebView2,',
+      '          Linux system libs). Confirms before installing; --dry-run to preview.',
+      '',
+      'doctor checks: version-sync, credentials, coi-headers, docs-accuracy, toolchain,',
+      '               native-readiness, protocol-mirror, node-registry, ssot-set-equality',
       '',
     ].join('\n'),
   );
@@ -139,6 +167,15 @@ async function main(): Promise<number> {
 
     case 'dev':
       return dev(flags.rest);
+
+    case 'setup':
+      return setup(flags.rest, {
+        install: flags.install,
+        yes: flags.yes,
+        dryRun: flags.dryRun,
+        wasm: flags.wasm,
+        json: flags.json,
+      });
 
     case 'design':
       return design(flags.rest, flags.json);

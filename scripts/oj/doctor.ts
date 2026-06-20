@@ -19,6 +19,7 @@ import * as credentials from './checks/credentials';
 import * as coiHeaders from './checks/coi-headers';
 import * as docsAccuracy from './checks/docs-accuracy';
 import * as toolchain from './checks/toolchain';
+import * as nativeReadiness from './checks/native-readiness';
 import * as protocolMirror from './checks/protocol-mirror';
 import * as nodeRegistry from './checks/node-registry';
 import * as ssotSetEquality from './checks/ssot-set-equality';
@@ -41,6 +42,7 @@ export const REGISTRY: CheckModule[] = [
   coiHeaders,
   docsAccuracy,
   toolchain,
+  nativeReadiness,
   protocolMirror,
   nodeRegistry,
   ssotSetEquality,
@@ -101,6 +103,17 @@ export function checksForFiles(paths: string[]): string[] {
     ) {
       ids.add('docs-accuracy');
       ids.add('node-registry');
+    }
+
+    // native-build surfaces (Tauri shell, native engine, toolchain pin)
+    //   -> native-readiness
+    if (
+      p.startsWith('src-tauri/') ||
+      p.startsWith('crates/ojcore-native/') ||
+      p === 'rust-toolchain.toml' ||
+      p === 'scripts/oj/lib/prereqs.ts'
+    ) {
+      ids.add('native-readiness');
     }
   }
 

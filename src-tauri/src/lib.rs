@@ -321,10 +321,10 @@ pub fn run() {
     #[cfg(any(windows, target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     builder
-        // Ableton-style install-on-quit: if the user has auto-update on and a
-        // verified update is staged, apply it on the way out (no relaunch, no
-        // mid-session interruption). Best-effort; never blocks quitting. macOS:
-        // no-op (updater compiled-off).
+        // Ableton-style install-after-close: if the user has auto-update on and
+        // a verified update is staged, apply it silently on the way out (no
+        // relaunch, no mid-session interruption). Best-effort; never blocks
+        // quitting. macOS: no-op (updater compiled-off).
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 updater::install_on_quit(window.app_handle());
@@ -346,7 +346,7 @@ pub fn run() {
             #[cfg(any(windows, target_os = "linux"))]
             app.manage(updater::PendingUpdate::default());
             // The native mirror of the auto-update preference (toggle + channel),
-            // read by the install-on-quit handler. Synced from the UI on mount.
+            // read by the install-after-close handler. Synced from the UI on mount.
             app.manage(updater::AutoUpdateConfig::default());
             Ok(())
         })

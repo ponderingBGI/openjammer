@@ -49,8 +49,8 @@ const CANARY_UPDATER_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1Ymx
 
 // --- native-side mirror of the auto-update preference ------------------------
 
-/// The frontend's auto-update preference, mirrored natively so the on-quit exit
-/// handler can decide install-on-quit without a frontend round-trip.
+/// The frontend's auto-update preference, mirrored natively so the close-path
+/// handler can decide install-after-close without a frontend round-trip.
 #[derive(Debug, Clone, Copy)]
 pub struct AutoUpdateSettings {
     pub enabled: bool,
@@ -60,7 +60,7 @@ pub struct AutoUpdateSettings {
 impl Default for AutoUpdateSettings {
     fn default() -> Self {
         // Disabled until the frontend syncs the real pref on mount (it defaults
-        // ON). Conservative: never install-on-quit before the UI has spoken.
+        // ON). Conservative: never install-after-close before the UI has spoken.
         Self {
             enabled: false,
             channel: Channel::Stable,
@@ -176,7 +176,7 @@ pub fn update_try_install(
 
 /// A downloaded-and-verified update awaiting an audio-idle install, with its
 /// bytes. Lives between [`update_check_and_stage`] (download + verify + stage) and
-/// the install (on quit, or the explicit [`update_install_if_idle`]). Win/Linux.
+/// the install (after close, or the explicit [`update_install_if_idle`]). Win/Linux.
 #[cfg(any(windows, target_os = "linux"))]
 #[derive(Default)]
 pub struct PendingUpdate(pub Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>>);
@@ -296,7 +296,7 @@ pub async fn update_check_and_stage(
         };
         let version = update.version.clone();
         // The minisign verification is part of `download`; hold the bytes until
-        // audio is idle (on quit or an explicit install).
+        // audio is idle (after close or an explicit install).
         let bytes = update
             .download(|_chunk, _total| {}, || {})
             .await
@@ -433,10 +433,81 @@ pub fn update_status(app: tauri::AppHandle) -> UpdateStatus {
     }
 }
 
-/// Install a staged update on the way out (the Ableton-style "installs when you
-/// quit"). Called from the window `CloseRequested` handler. Best-effort: a failed
-/// install must never block quitting. No-op unless the user has auto-update on and
-/// a verified update is staged. macOS: no-op (updater compiled-off).
+#[cfg(any(windows, all(test, target_os = "linux")))]
+fn windows_install_on_quit_args() -> [&'static str; 2] {
+    // Tauri's default NSIS updater args include `/R`, which relaunches the app
+    // after a passive/quiet update. The automatic close-path must never reopen
+    // OpenJammer, so it uses the NSIS silent flag plus update mode only.
+    ["/S", "/UPDATE"]
+}
+
+#[cfg(windows)]
+fn safe_update_version_for_filename(version: &str) -> String {
+    version
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+fn spawn_windows_quiet_install_on_quit(version: &str, bytes: &[u8]) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let dir = std::env::temp_dir().join("openjammer-updater");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("failed to create updater temp dir: {e}"))?;
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let installer_path = dir.join(format!(
+        "OpenJammer-update-{}-{}-{nonce}.exe",
+        safe_update_version_for_filename(version),
+        std::process::id(),
+    ));
+
+    std::fs::write(&installer_path, bytes)
+        .map_err(|e| format!("failed to write updater installer: {e}"))?;
+
+    // Current releases publish the Windows updater as the NSIS setup exe. Spawn
+    // it detached from the closing app, silently, and deliberately omit `/R` so
+    // the app does not reopen after the automatic close-path install.
+    std::process::Command::new(&installer_path)
+        .args(windows_install_on_quit_args())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|e| format!("failed to start updater installer: {e}"))?;
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn install_staged_update_on_quit(update: tauri_plugin_updater::Update, bytes: Vec<u8>) -> bool {
+    // Best-effort: a failed update must never block quitting. Do not fall back
+    // to `update.install(bytes)` here; Tauri's Windows path passes `/R` and
+    // would reopen OpenJammer after the user explicitly closed it.
+    spawn_windows_quiet_install_on_quit(&update.version, &bytes).is_ok()
+}
+
+#[cfg(all(target_os = "linux", not(windows)))]
+fn install_staged_update_on_quit(update: tauri_plugin_updater::Update, bytes: Vec<u8>) -> bool {
+    // AppImage replacement does not relaunch; deb/rpm installs are not allowed
+    // through `can_native_auto_update()` and stay manual/package-manager owned.
+    update.install(bytes).is_ok()
+}
+
+/// Install a staged update on the way out (the Ableton-style "installs after you
+/// close"). Called from the window `CloseRequested` handler. Best-effort: a
+/// failed install must never block quitting. No-op unless the user has
+/// auto-update on and a verified update is staged. macOS: no-op (updater
+/// compiled-off).
 #[cfg(any(windows, target_os = "linux"))]
 pub fn install_on_quit(app: &tauri::AppHandle) {
     use tauri::Manager;
@@ -468,12 +539,22 @@ pub fn install_on_quit(app: &tauri::AppHandle) {
         .unwrap_or_else(|p| p.into_inner())
         .take();
     if let Some((update, bytes)) = staged {
-        // No relaunch — the user asked to quit; the installer applies on exit.
-        let _ = update.install(bytes);
+        let started = install_staged_update_on_quit(update, bytes);
+        #[cfg(windows)]
+        if started {
+            // Match Tauri's Windows updater contract: after launching the NSIS
+            // updater, exit immediately so the installer does not have to kill
+            // a still-closing OpenJammer process. Unlike Tauri's default path,
+            // our installer args omit `/R`, so this does not reopen the app.
+            app.cleanup_before_exit();
+            std::process::exit(0);
+        }
+        #[cfg(not(windows))]
+        let _ = started;
     }
 }
 
-/// macOS / unsupported platforms: nothing to install on quit.
+/// macOS / unsupported platforms: nothing to install after close.
 #[cfg(not(any(windows, target_os = "linux")))]
 pub fn install_on_quit(_app: &tauri::AppHandle) {}
 
@@ -536,5 +617,15 @@ mod tests {
         ];
 
         assert!(select_latest_canari_manifest_url(&releases).is_none());
+    }
+
+    #[test]
+    fn windows_install_on_quit_args_do_not_relaunch() {
+        let args = windows_install_on_quit_args();
+        assert!(args.contains(&"/S"));
+        assert!(args.contains(&"/UPDATE"));
+        assert!(!args.contains(&"/P"));
+        assert!(!args.contains(&"/R"));
+        assert!(!args.contains(&"/ARGS"));
     }
 }

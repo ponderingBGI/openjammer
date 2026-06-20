@@ -2,12 +2,13 @@
  * Native auto-update preferences (desktop only).
  *
  * Persisted across launches and mirrored into the native shell (via the
- * `update_set_config` command in `useNativeUpdater`) so the install-on-quit
+ * `update_set_config` command in `useNativeUpdater`) so the install-after-close
  * handler knows whether to apply a staged update and on which channel.
  *
  * The experience is deliberately quiet (the Live Performance Rule): with
- * `autoUpdateEnabled` on, updates download in the background and install when you
- * quit — no mid-session prompts. The only explicit surface is Settings → Updates.
+ * `autoUpdateEnabled` on, updates download in the background and install silently
+ * after OpenJammer closes — no mid-session prompts and no self-reopen. The only
+ * explicit surface is Settings → Updates.
  */
 
 import { create } from 'zustand';
@@ -17,7 +18,7 @@ import { persist } from 'zustand/middleware';
 export type UpdateChannel = 'stable' | 'canary';
 
 interface UpdatePreferencesState {
-    /** Download + install-on-quit in the background. Default ON. */
+    /** Download + silent install-after-close in the background. Default ON. */
     autoUpdateEnabled: boolean;
     /** Which channel to follow. Switching is upstream-only (never downgrades). */
     updateChannel: UpdateChannel;

@@ -86,3 +86,15 @@ ci: rust web
 # (cache hits + affected-selection) — it never re-encodes a command.
 preflight *ARGS:
     bun scripts/oj/index.ts preflight {{ARGS}}
+
+# ── Native dev loops ───────────────────────────────────────────────────────────
+# The one-command native loop: Vite HMR + the ojcore-native engine in one
+# terminal, unified logs, clean Ctrl+C. `oj dev` delegates lifecycle + teardown
+# to the Tauri CLI (the edge we don't own), so this recipe stays a thin shell.
+dev *ARGS:
+    bun scripts/oj/index.ts dev {{ARGS}}
+
+# The windowless engine inner-loop: bacon re-runs the render/nextest harnesses on
+# save for sub-second DSP iteration (no cargo-rebuild + window-restart tax).
+engine-watch *ARGS:
+    bacon {{ARGS}}

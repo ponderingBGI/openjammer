@@ -86,9 +86,10 @@ job):
 Pi is bundled with **native desktop releases only**. The browser/PWA build does
 not ship or run Pi; it continues to show the desktop-required state.
 
-1. **Use the desktop app.** `bun run tauri dev` and `bun run tauri build` run
-   `bun run build:pi-runtime`, which compiles the pinned Pi sidecar into
-   `src-tauri/binaries/` and bundles it as a Tauri resource. At runtime
+1. **Use the desktop app.** `bun run dev:native` (lazily — only when stale) and
+   `bun run tauri build` (always) run `bun run build:pi-runtime`, which compiles
+   the pinned Pi sidecar into `src-tauri/binaries/` and bundles it as a Tauri
+   resource. At runtime
    OpenJammer copies that resource into `~/.openjammer/pi-runtime/<version>/`
    and launches it over `--mode rpc`. Developers can override with
    `OPENJAMMER_PI_BIN=/abs/path/to/pi`.
@@ -126,17 +127,38 @@ bundled sidecar; no test here depends on a global Pi install.
 From the **repo root** (not this directory):
 
 ```bash
-bun install                 # installs @tauri-apps/cli (+ web deps)
-bun run tauri dev           # builds bundled Pi runtime, then launches native UI
+bun install                   # installs @tauri-apps/cli (+ web deps)
+bun run dev:native            # one command: Vite HMR + the native engine (alias: just dev / oj dev)
+bun run dev:native --engine   # windowless engine inner-loop via bacon (alias: just engine-watch)
 ```
 
-`bun run tauri dev` runs the config's `beforeDevCommand` (`bun run build:pi-runtime && bun run dev`),
-waits for `http://localhost:5173`, then opens the native window with hot reload
-of both the web UI and (on save) the Rust backend.
+`bun run dev:native` (the `oj dev` wrapper) **delegates the whole Vite+cargo
+lifecycle and Ctrl+C teardown to the Tauri CLI** — the edge that already does
+recursive process-tree kill correctly on every OS — so shutdown is clean and
+identical on Windows/macOS/Linux (never add a sibling orchestrator here). It runs
+the config's `beforeDevCommand` (`bun run dev` → `http://localhost:5173`), then
+opens the native window with HMR of the web UI; saving Rust (`crates/**`,
+`src-tauri/**`) recompiles and **restarts** the window. The bundled Pi sidecar is
+built **lazily** — only on first run or after a Pi upgrade (it no longer
+recompiles on every start); set `OJ_DEV_SKIP_PI=1` to skip it, or
+`OPENJAMMER_PI_BIN` to point at an external Pi.
 
-### Linux build dependencies
+For fast Rust/DSP iteration without the window restart, use the windowless engine
+loop `bun run dev:native --engine` ([bacon](https://dystroy.org/bacon/) over the
+`render`/`nextest` harnesses, audible pass/fail; install once with
+`cargo install --locked bacon`). The raw `bun run tauri dev` still works for
+debugging the shell directly.
 
-The native shell needs the system webview + audio dev libraries:
+### Prerequisites — `oj setup`
+
+The fastest path on any OS is **`bun run oj setup`**: it detects every native
+prerequisite and installs the missing ones after a confirm (winget on Windows for
+MSVC + WebView2 + Rust; `xcode-select` + rustup on macOS; apt/dnf/pacman on Linux).
+`--dry-run` previews, `--wasm` adds the browser-worklet nightly, and
+`bun run oj doctor --check native-readiness` reports without installing. The set is
+derived from CI (`.github/actions/setup-rust/action.yml`), so local matches CI.
+
+To install the Linux system libraries by hand instead:
 
 ```bash
 sudo apt install \

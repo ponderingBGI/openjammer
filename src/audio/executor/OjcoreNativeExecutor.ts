@@ -107,6 +107,9 @@ export class OjcoreNativeExecutor implements Executor {
     private levels = new Map<string, number>();
     /** Interval id for the meter poll loop (engine -> UI level stream). */
     private meterPollId: number | null = null;
+    /** Serialized last-pushed OjGraph, to skip redundant `push_graph` IPC when a
+     *  store notification fires but the audio graph is unchanged (dedupe). */
+    private lastPushedGraph: string | null = null;
 
     /** The engine-side seam the capability handles drive (native impl). */
     private readonly bridge: OjcoreBridge = {
@@ -171,6 +174,8 @@ export class OjcoreNativeExecutor implements Executor {
         this.getConnections = null;
         this.index = new Map();
         this.reverseIndex = new Map();
+        // Reset the dedupe cache so a re-initialize re-pushes the graph.
+        this.lastPushedGraph = null;
     }
 
     /** Enable engine metering and poll the meter return ring, fanning per-node
@@ -227,6 +232,14 @@ export class OjcoreNativeExecutor implements Executor {
         this.reverseIndex = new Map();
         for (const [id, idx] of index) this.reverseIndex.set(idx, id);
         const native = remapForBackend(graph, 'native');
+        // Dedupe: a store notification can fire without the audio graph actually
+        // changing (or the same graph can be re-emitted by a re-render). The
+        // OjGraph is the audio IR (no canvas positions), so a byte-identical emit
+        // means "nothing to push" — skip the IPC entirely. This keeps a noisy
+        // subscriber (or a render loop) from hammering the native engine.
+        const serialized = JSON.stringify(native);
+        if (serialized === this.lastPushedGraph) return;
+        this.lastPushedGraph = serialized;
         void this.sendGraph(native);
     }
 
