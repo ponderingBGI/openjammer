@@ -42,9 +42,18 @@ describe('IssueReporter', () => {
         expect(preview?.textContent).not.toContain('/Users/milo/');
         expect(preview?.textContent).not.toContain('ghp_DEADBEEF0123');
 
-        // Both actions are offered.
+        // The local-only diagnostic affordances are offered (copy = the bundle
+        // to clipboard; the GitHub link is an explicit, user-driven action).
         expect(screen.getByText(/Open GitHub issue/i)).toBeInTheDocument();
-        expect(screen.getByText(/Copy full report/i)).toBeInTheDocument();
+        expect(screen.getByText(/Copy diagnostics/i)).toBeInTheDocument();
+    });
+
+    it('does NOT show "Reveal log file" in a plain browser (no Tauri opener)', () => {
+        render(<IssueReporter />);
+        fireEvent(window, new CustomEvent('openjammer:report-issue'));
+        // canRevealLogFile() is false without window.__TAURI__, so the desktop-
+        // only reveal affordance is absent — local-only, never a dead button.
+        expect(screen.queryByText(/Reveal log file/i)).toBeNull();
     });
 
     it('closes on Escape', () => {

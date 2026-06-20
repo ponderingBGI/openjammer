@@ -32,6 +32,7 @@
  */
 
 import { create } from 'zustand';
+import type { StatusDotStatus } from '@openjammer/oj-ui';
 
 /**
  * The tri-state engine health. Ordered loosely by severity for readability;
@@ -70,4 +71,82 @@ export const useEngineHealthStore = create<EngineHealthState>((set, get) => ({
  */
 export function setEngineHealth(health: EngineHealth, reason?: string): void {
     useEngineHealthStore.getState().setHealth(health, reason);
+}
+
+// ============================================================================
+// Derived presentation (Wave 2 / Phase 2) — PURE, testable without React.
+// ============================================================================
+//
+// The store owns the tri-state TRUTH (Wave 1); these helpers own how that truth
+// is calmly SHOWN. Kept pure + colocated so the ambient dot, the tooltip, and
+// the toast policy all read ONE mapping — there is never a second place that
+// decides "what colour is DEGRADED" or "is this an alarm".
+
+/**
+ * The honest round-trip latency tier shown in the dot's tooltip. We NEVER dress
+ * the desktop path up as sub-5 ms: true sub-5 ms needs WASAPI-exclusive / ASIO,
+ * which the shipped engine does not yet expose. On WASAPI-shared Windows-native
+ * the realistic figure is ~10 ms+; the browser tier is an honest ~15–25 ms.
+ */
+export function latencyTierLabel(isNative: boolean): string {
+    return isNative
+        ? 'native engine — about 10 ms+ on shared WASAPI (Windows)'
+        : 'browser engine — an honest 15–25 ms';
+}
+
+/** The calm, ambient presentation of one health state. */
+export interface HealthPresentation {
+    /**
+     * The oj-ui {@link StatusDotStatus} the ambient dot fills with. IDLE maps to
+     * the muted `idle` token — NEVER a warn/bad colour — because "nothing has
+     * happened yet" must never read as an alarm (the cold-start cry-wolf trap).
+     * DEGRADED → `warn` (ochre), DEAD → `bad` (clay).
+     */
+    status: StatusDotStatus;
+    /** The label that ALWAYS rides next to the dot (Signal-Not-Brand Rule). */
+    label: string;
+    /** A small glyph used as a redundant, colour-independent cue. */
+    icon: string;
+    /** A one-line plain explanation for the tooltip / aria description. */
+    blurb: string;
+    /** True only for DEAD — the one state a (still calm) toast is allowed for. */
+    isAlarm: boolean;
+}
+
+/**
+ * Map a tri-state {@link EngineHealth} to its calm presentation. PURE: the same
+ * input always yields the same output, so the dot and the toast policy can never
+ * disagree about what a state means. The `reason` (when present) is appended to
+ * the blurb so the tooltip carries the executor's own words.
+ */
+export function presentHealth(health: EngineHealth, reason = ''): HealthPresentation {
+    const detail = reason ? ` — ${reason}` : '';
+    switch (health) {
+        case 'DEGRADED':
+            return {
+                status: 'warn',
+                label: 'Sound degraded',
+                icon: '◐',
+                blurb: `Something went wrong but your last good sound is still playing${detail}.`,
+                isAlarm: false,
+            };
+        case 'DEAD':
+            return {
+                status: 'bad',
+                label: 'Sound stopped',
+                icon: '○',
+                blurb: `The audio engine can't make sound right now${detail}.`,
+                isAlarm: true,
+            };
+        case 'IDLE':
+        default:
+            return {
+                status: 'idle',
+                label: 'Sound ready',
+                icon: '●',
+                // Deliberately reassuring — IDLE is the calm before a set, not a fault.
+                blurb: 'Audio engine is calm and ready — nothing to report.',
+                isAlarm: false,
+            };
+    }
 }

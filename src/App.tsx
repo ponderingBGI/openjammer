@@ -13,6 +13,7 @@ import { CommandBar } from './components/CommandBar/CommandBar';
 import { DevLogPanel } from './components/DevLog/DevLogPanel';
 import { IssueReporter } from './components/IssueReporter/IssueReporter';
 import { AudioHealthPanel } from './components/AudioHealth/AudioHealthPanel';
+import { useEngineHealthToast } from './components/EngineHealthDot/useEngineHealthToast';
 import { PwaUpdatePrompt } from './components/PwaUpdatePrompt';
 import { NativeUpdaterRunner } from './components/NativeUpdaterRunner';
 import { PluginsPanel } from './components/Plugins/PluginsPanel';
@@ -41,6 +42,10 @@ function App() {
   const setAudioContextReady = useAudioStore((s) => s.setAudioContextReady);
   const audioConfig = useAudioStore((s) => s.audioConfig);
   const updateAudioMetrics = useAudioStore((s) => s.updateAudioMetrics);
+
+  // Calm, deduped engine-dead toast (Phase 2). The ONLY toast the health store
+  // raises — DEGRADED stays ambient; a fault storm yields one signal, not many.
+  useEngineHealthToast();
 
   // Initialize theme
   useEffect(() => {

@@ -13,6 +13,7 @@ import { exportWorkflow, downloadWorkflow, loadWorkflowFromFile, importWorkflow 
 import { DropdownMenu, type MenuItemOrSeparator } from './DropdownMenu';
 import { useOnlineStatus } from '../../hooks/usePWA';
 import { Button } from '@openjammer/oj-ui';
+import { EngineHealthDot } from '../EngineHealthDot/EngineHealthDot';
 import './Toolbar.css';
 
 export function Toolbar() {
@@ -388,6 +389,10 @@ export function Toolbar() {
 
             {/* Spacer to push status to right */}
             <div style={{ flex: 1 }} />
+
+            {/* Ambient engine-health signal (Phase 2) — one calm tri-state dot,
+                never a dashboard, never a modal. Opens the Audio-health readout. */}
+            <EngineHealthDot />
 
             {/* Project Status */}
             {projectName && (
