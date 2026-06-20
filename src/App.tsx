@@ -498,7 +498,7 @@ function App() {
       <PwaUpdatePrompt />
 
       {/* Native auto-update lifecycle (desktop): silent background download +
-          install-on-quit. Renders nothing; steals no focus. */}
+          install-after-close, with no self-reopen. Renders nothing; steals no focus. */}
       <NativeUpdaterRunner />
 
       {/* Plugins (§3) — discover your installed CLAP/VST3 plugins (desktop host). */}

@@ -2,7 +2,7 @@
  * Settings → Updates: the single explicit surface for release channel choice.
  *
  * Auto-update remains quiet (the Live Performance Rule): supported desktop
- * installs stage updates in the background and install on quit/idle. Platforms
+ * installs stage updates in the background and install silently after close. Platforms
  * that cannot safely auto-update still get the same channel selector plus a
  * manual download button, so Settings never hides the path to Stable/Canari.
  */
@@ -170,7 +170,7 @@ export function UpdatesPanel() {
         if (!status) return 'Reading updater status…';
         if (!autoUpdateAvailable) return status.manual_reason ?? 'Manual updates are used on this platform.';
         if (checking) return 'Checking…';
-        if (pending) return 'Update ready · installs when you quit';
+        if (pending) return 'Update ready · installs after you close OpenJammer';
         return 'Up to date';
     })();
 
@@ -257,8 +257,8 @@ export function UpdatesPanel() {
                         onChange={setAutoUpdateEnabled}
                     />
                     <p className="oj-upd-desc">
-                        Updates download in the background and install when you quit. You’re never
-                        interrupted mid-session.
+                        Updates download in the background and install silently after you close OpenJammer.
+                        The app won’t reopen itself or interrupt a session.
                     </p>
                 </div>
             ) : (
@@ -310,7 +310,7 @@ export function UpdatesPanel() {
                             {channelLabel(updateChannel)} <code className="oj-upd-ver">{pendingVersion}</code> is
                             ready.
                         </strong>
-                        <p>It’ll install automatically when you quit — or get it now.</p>
+                        <p>It’ll install silently after you close OpenJammer — or get it now.</p>
                         {installNote && <p className="oj-upd-installnote">{installNote}</p>}
                     </div>
                     <Button variant="primary" onClick={() => void handleInstallNow()}>
