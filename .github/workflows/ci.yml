@@ -118,6 +118,16 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      # RT no-alloc gate (mirrors `just test-rt`). nextest's process-per-test
+      # isolation is STRICTLY safer than `cargo test`'s shared process for the
+      # global-allocator swap `assert_no_alloc` installs. A REQUIRED per-PR check
+      # via the aggregate `gate` — an RT-path heap regression fails the merge.
+      - name: Install cargo-nextest (no-alloc gate)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      - name: RT no-alloc gate (assert_no_alloc)
+        run: cargo nextest run -p ojcore
       - name: no_std core builds (wasm-friendly)
         run: cargo build -p ojcore --no-default-features
       - name: wasm32 build
@@ -165,7 +175,15 @@ jobs:
   windows-native:
     name: Windows native build + audio gate
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    # Affected+: the Windows desktop app bundles the web frontend AND links the
+    # engine, so it must re-run when EITHER tier is affected. `engine` already
+    # subsumes `src-tauri/` changes (they select the fmt/clippy/test recipes ->
+    # engine=true in the `changes` job), so engine OR web covers engine, the
+    # Tauri shell, and the bundled frontend/IPC surface — closing the gap where a
+    # web-only IPC-contract change skipped the costliest runner. Non-PR and
+    # untrustworthy diffs set both outputs true (fail-closed), so this still runs
+    # everything then and never fires on a docs-only PR.
+    if: needs.changes.outputs.engine == 'true' || needs.changes.outputs.web == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

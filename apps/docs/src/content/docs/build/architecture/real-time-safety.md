@@ -18,7 +18,7 @@ This is not a convention you have to remember — it is checked mechanically.
 
 - **`assert_no_alloc`** — the engine's RT tests run the render loop inside a
   global allocator guard that *aborts* on any heap touch. A dedicated CI step
-  (`cargo test -p ojcore --features devlog`) trips the real fault paths inside
+  (`cargo nextest run -p ojcore`) trips the real fault paths inside
   that guard, so a regression that allocates on the audio thread fails the build.
 - **`no_std` core** — `ojcore` / `ojcore-dsp` build with `--no-default-features`
   (no `std`), so whole classes of blocking APIs simply are not in scope on the
