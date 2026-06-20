@@ -42,14 +42,41 @@
  * => the getters report a null/zero buffer and the copy is skipped.
  */
 
-// The wasm-bindgen `--target web` glue (committed under ../wasm/pkg). Imported
-// for its `initSync` (synchronous instantiate from a posted Module) + exports.
+// MUST be the FIRST import: installs a `TextDecoder` into the AudioWorkletGlobalScope
+// before the wasm-bindgen glue below runs its module-top-level `new TextDecoder()`.
+// `TextDecoder` is undefined in worklet scope, so without this the glue throws at
+// module-eval time and `registerProcessor` (further down) never runs — the dead
+// browser engine. ES import side effects run in source order, so this lands first.
+import { WORKLET_TEXT_CODEC_INSTALLED } from './worklet-text-codec';
+
+// The wasm-bindgen `--target web` glue (committed under ../wasm/pkg). We need its
+// SYNCHRONOUS `initSync(bytes)` — the worklet compiles + instantiates from the posted
+// wasm bytes on this thread, with no fetch/await (see {@link InitMsg.bytes} for why
+// bytes and not a `WebAssembly.Module`). The glue's DEFAULT export is `__wbg_init`
+// (the ASYNC, fetch-based initializer), so importing
+// the default and calling it as `initSync` silently instantiated nothing (it
+// returned a Promise and treated the module object as a fetch path), leaving the
+// `wasm` binding undefined — `wasm.init()` then threw and the engine never came up.
+// Because the default-import path never referenced the real `initSync`, Rollup also
+// tree-shook the synchronous instantiate out of the production bundle entirely. Pull
+// the NAMED `initSync` so the side-effectful sync instantiate is kept and used.
 // @ts-expect-error - generated JS module has no .d.ts (built by build-wasm.sh).
-import initSync, * as wasm from '../wasm/pkg/ojcore_wasm.js';
+import { initSync } from '../wasm/pkg/ojcore_wasm.js';
+// @ts-expect-error - generated JS module has no .d.ts (built by build-wasm.sh).
+import * as wasm from '../wasm/pkg/ojcore_wasm.js';
 
 interface InitMsg {
     type: 'init';
-    module: WebAssembly.Module;
+    /**
+     * The RAW wasm bytes (transferred). We deliberately ship bytes, NOT a compiled
+     * `WebAssembly.Module`: a `WebAssembly.Module` cannot be structured-cloned across
+     * the agent-cluster boundary into an `AudioWorkletGlobalScope` — in a
+     * cross-origin-isolated context Chromium SILENTLY DROPS such a message (no error
+     * on the sender, `onmessage` never fires in the worklet), so the engine never
+     * initialised and never posted `ready`. An `ArrayBuffer` clones/transfers
+     * cleanly, and `initSync` compiles it on this thread (`new WebAssembly.Module`).
+     */
+    bytes: ArrayBuffer;
     blockSize: number;
 }
 interface GraphMsg {
@@ -129,6 +156,9 @@ class OjcoreProcessor extends AudioWorkletProcessor {
 
     constructor() {
         super();
+        // Reference the codec-install flag so the side-effectful polyfill import
+        // can never be tree-shaken out of the bundle (it must run before the glue).
+        void WORKLET_TEXT_CODEC_INSTALLED;
         this.port.onmessage = (e: MessageEvent<InboundMsg>) => this.onMessage(e.data);
     }
 
@@ -206,10 +236,13 @@ class OjcoreProcessor extends AudioWorkletProcessor {
     }
 
     private handleInit(msg: InitMsg): void {
-        // Synchronously instantiate the posted compiled module on THIS thread.
-        // initSync returns the wasm instance exports (which carry `.memory`; the
-        // JS glue namespace does NOT re-export `memory`).
-        this.exports = initSync({ module: msg.module }) as WasmExports;
+        // Synchronously compile + instantiate the posted wasm BYTES on THIS thread
+        // (`initSync` does `new WebAssembly.Module(bytes)` then instantiates). We
+        // pass bytes, not a `WebAssembly.Module`, because a Module can't be
+        // structured-cloned into the worklet (see {@link InitMsg.bytes}). initSync
+        // returns the wasm instance exports (which carry `.memory`; the JS glue
+        // namespace does NOT re-export `memory`).
+        this.exports = initSync({ module: msg.bytes }) as WasmExports;
         this.blockSize = msg.blockSize || 128;
         wasm.init(sampleRate, this.blockSize);
 

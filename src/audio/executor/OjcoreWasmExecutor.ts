@@ -27,6 +27,7 @@
  * the app builds without the Rust toolchain.
  */
 
+import { toast } from 'sonner';
 import type { Connection, GraphNode } from '../../engine/types';
 import { BROWSER_CAPABILITIES, type EngineCapabilities } from '../../engine/capabilities';
 import type {
@@ -61,6 +62,35 @@ import ojcoreWasmUrl from '../wasm/pkg/ojcore_wasm_bg.wasm?url';
 
 /** Render quantum the AudioWorklet uses (the spec-fixed block size). */
 const WORKLET_BLOCK_SIZE = 128;
+
+/**
+ * One-time-per-session, non-focus-stealing "whisper" when the browser engine
+ * can't start at all. NEVER a modal and NEVER a toast storm: a single calm sonner
+ * line per session — a held note beats a glitch, and the performer's focus is
+ * sacred (DESIGN.md Live Performance Rule). Diagnostics still go to the console
+ * for the local DevLog; this is only the human-facing nudge.
+ *
+ * We deliberately do NOT whisper on "no cross-origin isolation": the committed
+ * `build-wasm.sh` wasm has no atomics/shared-memory, so the SharedArrayBuffer
+ * control path does not exist in this build and `crossOriginIsolated` is inert —
+ * an isolated and a non-isolated page run the SAME postMessage transport at the
+ * SAME latency. Surfacing a "slower path / use the desktop app" notice would cry
+ * wolf with a degradation that isn't real (honest interfaces). The COI state is
+ * still logged below for the local DevLog; relabelling that diagnostic honestly
+ * is Phase 2's job, not this slice's.
+ */
+const degradeNoticeShown = new Set<'dead'>();
+function whisperBrowserEngineDegrade(
+    kind: 'dead',
+    message: string,
+    description: string,
+): void {
+    if (degradeNoticeShown.has(kind)) return;
+    degradeNoticeShown.add(kind);
+    // `toast.error` (not bare `toast`) is reserved for the engine-dead case: the
+    // browser tier truly produced no sound, the one event worth the louder style.
+    toast.error(message, { description });
+}
 
 /** The sampler's root-note param id — mirrors `ojinstrument::sampler::
  *  SAMPLER_PCM_PARAM` (16). The compiler applies params BEFORE assets, so binding
@@ -127,16 +157,30 @@ export class OjcoreWasmExecutor implements Executor {
         this.getConnections = getConnections;
 
         if (typeof globalThis.crossOriginIsolated !== 'undefined' && !globalThis.crossOriginIsolated) {
+            // DIAGNOSTIC ONLY (local DevLog) — NOT performer-facing. The current
+            // committed wasm has no atomics/shared-memory, so there is no
+            // SharedArrayBuffer control path to fall back FROM: isolated and
+            // non-isolated pages run the identical postMessage transport at the
+            // identical latency. We log the COI state (it's the forward-compat
+            // precondition for a future shared-memory build) without claiming any
+            // current degradation. No whisper here — see whisperBrowserEngineDegrade.
             console.warn(
-                '[OjcoreWasmExecutor] page is NOT cross-origin isolated; running the ' +
-                    'postMessage control fallback. Serve COOP/COEP headers to enable the ' +
-                    'SharedArrayBuffer fast path (see vite.config.ts).',
+                '[OjcoreWasmExecutor] page is NOT cross-origin isolated. The committed ' +
+                    'wasm build has no shared-memory/atomics, so this is inert today (the ' +
+                    'postMessage control transport is used regardless); COOP/COEP would be ' +
+                    'the precondition for a future SharedArrayBuffer build (see vite.config.ts).',
             );
         }
 
         // Begin async worklet setup; graph pushes coalesce until it is ready.
         void this.setup().catch((err: unknown) => {
             console.error('[OjcoreWasmExecutor] worklet setup failed:', err);
+            whisperBrowserEngineDegrade(
+                'dead',
+                'Couldn’t start the browser engine',
+                'The audio engine failed to start in this browser. Open “Audio health” ' +
+                    '(Ctrl/Cmd+Shift+H) for details, or use the desktop app.',
+            );
         });
 
         const unsubNodes = subscribeToNodes(() => this.pushGraph());
@@ -205,12 +249,16 @@ export class OjcoreWasmExecutor implements Executor {
             }
         };
 
-        // Fetch + compile the wasm to a transferable Module and hand it to the
-        // worklet to instantiate synchronously on its own thread.
+        // Fetch the wasm BYTES and TRANSFER them to the worklet to compile +
+        // instantiate synchronously on its own thread. We must NOT post a compiled
+        // `WebAssembly.Module`: a Module cannot be structured-cloned across the
+        // agent-cluster boundary into an `AudioWorkletGlobalScope` — under
+        // cross-origin isolation Chromium silently DROPS such a message (no sender
+        // error, the worklet's `onmessage` never fires), so the engine never
+        // initialised and never posted `ready`. An `ArrayBuffer` transfers cleanly.
         const resp = await fetch(ojcoreWasmUrl);
         const bytes = await resp.arrayBuffer();
-        const module = await WebAssembly.compile(bytes);
-        node.port.postMessage({ type: 'init', module, blockSize: WORKLET_BLOCK_SIZE });
+        node.port.postMessage({ type: 'init', bytes, blockSize: WORKLET_BLOCK_SIZE }, [bytes]);
 
         // Route the engine output into the speakers (speaker-terminated).
         node.connect(ctx.destination);
