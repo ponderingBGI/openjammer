@@ -122,7 +122,8 @@ function usage(): void {
       '          Linux system libs). Confirms before installing; --dry-run to preview.',
       '',
       'doctor checks: version-sync, credentials, coi-headers, docs-accuracy, toolchain,',
-      '               native-readiness, protocol-mirror, node-registry, ssot-set-equality',
+      '               native-readiness, protocol-mirror, node-registry, ssot-set-equality,',
+      '               fault-pipe-connectivity',
       '',
     ].join('\n'),
   );

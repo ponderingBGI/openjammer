@@ -1,10 +1,20 @@
 // scripts/oj/checks/coi-headers.ts — verify the cross-origin-isolation (COOP/COEP)
-// headers that SharedArrayBuffer (the fast OjcoreWasmExecutor ring path) requires.
+// headers are PRESENT (forward-compatibility), without asserting a fast path that
+// the committed build does not contain.
 //
-// vite.config.ts sets them for the dev AND preview servers. Those only cover local
-// dev — a PRODUCTION host (Vercel/Netlify/nginx) must re-emit them or the engine
-// silently degrades to the slow postMessage path. No vercel.json / _headers exists
-// in the tree today, so this check WARNs loudly with a note (never fails). Pure TS.
+// HONESTY NOTE: cross-origin isolation only matters once a SharedArrayBuffer
+// (atomics / shared-memory) wasm build exists — and the committed `build-wasm.sh`
+// build has NO atomics/shared-memory, so `crossOriginIsolated` is INERT today
+// (there is no fast postMessage-vs-SAB difference to gate). This check therefore
+// asserts only that the headers are present and forward-compatible; it must NOT
+// claim a SharedArrayBuffer "fast path" exists or that its absence "degrades to a
+// slow path", because that path is not in the committed wasm build yet.
+//
+// vite.config.ts sets the headers for the dev AND preview servers. Those only
+// cover local dev — a PRODUCTION host (Vercel/Netlify/nginx) must re-emit them so
+// that WHEN a shared-memory build lands the isolation precondition is already in
+// place. No vercel.json / _headers exists in the tree today, so this check WARNs
+// loudly with a note (never fails). Pure TS.
 
 import type { CheckResult } from '../lib/report';
 import { resolve } from 'node:path';
@@ -56,7 +66,7 @@ export async function run(): Promise<CheckResult> {
       id,
       name,
       status: 'fail',
-      detail: `vite.config.ts is missing ${missing}. Without these, SharedArrayBuffer is undefined and the wasm executor falls back to the slow postMessage path.`,
+      detail: `vite.config.ts is missing ${missing}. These are forward-compatible: no shared-memory (atomics) wasm build exists yet, so cross-origin isolation is inert today — but the headers must be in place so that WHEN a SharedArrayBuffer build lands the isolation precondition is already satisfied (no scramble at the last minute).`,
       fix: `add ${missing} to the vite server and preview headers blocks.`,
     };
   }
@@ -79,7 +89,7 @@ export async function run(): Promise<CheckResult> {
       detail: [
         `vite.config.ts COI headers present (COOP x${coopCount}, COEP x${coepCount}; dev + preview).`,
         'No committed hosting config (vercel.json / _headers / netlify.toml) re-emits them for production.',
-        'A production host that does NOT serve these headers silently drops the engine to the slow postMessage path (SharedArrayBuffer undefined).',
+        'These headers are forward-compatible only: no shared-memory (atomics) wasm build exists yet, so cross-origin isolation is INERT today (crossOriginIsolated gates a SharedArrayBuffer fast path the committed wasm build does not contain). Keep them present so that WHEN such a build lands the isolation precondition is already in place.',
       ].join('\n'),
       fix: 'when a PWA host is chosen, commit a vercel.json `headers` (or _headers) block re-emitting COOP: same-origin + COEP: require-corp, then add a post-deploy crossOriginIsolated check.',
     };

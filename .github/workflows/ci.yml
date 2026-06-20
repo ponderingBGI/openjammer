@@ -203,10 +203,36 @@ jobs:
       - name: Offline audio render gate (Windows, device-free)
         run: cargo run -p ojcore-native --bin render --features demo -- ci-render.wav 2
 
+  doctor:
+    name: Doctor wiring gates (fault pipe + COI honesty)
+    needs: changes
+    # Affected+: the fault-pipe connectivity gate guards the native drain (engine
+    # /src-tauri surface) AND the ring ingest (web surface), so it must re-run when
+    # EITHER tier is affected. Non-PR and untrustworthy diffs set both true
+    # (fail-closed), so this still runs everything then and never fires on a
+    # docs-only PR.
+    if: needs.changes.outputs.engine == 'true' || needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup web (Bun + install)
+        uses: ./.github/actions/setup-web
+      # Pure-TS doctor checks only (no Rust toolchain needed): the fault-pipe
+      # connectivity gate (poll_events -> ingestEngineEvent must stay wired
+      # end-to-end so a silent-dropout regression can never ship green), the
+      # PrimitiveKind SSOT set-equality, and the COOP/COEP header presence. A
+      # `fail` exits non-zero and blocks the merge; `warn`/`skip` do not.
+      - name: Fault pipe wired end-to-end (connectivity gate)
+        run: bun scripts/oj/index.ts doctor --check fault-pipe-connectivity --json
+      - name: PrimitiveKind SSOT set-equality
+        run: bun scripts/oj/index.ts doctor --check ssot-set-equality --json
+      - name: COOP/COEP cross-origin isolation headers
+        run: bun scripts/oj/index.ts doctor --check coi-headers --json
+
   gate:
     name: Merge gate
     # The SINGLE required check. Runs always so it can adjudicate skipped legs.
-    needs: [changes, engine, web, windows-native]
+    needs: [changes, engine, web, windows-native, doctor]
     if: always()
     runs-on: ubuntu-latest
     steps:
