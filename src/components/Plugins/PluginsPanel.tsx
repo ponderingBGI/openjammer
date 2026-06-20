@@ -8,11 +8,13 @@
  * pure-Rust CLAP backend), so in a plain browser this explains that and points at
  * the desktop app.
  *
- * Toggled with Ctrl/Cmd+Shift+P or the "Plugins" palette command.
+ * Toggled with Ctrl/Cmd+Shift+P or the "Plugins" palette command. The overlay
+ * chrome (portal, scrim, Escape, focus-trap, click-outside) is the oj-ui Modal;
+ * the header, actions, notes and tags are oj-ui primitives.
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { Modal, PanelHeader, Button, Callout, Chip, Spinner, List, ListRow } from '@openjammer/oj-ui';
 import { getInvoke, isTauri } from '../../ai/tauri';
 import './PluginsPanel.css';
 
@@ -42,10 +44,6 @@ export function PluginsPanel() {
 
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                setOpen((v) => (v ? false : v));
-                return;
-            }
             const hit = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'p';
             if (!hit) return;
             e.preventDefault();
@@ -59,6 +57,8 @@ export function PluginsPanel() {
             window.removeEventListener('openjammer:toggle-plugins', onCmd);
         };
     }, []);
+
+    const close = useCallback(() => setOpen(false), []);
 
     const scan = useCallback(async () => {
         const invoke = getInvoke();
@@ -82,71 +82,67 @@ export function PluginsPanel() {
         if (open) void scan();
     }, [open, scan]);
 
-    if (!open) return null;
-
-    return createPortal(
-        <div className="plugins-overlay" onClick={() => setOpen(false)}>
-            <div
-                className="plugins-panel"
-                onClick={(e) => e.stopPropagation()}
-                role="dialog"
-                aria-modal="true"
-                aria-label="Plugins"
-            >
-                <header className="plugins-header">
-                    <span className="plugins-title">Plugins</span>
-                    <span className="plugins-spacer" />
-                    <button className="plugins-btn" onClick={() => void scan()} title="Re-scan">
+    return (
+        <Modal open={open} onClose={close} ariaLabel="Plugins" align="top" size="md">
+            <PanelHeader
+                title="Plugins"
+                onClose={close}
+                actions={
+                    <Button onClick={() => void scan()} title="Re-scan">
                         Re-scan
-                    </button>
-                    <button className="plugins-btn" onClick={() => setOpen(false)} title="Close (Ctrl/Cmd+Shift+P)">
-                        ✕
-                    </button>
-                </header>
+                    </Button>
+                }
+            />
 
-                <div className="plugins-body">
-                    {state.kind === 'unsupported' && (
-                        <p className="plugins-note">
-                            Plugin hosting (CLAP / VST3) is part of the <strong>desktop app</strong>.
-                            Install OpenJammer for your OS to scan and host your own plugins.
-                        </p>
-                    )}
-                    {state.kind === 'scanning' && <p className="plugins-note">Scanning your plugin folders…</p>}
-                    {state.kind === 'error' && (
-                        <p className="plugins-note plugins-error">Scan failed: {state.message}</p>
-                    )}
-                    {state.kind === 'ok' && state.plugins.length === 0 && (
-                        <p className="plugins-note">
-                            No plugins found. Drop a <code>.clap</code> into your CLAP folder
-                            (e.g. <code>~/.clap</code> on Linux, <code>~/Library/Audio/Plug-Ins/CLAP</code> on
-                            macOS) and re-scan.
-                        </p>
-                    )}
-                    {state.kind === 'ok' && state.plugins.length > 0 && (
-                        <ul className="plugins-list">
-                            {state.plugins.map((p) => (
-                                <li key={p.uid || p.path} className="plugins-item">
-                                    <div className="plugins-item-main">
-                                        <span className="plugins-name">{p.name}</span>
-                                        <span className="plugins-vendor">{p.vendor}</span>
-                                    </div>
+            <div className="plugins-body">
+                {state.kind === 'unsupported' && (
+                    <Callout variant="info">
+                        Plugin hosting (CLAP / VST3) is part of the <strong>desktop app</strong>.
+                        Install OpenJammer for your OS to scan and host your own plugins.
+                    </Callout>
+                )}
+                {state.kind === 'scanning' && (
+                    <p className="plugins-note">
+                        <Spinner /> Scanning your plugin folders…
+                    </p>
+                )}
+                {state.kind === 'error' && (
+                    <Callout variant="danger" title="Scan failed">
+                        {state.message}
+                    </Callout>
+                )}
+                {state.kind === 'ok' && state.plugins.length === 0 && (
+                    <Callout variant="info">
+                        No plugins found. Drop a <code>.clap</code> into your CLAP folder
+                        (e.g. <code>~/.clap</code> on Linux, <code>~/Library/Audio/Plug-Ins/CLAP</code> on
+                        macOS) and re-scan.
+                    </Callout>
+                )}
+                {state.kind === 'ok' && state.plugins.length > 0 && (
+                    <List aria-label="Installed plugins">
+                        {state.plugins.map((p) => (
+                            <ListRow
+                                key={p.uid || p.path}
+                                actions={
                                     <div className="plugins-meta">
-                                        <span className="plugins-tag">{p.format}</span>
-                                        <span className="plugins-tag">
-                                            {p.is_instrument ? 'instrument' : 'effect'}
-                                        </span>
-                                        <span className="plugins-tag">
+                                        <Chip>{p.format}</Chip>
+                                        <Chip>{p.is_instrument ? 'instrument' : 'effect'}</Chip>
+                                        <Chip>
                                             {p.ports.audio_in}→{p.ports.audio_out} ch
-                                        </span>
-                                        <span className="plugins-tag">{p.param_count} params</span>
+                                        </Chip>
+                                        <Chip>{p.param_count} params</Chip>
                                     </div>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
-                </div>
+                                }
+                            >
+                                <span className="plugins-item-main">
+                                    <span className="plugins-name">{p.name}</span>
+                                    <span className="plugins-vendor">{p.vendor}</span>
+                                </span>
+                            </ListRow>
+                        ))}
+                    </List>
+                )}
             </div>
-        </div>,
-        document.body,
+        </Modal>
     );
 }

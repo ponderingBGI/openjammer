@@ -1,0 +1,64 @@
+/*
+ * ValueScrubber — an exact numeric value (mono) that opens an inline editor on
+ * click. The parent owns the value and wires drag/wheel scrubbing; this only
+ * styles the display + editor. No blurred shadow, no layout shift on hover
+ * (DESIGN.md Hard-Shadow / No-Surprise) — feedback is background + border only.
+ * Mono on the value enforces Mono-Means-Exact. Theme-agnostic via tokens.
+ */
+.oj-value-scrubber {
+    display: inline-flex;
+    align-items: baseline;
+    gap: var(--space-xs);
+    font-family: var(--font-sketch);
+}
+
+.oj-value-scrubber__label {
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+}
+
+/* The exact value, read digit-by-digit. */
+.oj-value-scrubber__value {
+    padding: var(--space-xs) var(--space-sm);
+    border: var(--border-sketch-width) solid transparent;
+    border-radius: var(--radius-sm);
+    background: var(--bg-canvas);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    line-height: 1.4;
+    white-space: nowrap;
+    user-select: none;
+}
+
+/* Editable: scrub affordance + a hover/focus cue, no movement. */
+.oj-value-scrubber--editable .oj-value-scrubber__value {
+    cursor: ew-resize;
+    transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.oj-value-scrubber--editable .oj-value-scrubber__value:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-subtle);
+}
+
+.oj-value-scrubber--editable .oj-value-scrubber__value:focus-visible {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+/* Inline editor inherits the Input look; sized to sit in a node row. */
+.oj-value-scrubber__input {
+    width: 7ch;
+    padding: var(--space-xs) var(--space-sm);
+    font-size: var(--text-sm);
+    line-height: 1.4;
+}
+
+.oj-value-scrubber.is-disabled {
+    opacity: 0.5;
+}
+
+.oj-value-scrubber.is-disabled .oj-value-scrubber__value {
+    cursor: not-allowed;
+}

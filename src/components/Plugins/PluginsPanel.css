@@ -1,85 +1,24 @@
-/* PluginsPanel (§3) — reuses the design tokens + the portal-overlay convention. */
-
-.plugins-overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 1000;
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    padding-top: 10vh;
-    background: color-mix(in srgb, var(--sketch-black) 24%, transparent);
-}
-
-.plugins-panel {
-    width: min(520px, calc(100vw - var(--space-lg)));
-    max-height: 70vh;
-    display: flex;
-    flex-direction: column;
-    background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-menu);
-    color: var(--text-primary);
-    overflow: hidden;
-}
-
-.plugins-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-md);
-    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
-}
-
-.plugins-title {
-    font-family: var(--font-sketch);
-    font-size: var(--text-lg);
-}
-
-.plugins-spacer {
-    flex: 1;
-}
-
-.plugins-btn {
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    padding: var(--space-xs) var(--space-sm);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-sm);
-    background: var(--bg-node);
-    color: var(--text-primary);
-    cursor: pointer;
-}
+/* PluginsPanel (§3) — inner-content layout only. The overlay chrome
+   (scrim/panel/header/close), the action button, the notes/errors and the
+   plugin tags are all oj-ui primitives (Modal/PanelHeader/Button/Callout/
+   Chip/Spinner/List/ListRow), which own their tokens. This file is just the
+   body padding, the scanning-note row, and each row's name/vendor + tag layout. */
 
 .plugins-body {
     padding: var(--space-sm) var(--space-md);
     overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
 }
 
 .plugins-note {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
     font-size: var(--text-sm);
     color: var(--text-secondary, var(--text-muted));
     line-height: 1.5;
-}
-
-.plugins-error {
-    color: var(--accent-danger, #e53935);
-}
-
-.plugins-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-}
-
-.plugins-item {
-    padding: var(--space-sm);
-    border: 1px solid color-mix(in srgb, var(--sketch-black) 20%, transparent);
-    border-radius: var(--radius-sm);
 }
 
 .plugins-item-main {
@@ -102,14 +41,4 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--space-xs);
-    margin-top: var(--space-xs);
-}
-
-.plugins-tag {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    padding: 1px var(--space-xs);
-    border-radius: var(--radius-pill, 999px);
-    background: color-mix(in srgb, var(--sketch-black) 8%, transparent);
-    color: var(--text-secondary, var(--text-muted));
 }

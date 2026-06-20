@@ -17,7 +17,7 @@ import type { GraphStoreApi } from '../graphAdapter';
 import { createEnvPort } from '../envAdapter';
 import { useAudioStore } from '../../store/audioStore';
 import { useLogStore, _resetLogStoreForTests } from '../../store/logStore';
-import { getSavedThemeId } from '../../styles/themes';
+import { getSavedThemeId } from '@openjammer/oj-tokens';
 
 // The diagnostics/settings handlers never touch the graph store; batch_apply
 // only reads listNodes/listConnections for its post-state summary.

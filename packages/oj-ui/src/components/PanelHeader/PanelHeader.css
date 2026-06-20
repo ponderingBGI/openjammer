@@ -1,0 +1,95 @@
+/*
+ * PanelHeader — a panel/dialog title strip. A space-between row with a Caveat
+ * title (Caveat-Is-the-Voice) and an Inter subtitle for the dense second line.
+ * Styled only via semantic tokens (no literal colors, no blurred shadow), so it
+ * follows the active theme. The bottom hairline is the divider that the node
+ * header and panel headers it replaces all carry.
+ */
+.oj-panel-header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.oj-panel-header__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+}
+
+.oj-panel-header__left {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 0;
+}
+
+/* Back affordance — a ghost button whose chevron points left (the right-facing
+   glyph rotated), matching the `← Back` step it replaces. */
+.oj-panel-header__back {
+    flex-shrink: 0;
+    gap: var(--space-xs);
+}
+
+.oj-panel-header__back-chevron {
+    transform: rotate(180deg);
+}
+
+.oj-panel-header__heading {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    min-width: 0;
+}
+
+.oj-panel-header__title-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-width: 0;
+}
+
+.oj-panel-header__title {
+    font-family: var(--font-sketch);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    line-height: 1.2;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.oj-panel-header__badge {
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.oj-panel-header__subtitle {
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.4;
+    color: var(--text-secondary);
+}
+
+.oj-panel-header__right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-shrink: 0;
+}
+
+.oj-panel-header__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.oj-panel-header__extra {
+    display: flex;
+    flex-direction: column;
+}

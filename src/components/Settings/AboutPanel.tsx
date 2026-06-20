@@ -1,4 +1,4 @@
-import '../Nodes/SchematicNodes.css';
+import './SettingsPanel.css';
 
 export function AboutPanel() {
     const version = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0-dev';

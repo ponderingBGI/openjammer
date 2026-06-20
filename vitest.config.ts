@@ -11,6 +11,12 @@ export default defineConfig({
             '@openjammer/oj-protocol': fileURLToPath(
                 new URL('./packages/oj-protocol-ts/src/index.ts', import.meta.url),
             ),
+            '@openjammer/oj-tokens': fileURLToPath(
+                new URL('./packages/oj-tokens/src/index.ts', import.meta.url),
+            ),
+            '@openjammer/oj-ui': fileURLToPath(
+                new URL('./packages/oj-ui/src/index.ts', import.meta.url),
+            ),
             // The vite-plugin-pwa virtual module has no transform under vitest; a
             // tiny stub lets usePWA.ts load (the SW does nothing in jsdom).
             'virtual:pwa-register': fileURLToPath(
@@ -22,7 +28,10 @@ export default defineConfig({
         environment: 'jsdom',
         globals: true,
         setupFiles: ['./src/setupTests.ts'],
-        include: ['src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'],
+        include: [
+            'src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}',
+            'packages/oj-ui/src/**/*.{test,spec}.{ts,tsx}',
+        ],
         coverage: {
             provider: 'v8',
             reporter: ['text', 'json', 'html'],

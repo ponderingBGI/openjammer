@@ -12,6 +12,7 @@ import { useTransportStore } from '../../store/transportStore';
 import { exportWorkflow, downloadWorkflow, loadWorkflowFromFile, importWorkflow } from '../../engine/serialization';
 import { DropdownMenu, type MenuItemOrSeparator } from './DropdownMenu';
 import { useOnlineStatus } from '../../hooks/usePWA';
+import { Button } from '@openjammer/oj-ui';
 import './Toolbar.css';
 
 export function Toolbar() {
@@ -351,43 +352,39 @@ export function Toolbar() {
             <div className="toolbar-separator" />
 
             {/* Undo/Redo Buttons */}
-            <button
-                className="toolbar-btn toolbar-btn-icon"
-                onClick={undo}
-                title="Undo (Ctrl+Z)"
-            >
+            <Button variant="ghost" iconOnly className="toolbar-btn-icon" onClick={undo} title="Undo (Ctrl+Z)">
                 ↶
-            </button>
-            <button
-                className="toolbar-btn toolbar-btn-icon"
-                onClick={redo}
-                title="Redo (Ctrl+Shift+Z)"
-            >
+            </Button>
+            <Button variant="ghost" iconOnly className="toolbar-btn-icon" onClick={redo} title="Redo (Ctrl+Shift+Z)">
                 ↷
-            </button>
+            </Button>
 
             <div className="toolbar-separator" />
 
             {/* Global Play/Pause */}
-            <button
-                className="toolbar-btn toolbar-btn-icon"
+            <Button
+                variant="ghost"
+                iconOnly
+                className="toolbar-btn-icon"
                 onClick={handlePlayStop}
                 disabled={!isAudioContextReady}
                 title={isGloballyPaused ? 'Resume All (Space)' : 'Pause All (Space)'}
             >
                 {isGloballyPaused ? '▶' : '⏸'}
-            </button>
+            </Button>
 
             <div className="toolbar-separator" />
 
             {/* Settings */}
-            <button
-                className="toolbar-btn toolbar-btn-icon"
+            <Button
+                variant="ghost"
+                iconOnly
+                className="toolbar-btn-icon"
                 onClick={() => window.dispatchEvent(new CustomEvent('openjammer:toggle-settings'))}
                 title="Settings"
             >
                 ⚙️
-            </button>
+            </Button>
 
             {/* Spacer to push status to right */}
             <div style={{ flex: 1 }} />

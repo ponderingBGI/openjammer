@@ -3,8 +3,9 @@
  */
 
 @import './fonts.css';
-@import './variables.css';
-@import './sketch-effects.css';
+/* Design-token primitives (--space-*, --radius-*, --text-*, fonts, etc.) are
+   generated into @openjammer/oj-tokens and imported in main.tsx. Theme colors
+   (--bg-*, --text-*, --accent-*, port colors) are set at runtime by applyTheme. */
 
 *,
 *::before,
@@ -87,39 +88,6 @@ select:focus,
 textarea:focus {
     outline: none;
     border-color: var(--accent-primary);
-}
-
-/* Utility Classes */
-.flex {
-    display: flex;
-}
-
-.flex-col {
-    flex-direction: column;
-}
-
-.items-center {
-    align-items: center;
-}
-
-.justify-center {
-    justify-content: center;
-}
-
-.justify-between {
-    justify-content: space-between;
-}
-
-.gap-xs {
-    gap: var(--space-xs);
-}
-
-.gap-sm {
-    gap: var(--space-sm);
-}
-
-.gap-md {
-    gap: var(--space-md);
 }
 
 /* Welcome screen (browser tier entry — The Living Sketchbook, fully theme-var driven) */

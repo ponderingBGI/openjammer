@@ -1,0 +1,13 @@
+/*
+ * Icons — a set of inline-SVG glyphs that inherit the surrounding text color
+ * via `currentColor`, so they are never a literal color and follow the active
+ * theme (DESIGN.md). They carry no fill/border of their own; sizing comes from
+ * the `size` prop. `vertical-align` keeps a glyph optically centered against
+ * adjacent text without shifting layout (No-Surprise Rule).
+ */
+.oj-icon {
+    display: inline-block;
+    vertical-align: middle;
+    flex: none;
+    color: inherit;
+}

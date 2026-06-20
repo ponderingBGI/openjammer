@@ -16,6 +16,7 @@
  */
 
 import { useMemo } from 'react';
+import { Port } from '@openjammer/oj-ui';
 import type { GraphNode } from '../../engine/types';
 import { getPresetRegistry } from '../../midi';
 import { MiniLab3Visual } from './MiniLab3Visual';
@@ -250,8 +251,11 @@ export function MIDIVisualNode({
                     {node.ports.filter(p => p.direction === 'output').map((port) => (
                         <div key={port.id} className="port-row output">
                             <span className="port-label">{port.name}</span>
-                            <div
-                                className={`port-circle-marker control-port output-port ${hasConnection?.(port.id) ? 'connected' : ''}`}
+                            <Port
+                                kind={port.type}
+                                direction="output"
+                                connected={!!hasConnection?.(port.id)}
+                                style={{ width: 20, height: 20 }}
                                 data-node-id={node.id}
                                 data-port-id={port.id}
                                 data-port-type={port.type}

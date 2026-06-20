@@ -13,6 +13,7 @@ import type { GraphNode, InstrumentRow } from '../../engine/types';
 import { isBasicInstrumentNodeData } from '../../engine/typeGuards';
 import { useGraphStore } from '../../store/graphStore';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
+import { Port } from '@openjammer/oj-ui';
 import './InstrumentVisualNode.css';
 
 /** Debounce interval for wheel events (ms) */
@@ -270,12 +271,16 @@ export function InstrumentVisualNode({
                                     const pedalPortId = `${pedal.rowId}-key-0`;
                                     return (
                                         <div key={pedal.rowId} className="pedal-item">
-                                            <div
+                                            <Port
+                                                kind="control"
+                                                direction="input"
                                                 className="key-port pedal"
+                                                style={{ width: 10, height: 10 }}
                                                 data-node-id={node.id}
                                                 data-port-id={pedalPortId}
-                                                onMouseDown={(e) => handlePortMouseDown?.(pedalPortId, e)}
-                                                onMouseUp={(e) => handlePortMouseUp?.(pedalPortId, e)}
+                                                data-port-type="control"
+                                                onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(pedalPortId, e)}
+                                                onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(pedalPortId, e)}
                                                 onMouseEnter={() => handlePortMouseEnter?.(pedalPortId)}
                                                 onMouseLeave={handlePortMouseLeave}
                                             />
@@ -292,13 +297,18 @@ export function InstrumentVisualNode({
             {/* Output port on right */}
             <div className="output-port-area">
                 {outputPorts.map((port) => (
-                    <div
+                    <Port
                         key={port.id}
+                        kind="audio"
+                        direction="output"
+                        connected={!!hasConnection?.(port.id)}
                         className={`visual-port output audio ${hasConnection?.(port.id) ? 'connected' : ''}`}
+                        style={{ width: 14, height: 14 }}
                         data-node-id={node.id}
                         data-port-id={port.id}
-                        onMouseDown={(e) => handlePortMouseDown?.(port.id, e)}
-                        onMouseUp={(e) => handlePortMouseUp?.(port.id, e)}
+                        data-port-type="audio"
+                        onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(port.id, e)}
+                        onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(port.id, e)}
                         onMouseEnter={() => handlePortMouseEnter?.(port.id)}
                         onMouseLeave={handlePortMouseLeave}
                     />
@@ -405,12 +415,17 @@ function RowWithPorts({
 
                     return (
                         <div key={index} className="key-column">
-                            <div
+                            <Port
+                                kind="control"
+                                direction="input"
+                                connected={isConnected}
                                 className={`key-port ${isConnected ? 'connected' : ''}`}
+                                style={{ width: 10, height: 10 }}
                                 data-node-id={nodeId}
                                 data-port-id={portId}
-                                onMouseDown={(e) => handlePortMouseDown?.(portId, e)}
-                                onMouseUp={(e) => handlePortMouseUp?.(portId, e)}
+                                data-port-type="control"
+                                onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(portId, e)}
+                                onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(portId, e)}
                                 onMouseEnter={() => handlePortMouseEnter?.(portId)}
                                 onMouseLeave={handlePortMouseLeave}
                             />

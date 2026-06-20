@@ -170,6 +170,11 @@ export default defineConfig({
       // bare workspace specifier and app code resolve to the single source file
       // without a build step. Mirrors the tsconfig `paths` + vitest alias.
       '@openjammer/oj-protocol': '/packages/oj-protocol-ts/src/index.ts',
+      // The design-token SSOT (themes + engine). Same alias-only pattern as the
+      // protocol package — generated CSS is imported by relative path in main.tsx.
+      '@openjammer/oj-tokens': '/packages/oj-tokens/src/index.ts',
+      // The presentational component library (theme-agnostic primitives).
+      '@openjammer/oj-ui': '/packages/oj-ui/src/index.ts',
       events: 'rollup-plugin-node-polyfills/polyfills/events'
     }
   },

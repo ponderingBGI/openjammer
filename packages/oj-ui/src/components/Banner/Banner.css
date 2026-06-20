@@ -1,0 +1,80 @@
+/*
+ * Banner — a full-width notice strip (DESIGN.md Signal-Not-Brand, Hard-Shadow).
+ * Builds on Surface (node fill, 2px ink sketch border, hard blur-free menu
+ * shadow). The tone accent is confined to the thick left edge and the icon; the
+ * surface and title stay neutral ink so the strip reads as a labelled signal,
+ * not a brand-colored panel. Styled only via semantic tokens (no literal
+ * colors), so it follows the active theme. Title uses --font-sketch
+ * (Caveat-Is-the-Voice); message uses --font-sans for dense reading.
+ */
+.oj-banner {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    width: 100%;
+    padding: var(--space-md);
+    /* The accent lives here, on the left edge only (Signal-Not-Brand). */
+    border-left-width: var(--space-xs);
+    border-left-color: var(--banner-accent);
+}
+
+/* Accent token per tone — referenced by the left border and the icon, and
+   nowhere else. Each maps to a semantic theme color. */
+.oj-banner--warning {
+    --banner-accent: var(--accent-warning);
+}
+
+.oj-banner--danger {
+    --banner-accent: var(--accent-danger);
+}
+
+.oj-banner--info {
+    --banner-accent: var(--audio-connection);
+}
+
+/* Icon — the only other place the accent shows. Fixed box so the body text
+   aligns regardless of glyph size. */
+.oj-banner__icon {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: var(--text-xl);
+    height: var(--text-xl);
+    color: var(--banner-accent);
+}
+
+.oj-banner__icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.oj-banner__body {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Title stays neutral (Signal-Not-Brand: never a heading in a state color),
+   in the Caveat voice. */
+.oj-banner__title {
+    font-family: var(--font-sketch);
+    font-size: var(--text-md);
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+
+.oj-banner__message {
+    margin-top: var(--space-xs);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+/* Response buttons — pinned to the trailing edge, never wrapping into the body. */
+.oj-banner__actions {
+    display: flex;
+    flex-shrink: 0;
+    gap: var(--space-sm);
+}

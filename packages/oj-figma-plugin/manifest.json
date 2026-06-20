@@ -1,0 +1,9 @@
+{
+  "name": "OpenJammer oj-ui — stamp code links",
+  "id": "openjammer-oj-ui-stamp",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "editorType": ["figma"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": { "allowedDomains": ["none"] }
+}

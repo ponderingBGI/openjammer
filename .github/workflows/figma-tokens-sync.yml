@@ -1,0 +1,95 @@
+# Figma → canari, automatically.  ⚠ UPGRADE PATH, NOT THE FREE DEFAULT.
+#
+# This is the *Figma→repo write-back* leg. It only fires when someone PUSHES tokens to a
+# `figma/tokens` (or `figma-sync/*`) branch from the Tokens Studio plugin — and pushing our
+# MULTI-FILE token folder requires **Tokens Studio Pro** (the free tier can pull/theme-switch/
+# apply our folder, but cannot push it back). So on the free/Education stack this workflow is
+# dormant by design: no one can populate the trigger branch, so it never runs.
+#
+# THE FREE DEFAULT is code-first: edit the DTCG in `packages/oj-tokens/tokens/` and open a PR;
+# `tokens.yml` auto-rebuilds the artifacts. See apps/docs → "Design system" → "The 3-way sync".
+#
+# When a designer DOES push (Tokens Studio Pro), this does the rest so nobody hand-edits
+# generated code or hunts for drift:
+#   1. rebuilds EVERY token artifact from the pushed DTCG (`bun run tokens` — variables.css,
+#      themes.ts, and the design-sync snapshot) and commits the result back to the branch,
+#   2. fails loudly if the working tree still drifts after a rebuild (a hand-edited artifact),
+#   3. opens/refreshes a single PR into `canari` so anyone — including the designer — can
+#      review the token diff and merge to apply it across code, the app, and the next sync.
+name: Figma tokens → canari PR (Tokens Studio Pro write-back)
+
+on:
+  push:
+    branches:
+      - 'figma/tokens'
+      - 'figma-sync/**'
+  workflow_dispatch:
+    inputs:
+      head:
+        description: 'Branch Tokens Studio pushed to'
+        required: true
+        default: 'figma/tokens'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: figma-tokens-sync-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rebuild-and-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install (root toolchain — style-dictionary)
+        run: bun install --frozen-lockfile
+
+      - name: Rebuild every token artifact from the pushed DTCG
+        run: bun run tokens
+
+      - name: Commit regenerated artifacts (if any)
+        id: commit
+        run: |
+          git config user.name "openjammer-bot"
+          git config user.email "bot@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "No regeneration needed (artifacts already matched the DTCG)."
+          else
+            git add packages/oj-tokens/dist/variables.css \
+                    packages/oj-tokens/src/generated/themes.ts \
+                    packages/oj-ui/oj-tokens.css
+            git commit -m "chore(tokens): rebuild from Figma push [skip ci]"
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi
+
+      - name: Guard against residual drift
+        run: |
+          if ! git diff --quiet; then
+            echo "::error::Token artifacts still differ after a clean rebuild — a generated file was hand-edited. Edit the DTCG in packages/oj-tokens/tokens/ (or in Figma via Tokens Studio), never the generated output."
+            git --no-pager diff --stat
+            exit 1
+          fi
+
+      - name: Open or refresh the PR into canari
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REPO="${{ github.repository }}"
+          HEAD="${{ github.ref_name }}"
+          TITLE="design: token sync from Figma ($HEAD → canari)"
+          BODY=$'Tokens were edited in Figma and pushed from Tokens Studio to `'"$HEAD"$'`.\n\nCI rebuilt every generated artifact from the pushed DTCG:\n- `packages/oj-tokens/dist/variables.css` (primitives)\n- `packages/oj-tokens/src/generated/themes.ts` (theme registry)\n- `packages/oj-ui/oj-tokens.css` (design-sync snapshot)\n\n**Review the token diff and merge to apply** — the change then flows to the app (Style Dictionary), and a maintainer re-runs `/design-sync` to push it to claude.ai/design. Components are untouched (they read only semantic tokens).\n\n_Automated by `.github/workflows/figma-tokens-sync.yml`._'
+          existing="$(gh pr list --repo "$REPO" --base canari --head "$HEAD" --state open --json number -q '.[0].number' || true)"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --repo "$REPO" --title "$TITLE" --body "$BODY"
+            echo "Refreshed PR #$existing."
+          else
+            gh pr create --repo "$REPO" --base canari --head "$HEAD" --title "$TITLE" --body "$BODY"
+          fi

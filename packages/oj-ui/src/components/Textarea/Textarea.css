@@ -1,0 +1,20 @@
+/* Textarea — DESIGN.md §5 Inputs/Fields. Input's multiline sibling: same paper
+   fill, ink border and accent focus, but sans by default since it holds prose
+   (mono stays reserved for exact numerics — Mono-Means-Exact). */
+.oj-textarea {
+    width: 100%;
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--bg-canvas);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: var(--text-sm);
+    font-family: var(--font-sans);
+    /* Vertical-only: free horizontal resize would break canvas layout. */
+    resize: vertical;
+}
+
+.oj-textarea:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}

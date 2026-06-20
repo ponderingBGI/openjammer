@@ -1,0 +1,26 @@
+/*
+ * CodeBlock — a read-only preformatted block. Mono face (Mono-Means-Exact),
+ * a faint --bg-tertiary fill behind a hairline --border-subtle, small radius,
+ * scrolls on overflow. Styled only via semantic tokens (no literal colors,
+ * no raw px), so it follows the active theme.
+ */
+.oj-code {
+    margin: 0;
+    padding: var(--space-sm);
+    border: var(--border-sketch-width) solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: auto;
+    user-select: text;
+}
+
+/* Non-selectable variant — purely informational, not meant to be copied. */
+.oj-code.is-unselectable {
+    user-select: none;
+}

@@ -1,0 +1,35 @@
+/*
+ * StatusDot — DESIGN.md §Signal-Not-Brand. An ~8px ink-bordered circle whose
+ * fill reports machine state. Styled only via semantic tokens (no literal
+ * colors), so it follows the active theme. No pulse or animation (No-Surprise
+ * Rule): the color is the whole signal, and it always rides next to a label.
+ */
+.oj-status-dot {
+    display: inline-block;
+    width: var(--space-sm);
+    height: var(--space-sm);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-pill);
+    background: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.oj-status-dot--ok {
+    background: var(--accent-success);
+}
+
+.oj-status-dot--warn {
+    background: var(--accent-warning);
+}
+
+.oj-status-dot--bad {
+    background: var(--accent-danger);
+}
+
+.oj-status-dot--idle {
+    background: var(--text-muted);
+}
+
+.oj-status-dot--info {
+    background: var(--audio-connection);
+}

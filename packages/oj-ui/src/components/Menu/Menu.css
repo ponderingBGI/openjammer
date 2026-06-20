@@ -1,0 +1,136 @@
+/*
+ * Menu — DESIGN.md §5. The consolidation of the toolbar dropdown and the canvas
+ * context-menu into one keyboard-navigable panel, backed by a Surface (white
+ * node fill, 2px ink border, hard blur-free menu shadow). Styled only via
+ * semantic tokens (no literal colors), so it follows the active theme. Hover/
+ * focus fills a row with the accent and flips text to --text-on-accent (the
+ * per-theme token for text on a fill — never a hardcoded white).
+ */
+.oj-menu {
+    display: flex;
+    flex-direction: column;
+    min-width: var(--node-min-width);
+    padding: var(--space-xs) 0;
+}
+
+/* Menu item — the actionable row. */
+.oj-menu-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+    cursor: pointer;
+    outline: none;
+    /* No-Surprise: feedback is color only, no motion/reflow on hover. */
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.oj-menu-item:hover,
+.oj-menu-item:focus-visible {
+    background: var(--accent-primary);
+    color: var(--text-on-accent);
+}
+
+/* The trailing keycap and chevron ride the accent fill on hover/focus. */
+.oj-menu-item:hover .oj-menu-item__shortcut,
+.oj-menu-item:focus-visible .oj-menu-item__shortcut {
+    border-color: var(--text-on-accent);
+    color: var(--text-on-accent);
+    background: transparent;
+}
+
+.oj-menu-item:hover .oj-menu-item__chevron,
+.oj-menu-item:focus-visible .oj-menu-item__chevron,
+.oj-menu-item:hover .oj-menu-item__icon,
+.oj-menu-item:focus-visible .oj-menu-item__icon {
+    color: var(--text-on-accent);
+}
+
+/* Disabled — dimmed, non-actionable, no hover fill. */
+.oj-menu-item[aria-disabled='true'] {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.oj-menu-item[aria-disabled='true']:hover {
+    background: transparent;
+    color: var(--text-primary);
+}
+
+.oj-menu-item__icon {
+    display: inline-flex;
+    align-items: center;
+    color: var(--text-muted);
+}
+
+.oj-menu-item__label {
+    flex: 1;
+    white-space: nowrap;
+}
+
+/* Shortcut keycap — pushed to the trailing edge, mono via the Kbd primitive. */
+.oj-menu-item__shortcut {
+    margin-left: var(--space-md);
+}
+
+.oj-menu-item__chevron {
+    display: inline-flex;
+    align-items: center;
+    margin-left: var(--space-xs);
+    color: var(--text-muted);
+}
+
+/* Submenu — a nested panel anchored to the row's trailing edge, revealed on
+   hover/focus of the parent row. Open/close stays presentational here: the
+   panel is in the flow and shown via display, no JS toggle required. */
+.oj-menu-item--has-submenu {
+    position: relative;
+}
+
+.oj-menu-item__submenu {
+    position: absolute;
+    top: calc(var(--space-xs) * -1);
+    left: 100%;
+    margin-left: var(--space-xs);
+    display: none;
+    z-index: var(--z-popover);
+}
+
+.oj-menu-item--has-submenu:hover > .oj-menu-item__submenu,
+.oj-menu-item--has-submenu:focus-within > .oj-menu-item__submenu {
+    display: block;
+}
+
+/* Category — a non-interactive group header. Muted work face so it reads as
+   structure, not an action (it never takes focus, never fills on hover). */
+.oj-menu-category {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-md);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.oj-menu-category__icon {
+    display: inline-flex;
+    align-items: center;
+}
+
+.oj-menu-category__label {
+    white-space: nowrap;
+}
+
+/* Separator — a hairline rule between groups. */
+.oj-menu-separator {
+    height: 1px;
+    margin: var(--space-xs) 0;
+    background: var(--border-subtle);
+}

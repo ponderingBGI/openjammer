@@ -1,0 +1,12 @@
+{
+  "codeConnect": {
+    "parser": "react",
+    "include": [
+      "packages/oj-ui/src/components/**/*.figma.tsx",
+      "packages/oj-ui/src/components/**/*.tsx"
+    ],
+    "importPaths": {
+      "packages/oj-ui/src/components/*": "@openjammer/oj-ui"
+    }
+  }
+}

@@ -120,11 +120,14 @@
     color: var(--text-primary);
 }
 
+/* Customized binding — accent-primary highlight (not the success-green Button
+   active state); a binding the user changed from its default. */
 .keybindings-shortcut-custom {
     background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
     border-color: var(--accent-primary);
     color: var(--accent-primary);
 }
+
 
 .keybindings-shortcut-editing {
     background: var(--accent-primary);
@@ -230,37 +233,6 @@
     justify-content: flex-end;
 }
 
-.keybindings-conflict-cancel,
-.keybindings-conflict-confirm {
-    padding: var(--space-sm) var(--space-md);
-    border-radius: var(--radius-sm);
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-}
-
-.keybindings-conflict-cancel {
-    background: transparent;
-    border: 1px solid var(--border-subtle);
-    color: var(--text-secondary);
-}
-
-.keybindings-conflict-cancel:hover {
-    border-color: var(--text-secondary);
-    color: var(--text-primary);
-}
-
-.keybindings-conflict-confirm {
-    background: var(--accent-primary);
-    border: 1px solid var(--accent-primary);
-    color: white;
-}
-
-.keybindings-conflict-confirm:hover {
-    background: var(--accent-secondary);
-    border-color: var(--accent-secondary);
-}
 
 /* Error State */
 .keybindings-error {

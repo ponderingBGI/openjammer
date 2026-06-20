@@ -5,10 +5,20 @@
  * - Browse for individual files
  * - Browse for the folder containing all samples
  * - Attempt auto-locate by scanning a directory
+ *
+ * The overlay chrome (portal, scrim, Escape, focus-trap) is the oj-ui Modal;
+ * the header, banners, list rows, and actions are oj-ui primitives.
  */
 
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
+import { useState, useCallback, useMemo } from 'react';
+import {
+  Modal,
+  PanelHeader,
+  Callout,
+  List,
+  ListRow,
+  Button,
+} from '@openjammer/oj-ui';
 import {
   useLibraryStore,
   type LibraryItem,
@@ -137,142 +147,75 @@ export function RelinkSamplesDialog({
     onClose();
   }, [onClose]);
 
-  // Dialog ref for focus trap
-  const dialogRef = useRef<HTMLDivElement>(null);
+  return (
+    <Modal open onClose={handleClose} ariaLabel="Missing Samples" size="md">
+      <PanelHeader title="Missing Samples" onClose={handleClose} />
 
-  // Focus trap and keyboard handling
-  useEffect(() => {
-    const container = dialogRef.current;
-    if (!container) return;
+      <ScrollContainer mode="dropdown" className="relink-dialog-body">
+        {library && (
+          <p className="relink-library-info">
+            Library: <strong>{library.name}</strong>
+          </p>
+        )}
 
-    const focusableSelector =
-      'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
+        {error && (
+          <Callout variant="danger" className="relink-banner">
+            {error}
+          </Callout>
+        )}
 
-    // Save previous focus to restore on close
-    const previouslyFocused = document.activeElement as HTMLElement;
+        {remainingMissing.length === 0 ? (
+          <Callout variant="success" className="relink-banner">
+            All samples have been relinked!
+          </Callout>
+        ) : (
+          <>
+            <Callout variant="info" className="relink-banner">
+              {remainingMissing.length} sample{remainingMissing.length !== 1 ? 's' : ''} could not
+              be found. You can relink them individually or browse a folder to auto-locate.
+            </Callout>
 
-    // Focus first focusable element
-    const focusableElements = container.querySelectorAll<HTMLElement>(focusableSelector);
-    focusableElements[0]?.focus();
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Escape to close
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-        return;
-      }
-
-      // Focus trap on Tab
-      if (e.key === 'Tab') {
-        const currentFocusable = container.querySelectorAll<HTMLElement>(focusableSelector);
-        const first = currentFocusable[0];
-        const last = currentFocusable[currentFocusable.length - 1];
-
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last?.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first?.focus();
-        }
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      previouslyFocused?.focus();
-    };
-  }, [onClose]);
-
-  const dialogContent = (
-    <div
-      className="relink-dialog-overlay"
-      onClick={handleClose}
-      role="presentation"
-    >
-      <div
-        ref={dialogRef}
-        className="relink-dialog"
-        onClick={e => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="relink-dialog-title"
-      >
-        <div className="relink-dialog-header">
-          <h2 id="relink-dialog-title">Missing Samples</h2>
-          <button
-            className="relink-close-btn"
-            onClick={handleClose}
-            aria-label="Close dialog"
-          >
-            &times;
-          </button>
-        </div>
-
-        <ScrollContainer mode="dropdown" className="relink-dialog-body">
-          {library && (
-            <p className="relink-library-info">
-              Library: <strong>{library.name}</strong>
-            </p>
-          )}
-
-          {error && <div className="relink-error">{error}</div>}
-
-          {remainingMissing.length === 0 ? (
-            <div className="relink-success">
-              All samples have been relinked!
-            </div>
-          ) : (
-            <>
-              <p className="relink-info">
-                {remainingMissing.length} sample{remainingMissing.length !== 1 ? 's' : ''} could not
-                be found. You can relink them individually or browse a folder to auto-locate.
-              </p>
-
-              <div className="relink-samples-list">
-                {remainingMissing.map(sample => (
-                  <div key={sample.id} className="relink-sample-row">
-                    <div className="relink-sample-info">
-                      <span className="relink-sample-name">{sample.fileName}</span>
-                      <span className="relink-sample-path">{sample.relativePath}</span>
-                    </div>
-                    <button
-                      className="relink-browse-btn"
+            <List aria-label="Missing samples" className="relink-samples-list">
+              {remainingMissing.map(sample => (
+                <ListRow
+                  key={sample.id}
+                  actions={
+                    <Button
                       onClick={() => handleRelinkFile(sample)}
                       disabled={relinkingId === sample.id}
                     >
                       {relinkingId === sample.id ? 'Browsing...' : 'Browse'}
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              <div className="relink-actions">
-                <button
-                  className="relink-folder-btn"
-                  onClick={handleRelinkFromFolder}
-                  disabled={relinkingId !== null}
+                    </Button>
+                  }
                 >
-                  Browse Folder to Auto-Locate
-                </button>
-              </div>
-            </>
-          )}
-        </ScrollContainer>
+                  <span className="relink-sample-info">
+                    <span className="relink-sample-name">{sample.fileName}</span>
+                    <span className="relink-sample-path">{sample.relativePath}</span>
+                  </span>
+                </ListRow>
+              ))}
+            </List>
 
-        <div className="relink-dialog-footer">
-          <button className="relink-done-btn" onClick={handleClose}>
-            {remainingMissing.length === 0 ? 'Done' : 'Close'}
-          </button>
-        </div>
-      </div>
-    </div>
+            <div className="relink-actions">
+              <Button
+                variant="primary"
+                onClick={handleRelinkFromFolder}
+                disabled={relinkingId !== null}
+              >
+                Browse Folder to Auto-Locate
+              </Button>
+            </div>
+          </>
+        )}
+      </ScrollContainer>
+
+      <footer className="relink-dialog-footer">
+        <Button onClick={handleClose}>
+          {remainingMissing.length === 0 ? 'Done' : 'Close'}
+        </Button>
+      </footer>
+    </Modal>
   );
-
-  return createPortal(dialogContent, document.body);
 }
 
 // Helper: Find a file by name in a directory (recursive with depth limit)

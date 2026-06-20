@@ -5,10 +5,11 @@
   "type": "module",
   "description": "OpenJammer documentation site (Astro + Starlight). Workspace-ISOLATED: this package has its own lockfile and is NOT a member of the root bun workspace (root workspaces = ['packages/*']), to firewall the Astro/Zod dependency tree from the app's. Install + build from inside apps/docs.",
   "scripts": {
-    "dev": "astro dev",
-    "build": "astro build",
+    "gen:components": "bun scripts/gen-component-index.mjs",
+    "dev": "bun scripts/gen-component-index.mjs && astro dev",
+    "build": "bun scripts/gen-component-index.mjs && astro build",
     "preview": "astro preview",
-    "check": "astro check"
+    "check": "bun scripts/gen-component-index.mjs && astro check"
   },
   "dependencies": {
     "@astrojs/starlight": "^0.34.3",

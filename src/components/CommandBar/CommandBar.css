@@ -194,50 +194,6 @@
     white-space: nowrap;
 }
 
-.command-bar-ai-new {
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-sm);
-    padding: 1px 8px;
-    cursor: pointer;
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.command-bar-ai-new:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-sketch);
-}
-
-.command-bar-ai-new:active {
-    transform: translateY(1px);
-    box-shadow: none;
-}
-
-/* Rewind affordance — quiet sibling of "+ New"; opens the rewind/edit picker. */
-.command-bar-ai-rewind {
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-sm);
-    padding: 1px 8px;
-    cursor: pointer;
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.command-bar-ai-rewind:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-sketch);
-}
-
-.command-bar-ai-rewind:active {
-    transform: translateY(1px);
-    box-shadow: none;
-}
 
 /* Rewind picker: prior prompts, newest first, one per row. */
 .command-bar-rewind-list {
@@ -696,32 +652,6 @@
     color: var(--text-muted);
 }
 
-.command-bar-ai-send {
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    padding: var(--space-xs) var(--space-md);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-md);
-    background: var(--accent, var(--sketch-black));
-    color: var(--text-on-accent);
-    cursor: pointer;
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.command-bar-ai-send:hover:not(:disabled) {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-sketch);
-}
-
-.command-bar-ai-send:active:not(:disabled) {
-    transform: translateY(1px);
-    box-shadow: none;
-}
-
-.command-bar-ai-send:disabled {
-    opacity: 0.5;
-    cursor: default;
-}
 
 .command-bar-models {
     display: flex;
@@ -870,17 +800,6 @@
     color: var(--text-muted);
 }
 
-/* The Cancel button shared by the YOLO confirm gate (outlined, inked). */
-.command-bar-ai-reject {
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    padding: var(--space-xs) var(--space-md);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    background: var(--bg-node);
-    color: var(--text-primary);
-}
 
 .command-bar-ai-desktop-only {
     padding: var(--space-lg);
@@ -1021,23 +940,6 @@
     white-space: nowrap;
 }
 
-/* The Cancel button (YOLO confirm) presses like the rest. */
-.command-bar-ai-reject {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-xs);
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-}
-
-.command-bar-ai-reject:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-sketch);
-}
-
-.command-bar-ai-reject:active {
-    transform: translateY(1px);
-    box-shadow: none;
-}
 
 /* The permission footer — always visible on the live agent surface so the jail
    boundary is never a surprise. Mono, because it states an exact path/state. */
@@ -1179,25 +1081,4 @@ button.command-bar-ai-thinking:focus-visible {
     gap: var(--space-sm);
 }
 
-/* The commit button wears the danger, so the consequence reads before the click. */
-.command-bar-yolo-go {
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    padding: var(--space-xs) var(--space-md);
-    border: var(--border-sketch-width) solid var(--accent-danger);
-    border-radius: var(--radius-md);
-    background: var(--accent-danger);
-    color: var(--text-on-accent);
-    cursor: pointer;
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
-}
 
-.command-bar-yolo-go:hover {
-    transform: translateY(-1px);
-    box-shadow: 2px 2px 0 var(--accent-danger);
-}
-
-.command-bar-yolo-go:active {
-    transform: translateY(1px);
-    box-shadow: none;
-}

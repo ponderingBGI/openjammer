@@ -50,23 +50,6 @@
     color: var(--text-primary);
 }
 
-.waveform-editor-close {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 4px;
-    border-radius: var(--radius-sm);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.waveform-editor-close:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-}
 
 /* ============================================
  * Content Area
@@ -200,50 +183,6 @@
     flex: 1;
 }
 
-.waveform-editor-btn {
-    padding: var(--space-sm) var(--space-md);
-    border: 1px solid var(--border-sketch);
-    border-radius: var(--radius-sm);
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    cursor: pointer;
-    transition: background var(--transition-fast), color var(--transition-fast);
-}
-
-.waveform-editor-btn.preview {
-    background: var(--bg-canvas);
-    color: var(--text-primary);
-}
-
-.waveform-editor-btn.preview:hover {
-    background: var(--bg-tertiary);
-}
-
-.waveform-editor-btn.preview.playing {
-    background: var(--accent-danger);
-    color: white;
-    border-color: var(--accent-danger);
-}
-
-.waveform-editor-btn.cancel {
-    background: transparent;
-    color: var(--text-secondary);
-}
-
-.waveform-editor-btn.cancel:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-}
-
-.waveform-editor-btn.apply {
-    background: var(--accent-primary);
-    color: white;
-    border-color: var(--accent-primary);
-}
-
-.waveform-editor-btn.apply:hover {
-    filter: brightness(1.1);
-}
 
 /* ============================================
  * Zoom Track in Actions

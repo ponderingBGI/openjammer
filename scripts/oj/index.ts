@@ -7,6 +7,7 @@
 //   oj plan       [--json] [--base <ref>]
 //   oj scaffold   <node|dsp-kernel> ...     (STUB, exit 2)
 //   oj dev        ...                        (STUB, exit 2)
+//   oj design     <map|status> [--json]      (design-system bridge: component-map + sync health)
 //
 // Shared lib/ (git, cache, ssot, report) means version-sync logic lives ONCE.
 // Exit code: non-zero only when a hard failure occurs (any check status `fail`,
@@ -17,6 +18,7 @@ import { preflight } from './preflight';
 import { plan } from './plan';
 import { scaffold } from './scaffold';
 import { dev } from './dev';
+import { design } from './design';
 
 interface ParsedFlags {
   json: boolean;
@@ -137,6 +139,9 @@ async function main(): Promise<number> {
 
     case 'dev':
       return dev(flags.rest);
+
+    case 'design':
+      return design(flags.rest, flags.json);
 
     default:
       process.stderr.write(`unknown subcommand: ${sub}\n\n`);

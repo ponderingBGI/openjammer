@@ -1,0 +1,70 @@
+# Code Connect — keep Figma's Dev Mode showing the real oj-ui snippet.
+#
+# The .figma.tsx mappings (packages/oj-ui/src/components/**) link each Figma component to its
+# oj-ui code. On a PR we VALIDATE them (parse must be clean — a broken/renamed mapping fails the
+# PR). On merge to canari we PUBLISH them to Figma automatically, so nobody runs the CLI by hand.
+#
+# One-time human prerequisites (see apps/docs → Design system → The 3-way sync):
+#   1. Publish the oj-ui library in Figma (team library) — Code Connect only maps published comps.
+#   2. Code Connect requires a Figma Organization/Enterprise plan.
+#   3. Add a repo secret FIGMA_ACCESS_TOKEN (a Figma personal access token with Code Connect write).
+# Until the token exists, the publish step skips cleanly instead of failing.
+name: Code Connect
+
+on:
+  pull_request:
+    paths:
+      - 'packages/oj-ui/src/components/**/*.figma.tsx'
+      - 'figma.config.json'
+  push:
+    branches: [canari, main]
+    paths:
+      - 'packages/oj-ui/src/components/**/*.figma.tsx'
+      - 'figma.config.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Parse + validate the Code Connect mappings
+        run: |
+          # A hard parse failure exits non-zero — the `||` catches it.
+          out="$(bunx figma connect parse 2>&1)" || { echo "$out" | tail -20; exit 1; }
+          # A soft failure (an import that didn't resolve) still exits 0 but prints the exact
+          # diagnostic "could not be resolved". Grep ONLY that — NOT a generic "error", which
+          # appears inside the Code Connect template payload (the 'ERROR' node type) and would
+          # false-fail every run.
+          if echo "$out" | grep -qi "could not be resolved"; then
+            echo "::error::Code Connect mapping(s) could not be resolved:"
+            echo "$out" | grep -i "could not be resolved" | head
+            exit 1
+          fi
+          n="$(echo "$out" | grep -c '"figmaNode"')"
+          if [ "$n" -lt 1 ]; then echo "::error::no Code Connect mappings parsed"; exit 1; fi
+          echo "✓ $n Code Connect mappings parsed cleanly."
+
+  publish:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Publish Code Connect to Figma
+        env:
+          FIGMA_ACCESS_TOKEN: ${{ secrets.FIGMA_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$FIGMA_ACCESS_TOKEN" ]; then
+            echo "::warning::FIGMA_ACCESS_TOKEN not set — skipping Code Connect publish. Add it in Settings → Secrets and Variables → Actions to enable (needs a Figma Org/Enterprise plan + a published library)."
+            exit 0
+          fi
+          bunx figma connect publish
+          echo "Published Code Connect mappings to Figma."

@@ -16,6 +16,7 @@ import { getSampleFile } from '../../store/libraryStore';
 import { getAudioContext } from '../../audio/audioContext';
 import { useScrollCapture } from '../../hooks/useScrollCapture';
 import type { ScrollData } from '../../hooks/useScrollCapture';
+import { Button, Slider } from '@openjammer/oj-ui';
 import './WaveformEditorModal.css';
 
 // Preview audio state
@@ -570,11 +571,11 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
                     <span className="waveform-editor-title">
                         Edit Clip: {clip.sampleName}
                     </span>
-                    <button className="waveform-editor-close" onClick={handleCancel}>
+                    <Button variant="ghost" iconOnly onClick={handleCancel}>
                         <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
                             <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
                         </svg>
-                    </button>
+                    </Button>
                 </div>
 
                 <div className="waveform-editor-content">
@@ -613,23 +614,23 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
                 </div>
 
                 <div className="waveform-editor-actions">
-                    <button
-                        className={`waveform-editor-btn preview ${isPlaying ? 'playing' : ''}`}
+                    <Button
+                        variant="ghost"
+                        active={isPlaying}
                         onClick={handlePreview}
                         title="Space to play/stop"
                     >
                         {isPlaying ? '■ Stop' : '▶ Play'}
-                    </button>
+                    </Button>
                     <div className="waveform-editor-zoom-track">
                         <span className="waveform-editor-zoom-label">−</span>
-                        <input
-                            type="range"
-                            min="1"
-                            max="20"
-                            step="0.1"
+                        <Slider
+                            aria-label="Zoom"
+                            min={1}
+                            max={20}
+                            step={0.1}
                             value={zoom}
-                            onChange={(e) => {
-                                const newZoom = parseFloat(e.target.value);
+                            onChange={(newZoom) => {
                                 const oldVisibleRange = 1 / zoom;
                                 const newVisibleRange = 1 / newZoom;
                                 const viewCenter = scrollOffset + oldVisibleRange / 2;
@@ -643,12 +644,12 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
                         />
                         <span className="waveform-editor-zoom-label">+</span>
                     </div>
-                    <button className="waveform-editor-btn cancel" onClick={handleCancel}>
+                    <Button variant="secondary" onClick={handleCancel}>
                         Cancel
-                    </button>
-                    <button className="waveform-editor-btn apply" onClick={handleApply}>
+                    </Button>
+                    <Button variant="primary" onClick={handleApply}>
                         Apply
-                    </button>
+                    </Button>
                 </div>
             </div>
         </div>,

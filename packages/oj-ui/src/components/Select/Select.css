@@ -1,0 +1,17 @@
+/* Select — DESIGN.md §5. Caveat voice (choices, not exact numerics). */
+.oj-select {
+    flex: 1;
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--bg-canvas);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    cursor: pointer;
+}
+
+.oj-select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}

@@ -7,7 +7,7 @@ Thank you for your interest in contributing to OpenJammer! This document provide
 > [PRODUCT.md](PRODUCT.md) (who plays this and why, plus the design principles) and
 > [DESIGN.md](DESIGN.md) (the visual system). For the engine and the working covenant —
 > the perception beliefs, the nine code values, and the playbook — read
-> [.agent/workflows/agents.md](.agent/workflows/agents.md). The best contributions can name
+> [agents.md](agents.md). The best contributions can name
 > which value they honor: perception you can feel, and a core kept minimal so the community
 > can make it their own.
 
@@ -29,23 +29,45 @@ bun install
 bun dev
 ```
 
-The app will be available at `http://localhost:3000`
+The app will be available at `http://localhost:5173` (Vite's default).
+
+### Design system
+
+The look lives in two workspace packages, not in the app:
+
+- **Tokens** (color, spacing, radius, type) are authored as DTCG JSON in
+  `packages/oj-tokens/tokens` and compiled with `bun run tokens`.
+- **Components** live in `packages/oj-ui`; preview them in isolation with `bun run ladle`.
+
+Token and component changes target the **`canari`** branch like any other contribution.
+
+> **Fork PRs:** run `bun run tokens` and commit the result. CI auto-rebuilds the token
+> artifacts on same-repo PRs, but it can't push to forks — so a fork PR with stale generated
+> files fails. Running it locally and committing the output keeps the PR green.
 
 ## Project Structure
 
+OpenJammer is a Bun workspace: the web app in `src/`, the design-system and protocol
+packages under `packages/`, and the Rust audio core in `crates/`.
+
 ```
 openjammer/
-├── src/
-│   ├── components/      # React components
-│   │   ├── Canvas/      # Node canvas system
-│   │   └── Nodes/       # Individual node types
-│   ├── audio/           # Web Audio API engine
-│   │   ├── samplers/    # Instrument samplers
-│   │   └── effects/     # Audio effects
-│   ├── store/           # Zustand state management
-│   ├── engine/          # Node system types & registry
-│   └── lib/             # Utility functions
-└── public/              # Static assets
+├── src/                       # The web app
+│   ├── components/            # React components (the canvas + chrome)
+│   │   └── Nodes/             # Individual node types
+│   ├── audio/                 # Web Audio engine, samplers, effects
+│   ├── engine/                # Node system types & registry
+│   ├── store/                 # Zustand state management
+│   ├── midi/  ai/  collab/    # MIDI, the Ctrl+K agent, multiplayer
+│   └── utils/                 # Utility functions
+├── packages/
+│   ├── oj-tokens/             # DTCG design tokens (Style Dictionary)
+│   ├── oj-ui/                 # React component library (@openjammer/oj-ui)
+│   └── oj-protocol-ts/        # The TypeScript wire contract (@openjammer/oj-protocol)
+├── crates/                    # The Rust audio core
+│   ├── ojcore* / ojproto      # The real-time engine + wire contract
+│   └── ojhost / ojfaust / …   # Host backends, DSP, plugin hosting
+└── public/                    # Static assets
 ```
 
 ## How to Contribute

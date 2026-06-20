@@ -1,0 +1,61 @@
+/* design-sync font faces — same self-hosted woff2 as src/styles/fonts.css but with
+   RELATIVE url()s so they resolve next to this file once copied into the bundle's
+   fonts/ dir (the app uses absolute /fonts/ URLs; the design tool serves the DS
+   from a different root, so relative is the portable form). */
+
+@font-face {
+    font-family: 'Caveat';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('./caveat-regular.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Caveat';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('./caveat-bold.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('./inter-regular.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('./inter-medium.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('./inter-semibold.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 700;
+    font-display: swap;
+    src: url('./inter-bold.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'JetBrains Mono';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('./jetbrains-mono-regular.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'JetBrains Mono';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('./jetbrains-mono-medium.woff2') format('woff2');
+}

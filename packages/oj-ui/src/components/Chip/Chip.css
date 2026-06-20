@@ -1,0 +1,69 @@
+/*
+ * Chip — a small pill/badge. Rounded (--radius-pill), Caveat voice, compact.
+ * Styled only via semantic tokens (no literal colors), so it follows the active
+ * theme. Toned variants tint border + text via the state accent tokens and
+ * always travel with a label or glyph (Signal-Not-Brand) — the color reports
+ * state, it never becomes the surface's brand.
+ */
+.oj-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    max-width: 100%;
+    padding: var(--space-xs) var(--space-sm);
+    border: var(--border-sketch-width) solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    line-height: 1;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    transition: background var(--transition-fast), border-color var(--transition-fast),
+        color var(--transition-fast);
+}
+
+/* Toned variants — state color on border + text, surface stays neutral
+   (Signal-Not-Brand: never paint the whole pill in a state color). */
+.oj-chip--success {
+    border-color: var(--accent-success);
+    color: var(--accent-success);
+}
+
+.oj-chip--warning {
+    border-color: var(--accent-warning);
+    color: var(--accent-warning);
+}
+
+.oj-chip--danger {
+    border-color: var(--accent-danger);
+    color: var(--accent-danger);
+}
+
+/* Pressed — a toggled filter chip. Color/border feedback only, no transform
+   or reflow (No-Surprise): the stronger border + ink text read as "on". */
+.oj-chip.is-pressed {
+    background: var(--bg-secondary);
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+}
+
+/* The leading glyph sits a hair quieter than the label. */
+.oj-chip__glyph {
+    display: inline-flex;
+    align-items: center;
+    opacity: 0.85;
+}
+
+/* The label never wraps — a chip is a single quiet token. */
+.oj-chip__label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The count is an exact number (Mono-Means-Exact), set apart in mono. */
+.oj-chip__count {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
