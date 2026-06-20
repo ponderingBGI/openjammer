@@ -20,16 +20,21 @@ only when you want the lowest latency or to host your own VST3 / AU / CLAP plugi
 ## Browser or desktop app — which should I use?
 
 Start in the **browser**: it's the whole instrument, zero install, honest **~15–25 ms**
-latency — great for sketching and jamming. Move to the **desktop app** when you want native
-**< 5 ms** MIDI-to-audio or plugin hosting. See
+latency — great for sketching and jamming. Move to the **desktop app** when you want the
+lowest native latency — it asks the device for a small 64-frame buffer (~1.3 ms), which many
+devices grant even in WASAPI shared mode (measured ~1.3 ms on a Windows test machine), down to
+~10 ms+ on devices that force a larger period — or plugin hosting. See
 [Browser vs native](/openjammer/play/browser-vs-native/) for the full comparison.
 
 ## Why is the browser higher latency than the app?
 
 Browsers **cannot use ASIO drivers** — they go through the OS audio layer (WASAPI on Windows,
-Core Audio on macOS, ALSA/JACK on Linux), which adds latency. The native desktop app talks to
-a small-buffer audio stream directly, which is how it reaches sub-5 ms. A USB interface
-narrows the gap in the browser. Full detail in
+Core Audio on macOS, ALSA/JACK on Linux), which adds latency. The native desktop app talks to a
+small-buffer audio stream directly: it asks for a 64-frame buffer (~1.3 ms), which many devices
+grant even on the default Windows WASAPI-shared path (measured ~1.3 ms on a test machine —
+genuinely sub-5 ms), while some fall back to a larger device period (~10 ms+). A WASAPI-exclusive
+or ASIO driver (not routed by default yet) guarantees the low buffer on any device. A USB
+interface narrows the gap in the browser. Full detail in
 [Audio setup & latency](/openjammer/play/audio-and-latency/).
 
 ## Do I need a USB audio interface?

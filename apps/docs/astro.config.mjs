@@ -13,7 +13,7 @@ export default defineConfig({
         starlight({
             title: 'OpenJammer',
             description:
-                'Node-driven, real-time music creation for live performance — native (<5 ms) and in the browser.',
+                'Node-driven, real-time music creation for live performance — native low latency and in the browser.',
             social: [
                 {
                     icon: 'github',
