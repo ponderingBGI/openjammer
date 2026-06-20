@@ -112,6 +112,10 @@ jobs:
       - name: Stage Pi sidecar resource dir (bundle-only)
         shell: bash
         run: mkdir -p src-tauri/binaries
+      - name: RNG-ban gate (seed-reproducibility, mirrors the libm ban)
+        # Forbid global/thread entropy in the RT/DSP core so a DST run stays
+        # replayable from one seed. Pure bash, no toolchain needed.
+        run: bash scripts/ci/check-rng-ban.sh
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy (-D warnings)

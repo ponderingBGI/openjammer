@@ -56,8 +56,12 @@ jobs:
         uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
         with:
           toolchain: nightly
-      - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+      - name: Install cargo-fuzz (prebuilt binary)
+        # taiki-e/install-action fetches a prebuilt binary in seconds instead of
+        # compiling cargo-fuzz from source (matches the per-PR nextest install).
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
       - name: Fuzz the WAV decoder (time-boxed)
         # A clean Err on any input is correct; a crash/UB is a finding. Time-boxed
         # so the nightly stays bounded; the corpus is seeded from the smoke's RIFF

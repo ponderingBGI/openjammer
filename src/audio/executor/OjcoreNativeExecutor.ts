@@ -356,13 +356,12 @@ export class OjcoreNativeExecutor implements Executor {
             }
             return;
         }
-        // The push was accepted: a graph is live, so we are no longer in the
-        // honest "nothing has happened yet" IDLE state. Per the tri-state model
-        // (IDLE before the first graph; DEAD only on a real death; DEGRADED
-        // otherwise) the post-first-graph baseline is DEGRADED — but ONLY lift out
-        // of IDLE; never downgrade a real DEAD signal back to DEGRADED here.
+        // The push was accepted: a graph is live and the engine is making sound,
+        // so we are no longer in the honest "nothing has happened yet" IDLE state.
+        // Lift IDLE → LIVE (the positive state crash-recovery waits for to forgive
+        // the crash streak); NEVER downgrade a real DEAD/DEGRADED signal to LIVE.
         if (useEngineHealthStore.getState().health === 'IDLE') {
-            setEngineHealth('DEGRADED', 'engine active');
+            setEngineHealth('LIVE', 'engine active');
         }
         // Install the built-in default voice for instrument nodes that ship one,
         // so a freshly-wired Keys/Piano/… node has PCM to play (an empty

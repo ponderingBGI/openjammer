@@ -13,3 +13,8 @@ serde = { workspace = true }
 # hand-written TS mirror in packages/oj-protocol-ts depends on. Pulls in std
 # (fine: tests are built with std).
 serde_json = "1.0"
+# Property-based testing on-ramp (Track A P0a). Tests link std, so a no_std crate
+# can still use proptest as a dev-dependency. Drives the codec round-trip in
+# tests/proptest_codec.rs; the OjGraph/compile() generators that reuse these
+# strategies (cycle-rejection, valid Kahn order, never-panics) are the next step.
+proptest = "1"

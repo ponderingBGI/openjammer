@@ -17,6 +17,12 @@
  *                `self.host.is_some()` and documented-false on cold start / a
  *                device-less boot — alarming on it would cry wolf during the
  *                exact calm before a set when the player is plugging in.
+ *   • LIVE     — the positive "engine is up and making sound" state. This is the
+ *                signal crash-recovery waits for before it forgives the crash
+ *                streak (Track B P0): a session that reaches LIVE and stays there
+ *                is known-good, so past crashes should stop pushing toward Safe
+ *                Mode. Distinct from IDLE so "we actually started" is observable,
+ *                not conflated with "nothing happened yet."
  *   • DEGRADED — something went wrong but the last good sound is preserved (a
  *                rejected graph push kept the prior graph; a recoverable fault
  *                was reported). The performer can keep playing; we whisper, we
@@ -38,7 +44,7 @@ import type { StatusDotStatus } from '@openjammer/oj-ui';
  * The tri-state engine health. Ordered loosely by severity for readability;
  * the store does not rank them — callers set the truth they observe.
  */
-export type EngineHealth = 'IDLE' | 'DEGRADED' | 'DEAD';
+export type EngineHealth = 'IDLE' | 'LIVE' | 'DEGRADED' | 'DEAD';
 
 interface EngineHealthState {
     /** Current tri-state health. Starts `IDLE` (never an alarm). */
@@ -71,6 +77,16 @@ export const useEngineHealthStore = create<EngineHealthState>((set, get) => ({
  */
 export function setEngineHealth(health: EngineHealth, reason?: string): void {
     useEngineHealthStore.getState().setHealth(health, reason);
+}
+
+/**
+ * Convenience for the one positive transition: the engine is up and making
+ * sound. Crash-recovery subscribes to this to know the session reached a
+ * known-good state (Track B P0). Never downgrades a DEAD/DEGRADED engine to LIVE
+ * blindly — callers set it only when they have observed real activity.
+ */
+export function setEngineLive(reason = 'engine live'): void {
+    useEngineHealthStore.getState().setHealth('LIVE', reason);
 }
 
 // ============================================================================
@@ -125,6 +141,14 @@ export interface HealthPresentation {
 export function presentHealth(health: EngineHealth, reason = ''): HealthPresentation {
     const detail = reason ? ` — ${reason}` : '';
     switch (health) {
+        case 'LIVE':
+            return {
+                status: 'ok',
+                label: 'Sound live',
+                icon: '●',
+                blurb: `Audio engine is up and making sound${detail}.`,
+                isAlarm: false,
+            };
         case 'DEGRADED':
             return {
                 status: 'warn',

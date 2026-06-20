@@ -15,6 +15,7 @@
 import { EphemeralStore } from 'loro-crdt';
 import type { Value } from 'loro-crdt';
 import type { PeerPresence } from './types';
+import { logWarn } from '../utils/log';
 
 /** Default eviction timeout: a peer that hasn't updated in 30s is dropped. */
 const PRESENCE_TIMEOUT_MS = 30_000;
@@ -108,9 +109,23 @@ export class PresenceManager {
         return this.store.encodeAll();
     }
 
-    /** Apply a remote presence update. */
+    /**
+     * Apply a remote presence update.
+     *
+     * DECODE FIREWALL: presence bytes arrive off the same untrusted transport as
+     * the doc, so a malformed frame must never throw out of here and crash the
+     * session — we skip it and keep the current peer view. Presence is ephemeral
+     * (timeout-evicted), so dropping one bad update is harmless.
+     */
     apply(bytes: Uint8Array): void {
-        this.store.apply(bytes);
+        try {
+            this.store.apply(bytes);
+        } catch (err) {
+            logWarn('collab', 'skipped a corrupt presence frame', {
+                bytes: bytes.length,
+                error: err instanceof Error ? err.message : String(err),
+            });
+        }
     }
 
     /** Subscribe to local presence updates for forwarding over a transport. */

@@ -38,6 +38,10 @@ import { useGraphStore } from './store/graphStore';
 import { useProjectStore } from './store/projectStore';
 import { useCanvasStore } from './store/canvasStore';
 import { useKeybindingsStore } from './store/keybindingsStore';
+import { useEngineHealthStore, setEngineLive } from './store/engineHealthStore';
+import { useCrashRecovery } from './persistence/recovery/useCrashRecovery';
+import { writeEmergencyBackup } from './persistence/recovery';
+import { SafeModeScreen } from './components/SafeMode/SafeModeScreen';
 import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens';
 import { isEditableTarget } from './utils/editableTarget';
 import './styles/global.css';
@@ -55,6 +59,11 @@ function App() {
   // Calm, deduped engine-dead toast (Phase 2). The ONLY toast the health store
   // raises — DEGRADED stays ambient; a fault storm yields one signal, not many.
   useEngineHealthToast();
+
+  // Crash recovery (Track B P0): at boot, restore work that survived an unclean
+  // shutdown — or, after repeated crashes, drop to Safe Mode rather than reopening
+  // into a deadly crash cycle. Runs once, before the autosave effects engage.
+  const recovery = useCrashRecovery();
 
   // Initialize theme
   useEffect(() => {
@@ -120,6 +129,14 @@ function App() {
     // events against the live graph and drives the Executor note seam. Uses the
     // default routing context (graph store + executor + MIDIManager).
     initMidiVoiceRouting();
+
+    // Engine is up: lift the honest IDLE → LIVE so crash-recovery knows the
+    // session reached a known-good state (Track B P0). Only lift out of IDLE,
+    // never downgrade a real DEAD/DEGRADED signal (the native executor sets LIVE
+    // on its first accepted graph push; this covers the browser tier).
+    if (useEngineHealthStore.getState().health === 'IDLE') {
+      setEngineLive('audio engine initialized');
+    }
 
     return () => {
       disposeMidiVoiceRouting();
@@ -272,32 +289,47 @@ function App() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [projectName, projectHandleKey, saveProject]);
 
-  // Emergency backup on beforeunload (tab close/refresh)
+  // Default-on crash backup (Track B P0): persist the working graph to
+  // localStorage on every change (debounced), REGARDLESS of whether a project
+  // folder is connected, so an app/OS crash can restore unsaved work — and the
+  // boot-time recovery (useCrashRecovery) actually reads it. This is the
+  // localStorage tier of "default-on durability"; the crash-safe OPFS journal +
+  // native fsync tiers are Track B P1. The previous code wrote this blob only
+  // when a folder was connected AND never read it back on boot.
   useEffect(() => {
-    if (!projectName || !projectHandleKey) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastBackupVersion = useGraphStore.getState().version;
 
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      const currentVersion = useGraphStore.getState().version;
-      if (currentVersion !== lastVersionRef.current) {
-        // Emergency backup to localStorage
-        try {
-          localStorage.setItem('openjammer-emergency-backup', JSON.stringify({
-            timestamp: Date.now(),
-            projectName,
-            nodes: Array.from(useGraphStore.getState().nodes.values()),
-            edges: Array.from(useGraphStore.getState().connections.values()),
-          }));
-        } catch {
-          // Ignore storage errors
-        }
-        e.preventDefault();
-        e.returnValue = '';
-      }
+    const flush = () => {
+      const s = useGraphStore.getState();
+      // Nothing meaningful to back up — don't clobber a good backup with empty.
+      if (s.nodes.size === 0 && s.connections.size === 0) return;
+      writeEmergencyBackup({
+        nodes: Array.from(s.nodes.values()),
+        edges: Array.from(s.connections.values()),
+        projectName: useProjectStore.getState().name,
+      });
     };
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [projectName, projectHandleKey]);
+    const unsubscribe = useGraphStore.subscribe((state) => {
+      if (state.version === lastBackupVersion) return;
+      lastBackupVersion = state.version;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(flush, 2000);
+    });
+
+    // Final flush on page hide (the hook marks the clean exit separately). No
+    // "leave site?" prompt: with durable autosave the work is recoverable, so we
+    // never nag the performer on the way out.
+    const onPageHide = () => flush();
+    window.addEventListener('pagehide', onPageHide);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('pagehide', onPageHide);
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   // Global keyboard shortcut for save (Ctrl+S / Cmd+S)
   useEffect(() => {
@@ -411,6 +443,10 @@ function App() {
 
   return (
     <>
+      {/* Safe Mode (Track B P0) — shown only after repeated crashes; offers calm
+          choices instead of reopening into a deadly crash cycle. */}
+      <SafeModeScreen api={recovery} />
+
       {/* Welcome screen (browser tier only — native auto-starts, see useState above) */}
       {showActivation && (
         <div
