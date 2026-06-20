@@ -34,6 +34,9 @@ allow = [
     "CC0-1.0",
     "BSL-1.0",
     "0BSD",
+    # Permissive data license carried by webpki-root-certs (root cert bundle, via
+    # tauri/reqwest) — confirmed from the first CI run of this gate.
+    "CDLA-Permissive-2.0",
     "AGPL-3.0",
     "AGPL-3.0-only",
 ]
