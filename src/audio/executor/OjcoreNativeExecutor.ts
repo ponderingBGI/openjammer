@@ -48,12 +48,16 @@ import type {
     OjGraph,
     RtCommand,
     EngineFrame,
+    Event as EngineEvent,
 } from '../../../packages/oj-protocol-ts/src/index';
 import {
     OjcoreCapabilityRegistry,
     monoPcmToWavBlob,
     type OjcoreBridge,
 } from './ojcoreHandles';
+import { useLogStore } from '../../store/logStore';
+import { logger } from '../../utils/log';
+import { setEngineHealth, useEngineHealthStore } from '../../store/engineHealthStore';
 
 /** Minimal shape of the Tauri global IPC bridge (`withGlobalTauri`). */
 interface TauriGlobal {
@@ -74,10 +78,70 @@ function getInvoke(): ((cmd: string, args?: Record<string, unknown>) => Promise<
 /** How often (ms) to poll the engine for fresh per-node meter levels. */
 const METER_POLL_MS = 50;
 
+/**
+ * How often (ms) to drain the engine's fault-event ring. SEPARATE from the meter
+ * poll on purpose: meters early-return when no signal-level UI is mounted, but a
+ * fault must be drained whether or not any meter is on screen — folding the two
+ * would silently never surface a dropout during a set with no meter open. A
+ * fault that lands one block late at 100 ms cadence is still "instant" to a human
+ * ear; it does not need the 50 ms meter rate, and a slower tick keeps the ring
+ * drained without churning React.
+ */
+const EVENT_POLL_MS = 100;
+
+/** Scope-bound DevLog logger for this executor (routes through the L4 facade). */
+const log = logger('native');
+
 /** True when running inside a Tauri webview (the native desktop shell). */
 export function isTauri(): boolean {
     if (typeof window === 'undefined') return false;
     return Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__);
+}
+
+/**
+ * Coalesce a batch of engine events so a per-block fault storm collapses to a
+ * compact, history-preserving summary BEFORE it reaches the 5000-cap DevLog ring.
+ *
+ * Rules (order-stable for everything kept):
+ *   • All `Xrun`s in the batch fold into ONE event whose `dropped` is their sum
+ *     (the engine already coalesces between events; this folds across a batch).
+ *   • Repeated `NodeFault`s for the SAME (node, fault) fold into one, keeping the
+ *     first envelope (timestamp/seq) so click-to-correlate still lands.
+ *   • Every other kind passes through verbatim, in arrival order.
+ *
+ * Pure + exported so the dedup logic is unit-testable without the executor.
+ */
+export function coalesceEvents(events: readonly EngineEvent[]): EngineEvent[] {
+    const out: EngineEvent[] = [];
+    let xrun: EngineEvent | null = null;
+    let xrunDropped = 0;
+    // Track which (node|fault) NodeFaults we've already emitted this batch.
+    const seenFaults = new Set<string>();
+
+    for (const ev of events) {
+        const kind = ev.kind;
+        if (typeof kind === 'object' && 'Xrun' in kind) {
+            xrunDropped += kind.Xrun.dropped;
+            // Keep the FIRST Xrun envelope as the representative; rewrite its count
+            // at the end so the surfaced entry reflects the whole batch.
+            if (xrun === null) xrun = ev;
+            continue;
+        }
+        if (typeof kind === 'object' && 'NodeFault' in kind) {
+            const key = `${kind.NodeFault.node}|${kind.NodeFault.fault}`;
+            if (seenFaults.has(key)) continue;
+            seenFaults.add(key);
+            out.push(ev);
+            continue;
+        }
+        out.push(ev);
+    }
+
+    if (xrun !== null) {
+        // Rebuild the single rolled-up Xrun with the summed dropped count.
+        out.push({ ...xrun, kind: { Xrun: { dropped: xrunDropped } } });
+    }
+    return out;
 }
 
 /**
@@ -107,6 +171,9 @@ export class OjcoreNativeExecutor implements Executor {
     private levels = new Map<string, number>();
     /** Interval id for the meter poll loop (engine -> UI level stream). */
     private meterPollId: number | null = null;
+    /** Interval id for the DEDICATED, unconditional fault-event drain loop. Its
+     *  own timer so it drains regardless of whether any meter UI is mounted. */
+    private eventPollId: number | null = null;
     /** Serialized last-pushed OjGraph, to skip redundant `push_graph` IPC when a
      *  store notification fires but the audio graph is unchanged (dedupe). */
     private lastPushedGraph: string | null = null;
@@ -135,10 +202,14 @@ export class OjcoreNativeExecutor implements Executor {
         this.getConnections = getConnections;
 
         if (!this.invoke) {
-            console.warn(
-                '[OjcoreNativeExecutor] Tauri global IPC bridge not found ' +
-                    '(set app.withGlobalTauri=true in tauri.conf.json). Native audio disabled.',
+            // We were selected as the NATIVE executor (Tauri was detected) yet the
+            // global IPC bridge is missing — the engine cannot make sound. Surface
+            // DEAD (not a lone console.warn) so the fault is visible, calmly.
+            log.error(
+                'Tauri global IPC bridge not found (set app.withGlobalTauri=true ' +
+                    'in tauri.conf.json). Native audio disabled.',
             );
+            setEngineHealth('DEAD', 'native IPC bridge unavailable');
         }
 
         const unsubNodes = subscribeToNodes(() => this.pushGraph());
@@ -153,6 +224,8 @@ export class OjcoreNativeExecutor implements Executor {
 
         // Begin the engine -> UI meter event stream (no-op without Tauri).
         this.startMeterStream();
+        // Begin the dedicated fault-event drain (its OWN cadence; see startEventDrain).
+        this.startEventDrain();
     }
 
     /** The native (Tauri) capability row — the flagship. */
@@ -166,6 +239,10 @@ export class OjcoreNativeExecutor implements Executor {
         if (this.meterPollId !== null) {
             clearInterval(this.meterPollId);
             this.meterPollId = null;
+        }
+        if (this.eventPollId !== null) {
+            clearInterval(this.eventPollId);
+            this.eventPollId = null;
         }
         this.signalCallbacks.clear();
         this.levels.clear();
@@ -185,7 +262,7 @@ export class OjcoreNativeExecutor implements Executor {
         if (!this.invoke || this.meterPollId !== null) return;
         // Ask the backend to enable metering (zero-cost while no graph runs).
         this.invoke('subscribe_meters', {}).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] subscribe_meters failed:', err);
+            log.error('subscribe_meters failed', { detail: String(err) });
         });
         this.meterPollId = window.setInterval(() => {
             void this.pollMeters();
@@ -218,6 +295,68 @@ export class OjcoreNativeExecutor implements Executor {
         }
     }
 
+    // --- Fault-event drain -------------------------------------------------
+    // A DEDICATED, unconditional loop — NOT folded into the meter poll above,
+    // which early-returns when no signal-level subscriber is mounted. A fault
+    // must reach the DevLog whether or not a meter is on screen, so this drain
+    // runs on its own cadence and only ever stops on `dispose()`.
+
+    /** Begin draining the engine's fault-event ring on a fixed cadence.
+     *  Idempotent (a single loop); self-disables (no spam) without Tauri. */
+    private startEventDrain(): void {
+        if (this.eventPollId !== null) return;
+        this.eventPollId = window.setInterval(() => {
+            void this.pollEvents();
+        }, EVENT_POLL_MS);
+    }
+
+    /**
+     * Drain pending engine fault events, COALESCE repeated Xrun/NodeFault, and
+     * ingest the result into the DevLog ring. Coalescing happens at the drain,
+     * BEFORE ingest, because a faulting node emits a NodeFault EVERY block: an
+     * unfiltered firehose would evict real history from the 5000-cap ring (and
+     * jank React) during the exact dropout we need to diagnose.
+     *
+     * Self-disabling: when the IPC bridge is absent the drain is a quiet no-op
+     * (no console spam every tick) — the DEAD state was already surfaced at
+     * `initialize`.
+     */
+    private async pollEvents(): Promise<void> {
+        if (!this.invoke) return;
+        let events: EngineEvent[];
+        try {
+            events = (await this.invoke('poll_events', {})) as EngineEvent[];
+        } catch {
+            return; // transient; next tick retries
+        }
+        if (!Array.isArray(events) || events.length === 0) return;
+
+        const store = useLogStore.getState();
+        let sawFault = false;
+        let sawDeviceLost = false;
+        // Coalesce: keep one representative per "noisy" kind, summing the Xrun
+        // dropped counts and counting repeats, so a per-block storm collapses to a
+        // single rolled-up entry. Non-noisy kinds pass through verbatim, in order.
+        const coalesced = coalesceEvents(events);
+        for (const ev of coalesced) {
+            store.ingestEngineEvent(ev);
+            const kind = ev.kind;
+            if (typeof kind === 'object' && ('NodeFault' in kind || 'Xrun' in kind)) {
+                sawFault = true;
+            } else if (kind === 'Lifecycle') {
+                // The engine emits Lifecycle for device-loss in this wave (see
+                // engine.rs adopt()); treat it as a degraded signal.
+                sawDeviceLost = true;
+            }
+        }
+
+        if (sawDeviceLost) {
+            setEngineHealth('DEGRADED', 'audio device lost');
+        } else if (sawFault) {
+            setEngineHealth('DEGRADED', 'engine reported a fault');
+        }
+    }
+
     /** Emit + remap + push the current graph to the native engine. */
     private pushGraph(): void {
         if (!this.getNodes || !this.getConnections) return;
@@ -239,17 +378,37 @@ export class OjcoreNativeExecutor implements Executor {
         // subscriber (or a render loop) from hammering the native engine.
         const serialized = JSON.stringify(native);
         if (serialized === this.lastPushedGraph) return;
+        // Remember the prior accepted graph so a REJECTED push can roll the dedupe
+        // cache back — keeping the last good audio AND letting the next store
+        // notification re-attempt instead of being deduped away (held-note rule).
+        const prev = this.lastPushedGraph;
         this.lastPushedGraph = serialized;
-        void this.sendGraph(native);
+        void this.sendGraph(native, prev);
     }
 
-    private async sendGraph(graph: OjGraph): Promise<void> {
+    private async sendGraph(graph: OjGraph, prevSerialized: string | null): Promise<void> {
         if (!this.invoke) return;
         try {
             await this.invoke('push_graph', { graph });
         } catch (err) {
-            console.error('[OjcoreNativeExecutor] push_graph failed:', err);
+            // HELD NOTE BEATS A GLITCH: a rejected push (Compile / RingFull) does
+            // NOT tear down the prior graph — the engine keeps the last good
+            // program running (see engine.rs adopt(): it only swaps on success).
+            // We roll the dedupe cache back to the last ACCEPTED graph so we don't
+            // pretend the rejected one is live, and report DEGRADED quietly (no
+            // modal, no focus steal) instead of a lone console.error.
+            this.lastPushedGraph = prevSerialized;
+            log.warn('push_graph rejected; keeping last good audio', { detail: String(err) });
+            setEngineHealth('DEGRADED', 'graph rejected; last good sound held');
             return;
+        }
+        // The push was accepted: a graph is live, so we are no longer in the
+        // honest "nothing has happened yet" IDLE state. Per the tri-state model
+        // (IDLE before the first graph; DEAD only on a real death; DEGRADED
+        // otherwise) the post-first-graph baseline is DEGRADED — but ONLY lift out
+        // of IDLE; never downgrade a real DEAD signal back to DEGRADED here.
+        if (useEngineHealthStore.getState().health === 'IDLE') {
+            setEngineHealth('DEGRADED', 'engine active');
         }
         // A UI push REPLACES the engine's kept graph, dropping any imperatively
         // bound sample (see engine.rs push_graph), so (re)install the built-in
@@ -286,7 +445,7 @@ export class OjcoreNativeExecutor implements Executor {
     private send(cmd: RtCommand): void {
         if (!this.invoke) return;
         this.invoke('send_command', { cmd }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] send_command failed:', err);
+            log.error('send_command failed', { detail: String(err) });
         });
     }
 
@@ -367,7 +526,7 @@ export class OjcoreNativeExecutor implements Executor {
             volume: isMuted ? 0 : volume,
             muted: isMuted,
         }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] set_speaker_volume failed:', err);
+            log.error('set_speaker_volume failed', { detail: String(err) });
         });
     }
     setSpeakerDevice(nodeId: string, deviceId: string): void {
@@ -375,7 +534,7 @@ export class OjcoreNativeExecutor implements Executor {
         const node = this.index.get(nodeId);
         if (node === undefined) return;
         this.invoke('set_speaker_device', { node, deviceId }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] set_speaker_device failed:', err);
+            log.error('set_speaker_device failed', { detail: String(err) });
         });
     }
 
@@ -402,7 +561,7 @@ export class OjcoreNativeExecutor implements Executor {
         const node = this.index.get(nodeId);
         if (node === undefined) return;
         this.invoke('set_mic', { node, enabled: true }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] set_mic failed:', err);
+            log.error('set_mic failed', { detail: String(err) });
         });
     }
 
@@ -469,7 +628,7 @@ export class OjcoreNativeExecutor implements Executor {
                 rootNote,
             });
         } catch (err) {
-            console.error('[OjcoreNativeExecutor] load_sample failed:', err);
+            log.error('load_sample failed', { detail: String(err) });
         }
     }
 
@@ -479,7 +638,7 @@ export class OjcoreNativeExecutor implements Executor {
         const idx = this.index.get(nodeId);
         if (idx === undefined) return;
         this.invoke('recorder_start', { node: idx }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] recorder_start failed:', err);
+            log.error('recorder_start failed', { detail: String(err) });
         });
     }
 
@@ -499,7 +658,7 @@ export class OjcoreNativeExecutor implements Executor {
             if (!res || !res.pcm || res.pcm.length === 0) return null;
             return monoPcmToWavBlob(Float32Array.from(res.pcm), res.sampleRate);
         } catch (err) {
-            console.error('[OjcoreNativeExecutor] recorder_stop failed:', err);
+            log.error('recorder_stop failed', { detail: String(err) });
             return null;
         }
     }

@@ -6,12 +6,18 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
-import { installConsoleCapture } from './utils/log'
+import { installConsoleCapture, installGlobalErrorHandlers } from './utils/log'
 import './components/AppErrorBoundary.css'
 
 // Route every console.* line into the DevLog ring (and thereby the AI agent's
 // get_logs tool) before anything else logs. Idempotent + StrictMode-safe.
 installConsoleCapture()
+
+// Catch uncaught errors + unhandled promise rejections that never reach a React
+// error boundary, ALLOWLISTED to the app's own origin so third-party / browser
+// extension noise never pollutes the DevLog. Must run before app code so an
+// early throw is still captured.
+installGlobalErrorHandlers()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

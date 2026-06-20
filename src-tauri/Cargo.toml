@@ -62,6 +62,15 @@ tauri-plugin-opener = "2.5.4"
 serde = { workspace = true, features = ["std"] }
 serde_json = "1.0.150"
 
+# --- off-RT structured logging (L1) ------------------------------------------
+# The shell brings up the `tracing` NDJSON sink (`ojcore_native::init_logging`)
+# and routes a panic hook through it. STD-only, OFF the audio thread — the audio
+# callback owns the engine inside cpal and has no `tracing` dependency, so a
+# `tracing::*` call there cannot compile. `tracing-appender` is needed only to
+# name the `WorkerGuard` flush-guard parked in managed state.
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+
 [features]
 # This feature must be enabled when building the app in production, so the
 # webview loads the bundled frontend instead of the dev server. Tauri's CLI sets

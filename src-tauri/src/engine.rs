@@ -150,6 +150,13 @@ pub struct EngineBackend {
     event_ring: Arc<EventRing>,
     /// Monotonic sequence assigned while lifting compact RT events off-thread.
     event_seq: u32,
+    /// Control-side queue of synthesized `Event`s that do NOT originate on the RT
+    /// event ring — e.g. a `Lifecycle` device-loss when an audio host restart
+    /// fails. The ring is `Copy`-only (`RtEvent` carries no `Lifecycle` variant),
+    /// so these full envelopes are parked here and prepended by [`drain_events`]
+    /// so the fault still reaches the pipe. Off-RT: only the control thread (these
+    /// command handlers) ever pushes/drains it.
+    pending_events: Vec<Event>,
     /// Whether metering is enabled (mirrored so a graph swap re-applies it).
     metering: bool,
     /// Off-RT content-addressed asset catalog (sample PCM for the sampler,
@@ -252,6 +259,7 @@ impl EngineBackend {
             meter_ring,
             event_ring,
             event_seq: 0,
+            pending_events: Vec::new(),
             metering: false,
             catalog: AssetCatalog::new(),
             store: AssetStore::new(),
@@ -409,11 +417,40 @@ impl EngineBackend {
                 self.producer = producer;
             }
             Err(e) => {
+                // Device-less or incompatible default output: the start failed.
+                // STOP swallowing this as a bare eprintln — emit a `Lifecycle`
+                // event into the pipe so the fault surfaces in the DevLog and the
+                // tri-state health goes DEGRADED (the auto-rebuild recovery is a
+                // later wave; here we just make it visible, not silent). The prior
+                // program / last good sound is untouched (there was none to keep on
+                // a cold start, but we still never tear anything down here).
                 eprintln!("ojcore: audio host failed to start (non-fatal): {e}");
+                self.emit_lifecycle(format!("audio host failed to start: {e}"));
                 self.producer = producer;
             }
         }
         Ok(())
+    }
+
+    /// Queue a control-side `Lifecycle` `Event` (device-loss / host-restart
+    /// failure) onto [`pending_events`], to be drained by [`drain_events`]. The
+    /// RT event ring is `Copy`-only and has no `Lifecycle` variant, so these
+    /// synthesized envelopes ride this off-RT queue instead. Pure control-thread
+    /// work — never called from the audio callback.
+    fn emit_lifecycle(&mut self, text: String) {
+        self.event_seq = self.event_seq.wrapping_add(1);
+        self.pending_events.push(Event {
+            v: ojproto::SCHEMA_VERSION,
+            seq: self.event_seq,
+            severity: Severity::Warn,
+            kind: EventKind::Lifecycle,
+            source: Source::Native,
+            ts_us: now_us(),
+            corr_id: 0,
+        });
+        // `text` is folded into the structured NDJSON record for the post-crash
+        // trail; the UI surfaces the `Lifecycle` kind itself (a calm DEGRADED).
+        tracing::warn!(target: "engine", "{text}");
     }
 
     /// Enqueue one [`RtCommand`] onto the UI->RT ring (the high-rate control
@@ -468,7 +505,9 @@ impl EngineBackend {
     /// DevLog/diagnostics. Control-rate: called by the UI poll command, never on
     /// the audio thread.
     pub fn drain_events(&mut self) -> Vec<Event> {
-        let mut out = Vec::new();
+        // Control-side synthesized events (device-loss `Lifecycle`, …) first, so a
+        // host-restart failure reaches the pipe alongside RT faults in one drain.
+        let mut out = std::mem::take(&mut self.pending_events);
         event_frame::drain_events(&self.event_ring, |rt| {
             self.event_seq = self.event_seq.wrapping_add(1);
             out.push(lift_event(rt, self.event_seq, now_us()));

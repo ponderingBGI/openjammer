@@ -306,6 +306,39 @@ fn update_rollback(app: tauri::AppHandle) -> Option<backup::RestoreData> {
     backup::restore(&app)
 }
 
+/// Tauri-managed holder for the `tracing` non-blocking writer's flush guard.
+/// Held for the process lifetime: dropping it (on app teardown) flushes any
+/// buffered NDJSON records out of the background writer. A newtype so it can be
+/// `manage`d without leaking the `tracing_appender` type into command handlers.
+struct LogGuard(#[allow(dead_code)] tracing_appender::non_blocking::WorkerGuard);
+
+/// Install a process-wide panic hook that routes a host panic through the SAME
+/// off-RT `tracing` channel as everything else, so the most catastrophic class
+/// (a Rust panic on a control thread) is VISIBLE in the NDJSON record instead of
+/// dying silently. The previous default hook (stderr only) is chained after ours
+/// so a debug terminal still shows the backtrace. The audio thread never panics
+/// through here — it owns the engine inside cpal and has no `tracing` dep.
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Best-effort structured capture: location + payload, no allocation on any
+        // RT path (this is a control-thread panic by construction).
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "unknown".to_string());
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".to_string());
+        tracing::error!(target: "panic", location = %location, payload = %payload, "host panic");
+        // Chain the original hook so stderr / debugger behaviour is preserved.
+        default_hook(info);
+    }));
+}
+
 /// Build and run the Tauri application. Shared between the desktop binary
 /// (`main.rs`) and any future mobile entry point (the Tauri convention).
 ///
@@ -331,6 +364,22 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // Bring up the off-RT structured logging sink (human stderr + a
+            // daily-rolling NDJSON file under the platform log dir) and PARK its
+            // flush guard in managed state for the process lifetime — dropping the
+            // guard flushes the non-blocking writer, so it must outlive `setup`.
+            // The file is fed ONLY by the off-RT path (tracing call sites on the
+            // control thread + this panic hook); the audio callback never touches
+            // it. Best-effort: if the log dir is unavailable we skip the file sink
+            // rather than fail startup.
+            if let Ok(log_dir) = app.path().app_log_dir() {
+                if std::fs::create_dir_all(&log_dir).is_ok() {
+                    let guard = ojcore_native::init_logging(&log_dir);
+                    app.manage(LogGuard(guard));
+                    install_panic_hook();
+                }
+            }
+
             app.manage(BackendState::new());
             // The at-most-one warm Pi child for the session (Phase 1: instant feel).
             app.manage(ai::WarmChildState::default());

@@ -1,0 +1,73 @@
+/**
+ * Engine health store (Phase 1) — the tri-state ambient health of the audio
+ * engine, surfaced WITHOUT stealing the performer's focus.
+ *
+ * This is deliberately a tiny, headless state container: it holds one enum and
+ * a short reason string. There is NO visual dot here — the ambient health dot is
+ * Wave 2 (Phase 2), which will subscribe to this store. Keeping the state and its
+ * presentation separate means the fault pipe can be wired (and tested) now,
+ * before any UI exists, and means there is ONE owner of "how healthy is the
+ * engine" instead of a flag scattered across components.
+ *
+ * THE THREE STATES (and why three, not two):
+ *   • IDLE     — the honest "nothing has happened yet" state. Before the first
+ *                graph is pushed there is genuinely no engine activity to judge,
+ *                so this must NEVER alarm. We deliberately do NOT derive health
+ *                from the engine's raw `engine_running` flag, which is
+ *                `self.host.is_some()` and documented-false on cold start / a
+ *                device-less boot — alarming on it would cry wolf during the
+ *                exact calm before a set when the player is plugging in.
+ *   • DEGRADED — something went wrong but the last good sound is preserved (a
+ *                rejected graph push kept the prior graph; a recoverable fault
+ *                was reported). The performer can keep playing; we whisper, we
+ *                never grab focus.
+ *   • DEAD     — the engine cannot make sound: the native IPC bridge is absent
+ *                (`getInvoke() === null` where we expected Tauri), or a graph was
+ *                acknowledged yet the stream is down. This is the only state that
+ *                warrants a loud-but-still-calm signal in Wave 2.
+ *
+ * Reaching DEAD is sticky relative to DEGRADED (a dead engine is strictly worse
+ * than a degraded one), but any state can be set explicitly — the executor owns
+ * the transitions and knows the truth at each call site.
+ */
+
+import { create } from 'zustand';
+
+/**
+ * The tri-state engine health. Ordered loosely by severity for readability;
+ * the store does not rank them — callers set the truth they observe.
+ */
+export type EngineHealth = 'IDLE' | 'DEGRADED' | 'DEAD';
+
+interface EngineHealthState {
+    /** Current tri-state health. Starts `IDLE` (never an alarm). */
+    health: EngineHealth;
+    /** A short, human-readable reason for the current state (for the Wave-2
+     *  tooltip / DevLog correlation). Empty while `IDLE`. */
+    reason: string;
+    /**
+     * Set the current health + a short reason. The single transition entry point
+     * so every state change is one call (and trivially traceable). Idempotent:
+     * setting the same state with the same reason is a no-op (no needless
+     * re-render / subscriber churn during a fault storm).
+     */
+    setHealth: (health: EngineHealth, reason?: string) => void;
+}
+
+export const useEngineHealthStore = create<EngineHealthState>((set, get) => ({
+    health: 'IDLE',
+    reason: '',
+    setHealth: (health, reason = '') => {
+        const cur = get();
+        if (cur.health === health && cur.reason === reason) return;
+        set({ health, reason });
+    },
+}));
+
+/**
+ * Non-React accessor for the executor (which is a plain class, not a hook
+ * consumer). Mirrors how `logStore` is reached via `useLogStore.getState()`.
+ */
+export function setEngineHealth(health: EngineHealth, reason?: string): void {
+    useEngineHealthStore.getState().setHealth(health, reason);
+}
