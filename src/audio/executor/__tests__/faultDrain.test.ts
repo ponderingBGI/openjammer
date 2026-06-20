@@ -9,7 +9,9 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { Event as EngineEvent } from '../../../../packages/oj-protocol-ts/src/index';
 import { coalesceEvents } from '../OjcoreNativeExecutor';
+import { ingestEngineEvents } from '../faultPipe';
 import { useEngineHealthStore, setEngineHealth } from '../../../store/engineHealthStore';
+import { useLogStore, _resetLogStoreForTests } from '../../../store/logStore';
 
 function ev(seq: number, kind: EngineEvent['kind'], severity: EngineEvent['severity'] = 'Warn'): EngineEvent {
     return { v: 1, seq, severity, kind, source: 'Engine', ts_us: seq * 1000, corr_id: 0 };
@@ -85,5 +87,32 @@ describe('engineHealthStore', () => {
         setEngineHealth('DEGRADED', 'x');
         // No new object identity churn when nothing changed.
         expect(useEngineHealthStore.getState()).toBe(first);
+    });
+});
+
+describe('ingestEngineEvents (the shared fault sink, both tiers)', () => {
+    beforeEach(() => {
+        _resetLogStoreForTests();
+        useEngineHealthStore.setState({ health: 'IDLE', reason: '' });
+    });
+
+    it('coalesces, ingests into the DevLog ring, and nudges health to DEGRADED', () => {
+        // A per-block NodeFault storm for ONE (node, fault) must collapse to a
+        // single ring entry — not 3 — so real history is not evicted.
+        ingestEngineEvents([
+            ev(1, { NodeFault: { node: 2, fault: 'NonFinite' } }, 'Error'),
+            ev(2, { NodeFault: { node: 2, fault: 'NonFinite' } }, 'Error'),
+            ev(3, { NodeFault: { node: 2, fault: 'NonFinite' } }, 'Error'),
+        ]);
+        const entries = useLogStore.getState().entries;
+        expect(entries).toHaveLength(1);
+        expect(useEngineHealthStore.getState().health).toBe('DEGRADED');
+        expect(useEngineHealthStore.getState().reason).toBe('engine reported a fault');
+    });
+
+    it('does nothing for an empty batch (no health churn, no ring entry)', () => {
+        ingestEngineEvents([]);
+        expect(useLogStore.getState().entries).toHaveLength(0);
+        expect(useEngineHealthStore.getState().health).toBe('IDLE');
     });
 });

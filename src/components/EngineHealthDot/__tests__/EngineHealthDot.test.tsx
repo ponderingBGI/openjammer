@@ -50,9 +50,16 @@ describe('presentHealth (pure mapping)', () => {
         expect(p.blurb).toContain('IPC bridge absent');
     });
 
-    it('never advertises sub-5 ms latency (honest tiers only)', () => {
-        expect(latencyTierLabel(true)).not.toMatch(/sub-?5|under 5/i);
+    it('is honest about latency tiers (device-dependent native, never sub-5 ms browser)', () => {
+        // Native is device-dependent: it CAN be sub-5 ms when the device grants a
+        // small buffer (measured ~1.3 ms, Fixed(64) @ 48 kHz on a Windows test
+        // machine) and ~10 ms+ when it forces a larger period — so the honest
+        // label names BOTH ends of the range, not a single fixed figure.
+        expect(latencyTierLabel(true)).toMatch(/sub-?5 ms/i);
         expect(latencyTierLabel(true)).toMatch(/10 ms/i);
+        expect(latencyTierLabel(true)).toMatch(/device-dependent/i);
+        // The browser tier is never dressed up as sub-5 ms — it is an honest tier.
+        expect(latencyTierLabel(false)).not.toMatch(/sub-?5|under 5/i);
         expect(latencyTierLabel(false)).toMatch(/15.?25/);
     });
 });

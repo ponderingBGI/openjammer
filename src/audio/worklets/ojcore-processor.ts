@@ -387,6 +387,20 @@ class OjcoreProcessor extends AudioWorkletProcessor {
                 }
             }
         }
+
+        // Faults: surface engine node-faults (NaN/garbage) to the UI fault pipe.
+        // UNCONDITIONAL — NOT gated on `metersEnabled`, because a fault must reach
+        // the DevLog whether or not a meter UI is mounted (the same lesson the
+        // native poll loop encodes). `has_pending_events` is a cheap, alloc-free
+        // bool scan every block; the allocating `drain_events` (JSON `Event` bytes
+        // in the native wire shape) runs ONLY when a fault is actually pending, so
+        // a fault-free block costs nothing on the render path beyond the bool check.
+        if (wasm.has_pending_events() as boolean) {
+            const bytes = wasm.drain_events() as Uint8Array;
+            if (bytes && bytes.length > 0) {
+                this.port.postMessage({ type: 'events', bytes }, [bytes.buffer]);
+            }
+        }
         return true;
     }
 }

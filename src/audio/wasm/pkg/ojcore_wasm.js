@@ -28,6 +28,29 @@ export function cmd_ring_ptr() {
 }
 
 /**
+ * Drain the engine's per-node resilience flags into a JSON `Vec<Event>` — the
+ * SAME wire shape the native `poll_events` returns, so the one TS fault pipe
+ * ingests both tiers identically.
+ *
+ * The RT event RING and the CPU watchdog are `std`-only, so the wasm tier
+ * surfaces faults straight from [`NodeBudget`] (the `no_std` NaN/garbage guard
+ * `sanitize` sets `non_finite` from the render path) — exactly how
+ * [`drain_meters`] reads `meters_mut`. Consumed flags are CLEARED so each fault
+ * surfaces once per drain window; a persistently-bad node re-raises next block
+ * and the TS coalescer collapses the storm (parity with native). Returns an
+ * empty `Vec` (no allocation) when there is no fault — the common case. Off the
+ * critical path: a fault means something is already wrong, so the rare alloc is
+ * fine, mirroring `drain_meters`.
+ * @returns {Uint8Array}
+ */
+export function drain_events() {
+    const ret = wasm.drain_events();
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
  * Drain the current per-node + master meter windows as a FLAT `[node, peak, ...]`
  * `f32` array (node ids are exact integers within `f32`'s safe range for any
  * realistic node count). The master level is appended last under the master
@@ -74,6 +97,19 @@ export function encode_meter_frame(node, rms, peak) {
     var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v1;
+}
+
+/**
+ * True when the engine has at least one pending node-fault flag. A cheap
+ * O(nodes) bool scan with NO allocation — the worklet calls it every block and
+ * only invokes [`drain_events`] when it is set, so the (allocating) event
+ * serialization never runs on a fault-free block. NOT gated on metering: a fault
+ * must surface even when no meter UI is subscribed.
+ * @returns {boolean}
+ */
+export function has_pending_events() {
+    const ret = wasm.has_pending_events();
+    return ret !== 0;
 }
 
 /**

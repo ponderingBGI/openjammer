@@ -60,9 +60,14 @@ import {
     monoPcmToWavBlob,
     type OjcoreBridge,
 } from './ojcoreHandles';
-import { useLogStore } from '../../store/logStore';
 import { logger } from '../../utils/log';
 import { setEngineHealth, useEngineHealthStore } from '../../store/engineHealthStore';
+import { ingestEngineEvents } from './faultPipe';
+
+// Re-exported for back-compat: `coalesceEvents` moved to the shared `faultPipe`
+// seam (Wave 4) so both executor tiers share one fault path. Existing importers
+// (and tests) that reach for it here still resolve.
+export { coalesceEvents } from './faultPipe';
 
 /** Minimal shape of the Tauri global IPC bridge (`withGlobalTauri`). */
 interface TauriGlobal {
@@ -101,52 +106,6 @@ const log = logger('native');
 export function isTauri(): boolean {
     if (typeof window === 'undefined') return false;
     return Boolean((window as unknown as { __TAURI__?: unknown }).__TAURI__);
-}
-
-/**
- * Coalesce a batch of engine events so a per-block fault storm collapses to a
- * compact, history-preserving summary BEFORE it reaches the 5000-cap DevLog ring.
- *
- * Rules (order-stable for everything kept):
- *   • All `Xrun`s in the batch fold into ONE event whose `dropped` is their sum
- *     (the engine already coalesces between events; this folds across a batch).
- *   • Repeated `NodeFault`s for the SAME (node, fault) fold into one, keeping the
- *     first envelope (timestamp/seq) so click-to-correlate still lands.
- *   • Every other kind passes through verbatim, in arrival order.
- *
- * Pure + exported so the dedup logic is unit-testable without the executor.
- */
-export function coalesceEvents(events: readonly EngineEvent[]): EngineEvent[] {
-    const out: EngineEvent[] = [];
-    let xrun: EngineEvent | null = null;
-    let xrunDropped = 0;
-    // Track which (node|fault) NodeFaults we've already emitted this batch.
-    const seenFaults = new Set<string>();
-
-    for (const ev of events) {
-        const kind = ev.kind;
-        if (typeof kind === 'object' && 'Xrun' in kind) {
-            xrunDropped += kind.Xrun.dropped;
-            // Keep the FIRST Xrun envelope as the representative; rewrite its count
-            // at the end so the surfaced entry reflects the whole batch.
-            if (xrun === null) xrun = ev;
-            continue;
-        }
-        if (typeof kind === 'object' && 'NodeFault' in kind) {
-            const key = `${kind.NodeFault.node}|${kind.NodeFault.fault}`;
-            if (seenFaults.has(key)) continue;
-            seenFaults.add(key);
-            out.push(ev);
-            continue;
-        }
-        out.push(ev);
-    }
-
-    if (xrun !== null) {
-        // Rebuild the single rolled-up Xrun with the summed dropped count.
-        out.push({ ...xrun, kind: { Xrun: { dropped: xrunDropped } } });
-    }
-    return out;
 }
 
 /**
@@ -335,31 +294,9 @@ export class OjcoreNativeExecutor implements Executor {
             return; // transient; next tick retries
         }
         if (!Array.isArray(events) || events.length === 0) return;
-
-        const store = useLogStore.getState();
-        let sawFault = false;
-        let sawDeviceLost = false;
-        // Coalesce: keep one representative per "noisy" kind, summing the Xrun
-        // dropped counts and counting repeats, so a per-block storm collapses to a
-        // single rolled-up entry. Non-noisy kinds pass through verbatim, in order.
-        const coalesced = coalesceEvents(events);
-        for (const ev of coalesced) {
-            store.ingestEngineEvent(ev);
-            const kind = ev.kind;
-            if (typeof kind === 'object' && ('NodeFault' in kind || 'Xrun' in kind)) {
-                sawFault = true;
-            } else if (kind === 'Lifecycle') {
-                // The engine emits Lifecycle for device-loss in this wave (see
-                // engine.rs adopt()); treat it as a degraded signal.
-                sawDeviceLost = true;
-            }
-        }
-
-        if (sawDeviceLost) {
-            setEngineHealth('DEGRADED', 'audio device lost');
-        } else if (sawFault) {
-            setEngineHealth('DEGRADED', 'engine reported a fault');
-        }
+        // The ONE shared fault sink (coalesce -> ingest -> health), identical for
+        // the wasm tier — see `faultPipe.ts`. No second owner of the fault path.
+        ingestEngineEvents(events);
     }
 
     /** Emit + remap + push the current graph to the native engine. */

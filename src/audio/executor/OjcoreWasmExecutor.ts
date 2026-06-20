@@ -47,12 +47,18 @@ import {
     instrumentUsesKarplus,
 } from '../defaultInstrument';
 import { emitWithIndex, remapForBackend, resolveKeyboardNotes, type NodeIdxMap } from '../ojgraph';
-import type { NodeIdx, OjGraph, RtCommand } from '../../../packages/oj-protocol-ts/src/index';
+import type {
+    NodeIdx,
+    OjGraph,
+    RtCommand,
+    Event as EngineEvent,
+} from '../../../packages/oj-protocol-ts/src/index';
 import {
     OjcoreCapabilityRegistry,
     monoPcmToWavBlob,
     type OjcoreBridge,
 } from './ojcoreHandles';
+import { ingestEngineEvents } from './faultPipe';
 
 // Vite resolves these to URLs/assets at build time.
 // The worklet processor module (bundled as an ES module worklet).
@@ -219,6 +225,7 @@ export class OjcoreWasmExecutor implements Executor {
                 sampleRate?: number;
                 assetId?: number;
                 rootNote?: number;
+                bytes?: Uint8Array;
             };
             switch (data.type) {
                 case 'ready':
@@ -236,6 +243,9 @@ export class OjcoreWasmExecutor implements Executor {
                     break;
                 case 'meters':
                     this.onMeterFrame(data.levels ?? []);
+                    break;
+                case 'events':
+                    this.onEngineEvents(data.bytes);
                     break;
                 case 'recorder-data':
                     this.onRecorderData(data.node, data.pcm, data.sampleRate);
@@ -426,6 +436,30 @@ export class OjcoreWasmExecutor implements Executor {
             const snapshot = new Map(this.levels);
             for (const cb of this.signalCallbacks) cb(snapshot);
         }
+    }
+
+    /**
+     * Surface a batch of engine fault `Event`s the worklet drained (the browser
+     * tier's half of the fault pipe). The bytes are a JSON `Event[]` in the SAME
+     * wire shape `poll_events` returns on native, so the SAME shared sink
+     * (`ingestEngineEvents`: coalesce -> DevLog ring -> health) handles both tiers
+     * — one fault path, no fork. The worklet has no wall clock, so each event's
+     * `ts_us` arrives `0`; we stamp it here on the main thread before ingest.
+     */
+    private onEngineEvents(bytes?: Uint8Array): void {
+        if (!bytes || bytes.length === 0) return;
+        let events: EngineEvent[];
+        try {
+            events = JSON.parse(new TextDecoder().decode(bytes)) as EngineEvent[];
+        } catch {
+            return; // malformed batch; drop rather than throw on the message path
+        }
+        if (!Array.isArray(events) || events.length === 0) return;
+        const nowUs = Date.now() * 1000;
+        for (const ev of events) {
+            if (ev.ts_us === 0) ev.ts_us = nowUs;
+        }
+        ingestEngineEvents(events);
     }
 
     /** Resolve a pending recorder capture with the worklet-returned PCM. */

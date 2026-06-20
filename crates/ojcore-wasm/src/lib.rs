@@ -53,7 +53,8 @@ use ojcore::{
 use ojcore_midiring::{header_offsets, CmdRing, MidiRing};
 use ojinstrument::{register_all, RegisterOpts};
 use ojproto::{
-    AssetId, EngineFrame, IrNode, NodeIdx, OjGraph, PrimitiveKind, RtCommand, SCHEMA_VERSION,
+    AssetId, EngineFrame, Event, EventKind, FaultKind, IrNode, NodeIdx, OjGraph, PrimitiveKind,
+    RtCommand, Severity, Source, SCHEMA_VERSION,
 };
 
 use wasm_bindgen::prelude::*;
@@ -180,6 +181,9 @@ struct Host {
     block_size: usize,
     /// Sample rate the engine compiles graphs against.
     sample_rate: u32,
+    /// Monotonic sequence stamped on each drained fault [`Event`] (wire parity
+    /// with the native backend's `event_seq`). Bumped per surfaced fault.
+    event_seq: u32,
 }
 
 /// The single host instance. SOUND because an AudioWorklet processor runs on
@@ -271,6 +275,7 @@ pub fn init(sample_rate: u32, block_size: u32) {
         assets,
         block_size,
         sample_rate,
+        event_seq: 0,
     };
 
     // SAFETY: single-threaded worklet init; no other reference is live.
@@ -587,6 +592,89 @@ pub fn drain_meters() -> Vec<f32> {
     out.push(master_id as f32);
     out.push(master_peak);
     out
+}
+
+// --- Fault events (Wave 4): node faults back to the UI ------------------------
+
+/// Build a `NodeFault` [`Event`] with the native wire shape. `ts_us` is left `0`
+/// (there is no wall clock in the AudioWorklet global scope); the main thread
+/// stamps it on receipt. `NodeFault` lifts to `Error` severity, matching the
+/// native `lift_event`. The source is `Wasm` so the DevLog scope reads `wasm`.
+fn node_fault_event(node: NodeIdx, fault: FaultKind, seq: u32) -> Event {
+    Event {
+        v: SCHEMA_VERSION,
+        seq,
+        severity: Severity::Error,
+        kind: EventKind::NodeFault { node, fault },
+        source: Source::Wasm,
+        ts_us: 0,
+        corr_id: 0,
+    }
+}
+
+/// True when the engine has at least one pending node-fault flag. A cheap
+/// O(nodes) bool scan with NO allocation — the worklet calls it every block and
+/// only invokes [`drain_events`] when it is set, so the (allocating) event
+/// serialization never runs on a fault-free block. NOT gated on metering: a fault
+/// must surface even when no meter UI is subscribed.
+#[wasm_bindgen]
+pub fn has_pending_events() -> bool {
+    host_ref().is_some_and(|h| h.engine.budget().any_flagged())
+}
+
+/// Drain the engine's per-node resilience flags into a JSON `Vec<Event>` — the
+/// SAME wire shape the native `poll_events` returns, so the one TS fault pipe
+/// ingests both tiers identically.
+///
+/// The RT event RING and the CPU watchdog are `std`-only, so the wasm tier
+/// surfaces faults straight from [`NodeBudget`] (the `no_std` NaN/garbage guard
+/// `sanitize` sets `non_finite` from the render path) — exactly how
+/// [`drain_meters`] reads `meters_mut`. Consumed flags are CLEARED so each fault
+/// surfaces once per drain window; a persistently-bad node re-raises next block
+/// and the TS coalescer collapses the storm (parity with native). Returns an
+/// empty `Vec` (no allocation) when there is no fault — the common case. Off the
+/// critical path: a fault means something is already wrong, so the rare alloc is
+/// fine, mirroring `drain_meters`.
+#[wasm_bindgen]
+pub fn drain_events() -> Vec<u8> {
+    let Some(host) = host_mut() else {
+        return Vec::new();
+    };
+    if !host.engine.budget().any_flagged() {
+        return Vec::new();
+    }
+    // Disjoint field borrows: `engine` (the program + flags) and `event_seq`.
+    let Host {
+        engine, event_seq, ..
+    } = host;
+    // Snapshot node ids before borrowing the budget (disjoint from the flag read).
+    let ids = engine.program().ids.clone();
+    let mut events: Vec<Event> = Vec::new();
+    {
+        let budget = engine.budget();
+        for (slot, &flagged) in budget.non_finite.iter().enumerate() {
+            if flagged {
+                *event_seq = event_seq.wrapping_add(1);
+                let node = ids.get(slot).copied().unwrap_or(NodeIdx(0));
+                events.push(node_fault_event(node, FaultKind::NonFinite, *event_seq));
+            }
+        }
+        // `over_budget` is only set when a watchdog is armed (std-only, never on
+        // wasm today), but we surface it too so a future wasm watchdog is covered
+        // with no further wiring.
+        for (slot, &flagged) in budget.over_budget.iter().enumerate() {
+            if flagged {
+                *event_seq = event_seq.wrapping_add(1);
+                let node = ids.get(slot).copied().unwrap_or(NodeIdx(0));
+                events.push(node_fault_event(node, FaultKind::OverBudget, *event_seq));
+            }
+        }
+    }
+    engine.budget_mut().clear();
+    if events.is_empty() {
+        return Vec::new();
+    }
+    serde_json::to_vec(&events).unwrap_or_default()
 }
 
 /// Encode a `Meter` [`EngineFrame`] to JSON — a convenience mirror for tests /
