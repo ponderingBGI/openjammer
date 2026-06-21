@@ -27,7 +27,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: supply-chain-${{ github.ref }}
+  # Per-PR-head-SHA so a mid-build push can't drop this run (see ci.yml).
+  group: supply-chain-${{ github.event.pull_request.head.sha || github.ref }}
   cancel-in-progress: true
 
 jobs:

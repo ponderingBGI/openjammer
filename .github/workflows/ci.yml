@@ -21,7 +21,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Key on the PR head SHA so a push landing during an in-progress run can never
+  # drop the new commit's run (which would leave the required "Merge gate" check
+  # unreported and block the PR). Falls back to github.ref for push events.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.ref }}
   cancel-in-progress: true
 
 env:
