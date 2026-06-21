@@ -18,6 +18,38 @@
 
 use std::io;
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// A process-wide monotonic nonce for staging temp names. Combined with the PID it
+/// makes every in-flight durable write stage into a UNIQUE sibling temp, so two
+/// concurrent writers to the same destination never clobber each other's staged
+/// bytes before the rename. (A deterministic `<dest>.ojtmp` would let one writer's
+/// half-written temp overwrite another's.)
+fn next_temp_nonce() -> u64 {
+    static NONCE: AtomicU64 = AtomicU64::new(0);
+    NONCE.fetch_add(1, Ordering::Relaxed)
+}
+
+/// The unique sibling temp name a crash-safe write of `dest` stages into:
+/// `<dest>.<pid>.<nonce>.ojtmp`. Same directory ⇒ the rename is a same-filesystem
+/// atomic op; unique per write ⇒ concurrent writers don't collide.
+pub(crate) fn unique_temp_name(dest: &str) -> String {
+    format!("{dest}.{}.{}.ojtmp", std::process::id(), next_temp_nonce())
+}
+
+/// The unique sibling temp PATH a crash-safe write of `dest` stages into, built
+/// without a lossy UTF-8 conversion (`OsStr`-preserving). Same unique-per-write
+/// suffix as [`unique_temp_name`]; the path-based analogue for callers that hold a
+/// [`Path`] (e.g. `asset::write_wav_file`).
+pub(crate) fn unique_temp_path(dest: &Path) -> std::path::PathBuf {
+    let mut s = dest.as_os_str().to_owned();
+    s.push(format!(
+        ".{}.{}.ojtmp",
+        std::process::id(),
+        next_temp_nonce()
+    ));
+    std::path::PathBuf::from(s)
+}
 
 /// The filesystem operations a crash-safe write needs. Small + injectable so a
 /// fault FS can crash at any step. Paths are plain strings (the harness models a
@@ -29,6 +61,9 @@ pub trait OjFs {
     fn rename(&mut self, from: &str, to: &str) -> io::Result<()>;
     /// Fsync the directory so a just-completed rename survives power loss.
     fn sync_dir(&mut self) -> io::Result<()>;
+    /// Best-effort remove of a staged temp, to avoid leaking it when a write
+    /// fails partway through. A missing file is not an error.
+    fn remove(&mut self, path: &str);
     /// Read a file's current bytes, or `None` if absent.
     fn read(&self, path: &str) -> Option<Vec<u8>>;
 }
@@ -37,9 +72,17 @@ pub trait OjFs {
 /// replace. The destination is only ever changed by the rename, so an
 /// interruption can never leave it torn.
 pub fn atomic_write(fs: &mut impl OjFs, dest: &str, bytes: &[u8]) -> io::Result<()> {
-    let tmp = format!("{dest}.ojtmp");
-    fs.write_tmp(&tmp, bytes)?;
-    fs.rename(&tmp, dest)?;
+    // Unique per write so concurrent writers to `dest` never clobber each other's
+    // staged bytes before the rename.
+    let tmp = unique_temp_name(dest);
+    if let Err(e) = fs.write_tmp(&tmp, bytes) {
+        fs.remove(&tmp); // don't leak THIS write's temp on failure
+        return Err(e);
+    }
+    if let Err(e) = fs.rename(&tmp, dest) {
+        fs.remove(&tmp);
+        return Err(e);
+    }
     fs.sync_dir()?;
     Ok(())
 }
@@ -92,10 +135,25 @@ impl OjFs for RealFs {
         std::fs::rename(self.join(from), self.join(to))
     }
     fn sync_dir(&mut self) -> io::Result<()> {
-        if let Ok(d) = std::fs::File::open(&self.base) {
-            let _ = d.sync_all(); // best-effort; no-op/err on Windows is fine
+        // On Unix the parent-dir fsync is what makes the rename itself durable, so a
+        // failure must PROPAGATE — swallowing it would silently break the "rename is
+        // durable" contract. On Windows a directory handle can't be fsynced this way
+        // and the rename is durable regardless, so it stays best-effort.
+        #[cfg(not(windows))]
+        {
+            let d = std::fs::File::open(&self.base)?;
+            d.sync_all()?;
+        }
+        #[cfg(windows)]
+        {
+            if let Ok(d) = std::fs::File::open(&self.base) {
+                let _ = d.sync_all(); // best-effort; the rename is durable regardless
+            }
         }
         Ok(())
+    }
+    fn remove(&mut self, path: &str) {
+        let _ = std::fs::remove_file(self.join(path));
     }
     fn read(&self, path: &str) -> Option<Vec<u8>> {
         std::fs::read(self.join(path)).ok()
@@ -127,12 +185,14 @@ mod tests {
         atomic_write_path(&path, b"v1").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"v1");
 
-        // Overwrite atomically; leaves no `.ojtmp` sibling behind.
+        // Overwrite atomically; leaves no `.ojtmp` sibling behind (the temp is now
+        // uniquely named `<dest>.<pid>.<nonce>.ojtmp`, so scan for ANY such file).
         atomic_write_path(&path, b"v2-longer").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"v2-longer");
-        let mut tmp = path.clone().into_os_string();
-        tmp.push(".ojtmp");
-        assert!(!std::path::Path::new(&tmp).exists(), "temp must not leak");
+        let leaked_temp = std::fs::read_dir(&dir)
+            .unwrap()
+            .any(|e| e.unwrap().file_name().to_string_lossy().ends_with(".ojtmp"));
+        assert!(!leaked_temp, "temp must not leak");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -201,6 +261,9 @@ mod tests {
                 return Err(crashed());
             }
             Ok(())
+        }
+        fn remove(&mut self, path: &str) {
+            self.files.remove(path);
         }
         fn read(&self, path: &str) -> Option<Vec<u8>> {
             self.files.get(path).cloned()

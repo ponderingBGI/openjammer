@@ -8,30 +8,34 @@
 
 use std::fs::File;
 use std::io::{Cursor, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-/// The sibling temp path a crash-safe write stages into before the atomic rename
-/// (`<path>.ojtmp`). Same directory ⇒ the rename is a same-filesystem atomic op.
-fn temp_sibling(path: &Path) -> PathBuf {
-    let mut s = path.as_os_str().to_owned();
-    s.push(".ojtmp");
-    PathBuf::from(s)
-}
+use crate::fs::unique_temp_path;
 
-/// Best-effort fsync of `path`'s parent directory so a just-completed rename
-/// survives power loss (POSIX). On Windows opening a directory handle this way
-/// fails and the rename is durable regardless, so any error is ignored.
-fn sync_parent_dir(path: &Path) {
+/// Fsync of `path`'s parent directory so a just-completed rename survives power
+/// loss. On Unix this is what makes the rename itself durable, so a failure
+/// PROPAGATES (`?`). On Windows opening a directory handle this way fails and the
+/// rename is durable regardless, so it stays best-effort.
+fn sync_parent_dir(path: &Path) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         let dir = if dir.as_os_str().is_empty() {
             Path::new(".")
         } else {
             dir
         };
-        if let Ok(d) = File::open(dir) {
-            let _ = d.sync_all();
+        #[cfg(not(windows))]
+        {
+            let d = File::open(dir)?;
+            d.sync_all()?;
+        }
+        #[cfg(windows)]
+        {
+            if let Ok(d) = File::open(dir) {
+                let _ = d.sync_all(); // best-effort; the rename is durable regardless
+            }
         }
     }
+    Ok(())
 }
 
 use symphonia::core::codecs::audio::AudioDecoderOptions;
@@ -211,20 +215,29 @@ impl AssetStore {
     /// power loss.
     pub fn write_wav_file<P: AsRef<Path>>(&self, path: P, pcm: &Pcm) -> Result<(), AssetError> {
         let path = path.as_ref();
-        let tmp = temp_sibling(path);
-        {
+        // Unique per write (`<path>.<pid>.<nonce>.ojtmp`) so concurrent exports to
+        // the same destination never clobber each other's staged bytes.
+        let tmp = unique_temp_path(path);
+        // Stage the WAV into the temp + fsync it; on ANY failure remove THIS write's
+        // temp so it never leaks. `&File` is Write + Seek, so `hound` can finalize
+        // the header while we retain `file` to fsync the data + header before the
+        // rename.
+        let stage = (|| -> Result<(), AssetError> {
             let file = File::create(&tmp)?;
-            // `&File` is Write + Seek, so `hound` can finalize the header while we
-            // retain `file` to fsync the data + header to disk before the rename.
             Self::write_wav(&file, pcm)?;
             file.sync_all()?;
+            Ok(())
+        })();
+        if let Err(e) = stage {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
         }
         // Atomic replace, then make the rename durable.
         if let Err(e) = std::fs::rename(&tmp, path) {
             let _ = std::fs::remove_file(&tmp); // don't leak the temp on failure
             return Err(e.into());
         }
-        sync_parent_dir(path);
+        sync_parent_dir(path)?;
         Ok(())
     }
 
@@ -371,6 +384,14 @@ mod tests {
         dir
     }
 
+    /// True if `dir` holds ANY staged `.ojtmp` sibling (the temp name is now unique
+    /// per write — `<dest>.<pid>.<nonce>.ojtmp` — so we scan rather than guess it).
+    fn any_ojtmp(dir: &Path) -> bool {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .any(|e| e.unwrap().file_name().to_string_lossy().ends_with(".ojtmp"))
+    }
+
     #[test]
     fn write_wav_file_roundtrips_and_leaves_no_temp() {
         let store = AssetStore::new();
@@ -385,7 +406,7 @@ mod tests {
         assert_eq!(back.channels, pcm.channels);
         assert_eq!(back.samples.len(), pcm.samples.len());
         // ...and the sibling temp was renamed away, never left behind.
-        assert!(!temp_sibling(&path).exists(), "temp must not leak");
+        assert!(!any_ojtmp(&dir), "temp must not leak");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -406,7 +427,15 @@ mod tests {
 
         // A stale temp left by a hypothetical earlier interrupted write — it must
         // NOT corrupt the destination (the dest is only ever changed by rename).
-        std::fs::write(temp_sibling(&path), b"torn garbage, never renamed").unwrap();
+        // The temp name is unique per write, so a leftover from a prior crash is a
+        // distinct file the new write never touches; what matters is that it cannot
+        // reach the destination.
+        let stale = {
+            let mut s = path.clone().into_os_string();
+            s.push(".stale.ojtmp");
+            std::path::PathBuf::from(s)
+        };
+        std::fs::write(&stale, b"torn garbage, never renamed").unwrap();
         // v1 is still intact and decodable despite the stale temp.
         assert_eq!(
             store
@@ -417,7 +446,9 @@ mod tests {
             1
         );
 
-        // A new take (v2: 3 frames) atomically replaces v1 and clears the temp.
+        // A new take (v2: 3 frames) atomically replaces v1; its OWN temp is renamed
+        // away, leaving no temp from this write behind (the unrelated stale one is
+        // harmless and simply ignored).
         let v2 = Pcm {
             samples: vec![0.1, -0.2, 0.3],
             channels: 1,
@@ -432,10 +463,10 @@ mod tests {
                 .len(),
             3
         );
-        assert!(
-            !temp_sibling(&path).exists(),
-            "temp cleared after the replace"
-        );
+        // The stale temp never reached the dest (dest is the complete v2 above), and
+        // removing it leaves no `.ojtmp` from this write's own staging.
+        std::fs::remove_file(&stale).unwrap();
+        assert!(!any_ojtmp(&dir), "this write's own temp was renamed away");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
