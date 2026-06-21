@@ -369,11 +369,12 @@ fn install_panic_hook() {
 /// panics on a missing audio device (the headless/CI path) — it simply leaves
 /// the host idle until a device is present.
 pub fn run() {
-    // Win + Linux get the native auto-updater plugin; macOS is compiled-off
-    // (manual `.dmg` until Apple notarization — OWNER-PROVISIONING.md §4), so the
-    // plugin is never registered there and the updater commands are inert.
+    // The native auto-updater plugin is registered on Win + Linux, and on macOS
+    // once the build is notarized (the `apple-notarized` feature — see
+    // OWNER-PROVISIONING.md §4). A non-notarized macOS build ships a manual `.dmg`
+    // and leaves the updater commands inert.
     let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     // Justified panic (Phase-4 scoped panic guard): top-level app bring-up. A
     // failure to generate the Tauri context / start the event loop is a fatal
@@ -384,7 +385,7 @@ pub fn run() {
         // Ableton-style install-after-close: if the user has auto-update on and
         // a verified update is staged, apply it silently on the way out (no
         // relaunch, no mid-session interruption). Best-effort; never blocks
-        // quitting. macOS: no-op (updater compiled-off).
+        // quitting. macOS: no-op until the build is notarized.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 updater::install_on_quit(window.app_handle());
@@ -434,8 +435,8 @@ pub fn run() {
                 ojcore_native::UpdateGate::new(),
             ));
             // The staged-update holder the native updater downloads into before
-            // the audio-idle install (Win/Linux only; macOS has no runtime updater).
-            #[cfg(any(windows, target_os = "linux"))]
+            // the audio-idle install (Win/Linux, and macOS when notarized).
+            #[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
             app.manage(updater::PendingUpdate::default());
             // The native mirror of the auto-update preference (toggle + channel),
             // read by the install-after-close handler. Synced from the UI on mount.

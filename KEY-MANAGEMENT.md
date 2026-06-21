@@ -38,9 +38,9 @@ Minisign is **orthogonal to OS code-signing**:
 |---|---|---|---|
 | **minisign** (this doc) | The *update payload* came from a holder of the channel's private key | `pubkey` in `tauri.conf.json`, verified at install time by the updater | R2 / R4 |
 | Windows Authenticode (SignPath Foundation) | First-install OS trust (no SmartScreen "unknown publisher") | OS-level, complements minisign | Separate release-credentials decision |
-| macOS Developer ID + notarization | Gatekeeper allows the *swapped* `.app` to launch | OS-level, **hard blocker** for macOS auto-update | Separate release-credentials decision |
+| macOS Developer ID + notarization | Gatekeeper allows the *swapped* `.app` to launch | OS-level requirement for macOS auto-update | Apple Developer Program enrolled; provisioning pending (OWNER-PROVISIONING.md §4) |
 
-> **Why this distinction matters operationally:** minisign verifying a macOS `.app.tar.gz` payload does **nothing** to stop Gatekeeper from quarantining the swapped app. Per R2's per-platform matrix, the macOS updater is `cfg`-gated **off** until an Apple Developer ID is acquired. A green minisign verification is necessary but not sufficient for a working update on every platform.
+> **Why this distinction matters operationally:** minisign verifying a macOS `.app.tar.gz` payload does **nothing** to stop Gatekeeper from quarantining the swapped app. Per R2's per-platform matrix, the macOS updater is wired but inactive (behind the `apple-notarized` feature) until the build is notarized with an Apple Developer ID. A green minisign verification is necessary but not sufficient for a working update on every platform.
 
 `attest-build-provenance` (SLSA) **complements** minisign for auditors and AGPL redistributors but is explicitly **not** a runtime update-acceptance control — the updater verifies the minisign signature only and has zero knowledge of attestations (see the CI design's §8e build-provenance attestation).
 
