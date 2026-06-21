@@ -197,7 +197,7 @@ describe('OjcoreWasmExecutor sampler live-load (mocked worklet)', () => {
         MockWorkletNode.last = null;
         fakeMediaStreamSource.connect.mockClear();
         vi.stubGlobal('AudioWorkletNode', MockWorkletNode);
-        vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) })));
+        vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) })));
         vi.stubGlobal('WebAssembly', { ...globalThis.WebAssembly, compile: vi.fn(() => Promise.resolve({})) });
     });
     afterEach(() => {
@@ -283,7 +283,7 @@ describe('OjcoreWasmExecutor microphone input (mocked getUserMedia)', () => {
         MockWorkletNode.last = null;
         fakeMediaStreamSource.connect.mockClear();
         vi.stubGlobal('AudioWorkletNode', MockWorkletNode);
-        vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) })));
+        vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) })));
         vi.stubGlobal('WebAssembly', { ...globalThis.WebAssembly, compile: vi.fn(() => Promise.resolve({})) });
     });
     afterEach(() => {
@@ -348,7 +348,7 @@ describe('OjcoreWasmExecutor health on startup failure (mocked worklet)', () => 
         vi.stubGlobal('AudioWorkletNode', MockWorkletNode);
         vi.stubGlobal(
             'fetch',
-            vi.fn(() => Promise.resolve({ arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) })),
+            vi.fn(() => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) })),
         );
         useEngineHealthStore.setState({ health: 'IDLE', reason: '' });
     });
@@ -374,6 +374,31 @@ describe('OjcoreWasmExecutor health on startup failure (mocked worklet)', () => 
             () => new Map(),
         );
         // Let setup()'s rejected addModule propagate into the .catch handler.
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(useEngineHealthStore.getState().health).toBe('DEAD');
+        ex.dispose();
+    });
+
+    it('flips engine health to DEAD when the wasm fetch is not OK (404/500)', async () => {
+        // A non-OK fetch returns a Response whose body is an HTML error page, not
+        // wasm. We must FAIL FAST in setup() rather than post that garbage to the
+        // worklet (where `instantiate` would throw on its own thread and die silently,
+        // unseen by setup().catch). The non-OK fetch throws straight into the catch,
+        // which surfaces DEAD.
+        (globalThis.fetch as ReturnType<typeof vi.fn>).mockImplementationOnce(() =>
+            Promise.resolve({ ok: false, status: 404, statusText: 'Not Found' }),
+        );
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const ex = new OjcoreWasmExecutor();
+        ex.initialize(
+            () => () => {},
+            () => () => {},
+            () => new Map(),
+            () => new Map(),
+        );
+        // Let setup()'s addModule + the rejected fetch propagate into the .catch.
         await Promise.resolve();
         await Promise.resolve();
         await Promise.resolve();

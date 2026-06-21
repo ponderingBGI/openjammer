@@ -287,6 +287,14 @@ export class OjcoreWasmExecutor implements Executor {
         // error, the worklet's `onmessage` never fires), so the engine never
         // initialised and never posted `ready`. An `ArrayBuffer` transfers cleanly.
         const resp = await fetch(ojcoreWasmUrl);
+        // Fail FAST on a non-OK fetch (a 404/500 returns a Response whose body is an
+        // HTML error page, not wasm). Without this we would post that garbage to the
+        // worklet, where `WebAssembly.instantiate` throws on its own thread and dies
+        // silently — `setup().catch` cannot see it. Throwing here surfaces the real
+        // status into the catch, which flips engine health to DEAD.
+        if (!resp.ok) {
+            throw new Error(`failed to fetch ojcore wasm: ${resp.status} ${resp.statusText}`);
+        }
         const bytes = await resp.arrayBuffer();
         node.port.postMessage({ type: 'init', bytes, blockSize: WORKLET_BLOCK_SIZE }, [bytes]);
 
