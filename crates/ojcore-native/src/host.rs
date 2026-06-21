@@ -523,7 +523,9 @@ impl AudioHost {
             err_fault.mark();
             let fault = classify(is_device_absent(&e));
             fault_tx.push(fault);
-            eprintln!("audio output stream error (flagged for rebuild): {e} (device fault: {fault:?})");
+            eprintln!(
+                "audio output stream error (flagged for rebuild): {e} (device fault: {fault:?})"
+            );
         };
 
         let output = device

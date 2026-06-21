@@ -26,6 +26,7 @@
 pub mod asset;
 pub mod backend;
 pub mod device;
+pub mod device_listener;
 pub mod fs;
 pub mod host;
 pub mod latency;
@@ -43,6 +44,7 @@ pub use device::{
     classify as classify_device_fault, device_fault_channel, probe_default_output, DeviceFault,
     DeviceFaultRx, DeviceFaultTx, DeviceIdentity, DeviceWatcher,
 };
+pub use device_listener::{install as install_device_listener, DeviceListener};
 pub use fs::{atomic_write, atomic_write_path, OjFs, RealFs};
 pub use host::{
     default_output_sample_rate, render_block, AudioHost, BlockProcessor, HostError, StreamFault,

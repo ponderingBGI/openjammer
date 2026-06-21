@@ -39,9 +39,9 @@ use ojcore::{
     Engine, EventRing, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{
-    probe_default_output, AssetCatalog, AssetError, AssetStore, AudioHost, DeviceFault,
-    DeviceSupervisor, DeviceWatcher, HostError, LogRecord, LogStore, Pcm, RecoveryAction,
-    StreamRequest,
+    device_fault_channel, install_device_listener, probe_default_output, AssetCatalog, AssetError,
+    AssetStore, AudioHost, DeviceFault, DeviceFaultRx, DeviceListener, DeviceSupervisor,
+    DeviceWatcher, HostError, LogRecord, LogStore, Pcm, RecoveryAction, StreamRequest,
 };
 use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
 use ojinstrument::{register_all, RegisterOpts};
@@ -214,6 +214,13 @@ pub struct EngineBackend {
     /// Wall-clock (µs) of the last device probe, so the (device-enumerating) probe
     /// runs ~1 Hz rather than on every fast UI poll.
     last_probe_us: u64,
+    /// Event-driven OS default-device listener (macOS CoreAudio; `None` elsewhere —
+    /// Windows is covered by cpal's own notifier + `err_fn`). Held for its `Drop`
+    /// (deregisters). It feeds `listener_faults` the instant the OS notices, ahead
+    /// of the ~1 Hz poll.
+    _device_listener: Option<DeviceListener>,
+    /// Drain for faults the OS listener emits (empty where there is no listener).
+    listener_faults: DeviceFaultRx,
 }
 
 /// State of one recorder capture for a node.
@@ -236,6 +243,9 @@ impl EngineBackend {
     /// first successful start), and control commands still validate.
     pub fn new() -> Self {
         let registry = Self::build_registry();
+        // Event-driven OS device-change listener (macOS; None elsewhere) feeds this
+        // mailbox; drained alongside the host's err_fn faults + the polling watcher.
+        let (listener_tx, listener_rx) = device_fault_channel(8);
         // Render at the DEVICE's default sample rate, not a hardcoded 48k: a pro
         // interface (e.g. the MOTU M4) may run at 96k, and rendering at the wrong
         // rate plays back at the wrong pitch/tempo. The hardware is authoritative;
@@ -314,6 +324,8 @@ impl EngineBackend {
             last_reopen_us: 0,
             device_watcher: DeviceWatcher::new(probe_default_output()),
             last_probe_us: 0,
+            _device_listener: install_device_listener(listener_tx),
+            listener_faults: listener_rx,
         }
     }
 
@@ -577,6 +589,7 @@ impl EngineBackend {
     /// still lost only RETRY the rebuild (no event storm). On the rebuild that
     /// succeeds we emit ONE `DeviceRecovered`. No device yet → stay lost, retry on
     /// the next tick (no spin, no block, no panic).
+    #[cfg(test)]
     pub fn tick(&mut self) {
         // Read-and-clear the running host's fault edge. No host (device-less /
         // never started) → nothing to recover here; a cold start is still driven
@@ -622,6 +635,7 @@ impl EngineBackend {
     /// and rendering at the wrong rate would play back detuned. Then it routes
     /// through the SAME `adopt` cold-start path `push_graph` uses (host is `None`
     /// after the loss), so there is one stream-open seam, not a parallel one.
+    #[cfg(test)]
     fn rebuild_after_loss(&mut self) -> bool {
         debug_assert!(
             self.host.is_none(),
@@ -756,6 +770,8 @@ impl EngineBackend {
         if let Some(h) = self.host.as_mut() {
             h.drain_device_faults(|f| faults.push(f));
         }
+        // Event-driven OS listener faults (macOS CoreAudio; empty elsewhere).
+        self.listener_faults.drain(|f| faults.push(f));
         // Portable default-device watch (throttled ~1 Hz): catches a silent swap /
         // removal cpal's callback may never report. The probe enumerates devices,
         // so we do NOT run it on every fast UI poll.
@@ -781,12 +797,8 @@ impl EngineBackend {
                 self.last_reopen_us = now;
                 let ok = self.reopen_device();
                 match self.supervisor.on_reopen_result(ok) {
-                    RecoveryAction::Resume => {
-                        self.emit_lifecycle(
-                            Severity::Info,
-                            "audio device recovered — resuming".into(),
-                        )
-                    }
+                    RecoveryAction::Resume => self
+                        .emit_lifecycle(Severity::Info, "audio device recovered — resuming".into()),
                     RecoveryAction::GiveUp => self.emit_lifecycle(
                         Severity::Warn,
                         "could not reopen an audio device — open Settings → Audio to choose one"
