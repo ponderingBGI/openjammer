@@ -149,6 +149,10 @@ class OjcoreProcessor extends AudioWorkletProcessor {
     private metersEnabled = false;
     /** Block counter so meters are posted at ~UI rate, not every render quantum. */
     private meterTick = 0;
+    /** Block counter so faults drain at a fixed cadence, not every render quantum. */
+    private eventTick = 0;
+    /** Blocks between fault drains (~10 Hz). Recomputed from the rate in init. */
+    private eventDrainBlocks = 38;
     /** Master output scale (speaker volume). */
     private masterGain = 1;
     /** Per-node recorder captures: node id -> accumulated mono PCM chunks. */
@@ -244,6 +248,9 @@ class OjcoreProcessor extends AudioWorkletProcessor {
         // namespace does NOT re-export `memory`).
         this.exports = initSync({ module: msg.bytes }) as WasmExports;
         this.blockSize = msg.blockSize || 128;
+        // Fault drain cadence: ~10 Hz (≈100 ms), matching the native poll loop, so a
+        // persistent fault batches into one coalesced post instead of per-quantum.
+        this.eventDrainBlocks = Math.max(1, Math.round(sampleRate / this.blockSize / 10));
         wasm.init(sampleRate, this.blockSize);
 
         // Cache the cmd-ring base + frozen header offsets so command writes are
@@ -388,17 +395,25 @@ class OjcoreProcessor extends AudioWorkletProcessor {
             }
         }
 
-        // Faults: surface engine node-faults (NaN/garbage) to the UI fault pipe.
-        // UNCONDITIONAL — NOT gated on `metersEnabled`, because a fault must reach
-        // the DevLog whether or not a meter UI is mounted (the same lesson the
-        // native poll loop encodes). `has_pending_events` is a cheap, alloc-free
-        // bool scan every block; the allocating `drain_events` (JSON `Event` bytes
-        // in the native wire shape) runs ONLY when a fault is actually pending, so
-        // a fault-free block costs nothing on the render path beyond the bool check.
-        if (wasm.has_pending_events() as boolean) {
-            const bytes = wasm.drain_events() as Uint8Array;
-            if (bytes && bytes.length > 0) {
-                this.port.postMessage({ type: 'events', bytes }, [bytes.buffer]);
+        // Faults: surface engine node-faults (NaN/garbage) to the UI fault pipe at a
+        // FIXED cadence (~10 Hz), NOT every render quantum. A persistent fault latches
+        // its NodeBudget flag every block until drained, so draining per-block would
+        // post a single-event message ~375×/s and storm the main thread + DevLog ring
+        // — `ingestEngineEvents` only coalesces WITHIN one batch. Throttling lets the
+        // flags accumulate so one drain coalesces them. UNCONDITIONAL (not gated on
+        // `metersEnabled`): a fault must reach the DevLog whether or not a meter UI is
+        // mounted (the lesson the native poll loop encodes). `has_pending_events` is a
+        // cheap alloc-free bool scan; the allocating `drain_events` runs only at the
+        // cadence boundary AND only when a fault is pending, so fault-free blocks cost
+        // nothing on the render path.
+        this.eventTick++;
+        if (this.eventTick >= this.eventDrainBlocks) {
+            this.eventTick = 0;
+            if (wasm.has_pending_events() as boolean) {
+                const bytes = wasm.drain_events() as Uint8Array;
+                if (bytes && bytes.length > 0) {
+                    this.port.postMessage({ type: 'events', bytes }, [bytes.buffer]);
+                }
             }
         }
         return true;

@@ -325,10 +325,14 @@ export class OjcoreNativeExecutor implements Executor {
         // notification re-attempt instead of being deduped away (held-note rule).
         const prev = this.lastPushedGraph;
         this.lastPushedGraph = serialized;
-        void this.sendGraph(native, prev);
+        void this.sendGraph(native, prev, serialized);
     }
 
-    private async sendGraph(graph: OjGraph, prevSerialized: string | null): Promise<void> {
+    private async sendGraph(
+        graph: OjGraph,
+        prevSerialized: string | null,
+        attemptedSerialized: string,
+    ): Promise<void> {
         if (!this.invoke) return;
         try {
             await this.invoke('push_graph', { graph });
@@ -336,12 +340,20 @@ export class OjcoreNativeExecutor implements Executor {
             // HELD NOTE BEATS A GLITCH: a rejected push (Compile / RingFull) does
             // NOT tear down the prior graph — the engine keeps the last good
             // program running (see engine.rs adopt(): it only swaps on success).
-            // We roll the dedupe cache back to the last ACCEPTED graph so we don't
-            // pretend the rejected one is live, and report DEGRADED quietly (no
-            // modal, no focus steal) instead of a lone console.error.
-            this.lastPushedGraph = prevSerialized;
-            log.warn('push_graph rejected; keeping last good audio', { detail: String(err) });
-            setEngineHealth('DEGRADED', 'graph rejected; last good sound held');
+            // STALE-FAILURE GUARD: pushes are fire-and-forget, so an older push can
+            // reject AFTER a newer one was already accepted. Only roll the dedupe
+            // cache back / flip health if THIS push is still the current one
+            // (`lastPushedGraph` hasn't moved on) — otherwise a stale rejection would
+            // clobber the newer graph's cache and report DEGRADED on old news.
+            if (this.lastPushedGraph === attemptedSerialized) {
+                this.lastPushedGraph = prevSerialized;
+                log.warn('push_graph rejected; keeping last good audio', { detail: String(err) });
+                setEngineHealth('DEGRADED', 'graph rejected; last good sound held');
+            } else {
+                log.warn('stale push_graph rejected; superseded by a newer graph', {
+                    detail: String(err),
+                });
+            }
             return;
         }
         // The push was accepted: a graph is live, so we are no longer in the
