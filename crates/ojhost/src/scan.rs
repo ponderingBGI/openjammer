@@ -410,6 +410,7 @@ mod tests {
                     audio_out: 2,
                 },
                 param_count: 3,
+                params: Vec::new(),
                 latency_samples: 0,
             }],
         };

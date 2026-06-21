@@ -151,6 +151,7 @@ mod tests {
                 audio_out: 2,
             },
             param_count: 5,
+            params: Vec::new(),
             latency_samples: 0,
         }];
         let n = register_scanned(&mut reg, &descs);

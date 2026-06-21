@@ -31,7 +31,7 @@ use std::path::Path;
 use clack_host::prelude::*;
 
 use super::HostedBackend;
-use crate::descriptor::{PluginDescriptor, PluginFormat, PortCounts};
+use crate::descriptor::{HostedParam, PluginDescriptor, PluginFormat, PortCounts};
 use crate::error::HostError;
 
 /// A minimal CLAP host: registers no extensions and ignores every callback.
@@ -95,24 +95,76 @@ pub(super) fn probe(path: &Path, format: PluginFormat) -> Result<Vec<PluginDescr
             let f = f.to_string_lossy();
             f == "instrument" || f == "synthesizer"
         });
+        let uid = cstr_to_string(d.id());
+        // Briefly instantiate to read the plugin's parameter list (CLAP params
+        // extension) so the UI shows real knobs with the plugin's own ranges.
+        // Best-effort and off-RT: a plugin that fails to instantiate yields an
+        // empty list (the node still loads; it just surfaces no params).
+        let params = query_params(&entry, &uid);
         out.push(PluginDescriptor {
-            uid: cstr_to_string(d.id()),
+            uid,
             name: cstr_to_string(d.name()),
             vendor: cstr_to_string(d.vendor()),
             path: path_str.clone(),
             format: PluginFormat::Clap,
             is_instrument,
-            // CLAP reports ports/params via per-instance extensions; we fill
-            // conservative defaults at scan time and refine on load.
+            // CLAP reports ports via per-instance extensions; conservative
+            // defaults here, refined on load.
             ports: PortCounts {
                 audio_in: if is_instrument { 0 } else { 2 },
                 audio_out: 2,
             },
-            param_count: 0,
+            param_count: params.len() as u32,
+            params,
             latency_samples: 0,
         });
     }
     Ok(out)
+}
+
+/// Instantiate `uid` from `entry` just long enough to read its parameter list
+/// via the CLAP params extension, then drop it. Off-RT (scan time). Returns an
+/// empty list when the plugin exposes no params extension or fails to
+/// instantiate — the caller treats that as "no surfaced params", never an error.
+fn query_params(entry: &PluginEntry, uid: &str) -> Vec<HostedParam> {
+    use clack_extensions::params::{ParamInfoBuffer, PluginParams};
+
+    let Ok(id) = std::ffi::CString::new(uid) else {
+        return Vec::new();
+    };
+    let host = host_info();
+    let mut instance = match PluginInstance::<OjClapHost>::new(
+        |_| OjShared,
+        |_| OjMainThread,
+        entry,
+        &id,
+        &host,
+    ) {
+        Ok(i) => i,
+        Err(_) => return Vec::new(),
+    };
+    let Some(params) = instance.plugin_shared_handle().get_extension::<PluginParams>() else {
+        return Vec::new();
+    };
+    let mut handle = instance.plugin_handle();
+    let count = params.count(&mut handle);
+    let mut out = Vec::with_capacity(count as usize);
+    let mut buf = ParamInfoBuffer::new();
+    for i in 0..count {
+        if let Some(pi) = params.get_info(&mut handle, i, &mut buf) {
+            let name = String::from_utf8_lossy(pi.name)
+                .trim_end_matches('\0')
+                .to_string();
+            out.push(HostedParam {
+                id: pi.id.get(),
+                name,
+                min: pi.min_value,
+                max: pi.max_value,
+                default: pi.default_value,
+            });
+        }
+    }
+    out
 }
 
 /// Open a CLAP plugin into a live [`HostedBackend`]. Performs the full
@@ -160,17 +212,27 @@ pub(super) fn open(
     drop(entry);
 
     let channels = desc.ports.audio_out.max(desc.ports.audio_in).max(1) as usize;
+    // Map each surfaced param (by index) to its CLAP id, so `set_param(index, _)`
+    // can build a param-value event targeting the plugin's stable id.
+    let param_ids: Vec<clack_host::utils::ClapId> = desc
+        .params
+        .iter()
+        .filter_map(|p| clack_host::utils::ClapId::from_raw(p.id))
+        .collect();
     Ok(Box::new(ClapBackend {
         processor: Some(started),
         in_ports: AudioPorts::with_capacity(channels, 1),
         out_ports: AudioPorts::with_capacity(channels, 1),
         in_scratch: vec![vec![0.0f32; max_block]; channels],
         out_scratch: vec![vec![0.0f32; max_block]; channels],
-        in_events: EventBuffer::new(),
+        // Pre-sized so `set_param`'s param-value pushes don't allocate on the RT
+        // thread (the buffer is cleared each block in `process`).
+        in_events: EventBuffer::with_capacity(64),
         out_events: EventBuffer::new(),
         channels,
         max_block,
         latency: desc.latency_samples,
+        param_ids,
     }))
 }
 
@@ -191,6 +253,9 @@ struct ClapBackend {
     channels: usize,
     max_block: usize,
     latency: u32,
+    /// Index -> CLAP `clap_id` map (from the scanned param list). `set_param`
+    /// addresses params by 0-based index; this resolves it to the plugin's id.
+    param_ids: Vec<clack_host::utils::ClapId>,
 }
 
 impl HostedBackend for ClapBackend {
@@ -271,12 +336,27 @@ impl HostedBackend for ClapBackend {
             }
         }
         self.out_events.clear();
+        // Drop the param-value events we queued this block so they don't replay.
+        self.in_events.clear();
     }
 
-    fn set_param(&mut self, _id: u16, _value: f32) {
-        // TODO(clap-host): push a CLAP param-value event into `in_events` so the
-        // plugin sees the change next block. Requires the `clack-extensions`
-        // params extension; deferred (see crate README).
+    fn set_param(&mut self, id: u16, value: f32) {
+        // Queue a CLAP param-value event for the next `process` block; the plugin
+        // reads it from `in_events` and applies it. CLAP_EVENT_PARAM_VALUE is a
+        // CORE event — no extension is needed to SEND a value. `id` is the 0-based
+        // index the manifest surfaced; map it to the plugin's stable `clap_id`.
+        let Some(&clap_id) = self.param_ids.get(id as usize) else {
+            return;
+        };
+        let event = clack_host::events::event_types::ParamValueEvent::new(
+            0, // sample offset within the block
+            clap_id,
+            clack_host::events::Pckn::match_all(), // global: all ports/channels/keys
+            value as f64,
+            clack_host::utils::Cookie::empty(),
+        );
+        // Pre-reserved at `open`, so this push does not allocate on the RT thread.
+        self.in_events.push(&event);
     }
 
     fn latency_samples(&self) -> u32 {
