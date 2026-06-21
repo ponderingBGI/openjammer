@@ -143,7 +143,10 @@ fn query_params(entry: &PluginEntry, uid: &str) -> Vec<HostedParam> {
         Ok(i) => i,
         Err(_) => return Vec::new(),
     };
-    let Some(params) = instance.plugin_shared_handle().get_extension::<PluginParams>() else {
+    let Some(params) = instance
+        .plugin_shared_handle()
+        .get_extension::<PluginParams>()
+    else {
         return Vec::new();
     };
     let mut handle = instance.plugin_handle();

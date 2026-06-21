@@ -374,7 +374,11 @@ pub fn run() {
     // OWNER-PROVISIONING.md §4). A non-notarized macOS build ships a manual `.dmg`
     // and leaves the updater commands inert.
     let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
-    #[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    ))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     // Justified panic (Phase-4 scoped panic guard): top-level app bring-up. A
     // failure to generate the Tauri context / start the event loop is a fatal
@@ -436,7 +440,11 @@ pub fn run() {
             ));
             // The staged-update holder the native updater downloads into before
             // the audio-idle install (Win/Linux, and macOS when notarized).
-            #[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+            #[cfg(any(
+                windows,
+                target_os = "linux",
+                all(target_os = "macos", feature = "apple-notarized")
+            ))]
             app.manage(updater::PendingUpdate::default());
             // The native mirror of the auto-update preference (toggle + channel),
             // read by the install-after-close handler. Synced from the UI on mount.

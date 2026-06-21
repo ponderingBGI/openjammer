@@ -37,14 +37,22 @@ pub enum Channel {
     Canary,
 }
 
-#[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/ponderingBGI/openjammer/releases";
 
 /// The CANARI updater public key (minisign). Public; safe to commit. Its private
 /// counterpart signs canari builds in `canary.yml` (the
 /// `TAURI_SIGNING_PRIVATE_KEY_CANARY` secret). A canari-channel check verifies
 /// the downloaded `latest.json` against this.
-#[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 const CANARY_UPDATER_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZFRDU1NkQwNjZBNTNGMkYKUldRdlA2Vm0wRmJWL2dZVzZ2WC9HU2hpUUUrTTh5MGZqQXFoSTdXM0RLSnRwQ25WUERkRXpLankK";
 
 // --- native-side mirror of the auto-update preference ------------------------
@@ -181,11 +189,19 @@ pub fn update_try_install(
 /// A downloaded-and-verified update awaiting an audio-idle install, with its
 /// bytes. Lives between [`update_check_and_stage`] (download + verify + stage) and
 /// the install (after close, or the explicit [`update_install_if_idle`]). Win/Linux.
-#[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 #[derive(Default)]
 pub struct PendingUpdate(pub Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>>);
 
-#[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 #[derive(Debug, serde::Deserialize)]
 struct GithubRelease {
     tag_name: String,
@@ -194,14 +210,22 @@ struct GithubRelease {
     assets: Vec<GithubAsset>,
 }
 
-#[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 #[derive(Debug, serde::Deserialize)]
 struct GithubAsset {
     name: String,
     browser_download_url: String,
 }
 
-#[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 fn canari_version(tag: &str) -> Option<semver::Version> {
     let raw = tag.strip_prefix('v').unwrap_or(tag);
     let version = semver::Version::parse(raw).ok()?;
@@ -213,7 +237,11 @@ fn canari_version(tag: &str) -> Option<semver::Version> {
     }
 }
 
-#[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 fn select_latest_canari_manifest_url(releases: &[GithubRelease]) -> Option<String> {
     releases
         .iter()
@@ -230,7 +258,11 @@ fn select_latest_canari_manifest_url(releases: &[GithubRelease]) -> Option<Strin
         .map(|(_, url)| url)
 }
 
-#[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 async fn latest_canari_manifest_url() -> Result<url::Url, String> {
     let releases = reqwest::Client::new()
         .get(GITHUB_RELEASES_API)
@@ -253,7 +285,11 @@ async fn latest_canari_manifest_url() -> Result<url::Url, String> {
 /// Build the updater for `channel`: the canari channel resolves the newest
 /// numbered prerelease endpoint and embeds the canari pubkey; stable uses the
 /// `tauri.conf.json` defaults.
-#[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 async fn channel_updater(
     app: &tauri::AppHandle,
     channel: Channel,
@@ -284,7 +320,11 @@ pub async fn update_check_and_stage(
     app: tauri::AppHandle,
     channel: Channel,
 ) -> Result<Option<String>, String> {
-    #[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    ))]
     {
         use tauri::Manager;
         if !can_native_auto_update() {
@@ -312,7 +352,11 @@ pub async fn update_check_and_stage(
         app.state::<UpdateGateState>().stage();
         Ok(Some(version))
     }
-    #[cfg(not(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized"))))]
+    #[cfg(not(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    )))]
     {
         let _ = (&app, channel);
         Ok(None)
@@ -326,7 +370,11 @@ pub async fn update_check_and_stage(
 /// tick. The idle check + gate transition are atomic (no TOCTOU). macOS: `false`.
 #[tauri::command]
 pub fn update_install_if_idle(app: tauri::AppHandle) -> Result<bool, String> {
-    #[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    ))]
     {
         use tauri::Manager;
         if !can_native_auto_update() {
@@ -355,7 +403,11 @@ pub fn update_install_if_idle(app: tauri::AppHandle) -> Result<bool, String> {
         }
         Ok(true)
     }
-    #[cfg(not(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized"))))]
+    #[cfg(not(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    )))]
     {
         let _ = &app;
         Ok(false)
@@ -394,7 +446,11 @@ pub fn update_status(app: tauri::AppHandle) -> UpdateStatus {
     let current_version = app.package_info().version.to_string();
     let last_good_version = crate::backup::last_good_version(&app);
     let (install_kind, can_auto_update, manual_reason) = native_update_capability();
-    #[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    ))]
     {
         use tauri::Manager;
         let pending_version = app
@@ -420,7 +476,11 @@ pub fn update_status(app: tauri::AppHandle) -> UpdateStatus {
             manual_reason,
         }
     }
-    #[cfg(not(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized"))))]
+    #[cfg(not(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    )))]
     {
         UpdateStatus {
             current_version,
@@ -502,7 +562,10 @@ fn install_staged_update_on_quit(update: tauri_plugin_updater::Update, bytes: Ve
 
 #[cfg(all(
     not(windows),
-    any(target_os = "linux", all(target_os = "macos", feature = "apple-notarized"))
+    any(
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    )
 ))]
 fn install_staged_update_on_quit(update: tauri_plugin_updater::Update, bytes: Vec<u8>) -> bool {
     // Linux AppImage replacement (deb/rpm stay manual) and the notarized macOS
@@ -515,7 +578,11 @@ fn install_staged_update_on_quit(update: tauri_plugin_updater::Update, bytes: Ve
 /// failed install must never block quitting. No-op unless the user has
 /// auto-update on and a verified update is staged. macOS: no-op (updater
 /// compiled-off).
-#[cfg(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized")))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 pub fn install_on_quit(app: &tauri::AppHandle) {
     use tauri::Manager;
     if !can_native_auto_update() {
@@ -562,7 +629,11 @@ pub fn install_on_quit(app: &tauri::AppHandle) {
 }
 
 /// macOS / unsupported platforms: nothing to install after close.
-#[cfg(not(any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized"))))]
+#[cfg(not(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+)))]
 pub fn install_on_quit(_app: &tauri::AppHandle) {}
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
