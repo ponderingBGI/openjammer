@@ -369,11 +369,12 @@ export class OjcoreNativeExecutor implements Executor {
         // stay pointed at the last good graph (held-note rule).
         this.index = nextIndex;
         this.reverseIndex = nextReverseIndex;
-        // A graph is live and the engine is making sound, so we are no longer in the
-        // honest "nothing has happened yet" IDLE state. Lift IDLE → LIVE (the positive
-        // state crash-recovery waits for to forgive the crash streak); NEVER downgrade
-        // a real DEAD/DEGRADED signal to LIVE.
-        if (useEngineHealthStore.getState().health === 'IDLE') {
+        // A graph is live and the engine accepted it, so the executor has observed
+        // real recovery. Lift IDLE or DEGRADED to LIVE (the positive state
+        // crash-recovery waits for); keep DEAD sticky unless a caller performs a
+        // stronger explicit recovery.
+        const health = useEngineHealthStore.getState().health;
+        if (health === 'IDLE' || health === 'DEGRADED') {
             setEngineHealth('LIVE', 'engine active');
         }
         // Install the built-in default voice for instrument nodes that ship one,

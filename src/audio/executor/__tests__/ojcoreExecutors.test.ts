@@ -18,7 +18,7 @@
  *     command name + args.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { LooperAction } from '../../../../packages/oj-protocol-ts/src/index';
 import type { RtCommand, EngineFrame } from '../../../../packages/oj-protocol-ts/src/index';
 import {
@@ -32,6 +32,7 @@ import { OjcoreNativeExecutor } from '../OjcoreNativeExecutor';
 import { OjcoreWasmExecutor } from '../OjcoreWasmExecutor';
 import { getNodeDefinition } from '../../../engine/registry';
 import type { Connection, GraphNode, NodeType } from '../../../engine/types';
+import { useEngineHealthStore } from '../../../store/engineHealthStore';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -295,6 +296,10 @@ function looperGraph(): {
 }
 
 describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
+    beforeEach(() => {
+        useEngineHealthStore.setState({ health: 'IDLE', reason: '' });
+    });
+
     afterEach(() => {
         delete (window as unknown as { __TAURI__?: unknown }).__TAURI__;
         vi.useRealTimers();
@@ -524,6 +529,43 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         expect(latest.has('keys-1'), 'rejected interning was not committed').toBe(false);
 
         unsub();
+        ex.dispose();
+    });
+
+    it('recovers engine health from DEGRADED to LIVE after a later accepted push', async () => {
+        const graph = looperGraph();
+        let pushes = 0;
+        installMockTauri((cmd) => {
+            if (cmd === 'push_graph') {
+                pushes += 1;
+                if (pushes === 2) return Promise.reject(new Error('Compile'));
+            }
+            return undefined;
+        });
+        let nodeCb: (() => void) | null = null;
+        const ex = new OjcoreNativeExecutor();
+        ex.initialize(
+            () => () => {},
+            (cb) => {
+                nodeCb = cb as unknown as () => void;
+                return () => {};
+            },
+            () => graph.nodes,
+            () => graph.connections,
+        );
+        await flush();
+        expect(useEngineHealthStore.getState().health).toBe('LIVE');
+
+        graph.nodes.set('keys-1', makeNode('keys', 'keys-1'));
+        nodeCb!();
+        await flush();
+        expect(useEngineHealthStore.getState().health).toBe('DEGRADED');
+
+        graph.nodes.set('keys-2', makeNode('keys', 'keys-2'));
+        nodeCb!();
+        await flush();
+        expect(useEngineHealthStore.getState().health).toBe('LIVE');
+
         ex.dispose();
     });
 });

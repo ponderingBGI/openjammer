@@ -23,7 +23,9 @@ fn signal(n: usize) -> Vec<f32> {
 /// A hot ramp spanning +/-2.0 so the limiter exercises every branch: the linear
 /// region, the soft knee, and the hard clamp at the ceiling.
 fn hot_signal(n: usize) -> Vec<f32> {
-    (0..n).map(|i| ((i as f32 / n as f32) * 2.0 - 1.0) * 2.0).collect()
+    (0..n)
+        .map(|i| ((i as f32 / n as f32) * 2.0 - 1.0) * 2.0)
+        .collect()
 }
 
 fn bench_biquad(c: &mut Criterion) {

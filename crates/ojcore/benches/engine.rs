@@ -14,6 +14,7 @@
 //!     the schedule + routing-plan work that scales with nodes and edges.
 //!   * process_block: block-size scaling (32..512), heavy fan-in mixing, a
 //!     100-deep schedule, and the metering path toggled on (its accumulate cost).
+//!
 //! All graphs use only Gain + structural nodes so the measurement tracks engine
 //! *mechanics* (schedule walk + per-node dispatch + mixing), not DSP kernel cost
 //! (the kernels have their own suite in `ojcore-dsp`).
@@ -90,8 +91,13 @@ fn fanout(width: u32, block: u32) -> OjGraph {
         g.edges.push(edge(0, i)); // source -> each parallel gain
         g.edges.push(edge(i, speaker)); // each gain -> master (summed)
     }
-    g.nodes
-        .push(node(speaker, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.nodes.push(node(
+        speaker,
+        SPEAKER_OUT_ID,
+        PrimitiveKind::SpeakerOut,
+        1,
+        0,
+    ));
     g
 }
 

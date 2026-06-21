@@ -1,8 +1,8 @@
 /**
  * CommandBar (U19 + U20 + M2) — Raycast-style Ctrl/Cmd+K command palette.
  *
- * Rendered once at the app root. Owns its own open/close state and the global
- * Ctrl/Cmd+K toggle. Built from cmdk's primitives (`Command`, `Command.Input`,
+ * Lazy-loaded by CommandBarHost on first palette intent. Owns its own open/close
+ * state once mounted. Built from cmdk's primitives (`Command`, `Command.Input`,
  * `Command.List`, ...) rendered INSIDE this repo's existing overlay/portal
  * pattern (see SettingsPanel) — deliberately NOT `Command.Dialog`, to avoid
  * pulling in the Radix Dialog subtree.
@@ -50,7 +50,6 @@ import {
 import { buildPaletteCtx } from '../../store/actionContext';
 import { usePaletteLearningStore } from '../../store/paletteLearningStore';
 import { score as paletteScore } from '../../store/paletteScore';
-import { useCommandSources } from './useCommandSources';
 // The AI half (AiPanel + the Pi agent backend + the markdown renderer it pulls
 // in) is the single heaviest non-first-paint subtree. It only renders in 'ai'
 // mode, so it is code-split behind a real dynamic import: the command palette
@@ -63,8 +62,12 @@ const AiPanel = lazy(() =>
     import('./AiPanel').then((m) => ({ default: m.AiPanel })),
 );
 import { useCommandBarStore } from '../../store/commandBarStore';
-import { startBridgeListener } from '../../ai/bridgeListener';
 import './CommandBar.css';
+
+export type CommandBarOpenIntent =
+    | { kind: 'toggle'; prompt?: string; seq: number }
+    | { kind: 'configure-ai'; prompt?: string; seq: number }
+    | { kind: 'ask-ai'; prompt: string; seq: number };
 
 /** Max rows rendered after ranking (keeps the list snappy). */
 const MAX_ROWS = 50;
@@ -102,8 +105,8 @@ function searchableText(action: Action): string {
     return `${action.title} ${action.group} ${(action.keywords ?? []).join(' ')}`;
 }
 
-export function CommandBar() {
-    const [open, setOpen] = useState(false);
+export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null }) {
+    const [open, setOpen] = useState(() => intent?.kind === 'toggle');
     const [search, setSearch] = useState('');
     // The mode is PERSISTED (commandBarStore): close the bar in AI mode, press
     // Ctrl+K again, and you're back in the chat (conversation restored by the
@@ -123,35 +126,11 @@ export function CommandBar() {
     const [value, setValue] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // Register node-add + app-action commands while mounted.
-    useCommandSources();
-
     // Subscribe to the registry so newly-registered actions (e.g. AI-authored
     // DSP nodes) re-render the open palette live. We only need the change tick;
     // ranking re-reads getCommands() inside the memo below.
     const [registryTick, setRegistryTick] = useState(0);
     useEffect(() => subscribe(() => setRegistryTick((t) => t + 1)), []);
-
-    // Phase 3: answer the host tool-bridge for the session — read tools return the
-    // real graph state to Pi (grounded reasoning); writes are acked. No-op in the
-    // browser (no Tauri). Started once at app root.
-    useEffect(() => {
-        let unlisten: (() => void) | null = null;
-        let cancelled = false;
-        void startBridgeListener()
-            .then((fn) => {
-                if (cancelled) fn?.();
-                else unlisten = fn;
-            })
-            .catch(() => {
-                // Best-effort: a missing/failed tool bridge (no Tauri, or a test
-                // mock without `listen`) must not surface as an unhandled rejection.
-            });
-        return () => {
-            cancelled = true;
-            unlisten?.();
-        };
-    }, []);
 
     // The local frecency floor (M2). Re-render on changes so picks re-rank.
     const learning = usePaletteLearningStore();
@@ -179,37 +158,23 @@ export function CommandBar() {
         [search, setMode],
     );
 
-    // D6 (M7): the "Configure AI provider" action opens AI mode straight into the
-    // AuthChooser (forceAuth), so a configured user can still re-pick a provider.
+    // D6 (M7): host-owned intents open the lazy palette into search or AI flows.
     useEffect(() => {
-        const onConfigure = () => {
-            setOpen(true);
+        if (!intent) return;
+        setOpen(true);
+        if (intent.kind === 'configure-ai') {
             setAiPrompt('');
             setAiAutoSend(false);
             setForceAuth(true);
             setMode('ai');
-        };
-        window.addEventListener('openjammer:configure-ai', onConfigure);
-        return () => window.removeEventListener('openjammer:configure-ai', onConfigure);
-    }, [setMode]);
-
-    // "Ask the AI to fix this" — open the chat seeded with a prompt (e.g. from the
-    // DevLog / a latency banner), so a player can hand a problem to the assistant
-    // in one tap. The assistant has get_logs / get_diagnostics / update_settings,
-    // so the seed just needs to describe the symptom.
-    useEffect(() => {
-        const onAsk = (e: Event) => {
-            const detail = (e as CustomEvent<{ prompt?: string }>).detail;
-            setOpen(true);
-            const prompt = detail?.prompt ?? '';
+        } else if (intent.kind === 'ask-ai') {
+            const prompt = intent.prompt ?? '';
             setAiPrompt(prompt);
             setAiAutoSend(prompt.trim().length > 0);
             setForceAuth(false);
             setMode('ai');
-        };
-        window.addEventListener('openjammer:ask-ai', onAsk);
-        return () => window.removeEventListener('openjammer:ask-ai', onAsk);
-    }, [setMode]);
+        }
+    }, [intent, setMode]);
 
     // Return from AI mode to search. The conversation is preserved (persisted),
     // so coming back to AI later picks up exactly where it left off.
@@ -217,21 +182,6 @@ export function CommandBar() {
         setAiAutoSend(false);
         setMode('search');
     }, [setMode]);
-
-    // Global Ctrl/Cmd+K toggle. MUST early-return when the palette is already
-    // open/focused so the handler doesn't fight the in-palette key handling
-    // (cmdk owns arrow/enter/escape once focus is inside).
-    useEffect(() => {
-        const onKeyDown = (e: KeyboardEvent) => {
-            const isToggle = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k';
-            if (!isToggle) return;
-            if (open) return;
-            e.preventDefault();
-            setOpen(true);
-        };
-        window.addEventListener('keydown', onKeyDown);
-        return () => window.removeEventListener('keydown', onKeyDown);
-    }, [open]);
 
     // Focus the search input whenever the palette opens or returns to search.
     useEffect(() => {

@@ -7,6 +7,7 @@
 //!   * `parampatch/*` — the hand-packed 7-byte frame for the highest-rate param
 //!     stream (a knob being swept); pack/unpack must stay trivially cheap.
 //!   * `rtcommand/*` — the per-note/-param JSON control message.
+//!
 //! Run locally with `cargo bench`; CI measures instruction count + allocations.
 
 use codspeed_criterion_compat::{black_box, criterion_group, criterion_main, Criterion};
@@ -114,7 +115,9 @@ fn bench_parampatch(c: &mut Criterion) {
     let bytes = p.to_bytes();
     let mut group = c.benchmark_group("parampatch");
 
-    group.bench_function("to_bytes", |b| b.iter(|| black_box(black_box(p).to_bytes())));
+    group.bench_function("to_bytes", |b| {
+        b.iter(|| black_box(black_box(p).to_bytes()))
+    });
 
     group.bench_function("from_bytes", |b| {
         b.iter(|| black_box(ParamPatch::from_bytes(black_box(bytes))))

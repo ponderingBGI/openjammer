@@ -166,7 +166,8 @@ fn audio_edge(from: u32, to: u32) -> IrEdge {
 fn realistic_graph() -> OjGraph {
     let mut g = OjGraph::empty(48_000, BLOCK as u32);
     g.nodes.push(node(1, OSC_ID, PrimitiveKind::Osc, 0, 1));
-    g.nodes.push(node(2, BIQUAD_ID, PrimitiveKind::Biquad, 1, 1));
+    g.nodes
+        .push(node(2, BIQUAD_ID, PrimitiveKind::Biquad, 1, 1));
     g.nodes.push(node(3, DELAY_ID, PrimitiveKind::Delay, 1, 1));
     g.nodes
         .push(node(4, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));

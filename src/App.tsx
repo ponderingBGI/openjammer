@@ -18,7 +18,12 @@ const SettingsPanel = lazy(() =>
         default: m.SettingsPanel,
     })),
 );
-import { CommandBar } from './components/CommandBar/CommandBar';
+const SafeModeScreen = lazy(() =>
+    import('./components/SafeMode/SafeModeScreen').then((m) => ({
+        default: m.SafeModeScreen,
+    })),
+);
+import { CommandBarHost } from './components/CommandBar/CommandBarHost';
 import { DevLogPanel } from './components/DevLog/DevLogPanel';
 import { IssueReporter } from './components/IssueReporter/IssueReporter';
 import { AudioHealthPanel } from './components/AudioHealth/AudioHealthPanel';
@@ -41,7 +46,6 @@ import { useKeybindingsStore } from './store/keybindingsStore';
 import { useEngineHealthStore, setEngineLive } from './store/engineHealthStore';
 import { useCrashRecovery } from './persistence/recovery/useCrashRecovery';
 import { writeEmergencyBackup } from './persistence/recovery';
-import { SafeModeScreen } from './components/SafeMode/SafeModeScreen';
 import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens';
 import { isEditableTarget } from './utils/editableTarget';
 import './styles/global.css';
@@ -445,7 +449,11 @@ function App() {
     <>
       {/* Safe Mode (Track B P0) — shown only after repeated crashes; offers calm
           choices instead of reopening into a deadly crash cycle. */}
-      <SafeModeScreen api={recovery} />
+      {recovery.safeMode && (
+        <Suspense fallback={null}>
+          <SafeModeScreen api={recovery} />
+        </Suspense>
+      )}
 
       {/* Welcome screen (browser tier only — native auto-starts, see useState above).
           Suppressed in Safe Mode: SafeModeScreen is its own aria-modal dialog, and
@@ -538,8 +546,8 @@ function App() {
         </Suspense>
       )}
 
-      {/* Command Bar (Ctrl/Cmd+K) - owns its own toggle + open state (U19) */}
-      <CommandBar />
+      {/* Command Bar (Ctrl/Cmd+K) - host stays eager; heavy palette UI loads on demand. */}
+      <CommandBarHost />
 
       {/* DevLog panel (L4) — the on-device structured-log surface; the AI agent
           reads the same store. Toggled via the command palette / openjammer:toggle-devlog. */}
