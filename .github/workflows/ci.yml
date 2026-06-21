@@ -7,8 +7,9 @@ name: CI
 # Lane A (per-PR): an affected-selection `changes` job reads `oj plan --json` and
 # runs only the legs a PR actually touches. Non-PR events (push to main/canari,
 # manual dispatch) run EVERYTHING. The aggregate `gate` job is the single
-# required check: it passes when every needed job is success-or-skipped and fails
-# if any failed — so skipping an unaffected leg never weakens the gate.
+# required check: it starts immediately, watches the run live, and passes only
+# when every selected job is green — so skipping an unaffected leg never weakens
+# the gate or leaves the required check unclickable.
 #
 # The repeated checkout/apt/toolchain/cache/bun blocks are collapsed into the
 # `setup-rust` + `setup-web` composite actions (.github/actions/*).
@@ -96,6 +97,36 @@ jobs:
           else
             echo "web=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: Write merge-gate selection
+        shell: bash
+        env:
+          ENGINE: ${{ steps.plan.outputs.engine }}
+          WEB: ${{ steps.plan.outputs.web }}
+        run: |
+          mkdir -p ci-gate-selection
+          {
+            echo "Affected selection"
+            if [ "$ENGINE" = "true" ]; then
+              echo "Engine (Rust workspace)"
+            fi
+            if [ "$WEB" = "true" ]; then
+              echo "Web (control plane)"
+            fi
+            if [ "$ENGINE" = "true" ] || [ "$WEB" = "true" ]; then
+              echo "Windows native build + audio gate"
+              echo "macOS engine + audio gate (arm64)"
+              echo "Doctor wiring gates (fault pipe + COI honesty)"
+            fi
+          } > ci-gate-selection/expected-jobs.txt
+          echo "Merge gate expects:"
+          sed 's/^/  - /' ci-gate-selection/expected-jobs.txt
+      - name: Upload merge-gate selection
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ci-gate-selection
+          path: ci-gate-selection/expected-jobs.txt
+          if-no-files-found: error
+          retention-days: 1
 
   engine:
     name: Engine (Rust workspace)
@@ -286,21 +317,21 @@ jobs:
 
   gate:
     name: Merge gate
-    # The SINGLE required check. Runs always so it can adjudicate skipped legs.
-    needs: [changes, engine, web, windows-native, macos-native, doctor]
-    if: always()
+    # The SINGLE required check. It starts immediately, then watches the selected
+    # CI legs through the GitHub API so the required check is clickable while the
+    # expensive jobs are still running.
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
     steps:
-      - name: Require every needed job to be success-or-skipped
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Self-test merge-gate predicate
+        run: bash scripts/ci/gate-selftest.sh
+      - name: Watch selected CI jobs
         shell: bash
         env:
-          RESULTS: ${{ join(needs.*.result, ',') }}
-        run: |
-          echo "needed job results: $RESULTS"
-          # Affected-selection legitimately SKIPS unaffected legs; only a real
-          # failure or cancellation may block a merge.
-          if echo "$RESULTS" | tr ',' '\n' | grep -qE 'failure|cancelled'; then
-            echo "::error::A required CI job failed — the merge gate is RED."
-            exit 1
-          fi
-          echo "All required jobs passed or were skipped — merge gate GREEN."
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/gate-watch.sh
