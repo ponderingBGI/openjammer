@@ -11,6 +11,7 @@ core (`ojcore`) runs native on the desktop and compiled to WebAssembly in your b
 [![Version](https://img.shields.io/badge/version-0.0.0-orange.svg)](package.json)
 [![Docs](https://img.shields.io/badge/docs-living%20reference-4A7C59.svg)](https://ponderingbgi.github.io/openjammer/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/ponderingBGI/openjammer?utm_source=badge)
 
 </div>
 
