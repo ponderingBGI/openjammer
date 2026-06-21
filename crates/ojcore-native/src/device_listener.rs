@@ -17,13 +17,19 @@
 //! * **other** — the polling watcher is the sole path (a no-op listener).
 //!
 //! SAFETY MODEL (macOS): the listener is best-effort and CANNOT cause UB even if a
-//! runtime detail is wrong. The callback context is a LEAKED `DeviceFaultTx`
-//! (valid for the listener's whole life, reclaimed only on `Drop` after
-//! deregistration), and the callback does nothing but a wait-free push to the SPSC
-//! mailbox — exactly what the proven `err_fn` does. CoreAudio invokes a single
-//! (object, address) listener serially, so the single-producer SPSC contract
-//! holds. If the property/run-loop detail is off, the listener simply never fires
-//! and the poller covers it — no regression, no unsafety.
+//! runtime detail is wrong. The callback context is a LEAKED
+//! `Mutex<DeviceFaultTx>` — INTENTIONALLY never reclaimed (one bounded allocation
+//! per install, and installs happen once per engine). CoreAudio does NOT guarantee
+//! that property-listener callbacks are serialized (Apple's docs say nothing, and
+//! Chromium/cpal treat them as concurrent), so the callback takes a SHARED `&*ptr`
+//! to the mutex — never `&mut` — and the mutex serializes the wait-free push into
+//! the single-producer SPSC mailbox. Leaking the context (rather than freeing it in
+//! `Drop`) removes the use-after-free that a callback already in flight across
+//! `AudioObjectRemovePropertyListener` would otherwise cause: a stale `&*ptr` would
+//! be reading freed memory. The normal-priority notification thread briefly locking
+//! an uncontended mutex is fine — this is not the RT render thread. If the
+//! property/run-loop detail is off, the listener simply never fires and the poller
+//! covers it — no regression, no unsafety.
 
 use crate::device::DeviceFaultTx;
 
@@ -60,6 +66,7 @@ pub fn install(tx: DeviceFaultTx) -> Option<DeviceListener> {
 mod macos {
     use crate::device::{DeviceFault, DeviceFaultTx};
     use core::ffi::c_void;
+    use std::sync::Mutex;
 
     type AudioObjectID = u32;
     type OSStatus = i32;
@@ -110,8 +117,11 @@ mod macos {
     };
 
     /// Called by CoreAudio when the default output device changes. Pushes a fault
-    /// and returns `noErr`. SAFETY: `client_data` is the leaked `DeviceFaultTx`
-    /// from `install`, valid until `Drop` deregisters this proc.
+    /// and returns `noErr`. SAFETY: `client_data` is the leaked
+    /// `Mutex<DeviceFaultTx>` from `install`, valid for the whole process lifetime
+    /// (the context is never freed), so a shared `&*ptr` can never dangle even if a
+    /// callback is in flight across deregistration. CoreAudio may invoke this
+    /// concurrently, so the mutex (not `&mut`) serializes the single-producer push.
     unsafe extern "C" fn listener_proc(
         _obj: AudioObjectID,
         _n_addrs: u32,
@@ -119,28 +129,35 @@ mod macos {
         client_data: *mut c_void,
     ) -> OSStatus {
         if !client_data.is_null() {
-            let tx = &mut *(client_data as *mut DeviceFaultTx);
-            tx.push(DeviceFault::DefaultChanged);
+            let mtx = &*(client_data as *const Mutex<DeviceFaultTx>);
+            if let Ok(mut tx) = mtx.lock() {
+                tx.push(DeviceFault::DefaultChanged);
+            }
         }
         0 // noErr
     }
 
-    /// Owns the registration; deregisters + reclaims the leaked context on drop.
+    /// Owns the registration; deregisters on drop (the context is intentionally
+    /// leaked, never reclaimed — see the module SAFETY MODEL).
     pub struct CoreAudioListener {
-        ctx: *mut DeviceFaultTx,
+        ctx: *mut Mutex<DeviceFaultTx>,
     }
 
-    // The registration is created + dropped on the control thread; the raw ptr is
-    // only ever read by the (serial) CoreAudio callback. Safe to move the handle.
+    // The registration is created + dropped on the control thread; the raw ptr
+    // points at a `Mutex<DeviceFaultTx>` (`Send + Sync`) that the CoreAudio callback
+    // reads through a shared reference, with the mutex serializing concurrent
+    // callbacks. Safe to move the handle.
     unsafe impl Send for CoreAudioListener {}
 
     impl CoreAudioListener {
         pub fn install(tx: DeviceFaultTx) -> Option<Self> {
-            // Leak the producer so the callback context is valid for the whole
-            // listener lifetime; reclaimed in `Drop`.
-            let ctx = Box::into_raw(Box::new(tx));
+            // Leak a mutex-wrapped producer so the callback context is valid for the
+            // whole process lifetime (never reclaimed) and concurrent callbacks
+            // serialize through the lock.
+            let ctx = Box::into_raw(Box::new(Mutex::new(tx)));
             // SAFETY: ADDRESS is a valid static; `listener_proc` matches the proc
-            // ABI; `ctx` outlives the registration (reclaimed only after removal).
+            // ABI; `ctx` outlives the registration (it is leaked for the whole
+            // process — the callback only ever reads it through a shared reference).
             let status = unsafe {
                 AudioObjectAddPropertyListener(
                     K_AUDIO_OBJECT_SYSTEM_OBJECT,
@@ -161,8 +178,11 @@ mod macos {
 
     impl Drop for CoreAudioListener {
         fn drop(&mut self) {
-            // SAFETY: deregister BEFORE reclaiming the context, so no in-flight
-            // callback can observe a freed `tx`.
+            // SAFETY: deregister the listener. The context is INTENTIONALLY NOT
+            // reclaimed: CoreAudio may have a callback in flight across removal, and
+            // freeing the `Mutex<DeviceFaultTx>` here would leave that callback's
+            // shared `&*ptr` dangling (use-after-free). Leaking one bounded
+            // allocation per install is the standard FFI-callback discipline.
             unsafe {
                 AudioObjectRemovePropertyListener(
                     K_AUDIO_OBJECT_SYSTEM_OBJECT,
@@ -170,7 +190,6 @@ mod macos {
                     listener_proc,
                     self.ctx as *mut c_void,
                 );
-                drop(Box::from_raw(self.ctx));
             }
         }
     }
