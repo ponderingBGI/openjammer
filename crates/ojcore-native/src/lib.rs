@@ -40,8 +40,8 @@ pub mod update_gate;
 pub use asset::{AssetError, AssetStore, Pcm};
 pub use backend::{supervise_once, AudioBackend};
 pub use device::{
-    classify as classify_device_fault, device_fault_channel, DeviceFault, DeviceFaultRx,
-    DeviceFaultTx,
+    classify as classify_device_fault, device_fault_channel, probe_default_output, DeviceFault,
+    DeviceFaultRx, DeviceFaultTx, DeviceIdentity, DeviceWatcher,
 };
 pub use fs::{atomic_write, OjFs, RealFs};
 pub use host::{

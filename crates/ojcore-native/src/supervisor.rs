@@ -99,7 +99,9 @@ impl DeviceSupervisor {
     /// xrun-like) is counted and ridden out — never a rebuild.
     pub fn on_fault(&mut self, fault: DeviceFault) -> RecoveryAction {
         match fault {
-            DeviceFault::Removed => {
+            // A removal OR a default-device swap both require rebuilding onto the
+            // (new) default device — same recovery, exactly one rebuild per event.
+            DeviceFault::Removed | DeviceFault::DefaultChanged => {
                 if self.state == SupervisorState::Running {
                     self.state = SupervisorState::Recovering;
                     self.attempts = 0;

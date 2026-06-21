@@ -29,6 +29,12 @@ pub enum DeviceFault {
     /// A backend stream error that is NOT device-absence (a transient/though-rare
     /// driver error). Kept as a distinct, observable signal rather than swallowed.
     Backend,
+    /// The DEFAULT output device changed underneath us (the user plugged in
+    /// headphones / switched interface) — the stream is still on the OLD device, so
+    /// we must rebuild onto the new default. Surfaced by the portable
+    /// [`DeviceWatcher`] (cpal's error callback does not report this), and handled
+    /// like a removal: hold last good, rebuild ONCE on the new default.
+    DefaultChanged,
 }
 
 /// Pure classification of "is this error device-absence?" into a [`DeviceFault`].
@@ -84,6 +90,65 @@ impl DeviceFaultRx {
     }
 }
 
+/// A cheap, comparable identity of the default output device, so a change can be
+/// detected by polling rather than per-OS event APIs. (The pinned cpal 0.18.1 does
+/// not expose a device name, so identity is its default spec — enough to catch a
+/// removal and a spec-changing swap; an identically-specced swap is left to the
+/// error-callback path + the user's device picker.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceIdentity {
+    /// Its default sample rate (Hz) — switching interfaces usually changes this.
+    pub sample_rate: u32,
+    /// Its default output channel count.
+    pub channels: u16,
+}
+
+/// Probe the CURRENT default output device's identity, or `None` when there is no
+/// device. Off-RT (queries cpal); call on the control poll, never the audio thread.
+pub fn probe_default_output() -> Option<DeviceIdentity> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let host = cpal::default_host();
+    let device = host.default_output_device()?;
+    let cfg = device.default_output_config().ok()?;
+    Some(DeviceIdentity {
+        sample_rate: cfg.sample_rate(),
+        channels: cfg.channels(),
+    })
+}
+
+/// Watches the DEFAULT output device by polling and emits a [`DeviceFault`] when it
+/// disappears or changes — the portable, FFI-free answer to cpal's error callback
+/// staying silent on a default-device change (and, on some backends, on removal:
+/// cpal #373). Driven from the control poll alongside the error-callback mailbox;
+/// the two are complementary (the callback catches a hard stream error, the watcher
+/// catches a silent swap). Pure comparison logic + an injectable probe, so it is
+/// unit-testable without real hardware.
+#[derive(Debug, Default)]
+pub struct DeviceWatcher {
+    last: Option<DeviceIdentity>,
+}
+
+impl DeviceWatcher {
+    /// A watcher seeded with the device identity at stream start.
+    pub fn new(initial: Option<DeviceIdentity>) -> Self {
+        Self { last: initial }
+    }
+
+    /// Feed the freshly-probed current identity; return a fault if the default
+    /// VANISHED ([`DeviceFault::Removed`]) or CHANGED ([`DeviceFault::DefaultChanged`])
+    /// since the last poll. A device first APPEARING (none → some) is a recovery
+    /// opportunity, not a fault, so it yields `None`. Updates the remembered state.
+    pub fn poll(&mut self, current: Option<DeviceIdentity>) -> Option<DeviceFault> {
+        let fault = match (&self.last, &current) {
+            (Some(_), None) => Some(DeviceFault::Removed),
+            (Some(prev), Some(now)) if prev != now => Some(DeviceFault::DefaultChanged),
+            _ => None,
+        };
+        self.last = current;
+        fault
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -92,6 +157,41 @@ mod tests {
     fn classify_maps_absence_to_removed() {
         assert_eq!(classify(true), DeviceFault::Removed);
         assert_eq!(classify(false), DeviceFault::Backend);
+    }
+
+    fn ident(sr: u32) -> DeviceIdentity {
+        DeviceIdentity {
+            sample_rate: sr,
+            channels: 2,
+        }
+    }
+
+    #[test]
+    fn watcher_emits_removed_when_the_default_vanishes() {
+        let mut w = DeviceWatcher::new(Some(ident(48_000)));
+        assert_eq!(w.poll(None), Some(DeviceFault::Removed));
+        // Steady absence does not keep re-emitting.
+        assert_eq!(w.poll(None), None);
+    }
+
+    #[test]
+    fn watcher_emits_default_changed_on_a_swap() {
+        let mut w = DeviceWatcher::new(Some(ident(48_000)));
+        // Same device -> nothing.
+        assert_eq!(w.poll(Some(ident(48_000))), None);
+        // Switched interface (rate change) -> DefaultChanged, once.
+        assert_eq!(
+            w.poll(Some(ident(44_100))),
+            Some(DeviceFault::DefaultChanged)
+        );
+        assert_eq!(w.poll(Some(ident(44_100))), None);
+    }
+
+    #[test]
+    fn watcher_treats_a_device_appearing_as_no_fault() {
+        let mut w = DeviceWatcher::new(None);
+        // None -> Some is a recovery opportunity, not a fault.
+        assert_eq!(w.poll(Some(ident(48_000))), None);
     }
 
     #[test]

@@ -39,8 +39,9 @@ use ojcore::{
     Engine, EventRing, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{
-    AssetCatalog, AssetError, AssetStore, AudioHost, DeviceFault, DeviceSupervisor, HostError, Pcm,
-    RecoveryAction, LogRecord, LogStore, StreamRequest,
+    probe_default_output, AssetCatalog, AssetError, AssetStore, AudioHost, DeviceFault,
+    DeviceSupervisor, DeviceWatcher, HostError, LogRecord, LogStore, Pcm, RecoveryAction,
+    StreamRequest,
 };
 use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
 use ojinstrument::{register_all, RegisterOpts};
@@ -207,6 +208,12 @@ pub struct EngineBackend {
     /// Wall-clock (µs) of the last reopen attempt, so retries are paced (~1s
     /// backoff) instead of hammered on every fast UI poll.
     last_reopen_us: u64,
+    /// Portable default-output-device watcher: detects a silent device swap /
+    /// removal that cpal's error callback may never report (cpal #373), by polling.
+    device_watcher: DeviceWatcher,
+    /// Wall-clock (µs) of the last device probe, so the (device-enumerating) probe
+    /// runs ~1 Hz rather than on every fast UI poll.
+    last_probe_us: u64,
 }
 
 /// State of one recorder capture for a node.
@@ -305,6 +312,8 @@ impl EngineBackend {
             // Up to 8 reopen attempts per loss event before a calm give-up.
             supervisor: DeviceSupervisor::new(8),
             last_reopen_us: 0,
+            device_watcher: DeviceWatcher::new(probe_default_output()),
+            last_probe_us: 0,
         }
     }
 
@@ -746,6 +755,16 @@ impl EngineBackend {
         let mut faults: Vec<DeviceFault> = Vec::new();
         if let Some(h) = self.host.as_mut() {
             h.drain_device_faults(|f| faults.push(f));
+        }
+        // Portable default-device watch (throttled ~1 Hz): catches a silent swap /
+        // removal cpal's callback may never report. The probe enumerates devices,
+        // so we do NOT run it on every fast UI poll.
+        let now = now_us();
+        if now.wrapping_sub(self.last_probe_us) >= 1_000_000 {
+            self.last_probe_us = now;
+            if let Some(f) = self.device_watcher.poll(probe_default_output()) {
+                faults.push(f);
+            }
         }
         for fault in faults {
             if self.supervisor.on_fault(fault) == RecoveryAction::HoldLastGood {
