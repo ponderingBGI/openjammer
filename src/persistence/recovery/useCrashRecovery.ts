@@ -115,8 +115,17 @@ export function useCrashRecovery(): CrashRecoveryApi {
             settle(markerStore);
         };
         const onHealth = (health: string) => {
-            if (health === 'LIVE' && !liveTimer && !settled) {
-                liveTimer = setTimeout(doSettle, SETTLE_AFTER_LIVE_MS);
+            if (settled) return;
+            if (health === 'LIVE') {
+                // A sustained LIVE arms the settle timer (once — don't restart it
+                // on every LIVE re-emit during steady playback).
+                if (!liveTimer) liveTimer = setTimeout(doSettle, SETTLE_AFTER_LIVE_MS);
+            } else if (liveTimer) {
+                // Health fell back to DEAD/DEGRADED before the window elapsed: a
+                // brief LIVE blip must NOT forgive a crash streak. Disarm so only
+                // a *sustained* LIVE (or the uptime backstop) settles.
+                clearTimeout(liveTimer);
+                liveTimer = null;
             }
         };
         // React to the current and future health.

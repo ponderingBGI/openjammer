@@ -65,12 +65,28 @@ function safeRemove(key: string): void {
 function readQuarantineIndex(): Array<{ id: string; bootSeq: number; reason: string }> {
     const raw = safeGet(QUARANTINE_INDEX_KEY);
     if (raw === null) return [];
+    let parsed: unknown;
     try {
-        const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? parsed : [];
+        parsed = JSON.parse(raw);
     } catch {
         return [];
     }
+    if (!Array.isArray(parsed)) return [];
+    // Validate each member so downstream `q.id` / `b.bootSeq` access can never hit
+    // a `null` or a primitive (fail-closed): drop entries without a string id, and
+    // coerce the other fields to safe defaults rather than trust the stored shape.
+    return parsed.flatMap((item) => {
+        if (typeof item !== 'object' || item === null) return [];
+        const q = item as Record<string, unknown>;
+        if (typeof q.id !== 'string') return [];
+        return [
+            {
+                id: q.id,
+                bootSeq: typeof q.bootSeq === 'number' && Number.isFinite(q.bootSeq) ? q.bootSeq : 0,
+                reason: typeof q.reason === 'string' ? q.reason : 'unknown',
+            },
+        ];
+    });
 }
 
 /** Stable id for the emergency backup, keyed by its content timestamp. */

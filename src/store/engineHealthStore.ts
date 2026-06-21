@@ -86,7 +86,13 @@ export function setEngineHealth(health: EngineHealth, reason?: string): void {
  * blindly — callers set it only when they have observed real activity.
  */
 export function setEngineLive(reason = 'engine live'): void {
-    useEngineHealthStore.getState().setHealth('LIVE', reason);
+    const { health, setHealth } = useEngineHealthStore.getState();
+    // Never paper over a real fault: a DEAD or DEGRADED engine is sticky, so a
+    // stray "live" signal (e.g. a meter frame arriving after a fault) must not
+    // silently flip the dot green and mask the trouble. The executor escalates
+    // back to LIVE explicitly via `setEngineHealth` when it has truly recovered.
+    if (health === 'DEAD' || health === 'DEGRADED') return;
+    setHealth('LIVE', reason);
 }
 
 // ============================================================================

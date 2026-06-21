@@ -92,6 +92,43 @@ describe('crash-safe recovery (longest valid prefix)', () => {
     });
 });
 
+describe('MemoryJournalStore defensive-copies at every boundary', () => {
+    it('does not alias the caller-supplied initial buffers', () => {
+        const snap = enc('SNAP');
+        const log = frameRecord(enc('one'));
+        const store = new MemoryJournalStore({ snapshot: snap, log });
+        // Mutating the original inputs must not reach back into the store.
+        snap[0] ^= 0xff;
+        log[0] ^= 0xff;
+        const rec = new Journal(store).recover();
+        expect(rec.snapshot && new TextDecoder().decode(rec.snapshot)).toBe('SNAP');
+        expect(rec.updates.map((u) => new TextDecoder().decode(u))).toEqual(['one']);
+    });
+
+    it('returns copies from readSnapshot / readLog (a reader cannot corrupt the store)', () => {
+        const store = new MemoryJournalStore({ snapshot: enc('SNAP') });
+        store.appendBytes(frameRecord(enc('delta')));
+
+        const snapOut = store.readSnapshot();
+        const logOut = store.readLog();
+        // A consumer scribbling on the returned buffers leaves the store intact.
+        if (snapOut) snapOut.fill(0);
+        logOut.fill(0);
+
+        expect(store.readSnapshot() && new TextDecoder().decode(store.readSnapshot()!)).toBe('SNAP');
+        const rec = new Journal(store).recover();
+        expect(rec.updates.map((u) => new TextDecoder().decode(u))).toEqual(['delta']);
+    });
+
+    it('does not alias the snapshot handed to checkpoint', () => {
+        const store = new MemoryJournalStore();
+        const snap = enc('CHECKPOINT');
+        store.checkpoint(snap);
+        snap[0] ^= 0xff; // mutate after the call
+        expect(store.readSnapshot() && new TextDecoder().decode(store.readSnapshot()!)).toBe('CHECKPOINT');
+    });
+});
+
 describe('compaction', () => {
     it('folds state into a fresh snapshot and truncates the log', () => {
         const store = new MemoryJournalStore();

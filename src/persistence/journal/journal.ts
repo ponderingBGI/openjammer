@@ -80,15 +80,21 @@ export class MemoryJournalStore implements JournalStore {
     private log: Uint8Array = new Uint8Array(0);
 
     constructor(initial?: { snapshot?: Uint8Array | null; log?: Uint8Array }) {
-        this.snapshot = initial?.snapshot ?? null;
-        if (initial?.log) this.log = initial.log;
+        // Defensive-copy at the boundary: a real durable store owns its bytes, so
+        // the in-memory model must too — a caller mutating its passed-in buffer
+        // later must never reach back in and corrupt our snapshot/log.
+        this.snapshot = initial?.snapshot ? new Uint8Array(initial.snapshot) : null;
+        if (initial?.log) this.log = new Uint8Array(initial.log);
     }
 
     readSnapshot(): Uint8Array | null {
-        return this.snapshot;
+        // Hand back a copy: the snapshot bytes are ours; a reader mutating the
+        // result must not bit-rot the stored baseline.
+        return this.snapshot ? new Uint8Array(this.snapshot) : null;
     }
     readLog(): Uint8Array {
-        return this.log;
+        // Copy out so a caller cannot mutate the live log in place.
+        return new Uint8Array(this.log);
     }
     appendBytes(framed: Uint8Array): void {
         const next = new Uint8Array(this.log.length + framed.length);
@@ -98,7 +104,8 @@ export class MemoryJournalStore implements JournalStore {
     }
     checkpoint(snapshot: Uint8Array): void {
         // Snapshot first, THEN clear the log (mirrors the durable fsync ordering).
-        this.snapshot = snapshot;
+        // Copy in so a later mutation of the caller's buffer can't alter ours.
+        this.snapshot = new Uint8Array(snapshot);
         this.log = new Uint8Array(0);
     }
 

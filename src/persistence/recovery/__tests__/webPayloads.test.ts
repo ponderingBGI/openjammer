@@ -71,6 +71,48 @@ describe('WebPayloadSource', () => {
     });
 });
 
+describe('quarantine index is read fail-closed (malformed members never crash consumers)', () => {
+    const QUARANTINE_INDEX_KEY = 'openjammer-recovery-quarantine';
+
+    it('survives a non-array index (returns no recoverable id)', () => {
+        localStorage.setItem(QUARANTINE_INDEX_KEY, JSON.stringify({ not: 'an array' }));
+        expect(newestQuarantinedId()).toBeNull();
+    });
+
+    it('drops null / primitive / id-less members and keeps the well-formed one', () => {
+        localStorage.setItem(
+            QUARANTINE_INDEX_KEY,
+            JSON.stringify([
+                null,
+                42,
+                'a string',
+                { bootSeq: 9, reason: 'no-id' }, // missing id ⇒ dropped
+                { id: 'emergency:1', bootSeq: 5, reason: 'ok' },
+            ]),
+        );
+        // The only valid member wins; the malformed ones are silently dropped and
+        // never reach the `b.bootSeq` reducer as a `null`/primitive.
+        expect(newestQuarantinedId()).toBe('emergency:1');
+    });
+
+    it('coerces a non-finite bootSeq to 0 so the newest-by-bootSeq reducer is safe', () => {
+        localStorage.setItem(
+            QUARANTINE_INDEX_KEY,
+            JSON.stringify([
+                { id: 'emergency:nan', bootSeq: 'oops' }, // coerced to 0
+                { id: 'emergency:2', bootSeq: 2 },
+            ]),
+        );
+        expect(newestQuarantinedId()).toBe('emergency:2');
+    });
+
+    it('a backup IS listed when the index is garbage (its quarantine check yields nothing)', () => {
+        writeEmergencyBackup({ nodes: goodGraph.nodes, edges: goodGraph.edges, now: 700 });
+        localStorage.setItem(QUARANTINE_INDEX_KEY, 'not json at all {');
+        expect(new WebPayloadSource().list().map((p) => p.id)).toEqual(['emergency:700']);
+    });
+});
+
 describe('runRecovery end-to-end over localStorage', () => {
     function seedDirty(loadedSnapshotId: string | null) {
         const m: Marker = {

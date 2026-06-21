@@ -24,16 +24,43 @@ const PRIMARY_KEY = 'openjammer-recovery-marker';
 const SHADOW_KEY = 'openjammer-recovery-marker.bak';
 
 /**
+ * Is `raw` a value the breaker can actually parse? A torn write (the tab died
+ * mid-`setItem`) leaves a truncated, non-JSON string in one copy; the redundant
+ * copy is the whole point. We test PARSEABILITY (not full marker validity — that
+ * lives in {@link parseMarker}) so `read` can prefer the copy that survives, not
+ * the merely-present one.
+ */
+function isParseable(raw: string | null): boolean {
+    if (raw === null) return false;
+    try {
+        JSON.parse(raw);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
  * localStorage-backed, doubly-written breaker store. Each copy is independent;
- * `read` returns the first that exists, so losing one (partial eviction) still
- * yields the count. Every method swallows storage errors (private mode / quota)
- * because a breaker we cannot persist must degrade gracefully, never throw at
- * boot.
+ * `read` returns the first PARSEABLE copy, so a torn/invalid primary (the tab
+ * died mid-write) falls through to the surviving shadow instead of disarming the
+ * crash-loop guard with garbage. Every method swallows storage errors (private
+ * mode / quota) because a breaker we cannot persist must degrade gracefully,
+ * never throw at boot.
  */
 export class WebMarkerStore implements MarkerStore {
     read(): string | null {
         try {
-            return localStorage.getItem(PRIMARY_KEY) ?? localStorage.getItem(SHADOW_KEY);
+            const primary = localStorage.getItem(PRIMARY_KEY);
+            const shadow = localStorage.getItem(SHADOW_KEY);
+            // Prefer the first copy we can actually parse: a torn primary must not
+            // shadow a readable backup (that would defeat the redundant write).
+            if (isParseable(primary)) return primary;
+            if (isParseable(shadow)) return shadow;
+            // Neither parses — hand back whatever exists so the caller's own
+            // fail-safe parse decides (a present-but-garbage marker is treated as
+            // unreadable ⇒ fail toward Safe Mode, never a silent count reset).
+            return primary ?? shadow;
         } catch {
             return null;
         }
