@@ -308,10 +308,14 @@ export class OjcoreNativeExecutor implements Executor {
         const { graph, index } = emitWithIndex(this.getNodes(), this.getConnections(), {
             codeNodesAsWasmHost: true,
         });
-        this.index = index;
-        // Build the reverse NodeIdx -> visual id map for routing meter frames.
-        this.reverseIndex = new Map();
-        for (const [id, idx] of index) this.reverseIndex.set(idx, id);
+        // Build the next NodeIdx interning + reverse (NodeIdx -> visual id) maps as
+        // LOCALS — they are committed to `this.index`/`this.reverseIndex` only once
+        // the engine ACCEPTS this graph (see sendGraph). Committing them here, before
+        // the IPC is accepted, would point meter-frame routing (`reverseIndex.get`)
+        // and RtCommand addressing (`index.get`) at a graph the engine never adopted
+        // when the push is rejected.
+        const nextReverseIndex = new Map<number, string>();
+        for (const [id, idx] of index) nextReverseIndex.set(idx, id);
         const native = remapForBackend(graph, 'native');
         // Dedupe: a store notification can fire without the audio graph actually
         // changing (or the same graph can be re-emitted by a re-render). The
@@ -325,13 +329,15 @@ export class OjcoreNativeExecutor implements Executor {
         // notification re-attempt instead of being deduped away (held-note rule).
         const prev = this.lastPushedGraph;
         this.lastPushedGraph = serialized;
-        void this.sendGraph(native, prev, serialized);
+        void this.sendGraph(native, prev, serialized, index, nextReverseIndex);
     }
 
     private async sendGraph(
         graph: OjGraph,
         prevSerialized: string | null,
         attemptedSerialized: string,
+        nextIndex: NodeIdxMap,
+        nextReverseIndex: Map<number, string>,
     ): Promise<void> {
         if (!this.invoke) return;
         try {
@@ -356,10 +362,17 @@ export class OjcoreNativeExecutor implements Executor {
             }
             return;
         }
-        // The push was accepted: a graph is live and the engine is making sound,
-        // so we are no longer in the honest "nothing has happened yet" IDLE state.
-        // Lift IDLE → LIVE (the positive state crash-recovery waits for to forgive
-        // the crash streak); NEVER downgrade a real DEAD/DEGRADED signal to LIVE.
+        // The push was ACCEPTED: only now is the new interning the engine's truth, so
+        // commit the locals computed in pushGraph. Routing (`reverseIndex.get` for
+        // meter frames) and RtCommand addressing (`index.get`) move to the graph the
+        // engine actually adopted — on rejection above we touched neither, so they
+        // stay pointed at the last good graph (held-note rule).
+        this.index = nextIndex;
+        this.reverseIndex = nextReverseIndex;
+        // A graph is live and the engine is making sound, so we are no longer in the
+        // honest "nothing has happened yet" IDLE state. Lift IDLE → LIVE (the positive
+        // state crash-recovery waits for to forgive the crash streak); NEVER downgrade
+        // a real DEAD/DEGRADED signal to LIVE.
         if (useEngineHealthStore.getState().health === 'IDLE') {
             setEngineHealth('LIVE', 'engine active');
         }
