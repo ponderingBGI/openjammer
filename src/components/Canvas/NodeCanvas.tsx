@@ -139,6 +139,10 @@ export function NodeCanvas() {
 
     // Audio clip store
     const allClips = useAudioClipStore((s) => s.clips);
+    // Drives the lazy WaveformEditorModal mount: gating the mount on this (instead
+    // of rendering it unconditionally) is what actually defers the code-split chunk
+    // to first clip-edit, rather than fetching it on canvas mount.
+    const editingClipId = useAudioClipStore((s) => s.editingClipId);
     const selectedClipIds = useAudioClipStore((s) => s.selectedClipIds);
     const clipDragState = useAudioClipStore((s) => s.dragState);
     const startClipDrag = useAudioClipStore((s) => s.startDrag);
@@ -1232,10 +1236,13 @@ export function NodeCanvas() {
             {/* Audio Clip Drag Layer (portal) */}
             <ClipDragLayer />
 
-            {/* Waveform Editor Modal (portal) */}
-            <Suspense fallback={null}>
-                <WaveformEditorModal />
-            </Suspense>
+            {/* Waveform Editor Modal (portal) — mounted only while a clip is open
+                for editing, so its lazy chunk loads on first edit, not first paint. */}
+            {editingClipId && (
+                <Suspense fallback={null}>
+                    <WaveformEditorModal />
+                </Suspense>
+            )}
 
             {/* Back to Action button - appears when nodes are not visible on any level */}
             {nodes.size > 0 && !nodesVisibility.visible && nodesVisibility.direction !== null && (

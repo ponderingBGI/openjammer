@@ -87,6 +87,15 @@ class MIDIManager {
       return true;
     } catch (error) {
       const err = error as Error;
+      // An insecure context (no HTTPS) or a Permissions-Policy block surfaces as
+      // the SAME `NotAllowedError` as a user denial in modern engines, but it is
+      // NOT the user's choice — distinguish it (detectable independently via
+      // `isSecureContext`) so the UI says something honest and actionable rather
+      // than implying the user declined.
+      if (typeof globalThis.isSecureContext !== 'undefined' && !globalThis.isSecureContext) {
+        this.initError = 'MIDI needs a secure (https) context';
+        return false;
+      }
       // Permission denied is a normal user choice under the always-prompt path,
       // not an app defect — record it quietly so the UI can say "MIDI access was
       // declined" without polluting the console with an error.
@@ -102,8 +111,10 @@ class MIDIManager {
 
   /**
    * Whether a `requestMIDIAccess` rejection is the user declining the permission
-   * prompt (vs a real failure). Chromium rejects with `SecurityError`, other
-   * engines may use `NotAllowedError`; match on name first, message as a fallback.
+   * prompt (vs a real failure). Modern engines reject denial with `NotAllowedError`;
+   * `SecurityError` is the legacy name still emitted by older Chromium. We match
+   * BOTH names (insecure-context is filtered out by the caller first), with a
+   * message-substring fallback for engines that don't set a precise name.
    */
   private isPermissionDenied(err: Error): boolean {
     const name = err.name ?? '';
