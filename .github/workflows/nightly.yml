@@ -43,6 +43,22 @@ jobs:
           cargo +nightly miri test -p ojcore-midiring
           cargo +nightly miri test -p ojcore swap
 
+  loom:
+    name: loom — SPSC ring interleavings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: loom model-check the wait-free SPSC ring
+        # Exhaustively explores the producer/consumer atomic interleavings (data
+        # region modeled as a loom cell) — the weak-memory class the single-threaded
+        # deterministic-sim harness structurally can't reach. Production is
+        # `cfg(not(loom))` and untouched; only this `--cfg loom` build pulls loom in.
+        run: RUSTFLAGS="--cfg loom" cargo test -p ojcore-midiring --test loom_ring
+
   fuzz:
     name: fuzz — WAV parse surface (unbounded)
     runs-on: ubuntu-latest
