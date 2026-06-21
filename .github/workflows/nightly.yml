@@ -67,3 +67,21 @@ jobs:
         # so the nightly stays bounded; the corpus is seeded from the smoke's RIFF
         # shapes implicitly via libFuzzer's mutation.
         run: cargo +nightly fuzz run wav_decode -- -max_total_time=300 -rss_limit_mb=4096
+
+  durability:
+    name: durability — real-process SIGKILL crash test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: ALSA dev headers (cpal/alsa-sys)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Crash-kill the atomic-write path and verify recovery
+        # The real-process cross-check for the SimFs protocol model: a child writes
+        # versions through `atomic_write` and is SIGKILLed mid-flight; recovery must
+        # always find a COMPLETE value, never a torn file (Track B durability).
+        run: cargo test -p ojcore-native --test durability_crash -- --ignored
+
