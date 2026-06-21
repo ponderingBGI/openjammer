@@ -8,7 +8,31 @@
 
 use std::fs::File;
 use std::io::{Cursor, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+
+/// The sibling temp path a crash-safe write stages into before the atomic rename
+/// (`<path>.ojtmp`). Same directory ⇒ the rename is a same-filesystem atomic op.
+fn temp_sibling(path: &Path) -> PathBuf {
+    let mut s = path.as_os_str().to_owned();
+    s.push(".ojtmp");
+    PathBuf::from(s)
+}
+
+/// Best-effort fsync of `path`'s parent directory so a just-completed rename
+/// survives power loss (POSIX). On Windows opening a directory handle this way
+/// fails and the rename is durable regardless, so any error is ignored.
+fn sync_parent_dir(path: &Path) {
+    if let Some(dir) = path.parent() {
+        let dir = if dir.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            dir
+        };
+        if let Ok(d) = File::open(dir) {
+            let _ = d.sync_all();
+        }
+    }
+}
 
 use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error as SymphoniaError;
@@ -173,10 +197,35 @@ impl AssetStore {
         })
     }
 
-    /// Write interleaved f32 [`Pcm`] to a WAV file as 32-bit float samples.
+    /// Write interleaved f32 [`Pcm`] to a WAV file as 32-bit float samples,
+    /// CRASH-SAFELY (Track B durability — "a held take beats a lost take").
+    ///
+    /// A recording is written WHILE the user performs, and `hound` finalizes the
+    /// RIFF header LAST — so a direct `File::create` + write that is interrupted
+    /// (app crash / power loss) leaves a torn, headerless, undecodable file in
+    /// place of any prior take. Instead we write to a sibling temp, fsync it,
+    /// atomically rename it over the destination, then fsync the directory. A
+    /// crash at any point leaves the COMPLETE old file (or none) — never a torn
+    /// one. POSIX-atomic on the same filesystem; the dir-fsync (no-op on Windows,
+    /// where the rename is durable regardless) makes the rename itself survive
+    /// power loss.
     pub fn write_wav_file<P: AsRef<Path>>(&self, path: P, pcm: &Pcm) -> Result<(), AssetError> {
-        let file = File::create(path)?;
-        Self::write_wav(file, pcm)
+        let path = path.as_ref();
+        let tmp = temp_sibling(path);
+        {
+            let file = File::create(&tmp)?;
+            // `&File` is Write + Seek, so `hound` can finalize the header while we
+            // retain `file` to fsync the data + header to disk before the rename.
+            Self::write_wav(&file, pcm)?;
+            file.sync_all()?;
+        }
+        // Atomic replace, then make the rename durable.
+        if let Err(e) = std::fs::rename(&tmp, path) {
+            let _ = std::fs::remove_file(&tmp); // don't leak the temp on failure
+            return Err(e.into());
+        }
+        sync_parent_dir(path);
+        Ok(())
     }
 
     /// Encode interleaved f32 [`Pcm`] to an in-memory WAV byte buffer (32-bit
@@ -306,5 +355,88 @@ mod tests {
         };
         assert_eq!(p.frames(), 0);
         assert!(p.is_empty());
+    }
+
+    // ---- Crash-safe write (Track B durability) ----
+
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// A process-unique temp dir for a file test (no tempfile dep).
+    fn unique_dir(tag: &str) -> std::path::PathBuf {
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("oj-asset-{}-{}-{}", tag, std::process::id(), n));
+        std::fs::create_dir_all(&dir).expect("mkdir temp");
+        dir
+    }
+
+    #[test]
+    fn write_wav_file_roundtrips_and_leaves_no_temp() {
+        let store = AssetStore::new();
+        let dir = unique_dir("roundtrip");
+        let path = dir.join("take.wav");
+        let pcm = test_pcm();
+
+        store.write_wav_file(&path, &pcm).expect("atomic write");
+
+        // The destination exists and decodes back to the same PCM...
+        let back = store.decode_wav_file(&path).expect("decode");
+        assert_eq!(back.channels, pcm.channels);
+        assert_eq!(back.samples.len(), pcm.samples.len());
+        // ...and the sibling temp was renamed away, never left behind.
+        assert!(!temp_sibling(&path).exists(), "temp must not leak");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_wav_file_atomically_replaces_and_a_stale_temp_is_harmless() {
+        let store = AssetStore::new();
+        let dir = unique_dir("replace");
+        let path = dir.join("take.wav");
+
+        // An existing, GOOD take (v1: 1 mono frame).
+        let v1 = Pcm {
+            samples: vec![0.25],
+            channels: 1,
+            sample_rate: 48_000,
+        };
+        store.write_wav_file(&path, &v1).expect("write v1");
+
+        // A stale temp left by a hypothetical earlier interrupted write — it must
+        // NOT corrupt the destination (the dest is only ever changed by rename).
+        std::fs::write(temp_sibling(&path), b"torn garbage, never renamed").unwrap();
+        // v1 is still intact and decodable despite the stale temp.
+        assert_eq!(
+            store
+                .decode_wav_file(&path)
+                .expect("decode v1")
+                .samples
+                .len(),
+            1
+        );
+
+        // A new take (v2: 3 frames) atomically replaces v1 and clears the temp.
+        let v2 = Pcm {
+            samples: vec![0.1, -0.2, 0.3],
+            channels: 1,
+            sample_rate: 48_000,
+        };
+        store.write_wav_file(&path, &v2).expect("write v2");
+        assert_eq!(
+            store
+                .decode_wav_file(&path)
+                .expect("decode v2")
+                .samples
+                .len(),
+            3
+        );
+        assert!(
+            !temp_sibling(&path).exists(),
+            "temp cleared after the replace"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
