@@ -124,6 +124,43 @@ fn promote_audio_thread(_buffer_frames: u32, _sample_rate: u32) {
     // No-op: cpal already MMCSS-promotes the WASAPI render thread (see fn docs).
 }
 
+/// Enable flush-to-zero (FTZ) + denormals-are-zero (DAZ) on the CURRENT (audio
+/// callback) thread, so a denormal that appears INSIDE a DSP loop — e.g. a decaying
+/// filter feedback register — is flushed by the FPU itself instead of costing the
+/// 10-100x cycle penalty that can spike a block over its deadline and xrun.
+///
+/// This complements (does not replace) the per-node [`ojcore::sanitize`], which
+/// only flushes at block boundaries: it cannot catch an in-loop spike, which is the
+/// real live-CPU hazard. Per-thread + idempotent (set once at stream start, via the
+/// same promote-once guard). Uses stable inline asm — the `_mm_setcsr` intrinsic is
+/// deprecated — and is a no-op on architectures without a denormal-flush control.
+#[inline]
+fn set_flush_denormals() {
+    #[cfg(target_arch = "x86_64")]
+    {
+        use core::arch::asm;
+        let mut mxcsr: u32 = 0;
+        // SAFETY: stmxcsr/ldmxcsr read+write THIS thread's SSE control register
+        // (SSE2 is the x86_64 baseline). FTZ = bit 15, DAZ = bit 6.
+        unsafe {
+            asm!("stmxcsr [{}]", in(reg) &mut mxcsr, options(nostack, preserves_flags));
+            mxcsr |= 0x8040;
+            asm!("ldmxcsr [{}]", in(reg) &mxcsr, options(nostack, preserves_flags));
+        }
+    }
+    #[cfg(target_arch = "aarch64")]
+    {
+        use core::arch::asm;
+        let mut fpcr: u64;
+        // SAFETY: read/modify/write THIS thread's FPCR; FZ = bit 24 (flush-to-zero).
+        unsafe {
+            asm!("mrs {}, fpcr", out(reg) fpcr, options(nomem, nostack, preserves_flags));
+            fpcr |= 1 << 24;
+            asm!("msr fpcr, {}", in(reg) fpcr, options(nomem, nostack, preserves_flags));
+        }
+    }
+}
+
 /// How to open the stream. A tiny, explicit request rather than guessing from
 /// the device default — U7 cares specifically about *small* buffers.
 #[derive(Debug, Clone, Copy)]
@@ -496,6 +533,9 @@ impl AudioHost {
                     if !promoted {
                         promoted = true;
                         promote_audio_thread(buffer_frames, sample_rate);
+                        // Flush denormals in hardware on the render thread (in-loop
+                        // denormal-spike guard; complements per-node sanitize).
+                        set_flush_denormals();
                     }
                     // Adopt a hot-swapped program (if one was published) at the
                     // block boundary, BEFORE rendering. Lock-free; the displaced
@@ -742,6 +782,14 @@ mod tests {
             !err_side.is_set(),
             "clearing on one clone clears the shared flag"
         );
+    }
+
+    #[test]
+    fn set_flush_denormals_is_safe_to_call() {
+        // Smoke: enabling FTZ/DAZ on the current thread must never panic on any
+        // supported arch (and is a no-op where there's no denormal-flush control).
+        // Covers x86_64 here + in CI; the macOS arm64 job exercises the aarch64 path.
+        super::set_flush_denormals();
     }
 
     #[test]
