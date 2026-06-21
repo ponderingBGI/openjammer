@@ -43,6 +43,22 @@ jobs:
           cargo +nightly miri test -p ojcore-midiring
           cargo +nightly miri test -p ojcore swap
 
+  loom:
+    name: loom — SPSC ring interleavings
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Rust stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: loom model-check the wait-free SPSC ring
+        # Exhaustively explores the producer/consumer atomic interleavings (data
+        # region modeled as a loom cell) — the weak-memory class the single-threaded
+        # deterministic-sim harness structurally can't reach. Production is
+        # `cfg(not(loom))` and untouched; only this `--cfg loom` build pulls loom in.
+        run: RUSTFLAGS="--cfg loom" cargo test -p ojcore-midiring --test loom_ring
+
   fuzz:
     name: fuzz — WAV parse surface (unbounded)
     runs-on: ubuntu-latest
@@ -56,10 +72,32 @@ jobs:
         uses: dtolnay/rust-toolchain@5b842231ba77f5c045dba54ac5560fed2db780e2 # nightly
         with:
           toolchain: nightly
-      - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz --locked
+      - name: Install cargo-fuzz (prebuilt binary)
+        # taiki-e/install-action fetches a prebuilt binary in seconds instead of
+        # compiling cargo-fuzz from source (matches the per-PR nextest install).
+        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2
+        with:
+          tool: cargo-fuzz
       - name: Fuzz the WAV decoder (time-boxed)
         # A clean Err on any input is correct; a crash/UB is a finding. Time-boxed
         # so the nightly stays bounded; the corpus is seeded from the smoke's RIFF
         # shapes implicitly via libFuzzer's mutation.
         run: cargo +nightly fuzz run wav_decode -- -max_total_time=300 -rss_limit_mb=4096
+
+  durability:
+    name: durability — real-process SIGKILL crash test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: ALSA dev headers (cpal/alsa-sys)
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - name: Rust stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Crash-kill the atomic-write path and verify recovery
+        # The real-process cross-check for the SimFs protocol model: a child writes
+        # versions through `atomic_write` and is SIGKILLed mid-flight; recovery must
+        # always find a COMPLETE value, never a torn file (Track B durability).
+        run: cargo test -p ojcore-native --test durability_crash -- --ignored
+

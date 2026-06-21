@@ -103,10 +103,12 @@ fn gain_to_speaker_scales_known_input() {
     inject(&mut engine, &input);
     engine.process_block(&mut out, NB);
 
-    // The gain smoother was snapped to G at compile (params applied + reset),
-    // so output == input * G from the first frame within tolerance.
+    // The gain smoother was snapped to G at compile (params applied + reset), so
+    // output == input * G — THROUGH the master brickwall limiter (decision #1):
+    // samples past the +/-0.4995 knee are softly compressed, so we compare against
+    // the limited expectation, not the raw product. (Quiet frames are unaffected.)
     for (i, (&x, &y)) in input.iter().zip(out.iter()).enumerate() {
-        let expected = x * G;
+        let expected = ojcore_dsp::guards::soft_limit(x * G);
         assert!(
             (y - expected).abs() < 1e-3,
             "frame {i}: got {y}, expected {expected}"
@@ -146,7 +148,8 @@ fn setparam_changes_gain_next_block() {
         engine.process_block(&mut out, NB);
     }
     for (i, (&x, &y)) in input.iter().zip(out.iter()).enumerate() {
-        let expected = x * 2.0;
+        // input * 2.0 through the master brickwall (see gain_to_speaker above).
+        let expected = ojcore_dsp::guards::soft_limit(x * 2.0);
         assert!(
             (y - expected).abs() < 1e-2,
             "frame {i} after SetParam: got {y}, expected ~{expected}"

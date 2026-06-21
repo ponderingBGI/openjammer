@@ -292,10 +292,39 @@ export function installGlobalErrorHandlers(): void {
 /**
  * Heuristic: does a stack trace reference the app's own origin at all? Used to
  * drop promise rejections that originate purely in third-party / extension code.
- * Conservative — when in doubt (no parseable frame) it keeps the entry, since a
- * silent drop of OUR fault is worse than a rare foreign one slipping through.
+ *
+ * A raw `stack.includes(origin)` is wrong: minified / dev stacks often carry
+ * RELATIVE frames (`at fn (/assets/index.js:1:2)`, `webpack-internal:///…`) that
+ * never contain the origin substring, so a real app rejection would be silently
+ * dropped. Instead we extract every URL-like frame, RESOLVE it against
+ * `location.href`, and keep the entry if any frame is same-origin. Conservative
+ * by design — when in doubt (a relative, ambiguous, or unparseable frame) we keep
+ * it, because a silent drop of OUR fault is worse than a rare foreign one slipping
+ * through. We return `false` ONLY when every URL-like frame is a parseable,
+ * absolute, FOREIGN origin.
  */
 function stackTouchesOwnOrigin(stack: string): boolean {
     if (typeof window === 'undefined' || !window.location) return true;
-    return stack.includes(window.location.origin);
+    const ownOrigin = window.location.origin;
+    // Frames look like `…(scheme://host/path:line:col)` or `at /path:line:col` —
+    // pull out the URL-ish token from each. We err toward MORE matches: anything
+    // that smells like a path or URL is a candidate frame.
+    const frames = stack.match(/(?:[a-z][\w+.-]*:\/\/|[./])[^\s()]+/gi);
+    if (!frames || frames.length === 0) return true; // no parseable frame ⇒ keep it
+    let sawForeign = false;
+    for (const frame of frames) {
+        // Strip a trailing `:line:col` so the URL parser sees a clean resource.
+        const cleaned = frame.replace(/:\d+:\d+$/, '').replace(/:\d+$/, '');
+        let url: URL;
+        try {
+            url = new URL(cleaned, window.location.href);
+        } catch {
+            return true; // an unparseable frame is ambiguous ⇒ keep it
+        }
+        if (url.origin === ownOrigin) return true; // a same-origin frame ⇒ ours
+        sawForeign = true;
+    }
+    // Every frame parsed to an absolute foreign origin (no same-origin, none
+    // ambiguous) ⇒ third-party noise, drop it.
+    return !sawForeign;
 }

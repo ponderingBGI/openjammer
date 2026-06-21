@@ -6,3 +6,14 @@ version.workspace = true
 license.workspace = true
 
 [dependencies]
+
+# Concurrency model checking (Track A P2): loom is pulled in ONLY under `--cfg loom`
+# (the nightly Lane B run), never in production builds. It exhaustively explores the
+# SPSC interleavings of the wait-free ring.
+[target.'cfg(loom)'.dependencies]
+loom = "0.7"
+
+# `--cfg loom` is a known, intentional cfg (the nightly model-check build); declare
+# it so the unexpected_cfgs lint stays quiet under -D warnings.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }

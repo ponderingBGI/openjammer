@@ -321,14 +321,14 @@ const portPositions = Array.from({ length: n }, (_, i) => ({
 ### Required Fields
 
 ```typescript
-['my-node', {
-    type: 'my-node',           // Must match NodeType
+'my-node': {
+    type: 'my-node',           // Must match NodeType (registry is a Record, keyed by type)
     category: 'effects',       // One of: input, instruments, effects, routing, output, utility
     name: 'My Node',           // Display name in menu
     description: 'Does X',     // Tooltip/help text
     defaultPorts: [...],       // Initial port configuration
     defaultData: {...}         // Initial node data
-}]
+}
 ```
 
 ### Optional Fields
@@ -346,8 +346,7 @@ const portPositions = Array.from({ length: n }, (_, i) => ({
     },
 
     // Hierarchical behavior
-    canEnter: true,   // Allows E key to enter internal canvas
-    isAtomic: false   // Has internal structure (legacy, use canEnter)
+    canEnter: true    // Allows E key to enter the internal canvas (omit for atomic nodes)
 }
 ```
 

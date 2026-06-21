@@ -30,13 +30,22 @@ the contributor map; see `/home/wsl/.claude/plans/` history for the decision rec
 | `ojcore-wasm` | `wasm-bindgen` AudioWorklet host wrapping the **same** `ojcore` core. |
 | `ojcore-midiring` | `#[repr(C)]` wait-free SPSC byte ring for the JS↔wasm SharedArrayBuffer boundary. |
 | `ojfaust` | Faust runtime-compilation scaffold (feature-gated on `libfaust`) + agentic compile-repair loop, for AI-authored DSP nodes. |
+| `ojhost` | **Native-only** third-party plugin host: runs VST3 / CLAP (AU on macOS) behind the same `DspInstance` trait (`host.plugin` → `PrimitiveKind::PluginHost`). Default build is a dependency-free scaffold; real hosting is feature-gated (`clap-host` pure-Rust, or `juce`). All of OpenJammer's C++ is confined to this crate. |
+| `ojwasm` | **Native-only** host for AI-/hand-authored **code nodes**: runs an `oj_*`-ABI wasm32 DSP module behind `DspInstance` (`PrimitiveKind::WasmHost`) via `wasmtime`, every output sample forced through the `OutputGuard` chain *outside* the sandbox. Default build is a scaffold; real execution is feature-gated (`wasmtime-host`). |
 | `src-tauri` (`oj-tauri`) | Tauri v2 desktop shell: Rust backend runs `ojcore-native` + instruments and exposes control-rate IPC (`push_graph`, `send_command`); frontend is the web app. |
 | `packages/oj-protocol-ts` | Hand-written TS mirror of `ojproto`, kept honest by `crates/ojproto/tests/wire_shapes.rs`. |
 
 The React control plane (`src/`) — node editor, `graphStore`, MIDI, manifest
 dispatch, the Ctrl+K command bar — authors graph state and emits the `OjGraph`;
-it talks to whichever executor is selected (`OJ_EXECUTOR`): `webaudio` (legacy,
-default), `ojcore-native` (Tauri), or `ojcore-wasm` (browser worklet).
+it talks to whichever executor is selected (`VITE_OJ_EXECUTOR`): `ojcore-native`
+(Tauri, the <5ms path) or `ojcore-wasm` (browser worklet, the default). The legacy
+`webaudio` executor was removed in the U-DEDUP migration — `ojcore` is the one engine now.
+
+**Which side of the core boundary does a given piece of code belong on — Rust or
+TypeScript?** That is the subject of [BOUNDARY.md](./BOUNDARY.md): the four tiers, the
+three gates that place any new logic, and why the translation membrane (`emitOjGraph`,
+`resolveKeyboardNotes`) is correctly TypeScript rather than Rust despite feeling
+"performance-critical."
 
 ## Build · run · test
 
@@ -104,14 +113,15 @@ the promotion workflow with a target like `0.1.0` to start a new minor line.
   canari-signs installers and publishes numbered prereleases like
   `v0.0.2-canari.1` with signed updater metadata.
 
-Native auto-update (Tauri `tauri-plugin-updater`) is wired for **Windows + Linux**;
-macOS is compiled-off until Apple notarization (OWNER-PROVISIONING.md §4). It's quiet
+Native auto-update (Tauri `tauri-plugin-updater`) is active on **Windows + Linux**,
+and ready on **macOS** behind the `apple-notarized` feature — it activates once the
+build is signed/notarized (OWNER-PROVISIONING.md §4). It's quiet
 by design: a new build downloads in the background and **installs silently after you
 close OpenJammer** (no mid-session prompts and no self-reopen), gated through
 `ojcore_native::UpdateGate` so the binary is never swapped while audio is live. The
 channel (Stable / Canari) is a **runtime** choice in Settings → Updates; switching is
 upstream-only (never downgrades). See
-[channels-and-versions](../apps/docs/src/content/docs/reference/channels-and-versions.md).
+[channels-and-versions](../apps/docs/src/content/docs/build/internals/channels-and-versions.md).
 
 ## Founder-gated verification (needs real hardware/keys)
 
@@ -128,12 +138,13 @@ compiled-but-dormant today is listed here rather than left to rot unnoticed. Eac
 item is an honest gap with a defined unblock, not a permanent twin. Remove the row
 when the gap closes.
 
-- **macOS native updater — compiled-off.** `src-tauri/src/updater.rs` is gated to
-  `cfg(any(windows, target_os = "linux"))`; on macOS the updater commands exist as
-  inert no-ops so the `invoke_handler` list stays platform-uniform, and Mac ships a
-  manual `.dmg`. *Reason:* without an Apple Developer ID + notarization, Gatekeeper
-  quarantines a self-swapped `.app`. *Unblock:* Apple notarization
-  (OWNER-PROVISIONING.md §4), then drop the `cfg` exclusion.
+- **macOS native updater — ready, pending signing credentials.** The updater is
+  wired for macOS behind the `apple-notarized` feature (`updater.rs` gates on
+  `any(windows, target_os = "linux", all(target_os = "macos", feature = "apple-notarized"))`).
+  A default macOS build keeps the commands inert and ships a manual `.dmg`, because a
+  non-notarized self-swapped `.app` is Gatekeeper-quarantined. *Activate:* provide the
+  Apple Developer ID signing secrets and set the feature in CI — no code change
+  (OWNER-PROVISIONING.md §4).
 - **Windows/macOS sandbox `Jail` — constructed but unenforced.** `src-tauri/src/sandbox.rs`
   builds a `Jail` (writable/readable roots) in every jailed run, but only the
   **Linux** path enforces it (Landlock via `pre_exec`); on Windows/macOS `apply()`

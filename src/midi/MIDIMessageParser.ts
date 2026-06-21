@@ -50,7 +50,7 @@ export function parseMIDIMessage(
       return parsePitchBend(data, channel, timestamp, deviceId);
 
     default:
-      // System messages or unsupported - ignore for now
+      // System / unsupported messages are not note or controller data: ignore.
       return null;
   }
 }

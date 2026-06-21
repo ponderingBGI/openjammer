@@ -97,8 +97,8 @@ export function PluginsPanel() {
             <div className="plugins-body">
                 {state.kind === 'unsupported' && (
                     <Callout variant="info">
-                        Plugin hosting (CLAP / VST3) is part of the <strong>desktop app</strong>.
-                        Install OpenJammer for your OS to scan and host your own plugins.
+                        CLAP plugin hosting is part of the <strong>desktop app</strong> (VST3 / AU
+                        planned). Install OpenJammer for your OS to scan and host your own plugins.
                     </Callout>
                 )}
                 {state.kind === 'scanning' && (

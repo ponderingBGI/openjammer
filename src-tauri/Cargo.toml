@@ -18,7 +18,7 @@ name = "openjammer"
 path = "src/main.rs"
 
 [build-dependencies]
-# Pinned from a fresh `cargo search` at scaffold time (governing principle #9).
+# Versions pinned deliberately (governing principle #9).
 tauri-build = { version = "2.6.2", features = [] }
 
 [dependencies]
@@ -36,11 +36,11 @@ ojinstrument = { path = "../crates/ojinstrument" }
 ojproto = { path = "../crates/ojproto" }
 
 # --- third-party plugin host (U-JUCE) ----------------------------------------
-# Scans for and hosts VST3 / CLAP (+ AU on macOS) plugins as ojcore nodes.
-# NATIVE-ONLY. Default features = scaffold (scan returns empty, no native deps);
-# enable real hosting with `--features ojhost/clap-host` (pure-Rust CLAP) or
-# `--features ojhost/juce` (bundled C++ JUCE 8) — see crates/ojhost/README.md.
-ojhost = { path = "../crates/ojhost" }
+# Scans for and hosts CLAP plugins as ojcore nodes (NATIVE-ONLY). The shipped
+# desktop app enables `clap-host` (pure-Rust `clack`, MIT — no C++/CMake), so
+# CLAP hosting works out of the box. VST3 / AU need the heavier `juce` feature
+# (bundled C++ JUCE 8 + CMake) and stay opt-in — see crates/ojhost/README.md.
+ojhost = { path = "../crates/ojhost", features = ["clap-host"] }
 
 # --- AI DSP-node authoring (U20) ---------------------------------------------
 # Host-side Faust compilation behind the AI agent's `author_dsp_node` tool.
@@ -81,6 +81,13 @@ tracing-appender = { workspace = true }
 # it via `tauri build`; harmless in `cargo build`.
 custom-protocol = ["tauri/custom-protocol"]
 
+# macOS auto-update activation. OFF by default — a non-notarized macOS
+# self-updater would be Gatekeeper-quarantined. CI sets this ONLY when Apple
+# signing secrets exist (alongside the notarized build), flipping macOS
+# auto-update on. Adding the secrets activates it with no code change
+# (OWNER-PROVISIONING.md §4).
+apple-notarized = []
+
 # --- scoped panic guard (Phase 4) --------------------------------------------
 # `unwrap()`/`expect()` panic the WHOLE app — on stage that is a dead set, not a
 # recoverable glitch. So the desktop shell, where the audited panic risk lives
@@ -114,14 +121,17 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 # --- native auto-updater (R2/R4) ---------------------------------------------
-# Win + Linux ONLY. macOS is intentionally excluded: without an Apple Developer
-# ID + notarization Gatekeeper quarantines a swapped `.app`, so the macOS updater
-# stays compiled-off and Mac ships a manual `.dmg` (OWNER-PROVISIONING.md §4).
-# The download-complete path hands off to `ojcore_native::UpdateGate` so an
-# install never swaps the binary out from under live audio (a held note beats a
-# glitch). Owner-enabled: needs the split stable/canary minisign keys + the
-# update endpoints (OWNER-PROVISIONING.md §3) before it does anything.
-[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+# ACTIVE on Windows + Linux, and ready on macOS the moment the build is notarized
+# (the `apple-notarized` feature, set by CI when Apple signing secrets are present
+# — OWNER-PROVISIONING.md §4). The updater code is cfg-gated on
+# `any(windows, linux, macos+apple-notarized)`, so a non-notarized macOS build
+# never ships a Gatekeeper-broken self-updater. These deps build on every desktop
+# target; on a non-updating macOS build the updater code is off and they sit
+# unused. Downloads hand off to `ojcore_native::UpdateGate` so an install never
+# swaps the binary out from under live audio (a held note beats a glitch).
+# Owner-enabled: needs the split stable/canary minisign keys + endpoints
+# (OWNER-PROVISIONING.md §3).
+[target.'cfg(any(windows, target_os = "linux", target_os = "macos"))'.dependencies]
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
 semver = "1.0.28"
 tauri-plugin-updater = "2.10.1"

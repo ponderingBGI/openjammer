@@ -6,9 +6,9 @@
 //!   binary to compile `.wasm` + read the `-json` metadata. When `faust` is not
 //!   on `PATH` it returns [`FaustError::Unavailable`] so the crate still builds
 //!   + behaves with no toolchain at all.
-//! * feature ON: the [`native`] backend — a TODO-marked scaffold of the
-//!   in-process libfaust JIT (Path A). It returns [`FaustError::Unavailable`]
-//!   until implemented; see `README.md` for the install prerequisites.
+//! * feature ON: the [`native`] backend — the in-process libfaust JIT (Path A),
+//!   not yet implemented. It returns [`FaustError::Unavailable`] until wired;
+//!   see `README.md` for the install prerequisites.
 //!
 //! # FOUNDER-GATED BOUNDARY (D4)
 //!

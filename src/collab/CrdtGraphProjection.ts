@@ -29,6 +29,7 @@
 import { LoroDoc, LoroMap } from 'loro-crdt';
 import type { LoroEventBatch } from 'loro-crdt';
 import type { CrdtConnection, CrdtNode, GraphSnapshot } from './types';
+import { logWarn } from '../utils/log';
 
 /** Commit origin used for mutations that originated from THIS peer's store. */
 export const LOCAL_ORIGIN = 'oj-local';
@@ -261,9 +262,27 @@ export class CrdtGraphProjection {
         return this.doc.export({ mode: 'snapshot' });
     }
 
-    /** Import a remote update/snapshot. Fires the subscriber with remote=true. */
-    import(bytes: Uint8Array): void {
-        this.doc.import(bytes);
+    /**
+     * Import a remote update/snapshot. Fires the subscriber with remote=true.
+     *
+     * DECODE FIREWALL: a truncated/byte-flipped/incompatible blob — whether it
+     * arrives off a flaky transport or (later) off disk during crash recovery —
+     * makes Loro throw. An uncaught throw here would take down the app and, on a
+     * persisted blob, do so on EVERY relaunch (the "deadly crash cycle"). We
+     * contain it: skip the bad blob, keep the last-good document, and report
+     * without stealing focus. Returns `true` if the bytes were applied.
+     */
+    import(bytes: Uint8Array): boolean {
+        try {
+            this.doc.import(bytes);
+            return true;
+        } catch (err) {
+            logWarn('collab', 'skipped a corrupt/incompatible CRDT blob (kept last-good state)', {
+                bytes: bytes.length,
+                error: err instanceof Error ? err.message : String(err),
+            });
+            return false;
+        }
     }
 
     /** Subscribe to local binary updates for forwarding over a transport. */

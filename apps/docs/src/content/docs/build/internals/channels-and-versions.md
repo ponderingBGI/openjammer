@@ -73,9 +73,9 @@ The **channel is chosen at runtime**, so the client embeds both pubkeys (stable 
 channel's key. Stable uses GitHub's latest full release; canari resolves the
 newest numbered `vX.Y.Z-canari.N` prerelease and downloads that release's
 `latest.json`. Switching is **upstream-only**: Canari → Stable never downgrades
-— you stay on your build until Stable reaches it. macOS auto-update is
-compiled-off until notarization (manual `.dmg`); Linux auto-update covers the
-**AppImage** (the `.deb` updates via your package manager).
+— you stay on your build until Stable reaches it. macOS auto-update is ready and
+activates once the build is notarized (manual `.dmg` until then); Linux
+auto-update covers the **AppImage** (the `.deb` updates via your package manager).
 
 :::caution[Owner-gated]
 Signed installers + auto-update delivery are gated on owner-provisioned

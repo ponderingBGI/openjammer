@@ -1,0 +1,67 @@
+name: Supply chain
+
+# Supply-chain gate (Track A P0a). Two complementary checks, both free for public
+# OSS repos:
+#   • cargo-deny (per-PR, on Cargo-metadata changes): bans / licenses / sources,
+#     read offline from Cargo.lock against the pinned `deny.toml`.
+#   • cargo-audit (nightly): live RustSec advisories — kept OFF the PR path so a
+#     freshly-disclosed CVE never red-walls an unrelated PR.
+#
+# Both run `continue-on-error` in advisory mode: they REPORT on every relevant
+# PR / night but do not block a merge until a first green run confirms the
+# `deny.toml` license allowlist, at which point cargo-deny is promoted into the
+# merge gate.
+
+on:
+  pull_request:
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "deny.toml"
+      - ".github/workflows/supply-chain.yml"
+  schedule:
+    - cron: "30 6 * * *" # 06:30 UTC daily (after Lane B)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Per-PR-head-SHA so a mid-build push can't drop this run (see ci.yml).
+  group: supply-chain-${{ github.event.pull_request.head.sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cargo-deny:
+    name: cargo-deny (bans · licenses · sources)
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true # advisory until the license allowlist is confirmed green
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Install cargo-deny (prebuilt binary)
+        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2
+        with:
+          tool: cargo-deny
+      - name: cargo deny check
+        run: cargo deny --all-features check bans licenses sources
+
+  cargo-audit:
+    name: cargo-audit (RustSec advisories)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true # a fresh CVE reports, never blocks
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - name: Install cargo-audit (prebuilt binary)
+        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2
+        with:
+          tool: cargo-audit
+      - name: cargo audit
+        run: cargo audit

@@ -18,8 +18,8 @@
  * only the rows near the scroll position are mounted (fixed row height + a small
  * overscan), so a full 5000-entry ring costs O(visible) DOM nodes, not O(5000).
  * This is a lightweight manual windowing with zero new dependencies.
- * TODO(perf): upgrade to `@tanstack/react-virtual` if variable-height rows or
- * very large rings make manual windowing insufficient.
+ * If variable-height rows or very large rings ever make manual windowing
+ * insufficient, `@tanstack/react-virtual` is the natural next step.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';

@@ -56,6 +56,7 @@ fn load_bogus_descriptor_errors_gracefully() {
             audio_out: 2,
         },
         param_count: 0,
+        params: Vec::new(),
         latency_samples: 0,
     };
     let res = HostedPlugin::load(&desc, 48_000.0, 64);

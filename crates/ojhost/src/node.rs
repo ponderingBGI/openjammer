@@ -134,15 +134,34 @@ pub struct PluginHostLoader {
 impl PluginHostLoader {
     /// Build a loader for a specific scanned plugin.
     pub fn new(descriptor: PluginDescriptor) -> Self {
-        let params = (0..descriptor.param_count.min(u16::MAX as u32) as u16)
-            .map(|i| ParamDecl {
-                id: i,
-                name: alloc_param_name(i),
-                min: 0.0,
-                max: 1.0,
-                default: 0.0,
-            })
-            .collect();
+        // Prefer the detailed param list (real names + the plugin's own ranges)
+        // the backend captured at scan; fall back to generic index-named params
+        // when only a count is known (the JUCE backend, or an older scan cache).
+        let params: Vec<ParamDecl> = if descriptor.params.is_empty() {
+            (0..descriptor.param_count.min(u16::MAX as u32) as u16)
+                .map(|i| ParamDecl {
+                    id: i,
+                    name: alloc_param_name(i),
+                    min: 0.0,
+                    max: 1.0,
+                    default: 0.0,
+                })
+                .collect()
+        } else {
+            descriptor
+                .params
+                .iter()
+                .take(u16::MAX as usize)
+                .enumerate()
+                .map(|(i, p)| ParamDecl {
+                    id: i as u16,
+                    name: p.name.clone(),
+                    min: p.min as f32,
+                    max: p.max as f32,
+                    default: p.default as f32,
+                })
+                .collect()
+        };
         let manifest = PluginManifest {
             id: PLUGIN_HOST_ID.to_string(),
             name: descriptor.name.clone(),
@@ -248,6 +267,7 @@ mod tests {
                 audio_out: 2,
             },
             param_count: params,
+            params: Vec::new(),
             latency_samples: 128,
         }
     }

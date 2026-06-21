@@ -64,10 +64,13 @@ whether a session stayed glitch-free in the [DevLog and on-device
 logs](/openjammer/build/architecture/logging/). A non-zero xrun count during the
 measurement invalidates the run — fix the buffer/threading first, then re-measure.
 
-:::caution[Current state]
-The in-engine input capture used for an *automated* loopback assertion is not yet
-wired (the loopback test is `#[ignore]`d and the input-recorder sink is a stub),
-so this manual runbook is the authoritative latency gate until that lands. The
-xrun counter is the automated complement — observable, but not a latency
-measurement.
+:::note[Why there is no device-free automated version]
+The input-capture seam is fully wired — `start_with_input_capture` records the
+duplex input into a `Recorder` on the RT thread, and the
+`loopback_capture_records_input` test exercises it end to end. That test is
+`#[ignore]`d because it needs a real duplex device plus a physical (or software)
+loopback cable, which a headless CI runner does not have — the same reason this
+whole runbook is manual. So this manual runbook is the authoritative latency
+gate. The xrun counter is the automated complement — observable on every run,
+but not a latency measurement.
 :::

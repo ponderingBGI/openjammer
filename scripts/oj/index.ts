@@ -5,13 +5,13 @@
 //   oj doctor     [--json] [--fix] [--from-files [<files...>]] [--check <id>]
 //   oj preflight  [--json] [--affected] [--plan] [--base <ref>]
 //   oj plan       [--json] [--base <ref>]
-//   oj scaffold   <node|dsp-kernel> ...     (STUB, exit 2)
+//   oj scaffold   <node|dsp-kernel> ...     (planned — exits 2)
 //   oj dev        [--engine] [tauri-flags…]  (native dev loop; --engine = bacon inner-loop)
 //   oj design     <map|status> [--json]      (design-system bridge: component-map + sync health)
 //
 // Shared lib/ (git, cache, ssot, report) means version-sync logic lives ONCE.
 // Exit code: non-zero only when a hard failure occurs (any check status `fail`,
-// a preflight recipe failure, or a stubbed subcommand).
+// a preflight recipe failure, or a not-yet-implemented subcommand).
 
 import { doctor } from './doctor';
 import { preflight } from './preflight';

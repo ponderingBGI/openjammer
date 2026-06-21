@@ -93,7 +93,7 @@ export function Toolbar() {
         e.target.value = '';
     }, [loadGraph]);
 
-    // New workflow (legacy - just clears canvas)
+    // New Canvas — the project-less workflow: just clears the canvas.
     const handleNew = useCallback(() => {
         if (nodes.size > 0) {
             if (!confirm('Clear current workflow? This cannot be undone.')) {
@@ -272,7 +272,7 @@ export function Toolbar() {
             },
             { type: 'separator' as const },
         ] as MenuItemOrSeparator[] : []),
-        // Legacy workflow operations
+        // File-based workflow (project-less): new canvas, import/export workflow JSON
         {
             id: 'new',
             label: 'New Canvas',

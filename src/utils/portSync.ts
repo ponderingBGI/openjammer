@@ -527,7 +527,7 @@ export function checkDynamicPortAddition(
         }
     }
 
-    // Fallback: Check for canvas-output nodes (legacy approach)
+    // Fallback: nodes that expose ports via canvas-output children
     const canvasOutputs = parent.childIds
         .map(id => nodes.get(id))
         .filter((n): n is GraphNode =>
@@ -706,20 +706,6 @@ export function detectBundleInfo(
 ): BundleInfo | null {
     // Use the new bundle manager to get full bundle info with channels
     return getBundleInfoFromManager(sourceNodeId, sourcePortId, nodes, connections);
-}
-
-/**
- * Legacy function for backward compatibility
- * Returns simple size/label for code that doesn't need full bundle info
- */
-export function detectBundleInfoSimple(
-    sourceNodeId: string,
-    sourcePortId: string,
-    nodes: Map<string, GraphNode>,
-    connections: Map<string, Connection>
-): { size: number; label: string } | null {
-    const result = getBundleSizeFromSourcePort(sourceNodeId, sourcePortId, nodes, connections);
-    return result.size >= 1 ? result : null;
 }
 
 /**

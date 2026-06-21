@@ -21,7 +21,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Key on the PR head SHA so a push landing during an in-progress run can never
+  # drop the new commit's run (which would leave the required "Merge gate" check
+  # unreported and block the PR). Falls back to github.ref for push events.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -112,6 +115,10 @@ jobs:
       - name: Stage Pi sidecar resource dir (bundle-only)
         shell: bash
         run: mkdir -p src-tauri/binaries
+      - name: RNG-ban gate (seed-reproducibility, mirrors the libm ban)
+        # Forbid global/thread entropy in the RT/DSP core so a DST run stays
+        # replayable from one seed. Pure bash, no toolchain needed.
+        run: bash scripts/ci/check-rng-ban.sh
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy (-D warnings)
@@ -223,6 +230,25 @@ jobs:
       - name: Offline audio render gate (Windows, device-free)
         run: cargo run -p ojcore-native --bin render --features demo -- ci-render.wav 2
 
+  macos-native:
+    name: macOS engine + audio gate (arm64)
+    needs: changes
+    # macOS + arm64 coverage: CoreAudio's cpal path AND the arm64 libm ULP band
+    # the golden fingerprints depend on. A REQUIRED leg of the `gate` aggregator
+    # (in its `needs`): it runs on the free standard M1 runner — `-large`/`-xlarge`
+    # macOS runners BILL even on public repos, so this stays on the free standard
+    # label.
+    if: needs.changes.outputs.engine == 'true' || needs.changes.outputs.web == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Setup Rust (stable)
+        uses: ./.github/actions/setup-rust
+      - name: Engine tests on macOS (arm64)
+        run: cargo test -p ojcore -p ojinstrument -p ojcore-native
+      - name: Offline audio render gate (macOS, device-free)
+        run: cargo run -p ojcore-native --bin render --features demo -- "${RUNNER_TEMP}/ci-render.wav" 2
+
   doctor:
     name: Doctor wiring gates (fault pipe + COI honesty)
     # Least-privilege: this job only reads the checked-out tree to run pure-TS
@@ -261,7 +287,7 @@ jobs:
   gate:
     name: Merge gate
     # The SINGLE required check. Runs always so it can adjudicate skipped legs.
-    needs: [changes, engine, web, windows-native, doctor]
+    needs: [changes, engine, web, windows-native, macos-native, doctor]
     if: always()
     runs-on: ubuntu-latest
     steps:

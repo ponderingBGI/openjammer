@@ -4,14 +4,13 @@
  * The {@link Executor} note seam speaks in keyboard terms — `(keyboardId, row,
  * keyIndex, velocity)` — but the ojcore engines speak `RtCommand::NoteOn/NoteOff`
  * addressed by `(NodeIdx, midiNote, velocity)`. This pure helper bridges the two
- * by resolving exactly the way `AudioGraphManager.triggerKeyboardNote` /
- * `releaseKeyboardNote` do, so the native/wasm note math matches the Web Audio
- * backend note-for-note:
+ * by resolving keyboard rows -> instrument targets from the graph maps, so the
+ * native and wasm engines compute the same MIDI note for the same key press:
  *
  *   • find the keyboard's source output port for `row` (bundle or per-row),
  *   • follow every connection from that port to an instrument/sampler target,
  *   • compute the MIDI note from the matching InstrumentRow / SamplerRow (spread,
- *     base octave/note/offset) or the legacy per-port offsets,
+ *     base octave/note/offset) or the per-port offsets map,
  *   • scale velocity by the per-key / per-row gain.
  *
  * Pure: depends only on the graph maps passed in (no store/audio access).

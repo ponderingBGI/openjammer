@@ -6,6 +6,7 @@
 //! multiple) so the measurements track real per-buffer cost.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use ojcore_dsp::guards::{scrub_denormals_and_nan, soft_limit};
 use ojcore_dsp::{
     generate_distortion_curve, Biquad, BiquadCoeffs, Convolver, DelayLine, FilterType,
     KarplusString, OnePole, Osc, Waveshaper,
@@ -17,6 +18,14 @@ const BLOCK: usize = 512;
 /// A deterministic test signal (a normalized ramp/saw) used as the DSP input.
 fn signal(n: usize) -> Vec<f32> {
     (0..n).map(|i| (i as f32 / n as f32) * 2.0 - 1.0).collect()
+}
+
+/// A hot ramp spanning +/-2.0 so the limiter exercises every branch: the linear
+/// region, the soft knee, and the hard clamp at the ceiling.
+fn hot_signal(n: usize) -> Vec<f32> {
+    (0..n)
+        .map(|i| ((i as f32 / n as f32) * 2.0 - 1.0) * 2.0)
+        .collect()
 }
 
 fn bench_biquad(c: &mut Criterion) {
@@ -89,18 +98,57 @@ fn bench_delay(c: &mut Criterion) {
 
 fn bench_convolver(c: &mut Criterion) {
     let input = signal(BLOCK);
-    let ir = signal(256); // 256-tap impulse response (cabinet-sim sized)
-    c.bench_function("convolver_process_block_256taps", |b| {
+    // Convolution is the most expensive kernel: O(taps) MACs per sample. Sweeping
+    // the tap count (a short room tail, a cabinet sim, a long reverb IR) turns the
+    // bench into an algorithmic-complexity guard — a regression that makes the
+    // inner loop super-linear shows up as the long IR blowing out first. The
+    // 256-tap case keeps its original name so its CodSpeed history continues.
+    for taps in [64usize, 256, 1024] {
+        let ir = signal(taps);
+        c.bench_function(&format!("convolver_process_block_{taps}taps"), |b| {
+            b.iter(|| {
+                let mut conv = Convolver::new(taps);
+                conv.set_ir(&ir);
+                let mut acc = 0.0f32;
+                for &x in &input {
+                    acc += conv.process(black_box(x));
+                }
+                black_box(acc)
+            })
+        });
+    }
+}
+
+fn bench_guards(c: &mut Criterion) {
+    let mut group = c.benchmark_group("guards");
+
+    // `soft_limit` is the master brickwall: EVERY sample leaving the engine
+    // passes through it, so its per-sample cost compounds across the whole mix.
+    let hot = hot_signal(BLOCK);
+    group.bench_function("soft_limit_block", |b| {
         b.iter(|| {
-            let mut conv = Convolver::new(256);
-            conv.set_ir(&ir);
             let mut acc = 0.0f32;
-            for &x in &input {
-                acc += conv.process(black_box(x));
+            for &x in &hot {
+                acc += soft_limit(black_box(x));
             }
             black_box(acc)
         })
     });
+
+    // `scrub_denormals_and_nan` is the per-sample NaN/denormal flush applied on
+    // the code-node output path.
+    let input = signal(BLOCK);
+    group.bench_function("scrub_denormals_block", |b| {
+        b.iter(|| {
+            let mut acc = 0.0f32;
+            for &x in &input {
+                acc += scrub_denormals_and_nan(black_box(x));
+            }
+            black_box(acc)
+        })
+    });
+
+    group.finish();
 }
 
 fn bench_onepole(c: &mut Criterion) {
@@ -155,5 +203,6 @@ criterion_group!(
     bench_onepole,
     bench_osc,
     bench_karplus,
+    bench_guards,
 );
 criterion_main!(benches);

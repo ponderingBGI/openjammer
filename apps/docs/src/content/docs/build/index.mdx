@@ -12,8 +12,8 @@ community territory behind one contract: a `PluginManifest` plus one CLAP-shaped
 `DspInstance` trait. Built-in DSP and a synth written this morning are the same shape to
 the engine.
 
-The same engine runs **native** on the desktop (low latency, VST3 / AU / CLAP hosting)
-and compiled to **WebAssembly** in the browser, selected by `OJ_EXECUTOR`. The wire
+The same engine runs **native** on the desktop (low latency, CLAP plugin hosting; VST3 / AU planned)
+and compiled to **WebAssembly** in the browser, selected by `VITE_OJ_EXECUTOR`. The wire
 contract (`OjGraph`, `RtCommand`, `ParamPatch`, `EngineFrame`) lives once in `ojproto`
 and crosses the native ↔ browser seam, parity-gated against its TypeScript mirror.
 

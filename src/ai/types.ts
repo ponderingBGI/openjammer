@@ -137,8 +137,8 @@ export interface AuthorDspNodeArgs {
     params?: ParamDecl[];
     /**
      * The content-addressed wasm hash from the native author step (M6). When
-     * present the dynamic id is keyed `ai.wasm.<hash>`; absent → the legacy
-     * `ai.dsp.<sourceHash>` keying (faust unavailable / browser).
+     * present the dynamic id is keyed `ai.wasm.<hash>`; absent → the
+     * `ai.dsp.<sourceHash>` source-keyed id (faust unavailable / browser).
      */
     wasmHash?: string;
 }
@@ -349,7 +349,11 @@ export type AgentEvent =
      * the next run / after a restart. NOT a terminal event.
      */
     | { kind: 'session'; sessionId: string }
-    /** A Pi extension UI request (surfaced, not yet interactively answered). */
+    /**
+     * A Pi extension UI request, surfaced to the transcript. Blocking dialogs are
+     * auto-cancelled in the Tauri backend so a run never hangs; driving an
+     * interactive reply is a deferred milestone.
+     */
     | { kind: 'ui-request'; request: AgentUiRequest; id: string };
 
 // ============================================================================

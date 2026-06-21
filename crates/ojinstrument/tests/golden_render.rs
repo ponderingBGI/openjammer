@@ -7,9 +7,8 @@
 //! into a plain `Vec<f32>`, and ASSERT the samples are correct with real numeric
 //! tolerances — not "it ran".
 //!
-//! This suite is the verification backbone that lets us trust ojcore's audio
-//! before deleting the legacy Web Audio engine: if these pass, the compiled
-//! graph -> rendered-buffer path is sample-correct end to end.
+//! This suite is the verification backbone for ojcore's audio: if these pass,
+//! the compiled graph -> rendered-buffer path is sample-correct end to end.
 //!
 //! Signal model. A `GraphIn` source carries host-injected input (the executor
 //! leaves source output buffers intact — see [`Engine::input_mut`]), so
@@ -341,8 +340,13 @@ fn waveshaper_changes_amplitude_shape() {
         g.edges.push(audio_edge(2, 3));
         g
     };
+    // Amplitude 0.4 keeps the CLEAN sine under the master limiter's 0.4995 knee
+    // (decision #1), so the clean crest factor stays the pure-sine sqrt(2); only
+    // the waveshaper's distortion (and any limiting it then provokes) lowers it.
+    // Crest factor is amplitude-independent for a pure sine, so this measures the
+    // shaper, not the master brickwall.
     let sine: Vec<f32> = (0..NB)
-        .map(|i| core_f32_sin(2.0 * std::f32::consts::PI * 220.0 * i as f32 / SRF))
+        .map(|i| 0.4 * core_f32_sin(2.0 * std::f32::consts::PI * 220.0 * i as f32 / SRF))
         .collect();
 
     let crest = |amount: f32| -> f32 {
@@ -646,9 +650,12 @@ fn sampler_plays_resolved_asset_at_root_pitch() {
     // The first `pcm.len()` output frames reproduce the buffer (vel 127 -> amp
     // ~1.0, gain 1.0, attack 0 + sustain 1 -> envelope ~1.0). Allow a small
     // tolerance for the envelope's first-sample ramp.
+    // Compare against the limited expectation: the engine's final output passes
+    // through the master brickwall (decision #1), so any PCM sample past the
+    // 0.4995 knee is softly compressed before it reaches `out`.
     let mut matched = 0;
     for (i, &expected) in pcm.iter().enumerate() {
-        if (out[i] - expected).abs() < 0.05 {
+        if (out[i] - ojcore_dsp::guards::soft_limit(expected)).abs() < 0.05 {
             matched += 1;
         }
     }
@@ -953,23 +960,28 @@ fn osc440_fingerprint() -> Vec<f32> {
 
 /// The committed golden (16 samples). Generated once on a libm rig; identical on
 /// every supported arch. Update ONLY with an intentional DSP change.
+// Re-captured for the master brickwall limiter (decision #1): the engine's final
+// output now passes through `ojcore_dsp::guards::soft_limit` (ceiling 0.999, knee
+// at 0.4995), so samples whose magnitude exceeded the knee are softly compressed.
+// Under-knee samples (e.g. #1, #2, #7, #8, #13, #14) are byte-identical to the
+// pre-limiter golden, confirming the limiter leaves quiet/normal signal untouched.
 const OSC440_GOLDEN: [f32; 16] = [
-    0.8211538,
+    0.69515896,
     -0.40674695,
     -0.12532012,
-    0.6211351,
-    -0.9372757,
-    0.982291,
-    -0.74316037,
+    0.59731567,
+    -0.73280275,
+    0.7450017,
+    -0.6632713,
     0.28905588,
     0.24866231,
-    -0.7144515,
-    0.97357154,
-    -0.9510674,
-    0.6534479,
+    -0.6497807,
+    0.74272686,
+    -0.7366629,
+    0.61717886,
     -0.1668075,
     -0.36808708,
-    0.7965039,
+    0.6857557,
 ];
 
 #[test]

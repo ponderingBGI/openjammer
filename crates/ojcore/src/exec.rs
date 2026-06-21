@@ -477,6 +477,19 @@ impl Engine {
             #[cfg(feature = "std")]
             self.emit_node_fault(self.program.master_out, ojproto::FaultKind::NonFinite);
         }
+        // Master brickwall limiter (Track A P0b — founder decision #1): keep the
+        // FINAL output within +/-0.999 (`LIMITER_CEILING`) so summed over-unity
+        // graphs can never clip the device — the last line of defence the performer
+        // actually hears. Applied AFTER `sanitize` (so a master-level NaN/Inf is
+        // still flagged + reported, not silently swallowed) and BEFORE metering (so
+        // the meter reflects what is truly heard). Reuses the shared `ojcore-dsp`
+        // kernel — the same soft knee the per-graph guard chain uses — rather than
+        // forking a second limiter. The linear region (|x| <= ceiling/2 = 0.4995)
+        // passes through untouched, so quiet/normal graphs stay bit-identical; the
+        // committed golden fingerprints were re-captured for the limited chain.
+        for o in out.iter_mut().take(nframes) {
+            *o = ojcore_dsp::guards::soft_limit(*o);
+        }
         if self.meters.enabled {
             self.meters.master.accumulate(&out[..nframes]);
         }

@@ -158,6 +158,9 @@ pub(super) fn probe(
                     audio_out: d.audio_out,
                 },
                 param_count: d.param_count,
+                // The JUCE C shim reports only a count; the node falls back to
+                // generic index-named params. CLAP via clack fills this list.
+                params: Vec::new(),
                 latency_samples: d.latency_samples,
             });
         }

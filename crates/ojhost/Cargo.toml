@@ -21,7 +21,7 @@ default = []
 # Pure-Rust CLAP host via the `clack` family (MIT, no C++). This is the
 # recommended path to host a real plugin in this sandbox: no CMake, no JUCE
 # checkout. Supports CLAP only.
-clap-host = ["dep:clack-host"]
+clap-host = ["dep:clack-host", "dep:clack-extensions"]
 
 # The JUCE 8 C++ host (VST3 + CLAP, + AU on macOS). Pulls JUCE via CMake
 # FetchContent in `build.rs` and links the small `extern "C"` shim in `cpp/`.
@@ -44,6 +44,10 @@ serde_json = "1.0.150"
 # Pure-Rust CLAP host (MIT). Only linked with `--features clap-host`. Pinned
 # from a fresh `cargo add` resolve (governing principle #9).
 clack-host = { version = "0.1.0", optional = true }
+# CLAP params extension: query a plugin's parameter list (id/name/range) at scan
+# so the UI shows real knobs, and drive values via core param events. Same
+# pure-Rust clack family (MIT); only linked with `--features clap-host`.
+clack-extensions = { version = "0.1.0", optional = true, features = ["clack-host", "params"] }
 
 [build-dependencies]
 # Drives the CMake build of the bundled C++ JUCE host. Only used with

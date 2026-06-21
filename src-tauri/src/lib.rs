@@ -280,6 +280,28 @@ fn set_mic(node: u32, enabled: bool, state: tauri::State<'_, BackendState>) -> R
         .map_err(|e| e.to_string())
 }
 
+/// One selectable output device for the Settings device picker: its stable cpal
+/// id (passed back to `set_speaker_device`) and its human-readable name.
+#[derive(serde::Serialize)]
+struct OutputDevice {
+    id: String,
+    name: String,
+}
+
+/// Enumerate the host's available OUTPUT devices for the device picker. Each
+/// entry carries the stable cpal `DeviceId` string (which `set_speaker_device`
+/// re-opens the stream onto) and the device's human-readable name. Off-RT: the
+/// enumeration runs on the control thread (inside `ojcore_native`), never the
+/// audio thread. A device-less sandbox (CI / headless) yields an empty list
+/// rather than erroring — the UI degrades to "system default only".
+#[tauri::command]
+fn list_output_devices() -> Vec<OutputDevice> {
+    ojcore_native::host::output_devices()
+        .into_iter()
+        .map(|(id, name)| OutputDevice { id, name })
+        .collect()
+}
+
 /// Snapshot the current user data before an update installs — the frontend passes
 /// its exported `localStorage`; the Pi agent dir is copied natively. Best-effort:
 /// a failed backup never fails the caller. Records the OUTGOING version + channel
@@ -347,11 +369,16 @@ fn install_panic_hook() {
 /// panics on a missing audio device (the headless/CI path) — it simply leaves
 /// the host idle until a device is present.
 pub fn run() {
-    // Win + Linux get the native auto-updater plugin; macOS is compiled-off
-    // (manual `.dmg` until Apple notarization — OWNER-PROVISIONING.md §4), so the
-    // plugin is never registered there and the updater commands are inert.
+    // The native auto-updater plugin is registered on Win + Linux, and on macOS
+    // once the build is notarized (the `apple-notarized` feature — see
+    // OWNER-PROVISIONING.md §4). A non-notarized macOS build ships a manual `.dmg`
+    // and leaves the updater commands inert.
     let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    ))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
     // Justified panic (Phase-4 scoped panic guard): top-level app bring-up. A
     // failure to generate the Tauri context / start the event loop is a fatal
@@ -362,7 +389,7 @@ pub fn run() {
         // Ableton-style install-after-close: if the user has auto-update on and
         // a verified update is staged, apply it silently on the way out (no
         // relaunch, no mid-session interruption). Best-effort; never blocks
-        // quitting. macOS: no-op (updater compiled-off).
+        // quitting. macOS: no-op until the build is notarized.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
                 updater::install_on_quit(window.app_handle());
@@ -412,8 +439,12 @@ pub fn run() {
                 ojcore_native::UpdateGate::new(),
             ));
             // The staged-update holder the native updater downloads into before
-            // the audio-idle install (Win/Linux only; macOS has no runtime updater).
-            #[cfg(any(windows, target_os = "linux"))]
+            // the audio-idle install (Win/Linux, and macOS when notarized).
+            #[cfg(any(
+                windows,
+                target_os = "linux",
+                all(target_os = "macos", feature = "apple-notarized")
+            ))]
             app.manage(updater::PendingUpdate::default());
             // The native mirror of the auto-update preference (toggle + channel),
             // read by the install-after-close handler. Synced from the UI on mount.
@@ -455,6 +486,7 @@ pub fn run() {
             set_speaker_volume,
             set_speaker_device,
             set_mic,
+            list_output_devices,
             updater::update_stage,
             updater::update_is_pending,
             updater::update_try_install,

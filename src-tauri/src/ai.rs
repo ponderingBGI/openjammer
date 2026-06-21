@@ -48,9 +48,9 @@
 //! * **Tool calls are forwarded, not executed here.** Graph mutations are
 //!   surfaced to the frontend as reversible live edits that undo with Ctrl+Z.
 //! * **Blocking extension dialogs are auto-cancelled.** M1 surfaces an
-//!   `extension_ui_request` as a `ui-request` event but does not yet drive an
-//!   interactive reply; to keep a run from hanging on a dialog we never answer,
-//!   blocking methods (`select`/`confirm`/`input`/`editor`) get an immediate
+//!   `extension_ui_request` as a `ui-request` event for the UI to observe; to
+//!   keep a run from hanging on a dialog the host never answers, blocking
+//!   methods (`select`/`confirm`/`input`/`editor`) get an immediate
 //!   `extension_ui_response{cancelled:true}`.
 //!
 //! # Reality / fallback
@@ -779,7 +779,9 @@ fn write_openjammer_models_json(
         std::fs::create_dir_all(parent)?;
     }
     let serialized = serde_json::to_string_pretty(&root).map_err(std::io::Error::other)?;
-    std::fs::write(models_path, serialized)
+    // Crash-safe (temp + fsync + atomic rename) so an interrupted write can't leave
+    // a torn models.json that fails to parse on next launch.
+    ojcore_native::atomic_write_path(&models_path, serialized.as_bytes())
 }
 
 // ============================================================================
@@ -1197,7 +1199,8 @@ fn set_settings_package(agent_home: &Path, package: &str, present: bool) -> std:
         std::fs::create_dir_all(parent)?;
     }
     let serialized = serde_json::to_string_pretty(&root).map_err(std::io::Error::other)?;
-    std::fs::write(&settings_path, serialized)
+    // Crash-safe (temp + fsync + atomic rename): never leave a torn settings.json.
+    ojcore_native::atomic_write_path(&settings_path, serialized.as_bytes())
 }
 
 /// Make the in-Pi permission-gate ACTIVE (jailed) or DROPPED (YOLO) by editing the

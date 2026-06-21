@@ -1,9 +1,9 @@
-// scripts/oj/checks/node-registry.ts — STUB.
+// scripts/oj/checks/node-registry.ts — planned (Phase 3).
 //
 // Phase-3 keystone: the `validate-nodes` tool. Will use ts-morph to cross-
 // reference the NodeType union (src/engine/types.ts) <-> nodeDefinitions
-// (src/engine/registry.ts) <-> BOTH switch (node.type) blocks in
-// src/components/Nodes/NodeWrapper.tsx (:383, :439) <-> component file on disk
+// (src/engine/registry.ts) <-> BOTH `switch (node.type)` blocks in
+// src/components/Nodes/NodeWrapper.tsx <-> component file on disk
 // <-> CSS, reusing the validators in src/engine/nodeStandards.ts. AST, never
 // regex. Not implemented now (needs ts-morph AST coupling work).
 //
@@ -19,6 +19,6 @@ export async function run(): Promise<CheckResult> {
     id,
     name,
     status: 'skip',
-    detail: 'Phase-3: ts-morph node-registry coupling not yet wired',
+    detail: 'Planned (Phase 3): ts-morph node-registry coupling check',
   };
 }

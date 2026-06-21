@@ -3,15 +3,51 @@
  * Enhanced with detailed latency monitoring and smart warnings
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAudioStore } from '../../store/audioStore';
 import type { LatencyClassification } from '../../store/audioStore';
 import { reinitAudioContext, getLatencyMetrics, startLatencyMonitoring } from '../../audio/audioContext';
-import { getExecutor } from '../../audio/executor';
+import { getExecutor, isTauri } from '../../audio/executor';
+import { useGraphStore } from '../../store/graphStore';
+import type { SpeakerNodeData } from '../../engine/types';
 import { LowLatencyGuide } from '../Guides';
 import { useLowLatencyGuide } from '../../store/guideStore';
 import { Button, Select, Toggle } from '@openjammer/oj-ui';
 import './AudioSettingsPanel.css';
+
+/**
+ * A native OUTPUT device, as enumerated by the Rust/cpal host. The
+ * `list_output_devices` Tauri command returns these (B1): `id` is the stable
+ * cpal `DeviceId` string the engine resolves on a controlled stream rebuild;
+ * `name` is the human label for the picker.
+ */
+interface NativeOutputDevice {
+    id: string;
+    name: string;
+}
+
+/**
+ * Resolve the Tauri `invoke` from the global IPC bridge (mirrors the native
+ * executor's resolver — we read the same `__TAURI__` global rather than bundle
+ * the `@tauri-apps/api` SDK). Returns null off the native tier, so the native
+ * device picker simply does not render in the browser (which uses the per-node
+ * Web-Audio picker on the Speaker node instead).
+ */
+function getTauriInvoke():
+    | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>)
+    | null {
+    if (typeof window === 'undefined') return null;
+    const t = (window as unknown as {
+        __TAURI__?: {
+            core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> };
+            invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+        };
+    }).__TAURI__;
+    if (!t) return null;
+    if (t.core?.invoke) return t.core.invoke.bind(t.core);
+    if (t.invoke) return t.invoke.bind(t);
+    return null;
+}
 
 // Friendly messages for each latency classification
 const LATENCY_MESSAGES: Record<LatencyClassification, { message: string; hint: string }> = {
@@ -49,8 +85,70 @@ export function AudioSettingsPanel() {
     const [pendingConfig, setPendingConfig] = useState(audioConfig);
     const [isRestarting, setIsRestarting] = useState(false);
 
+    // Native (Tauri) output-device routing (B1). On the native tier the engine —
+    // not Web Audio — owns the output stream, so the Speaker node's browser picker
+    // does not apply; instead we enumerate the host's cpal devices here and route
+    // the (single) Speaker node to the chosen device via the executor seam. The
+    // whole section is suppressed in the browser, where the per-node picker rules.
+    const isNative = isTauri();
+    const [outputDevices, setOutputDevices] = useState<NativeOutputDevice[]>([]);
+    // Subscribe to the node map (its reference changes on every graph edit) so the
+    // routing controls stay correct as the Speaker / Microphone nodes appear and
+    // vanish on the canvas; derive the (single) target node of each kind from it.
+    const nodes = useGraphStore((s) => s.nodes);
+    const speakerNode = [...nodes.values()].find((n) => n.type === 'speaker');
+    const micNode = [...nodes.values()].find((n) => n.type === 'microphone');
+    const selectedOutput = (speakerNode?.data as SpeakerNodeData | undefined)?.deviceId ?? 'default';
+
     // Low latency guide
     const lowLatencyGuide = useLowLatencyGuide();
+
+    // Enumerate the host's output devices once on the native tier (and refresh
+    // whenever this panel mounts). Best-effort: an empty/failed list just leaves
+    // the picker on "System Default", which is always a valid target.
+    useEffect(() => {
+        if (!isNative) return;
+        const invoke = getTauriInvoke();
+        if (!invoke) return;
+        let cancelled = false;
+        invoke('list_output_devices')
+            .then((res) => {
+                if (cancelled) return;
+                const devices = Array.isArray(res) ? (res as NativeOutputDevice[]) : [];
+                setOutputDevices(devices);
+            })
+            .catch(() => {
+                // Host enumeration failed — keep the default-only picker; selecting
+                // "System Default" still routes correctly via the engine.
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isNative]);
+
+    // Route the (single) Speaker node to the chosen output device. The engine
+    // performs a brief controlled stream rebuild on the new device — the same
+    // held-note gap as device-loss recovery (a held note beats a glitch). Records
+    // the choice on the node so it survives reloads and reconciles with autosave.
+    const handleOutputDeviceChange = useCallback(
+        (deviceId: string) => {
+            if (!speakerNode) return;
+            useGraphStore
+                .getState()
+                .updateNodeData<SpeakerNodeData>(speakerNode.id, { deviceId });
+            getExecutor().setSpeakerDevice(speakerNode.id, deviceId);
+        },
+        [speakerNode],
+    );
+
+    // Route the (existing) Microphone node into the engine's input bus. Native mic
+    // capture is an engine duplex concern; the executor ignores the Web-Audio node
+    // arg on this tier, so we pass a throwaway placeholder. Only offered when a
+    // Microphone node is on the canvas — removing that node (Ctrl+Z) stops capture.
+    const handleRouteMic = useCallback(() => {
+        if (!micNode) return;
+        getExecutor().setMicrophoneOutput(micNode.id, {} as AudioNode);
+    }, [micNode]);
 
     // Sync pendingConfig with audioConfig when it changes externally
     useEffect(() => {
@@ -232,6 +330,52 @@ export function AudioSettingsPanel() {
             {/* Audio Configuration */}
             <div className="audio-config-section">
                 <h3>Audio Configuration</h3>
+
+                {/* Native output device (B1). The desktop engine owns the output
+                    stream, so device selection lives here rather than on the Speaker
+                    node's browser picker. Hidden in the browser tier. */}
+                {isNative && (
+                    <div className="setting-group">
+                        <label htmlFor="native-output-device">Output Device</label>
+                        <Select
+                            id="native-output-device"
+                            value={selectedOutput}
+                            disabled={!speakerNode}
+                            onChange={(e) => handleOutputDeviceChange(e.target.value)}
+                        >
+                            <option value="default">System Default</option>
+                            {outputDevices.map((device) => (
+                                <option key={device.id} value={device.id}>
+                                    {device.name}
+                                </option>
+                            ))}
+                        </Select>
+                        <p className="setting-description">
+                            {speakerNode
+                                ? 'Sends the engine to this device. Switching briefly rebuilds the audio stream — a held note may gap, then resumes on the new device.'
+                                : 'Add a Speaker node to the canvas to choose an output device.'}
+                        </p>
+                    </div>
+                )}
+
+                {/* Native microphone routing (B2). Captures the canvas Microphone
+                    node into the engine's input bus. Only shown when a Microphone
+                    node exists; remove that node (Ctrl+Z) to stop capture. */}
+                {isNative && micNode && (
+                    <div className="setting-group">
+                        <label>Microphone</label>
+                        <Button
+                            variant="secondary"
+                            onClick={handleRouteMic}
+                        >
+                            Capture microphone into the engine
+                        </Button>
+                        <p className="setting-description">
+                            Routes your Microphone node to the live engine input. Use
+                            headphones to avoid feedback.
+                        </p>
+                    </div>
+                )}
 
                 {/* Sample Rate */}
                 <div className="setting-group">

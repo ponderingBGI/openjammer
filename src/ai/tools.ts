@@ -583,7 +583,7 @@ function applyAuthorDspNode(
  * supports it (native authors Faust→`.wasm` + a validated manifest and registers
  * an `ai.wasm.<hash>` dynamic plugin with the REAL params). A registrar predating
  * M6 (only {@link DspNodeRegistrar.registerDspNode}) is adapted by mapping the
- * code-node args onto the legacy stored-source path — so `author_code_node` is
+ * code-node args onto the stored-source path — so `author_code_node` is
  * back-compatible with `author_dsp_node` and never silently drops a node.
  */
 function applyAuthorCodeNode(

@@ -18,7 +18,7 @@
  *     command name + args.
  */
 
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { LooperAction } from '../../../../packages/oj-protocol-ts/src/index';
 import type { RtCommand, EngineFrame } from '../../../../packages/oj-protocol-ts/src/index';
 import {
@@ -32,6 +32,7 @@ import { OjcoreNativeExecutor } from '../OjcoreNativeExecutor';
 import { OjcoreWasmExecutor } from '../OjcoreWasmExecutor';
 import { getNodeDefinition } from '../../../engine/registry';
 import type { Connection, GraphNode, NodeType } from '../../../engine/types';
+import { useEngineHealthStore } from '../../../store/engineHealthStore';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -295,6 +296,10 @@ function looperGraph(): {
 }
 
 describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
+    beforeEach(() => {
+        useEngineHealthStore.setState({ health: 'IDLE', reason: '' });
+    });
+
     afterEach(() => {
         delete (window as unknown as { __TAURI__?: unknown }).__TAURI__;
         vi.useRealTimers();
@@ -312,6 +317,14 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         );
     }
 
+    /** Let the initial `push_graph` invoke resolve so the executor commits its
+     *  NodeIdx interning (the index/reverseIndex are committed only AFTER the
+     *  engine accepts the graph, so command addressing is live only post-flush). */
+    async function flush(): Promise<void> {
+        await Promise.resolve();
+        await Promise.resolve();
+    }
+
     it('pushes the graph on initialize via push_graph', () => {
         const calls = installMockTauri();
         const ex = new OjcoreNativeExecutor();
@@ -324,6 +337,7 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         const calls = installMockTauri();
         const ex = new OjcoreNativeExecutor();
         initWith(ex, looperGraph());
+        await flush(); // commit the interning once the push is accepted
 
         const looper = ex.getLooper('looper-1');
         expect(looper).not.toBeNull();
@@ -348,10 +362,11 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         ex.dispose();
     });
 
-    it('sampler config reaches send_command and sample reaches load_sample', () => {
+    it('sampler config reaches send_command and sample reaches load_sample', async () => {
         const calls = installMockTauri();
         const ex = new OjcoreNativeExecutor();
         initWith(ex, looperGraph());
+        await flush(); // commit the interning once the push is accepted
 
         // Use the looper node id only to prove command addressing; the sampler
         // handle works for any node id (interned or not — null-safe).
@@ -365,10 +380,11 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         ex.dispose();
     });
 
-    it('speaker volume / device / mic reach their commands', () => {
+    it('speaker volume / device / mic reach their commands', async () => {
         const calls = installMockTauri();
         const ex = new OjcoreNativeExecutor();
         initWith(ex, looperGraph());
+        await flush(); // commit the interning once the push is accepted
 
         ex.setSpeakerVolume('speaker-1', 0.7, false);
         ex.setSpeakerDevice('speaker-1', 'dev-2');
@@ -395,6 +411,7 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         });
         const ex = new OjcoreNativeExecutor();
         initWith(ex, graph);
+        await flush(); // commit the reverse interning the poll routes meters through
 
         const received: Map<string, number>[] = [];
         const unsub = ex.subscribeSignalLevels((levels) => received.push(levels));
@@ -429,6 +446,7 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         });
         const ex = new OjcoreNativeExecutor();
         initWith(ex, graph);
+        await flush(); // commit the reverse interning the poll routes meters through
 
         const received: Map<string, number>[] = [];
         const unsub = ex.subscribeSignalLevels((levels) => received.push(levels));
@@ -448,6 +466,106 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         expect(received.at(-1)!.get('conn-test')).toBe(0);
 
         unsub();
+        ex.dispose();
+    });
+
+    it('a REJECTED push leaves meter routing on the last good graph', async () => {
+        // Regression: the NodeIdx interning (index/reverseIndex) used to be committed
+        // BEFORE `push_graph` was accepted, so a rejected push left meter-frame
+        // routing pointed at a graph the engine never adopted. The interning must
+        // commit ONLY on acceptance — a rejected edit keeps the last good routing.
+        vi.useFakeTimers();
+        const graph = looperGraph();
+        const meterFrame = (node: number): EngineFrame => ({
+            Meter: { node, rms: 0.1, peak: 0.8 },
+        });
+        // Accept the FIRST push_graph (graph A) and REJECT the second (the edit we
+        // add below), as the engine would on a Compile/RingFull error. poll_meters
+        // always reports a frame for NodeIdx 0.
+        let pushes = 0;
+        const calls = installMockTauri((cmd) => {
+            if (cmd === 'poll_meters') return [meterFrame(0)];
+            if (cmd === 'push_graph') {
+                pushes += 1;
+                if (pushes >= 2) return Promise.reject(new Error('Compile'));
+            }
+            return undefined;
+        });
+        // Capture the node-change subscription so we can fire a second push.
+        let nodeCb: (() => void) | null = null;
+        const ex = new OjcoreNativeExecutor();
+        ex.initialize(
+            () => () => {},
+            (cb) => {
+                nodeCb = cb as unknown as () => void;
+                return () => {};
+            },
+            () => graph.nodes,
+            () => graph.connections,
+        );
+        await flush(); // first push accepted: reverseIndex maps 0 -> 'looper-1'
+
+        const received: Map<string, number>[] = [];
+        const unsub = ex.subscribeSignalLevels((levels) => received.push(levels));
+        await vi.advanceTimersByTimeAsync(120);
+        expect(received.at(-1)!.get('looper-1')).toBeCloseTo(0.8, 5);
+
+        // Add a 'keys' node (sorts before 'looper-1', so the NEW interning would map
+        // NodeIdx 0 -> 'keys-1'); fire the edit. The engine REJECTS this push.
+        graph.nodes.set('keys-1', makeNode('keys', 'keys-1'));
+        nodeCb!();
+        await flush();
+        expect(calls.filter((c) => c.cmd === 'push_graph')).toHaveLength(2);
+
+        // The rejected interning was never committed: a meter frame for NodeIdx 0
+        // still routes to 'looper-1' (NOT 'keys-1'), holding the last good routing.
+        received.length = 0;
+        await vi.advanceTimersByTimeAsync(120);
+        const latest = received.at(-1)!;
+        expect(latest.get('looper-1'), 'last good routing held after rejection').toBeCloseTo(
+            0.8,
+            5,
+        );
+        expect(latest.has('keys-1'), 'rejected interning was not committed').toBe(false);
+
+        unsub();
+        ex.dispose();
+    });
+
+    it('recovers engine health from DEGRADED to LIVE after a later accepted push', async () => {
+        const graph = looperGraph();
+        let pushes = 0;
+        installMockTauri((cmd) => {
+            if (cmd === 'push_graph') {
+                pushes += 1;
+                if (pushes === 2) return Promise.reject(new Error('Compile'));
+            }
+            return undefined;
+        });
+        let nodeCb: (() => void) | null = null;
+        const ex = new OjcoreNativeExecutor();
+        ex.initialize(
+            () => () => {},
+            (cb) => {
+                nodeCb = cb as unknown as () => void;
+                return () => {};
+            },
+            () => graph.nodes,
+            () => graph.connections,
+        );
+        await flush();
+        expect(useEngineHealthStore.getState().health).toBe('LIVE');
+
+        graph.nodes.set('keys-1', makeNode('keys', 'keys-1'));
+        nodeCb!();
+        await flush();
+        expect(useEngineHealthStore.getState().health).toBe('DEGRADED');
+
+        graph.nodes.set('keys-2', makeNode('keys', 'keys-2'));
+        nodeCb!();
+        await flush();
+        expect(useEngineHealthStore.getState().health).toBe('LIVE');
+
         ex.dispose();
     });
 });

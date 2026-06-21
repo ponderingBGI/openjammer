@@ -4,8 +4,8 @@
 //! reasons on ground truth instead of a guess.
 //!
 //! WRITE verbs are NOT applied here: they already apply through the streamed
-//! `tool_execution_start` → `tool-call` → `applyToolCall` path (with undo / single
-//! Approve-Reject / collab-guard intact), so the bridge only ACKs them. That split
+//! `tool_execution_start` → `tool-call` → `applyToolCall` path (live edits with
+//! plain Ctrl+Z undo / collab-guard intact), so the bridge only ACKs them. That split
 //! is what avoids a double-apply without touching the verified mutation machinery.
 //!
 //! Protocol — one JSON line each over a loopback TCP socket the host owns:

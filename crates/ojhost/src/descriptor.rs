@@ -56,6 +56,24 @@ pub struct PortCounts {
     pub audio_out: u16,
 }
 
+/// One automatable parameter a hosted plugin exposes. Captured at scan (the CLAP
+/// params extension) so the UI shows a real knob with the plugin's own range,
+/// and `set_param` can target the parameter by its stable id.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct HostedParam {
+    /// The plugin's stable parameter id (CLAP `clap_id`). The UI/engine address
+    /// params by their 0-based INDEX; the backend maps index -> this id.
+    pub id: u32,
+    /// Display name, e.g. "Cutoff".
+    pub name: String,
+    /// Minimum plain value (the parameter's own range, NOT normalized).
+    pub min: f64,
+    /// Maximum plain value.
+    pub max: f64,
+    /// Default plain value.
+    pub default: f64,
+}
+
 /// The static description of one scanned plugin. Backend-agnostic and
 /// serializable so it round-trips through the on-disk scan cache and the Tauri
 /// IPC boundary to the UI.
@@ -78,8 +96,13 @@ pub struct PluginDescriptor {
     pub is_instrument: bool,
     /// Audio port topology the plugin reported at scan time.
     pub ports: PortCounts,
-    /// Number of automatable parameters the plugin exposes.
+    /// Number of automatable parameters the plugin exposes (equals
+    /// `params.len()` when the backend filled the detailed list at scan).
     pub param_count: u32,
+    /// The plugin's automatable parameters (id / name / range), captured at scan
+    /// so the UI can render real knobs. Empty when a backend reports only a count
+    /// (the UI then falls back to generic, index-named params).
+    pub params: Vec<HostedParam>,
     /// Processing latency in samples the plugin reports (for PDC /
     /// Live-Monitoring budget enforcement). May be 0 at scan time and refined
     /// once the plugin is activated at the real sample rate.
@@ -136,6 +159,7 @@ mod tests {
                 audio_out: 2,
             },
             param_count: 12,
+            params: Vec::new(),
             latency_samples: 256,
         };
         let json = serde_json::to_string(&d).expect("serialize");

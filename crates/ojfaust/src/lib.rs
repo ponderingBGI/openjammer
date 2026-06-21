@@ -50,9 +50,10 @@ mod backend;
 /// *terminal* [`FaustError::Unavailable`] (no backend — retrying is pointless).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FaustError {
-    /// No Faust backend is compiled in (the `libfaust` feature is off) or the
-    /// runtime toolchain it needs is missing. This is **terminal**: re-feeding
-    /// source cannot help, so the repair loop bails out immediately.
+    /// The active backend has no toolchain to run: the default CLI Path B can't
+    /// find the `faust` binary on PATH, or the `libfaust` JIT is not yet wired.
+    /// This is **terminal**: re-feeding source cannot help, so the repair loop
+    /// bails out immediately.
     Unavailable,
     /// The Faust source did not compile. `message` carries the diagnostic
     /// verbatim from the backend; the repair loop hands this back to the author
@@ -76,8 +77,8 @@ impl fmt::Display for FaustError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             FaustError::Unavailable => f.write_str(
-                "Faust backend unavailable: build ojfaust with `--features libfaust` \
-                 (and install libfaust — see crate README)",
+                "Faust backend unavailable: install the `faust` binary on PATH for the \
+                 default CLI backend (see crate README)",
             ),
             FaustError::Compile { message } => {
                 write!(f, "Faust compile error: {message}")
@@ -149,20 +150,22 @@ pub struct CompiledFaust {
 /// Compiles Faust source into a loadable [`CompiledFaust`].
 ///
 /// This is the single dispatch point: [`compile`](FaustCompiler::compile)
-/// forwards to whichever backend is compiled in. In the default scaffold that
-/// is the stub, which returns [`FaustError::Unavailable`].
+/// forwards to whichever backend is compiled in. In the default build that is
+/// the CLI Path B, which compiles via the `faust` binary when it is on `PATH` and
+/// otherwise returns [`FaustError::Unavailable`].
 ///
 /// It is cheap to construct and holds the (future) backend configuration, so
 /// callers can build one once and reuse it across many compiles — including the
 /// repeated compiles inside [`compile_repair`].
 #[derive(Debug, Default, Clone)]
 pub struct FaustCompiler {
-    /// Reserved for backend options (target/optimization/arch). Unused by the
-    /// stub; carried so enabling the feature does not change the public shape.
+    /// Backend options (target/optimization/arch). The CLI Path B forwards
+    /// `extra_args` to the `faust` command line; the shape is stable across
+    /// backends so enabling `libfaust` does not change the public API.
     cfg: CompilerConfig,
 }
 
-/// Backend configuration knobs (currently inert in the scaffold).
+/// Backend configuration knobs. `extra_args` is forwarded to the `faust` CLI in the default Path B backend.
 #[derive(Debug, Clone, Default)]
 pub struct CompilerConfig {
     /// Faust `-vec`/optimization-style hints, passed through to the backend.
@@ -243,9 +246,10 @@ pub enum Repair {
 /// fix it"); tests / the CLI pass a trivial closure. Keeping the LLM behind a
 /// closure keeps this crate free of any model dependency.
 ///
-/// In the default scaffold the very first `compile` returns
-/// [`FaustError::Unavailable`], so `author` is never invoked — but the loop's
-/// control flow is fully present and unit-tested via an injectable compile
+/// When no backend toolchain is available (the default CLI path with no `faust`
+/// on PATH, or the unwired `libfaust` JIT) the first `compile` returns
+/// [`FaustError::Unavailable`] and `author` is never invoked. The loop's control
+/// flow is exercised independently of any backend via an injectable compile
 /// function (see [`compile_repair_with`]).
 pub fn compile_repair(
     compiler: &FaustCompiler,
@@ -492,8 +496,8 @@ mod tests {
     fn error_display_is_actionable() {
         let s = FaustError::Unavailable.to_string();
         assert!(
-            s.contains("libfaust"),
-            "should point at the feature/install"
+            s.contains("faust") && s.contains("PATH"),
+            "should point at the actionable fix (the `faust` binary on PATH)"
         );
     }
 }

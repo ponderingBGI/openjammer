@@ -2,8 +2,8 @@
 //!
 //! This module is the NATIVE half of the auth onboarding the frontend
 //! ([`src/auth/authStore.ts`] + [`AuthChooser`]) drives. It resolves only WHO
-//! PAYS — it grants the agent no new power (tool calls still apply-with-undo
-//! behind Approve / Reject), and OpenJammer NEVER writes the provider key to its
+//! PAYS — it grants the agent no new power (tool calls still apply live with
+//! plain Ctrl+Z undo, no Approve/Reject gate), and OpenJammer NEVER writes the provider key to its
 //! own config: the key belongs in the OS keychain (founder-gated) and is forwarded
 //! transiently to Pi via the existing [`crate::ai::stripped_env`] seam.
 //!
@@ -22,7 +22,7 @@
 //!
 //! # FOUNDER-GATED BOUNDARY — read before extending
 //!
-//! The COMMANDS that touch live providers / the OS / the network are SCAFFOLDS:
+//! The COMMANDS that touch live providers / the OS / the network are FOUNDER-GATED:
 //! [`auth_store_key`] / [`auth_get_key`] / [`auth_clear`] (OS keychain via
 //! `tauri-plugin-keyring`), [`auth_begin_oauth`] (loopback PKCE via
 //! `tauri-plugin-oauth`), and [`auth_validate_key`] (an HTTP round-trip) each
@@ -59,7 +59,7 @@ pub struct AuthState {
 #[serde(rename_all = "camelCase")]
 pub struct AuthActionResult {
     pub ok: bool,
-    /// True when this is the founder-gated stub body (not configured in this build).
+    /// True when this is the founder-gated body (not configured in this build).
     #[serde(skip_serializing_if = "is_false")]
     pub not_configured: bool,
     /// Human-readable detail for the chooser.

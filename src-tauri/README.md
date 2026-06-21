@@ -61,8 +61,10 @@ On startup the backend:
 
 The Ctrl/Cmd+K command bar's **Ask AI** half (`src/ai/**`,
 `src/components/CommandBar/**`) drives a "Pi-inspired" agent: type a request,
-press Tab, and the agent proposes graph edits / new DSP nodes, streamed live with
-an **Approve / Reject** transaction. AI is **native/hybrid only** — in a plain
+press Tab, and the agent proposes graph edits / new DSP nodes that apply live to
+the canvas, each undoable with plain **Ctrl+Z** (no Approve/Reject gate —
+reversibility plus the OS/Pi sandbox is the boundary). AI is **native/hybrid
+only** — in a plain
 browser the Tab -> AI path shows *"AI requires the desktop app"* and is disabled;
 only inside this Tauri shell does the Rust `ai_run` command drive Pi.
 
@@ -78,8 +80,8 @@ job):
   only process basics plus the **one** provider key the user supplied are
   forwarded. Every other secret is stripped. OpenJammer never stores the key.
 - **Tool calls are forwarded, not executed natively.** Graph mutations are
-  surfaced to the frontend and applied only behind the user's Approve, via the
-  same reversible `graphStore` verbs the UI uses.
+  surfaced to the frontend and applied live as the same reversible `graphStore`
+  verbs the UI uses, each undoable with Ctrl+Z (no Approve/Reject gate).
 
 ### AI setup (one-time)
 
@@ -107,15 +109,15 @@ not ship or run Pi; it continues to show the desktop-required state.
 
 ### Pi RPC schema
 
-`ai.rs::parse_pi_line` maps Pi's LF-delimited JSONL (split **only** on `\n`)
-into `PiStreamLine`s defensively — recognised `tool_call` / `result` / `error`
-lines are typed, anything else degrades to a `thought` (nothing is lost). Pin a
-Pi version and tighten this mapping once the RPC schema is fixed. The frontend
-mirror is `src/ai/PiAgentBackend.ts`.
+`ai.rs` normalizes Pi's LF-delimited JSONL RPC (split **only** on `\n`) against
+the pinned protocol: `tool_execution_start` -> `tool-call`, a `message_update`
+`text_delta` -> `thought`, `agent_end` -> `result`, and `extension_ui_request`
+-> `ui-request`; every other lifecycle/partial event is skipped (no
+thought-spam). The frontend mirror is `src/ai/PiAgentBackend.ts`.
 
 ### Testing without Pi
 
-The whole tool-call -> graph-verb path and the Approve/Reject transaction are
+The whole tool-call -> graph-verb apply-live + undo path is
 proven with Pi **mocked** (`MockAgentBackend`) — `bun run test:run` covers
 `src/ai/__tests__` and `src/store/__tests__/agentSessionStore.test.ts`. The
 native `ai.rs` env-stripping + JSONL parsing have Rust unit tests

@@ -65,4 +65,6 @@ Future: A custom logo for OpenJammer in the hand-drawn aesthetic style.
 
 ---
 
-Once you create `demo.gif`, the README will automatically display it (the reference is already in place).
+These assets are not yet produced, and no README references them. When you create
+`demo.gif`, add a `![OpenJammer demo](docs/assets/demo.gif)` reference to the README to
+display it.

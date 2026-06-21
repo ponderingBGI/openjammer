@@ -46,8 +46,8 @@ and the default answer is the plugin side. Then:
 2. **Strong, reusable pillars.** The DSP kernels live once in `ojcore-dsp`; the wire
    contract lives once in `ojproto` (`OjGraph`, `RtCommand`, `ParamPatch`, `EngineFrame`);
    the plugin contract is one `DspInstance` trait. **Extend these; never fork a parallel version.**
-3. **One simple path first.** One wire contract, one executor selected by `OJ_EXECUTOR`
-   (`webaudio` / `ojcore-native` / `ojcore-wasm`). Complexity on a real-time path needs
+3. **One simple path first.** One wire contract, one executor selected by `VITE_OJ_EXECUTOR`
+   (`ojcore-native` / `ojcore-wasm`). Complexity on a real-time path needs
    explicit justification — every branch runs while audio is flowing.
 4. **Fallbacks are exceptional.** None inside `ojcore`. Fallbacks live only at the edges we
    don't own — a host audio backend that may not exist, an interface that may be unplugged,
@@ -61,15 +61,19 @@ and the default answer is the plugin side. Then:
    enforced mechanically (`assert_no_alloc` in CI, the compile-time `RtCommand` size guard,
    the acyclic-schedule invariant the compiler proves). A dropout is a bug, not a trade-off.
 7. **Migrate fully, remove legacy paths.** The `ojcore` rewrite *is* this value in motion:
-   the legacy `webaudio` executor is a migration target, not a permanent twin. After a
-   migration, keep no legacy path, shim, or obsolete format.
+   the legacy `webaudio` executor was already removed in the U-DEDUP migration — `ojcore`
+   is the one engine, not a permanent twin. After a migration, keep no legacy path, shim,
+   or obsolete format.
 8. **Every production line is used.** No dormant DSP, no half-wired node shipped "just in
    case." If it isn't needed for real behavior now, remove it.
 9. **Design for instant.** Render from what you already know, preload what's next, apply
    graph edits optimistically so the player watches the change land while the engine catches
    up. The audio path blocks for nothing.
 
-Full crate map and the CI commands that enforce all of this:
+Which side of that line a given piece of code falls on — and *why* — is worked out in
+full in [docs/BOUNDARY.md](../../docs/BOUNDARY.md): the four tiers, the three gates, and the
+reasoning derived from the two beliefs (it is why `emitOjGraph` / `resolveKeyboardNotes`
+stay TypeScript). Full crate map and the CI commands that enforce all of this:
 [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
 
 ---
@@ -96,9 +100,10 @@ Do not introduce `npm`/`yarn`/`pnpm` commands anywhere in the codebase or the do
 
 ### Code standards
 
-- **File structure:** components in `/src/components/`; nodes in `/src/nodes/`, one file
-  per node type; audio engine in `/src/audio/`; state in `/src/state/`; theming in
-  `/src/themes/`.
+- **File structure:** components in `/src/components/` (node UIs one file each in
+  `/src/components/Nodes/`); node definitions in `/src/engine/registry.ts`; audio engine in
+  `/src/audio/`; state in `/src/store/` (Zustand); theming via the `packages/oj-tokens` CSS
+  variables (+ global styles in `/src/styles/`).
 - **Naming:** components `PascalCase` (`KeyboardNode.tsx`); utilities `camelCase`
   (`audioUtils.ts`); constants `SCREAMING_SNAKE_CASE`.
 - **Commits:** conventional — `feat:`, `fix:`, `docs:`, `refactor:`, `style:`, `test:`,

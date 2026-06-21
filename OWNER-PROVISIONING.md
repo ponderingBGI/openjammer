@@ -105,18 +105,36 @@ rotation policy: [`KEY-MANAGEMENT.md`](KEY-MANAGEMENT.md). In short:
 
 ---
 
-## 4. 🔴 macOS code-signing + notarization (Apple Developer ID)
+## 4. 🟡 macOS code-signing + notarization (Apple Developer ID)
 
-Without an Apple Developer ID + notarization, Gatekeeper quarantines a swapped
-`.app`, so the macOS updater is `cfg`-gated **off** and Mac users get a manual
-`.dmg`. To enable macOS auto-update:
+The macOS auto-updater is **wired and ready** — the code, the audio-safe
+`UpdateGate`, the updater commands, and the Settings UI are all in place. It
+activates behind the `apple-notarized` Cargo feature on `oj-tauri`
+(`src-tauri/src/updater.rs` / `Cargo.toml`). It is OFF by default because a
+non-notarized self-updater would be Gatekeeper-quarantined, so a default macOS
+build ships a manual `.dmg`. Activation is **provisioning + a build flag — no new
+code**:
 
-1. Enrol in the **Apple Developer Program** (~$99/yr).
-2. Add the signing identity + notarization credentials as repo secrets (Apple
-   Team ID, Developer ID cert + password, an app-specific password / API key).
-3. Flip the macOS updater from `cfg`-off to on.
-
-Tracked as Open Question #3 (release-credentials funding).
+1. **Apple Developer Program** — enrolled (paid). ✅
+2. **Create a Developer ID Application certificate** (Apple Developer →
+   Certificates), export it as a `.p12`, and base64-encode it:
+   `openssl base64 -in cert.p12 -out cert-b64.txt`.
+3. **Add the repo secrets** Tauri's bundler reads (it signs + notarizes
+   automatically when they are present):
+   - `APPLE_CERTIFICATE` — base64 of the Developer ID Application `.p12`
+   - `APPLE_CERTIFICATE_PASSWORD` — the `.p12` password
+   - `APPLE_SIGNING_IDENTITY` — e.g. `Developer ID Application: Name (TEAMID)`
+   - notarization, EITHER an App Store Connect API key (recommended for CI):
+     `APPLE_API_ISSUER`, `APPLE_API_KEY`, `APPLE_API_KEY_PATH` — OR an Apple ID:
+     `APPLE_ID`, `APPLE_PASSWORD` (app-specific), `APPLE_TEAM_ID`.
+4. **Wire CI once** (`release.yml` + `canary.yml`): forward the `APPLE_*` secrets
+   into the `tauri-action` `env:` (it skips signing when they are empty, so this
+   is safe to add ahead of time), and append `--features apple-notarized` to the
+   macOS matrix entries' build `args` when the secrets are present. That flag
+   flips `native_update_capability()` to `can_auto_update = true` on macOS and
+   registers the updater plugin there.
+5. Verify on a **canary** release first (signing/notarization only runs on a real
+   Mac/CI runner), then drop this section's 🟡.
 
 ---
 

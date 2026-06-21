@@ -8,8 +8,8 @@ plugins, and provider keys. Run them on the **Windows native install**.
 
 ## 0. Get a build
 - **Local:** `bun install && bun run tauri build` → installer in `target/release/bundle/`.
-- **CI:** after PR #10 merges to `main`, run the **“Build installers (on demand)”**
-  workflow from the Actions tab → download the `openjammer-windows-latest` artifact.
+- **CI:** run the **“Build installers (on demand)”** workflow from the Actions
+  tab → download the `openjammer-windows-latest` artifact.
 
 ## 0.5 Hear it — no hardware needed
 ```bash
