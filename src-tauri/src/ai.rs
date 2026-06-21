@@ -959,11 +959,35 @@ fn spawn_and_configure(
     // back to today's single-process kill rather than failing the spawn.
     #[cfg(windows)]
     let job = {
-        let job = JobObject::create_kill_on_close();
-        if let Some(j) = job.as_ref() {
-            let _ = j.assign(&child);
+        match JobObject::create_kill_on_close() {
+            Some(j) if j.assign(&child) => Some(j),
+            Some(_) => {
+                // Created but could NOT adopt the child: a held-but-unassigned job
+                // reaps nothing, so keeping it is a false sense of protection. Drop
+                // it now and SAY so — the fallback to single-process kill must be
+                // visible, never silent (descendants may then orphan on force-kill).
+                emit(
+                    app,
+                    channel,
+                    PiStreamLine::status(
+                        "Windows Job Object assignment failed; falling back to single-process kill"
+                            .to_string(),
+                    ),
+                );
+                None
+            }
+            None => {
+                emit(
+                    app,
+                    channel,
+                    PiStreamLine::status(
+                        "Windows Job Object unavailable; falling back to single-process kill"
+                            .to_string(),
+                    ),
+                );
+                None
+            }
         }
-        job
     };
 
     let Some(mut stdin) = child.stdin.take() else {

@@ -59,6 +59,7 @@ import {
     type OjcoreBridge,
 } from './ojcoreHandles';
 import { ingestEngineEvents } from './faultPipe';
+import { setEngineHealth } from '../../store/engineHealthStore';
 
 // Vite resolves these to URLs/assets at build time.
 // The worklet processor module (bundled as an ES module worklet).
@@ -181,6 +182,10 @@ export class OjcoreWasmExecutor implements Executor {
         // Begin async worklet setup; graph pushes coalesce until it is ready.
         void this.setup().catch((err: unknown) => {
             console.error('[OjcoreWasmExecutor] worklet setup failed:', err);
+            // The browser engine cannot make sound — surface it in the shared health
+            // state (the tri-state dot reads DEAD), not just the console. Without this
+            // the dot can sit at IDLE while the engine is dead (a silent failure).
+            setEngineHealth('DEAD', 'browser engine failed to start');
             whisperBrowserEngineDegrade(
                 'dead',
                 'Couldn’t start the browser engine',
@@ -255,6 +260,21 @@ export class OjcoreWasmExecutor implements Executor {
                     break;
                 case 'error':
                     console.error('[OjcoreWasmExecutor] worklet error:', data.message);
+                    // An error BEFORE the worklet ever signalled `ready` is a startup
+                    // failure (e.g. wasm instantiate threw inside the worklet's init,
+                    // which posts here instead of rejecting setup()): the engine makes
+                    // no sound, so surface DEAD + the one-time whisper. AFTER `ready`
+                    // the engine is live — a transient message error must NOT cry wolf
+                    // by marking the whole engine dead.
+                    if (!this.ready) {
+                        setEngineHealth('DEAD', 'browser engine failed to start');
+                        whisperBrowserEngineDegrade(
+                            'dead',
+                            'Couldn’t start the browser engine',
+                            'The audio engine failed to start in this browser. Open “Audio ' +
+                                'health” (Ctrl/Cmd+Shift+H) for details, or use the desktop app.',
+                        );
+                    }
                     break;
             }
         };
