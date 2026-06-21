@@ -140,7 +140,7 @@ export function IssueReporter() {
                     {report.truncated && (
                         <em>
                             {' '}
-                            The GitHub link carries a shortened log tail — use “Copy full report”
+                            The GitHub link carries a shortened log tail — use “Copy diagnostics”
                             to paste everything.
                         </em>
                     )}

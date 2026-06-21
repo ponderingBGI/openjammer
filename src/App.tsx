@@ -447,8 +447,11 @@ function App() {
           choices instead of reopening into a deadly crash cycle. */}
       <SafeModeScreen api={recovery} />
 
-      {/* Welcome screen (browser tier only — native auto-starts, see useState above) */}
-      {showActivation && (
+      {/* Welcome screen (browser tier only — native auto-starts, see useState above).
+          Suppressed in Safe Mode: SafeModeScreen is its own aria-modal dialog, and
+          two modal dialogs must never co-render (a held note beats a glitch — one
+          calm surface at a time). */}
+      {showActivation && !recovery.safeMode && (
         <div
           className="oj-welcome"
           role="dialog"
