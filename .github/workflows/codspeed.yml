@@ -1,9 +1,20 @@
 name: CodSpeed
 
-# Continuous performance measurement for the OpenJammer audio hot paths: the
-# engine compile + process_block benches (ojcore) and the DSP kernels (ojcore-dsp).
-# Runs the criterion benchmarks under CodSpeed's CPU simulation instrument so a
-# regression in the real-time audio hot paths is caught on every PR. CodSpeed
+# Continuous performance measurement for the OpenJammer hot paths, across all
+# four benched crates:
+#   * ojcore       — engine compile (Kahn topo-sort + routing plan) + process_block
+#   * ojcore-dsp   — the DSP kernels + the master output guards (soft-limit/scrub)
+#   * ojinstrument — polyphonic voice render + a realistic end-to-end patch
+#   * ojproto      — the control-plane wire codec (OjGraph / ParamPatch / RtCommand)
+#
+# Two CodSpeed instruments run on every PR:
+#   * simulation — CPU instruction count (stable to <1% run-to-run); catches an
+#     O(n^2) schedule or a hotter inner loop.
+#   * memory     — heap allocations; turns the zero-alloc covenant into a tracked
+#     per-PR number, complementing the binary `assert_no_alloc` test gate.
+# Both run on the free ubuntu runner (instrumentation-based, no macro runner).
+# This is a work-done / allocation proxy, NOT a wall-clock latency gate — real
+# <5ms latency is the founder-hardware loopback harness's job. CodSpeed
 # authenticates over OIDC (id-token below) — no token secret required.
 
 on:
@@ -35,11 +46,17 @@ jobs:
           cache-target: release
           bins: cargo-codspeed
 
-      - name: Build the benchmark target(s)
-        run: cargo codspeed build -p ojcore -p ojcore-dsp
+      - name: Build the benchmark target(s) for both instruments
+        run: cargo codspeed build -m simulation -m memory -p ojcore -p ojcore-dsp -p ojproto -p ojinstrument
 
-      - name: Run the benchmarks
+      - name: Run the benchmarks (CPU simulation)
         uses: CodSpeedHQ/action@63f3e98b61959fe67f146a3ff022e4136fe9bb9c # v4
         with:
           mode: simulation
-          run: cargo codspeed run
+          run: cargo codspeed run -m simulation
+
+      - name: Run the benchmarks (memory / allocations)
+        uses: CodSpeedHQ/action@63f3e98b61959fe67f146a3ff022e4136fe9bb9c # v4
+        with:
+          mode: memory
+          run: cargo codspeed run -m memory

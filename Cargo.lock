@@ -3383,6 +3383,7 @@ dependencies = [
 name = "ojinstrument"
 version = "0.0.0"
 dependencies = [
+ "codspeed-criterion-compat",
  "libm",
  "ojcore",
  "ojcore-dsp",
@@ -3394,6 +3395,7 @@ dependencies = [
 name = "ojproto"
 version = "0.0.0"
 dependencies = [
+ "codspeed-criterion-compat",
  "proptest",
  "serde",
  "serde_json",

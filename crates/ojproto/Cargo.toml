@@ -18,3 +18,11 @@ serde_json = "1.0"
 # tests/proptest_codec.rs; the OjGraph/compile() generators that reuse these
 # strategies (cycle-rejection, valid Kahn order, never-panics) are the next step.
 proptest = "1"
+# CodSpeed-compatible criterion: plain criterion locally, instruction-count +
+# allocation instrumented in CI. Benches the control-plane serialization path
+# (OjGraph push, ParamPatch frame, RtCommand) in benches/codec.rs.
+codspeed-criterion-compat = "4.7.0"
+
+[[bench]]
+name = "codec"
+harness = false
