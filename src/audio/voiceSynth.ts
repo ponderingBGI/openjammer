@@ -4,7 +4,7 @@
  *
  * OpenJammer's melodic instrument nodes lower to the engine's `builtin.sampler`,
  * which is silent until PCM is bound (the repo ships no samples). Rather than
- * leave 171 catalogue entries either silent or all sharing one tone, we
+ * leave 133 catalogue entries either silent or all sharing one tone, we
  * SYNTHESIZE a recognizable mono one-shot per instrument FAMILY here — a struck
  * string for pianos, a bowed saw for strings, a reedy buzz for saxes, a metallic
  * ring for mallets, drawbar harmonics for organs, and so on. The engine sampler
@@ -468,7 +468,7 @@ function synthesize(spec: VoiceSpec, seed: number): Float32Array {
     return pcm;
 }
 
-// Cache one rendered voice per FAMILY (12-ish renders, shared across the 171 ids).
+// Cache one rendered voice per FAMILY (12-ish renders, shared across the 133 ids).
 const familyCache = new Map<VoiceFamily, SynthVoice>();
 
 /** A stable per-family seed so the (deterministic) noise differs between families. */

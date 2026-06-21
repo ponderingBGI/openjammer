@@ -4,6 +4,10 @@
 
 **Scope:** Move the node/canvas UI onto `@openjammer/oj-ui` (NodeFrame/NodeShell/Port/PortRow/Cable + leaf primitives) with **zero legacy**, preserving every load-bearing contract so the live canvas never breaks. The audio executor (`subscribeSignalLevels` producer, AudioWorklet/native) is **off the React tree and is not touched** — the canvas only *reads* the level Map and *hit-tests the DOM*.
 
+> **STATUS: COMPLETED.** This migration has shipped — the node/canvas UI composes from
+> `@openjammer/oj-ui` and the legacy port classes are gone. Retained as the execution
+> record; read the future-tense steps below as history, not pending work.
+
 ---
 
 ## 1. THE DOM CONTRACT & THE INVARIANT THAT KEEPS IT ALIVE

@@ -6,7 +6,7 @@ everything else is the way it is.
 
 ## Start here
 
-- [.agent/workflows/agents.md](../.agent/workflows/agents.md): the working covenant and the
+- [agents.md](../agents.md): the working covenant and the
   one doc to read first — the two beliefs (perception is the medium; a minimal core made
   infinite by everyone), the nine code values, and the day-to-day playbook. Loaded every session.
 - [PRODUCT.md](../PRODUCT.md): who plays OpenJammer and why — register, users,
@@ -37,6 +37,6 @@ The Ctrl+K / AI design history lives in
 ---
 
 Working guidance for contributors and the AI agent lives at
-[.agent/workflows/agents.md](../.agent/workflows/agents.md) — the values made into a
+[agents.md](../agents.md) — the values made into a
 daily practice. [.claude/CLAUDE.md](../.claude/CLAUDE.md) is the same covenant for
 Claude Code.

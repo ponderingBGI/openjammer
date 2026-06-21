@@ -114,7 +114,7 @@ export function isValidSamplerRow(row: unknown): row is SamplerRow {
  *
  * Supports both:
  * - New row-based system (rows array)
- * - Legacy offset-based system (offsets object)
+ * - Offset-based config (offsets object — the built-in instrument default)
  * - Empty data (no configuration yet)
  */
 export function isInstrumentNodeData(data: unknown): data is InstrumentNodeData {
@@ -129,7 +129,7 @@ export function isInstrumentNodeData(data: unknown): data is InstrumentNodeData 
         return rows.every(isValidInstrumentRow);
     }
 
-    // Check for legacy offset-based system
+    // Check for the offset-based config (built-in instrument default)
     if ('offsets' in d && typeof d.offsets === 'object' && d.offsets !== null) {
         return true;
     }
@@ -158,7 +158,7 @@ export function isBasicInstrumentNodeData(data: unknown): data is InstrumentNode
         });
     }
 
-    // Check for legacy offset-based system
+    // Check for the offset-based config (built-in instrument default)
     if ('offsets' in d && typeof d.offsets === 'object' && d.offsets !== null) {
         return true;
     }

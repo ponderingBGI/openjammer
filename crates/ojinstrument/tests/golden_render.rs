@@ -7,9 +7,8 @@
 //! into a plain `Vec<f32>`, and ASSERT the samples are correct with real numeric
 //! tolerances — not "it ran".
 //!
-//! This suite is the verification backbone that lets us trust ojcore's audio
-//! before deleting the legacy Web Audio engine: if these pass, the compiled
-//! graph -> rendered-buffer path is sample-correct end to end.
+//! This suite is the verification backbone for ojcore's audio: if these pass,
+//! the compiled graph -> rendered-buffer path is sample-correct end to end.
 //!
 //! Signal model. A `GraphIn` source carries host-injected input (the executor
 //! leaves source output buffers intact — see [`Engine::input_mut`]), so

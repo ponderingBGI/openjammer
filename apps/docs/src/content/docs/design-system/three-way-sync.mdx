@@ -181,8 +181,9 @@ capability is worth paying for.
    and one publish action.
 
 4. **Enterprise — headless token push (optional).** The **REST Variables write API** unlocks a
-   CI job that pushes tokens into Figma automatically, behind its own clean-skip secret
-   (`ENABLE_FIGMA_WRITEBACK`, currently a deferred future). Extended variable collections matter
+   CI job that could push tokens into Figma automatically. OpenJammer does not ship
+   such a job today — the code-first path (`tokens.yml`) and the Tokens Studio Pro
+   write-back (`figma-tokens-sync.yml`) cover the live flows. Extended variable collections matter
    only if the theme count outgrows 20 modes.
 
 </Steps>
@@ -203,8 +204,10 @@ guarantees:
 - **Figma always Pulls; it never authors tokens.** Tokens Studio's Git sync means the repo is the
   truth. On the free/Education stack the folder sync is **pull-only**, so a designer Pulls the
   latest tokens, theme-switches, and Applies — there's no way to push a stale or divergent token
-  set back from Figma. (A Figma → repo write-back is a deferred, flag-gated future, not a current
-  capability — see the upgrade ladder.)
+  set back from Figma. (A Figma → repo write-back IS implemented — the
+  `figma-tokens-sync.yml` workflow rebuilds the token artifacts from a Tokens Studio
+  push and opens a PR into `canari` — but it stays dormant on the free/Education tier,
+  because pushing the multi-file token folder needs Tokens Studio Pro. See the upgrade ladder.)
 - **The sync anchor catches component drift.** `/design-sync` records content hashes
   (`_ds_sync.json`); a re-sync re-verifies and re-uploads only what changed, so Claude Design
   can't silently rot.

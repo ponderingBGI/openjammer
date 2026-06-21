@@ -16,7 +16,7 @@ difference is latency and plugin hosting, not features.
 |---|---|---|
 | **Install** | None — open a tab | Per-OS installer |
 | **Latency** | ~15–25 ms (honest tier) | **device-dependent: ~1.3 ms to ~10 ms+** |
-| **Plugin hosting** | — | VST3 / AU / CLAP |
+| **Plugin hosting** | — | CLAP (VST3 / AU planned) |
 | **Offline** | After first visit | Always |
 | **Best for** | Sketching, jamming, trying it out | Live performance, lowest latency |
 
@@ -64,5 +64,5 @@ Chromium-based browser — Chrome or Edge 110+.
 - **Playing live, or chasing the lowest latency?** The [desktop app](/openjammer/play/install/)
   — it asks the device for a small 64-frame buffer (~1.3 ms); many devices grant it even in
   WASAPI shared mode, and an exclusive/ASIO driver will guarantee it on any device.
-- **Want to host plugins you already own?** The desktop app — VST3 / AU / CLAP hosting is
-  native-only.
+- **Want to host plugins you already own?** The desktop app — CLAP hosting is
+  native-only (VST3 / AU planned).

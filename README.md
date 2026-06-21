@@ -49,7 +49,7 @@ beliefs carry the whole project:
 
 What you get:
 
-- 🎹 **171 instruments out of the box** — distinct procedural voices (piano, strings,
+- 🎹 **133 instruments out of the box** — distinct procedural voices (piano, strings,
   reed, bell, pluck…), zero sample downloads.
 - 🤖 **A Ctrl/Cmd+K AI co-pilot** that builds graphs *and* reads your on-device logs +
   audio diagnostics to fix "there's no sound" — reversibly, undone with plain Ctrl+Z.
@@ -88,7 +88,7 @@ play the Q–P row — or press **Ctrl/Cmd+K** and ask the AI to build it for yo
 OpenJammer is powered by **`ojcore`**: one minimal, real-time-safe **Rust** audio core
 that compiles to **native** (low-latency `cpal`, with VST3/AU/CLAP plugin hosting via a
 JUCE/CLAP host) **and** to **WebAssembly** (the zero-install AudioWorklet PWA), driven by
-one shared **React 19 + TypeScript** control plane and selected by `OJ_EXECUTOR`. The
+one shared **React 19 + TypeScript** control plane and selected by `VITE_OJ_EXECUTOR`. The
 audio thread never allocates, locks, or blocks — a guarantee enforced mechanically in CI.
 
 **Stack:** Bun · React 19 + TypeScript · Rust `ojcore` · Zustand · Tauri (desktop) ·

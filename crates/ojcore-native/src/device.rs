@@ -7,10 +7,10 @@
 //! and pushes a [`DeviceFault`] into a wait-free SPSC mailbox (the same `rtrb`
 //! ring the recorder uses), which the control plane drains off-RT.
 //!
-//! This is the "ship first, standalone" step of the device-recovery work: it makes
-//! the silent stop VISIBLE before any recovery logic exists, and it is the exact
-//! seam the future `DeviceSupervisor` (and the per-OS CoreAudio / WASAPI listeners)
-//! will feed. The richer fault classes (default-device change, sample-rate change)
+//! This is the device-recovery work's fault-observation layer: it makes the
+//! otherwise-silent stop VISIBLE, and it is the exact seam the
+//! [`DeviceSupervisor`](crate::supervisor) (and the per-OS CoreAudio / WASAPI
+//! listeners) feed from. The richer fault classes (default-device change, sample-rate change)
 //! are NOT emitted here — cpal's error callback cannot observe them; they arrive
 //! with the native OS listeners later and will extend this enum then (no dormant
 //! variants now, per the "every production line is used" value).

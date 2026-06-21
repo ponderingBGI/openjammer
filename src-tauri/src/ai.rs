@@ -48,9 +48,9 @@
 //! * **Tool calls are forwarded, not executed here.** Graph mutations are
 //!   surfaced to the frontend as reversible live edits that undo with Ctrl+Z.
 //! * **Blocking extension dialogs are auto-cancelled.** M1 surfaces an
-//!   `extension_ui_request` as a `ui-request` event but does not yet drive an
-//!   interactive reply; to keep a run from hanging on a dialog we never answer,
-//!   blocking methods (`select`/`confirm`/`input`/`editor`) get an immediate
+//!   `extension_ui_request` as a `ui-request` event for the UI to observe; to
+//!   keep a run from hanging on a dialog the host never answers, blocking
+//!   methods (`select`/`confirm`/`input`/`editor`) get an immediate
 //!   `extension_ui_response{cancelled:true}`.
 //!
 //! # Reality / fallback

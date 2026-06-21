@@ -207,9 +207,10 @@ const VCVARS_CANDIDATES: &[&str] = &[
 /// Compile faust `src` to a native `.dll` in `out_dir`, returning the dll path.
 ///
 /// Windows dev-environment helper: shells `faust -lang cpp` then `cl.exe` (via a
-/// discovered `vcvars64.bat`) against the wrapper. Hardcodes the faust + VS install
-/// paths for now (the production author path will discover them). Returns `None` on
-/// any failure (faust/cl missing, compile error). Off-RT only.
+/// discovered `vcvars64.bat`) against the wrapper. Resolves the faust binary and
+/// the VS toolchain from the candidate paths above (with a `faust`-on-PATH
+/// fallback). Returns `None` on any failure (faust/cl missing, compile error).
+/// Off-RT only; the production caller is `author_faust_native` in `src-tauri`.
 pub fn compile_faust_to_dll(src: &str, out_dir: &Path) -> Option<PathBuf> {
     let dsp = out_dir.join("ojdsp.dsp");
     let cpp = out_dir.join("ojdsp.cpp");

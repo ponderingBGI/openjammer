@@ -38,5 +38,7 @@ src/
 
 ## Status
 
-Phase 1 in progress — primitives are being authored/extracted (Button first).
-The app is migrated onto them in Phase 2.
+The primitive set is established and the app composes its UI from it: dozens of
+theme-agnostic components (Button, Select, Modal, Slider, Field, Cable, Waveform,
+NodeShell, …) consumed across the control plane. New primitives are added here as
+the app needs them, following the one-rule above.

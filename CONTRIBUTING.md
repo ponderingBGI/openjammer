@@ -77,7 +77,7 @@ openjammer/
 ├── src/                       # The web app
 │   ├── components/            # React components (the canvas + chrome)
 │   │   └── Nodes/             # Individual node types
-│   ├── audio/                 # Web Audio engine, samplers, effects
+│   ├── audio/                 # ojcore executor seam: graph emit, worklet/native host, voice synth
 │   ├── engine/                # Node system types & registry
 │   ├── store/                 # Zustand state management
 │   ├── midi/  ai/  collab/    # MIDI, the Ctrl+K agent, multiplayer
@@ -153,10 +153,15 @@ openjammer/
 - Keep components focused and single-purpose
 - Extract reusable logic into custom hooks
 
-### Web Audio API
-- Always disconnect nodes properly to prevent memory leaks
-- Use `useEffect` cleanup functions for audio nodes
-- Test with different sample rates and buffer sizes
+### Audio (the ojcore engine)
+- You author/patch an `OjGraph` via `graphStore`; `emit.ts` lowers it and the
+  selected ojcore executor (native `cpal`, or wasm in an AudioWorklet) renders it.
+  React components never build or tear down a Web Audio node graph by hand.
+- The audio thread is real-time-safe — it never allocates, locks, or blocks
+  (enforced by `assert_no_alloc` + the compile-time `RtCommand` size guard). Drive
+  the engine with control-rate `RtCommand`s; never add work to the audio thread.
+- Test with audio actually playing, across sample rates and output devices. Direct
+  Web Audio survives only at the edges we don't own (e.g. microphone capture).
 
 ### State Management
 - Use Zustand for global state
@@ -164,7 +169,7 @@ openjammer/
 - Document store slices with comments
 
 ### Styling
-- Use Tailwind CSS utility classes
+- Use the oj-tokens CSS variables and oj-ui components (no Tailwind in this project)
 - Follow the hand-drawn aesthetic theme
 - Ensure responsive design (laptop-first)
 
@@ -188,7 +193,7 @@ Before submitting a PR:
 
 ## Performance Considerations
 
-- Web Audio API runs on a separate thread - avoid blocking main thread
+- The ojcore engine renders on its own real-time thread (native `cpal` / browser AudioWorklet) — never block it, and keep the main thread free for the UI
 - Minimize re-renders in canvas components
 - Use React.memo for expensive components
 - Profile with Chrome DevTools Performance tab

@@ -7,9 +7,10 @@ name: Supply chain
 #   • cargo-audit (nightly): live RustSec advisories — kept OFF the PR path so a
 #     freshly-disclosed CVE never red-walls an unrelated PR.
 #
-# Both run `continue-on-error` for now: they REPORT on every relevant PR / night
-# but cannot block a merge until a first green run confirms the `deny.toml`
-# license allowlist, at which point cargo-deny is promoted into the merge gate.
+# Both run `continue-on-error` in advisory mode: they REPORT on every relevant
+# PR / night but do not block a merge until a first green run confirms the
+# `deny.toml` license allowlist, at which point cargo-deny is promoted into the
+# merge gate.
 
 on:
   pull_request:
