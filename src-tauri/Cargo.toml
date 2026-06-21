@@ -27,7 +27,11 @@ tauri-build = { version = "2.6.2", features = [] }
 # `ojcore-native` owns the cpal AudioHost; `ojinstrument` ships the Osc/Sampler/
 # Karplus loaders; `ojproto` is the control-rate IR/command wire type.
 ojcore = { path = "../crates/ojcore" }
-ojcore-native = { path = "../crates/ojcore-native" }
+# `persist` turns on the L3 SQLite/FTS5 local log store (bundled SQLite, no system
+# dep). The shell wires it into the off-RT event drain as the queryable durable
+# local tail (the NDJSON remains the post-crash SSOT). LOCAL-ONLY, never network,
+# and fed ONLY off the audio thread (the control-side `drain_events`).
+ojcore-native = { path = "../crates/ojcore-native", features = ["persist"] }
 ojinstrument = { path = "../crates/ojinstrument" }
 ojproto = { path = "../crates/ojproto" }
 
@@ -62,14 +66,52 @@ tauri-plugin-opener = "2.5.4"
 serde = { workspace = true, features = ["std"] }
 serde_json = "1.0.150"
 
+# --- off-RT structured logging (L1) ------------------------------------------
+# The shell brings up the `tracing` NDJSON sink (`ojcore_native::init_logging`)
+# and routes a panic hook through it. STD-only, OFF the audio thread — the audio
+# callback owns the engine inside cpal and has no `tracing` dependency, so a
+# `tracing::*` call there cannot compile. `tracing-appender` is needed only to
+# name the `WorkerGuard` flush-guard parked in managed state.
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+
 [features]
 # This feature must be enabled when building the app in production, so the
 # webview loads the bundled frontend instead of the dev server. Tauri's CLI sets
 # it via `tauri build`; harmless in `cargo build`.
 custom-protocol = ["tauri/custom-protocol"]
 
+# --- scoped panic guard (Phase 4) --------------------------------------------
+# `unwrap()`/`expect()` panic the WHOLE app — on stage that is a dead set, not a
+# recoverable glitch. So the desktop shell, where the audited panic risk lives
+# (subprocess spawn, IPC, env, fs), must surface a `Result`/honest fallback
+# instead. This deny is DELIBERATELY scoped to `oj-tauri` ONLY and is NEVER
+# promoted workspace-wide: the no_std DSP crates (`ojcore`, `ojcore-dsp`, …) are
+# full of legitimate INFALLIBLE unwraps on compile-time-proven invariants, and a
+# workspace deny would push silent `.unwrap_or(default)` fallbacks into the audio
+# path — a lie told to the performer's hands (code-values #4/#6). Tests are
+# exempt (their `unwrap`/`expect` IS the assertion); a handful of production sites
+# whose precondition is a build-time invariant carry a justified, documented
+# `#[allow(clippy::expect_used)]` at the call site.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
+
+# --- Windows process hygiene (Phase 4) ---------------------------------------
+# Job Object APIs so the Pi agent child is reaped WHOLE-TREE on kill/drop (a bare
+# `Child::kill()` orphans descendants on Windows). Win-only; the same crate Tauri
+# already pulls transitively (no new toolchain). CONTROL-PLANE only, never on the
+# audio RT path. `CREATE_NO_WINDOW` itself needs no crate (it's in `std`).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
 
 # --- native auto-updater (R2/R4) ---------------------------------------------
 # Win + Linux ONLY. macOS is intentionally excluded: without an Apple Developer

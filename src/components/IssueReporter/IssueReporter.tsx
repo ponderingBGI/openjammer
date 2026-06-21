@@ -7,10 +7,13 @@
  * DevLog and renders a REDACTED markdown report ({@link buildIssueReport}).
  *
  * Nothing is sent automatically: the user sees the EXACT body in a live preview
- * (updated as they edit the title + description), can "Copy full report", and
- * only on "Open GitHub issue" is a pre-filled `issues/new` tab opened. Secrets,
- * home-directory paths, and LAN addresses are auto-redacted; the preview makes
- * that reviewable before posting.
+ * (updated as they edit the title + description), can "Copy diagnostics" (the
+ * full redacted bundle to the clipboard) and "Reveal log file" (opens the local
+ * NDJSON log directory via the Tauri opener — desktop only), and only on the
+ * explicit "Open GitHub issue" is a pre-filled `issues/new` tab opened. These
+ * local affordances are the Phase-2 diagnostic bundle: LOCAL-ONLY, never an
+ * upload. Secrets, home-directory paths, and LAN addresses are auto-redacted;
+ * the preview makes that reviewable before anything leaves the device.
  *
  * Always mounted (production users must be able to report). The overlay chrome
  * (portal, scrim, Escape, focus-trap) is the oj-ui Modal; the fields/preview/
@@ -22,6 +25,48 @@ import { Modal, PanelHeader, Field, Input, Textarea, CodeBlock, Button } from '@
 import { useLogStore } from '../../store/logStore';
 import { buildIssueReport, gatherDiagnostics } from '../../utils/diagnostics';
 import './IssueReporter.css';
+
+/** The slice of the Tauri global bridge this LOCAL-only reveal path consumes. */
+interface TauriRevealBridge {
+    path?: { appLogDir?: () => Promise<string> };
+    opener?: {
+        revealItemInDir?: (path: string) => Promise<void>;
+        openPath?: (path: string) => Promise<void>;
+    };
+}
+
+function tauriReveal(): TauriRevealBridge | null {
+    if (typeof window === 'undefined') return null;
+    return (window as unknown as { __TAURI__?: TauriRevealBridge }).__TAURI__ ?? null;
+}
+
+/** True when the desktop opener bridge is present (so "Reveal log file" applies). */
+function canRevealLogFile(): boolean {
+    const t = tauriReveal();
+    return Boolean(t?.opener && t?.path?.appLogDir);
+}
+
+/**
+ * Open the local NDJSON log directory in the OS file browser via the Tauri
+ * opener plugin. LOCAL-ONLY — this reveals a folder on disk; nothing is read,
+ * copied, or transmitted. Best-effort: swallows errors so a failed reveal never
+ * throws into the reporter UI (the clipboard bundle is always available).
+ */
+async function revealLogFile(): Promise<void> {
+    const t = tauriReveal();
+    if (!t?.path?.appLogDir || !t.opener) return;
+    try {
+        const dir = await t.path.appLogDir();
+        if (t.opener.revealItemInDir) {
+            await t.opener.revealItemInDir(dir);
+        } else if (t.opener.openPath) {
+            await t.opener.openPath(dir);
+        }
+    } catch {
+        // The folder may not exist yet (no faults logged) or the platform may
+        // refuse — the copyable diagnostics bundle is the always-available path.
+    }
+}
 
 export function IssueReporter() {
     const [open, setOpen] = useState(false);
@@ -63,6 +108,9 @@ export function IssueReporter() {
         window.open(report.url, '_blank', 'noopener,noreferrer');
     }, [report.url]);
 
+    // Desktop-only: whether the local NDJSON log directory can be revealed.
+    const canReveal = useMemo(() => canRevealLogFile(), []);
+
     return (
         <Modal open={open} onClose={close} ariaLabel="Report a problem" size="lg">
             <PanelHeader title="Report a problem" onClose={close} />
@@ -102,7 +150,10 @@ export function IssueReporter() {
             </div>
 
             <footer className="issue-footer">
-                <Button onClick={copyReport}>{copied ? 'Copied!' : 'Copy full report'}</Button>
+                <Button onClick={copyReport}>{copied ? 'Copied!' : 'Copy diagnostics'}</Button>
+                {canReveal && (
+                    <Button onClick={() => void revealLogFile()}>Reveal log file</Button>
+                )}
                 <span className="issue-footer__spacer" />
                 <Button variant="primary" onClick={openIssue}>
                     Open GitHub issue →

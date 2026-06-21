@@ -46,7 +46,7 @@ on_failure = "play-sound(name=beep-warning,volume=70)"
 
 # RT no-alloc gate (mirrors `just test-rt`).
 [jobs.test-rt]
-command = ["cargo", "nextest", "run", "-p", "ojcore", "--features", "devlog", "--hide-progress-bar", "--failure-output", "final"]
+command = ["cargo", "nextest", "run", "-p", "ojcore", "--hide-progress-bar", "--failure-output", "final"]
 need_stdout = true
 on_success = "play-sound(name=success,volume=40)"
 on_failure = "play-sound(name=beep-warning,volume=70)"

@@ -147,6 +147,23 @@
     margin-bottom: var(--space-lg);
 }
 
+.about-diagnostics {
+    margin-bottom: var(--space-lg);
+    padding-bottom: var(--space-lg);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.about-diagnostics-title {
+    margin: 0 0 var(--space-xs);
+    font-size: 1rem;
+}
+
+.about-diagnostics-note {
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: var(--space-md);
+}
+
 .about-links {
     margin-bottom: var(--space-lg);
 }

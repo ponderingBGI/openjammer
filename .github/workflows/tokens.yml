@@ -27,7 +27,7 @@ jobs:
   rebuild:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           # Check out the PR's head branch (not the merge ref) so we can push back.
           ref: ${{ github.event.pull_request.head.ref }}
@@ -35,7 +35,7 @@ jobs:
           token: ${{ github.token }}
           fetch-depth: 0
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
 
       - name: Install (root toolchain — style-dictionary)
         run: bun install --frozen-lockfile

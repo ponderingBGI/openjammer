@@ -33,12 +33,14 @@ test:
 doctest:
     cargo test --workspace --doc
 
-# RT no-alloc gate (Phase 2: the `devlog` feature is added to ojcore in Phase 2).
-# Trips over_budget / auto_bypass / non_finite (crates/ojcore/src/exec.rs) INSIDE
-# assert_no_alloc with both the meter ring and the event ring attached. Wired as a
-# `needs:` of the aggregate `gate` — a REQUIRED per-PR check, never nightly-only.
+# RT no-alloc gate. The `assert_no_alloc` AllocDisabler is the test-binary global
+# allocator (crates/ojcore/tests/engine.rs), so the *_alloc_free / *_allocation_free
+# tests abort on any heap touch inside the hot loop — over_budget / auto_bypass /
+# non_finite exercised with the meter ring attached. The gate runs on the default
+# (`std`) feature set; no extra feature flag gates these tests. Wired as a `needs:`
+# of the aggregate `gate` — a REQUIRED per-PR check, never nightly-only.
 test-rt:
-    cargo nextest run -p ojcore --features devlog
+    cargo nextest run -p ojcore
 
 # ── Build legs ─────────────────────────────────────────────────────────────────
 # `ojcore` defaults to ["std"]; --no-default-features compiles the no_std core
@@ -74,9 +76,10 @@ web:
     bun run build
 
 # ── Aggregates the CI lanes call (dependency form: run in listed order) ────────
-# NOTE: `test-rt` is intentionally NOT in `rust` yet — it requires the ojcore
-# `devlog` feature, a Phase-2 addition. Run it standalone (`just test-rt`) only
-# after Phase 2 lands; it joins the per-PR gate then (docs/plans/02 + 00 §F3).
+# `test-rt` (assert_no_alloc) is a REQUIRED per-PR check, wired into the ci.yml
+# engine job's merge gate. It is kept as its own recipe (not folded into `rust`)
+# so the no-alloc gate is invoked explicitly and stays a named, single-purpose
+# command CI and lefthook can both call without re-encoding it.
 rust: fmt clippy test doctest nostd wasm render clap-host
 
 ci: rust web

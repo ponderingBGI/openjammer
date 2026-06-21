@@ -40,6 +40,8 @@
     "tauri": "tauri"
   },
   "dependencies": {
+    "baseline-browser-mapping": "^2.10.38",
+    "caniuse-lite": "^1.0.30001799",
     "cmdk": "1.1.1",
     "idb-keyval": "^6.2.2",
     "loro-crdt": "1.13.3",

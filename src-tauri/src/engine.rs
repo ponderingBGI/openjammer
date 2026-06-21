@@ -39,7 +39,8 @@ use ojcore::{
     Engine, EventRing, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{
-    AssetCatalog, AssetError, AssetStore, AudioHost, HostError, Pcm, StreamRequest,
+    AssetCatalog, AssetError, AssetStore, AudioHost, HostError, LogRecord, LogStore, Pcm,
+    StreamRequest,
 };
 use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
 use ojinstrument::{register_all, RegisterOpts};
@@ -81,6 +82,12 @@ pub enum BackendError {
     Asset(AssetError),
     /// A capability command referenced a node id not present in the live graph.
     UnknownNode(u32),
+    /// A control command is not yet routable on the native host (e.g. per-node
+    /// output-device selection / mic capture). Surfaced HONESTLY rather than
+    /// silently succeeding: the cpal stream re-open / duplex-input routing is a
+    /// later (device-rebuild) wave, so the UI must not report success while the
+    /// engine keeps rendering to the default device. Carries what was requested.
+    NotRoutable(&'static str),
 }
 
 impl std::fmt::Display for BackendError {
@@ -91,6 +98,9 @@ impl std::fmt::Display for BackendError {
             BackendError::PluginScan(e) => write!(f, "plugin scan failed: {e}"),
             BackendError::Asset(e) => write!(f, "asset operation failed: {e}"),
             BackendError::UnknownNode(n) => write!(f, "unknown node id {n} in live graph"),
+            BackendError::NotRoutable(what) => {
+                write!(f, "{what} is not yet routable on the native host")
+            }
         }
     }
 }
@@ -150,6 +160,13 @@ pub struct EngineBackend {
     event_ring: Arc<EventRing>,
     /// Monotonic sequence assigned while lifting compact RT events off-thread.
     event_seq: u32,
+    /// Control-side queue of synthesized `Event`s that do NOT originate on the RT
+    /// event ring — e.g. a `Lifecycle` device-loss when an audio host restart
+    /// fails. The ring is `Copy`-only (`RtEvent` carries no `Lifecycle` variant),
+    /// so these full envelopes are parked here and prepended by [`drain_events`]
+    /// so the fault still reaches the pipe. Off-RT: only the control thread (these
+    /// command handlers) ever pushes/drains it.
+    pending_events: Vec<Event>,
     /// Whether metering is enabled (mirrored so a graph swap re-applies it).
     metering: bool,
     /// Off-RT content-addressed asset catalog (sample PCM for the sampler,
@@ -168,6 +185,20 @@ pub struct EngineBackend {
     /// graph against the updated [`AssetCatalog`]. `None` until the first
     /// `push_graph` (the starter graph runs but is not stored).
     last_graph: Option<OjGraph>,
+    /// `true` while the engine is in the DEVICE-LOST state: the running output
+    /// stream faulted (device yanked/disabled/reconfigured) and a rebuild has not
+    /// yet succeeded. Set by [`tick`] on the first detected fault, cleared on a
+    /// successful rebuild. Drives the de-bounce (one `DeviceLost` event per loss,
+    /// not per retry tick) and gates the `DeviceRecovered` event (only emitted if
+    /// we were actually lost). Off-RT: only the control thread touches it.
+    device_lost: bool,
+    /// The L3 durable LOCAL log store (SQLite + FTS5), the queryable tail of the
+    /// fault trail. `None` until [`attach_log_store`] wires one (the Tauri shell
+    /// opens it under the platform log dir in `setup`); never network, never the
+    /// post-crash SSOT (the NDJSON file is). Fed ONLY here, on the control thread,
+    /// from [`drain_events`] — never the audio callback. A write failure is
+    /// swallowed (best-effort durability must never take the instrument down).
+    log_store: Option<LogStore>,
 }
 
 /// State of one recorder capture for a node.
@@ -205,6 +236,9 @@ impl EngineBackend {
         // Compile the minimal starter program (silent: a gain into the speaker).
         // `compile` only fails on a malformed graph, and ours is well-formed by
         // construction, so a failure here is a build-time bug, not a runtime one.
+        // Justified panic (Phase-4 scoped panic guard): the precondition is a
+        // compile-time invariant, not runtime input — an `Err` here is unreachable.
+        #[allow(clippy::expect_used)]
         let program =
             compile(&Self::starter_graph(stream), &registry).expect("starter graph compiles");
         let mut engine = Engine::new(program);
@@ -252,12 +286,27 @@ impl EngineBackend {
             meter_ring,
             event_ring,
             event_seq: 0,
+            pending_events: Vec::new(),
             metering: false,
             catalog: AssetCatalog::new(),
             store: AssetStore::new(),
             captures: std::collections::HashMap::new(),
             last_graph: None,
+            device_lost: false,
+            log_store: None,
         }
+    }
+
+    /// Attach the L3 durable LOCAL log store (SQLite/FTS5) opened at `path`. Called
+    /// once from the Tauri `setup` hook with a file under the platform log dir, so
+    /// the off-RT event drain ([`drain_events`]) gets a queryable durable tail
+    /// alongside the NDJSON post-crash record. LOCAL-ONLY. A failure to open is
+    /// non-fatal: the backend keeps running with `log_store: None` (the NDJSON
+    /// SSOT is unaffected), and the error is returned so the caller can log it.
+    pub fn attach_log_store(&mut self, path: &std::path::Path) -> Result<(), String> {
+        let store = LogStore::open(path).map_err(|e| e.to_string())?;
+        self.log_store = Some(store);
+        Ok(())
     }
 
     /// Register the FULL native built-in set through the ONE shared path
@@ -335,33 +384,84 @@ impl EngineBackend {
     /// goes live — the founder-verified seam that makes a serialized graph with a
     /// bound sample actually play.
     pub fn push_graph(&mut self, graph: &OjGraph) -> Result<(), BackendError> {
-        // Render at the device's rate (see `new`): the graph's own sample_rate is a
-        // UI hint; the hardware is authoritative, so a 96k interface plays in tune.
-        let mut g = self.at_device_rate(graph);
-        // Pin the engine block to the host's render chunk (the callback's `mono`
-        // size = stream.buffer_frames). With publish-only swaps the stream is no
-        // longer restarted per push, so the compiled program's block_size must
-        // match what the callback feeds — otherwise a block_size < chunk would
-        // leave a stale tail. render_block still chunks the larger device period.
-        g.block_size = self.stream.buffer_frames;
+        // The graph's own sample_rate / block_size are UI hints; `adopt` is the one
+        // owner that compiles at the live device rate + host render chunk (see
+        // `adopt`), so a 96k interface plays in tune and a recovery onto a
+        // different-rate device never detunes. Here we only carry the binding forward.
+        let mut g = graph.clone();
+        // SAMPLE-BINDING SINGLE OWNER. A fresh UI push carries no imperatively
+        // bound sample (a `load_sample` mutates only the engine's kept graph, never
+        // the UI's), so a naive clobber would silently drop a user-loaded sample on
+        // the very next edit — a native↔wasm divergence the wasm path doesn't have.
+        // Forward-merge the prior per-node sample binding (its `AssetRef` + the
+        // sampler root-note param) from `last_graph` onto the incoming graph so a
+        // bound sample survives subsequent edits. The ENGINE is the one owner of
+        // this mapping; no second owner in TS.
+        if let Some(prev) = self.last_graph.as_ref() {
+            Self::forward_merge_sample_bindings(prev, &mut g);
+        }
         self.adopt(&g)?;
-        // Remember the (rate-adjusted) live graph so a later sample bind can
-        // re-resolve + recompile it against the catalog without a fresh UI push.
+        // Remember the (rate-adjusted, binding-merged) live graph so a later sample
+        // bind can re-resolve + recompile it against the catalog without a fresh
+        // UI push, and so the NEXT push forward-merges from it in turn.
         self.last_graph = Some(g);
         Ok(())
     }
 
-    /// Clone `graph` with its `sample_rate` set to the default output device's rate
-    /// (when one is available and differs) so the engine renders in tune on hardware
-    /// that isn't 48k. Falls back to the graph's own rate when no device is present.
-    fn at_device_rate(&self, graph: &OjGraph) -> OjGraph {
-        match ojcore_native::default_output_sample_rate() {
-            Some(rate) if rate != graph.sample_rate => {
-                let mut g = graph.clone();
-                g.sample_rate = rate;
-                g
+    /// Carry forward the per-node sample binding (the slot-0 [`AssetRef`] and the
+    /// sampler root-note param) from the previously adopted `prev` graph onto the
+    /// freshly pushed `next` graph, for every node id present in both that still
+    /// exists in `next`. This is the single-owner persistence seam: a UI push
+    /// never carries an imperatively bound sample (that lives only in the engine's
+    /// kept graph), so without this merge the next edit would clobber it.
+    ///
+    /// Only nodes whose `next` slot-0 binding is empty are merged — a UI push that
+    /// deliberately carries its own slot-0 asset (e.g. a serialized project with a
+    /// baked sample) is authoritative and is left untouched. Off-RT, pure data.
+    fn forward_merge_sample_bindings(prev: &OjGraph, next: &mut OjGraph) {
+        use ojinstrument::SAMPLER_PCM_PARAM;
+        use ojproto::{Param, PrimitiveKind};
+        for node in next.nodes.iter_mut() {
+            // Only carry a sample binding between Samplers. The merge keys on node
+            // id, so if the UI replaced a Sampler with a different node type at the
+            // SAME id, copying the old slot-0 asset/root-note would bind a stale
+            // sample to the wrong node and corrupt the adopted graph.
+            if !matches!(node.kind, PrimitiveKind::Sampler) {
+                continue;
             }
-            _ => graph.clone(),
+            // The prior binding for this exact node id, if any.
+            let Some(prev_node) = prev.nodes.iter().find(|n| n.id == node.id) else {
+                continue;
+            };
+            if !matches!(prev_node.kind, PrimitiveKind::Sampler) {
+                continue;
+            }
+            let Some(prev_asset) = prev_node.assets.iter().find(|a| a.slot == 0) else {
+                continue;
+            };
+            // Respect an explicit slot-0 binding already on the incoming node.
+            if node.assets.iter().any(|a| a.slot == 0) {
+                continue;
+            }
+            node.assets.push(AssetRef {
+                slot: 0,
+                asset: prev_asset.asset,
+            });
+            // Carry the root-note param too, so the merged sample keeps its pitch
+            // mapping. Only fill it when the incoming node hasn't set its own.
+            if let Some(prev_root) = prev_node
+                .params
+                .iter()
+                .find(|p| p.id == SAMPLER_PCM_PARAM)
+                .map(|p| p.value)
+            {
+                if !node.params.iter().any(|p| p.id == SAMPLER_PCM_PARAM) {
+                    node.params.push(Param {
+                        id: SAMPLER_PCM_PARAM,
+                        value: prev_root,
+                    });
+                }
+            }
         }
     }
 
@@ -380,7 +480,16 @@ impl EngineBackend {
     /// When no host is running yet (device absent at boot, or a prior start
     /// failed), we start one now around this program — subsequent edits hot-swap.
     fn adopt(&mut self, graph: &OjGraph) -> Result<(), BackendError> {
-        let program = compile_with_assets(graph, &self.registry, &self.catalog)
+        // SINGLE OWNER of "render at the live device rate + host block size". Both
+        // the UI push AND the post-device-loss rebuild route through here, so
+        // neither can forget it: a recovery onto a different-rate default device
+        // recompiles at the NEW rate instead of playing back detuned. `self.stream`
+        // carries the running stream's negotiated rate (cold start / rebuild seed it
+        // from the current default device), authoritative over the graph's UI hint.
+        let mut g = graph.clone();
+        g.sample_rate = self.stream.sample_rate;
+        g.block_size = self.stream.buffer_frames;
+        let program = compile_with_assets(&g, &self.registry, &self.catalog)
             .map_err(BackendError::Compile)?;
 
         if self.host.is_some() {
@@ -409,11 +518,149 @@ impl EngineBackend {
                 self.producer = producer;
             }
             Err(e) => {
+                // Device-less or incompatible default output: the start failed.
+                // STOP swallowing this as a bare eprintln — emit a `Lifecycle`
+                // event into the pipe so the fault surfaces in the DevLog and the
+                // tri-state health goes DEGRADED (the auto-rebuild recovery is a
+                // later wave; here we just make it visible, not silent). The prior
+                // program / last good sound is untouched (there was none to keep on
+                // a cold start, but we still never tear anything down here).
                 eprintln!("ojcore: audio host failed to start (non-fatal): {e}");
+                // Announce the cold-start failure ONCE, but stay silent while a
+                // device loss is latched: `rebuild_after_loss` calls `adopt` on
+                // EVERY tick, and the loss was already announced at detection in
+                // `tick`, so emitting here per retry would storm the fault pipe and
+                // break the one-loss-event de-bounce.
+                if !self.device_lost {
+                    self.emit_lifecycle(Severity::Warn, format!("audio host failed to start: {e}"));
+                }
                 self.producer = producer;
             }
         }
         Ok(())
+    }
+
+    /// Control-thread tick: the off-RT recovery pump. Called each `drain_events`
+    /// poll (alongside `drain_meters`), it checks the running host's device-fault
+    /// signal — SET by the cpal `err_fn` off the render thread on a yanked /
+    /// disabled / reconfigured device — and, on a fault, attempts to REBUILD the
+    /// stream on the CURRENT default output device, re-adopting `last_graph` so the
+    /// patch resumes. Runs ENTIRELY off the audio path (no audio thread work, no
+    /// allocation/lock in the render callback — only here).
+    ///
+    /// LIVE-PERFORMANCE RULE: device-loss means the instrument is ALREADY silent,
+    /// so automated visible recovery is allowed (unlike a mid-note graph swap). We
+    /// preserve graph state and report via the existing event pipe WITHOUT a modal.
+    ///
+    /// DE-BOUNCE: `device_lost` latches on the first detected fault so one
+    /// device-loss emits exactly ONE `DeviceLost` event; subsequent ticks while
+    /// still lost only RETRY the rebuild (no event storm). On the rebuild that
+    /// succeeds we emit ONE `DeviceRecovered`. No device yet → stay lost, retry on
+    /// the next tick (no spin, no block, no panic).
+    pub fn tick(&mut self) {
+        // Read-and-clear the running host's fault edge. No host (device-less /
+        // never started) → nothing to recover here; a cold start is still driven
+        // by `push_graph`/`adopt`.
+        let faulted = self
+            .host
+            .as_ref()
+            .map(|h| h.fault_signal().take())
+            .unwrap_or(false);
+
+        if faulted && !self.device_lost {
+            // FIRST detection of this loss: latch, drop the dead stream (off-RT),
+            // and announce ONCE. Dropping the host stops cpal's dead stream cleanly
+            // and flips `is_running()` to false so the rebuild takes the cold-start
+            // path that opens a fresh stream on the current default device.
+            self.device_lost = true;
+            self.host = None;
+            self.emit_lifecycle(
+                Severity::Warn,
+                "audio device lost; attempting auto-rebuild".into(),
+            );
+        }
+
+        // While lost, try to rebuild on EVERY tick until a device is back. The
+        // retry is cheap (one default-device probe); if there is no device yet the
+        // attempt fails fast and we stay lost for the next tick.
+        if self.device_lost && self.rebuild_after_loss() {
+            self.device_lost = false;
+            self.emit_lifecycle(
+                Severity::Info,
+                "audio device recovered; patch resumed".into(),
+            );
+        }
+    }
+
+    /// Re-open the cpal stream on the current default output device and re-adopt
+    /// the last compiled program so the patch resumes after a device loss. Returns
+    /// `true` on success, `false` if no usable device is available yet (caller
+    /// retries on the next tick). Off-RT only.
+    ///
+    /// Re-syncs the stream request to the (possibly new) device's default sample
+    /// rate first — a yanked interface may be replaced by one at a different rate,
+    /// and rendering at the wrong rate would play back detuned. Then it routes
+    /// through the SAME `adopt` cold-start path `push_graph` uses (host is `None`
+    /// after the loss), so there is one stream-open seam, not a parallel one.
+    fn rebuild_after_loss(&mut self) -> bool {
+        debug_assert!(
+            self.host.is_none(),
+            "rebuild expects the dead host already dropped"
+        );
+        // Follow the current default device's rate (it may be a different device).
+        if let Some(rate) = ojcore_native::default_output_sample_rate() {
+            self.stream.sample_rate = rate;
+        }
+        // Re-adopt the last compiled program if there is one, else the silent
+        // starter graph, so the cold-start path inside `adopt` opens a stream.
+        let graph = self
+            .last_graph
+            .clone()
+            .unwrap_or_else(|| Self::starter_graph(self.stream));
+        // `adopt` is idempotent w.r.t. `last_graph` (it does not store it); it
+        // opens a fresh stream when `host.is_none()`. A compile error here would be
+        // a build-time bug (the graph last compiled fine), so swallow+report rather
+        // than panic — the next tick retries.
+        if let Err(e) = self.adopt(&graph) {
+            tracing::warn!(target: "engine", "device rebuild: re-adopt failed: {e}");
+            return false;
+        }
+        // `adopt` only opens a stream on the cold-start path; if the device is
+        // still absent it leaves `host` None (and emits its own Lifecycle). So a
+        // running host is the unambiguous "recovered" signal.
+        self.host.is_some()
+    }
+
+    /// Queue a control-side `Lifecycle` `Event` (device-loss, recovery, or
+    /// host-restart failure) onto [`pending_events`], to be drained by
+    /// [`drain_events`]. The RT event ring is `Copy`-only and has no `Lifecycle`
+    /// variant, so these synthesized envelopes ride this off-RT queue instead.
+    /// Pure control-thread work — never called from the audio callback.
+    ///
+    /// `severity` distinguishes loss/failure (`Warn` → DEGRADED) from recovery
+    /// (`Info`). The wire `kind` stays the existing [`EventKind::Lifecycle`] so
+    /// ojproto is unchanged and the Wave-1 frontend fault pipe still reads it; the
+    /// human `text` is the observable log line (NDJSON + tracing) the orchestrator
+    /// watches during the live Disable-PnpDevice test.
+    fn emit_lifecycle(&mut self, severity: Severity, text: String) {
+        self.event_seq = self.event_seq.wrapping_add(1);
+        self.pending_events.push(Event {
+            v: ojproto::SCHEMA_VERSION,
+            seq: self.event_seq,
+            severity,
+            kind: EventKind::Lifecycle,
+            source: Source::Native,
+            ts_us: now_us(),
+            corr_id: 0,
+        });
+        // `text` is folded into the structured NDJSON record for the post-crash
+        // trail; the UI surfaces the `Lifecycle` kind itself (a calm DEGRADED).
+        match severity {
+            Severity::Info | Severity::Debug | Severity::Trace => {
+                tracing::info!(target: "engine", "{text}")
+            }
+            _ => tracing::warn!(target: "engine", "{text}"),
+        }
     }
 
     /// Enqueue one [`RtCommand`] onto the UI->RT ring (the high-rate control
@@ -468,12 +715,54 @@ impl EngineBackend {
     /// DevLog/diagnostics. Control-rate: called by the UI poll command, never on
     /// the audio thread.
     pub fn drain_events(&mut self) -> Vec<Event> {
-        let mut out = Vec::new();
+        // DEVICE-LOSS AUTO-REBUILD pump. This poll is the control-thread tick the
+        // frontend already drives on a timer, so it is the natural off-RT seam to
+        // check the cpal fault signal and rebuild the stream on the current default
+        // device (re-adopting `last_graph`). It runs BEFORE we snapshot
+        // `pending_events` so a `DeviceLost`/`DeviceRecovered` Lifecycle emitted
+        // this tick is drained in the SAME batch (no extra poll latency on stage).
+        self.tick();
+
+        // Control-side synthesized events (device-loss `Lifecycle`, …) first, so a
+        // host-restart failure reaches the pipe alongside RT faults in one drain.
+        let mut out = std::mem::take(&mut self.pending_events);
         event_frame::drain_events(&self.event_ring, |rt| {
             self.event_seq = self.event_seq.wrapping_add(1);
             out.push(lift_event(rt, self.event_seq, now_us()));
         });
+        // L3 durable LOCAL tail: append every drained event to the SQLite/FTS5 store
+        // (the queryable history). This is the SINGLE off-RT ingest site — the same
+        // control thread that drains the RT ring also writes the store, so there is
+        // no second owner and the audio callback never touches I/O. Best-effort:
+        // a write failure is swallowed so durability never takes the instrument
+        // down (the NDJSON file remains the post-crash SSOT regardless).
+        if let Some(store) = self.log_store.as_ref() {
+            for ev in &out {
+                Self::persist_event(store, ev);
+            }
+        }
         out
+    }
+
+    /// Append one drained [`Event`] to the L3 [`LogStore`] as a [`LogRecord`].
+    /// Renders the closed event taxonomy into the store's already-shaped fields
+    /// (severity/source/kind variant names + a human message + structured JSON).
+    /// Off-RT only (control thread). Errors are intentionally swallowed.
+    fn persist_event(store: &LogStore, ev: &Event) {
+        let severity = severity_name(ev.severity);
+        let source = source_name(ev.source);
+        let (kind, message, fields) = render_event_kind(&ev.kind);
+        let rec = LogRecord {
+            ts_us: ev.ts_us.min(i64::MAX as u64) as i64,
+            seq: i64::from(ev.seq),
+            severity,
+            source,
+            kind,
+            message: &message,
+            corr_id: ev.corr_id.min(i64::MAX as u64) as i64,
+            fields_json: fields.as_deref(),
+        };
+        let _ = store.insert(&rec);
     }
 
     /// Load decoded mono PCM as the sample for `node`'s `builtin.sampler` and
@@ -631,16 +920,26 @@ impl EngineBackend {
     }
 
     /// Route a speaker node to an output device id. Device selection is a host
-    /// (cpal) concern; v1 records the request (the host renders to the default
-    /// device). Surfaced for round-trip parity with the Web Audio path.
-    pub fn set_speaker_device(&mut self, _node: NodeIdx, _device_id: &str) {
-        // TODO(native-parity): re-open the cpal stream on the chosen device.
+    /// (cpal) concern: it requires re-opening the cpal stream on the chosen
+    /// device, which is deferred to the device-rebuild wave (after human stage
+    /// testing). Until then this is HONEST — it returns [`BackendError::NotRoutable`]
+    /// rather than silently succeeding while the engine keeps rendering to the
+    /// default device (a UI-vs-reality lie). The executor `.catch` routes the
+    /// error into the log store so the performer sees the truth.
+    pub fn set_speaker_device(
+        &mut self,
+        _node: NodeIdx,
+        _device_id: &str,
+    ) -> Result<(), BackendError> {
+        Err(BackendError::NotRoutable("output device selection"))
     }
 
-    /// Enable mic capture into `node`'s input bus. Requires the duplex input
-    /// stream; v1 records the request (the host opens output-only by default).
-    pub fn set_mic(&mut self, _node: NodeIdx, _enabled: bool) {
-        // TODO(native-parity): open the duplex input + route it to the node bus.
+    /// Enable mic capture into `node`'s input bus. Requires opening the duplex
+    /// input stream and routing it to the node bus — deferred to the same
+    /// device-rebuild wave. HONEST until then: returns [`BackendError::NotRoutable`]
+    /// rather than reporting a mic that isn't actually captured.
+    pub fn set_mic(&mut self, _node: NodeIdx, _enabled: bool) -> Result<(), BackendError> {
+        Err(BackendError::NotRoutable("mic capture"))
     }
 
     /// Scan `dirs` for hostable third-party plugins (VST3 / CLAP, + AU on
@@ -742,6 +1041,59 @@ fn now_us() -> u64 {
         .unwrap_or(0)
 }
 
+/// The stable variant name for a [`Severity`] (mirrors the bare-string serde the
+/// `LogStore` columns expect: `Trace|Debug|Info|Warn|Error`).
+fn severity_name(s: Severity) -> &'static str {
+    match s {
+        Severity::Trace => "Trace",
+        Severity::Debug => "Debug",
+        Severity::Info => "Info",
+        Severity::Warn => "Warn",
+        Severity::Error => "Error",
+    }
+}
+
+/// The stable variant name for a [`Source`] (`Engine|Wasm|Ui|Native`).
+fn source_name(s: Source) -> &'static str {
+    match s {
+        Source::Engine => "Engine",
+        Source::Wasm => "Wasm",
+        Source::Ui => "Ui",
+        Source::Native => "Native",
+    }
+}
+
+/// Render an [`EventKind`] into the `LogStore` triple: the variant name, a
+/// human-readable message, and an optional JSON blob of the structured fields.
+/// Pure, off-RT; keeps the SQLite tail self-describing without coupling the store
+/// to `ojproto`.
+fn render_event_kind(kind: &EventKind) -> (&'static str, String, Option<String>) {
+    match kind {
+        EventKind::Lifecycle => ("Lifecycle", "lifecycle event".into(), None),
+        EventKind::GraphSwap => ("GraphSwap", "graph hot-swap landed".into(), None),
+        EventKind::Xrun { dropped } => (
+            "Xrun",
+            format!("xrun: {dropped} frame(s) dropped"),
+            Some(format!("{{\"dropped\":{dropped}}}")),
+        ),
+        EventKind::NodeFault { node, fault } => (
+            "NodeFault",
+            format!("node {} fault: {fault:?}", node.0),
+            Some(format!("{{\"node\":{},\"fault\":\"{fault:?}\"}}", node.0)),
+        ),
+        EventKind::RingFull => ("RingFull", "event ring overflowed".into(), None),
+        EventKind::Asset => ("Asset", "asset event".into(), None),
+        EventKind::Plugin => ("Plugin", "plugin event".into(), None),
+        EventKind::Midi => ("Midi", "midi event".into(), None),
+        EventKind::Collab => ("Collab", "collab event".into(), None),
+        EventKind::Message { code, text } => (
+            "Message",
+            text.clone(),
+            Some(format!("{{\"code\":{code}}}")),
+        ),
+    }
+}
+
 fn lift_event(rt: RtEvent, seq: u32, ts_us: u64) -> Event {
     let kind = match rt {
         RtEvent::Xrun { dropped } => EventKind::Xrun { dropped },
@@ -825,15 +1177,28 @@ mod tests {
         assert!(compile(&g, &reg).is_ok());
     }
 
-    /// `push_graph` recompiles a UI-pushed graph and publishes it (device-less:
-    /// no host, but no error either — the program is staged).
+    /// `push_graph` recompiles a UI-pushed graph and adopts it without error.
+    /// ENVIRONMENT-AGNOSTIC: the device-independent contract is that the graph is
+    /// retained as `last_graph`. Whether the program is ALSO staged in the swap
+    /// mailbox depends on a live host — present only with a real output device; the
+    /// headless cold-start path bakes it directly into `Engine::new` instead and the
+    /// swap stays empty. So we assert the universal invariant always, and the swap
+    /// publish only where a device makes the host live (a box WITH audio).
     #[test]
     fn push_graph_compiles_and_publishes() {
         let mut be = EngineBackend::new();
         let g = EngineBackend::starter_graph(DEFAULT_STREAM);
         assert!(be.push_graph(&g).is_ok());
-        // The swap mailbox holds the published program.
-        assert!(be.swap.has_pending());
+        assert!(
+            be.last_graph.is_some(),
+            "the adopted graph is retained as last_graph"
+        );
+        if be.is_running() {
+            assert!(
+                be.swap.has_pending(),
+                "a live host stages the pushed program in the swap mailbox"
+            );
+        }
     }
 
     /// A malformed graph (no master output) is rejected as a compile error,
@@ -960,17 +1325,25 @@ mod tests {
         }
     }
 
-    /// Speaker / mic control methods are safe round trips and never panic.
-    /// `set_speaker_volume` now enqueues real `SetParam`s (volume + mute) onto the
-    /// live ring; device / mic remain documented host-side gaps.
+    /// Speaker volume is a real round trip; device / mic are HONEST `NotRoutable`
+    /// errors rather than silent UI-vs-reality lies (the cpal re-open / duplex
+    /// input is the deferred device-rebuild wave).
     #[test]
-    fn speaker_and_mic_controls_do_not_panic() {
+    fn speaker_and_mic_controls_are_honest() {
         let mut be = EngineBackend::new();
         // Two SetParams (volume, mute) enqueue cleanly on the live ring.
         be.set_speaker_volume(NodeIdx(1), 0.7, false)
             .expect("speaker volume enqueues");
-        be.set_speaker_device(NodeIdx(1), "device-2");
-        be.set_mic(NodeIdx(1), true);
+        // Device selection / mic capture are not yet routable on native: they
+        // report the truth instead of silently succeeding.
+        assert!(matches!(
+            be.set_speaker_device(NodeIdx(1), "device-2"),
+            Err(BackendError::NotRoutable(_))
+        ));
+        assert!(matches!(
+            be.set_mic(NodeIdx(1), true),
+            Err(BackendError::NotRoutable(_))
+        ));
     }
 
     /// `load_sample` with a previously pushed graph binds the asset to the
@@ -1041,5 +1414,270 @@ mod tests {
                 .any(|p| p.id == SAMPLER_PCM_PARAM && p.value == 60.0),
             "root note not bound"
         );
+    }
+
+    /// Build a Sampler(1) -> SpeakerOut(2) graph (no asset bound) for the
+    /// forward-merge tests.
+    fn sampler_graph() -> OjGraph {
+        use ojinstrument::SAMPLER_ID;
+        use ojproto::{ConnectionType, IrEdge, IrNode, PrimitiveKind};
+        OjGraph {
+            ir_version: ojproto::SCHEMA_VERSION,
+            sample_rate: 48_000,
+            block_size: 64,
+            nodes: vec![
+                IrNode {
+                    id: NodeIdx(1),
+                    manifest_id: SAMPLER_ID.into(),
+                    kind: PrimitiveKind::Sampler,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 0,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(2),
+                    manifest_id: ojcore::SPEAKER_OUT_ID.into(),
+                    kind: PrimitiveKind::SpeakerOut,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 0,
+                },
+            ],
+            edges: vec![IrEdge {
+                from_node: NodeIdx(1),
+                from_port: 0,
+                to_node: NodeIdx(2),
+                to_port: 0,
+                kind: ConnectionType::Audio,
+            }],
+            schedule: vec![],
+        }
+    }
+
+    /// SINGLE-OWNER FORWARD-MERGE: a sample bound via `load_sample` SURVIVES a
+    /// subsequent UI `push_graph` (which carries no asset). Before the fix the
+    /// push clobbered `last_graph` and silently dropped the sample on the next
+    /// edit; now the engine forward-merges the prior binding, with no second owner
+    /// in TS. This is the native↔wasm parity the plan calls out.
+    #[test]
+    fn pushed_graph_preserves_bound_sample() {
+        use ojinstrument::SAMPLER_PCM_PARAM;
+
+        let mut be = EngineBackend::new();
+        be.push_graph(&sampler_graph()).expect("initial push");
+
+        // Imperatively bind a sample to the sampler node (the engine-only mapping).
+        let pcm = vec![0.0f32, 0.5, -0.5, 0.25];
+        let id = be
+            .load_sample(NodeIdx(1), pcm.clone(), 48_000, 60)
+            .expect("sample binds");
+
+        // A FRESH UI push of the same topology (no asset on the wire) must NOT drop
+        // the binding — the forward-merge carries it onto the new kept graph.
+        be.push_graph(&sampler_graph()).expect("re-push");
+
+        let g = be.last_graph.as_ref().expect("graph kept");
+        let sampler = g.nodes.iter().find(|n| n.id == NodeIdx(1)).unwrap();
+        assert!(
+            sampler.assets.iter().any(|a| a.slot == 0 && a.asset == id),
+            "bound sample dropped by re-push (forward-merge failed)"
+        );
+        assert!(
+            sampler
+                .params
+                .iter()
+                .any(|p| p.id == SAMPLER_PCM_PARAM && p.value == 60.0),
+            "root note dropped by re-push"
+        );
+    }
+
+    /// The forward-merge yields to an EXPLICIT slot-0 binding on the incoming push
+    /// (a serialized project that bakes its own sample stays authoritative).
+    #[test]
+    fn explicit_push_binding_overrides_merge() {
+        let mut be = EngineBackend::new();
+        be.push_graph(&sampler_graph()).expect("initial push");
+        let first = be
+            .load_sample(NodeIdx(1), vec![0.1f32, 0.2], 48_000, 60)
+            .expect("first sample binds");
+
+        // Push a graph that ALREADY carries its own slot-0 asset on node 1.
+        let other = be
+            .catalog
+            .insert(Pcm {
+                samples: vec![0.9f32, -0.9],
+                channels: 1,
+                sample_rate: 48_000,
+            })
+            .expect("store second asset");
+        assert_ne!(first, other, "distinct assets");
+        let mut g = sampler_graph();
+        g.nodes[0].assets.push(AssetRef {
+            slot: 0,
+            asset: other,
+        });
+        be.push_graph(&g).expect("push with explicit binding");
+
+        let kept = be.last_graph.as_ref().unwrap();
+        let sampler = kept.nodes.iter().find(|n| n.id == NodeIdx(1)).unwrap();
+        let slot0 = sampler.assets.iter().find(|a| a.slot == 0).unwrap();
+        assert_eq!(
+            slot0.asset, other,
+            "explicit push binding must win over the merged one"
+        );
+    }
+
+    /// DEVICE-LOSS TICK, NO-HOST BRANCH: when there is no running host (device-less
+    /// boot, or a prior start failed) a `tick` has nothing to recover — it must NOT
+    /// latch `device_lost`, must emit no event, and must never panic. We force
+    /// `host = None` so this is deterministic on a dev box that DOES have a device.
+    #[test]
+    fn tick_is_inert_without_a_host() {
+        let mut be = EngineBackend::new();
+        // Force the no-host state (the headless / failed-start path) regardless of
+        // whether this machine happens to have an audio device.
+        be.host = None;
+        be.device_lost = false;
+        be.tick();
+        assert!(
+            !be.device_lost,
+            "tick must not latch device-loss with no host"
+        );
+        assert!(
+            be.pending_events.is_empty(),
+            "tick emits no event when there is nothing to recover"
+        );
+        // And it composes into a clean drain (the live call site).
+        let drained = be.drain_events();
+        assert!(drained.iter().all(|e| e.kind != EventKind::Lifecycle));
+    }
+
+    /// DEVICE-LOSS REBUILD DECISION: after a (simulated) loss the dead host is
+    /// dropped, so `rebuild_after_loss` takes the cold-start `adopt` path and
+    /// RE-ADOPTS `last_graph`. Environment-agnostic:
+    ///   • on a box WITH a device the rebuild OPENS a real stream → recovered
+    ///     (host running again), the live patch resumes;
+    ///   • on a device-less box it returns `false` (stay lost, retry next tick).
+    /// EITHER way it must not panic and must leave `last_graph` intact so the patch
+    /// is ready to resume. The orchestrator drives the real Disable-PnpDevice loss.
+    #[test]
+    fn rebuild_after_loss_readopts_last_graph() {
+        let mut be = EngineBackend::new();
+        // Push a real graph so `last_graph` is populated (the patch to resume).
+        be.push_graph(&sampler_graph()).expect("push graph");
+        let kept_before = be.last_graph.clone().expect("graph kept");
+
+        // Simulate the post-loss state the tick sets up: dead host dropped.
+        be.host = None;
+        be.device_lost = true;
+
+        // Rebuild on the current default device. Result depends on hardware; the
+        // INVARIANT we assert is recovered ⇔ host is now running.
+        let recovered = be.rebuild_after_loss();
+        assert_eq!(
+            recovered,
+            be.is_running(),
+            "recovered iff a stream is running again"
+        );
+        // The patch is preserved across the attempt (NOT cleared by the rebuild),
+        // so the sampler topology survives a loss whether or not a device was back.
+        assert_eq!(
+            be.last_graph.as_ref().map(|g| g.nodes.len()),
+            Some(kept_before.nodes.len()),
+            "last_graph preserved across the rebuild so the patch resumes intact"
+        );
+    }
+
+    /// DE-BOUNCE: one device-loss latches `device_lost` and emits EXACTLY ONE
+    /// `Warn` Lifecycle, and repeated ticks while still lost do NOT re-emit the loss
+    /// event (no event storm) — they only retry the rebuild. Forced no-host state
+    /// makes the retry branch deterministic without hardware.
+    #[test]
+    fn repeated_ticks_while_lost_emit_one_loss_event() {
+        let mut be = EngineBackend::new();
+        be.push_graph(&sampler_graph()).expect("push graph");
+        // Enter the lost state as if a fault was just detected and the dead host
+        // dropped; clear any events the push staged so we count only the loss path.
+        be.host = None;
+        be.device_lost = true;
+        be.pending_events.clear();
+
+        // Tick three times. On a device-less box every retry fails and stays lost;
+        // on a box WITH a device the FIRST retry recovers. Either way the loss
+        // itself is already latched, so no NEW Warn loss event should appear here —
+        // the loss event is emitted once at detection (covered by the tick path),
+        // not per retry.
+        let mut warns = 0usize;
+        for _ in 0..3 {
+            be.tick();
+            warns += be
+                .pending_events
+                .iter()
+                .filter(|e| e.kind == EventKind::Lifecycle && e.severity == Severity::Warn)
+                .count();
+            // Drain so each tick's events are counted once.
+            let _ = be.drain_events();
+        }
+        assert_eq!(
+            warns, 0,
+            "already-latched loss must not re-emit a Warn loss event on retries"
+        );
+    }
+
+    /// DE-BOUNCE: a recovery emits exactly ONE `Info` Lifecycle, and the `Warn`
+    /// loss / `Info` recovery severities are distinct (loss → DEGRADED, recovery →
+    /// healthy). Drives the tri-state health without a second wire variant.
+    #[test]
+    fn lifecycle_severity_distinguishes_loss_from_recovery() {
+        let mut be = EngineBackend::new();
+        be.emit_lifecycle(Severity::Warn, "audio device lost".into());
+        be.emit_lifecycle(Severity::Info, "audio device recovered".into());
+        let drained = be.drain_events();
+        let lifecycles: Vec<_> = drained
+            .iter()
+            .filter(|e| e.kind == EventKind::Lifecycle)
+            .collect();
+        assert_eq!(lifecycles.len(), 2, "one loss + one recovery event");
+        assert_eq!(lifecycles[0].severity, Severity::Warn, "loss is a warning");
+        assert_eq!(
+            lifecycles[1].severity,
+            Severity::Info,
+            "recovery is informational (not an alarm)"
+        );
+    }
+
+    /// The L3 SQLite/FTS5 log store ingests drained events off-RT: after attaching
+    /// a store and draining a synthesized device-loss `Lifecycle`, the row is
+    /// queryable. Proves the dormant store is now WIRED (code-value #8).
+    #[test]
+    fn drain_events_persists_into_log_store() {
+        let dir = std::env::temp_dir();
+        let path = dir.join(format!("oj-logstore-test-{}.sqlite", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+
+        let mut be = EngineBackend::new();
+        be.attach_log_store(&path).expect("store opens");
+
+        // Synthesize a control-side Lifecycle event and drain it.
+        be.emit_lifecycle(Severity::Warn, "simulated device loss".into());
+        let drained = be.drain_events();
+        assert!(
+            drained.iter().any(|e| e.kind == EventKind::Lifecycle),
+            "lifecycle event drained"
+        );
+
+        // The store now holds the durable tail; it is searchable by kind.
+        let store = be.log_store.as_ref().expect("store attached");
+        assert_eq!(store.count().unwrap(), drained.len() as i64);
+        let hits = store.search("Lifecycle", 10).unwrap();
+        assert!(
+            hits.iter().any(|h| h.kind == "Lifecycle"),
+            "lifecycle row searchable in the SQLite tail"
+        );
+
+        drop(be);
+        let _ = std::fs::remove_file(&path);
     }
 }

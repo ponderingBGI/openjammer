@@ -49,7 +49,15 @@ class MIDIManager {
   }
 
   /**
-   * Initialize MIDI access
+   * Initialize MIDI access.
+   *
+   * Forward-compat note (Chrome deprecation): newer Chromium always shows a
+   * permission prompt for `requestMIDIAccess`, even when `sysex` is NOT requested
+   * (the old "no prompt without sysex" shortcut is gone). So this resolves to a
+   * user CHOICE, not just a capability check: the user may deny. We treat a denial
+   * as an expected, gracefully-reported state — never a `console.error` defect —
+   * so a player who clicks "Block" doesn't get a red error in the console or a
+   * cry-wolf alarm. Only genuinely unexpected failures are logged loudly.
    */
   async init(config: MIDIManagerConfig = {}): Promise<boolean> {
     if (this.isInitialized) {
@@ -79,10 +87,39 @@ class MIDIManager {
       return true;
     } catch (error) {
       const err = error as Error;
+      // An insecure context (no HTTPS) or a Permissions-Policy block surfaces as
+      // the SAME `NotAllowedError` as a user denial in modern engines, but it is
+      // NOT the user's choice — distinguish it (detectable independently via
+      // `isSecureContext`) so the UI says something honest and actionable rather
+      // than implying the user declined.
+      if (typeof globalThis.isSecureContext !== 'undefined' && !globalThis.isSecureContext) {
+        this.initError = 'MIDI needs a secure (https) context';
+        return false;
+      }
+      // Permission denied is a normal user choice under the always-prompt path,
+      // not an app defect — record it quietly so the UI can say "MIDI access was
+      // declined" without polluting the console with an error.
+      if (this.isPermissionDenied(err)) {
+        this.initError = 'MIDI access was not granted';
+        return false;
+      }
       this.initError = err.message || 'Failed to access MIDI devices';
       console.error('[MIDIManager] Initialization failed:', this.initError);
       return false;
     }
+  }
+
+  /**
+   * Whether a `requestMIDIAccess` rejection is the user declining the permission
+   * prompt (vs a real failure). Modern engines reject denial with `NotAllowedError`;
+   * `SecurityError` is the legacy name still emitted by older Chromium. We match
+   * BOTH names (insecure-context is filtered out by the caller first), with a
+   * message-substring fallback for engines that don't set a precise name.
+   */
+  private isPermissionDenied(err: Error): boolean {
+    const name = err.name ?? '';
+    if (name === 'SecurityError' || name === 'NotAllowedError') return true;
+    return /permission|denied|not allowed|dismissed/i.test(err.message ?? '');
   }
 
   /**

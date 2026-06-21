@@ -23,6 +23,7 @@ import * as nativeReadiness from './checks/native-readiness';
 import * as protocolMirror from './checks/protocol-mirror';
 import * as nodeRegistry from './checks/node-registry';
 import * as ssotSetEquality from './checks/ssot-set-equality';
+import * as faultPipeConnectivity from './checks/fault-pipe-connectivity';
 
 export interface RunOpts {
   fix?: boolean;
@@ -46,6 +47,7 @@ export const REGISTRY: CheckModule[] = [
   protocolMirror,
   nodeRegistry,
   ssotSetEquality,
+  faultPipeConnectivity,
 ];
 
 const REGISTRY_BY_ID = new Map(REGISTRY.map((c) => [c.id, c]));
@@ -114,6 +116,15 @@ export function checksForFiles(paths: string[]): string[] {
       p === 'scripts/oj/lib/prereqs.ts'
     ) {
       ids.add('native-readiness');
+    }
+
+    // The fault-pipe ends (the native drain + the ring ingest) -> connectivity
+    // gate. Re-check the wire whenever either end of the pipe is touched.
+    if (
+      p === 'src/audio/executor/OjcoreNativeExecutor.ts' ||
+      p === 'src/store/logStore.ts'
+    ) {
+      ids.add('fault-pipe-connectivity');
     }
   }
 

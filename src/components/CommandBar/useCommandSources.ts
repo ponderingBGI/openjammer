@@ -154,6 +154,17 @@ function buildAppCommands(): Command[] {
             run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-audio-health')),
         },
         {
+            // Report a problem (L5/Phase 2) — opens the local diagnostic bundle
+            // (DevLog tail + reveal log file + copy diagnostics). Nothing is
+            // uploaded; the performer chooses what to share. Wires the previously
+            // orphaned `openjammer:report-issue` seam the IssueReporter listens for.
+            id: 'app.report-issue',
+            title: 'Report a problem',
+            group: 'App',
+            keywords: ['report', 'issue', 'bug', 'problem', 'diagnostics', 'log', 'support', 'crash'],
+            run: () => window.dispatchEvent(new CustomEvent('openjammer:report-issue')),
+        },
+        {
             // Bring-your-own plugin discovery (§3) — scan installed CLAP/VST3.
             id: 'app.plugins.toggle',
             title: 'Plugins',

@@ -31,7 +31,7 @@ bun run build      # tsc + production PWA build
 
 ```sh
 cargo test --workspace                       # engine tests + golden render
-cargo test -p ojcore --features devlog       # the audio-thread no-alloc gate
+cargo nextest run -p ojcore                  # the audio-thread no-alloc gate
 cargo build -p oj-tauri                      # the native desktop shell
 cargo run -p ojcore-native --bin render --features demo -- out.wav 2   # device-free render
 ```

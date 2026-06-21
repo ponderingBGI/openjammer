@@ -265,8 +265,8 @@ fn set_speaker_device(
         .0
         .lock()
         .map_err(|_| "engine backend mutex poisoned".to_string())?
-        .set_speaker_device(NodeIdx(node), &device_id);
-    Ok(())
+        .set_speaker_device(NodeIdx(node), &device_id)
+        .map_err(|e| e.to_string())
 }
 
 /// Enable mic capture into `node`'s input bus.
@@ -276,8 +276,8 @@ fn set_mic(node: u32, enabled: bool, state: tauri::State<'_, BackendState>) -> R
         .0
         .lock()
         .map_err(|_| "engine backend mutex poisoned".to_string())?
-        .set_mic(NodeIdx(node), enabled);
-    Ok(())
+        .set_mic(NodeIdx(node), enabled)
+        .map_err(|e| e.to_string())
 }
 
 /// Snapshot the current user data before an update installs — the frontend passes
@@ -306,6 +306,39 @@ fn update_rollback(app: tauri::AppHandle) -> Option<backup::RestoreData> {
     backup::restore(&app)
 }
 
+/// Tauri-managed holder for the `tracing` non-blocking writer's flush guard.
+/// Held for the process lifetime: dropping it (on app teardown) flushes any
+/// buffered NDJSON records out of the background writer. A newtype so it can be
+/// `manage`d without leaking the `tracing_appender` type into command handlers.
+struct LogGuard(#[allow(dead_code)] tracing_appender::non_blocking::WorkerGuard);
+
+/// Install a process-wide panic hook that routes a host panic through the SAME
+/// off-RT `tracing` channel as everything else, so the most catastrophic class
+/// (a Rust panic on a control thread) is VISIBLE in the NDJSON record instead of
+/// dying silently. The previous default hook (stderr only) is chained after ours
+/// so a debug terminal still shows the backtrace. The audio thread never panics
+/// through here — it owns the engine inside cpal and has no `tracing` dep.
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        // Best-effort structured capture: location + payload, no allocation on any
+        // RT path (this is a control-thread panic by construction).
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "unknown".to_string());
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "non-string panic payload".to_string());
+        tracing::error!(target: "panic", location = %location, payload = %payload, "host panic");
+        // Chain the original hook so stderr / debugger behaviour is preserved.
+        default_hook(info);
+    }));
+}
+
 /// Build and run the Tauri application. Shared between the desktop binary
 /// (`main.rs`) and any future mobile entry point (the Tauri convention).
 ///
@@ -320,6 +353,11 @@ pub fn run() {
     let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
     #[cfg(any(windows, target_os = "linux"))]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
+    // Justified panic (Phase-4 scoped panic guard): top-level app bring-up. A
+    // failure to generate the Tauri context / start the event loop is a fatal
+    // startup bug with no recoverable in-app fallback — there is no instrument yet
+    // to keep playing — so a clear panic at the entry point is the honest outcome.
+    #[allow(clippy::expect_used)]
     builder
         // Ableton-style install-after-close: if the user has auto-update on and
         // a verified update is staged, apply it silently on the way out (no
@@ -331,7 +369,39 @@ pub fn run() {
             }
         })
         .setup(|app| {
-            app.manage(BackendState::new());
+            // Bring up the off-RT structured logging sink (human stderr + a
+            // daily-rolling NDJSON file under the platform log dir) and PARK its
+            // flush guard in managed state for the process lifetime — dropping the
+            // guard flushes the non-blocking writer, so it must outlive `setup`.
+            // The file is fed ONLY by the off-RT path (tracing call sites on the
+            // control thread + this panic hook); the audio callback never touches
+            // it. Best-effort: if the log dir is unavailable we skip the file sink
+            // rather than fail startup.
+            let mut log_dir_for_store: Option<std::path::PathBuf> = None;
+            if let Ok(log_dir) = app.path().app_log_dir() {
+                if std::fs::create_dir_all(&log_dir).is_ok() {
+                    let guard = ojcore_native::init_logging(&log_dir);
+                    app.manage(LogGuard(guard));
+                    install_panic_hook();
+                    log_dir_for_store = Some(log_dir);
+                }
+            }
+
+            // Build the backend, then attach the L3 durable LOCAL log store
+            // (SQLite/FTS5) under the same log dir. This is the queryable history
+            // tail; the NDJSON file above remains the post-crash SSOT. LOCAL-ONLY,
+            // fed only off the audio thread (the control-side event drain). A failed
+            // open is non-fatal — the instrument keeps running without the tail.
+            let backend = BackendState::new();
+            if let Some(log_dir) = log_dir_for_store {
+                let path = log_dir.join("openjammer-events.sqlite");
+                if let Ok(mut be) = backend.0.lock() {
+                    if let Err(e) = be.attach_log_store(&path) {
+                        tracing::warn!(target: "engine", "log store unavailable: {e}");
+                    }
+                }
+            }
+            app.manage(backend);
             // The at-most-one warm Pi child for the session (Phase 1: instant feel).
             app.manage(ai::WarmChildState::default());
             // The loopback tool bridge (Phase 3: real graph reads round-trip to Pi).

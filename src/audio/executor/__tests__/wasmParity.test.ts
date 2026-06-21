@@ -18,6 +18,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import type { OjGraph } from '../../../../packages/oj-protocol-ts/src/index';
 import { getNodeDefinition } from '../../../engine/registry';
 import type { Connection, GraphNode, NodeType } from '../../../engine/types';
+import { useEngineHealthStore } from '../../../store/engineHealthStore';
 
 // The wasm bytes + worklet module are vite `?url` / `?worker&url` imports; under
 // vitest they resolve to plain strings, so no extra mock is needed for those.
@@ -337,6 +338,46 @@ describe('OjcoreWasmExecutor microphone input (mocked getUserMedia)', () => {
         expect(() => ex.setMicrophoneOutput('mic-1', {} as AudioNode)).not.toThrow();
         await Promise.resolve();
         expect(fakeMediaStreamSource.connect).not.toHaveBeenCalled();
+        ex.dispose();
+    });
+});
+
+describe('OjcoreWasmExecutor health on startup failure (mocked worklet)', () => {
+    beforeEach(() => {
+        MockWorkletNode.last = null;
+        vi.stubGlobal('AudioWorkletNode', MockWorkletNode);
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(() => Promise.resolve({ arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) })),
+        );
+        useEngineHealthStore.setState({ health: 'IDLE', reason: '' });
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        useEngineHealthStore.setState({ health: 'IDLE', reason: '' });
+    });
+
+    it('flips engine health to DEAD when the worklet module fails to load', async () => {
+        // The most consequential browser failure: addModule rejects, so the worklet
+        // never registers (`registerProcessor` never takes effect) and the engine
+        // makes NO sound. Health must NOT sit at IDLE — a silent failure the dot
+        // cannot show — it must surface DEAD so the performer sees it.
+        (fakeContext.audioWorklet.addModule as ReturnType<typeof vi.fn>).mockImplementationOnce(
+            () => Promise.reject(new Error('addModule failed')),
+        );
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const ex = new OjcoreWasmExecutor();
+        ex.initialize(
+            () => () => {},
+            () => () => {},
+            () => new Map(),
+            () => new Map(),
+        );
+        // Let setup()'s rejected addModule propagate into the .catch handler.
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(useEngineHealthStore.getState().health).toBe('DEAD');
         ex.dispose();
     });
 });

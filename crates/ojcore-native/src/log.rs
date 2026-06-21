@@ -66,11 +66,15 @@ pub fn init_logging(log_dir: &Path) -> WorkerGuard {
     // `let` leaves its subscriber type parameter unconstrained ("type
     // annotations needed"); used directly as a `.with(..)` argument it infers
     // from the registry being layered.
-    tracing_subscriber::registry()
+    // `try_init` (not `init`): the observability layer must never PANIC the app it
+    // exists to instrument. If a global subscriber is already installed (a second
+    // call, or a test that set one up), this is a no-op — we still return the guard
+    // so the caller's lifetime contract is unchanged.
+    let _ = tracing_subscriber::registry()
         .with(filter)
         .with(fmt::layer().with_writer(std::io::stderr))
         .with(fmt::layer().json().with_writer(non_blocking))
-        .init();
+        .try_init();
 
     // Capture transitive `log` records (cpal / tauri / plugin hosts) into the
     // same pipeline. Best-effort: if a `log` logger is already installed (e.g.

@@ -16,13 +16,20 @@ and on your hardware:
 
 | Where you run | Typical latency | Notes |
 |---|---|---|
-| **Native desktop** | **< 5 ms** MIDI-to-audio | The lowest tier — small-buffer audio stream, the threshold below which the software disappears. |
+| **Native desktop** | **device-dependent: ~1.3 ms to ~10 ms+** | The lowest tier. The engine asks for a small 64-frame buffer (~1.3 ms); many devices grant it even in WASAPI shared mode, some fall back to a larger device period (~10 ms+). |
+| **Native desktop** | **guaranteed low** with WASAPI-exclusive / ASIO | An exclusive/ASIO driver locks in the small buffer on any device — not yet routed by default. |
 | Browser, built-in audio | 30–80 ms | Fine to try it out, high for tight playing. |
 | Browser, USB interface | 10–20 ms | A USB interface is the single biggest browser improvement. |
 | Browser, USB optimized | 3–10 ms | With Low Latency Mode + interactive hint + the right devices selected. |
 
-We never label the browser tier sub-5 ms — that floor belongs to native desktop. The browser
-is honest at **~15–25 ms** out of the box and is great for sketching and jamming.
+We never label the browser tier sub-5 ms — and we don't over-promise one fixed native figure
+either, because native latency is **device-dependent**. The engine asks the audio device for a
+small **64-frame buffer (~1.3 ms)**. Many devices grant it **even in WASAPI shared mode** — on a
+Windows test machine we measured ~1.3 ms (`Fixed(64)` @ 48 kHz), genuinely **sub-5 ms**, with no
+exclusive/ASIO driver — while some devices or drivers reject the small buffer and fall back to the
+device period (**~10 ms+**). A **WASAPI-exclusive or ASIO** driver (not yet routed by default)
+*guarantees* the low buffer on any device. The browser stays honest at **~15–25 ms** out of the
+box and is great for sketching and jamming.
 
 ## Tune the audio settings
 
@@ -78,16 +85,20 @@ Web browsers **cannot access ASIO drivers**. They use the OS audio layer instead
 - **Linux** — ALSA / JACK (varies by configuration)
 
 This is a browser limitation, not an OpenJammer one. A USB interface still helps a lot in the
-browser — better hardware buffering and low-latency-optimized drivers — but if you need ASIO
-and the absolute lowest latency, use the [native desktop app](/openjammer/play/install/).
+browser — better hardware buffering and low-latency-optimized drivers — but for the lowest,
+most consistent latency use the [native desktop app](/openjammer/play/install/): it asks the
+device directly for a small 64-frame buffer (~1.3 ms), which many devices grant even in WASAPI
+shared mode, and a future WASAPI-exclusive or ASIO path will lock that buffer in on any device.
 
 ## OS-specific notes
 
 - **macOS** — generally the best latency, thanks to Core Audio. Most interfaces are
   class-compliant (no drivers).
-- **Windows** — WASAPI adds latency versus ASIO; a USB interface helps significantly. Some
-  interfaces need manufacturer drivers — check the support page. Enabling exclusive mode in
-  Windows Sound settings can also help.
+- **Windows** — native latency is device-dependent: the engine requests a small 64-frame
+  buffer, which many devices grant even in WASAPI shared mode, while others fall back to a
+  larger device period. A USB interface helps significantly. Some interfaces need manufacturer
+  drivers — check the support page. Enabling exclusive mode in Windows Sound settings can lock
+  in the small buffer on a device that otherwise refuses it.
 - **Linux** — setup varies by distro. JACK gives the best latency but needs configuration;
   PipeWire offers a good balance; PulseAudio works but is higher latency.
 

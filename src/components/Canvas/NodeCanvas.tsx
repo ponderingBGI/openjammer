@@ -2,7 +2,7 @@
  * Node Canvas - Main canvas with pan/zoom, box selection, and node rendering
  */
 
-import { useCallback, useRef, useState, useEffect, useMemo } from 'react';
+import { useCallback, useRef, useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import type { Position, Connection } from '../../engine/types';
 import { useGraphStore, getNodeDimensions, type NodeBounds } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -27,7 +27,16 @@ import { getAudioContext } from '../../audio/audioContext';
 import { isEditableTarget } from '../../utils/editableTarget';
 import { AudioClipVisual } from '../Clips/AudioClipVisual';
 import { ClipDragLayer } from '../Clips/ClipDragLayer';
-import { WaveformEditorModal } from '../Clips/WaveformEditorModal';
+// The waveform editor is a heavy, on-demand modal (canvas rendering + clip DSP)
+// that renders null until a clip is opened for editing. Code-split it behind a
+// real dynamic import so its weight stays out of the first-paint entry chunk;
+// the canvas itself loads eagerly. The Suspense fallback is never seen on the
+// hot path — only on the first clip-edit open, where a frame's delay is invisible.
+const WaveformEditorModal = lazy(() =>
+    import('../Clips/WaveformEditorModal').then((m) => ({
+        default: m.WaveformEditorModal,
+    })),
+);
 import { PresenceOverlay } from '../Collab/PresenceOverlay';
 import { useCollabStore } from '../../store/collabStore';
 import './NodeCanvas.css';
@@ -130,6 +139,10 @@ export function NodeCanvas() {
 
     // Audio clip store
     const allClips = useAudioClipStore((s) => s.clips);
+    // Drives the lazy WaveformEditorModal mount: gating the mount on this (instead
+    // of rendering it unconditionally) is what actually defers the code-split chunk
+    // to first clip-edit, rather than fetching it on canvas mount.
+    const editingClipId = useAudioClipStore((s) => s.editingClipId);
     const selectedClipIds = useAudioClipStore((s) => s.selectedClipIds);
     const clipDragState = useAudioClipStore((s) => s.dragState);
     const startClipDrag = useAudioClipStore((s) => s.startDrag);
@@ -1223,8 +1236,13 @@ export function NodeCanvas() {
             {/* Audio Clip Drag Layer (portal) */}
             <ClipDragLayer />
 
-            {/* Waveform Editor Modal (portal) */}
-            <WaveformEditorModal />
+            {/* Waveform Editor Modal (portal) — mounted only while a clip is open
+                for editing, so its lazy chunk loads on first edit, not first paint. */}
+            {editingClipId && (
+                <Suspense fallback={null}>
+                    <WaveformEditorModal />
+                </Suspense>
+            )}
 
             {/* Back to Action button - appears when nodes are not visible on any level */}
             {nodes.size > 0 && !nodesVisibility.visible && nodesVisibility.direction !== null && (

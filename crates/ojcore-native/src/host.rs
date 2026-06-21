@@ -17,6 +17,8 @@
 //! and written against the [`BlockProcessor`] trait, so it is unit-tested with a
 //! mock engine and a real command ring — no audio device required.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -208,6 +210,53 @@ fn map_cpal(err: cpal::Error, fallback: impl FnOnce(String) -> HostError) -> Hos
     }
 }
 
+/// A cheap, shared "the output stream faulted" flag. The cpal `err_fn` runs on
+/// cpal's OWN error thread (NOT the audio render thread) when a running stream
+/// errors — a yanked/disabled/reconfigured device hands us a
+/// [`cpal::StreamError`] here. The contract for that callback is strict: it does
+/// a SINGLE atomic store and nothing else — no allocation, no lock, no blocking
+/// I/O, no stream teardown. The control thread (which already ticks
+/// `drain_events`/`poll_meters`) polls [`StreamFault::take`] each tick and does
+/// the actual off-RT stream rebuild.
+///
+/// This is intentionally a one-bit edge, not a counter: device-loss is a single
+/// recoverable condition, and a relaxed boolean is the cheapest wait-free signal
+/// that survives the cpal-thread → control-thread hop.
+#[derive(Clone, Default)]
+pub struct StreamFault(Arc<AtomicBool>);
+
+impl StreamFault {
+    /// A fresh, un-faulted signal.
+    pub fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(false)))
+    }
+
+    /// RT/cpal-thread side: mark the stream as faulted. ONE relaxed atomic store,
+    /// nothing else — safe to call from the cpal `err_fn`. (Relaxed is sufficient:
+    /// there is no other state being published alongside the flag; the control
+    /// thread only needs to eventually observe the set, which a relaxed store on
+    /// one side and a relaxed load on the other guarantees.)
+    #[inline]
+    pub fn mark(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    /// Non-destructive peek (mostly for tests / diagnostics).
+    pub fn is_set(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+
+    /// Control-thread side: read AND clear the fault in one step, returning
+    /// whether a fault was pending. Clearing here (rather than in `mark`) keeps
+    /// the cpal `err_fn` a pure store and makes the control thread the single
+    /// owner of the rebuild decision — a second fault that lands mid-rebuild is
+    /// simply observed on the next tick (no lost edge, no rebuild storm because
+    /// the caller debounces on its own host state).
+    pub fn take(&self) -> bool {
+        self.0.swap(false, Ordering::Relaxed)
+    }
+}
+
 /// A live audio host. Holds the cpal stream(s) open; dropping it stops audio.
 ///
 /// The [`Engine`] is moved INTO the output callback (it is `Send`), so once
@@ -221,6 +270,10 @@ pub struct AudioHost {
     _input: Option<Stream>,
     /// The negotiated stream config, exposed for the latency estimate.
     config: StreamConfig,
+    /// Shared device-fault signal SET by the cpal output `err_fn` (off the render
+    /// thread) and polled+cleared by the control thread to trigger an off-RT
+    /// rebuild. Cloned out via [`AudioHost::fault_signal`].
+    fault: StreamFault,
 }
 
 /// The default output device's default sample rate (Hz), or `None` when there is
@@ -262,6 +315,20 @@ impl AudioHost {
             BufferSize::Fixed(n) => Some(n),
             BufferSize::Default => None,
         }
+    }
+
+    /// A clone of this host's device-fault signal, for the control thread to poll
+    /// (`take`) each tick and trigger an off-RT rebuild on a yanked/disabled
+    /// device. The signal is SET by the cpal `err_fn` (off the render thread).
+    pub fn fault_signal(&self) -> StreamFault {
+        self.fault.clone()
+    }
+
+    /// Has the output stream faulted (device yanked/disabled/reconfigured) since
+    /// the last [`StreamFault::take`]? Non-destructive convenience for the control
+    /// thread; the rebuild path uses `fault_signal().take()` to read-and-clear.
+    pub fn faulted(&self) -> bool {
+        self.fault.is_set()
     }
 
     /// Open the stream(s) and start rendering `engine` through the callback.
@@ -384,8 +451,21 @@ impl AudioHost {
         // Promote-once guard for realtime priority.
         let mut promoted = false;
 
-        let err_fn = |e: cpal::Error| {
-            eprintln!("audio output stream error: {e}");
+        // Shared device-fault signal. The cpal `err_fn` (cpal's own error thread,
+        // NOT the render thread) SETS it; the control thread polls + clears it to
+        // drive the off-RT rebuild. The render data callback never touches it.
+        let fault = StreamFault::new();
+        let err_fault = fault.clone();
+        let err_fn = move |e: cpal::Error| {
+            // CPAL-ERROR-THREAD CONTRACT: ONE relaxed atomic store, then nothing
+            // that could block. A `StreamError` here means the device was
+            // yanked/disabled/reconfigured and the running stream is dead; we flag
+            // it so the control thread rebuilds off the audio path. The eprintln is
+            // diagnostic only and runs AFTER the store so the signal is never
+            // delayed by I/O (and this is cpal's error thread, never the render
+            // thread, so it cannot glitch audio).
+            err_fault.mark();
+            eprintln!("audio output stream error (flagged for rebuild): {e}");
         };
 
         let output = device
@@ -422,6 +502,7 @@ impl AudioHost {
             _output: output,
             _input: input,
             config,
+            fault,
         })
     }
 
@@ -602,6 +683,43 @@ mod tests {
         assert_eq!(proc.last_nframes, 2);
         // EVERY frame across EVERY channel is filled — no gaps, no stale samples.
         assert!(data.iter().all(|&s| s == 1.0));
+    }
+
+    #[test]
+    fn stream_fault_marks_and_takes_once() {
+        // The cpal err_fn side `mark`s; the control side `take`s it read-and-clear.
+        let fault = StreamFault::new();
+        assert!(!fault.is_set(), "fresh signal is un-faulted");
+        assert!(!fault.take(), "take on a clean signal is false");
+
+        fault.mark();
+        assert!(fault.is_set(), "mark sets the flag");
+        // First take consumes the edge; a second take sees nothing (no rebuild storm
+        // from one device-loss — the control thread debounces on this single edge).
+        assert!(fault.take(), "first take observes the fault");
+        assert!(!fault.take(), "second take is clear (debounced)");
+        assert!(!fault.is_set(), "take cleared the flag");
+    }
+
+    #[test]
+    fn stream_fault_is_shared_across_clones() {
+        // The `err_fn` holds a clone; the host holds the original. A mark on either
+        // is visible on the other (the Arc<AtomicBool> is shared, not copied).
+        let host_side = StreamFault::new();
+        let err_side = host_side.clone();
+        err_side.mark();
+        assert!(
+            host_side.is_set(),
+            "mark on the err_fn clone is seen host-side"
+        );
+        assert!(
+            host_side.take(),
+            "host-side take observes the err_fn's mark"
+        );
+        assert!(
+            !err_side.is_set(),
+            "clearing on one clone clears the shared flag"
+        );
     }
 
     #[test]

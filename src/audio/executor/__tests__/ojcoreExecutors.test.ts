@@ -2,7 +2,9 @@
  * U-EXEC-PARITY gate tests.
  *
  * Pin the ojcore executors' capability parity against the {@link Executor}
- * interface, the level the founder's native (<5 ms) app depends on:
+ * interface, the level the founder's native (low-latency, device-dependent:
+ * sub-5 ms when the device grants a small 64-frame buffer, ~10 ms+ otherwise) app
+ * depends on:
  *
  *  1. Each ojcore executor returns a NON-NULL handle from getLooper /
  *     getRecorder / getSamplerAdapter (never null/throw — the seam stays whole).

@@ -35,7 +35,7 @@ jobs:
       engine: ${{ steps.plan.outputs.engine }}
       web: ${{ steps.plan.outputs.web }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0 # history needed to diff against the base
       - name: Setup web (Bun + install)
@@ -100,7 +100,7 @@ jobs:
     if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup Rust (stable + nightly wasm leg)
         uses: ./.github/actions/setup-rust
         with:
@@ -118,6 +118,16 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace
+      # RT no-alloc gate (mirrors `just test-rt`). nextest's process-per-test
+      # isolation is STRICTLY safer than `cargo test`'s shared process for the
+      # global-allocator swap `assert_no_alloc` installs. A REQUIRED per-PR check
+      # via the aggregate `gate` — an RT-path heap regression fails the merge.
+      - name: Install cargo-nextest (no-alloc gate)
+        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2
+        with:
+          tool: cargo-nextest
+      - name: RT no-alloc gate (assert_no_alloc)
+        run: cargo nextest run -p ojcore
       - name: no_std core builds (wasm-friendly)
         run: cargo build -p ojcore --no-default-features
       - name: wasm32 build
@@ -146,7 +156,7 @@ jobs:
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup web (Bun + install)
         uses: ./.github/actions/setup-web
       - name: Typecheck
@@ -155,8 +165,28 @@ jobs:
         run: bun run lint
       - name: Test
         run: bun run test:run
-      - name: Build
-        run: bun run build
+      # Build-warning gate: the production build must emit ZERO warnings. A clean
+      # build is part of the covenant — a chunk-size, browserslist, or deprecation
+      # notice is cosmetic noise that erodes trust and, left unchecked, creeps back.
+      # We capture the FULL build output (stdout+stderr), then fail if any known
+      # warning signature appears. This is fail-closed by signature, not a blanket
+      # "any line with 'warn'": we match the specific notices Vite/Rollup/browserslist
+      # emit so a legitimate filename containing "warning" can't false-trip it.
+      #   - chunk-size .......... "(!) Some chunks are larger than" / "larger than N kB"
+      #   - browserslist ........ "Browserslist: browsers data" / "is N months old"
+      #   - rollup/vite warns ... lines beginning with "warning" or "(!)"
+      #   - deprecations ........ "deprecat" (DEP00xx, "is deprecated", etc.)
+      # The build still writes dist/ for the e2e step below.
+      - name: Build (zero-warning gate)
+        shell: bash
+        run: |
+          set -o pipefail
+          bun run build 2>&1 | tee build.log
+          if grep -niE 'Some chunks are larger than|larger than [0-9]+ ?kB|Browserslist: browsers data|caniuse-lite\) is [0-9]+ months? old|months? old\. Please run|^[[:space:]]*\(!\)|^[[:space:]]*warning|deprecat' build.log; then
+            echo "::error::Production build emitted a warning (see matched lines above). Fix it honestly — do NOT raise the chunk-size limit or silence browserslist without verifying the data is already at the latest published version."
+            exit 1
+          fi
+          echo "Build emitted zero warnings — gate GREEN."
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
       - name: Production PWA smoke test
@@ -165,10 +195,18 @@ jobs:
   windows-native:
     name: Windows native build + audio gate
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    # Affected+: the Windows desktop app bundles the web frontend AND links the
+    # engine, so it must re-run when EITHER tier is affected. `engine` already
+    # subsumes `src-tauri/` changes (they select the fmt/clippy/test recipes ->
+    # engine=true in the `changes` job), so engine OR web covers engine, the
+    # Tauri shell, and the bundled frontend/IPC surface — closing the gap where a
+    # web-only IPC-contract change skipped the costliest runner. Non-PR and
+    # untrustworthy diffs set both outputs true (fail-closed), so this still runs
+    # everything then and never fires on a docs-only PR.
+    if: needs.changes.outputs.engine == 'true' || needs.changes.outputs.web == 'true'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup web (Bun + install)
         uses: ./.github/actions/setup-web
       - name: Setup Rust (stable)
@@ -185,10 +223,45 @@ jobs:
       - name: Offline audio render gate (Windows, device-free)
         run: cargo run -p ojcore-native --bin render --features demo -- ci-render.wav 2
 
+  doctor:
+    name: Doctor wiring gates (fault pipe + COI honesty)
+    # Least-privilege: this job only reads the checked-out tree to run pure-TS
+    # gates — it needs no write scopes. Set explicitly so it never inherits a
+    # broader repository default.
+    permissions:
+      contents: read
+    needs: changes
+    # Affected+: the fault-pipe connectivity gate guards the native drain (engine
+    # /src-tauri surface) AND the ring ingest (web surface), so it must re-run when
+    # EITHER tier is affected. Non-PR and untrustworthy diffs set both true
+    # (fail-closed), so this still runs everything then and never fires on a
+    # docs-only PR.
+    if: needs.changes.outputs.engine == 'true' || needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # This job only reads the tree to run pure-TS gates (no authenticated git
+          # ops), so don't persist the token into .git/config — least token surface.
+          persist-credentials: false
+      - name: Setup web (Bun + install)
+        uses: ./.github/actions/setup-web
+      # Pure-TS doctor checks only (no Rust toolchain needed): the fault-pipe
+      # connectivity gate (poll_events -> ingestEngineEvent must stay wired
+      # end-to-end so a silent-dropout regression can never ship green), the
+      # PrimitiveKind SSOT set-equality, and the COOP/COEP header presence. A
+      # `fail` exits non-zero and blocks the merge; `warn`/`skip` do not.
+      - name: Fault pipe wired end-to-end (connectivity gate)
+        run: bun scripts/oj/index.ts doctor --check fault-pipe-connectivity --json
+      - name: PrimitiveKind SSOT set-equality
+        run: bun scripts/oj/index.ts doctor --check ssot-set-equality --json
+      - name: COOP/COEP cross-origin isolation headers
+        run: bun scripts/oj/index.ts doctor --check coi-headers --json
+
   gate:
     name: Merge gate
     # The SINGLE required check. Runs always so it can adjudicate skipped legs.
-    needs: [changes, engine, web, windows-native]
+    needs: [changes, engine, web, windows-native, doctor]
     if: always()
     runs-on: ubuntu-latest
     steps:

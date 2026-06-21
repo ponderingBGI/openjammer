@@ -3060,7 +3060,10 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-opener",
  "tauri-plugin-updater",
+ "tracing",
+ "tracing-appender",
  "url",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
