@@ -7,8 +7,10 @@ name: Benchmarks
 # work-done proxy, NOT a <5ms wall-clock latency gate (that stays the founder-
 # hardware loopback harness).
 #
-# ADVISORY (continue-on-error) until the CODSPEED_TOKEN repo secret is configured;
-# promote to a required check once it reports. Free + unlimited for public OSS.
+# Until the CODSPEED_TOKEN repo secret is set, the upload step is SKIPPED (the job
+# still builds the benches, so it stays green and verifies they compile); once the
+# token is added the per-PR measurement + comment turn on automatically. Free +
+# unlimited for public OSS.
 
 on:
   pull_request:
@@ -40,9 +42,14 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-codspeed
+      # Always build the benches in CI (verifies they compile), even before the
+      # measurement service is wired up.
       - name: Build benchmarks
         run: cargo codspeed build -p ojcore
+      # Measure + upload only when the token exists, so the job stays GREEN (not a
+      # noisy red X) until the founder adds CODSPEED_TOKEN, then turns on for real.
       - name: Run benchmarks
+        if: ${{ secrets.CODSPEED_TOKEN != '' }}
         uses: CodSpeedHQ/action@v3
         with:
           run: cargo codspeed run
