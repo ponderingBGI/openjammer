@@ -240,6 +240,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # This job only reads the tree to run pure-TS gates (no authenticated git
+          # ops), so don't persist the token into .git/config — least token surface.
+          persist-credentials: false
       - name: Setup web (Bun + install)
         uses: ./.github/actions/setup-web
       # Pure-TS doctor checks only (no Rust toolchain needed): the fault-pipe

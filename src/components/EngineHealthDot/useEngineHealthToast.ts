@@ -42,8 +42,14 @@ export function useEngineHealthToast(): void {
             if (next === prev) return;
             prevRef.current = next;
 
-            // Only a fresh entry into DEAD is allowed to surface a toast.
-            if (next !== 'DEAD') return;
+            // Only a fresh entry into DEAD is allowed to surface a toast. Leaving
+            // DEAD (recovered to IDLE/DEGRADED) is silent — but we DISMISS the stale
+            // dead toast so a "Sound stopped" line can't linger after sound is back
+            // (the dot already shows the new calm state; we never celebrate recovery).
+            if (next !== 'DEAD') {
+                toast.dismiss(DEAD_TOAST_ID);
+                return;
+            }
 
             const now = Date.now();
             if (now - lastToastAtRef.current < DEAD_TOAST_COOLDOWN_MS) return;

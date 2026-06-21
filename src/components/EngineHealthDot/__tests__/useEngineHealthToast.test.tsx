@@ -6,6 +6,7 @@
  *   • DEGRADED raises NO toast.
  *   • The first transition into DEAD raises exactly one.
  *   • Re-entering DEAD within the cooldown is deduped to zero extra toasts.
+ *   • Leaving DEAD (recovery) DISMISSES the dead toast — no stale line lingers.
  */
 
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest';
@@ -13,8 +14,12 @@ import { renderHook, cleanup } from '@testing-library/react';
 import { act } from 'react';
 
 const errorSpy = vi.fn();
+const dismissSpy = vi.fn();
 vi.mock('sonner', () => ({
-    toast: { error: (...args: unknown[]) => errorSpy(...args) },
+    toast: {
+        error: (...args: unknown[]) => errorSpy(...args),
+        dismiss: (...args: unknown[]) => dismissSpy(...args),
+    },
 }));
 
 import { useEngineHealthToast } from '../useEngineHealthToast';
@@ -27,6 +32,7 @@ afterEach(() => {
 
 beforeEach(() => {
     errorSpy.mockClear();
+    dismissSpy.mockClear();
     useEngineHealthStore.setState({ health: 'IDLE', reason: '' });
 });
 
@@ -50,5 +56,13 @@ describe('useEngineHealthToast', () => {
         act(() => useEngineHealthStore.getState().setHealth('DEGRADED', 'recovering'));
         act(() => useEngineHealthStore.getState().setHealth('DEAD', 'fault 2'));
         expect(errorSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('dismisses the dead toast on recovery (no stale "Sound stopped" lingers)', () => {
+        renderHook(() => useEngineHealthToast());
+        act(() => useEngineHealthStore.getState().setHealth('DEAD', 'stream down'));
+        act(() => useEngineHealthStore.getState().setHealth('DEGRADED', 'recovered'));
+        // Recovery is silent (no new error toast) but the stale dead toast is cleared.
+        expect(dismissSpy).toHaveBeenCalledWith('engine-health-dead');
     });
 });
