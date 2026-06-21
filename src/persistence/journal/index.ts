@@ -13,3 +13,4 @@ export {
     type Recovered,
 } from './journal';
 export { LoroPersistence } from './loroPersistence';
+export { OpfsJournalStore, openOpfsJournalStore, type SyncAccessHandle } from './opfsStore';
