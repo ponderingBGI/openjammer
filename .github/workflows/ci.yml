@@ -228,20 +228,17 @@ jobs:
         run: cargo run -p ojcore-native --bin render --features demo -- ci-render.wav 2
 
   macos-native:
-    name: macOS engine + audio gate (arm64, non-blocking)
+    name: macOS engine + audio gate (arm64)
     needs: changes
     # macOS + arm64 coverage: CoreAudio's cpal path AND the arm64 libm ULP band
-    # the golden fingerprints depend on. NON-BLOCKING for now (continue-on-error +
-    # deliberately NOT in the `gate` aggregator's needs): gather wall-time/signal
-    # on the free standard M1 runner first; promote to a required leg once it is
-    # reliably green and does not queue (the plan's "macOS-on-PR non-blocking
-    # first" step). `-large`/`-xlarge` macOS runners BILL even on public repos, so
-    # this stays on the free standard label.
+    # the golden fingerprints depend on. A REQUIRED leg of the `gate` aggregator
+    # (in its `needs`): it runs on the free standard M1 runner — `-large`/`-xlarge`
+    # macOS runners BILL even on public repos, so this stays on the free standard
+    # label.
     if: needs.changes.outputs.engine == 'true' || needs.changes.outputs.web == 'true'
     runs-on: macos-latest
-    continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Setup Rust (stable)
         uses: ./.github/actions/setup-rust
       - name: Engine tests on macOS (arm64)
@@ -287,7 +284,7 @@ jobs:
   gate:
     name: Merge gate
     # The SINGLE required check. Runs always so it can adjudicate skipped legs.
-    needs: [changes, engine, web, windows-native, doctor]
+    needs: [changes, engine, web, windows-native, macos-native, doctor]
     if: always()
     runs-on: ubuntu-latest
     steps:

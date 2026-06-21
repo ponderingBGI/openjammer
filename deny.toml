@@ -7,9 +7,6 @@
 # the PR job runs advisory (continue-on-error) until a first green run confirms
 # the real license set, after which it is promoted to a required check.
 
-[graph]
-all-features = false
-
 [advisories]
 version = 2
 # Run live against the RustSec DB in the nightly lane (continue-on-error there).

@@ -31,7 +31,7 @@ proptest = "1"                                        # property tests over comp
 # CodSpeed-compatible criterion: runs as plain criterion locally (`cargo bench`)
 # and is instrumented for instruction-count measurement by the CodSpeed CI action
 # (Track A P1 — perf-regression gate on the hot paths).
-codspeed-criterion-compat = "2"
+codspeed-criterion-compat = "4.7.0"
 
 [[bench]]
 name = "engine"

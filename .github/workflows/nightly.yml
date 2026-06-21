@@ -51,7 +51,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - name: loom model-check the wait-free SPSC ring
         # Exhaustively explores the producer/consumer atomic interleavings (data
         # region modeled as a loom cell) — the weak-memory class the single-threaded
@@ -75,7 +75,7 @@ jobs:
       - name: Install cargo-fuzz (prebuilt binary)
         # taiki-e/install-action fetches a prebuilt binary in seconds instead of
         # compiling cargo-fuzz from source (matches the per-PR nextest install).
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2
         with:
           tool: cargo-fuzz
       - name: Fuzz the WAV decoder (time-boxed)
@@ -94,7 +94,7 @@ jobs:
       - name: ALSA dev headers (cpal/alsa-sys)
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       - name: Rust stable
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - name: Crash-kill the atomic-write path and verify recovery
         # The real-process cross-check for the SimFs protocol model: a child writes
         # versions through `atomic_write` and is SIGKILLed mid-flight; recovery must

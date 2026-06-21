@@ -36,16 +36,16 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true # advisory until the license allowlist is confirmed green
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - name: Install cargo-deny (prebuilt binary)
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2
         with:
           tool: cargo-deny
       - name: cargo deny check
-        run: cargo deny check bans licenses sources
+        run: cargo deny --all-features check bans licenses sources
 
   cargo-audit:
     name: cargo-audit (RustSec advisories)
@@ -53,12 +53,12 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true # a fresh CVE reports, never blocks
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       - name: Install cargo-audit (prebuilt binary)
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2
         with:
           tool: cargo-audit
       - name: cargo audit
