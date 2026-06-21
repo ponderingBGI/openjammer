@@ -1,0 +1,49 @@
+name: Benchmarks
+
+# Perf-regression gate (Track A P1). CodSpeed runs the ojcore hot-path benches
+# (compile + process_block) under instruction-count measurement (<1% variance, no
+# noisy wall-clock) and comments the per-PR delta — so an accidental allocation or
+# an O(n^2) schedule regression on the audio path is caught in REVIEW. This is a
+# work-done proxy, NOT a <5ms wall-clock latency gate (that stays the founder-
+# hardware loopback harness).
+#
+# ADVISORY (continue-on-error) until the CODSPEED_TOKEN repo secret is configured;
+# promote to a required check once it reports. Free + unlimited for public OSS.
+
+on:
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/benchmarks.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmarks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  codspeed:
+    name: CodSpeed (hot-path instruction counts)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-codspeed (prebuilt binary)
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-codspeed
+      - name: Build benchmarks
+        run: cargo codspeed build -p ojcore
+      - name: Run benchmarks
+        uses: CodSpeedHQ/action@v3
+        with:
+          run: cargo codspeed run
+          token: ${{ secrets.CODSPEED_TOKEN }}
