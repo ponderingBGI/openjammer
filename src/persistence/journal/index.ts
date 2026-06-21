@@ -12,3 +12,4 @@ export {
     type JournalStore,
     type Recovered,
 } from './journal';
+export { LoroPersistence } from './loroPersistence';
