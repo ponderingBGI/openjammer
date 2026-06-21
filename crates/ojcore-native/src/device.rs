@@ -91,12 +91,15 @@ impl DeviceFaultRx {
 }
 
 /// A cheap, comparable identity of the default output device, so a change can be
-/// detected by polling rather than per-OS event APIs. (The pinned cpal 0.18.1 does
-/// not expose a device name, so identity is its default spec — enough to catch a
-/// removal and a spec-changing swap; an identically-specced swap is left to the
-/// error-callback path + the user's device picker.)
+/// detected by polling rather than per-OS event APIs. The pinned cpal 0.18.1 DOES
+/// expose a stable [`DeviceId`](cpal::DeviceId) (`DeviceTrait::id`), so identity is
+/// that id plus the default spec — which now also catches an identically-specced
+/// swap (same sample rate + channels, different device), not just a spec change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DeviceIdentity {
+    /// The backend-stable device id (`DeviceTrait::id`) — distinguishes two devices
+    /// that happen to share a spec, so a same-spec swap is still detected.
+    pub id: String,
     /// Its default sample rate (Hz) — switching interfaces usually changes this.
     pub sample_rate: u32,
     /// Its default output channel count.
@@ -109,8 +112,10 @@ pub fn probe_default_output() -> Option<DeviceIdentity> {
     use cpal::traits::{DeviceTrait, HostTrait};
     let host = cpal::default_host();
     let device = host.default_output_device()?;
+    let id = device.id().ok()?.to_string();
     let cfg = device.default_output_config().ok()?;
     Some(DeviceIdentity {
+        id,
         sample_rate: cfg.sample_rate(),
         channels: cfg.channels(),
     })
@@ -161,6 +166,17 @@ mod tests {
 
     fn ident(sr: u32) -> DeviceIdentity {
         DeviceIdentity {
+            id: "dev-a".to_string(),
+            sample_rate: sr,
+            channels: 2,
+        }
+    }
+
+    /// Same as [`ident`] but with an explicit device id, to model a swap between two
+    /// devices that share a spec.
+    fn ident_with_id(id: &str, sr: u32) -> DeviceIdentity {
+        DeviceIdentity {
+            id: id.to_string(),
             sample_rate: sr,
             channels: 2,
         }
@@ -185,6 +201,19 @@ mod tests {
             Some(DeviceFault::DefaultChanged)
         );
         assert_eq!(w.poll(Some(ident(44_100))), None);
+    }
+
+    #[test]
+    fn watcher_emits_default_changed_on_a_same_spec_swap() {
+        let mut w = DeviceWatcher::new(Some(ident_with_id("dev-a", 48_000)));
+        // A swap to a DIFFERENT device with the IDENTICAL spec (same sample rate +
+        // channels) is still a change — the stable id distinguishes them, so the
+        // watcher must emit DefaultChanged (once).
+        assert_eq!(
+            w.poll(Some(ident_with_id("dev-b", 48_000))),
+            Some(DeviceFault::DefaultChanged)
+        );
+        assert_eq!(w.poll(Some(ident_with_id("dev-b", 48_000))), None);
     }
 
     #[test]
