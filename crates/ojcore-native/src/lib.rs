@@ -32,6 +32,7 @@ pub mod log;
 pub mod logstore;
 pub mod recorder;
 pub mod store;
+pub mod supervisor;
 pub mod update_gate;
 
 pub use asset::{AssetError, AssetStore, Pcm};
@@ -51,6 +52,7 @@ pub use log::init_logging;
 pub use logstore::{LogHit, LogRecord, LogStore};
 pub use recorder::{Recorder, RecorderSink, DEFAULT_RING_FRAMES};
 pub use store::{content_address, AssetCatalog};
+pub use supervisor::{DeviceSupervisor, RecoveryAction, SupervisorState};
 pub use update_gate::{UpdateGate, UpdateState};
 
 /// The amplitude threshold used to detect the loopback impulse in the captured
