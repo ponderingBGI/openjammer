@@ -43,7 +43,7 @@ pub use device::{
     classify as classify_device_fault, device_fault_channel, probe_default_output, DeviceFault,
     DeviceFaultRx, DeviceFaultTx, DeviceIdentity, DeviceWatcher,
 };
-pub use fs::{atomic_write, OjFs, RealFs};
+pub use fs::{atomic_write, atomic_write_path, OjFs, RealFs};
 pub use host::{
     default_output_sample_rate, render_block, AudioHost, BlockProcessor, HostError, StreamFault,
     StreamRequest, DEFAULT_RUN,

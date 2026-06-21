@@ -17,6 +17,7 @@
 //! kernel/SSD layer.
 
 use std::io;
+use std::path::Path;
 
 /// The filesystem operations a crash-safe write needs. Small + injectable so a
 /// fault FS can crash at any step. Paths are plain strings (the harness models a
@@ -41,6 +42,24 @@ pub fn atomic_write(fs: &mut impl OjFs, dest: &str, bytes: &[u8]) -> io::Result<
     fs.rename(&tmp, dest)?;
     fs.sync_dir()?;
     Ok(())
+}
+
+/// Crash-safely replace the whole file at `path` (temp in the same dir -> fsync ->
+/// atomic rename -> fsync dir). The path-based convenience over [`atomic_write`]
+/// for "durably overwrite this config/state file" — a drop-in for a bare
+/// `std::fs::write`, which can leave a torn/half-written file if interrupted.
+pub fn atomic_write_path(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let parent = match path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::other("atomic_write_path: path has no file name"))?
+        .to_string_lossy()
+        .into_owned();
+    let mut fs = RealFs::new(parent);
+    atomic_write(&mut fs, &name, bytes)
 }
 
 /// Production filesystem: real temp + fsync + atomic rename + parent-dir fsync,
@@ -87,10 +106,35 @@ impl OjFs for RealFs {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     /// Sentinel error a `SimFs` returns at its scripted crash point.
     fn crashed() -> io::Error {
         io::Error::other("simulated process crash")
+    }
+
+    #[test]
+    fn atomic_write_path_replaces_durably_and_leaves_no_temp() {
+        static N: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "oj-awp-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+
+        atomic_write_path(&path, b"v1").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"v1");
+
+        // Overwrite atomically; leaves no `.ojtmp` sibling behind.
+        atomic_write_path(&path, b"v2-longer").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"v2-longer");
+        let mut tmp = path.clone().into_os_string();
+        tmp.push(".ojtmp");
+        assert!(!std::path::Path::new(&tmp).exists(), "temp must not leak");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// An in-memory filesystem that "crashes" (returns an error, applying the
