@@ -962,11 +962,16 @@ impl EngineBackend {
         true
     }
 
-    /// Arm a recorder capture of `node`'s output bus. v1 records the capture's
-    /// spec; the engine-output tap that fills the PCM is the documented gap (the
-    /// public [`AudioHost`] callback owns the engine and exposes no per-node bus
-    /// tap yet). `recorder_stop` / `recorder_export` operate on the captured PCM.
+    /// Arm a recorder capture of the master mix, tagged to `node`. The host's
+    /// output tap records the rendered MONO master into its recorder while armed
+    /// (see [`ojcore_native::AudioHost::arm_capture`]); `recorder_stop` takes the
+    /// captured PCM and `recorder_export` writes it to WAV. In a device-less
+    /// sandbox (no host) the start/stop lifecycle still validates — there is
+    /// simply no live stream to tap.
     pub fn recorder_start(&mut self, node: NodeIdx) {
+        if let Some(host) = self.host.as_ref() {
+            host.arm_capture();
+        }
         self.captures.insert(
             node.0,
             CaptureState {
@@ -978,12 +983,22 @@ impl EngineBackend {
         );
     }
 
-    /// Stop a recorder capture and return its captured (interleaved) PCM + rate.
+    /// Stop a recorder capture and return its captured (mono) PCM + rate. Takes
+    /// the recorded master from the host tap when a stream is live, and RETAINS it
+    /// on the [`CaptureState`] so `recorder_export` can still write it afterward.
     /// Returns `None` if no capture was armed for `node`.
     pub fn recorder_stop(&mut self, node: NodeIdx) -> Option<(Vec<f32>, u32)> {
-        let mut cap = self.captures.remove(&node.0)?;
+        // Take the captured PCM from the host first (immutable borrow), then
+        // record it on the capture state (mutable borrow) — kept separate so the
+        // borrows don't overlap.
+        let captured = self.host.as_ref().map(|host| host.stop_capture());
+        let cap = self.captures.get_mut(&node.0)?;
         cap.recording = false;
-        Some((cap.pcm, cap.sample_rate))
+        if let Some(pcm) = captured {
+            cap.pcm = pcm.samples;
+            cap.sample_rate = pcm.sample_rate;
+        }
+        Some((cap.pcm.clone(), cap.sample_rate))
     }
 
     /// Export a node's captured recording to a WAV file at `path` via the
@@ -1493,8 +1508,10 @@ mod tests {
         let expected_rate =
             ojcore_native::default_output_sample_rate().unwrap_or(DEFAULT_STREAM.sample_rate);
         assert_eq!(rate, expected_rate);
-        // No engine-output tap in the sandbox, so the captured PCM is empty —
-        // but the start/stop lifecycle is intact (the documented gap is the tap).
+        // The engine-output tap is wired in the host (see host.rs
+        // `render_block_taps_mono_master_into_armed_capture`), but this sandbox
+        // has no output device — so there is no live stream to render, and the
+        // captured PCM is empty here. The start/stop lifecycle is intact.
         assert!(pcm.is_empty());
         // Stopping an unarmed node returns None rather than erroring.
         assert!(be.recorder_stop(NodeIdx(99)).is_none());

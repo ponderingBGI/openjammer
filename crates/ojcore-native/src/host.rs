@@ -18,7 +18,8 @@
 //! mock engine and a real command ring — no audio device required.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use std::str::FromStr;
@@ -30,8 +31,9 @@ use rtrb::{Consumer, Producer, RingBuffer};
 use ojcore::{CommandConsumer, Engine, ProgramSwapRx};
 use ojproto::NodeIdx;
 
+use crate::asset::Pcm;
 use crate::device::{classify, device_fault_channel, DeviceFault, DeviceFaultRx};
-use crate::recorder::RecorderSink;
+use crate::recorder::{Recorder, RecorderSink};
 
 /// The minimal slice of [`Engine`] the audio callback needs. Abstracting it lets
 /// the callback wiring be tested against a mock without an audio device (and
@@ -99,6 +101,7 @@ pub fn render_block<P: BlockProcessor>(
     data: &mut [f32],
     channels: usize,
     mono: &mut [f32],
+    mut capture: Option<&mut RecorderSink>,
 ) {
     proc.drain_commands(rx);
 
@@ -118,6 +121,12 @@ pub fn render_block<P: BlockProcessor>(
     while done < total_frames {
         let n = (total_frames - done).min(block);
         proc.render(&mut mono[..n], n);
+        // Tap the rendered MONO master into the output recorder when a recording
+        // is armed. Wait-free + allocation-free (a ring push); the RT thread never
+        // blocks or locks here, and it is a no-op when `capture` is `None`.
+        if let Some(sink) = capture.as_deref_mut() {
+            sink.capture(&mono[..n]);
+        }
         // Fan each mono frame out across all interleaved channels.
         for (f, &s) in mono[..n].iter().enumerate() {
             let base = (done + f) * channels;
@@ -413,6 +422,30 @@ pub struct AudioHost {
     /// (device removed, backend error). Lets the control plane SEE a silent stop
     /// instead of it vanishing into a dead `eprintln!` (Track A P0a).
     device_faults: DeviceFaultRx,
+    /// Output-capture arm flag: the render callback pushes the rendered MONO
+    /// master into the capture sink ONLY while this is set (one relaxed atomic
+    /// load per block when idle — no allocation, no lock on the RT thread).
+    capture_armed: Arc<AtomicBool>,
+    /// Control-side master recorder, drained off-RT by `drain_thread` and on
+    /// stop. Behind a `Mutex` so the drain thread and the control arm/stop
+    /// methods share the one SPSC consumer; the RT thread NEVER touches it (it
+    /// owns the sink half, moved into the callback).
+    capture: Arc<Mutex<Recorder>>,
+    /// Stop signal for `drain_thread`; set on drop so the thread exits and joins.
+    drain_stop: Arc<AtomicBool>,
+    /// The off-RT capture-drain worker; joined in [`Drop`].
+    drain_thread: Option<JoinHandle<()>>,
+}
+
+impl Drop for AudioHost {
+    fn drop(&mut self) {
+        // Stop the off-RT capture-drain thread and join it (it wakes every ≤20 ms,
+        // so the join is bounded). Never touches the audio thread.
+        self.drain_stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.drain_thread.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 /// The default output device's default sample rate (Hz), or `None` when there is
@@ -523,6 +556,34 @@ impl AudioHost {
     /// Pop a single pending device fault, if any (off-RT).
     pub fn poll_device_fault(&mut self) -> Option<DeviceFault> {
         self.device_faults.try_recv()
+    }
+
+    /// Arm output capture: reset any prior capture and begin recording the MONO
+    /// master mix (post-engine, pre-fan) into this host's recorder. The render
+    /// callback feeds the capture sink while armed; the off-RT drain thread grows
+    /// the PCM. Off-RT (control thread).
+    pub fn arm_capture(&self) {
+        if let Ok(mut rec) = self.capture.lock() {
+            rec.reset();
+        }
+        self.capture_armed.store(true, Ordering::Relaxed);
+    }
+
+    /// Whether output capture is currently armed.
+    pub fn capture_armed(&self) -> bool {
+        self.capture_armed.load(Ordering::Relaxed)
+    }
+
+    /// Stop output capture and take the recorded MONO master as a [`Pcm`] (sample
+    /// rate = the negotiated stream rate). Leaves the recorder empty and ready to
+    /// arm again. Off-RT (control thread).
+    pub fn stop_capture(&self) -> Pcm {
+        self.capture_armed.store(false, Ordering::Relaxed);
+        // The in-flight block (if any) finishes pushing; `take` drains the ring.
+        match self.capture.lock() {
+            Ok(mut rec) => rec.take(),
+            Err(poisoned) => poisoned.into_inner().take(),
+        }
     }
 
     /// Open the stream(s) and start rendering `engine` through the callback.
@@ -730,6 +791,14 @@ impl AudioHost {
         let ch = channels as usize;
         // Mono render scratch, allocated ONCE here (off the RT thread).
         let mut mono = vec![0.0f32; buffer_frames as usize];
+        // Output capture: a mono master recorder fed by the callback ONLY while
+        // armed. The SINK (RT producer) moves into the callback; the consumer is
+        // wrapped in a `Mutex` and drained off-RT by a thread spawned once the
+        // stream is live (below).
+        let (capture_recorder, mut out_capture) =
+            Recorder::with_default_ring(1, config.sample_rate);
+        let capture_armed = Arc::new(AtomicBool::new(false));
+        let cap_armed_cb = Arc::clone(&capture_armed);
         // Promote-once guard for realtime priority.
         let mut promoted = false;
 
@@ -779,6 +848,13 @@ impl AudioHost {
                     if let Some(swap) = swap_rx.as_ref() {
                         swap.install_into(&mut engine);
                     }
+                    // Tap the rendered master into the recorder ONLY while a
+                    // recording is armed (one relaxed atomic load per block).
+                    let cap = if cap_armed_cb.load(Ordering::Relaxed) {
+                        Some(&mut out_capture)
+                    } else {
+                        None
+                    };
                     // With mic capture wired, feed the `MicIn` node from the ring
                     // per engine-block (inside `render_block`'s chunking) via the
                     // `MicFedEngine` adapter; otherwise render the engine directly.
@@ -789,9 +865,9 @@ impl AudioHost {
                                 mic,
                                 mic_node: node,
                             };
-                            render_block(&mut fed, &mut rx, data, ch, &mut mono);
+                            render_block(&mut fed, &mut rx, data, ch, &mut mono, cap);
                         }
-                        _ => render_block(&mut engine, &mut rx, data, ch, &mut mono),
+                        _ => render_block(&mut engine, &mut rx, data, ch, &mut mono, cap),
                     }
                 },
                 err_fn,
@@ -804,12 +880,42 @@ impl AudioHost {
             s.play().map_err(|e| map_cpal(e, HostError::Stream))?;
         }
 
+        // Off-RT capture drain: pull captured samples out of the wait-free ring
+        // into the recorder's growing `Vec` every ~20 ms, independent of any UI
+        // poll cadence. The RT thread NEVER touches this `Mutex` — it only pushes
+        // into the sink's ring; the lock is contended off-RT by this thread and
+        // the `arm_capture`/`stop_capture` control methods, which is fine away
+        // from the audio callback. Spawned only after the stream is live so a
+        // failed start never leaks a thread.
+        let capture = Arc::new(Mutex::new(capture_recorder));
+        let drain_stop = Arc::new(AtomicBool::new(false));
+        let drain_thread = {
+            let capture = Arc::clone(&capture);
+            let drain_stop = Arc::clone(&drain_stop);
+            thread::spawn(move || {
+                while !drain_stop.load(Ordering::Relaxed) {
+                    if let Ok(mut rec) = capture.lock() {
+                        rec.drain();
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                }
+                // Final drain so a just-stopped recording keeps its tail.
+                if let Ok(mut rec) = capture.lock() {
+                    rec.drain();
+                }
+            })
+        };
+
         Ok(Self {
             _output: output,
             _input: input,
             config,
             fault,
             device_faults: fault_rx,
+            capture_armed,
+            capture,
+            drain_stop,
+            drain_thread: Some(drain_thread),
         })
     }
 
@@ -950,7 +1056,7 @@ mod tests {
         let mut data = vec![0.0f32; frames * channels];
         let mut mono = vec![0.0f32; frames];
 
-        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono);
+        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None);
 
         // Commands were drained, in order, before any render.
         assert_eq!(proc.drained.len(), 2);
@@ -973,12 +1079,62 @@ mod tests {
         let mut data = vec![0.0f32; frames]; // mono: channels == 1
         let mut mono = vec![0.0f32; frames];
 
-        render_block(&mut proc, &mut rx, &mut data, 1, &mut mono);
+        render_block(&mut proc, &mut rx, &mut data, 1, &mut mono, None);
 
         assert_eq!(proc.last_nframes, frames);
         for (i, &s) in data.iter().enumerate() {
             assert_eq!(s, -0.25, "frame {i}");
         }
+    }
+
+    #[test]
+    fn render_block_taps_mono_master_into_armed_capture() {
+        // With a capture sink wired, render_block pushes the rendered MONO master
+        // (pre-fan) into the recorder ring — the seam that makes native recording
+        // non-silent. Device-free: a mock processor stands in for the engine, and
+        // a `mono` scratch smaller than the buffer exercises multi-chunk capture.
+        let (_tx, rx) = ojcore::CommandQueue::split(4);
+        let mut rx = rx;
+        let mut proc = MockProcessor::new(0.5);
+        let (mut rec, mut sink) = crate::recorder::Recorder::new(1, 48_000, 8192);
+        let channels = 2;
+        let frames = 64;
+        let mut data = vec![0.0f32; frames * channels];
+        let mut mono = vec![0.0f32; 16];
+
+        render_block(
+            &mut proc,
+            &mut rx,
+            &mut data,
+            channels,
+            &mut mono,
+            Some(&mut sink),
+        );
+
+        // One MONO sample captured per output frame (not per interleaved sample).
+        assert_eq!(rec.drain(), frames);
+        let pcm = rec.finish();
+        assert_eq!(pcm.channels, 1);
+        assert_eq!(pcm.samples.len(), frames);
+        for (i, &s) in pcm.samples.iter().enumerate() {
+            assert!((s - 0.5).abs() < 1e-9, "captured frame {i}: {s}");
+        }
+    }
+
+    #[test]
+    fn render_block_without_capture_is_unchanged() {
+        // A `None` capture renders exactly as before — full fan-out, no panic.
+        let (_tx, rx) = ojcore::CommandQueue::split(4);
+        let mut rx = rx;
+        let mut proc = MockProcessor::new(0.25);
+        let channels = 2;
+        let frames = 8;
+        let mut data = vec![0.0f32; frames * channels];
+        let mut mono = vec![0.0f32; frames];
+
+        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None);
+
+        assert!(data.iter().all(|&s| (s - 0.25).abs() < 1e-9));
     }
 
     #[test]
@@ -995,7 +1151,7 @@ mod tests {
         let mut data = vec![9.0f32; big_frames * channels];
         let mut mono = vec![0.0f32; 4]; // engine block fits 4 frames
 
-        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono);
+        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None);
 
         // 10 frames in 4-frame chunks → 4 + 4 + 2 = three render calls, last = 2.
         assert_eq!(proc.renders, 3);
@@ -1057,7 +1213,7 @@ mod tests {
         let mut data = vec![7.0f32; 8];
         let mut mono = vec![0.0f32; 8];
 
-        render_block(&mut proc, &mut rx, &mut data, 0, &mut mono);
+        render_block(&mut proc, &mut rx, &mut data, 0, &mut mono, None);
 
         // Degenerate channel count: output silenced, no render, no panic.
         assert_eq!(proc.renders, 0);
@@ -1182,7 +1338,7 @@ mod tests {
         };
         let mut out = vec![0.0f32; signal.len()];
         let mut mono = vec![0.0f32; signal.len()];
-        render_block(&mut fed, &mut rx, &mut out, 1, &mut mono);
+        render_block(&mut fed, &mut rx, &mut out, 1, &mut mono, None);
 
         for (i, (&a, &b)) in signal.iter().zip(out.iter()).enumerate() {
             assert!(
