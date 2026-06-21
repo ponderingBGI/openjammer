@@ -39,8 +39,8 @@ use ojcore::{
     Engine, EventRing, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{
-    AssetCatalog, AssetError, AssetStore, AudioHost, HostError, LogRecord, LogStore, Pcm,
-    StreamRequest,
+    AssetCatalog, AssetError, AssetStore, AudioHost, DeviceFault, DeviceSupervisor, HostError, Pcm,
+    RecoveryAction, LogRecord, LogStore, StreamRequest,
 };
 use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
 use ojinstrument::{register_all, RegisterOpts};
@@ -199,6 +199,14 @@ pub struct EngineBackend {
     /// from [`drain_events`] — never the audio callback. A write failure is
     /// swallowed (best-effort durability must never take the instrument down).
     log_store: Option<LogStore>,
+    /// Device-loss recovery policy (Track A P1). Driven each control poll by
+    /// [`EngineBackend::poll_device_recovery`] from the host's `DeviceFault`
+    /// mailbox: on a removal it holds the last good sound and rebuilds the stream
+    /// with backoff (exactly one rebuild per loss; xruns never rebuild).
+    supervisor: DeviceSupervisor,
+    /// Wall-clock (µs) of the last reopen attempt, so retries are paced (~1s
+    /// backoff) instead of hammered on every fast UI poll.
+    last_reopen_us: u64,
 }
 
 /// State of one recorder capture for a node.
@@ -294,6 +302,9 @@ impl EngineBackend {
             last_graph: None,
             device_lost: false,
             log_store: None,
+            // Up to 8 reopen attempts per loss event before a calm give-up.
+            supervisor: DeviceSupervisor::new(8),
+            last_reopen_us: 0,
         }
     }
 
@@ -711,18 +722,70 @@ impl EngineBackend {
         out
     }
 
+    /// Rebuild the audio stream around the last good graph — the production
+    /// `reopen` the recovery loop drives. Drops the dead host and re-runs the
+    /// cold-start path (`adopt`), which opens a fresh stream + engine on whatever
+    /// device is now default. Returns whether audio is running again. No graph yet
+    /// (nothing was ever pushed) ⇒ nothing to rebuild.
+    fn reopen_device(&mut self) -> bool {
+        let Some(graph) = self.last_graph.clone() else {
+            return false;
+        };
+        self.host = None; // tear down the dead stream before re-opening
+        let _ = self.adopt(&graph); // start failure is non-fatal (emits Lifecycle)
+        self.host.is_some()
+    }
+
+    /// One control-poll tick of device-loss recovery (Track A P1). Drains the
+    /// host's device-fault mailbox, drives the [`DeviceSupervisor`] policy, and —
+    /// while recovering — makes one PACED reopen attempt (~1s backoff). A removal
+    /// holds the last good sound and rebuilds the stream exactly once; an xrun
+    /// storm rebuilds zero times. Off-RT: only the control thread runs this.
+    pub fn poll_device_recovery(&mut self) {
+        // Drain faults first (releases the &mut host borrow before we rebuild).
+        let mut faults: Vec<DeviceFault> = Vec::new();
+        if let Some(h) = self.host.as_mut() {
+            h.drain_device_faults(|f| faults.push(f));
+        }
+        for fault in faults {
+            if self.supervisor.on_fault(fault) == RecoveryAction::HoldLastGood {
+                self.emit_lifecycle(
+                    Severity::Warn,
+                    "audio device lost — holding last good sound, reconnecting".into(),
+                );
+            }
+        }
+        // While recovering, attempt a paced reopen.
+        if self.supervisor.poll_recovery() == RecoveryAction::AttemptReopen {
+            let now = now_us();
+            if now.wrapping_sub(self.last_reopen_us) >= 1_000_000 {
+                self.last_reopen_us = now;
+                let ok = self.reopen_device();
+                match self.supervisor.on_reopen_result(ok) {
+                    RecoveryAction::Resume => {
+                        self.emit_lifecycle(
+                            Severity::Info,
+                            "audio device recovered — resuming".into(),
+                        )
+                    }
+                    RecoveryAction::GiveUp => self.emit_lifecycle(
+                        Severity::Warn,
+                        "could not reopen an audio device — open Settings → Audio to choose one"
+                            .into(),
+                    ),
+                    _ => {}
+                }
+            }
+        }
+    }
+
     /// Drain compact RT fault events and lift them into protocol `Event`s for
     /// DevLog/diagnostics. Control-rate: called by the UI poll command, never on
     /// the audio thread.
     pub fn drain_events(&mut self) -> Vec<Event> {
-        // DEVICE-LOSS AUTO-REBUILD pump. This poll is the control-thread tick the
-        // frontend already drives on a timer, so it is the natural off-RT seam to
-        // check the cpal fault signal and rebuild the stream on the current default
-        // device (re-adopting `last_graph`). It runs BEFORE we snapshot
-        // `pending_events` so a `DeviceLost`/`DeviceRecovered` Lifecycle emitted
-        // this tick is drained in the SAME batch (no extra poll latency on stage).
-        self.tick();
-
+        // Drive device-loss recovery on the same control-poll tick the UI already
+        // makes, so a mid-set unplug is held + reconnected without a separate loop.
+        self.poll_device_recovery();
         // Control-side synthesized events (device-loss `Lifecycle`, …) first, so a
         // host-restart failure reaches the pipe alongside RT faults in one drain.
         let mut out = std::mem::take(&mut self.pending_events);
@@ -1184,6 +1247,23 @@ mod tests {
     /// headless cold-start path bakes it directly into `Engine::new` instead and the
     /// swap stays empty. So we assert the universal invariant always, and the swap
     /// publish only where a device makes the host live (a box WITH audio).
+    #[test]
+    fn device_recovery_poll_is_safe_without_a_host() {
+        // Device-less (CI sandbox): no host, so the recovery tick has no mailbox to
+        // drain, the supervisor stays Running, and no spurious lifecycle events are
+        // emitted. It must be safe to call every poll without a device. (The full
+        // hold -> reopen -> resume policy is covered by ojcore-native's supervisor
+        // + backend tests; this guards the EngineBackend wiring.)
+        let mut be = EngineBackend::new();
+        for _ in 0..5 {
+            be.poll_device_recovery();
+        }
+        assert!(
+            be.drain_events().is_empty(),
+            "no device, no spurious faults"
+        );
+    }
+
     #[test]
     fn push_graph_compiles_and_publishes() {
         let mut be = EngineBackend::new();
