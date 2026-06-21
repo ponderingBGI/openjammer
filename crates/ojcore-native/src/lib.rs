@@ -26,6 +26,7 @@
 pub mod asset;
 pub mod backend;
 pub mod device;
+pub mod fs;
 pub mod host;
 pub mod latency;
 pub mod log;
@@ -42,6 +43,7 @@ pub use device::{
     classify as classify_device_fault, device_fault_channel, DeviceFault, DeviceFaultRx,
     DeviceFaultTx,
 };
+pub use fs::{atomic_write, OjFs, RealFs};
 pub use host::{
     default_output_sample_rate, render_block, AudioHost, BlockProcessor, HostError, StreamFault,
     StreamRequest, DEFAULT_RUN,
