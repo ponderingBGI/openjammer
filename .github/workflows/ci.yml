@@ -225,6 +225,11 @@ jobs:
 
   doctor:
     name: Doctor wiring gates (fault pipe + COI honesty)
+    # Least-privilege: this job only reads the checked-out tree to run pure-TS
+    # gates — it needs no write scopes. Set explicitly so it never inherits a
+    # broader repository default.
+    permissions:
+      contents: read
     needs: changes
     # Affected+: the fault-pipe connectivity gate guards the native drain (engine
     # /src-tauri surface) AND the ring ingest (web surface), so it must re-run when

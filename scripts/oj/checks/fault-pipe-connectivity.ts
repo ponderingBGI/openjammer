@@ -76,10 +76,21 @@ async function collectProductionFiles(dir: string): Promise<string[]> {
   return out;
 }
 
-/** Files (POSIX-relative) whose production source mentions `symbol`. */
-async function filesReferencing(
+/**
+ * Strip line + block comments so a CALL pattern can't be satisfied by prose. A raw
+ * substring (or even a call-shaped regex) would match a doc comment — e.g. this very
+ * file's header writes `invoke('poll_events')` in a comment — letting the gate stay
+ * green while the real wiring is deleted. Stripping comments first makes the match
+ * prove an actual call site, not a mention.
+ */
+function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+}
+
+/** Files (POSIX-relative) whose production CODE (comments stripped) CALLS `pattern`. */
+async function filesCalling(
   files: string[],
-  symbol: string,
+  pattern: RegExp,
   exclude: string[] = [],
 ): Promise<string[]> {
   const excludeSet = new Set(exclude.map((p) => p.replace(/\\/g, '/')));
@@ -93,7 +104,7 @@ async function filesReferencing(
     } catch {
       continue;
     }
-    if (text.includes(symbol)) hits.push(posix);
+    if (pattern.test(stripComments(text))) hits.push(posix);
   }
   return hits;
 }
@@ -110,10 +121,17 @@ export async function run(): Promise<CheckResult> {
     };
   }
 
-  // End 1: a production CALLER of ingestEngineEvent (excluding its own definition).
-  const ingestCallers = await filesReferencing(files, INGEST_SYMBOL, INGEST_DEFINITION_FILES);
-  // End 2: a production frontend caller of the poll_events Tauri command.
-  const pollCallers = await filesReferencing(files, POLL_COMMAND);
+  // End 1: a production CALL of ingestEngineEvent — `.ingestEngineEvent(` — not a
+  // mere mention (an import of the plural `ingestEngineEvents`, or a comment). The
+  // `\s*\(` proves a call; `\b` + the trailing `(` excludes the plural sink's name.
+  const ingestCallers = await filesCalling(
+    files,
+    /\bingestEngineEvent\s*\(/,
+    INGEST_DEFINITION_FILES,
+  );
+  // End 2: a production frontend INVOKE of the poll_events Tauri command —
+  // `invoke('poll_events'`/`"poll_events"` — proving the drain still runs.
+  const pollCallers = await filesCalling(files, /invoke\s*\(\s*['"`]poll_events['"`]/);
 
   const problems: string[] = [];
   if (ingestCallers.length === 0) {
