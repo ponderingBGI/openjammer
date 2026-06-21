@@ -384,15 +384,11 @@ impl EngineBackend {
     /// goes live — the founder-verified seam that makes a serialized graph with a
     /// bound sample actually play.
     pub fn push_graph(&mut self, graph: &OjGraph) -> Result<(), BackendError> {
-        // Render at the device's rate (see `new`): the graph's own sample_rate is a
-        // UI hint; the hardware is authoritative, so a 96k interface plays in tune.
-        let mut g = self.at_device_rate(graph);
-        // Pin the engine block to the host's render chunk (the callback's `mono`
-        // size = stream.buffer_frames). With publish-only swaps the stream is no
-        // longer restarted per push, so the compiled program's block_size must
-        // match what the callback feeds — otherwise a block_size < chunk would
-        // leave a stale tail. render_block still chunks the larger device period.
-        g.block_size = self.stream.buffer_frames;
+        // The graph's own sample_rate / block_size are UI hints; `adopt` is the one
+        // owner that compiles at the live device rate + host render chunk (see
+        // `adopt`), so a 96k interface plays in tune and a recovery onto a
+        // different-rate device never detunes. Here we only carry the binding forward.
+        let mut g = graph.clone();
         // SAMPLE-BINDING SINGLE OWNER. A fresh UI push carries no imperatively
         // bound sample (a `load_sample` mutates only the engine's kept graph, never
         // the UI's), so a naive clobber would silently drop a user-loaded sample on
@@ -424,12 +420,22 @@ impl EngineBackend {
     /// baked sample) is authoritative and is left untouched. Off-RT, pure data.
     fn forward_merge_sample_bindings(prev: &OjGraph, next: &mut OjGraph) {
         use ojinstrument::SAMPLER_PCM_PARAM;
-        use ojproto::Param;
+        use ojproto::{Param, PrimitiveKind};
         for node in next.nodes.iter_mut() {
+            // Only carry a sample binding between Samplers. The merge keys on node
+            // id, so if the UI replaced a Sampler with a different node type at the
+            // SAME id, copying the old slot-0 asset/root-note would bind a stale
+            // sample to the wrong node and corrupt the adopted graph.
+            if !matches!(node.kind, PrimitiveKind::Sampler) {
+                continue;
+            }
             // The prior binding for this exact node id, if any.
             let Some(prev_node) = prev.nodes.iter().find(|n| n.id == node.id) else {
                 continue;
             };
+            if !matches!(prev_node.kind, PrimitiveKind::Sampler) {
+                continue;
+            }
             let Some(prev_asset) = prev_node.assets.iter().find(|a| a.slot == 0) else {
                 continue;
             };
@@ -459,20 +465,6 @@ impl EngineBackend {
         }
     }
 
-    /// Clone `graph` with its `sample_rate` set to the default output device's rate
-    /// (when one is available and differs) so the engine renders in tune on hardware
-    /// that isn't 48k. Falls back to the graph's own rate when no device is present.
-    fn at_device_rate(&self, graph: &OjGraph) -> OjGraph {
-        match ojcore_native::default_output_sample_rate() {
-            Some(rate) if rate != graph.sample_rate => {
-                let mut g = graph.clone();
-                g.sample_rate = rate;
-                g
-            }
-            _ => graph.clone(),
-        }
-    }
-
     /// Compile `graph` (resolving its assets through the catalog) and adopt the
     /// fresh program into the running engine. Shared by [`push_graph`] and the
     /// sample-bind path; does NOT itself store `last_graph` (the caller decides).
@@ -488,7 +480,16 @@ impl EngineBackend {
     /// When no host is running yet (device absent at boot, or a prior start
     /// failed), we start one now around this program — subsequent edits hot-swap.
     fn adopt(&mut self, graph: &OjGraph) -> Result<(), BackendError> {
-        let program = compile_with_assets(graph, &self.registry, &self.catalog)
+        // SINGLE OWNER of "render at the live device rate + host block size". Both
+        // the UI push AND the post-device-loss rebuild route through here, so
+        // neither can forget it: a recovery onto a different-rate default device
+        // recompiles at the NEW rate instead of playing back detuned. `self.stream`
+        // carries the running stream's negotiated rate (cold start / rebuild seed it
+        // from the current default device), authoritative over the graph's UI hint.
+        let mut g = graph.clone();
+        g.sample_rate = self.stream.sample_rate;
+        g.block_size = self.stream.buffer_frames;
+        let program = compile_with_assets(&g, &self.registry, &self.catalog)
             .map_err(BackendError::Compile)?;
 
         if self.host.is_some() {
@@ -525,7 +526,14 @@ impl EngineBackend {
                 // program / last good sound is untouched (there was none to keep on
                 // a cold start, but we still never tear anything down here).
                 eprintln!("ojcore: audio host failed to start (non-fatal): {e}");
-                self.emit_lifecycle(Severity::Warn, format!("audio host failed to start: {e}"));
+                // Announce the cold-start failure ONCE, but stay silent while a
+                // device loss is latched: `rebuild_after_loss` calls `adopt` on
+                // EVERY tick, and the loss was already announced at detection in
+                // `tick`, so emitting here per retry would storm the fault pipe and
+                // break the one-loss-event de-bounce.
+                if !self.device_lost {
+                    self.emit_lifecycle(Severity::Warn, format!("audio host failed to start: {e}"));
+                }
                 self.producer = producer;
             }
         }
@@ -1169,15 +1177,28 @@ mod tests {
         assert!(compile(&g, &reg).is_ok());
     }
 
-    /// `push_graph` recompiles a UI-pushed graph and publishes it (device-less:
-    /// no host, but no error either — the program is staged).
+    /// `push_graph` recompiles a UI-pushed graph and adopts it without error.
+    /// ENVIRONMENT-AGNOSTIC: the device-independent contract is that the graph is
+    /// retained as `last_graph`. Whether the program is ALSO staged in the swap
+    /// mailbox depends on a live host — present only with a real output device; the
+    /// headless cold-start path bakes it directly into `Engine::new` instead and the
+    /// swap stays empty. So we assert the universal invariant always, and the swap
+    /// publish only where a device makes the host live (a box WITH audio).
     #[test]
     fn push_graph_compiles_and_publishes() {
         let mut be = EngineBackend::new();
         let g = EngineBackend::starter_graph(DEFAULT_STREAM);
         assert!(be.push_graph(&g).is_ok());
-        // The swap mailbox holds the published program.
-        assert!(be.swap.has_pending());
+        assert!(
+            be.last_graph.is_some(),
+            "the adopted graph is retained as last_graph"
+        );
+        if be.is_running() {
+            assert!(
+                be.swap.has_pending(),
+                "a live host stages the pushed program in the swap mailbox"
+            );
+        }
     }
 
     /// A malformed graph (no master output) is rejected as a compile error,
