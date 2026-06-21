@@ -227,6 +227,28 @@ jobs:
       - name: Offline audio render gate (Windows, device-free)
         run: cargo run -p ojcore-native --bin render --features demo -- ci-render.wav 2
 
+  macos-native:
+    name: macOS engine + audio gate (arm64, non-blocking)
+    needs: changes
+    # macOS + arm64 coverage: CoreAudio's cpal path AND the arm64 libm ULP band
+    # the golden fingerprints depend on. NON-BLOCKING for now (continue-on-error +
+    # deliberately NOT in the `gate` aggregator's needs): gather wall-time/signal
+    # on the free standard M1 runner first; promote to a required leg once it is
+    # reliably green and does not queue (the plan's "macOS-on-PR non-blocking
+    # first" step). `-large`/`-xlarge` macOS runners BILL even on public repos, so
+    # this stays on the free standard label.
+    if: needs.changes.outputs.engine == 'true' || needs.changes.outputs.web == 'true'
+    runs-on: macos-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Rust (stable)
+        uses: ./.github/actions/setup-rust
+      - name: Engine tests on macOS (arm64)
+        run: cargo test -p ojcore -p ojinstrument -p ojcore-native
+      - name: Offline audio render gate (macOS, device-free)
+        run: cargo run -p ojcore-native --bin render --features demo -- "${RUNNER_TEMP}/ci-render.wav" 2
+
   doctor:
     name: Doctor wiring gates (fault pipe + COI honesty)
     # Least-privilege: this job only reads the checked-out tree to run pure-TS
