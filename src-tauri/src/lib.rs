@@ -280,6 +280,28 @@ fn set_mic(node: u32, enabled: bool, state: tauri::State<'_, BackendState>) -> R
         .map_err(|e| e.to_string())
 }
 
+/// One selectable output device for the Settings device picker: its stable cpal
+/// id (passed back to `set_speaker_device`) and its human-readable name.
+#[derive(serde::Serialize)]
+struct OutputDevice {
+    id: String,
+    name: String,
+}
+
+/// Enumerate the host's available OUTPUT devices for the device picker. Each
+/// entry carries the stable cpal `DeviceId` string (which `set_speaker_device`
+/// re-opens the stream onto) and the device's human-readable name. Off-RT: the
+/// enumeration runs on the control thread (inside `ojcore_native`), never the
+/// audio thread. A device-less sandbox (CI / headless) yields an empty list
+/// rather than erroring — the UI degrades to "system default only".
+#[tauri::command]
+fn list_output_devices() -> Vec<OutputDevice> {
+    ojcore_native::host::output_devices()
+        .into_iter()
+        .map(|(id, name)| OutputDevice { id, name })
+        .collect()
+}
+
 /// Snapshot the current user data before an update installs — the frontend passes
 /// its exported `localStorage`; the Pi agent dir is copied natively. Best-effort:
 /// a failed backup never fails the caller. Records the OUTGOING version + channel
@@ -455,6 +477,7 @@ pub fn run() {
             set_speaker_volume,
             set_speaker_device,
             set_mic,
+            list_output_devices,
             updater::update_stage,
             updater::update_is_pending,
             updater::update_try_install,

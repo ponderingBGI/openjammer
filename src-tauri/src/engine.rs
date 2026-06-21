@@ -35,8 +35,8 @@ use std::sync::{Arc, Mutex};
 
 use ojcore::meter::{event_frame, return_frame};
 use ojcore::{
-    compile, compile_with_assets, master_param, CommandProducer, CommandQueue, CompileError,
-    Engine, EventRing, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
+    compile, compile_with_assets, master_param, CommandConsumer, CommandProducer, CommandQueue,
+    CompileError, Engine, EventRing, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{
     device_fault_channel, install_device_listener, probe_default_output, AssetCatalog, AssetError,
@@ -83,12 +83,6 @@ pub enum BackendError {
     Asset(AssetError),
     /// A capability command referenced a node id not present in the live graph.
     UnknownNode(u32),
-    /// A control command is not yet routable on the native host (e.g. per-node
-    /// output-device selection / mic capture). Surfaced HONESTLY rather than
-    /// silently succeeding: the cpal stream re-open / duplex-input routing is a
-    /// later (device-rebuild) wave, so the UI must not report success while the
-    /// engine keeps rendering to the default device. Carries what was requested.
-    NotRoutable(&'static str),
 }
 
 impl std::fmt::Display for BackendError {
@@ -99,9 +93,6 @@ impl std::fmt::Display for BackendError {
             BackendError::PluginScan(e) => write!(f, "plugin scan failed: {e}"),
             BackendError::Asset(e) => write!(f, "asset operation failed: {e}"),
             BackendError::UnknownNode(n) => write!(f, "unknown node id {n} in live graph"),
-            BackendError::NotRoutable(what) => {
-                write!(f, "{what} is not yet routable on the native host")
-            }
         }
     }
 }
@@ -221,6 +212,17 @@ pub struct EngineBackend {
     _device_listener: Option<DeviceListener>,
     /// Drain for faults the OS listener emits (empty where there is no listener).
     listener_faults: DeviceFaultRx,
+    /// The chosen OUTPUT device's cpal [`DeviceId`] string, or `None` for the
+    /// system default. Set by [`set_speaker_device`]; the audio host is (re)opened
+    /// onto it through the SAME rebuild seam device-loss recovery uses, so a pick
+    /// costs one controlled stream rebuild (a brief held-note gap) and survives a
+    /// later graph swap / recovery (every `open_host` honours it).
+    selected_output_device: Option<String>,
+    /// The live `MicIn` node fed by the duplex input stream, or `None` when mic
+    /// capture is off. Set by [`set_mic`]; while `Some`, the host opens the duplex
+    /// input and feeds this node's buffer from the mic ring each block. Re-applied
+    /// on every `open_host` so it survives a graph swap / device recovery.
+    mic_node: Option<NodeIdx>,
 }
 
 /// State of one recorder capture for a node.
@@ -326,6 +328,8 @@ impl EngineBackend {
             last_probe_us: 0,
             _device_listener: install_device_listener(listener_tx),
             listener_faults: listener_rx,
+            selected_output_device: None,
+            mic_node: None,
         }
     }
 
@@ -432,6 +436,13 @@ impl EngineBackend {
         if let Some(prev) = self.last_graph.as_ref() {
             Self::forward_merge_sample_bindings(prev, &mut g);
         }
+        // Re-validate mic capture against the incoming graph: if the user enabled
+        // the mic but this edit removed (or moved) the `MicIn` node, re-bind to its
+        // current id, or drop the wiring entirely when it is gone — so we never
+        // open a duplex stream for a node that cannot hear it. No-op when mic
+        // capture is off. Done HERE (the real UI graph), not on the starter-graph
+        // cold-start fallback, so a device-less enable does not lose the target.
+        self.reconcile_mic_node(&g);
         self.adopt(&g)?;
         // Remember the (rate-adjusted, binding-merged) live graph so a later sample
         // bind can re-resolve + recompile it against the catalog without a fresh
@@ -533,7 +544,9 @@ impl EngineBackend {
         }
 
         // Cold start: build the persistent engine around this program and open
-        // the stream with the swap mailbox wired into the callback.
+        // the stream with the swap mailbox wired into the callback. Routing (the
+        // chosen device + mic) is honoured inside `open_host`, so a cold start /
+        // recovery resumes on the same device and mic the user picked.
         let mut engine = Engine::new(program);
         engine.attach_meter_ring(Some(Arc::clone(&self.meter_ring)));
         engine.attach_event_ring(Some(Arc::clone(&self.event_ring)));
@@ -544,7 +557,7 @@ impl EngineBackend {
         // producer is live so commands still validate, and the next `push_graph`
         // re-attempts the start. Covers a device-less sandbox AND a present-but-
         // incompatible default output.
-        match AudioHost::start_with_swap(self.stream, engine, consumer, self.swap.rx()) {
+        match self.open_host(engine, consumer) {
             Ok(h) => {
                 self.host = Some(h);
                 self.producer = producer;
@@ -1013,27 +1026,120 @@ impl EngineBackend {
         })
     }
 
-    /// Route a speaker node to an output device id. Device selection is a host
-    /// (cpal) concern: it requires re-opening the cpal stream on the chosen
-    /// device, which is deferred to the device-rebuild wave (after human stage
-    /// testing). Until then this is HONEST — it returns [`BackendError::NotRoutable`]
-    /// rather than silently succeeding while the engine keeps rendering to the
-    /// default device (a UI-vs-reality lie). The executor `.catch` routes the
-    /// error into the log store so the performer sees the truth.
+    /// Open the audio host for `engine` on the CURRENT routing state — the chosen
+    /// output device ([`selected_output_device`], default when `None`) and, when
+    /// mic capture is on ([`mic_node`]), the duplex input feeding that `MicIn`
+    /// node. The ONE stream-open seam: every cold start / device-loss rebuild /
+    /// device-pick / mic-toggle routes through here, so routing can never be
+    /// forgotten on one path and present on another (code-value #2: extend the
+    /// pillar, never fork it).
+    fn open_host(
+        &mut self,
+        engine: Engine,
+        consumer: CommandConsumer,
+    ) -> Result<AudioHost, HostError> {
+        let mut req = self.stream;
+        // The duplex input is opened iff mic capture is wired to a live node.
+        req.duplex_input = self.mic_node.is_some();
+        AudioHost::start_with_swap_on_device(
+            req,
+            engine,
+            consumer,
+            self.swap.rx(),
+            self.selected_output_device.clone(),
+            self.mic_node,
+        )
+    }
+
+    /// The `MicIn` source node in `graph`, if any. The duplex input feeds this
+    /// node's buffer; a graph carries at most one mic source in practice, so the
+    /// first match is authoritative. Pure, off-RT.
+    fn mic_node_of(graph: &OjGraph) -> Option<NodeIdx> {
+        use ojproto::PrimitiveKind;
+        graph
+            .nodes
+            .iter()
+            .find(|n| matches!(n.kind, PrimitiveKind::MicIn))
+            .map(|n| n.id)
+    }
+
+    /// Re-validate the enabled mic target against the graph being adopted: if mic
+    /// capture is on but its `MicIn` node is gone (the user deleted it), drop the
+    /// wiring so `open_host` does not open a duplex stream for a node that cannot
+    /// hear it. Re-binds to the node's current id when it is still present. No-op
+    /// when mic capture is off. Off-RT, pure bookkeeping.
+    fn reconcile_mic_node(&mut self, graph: &OjGraph) {
+        if self.mic_node.is_some() {
+            self.mic_node = Self::mic_node_of(graph);
+        }
+    }
+
+    /// Tear down the live stream and re-open it on the CURRENT routing state
+    /// (chosen device + mic) around `last_graph` (or the silent starter graph when
+    /// nothing has been pushed yet). This is the SAME controlled rebuild
+    /// device-loss recovery uses — a brief held-note gap — so a device pick or a
+    /// mic toggle reuses one seam rather than inventing a teardown path. Off-RT.
+    /// A start failure is non-fatal (`adopt` emits a `Lifecycle` and leaves the
+    /// backend usable); the error is not surfaced to the caller because the
+    /// routing state IS recorded and the next push/recovery retries.
+    fn rebuild_stream(&mut self) {
+        // Follow the chosen/default device's rate first, so a pick onto a
+        // different-rate interface recompiles at the new rate (no detune) — the
+        // same rule the device-loss rebuild applies.
+        if let Some(rate) = ojcore_native::default_output_sample_rate() {
+            self.stream.sample_rate = rate;
+        }
+        self.host = None; // drop the dead/old stream before re-opening
+        let graph = self
+            .last_graph
+            .clone()
+            .unwrap_or_else(|| Self::starter_graph(self.stream));
+        // `adopt` opens a fresh stream via the cold-start path (host is None) and
+        // honours the recorded routing through `open_host`.
+        if let Err(e) = self.adopt(&graph) {
+            tracing::warn!(target: "engine", "stream rebuild: re-adopt failed: {e}");
+        }
+    }
+
+    /// Route the engine's output to the device with cpal id `device_id` (the
+    /// device picker's selection). Records the choice and re-opens the stream onto
+    /// it through the shared rebuild seam — a brief, controlled held-note gap,
+    /// identical to device-loss recovery (a held note beats a glitch). An empty
+    /// id resets to the system default. The `node` is accepted for API symmetry
+    /// with `set_speaker_volume`; native output is a single master stream, so the
+    /// device applies to the whole engine, not a per-node sink. A REAL round trip:
+    /// after this call the audio plays out of the chosen device.
     pub fn set_speaker_device(
         &mut self,
         _node: NodeIdx,
-        _device_id: &str,
+        device_id: &str,
     ) -> Result<(), BackendError> {
-        Err(BackendError::NotRoutable("output device selection"))
+        let chosen = (!device_id.is_empty()).then(|| device_id.to_string());
+        // No-op if the device is already selected: do not glitch a held note for a
+        // redundant pick.
+        if self.selected_output_device == chosen {
+            return Ok(());
+        }
+        self.selected_output_device = chosen;
+        self.rebuild_stream();
+        Ok(())
     }
 
-    /// Enable mic capture into `node`'s input bus. Requires opening the duplex
-    /// input stream and routing it to the node bus — deferred to the same
-    /// device-rebuild wave. HONEST until then: returns [`BackendError::NotRoutable`]
-    /// rather than reporting a mic that isn't actually captured.
-    pub fn set_mic(&mut self, _node: NodeIdx, _enabled: bool) -> Result<(), BackendError> {
-        Err(BackendError::NotRoutable("mic capture"))
+    /// Enable / disable microphone capture into `node` (a `MicIn` source). On
+    /// enable, records the target and re-opens the stream WITH the duplex input,
+    /// which down-mixes the mic to mono and feeds `node`'s buffer each block (see
+    /// `ojcore_native::host`); on disable, re-opens WITHOUT the duplex input. Both
+    /// reuse the shared rebuild seam (a brief held-note gap). A REAL round trip:
+    /// once enabled, the `MicIn` node actually hears the microphone.
+    pub fn set_mic(&mut self, node: NodeIdx, enabled: bool) -> Result<(), BackendError> {
+        let next = enabled.then_some(node);
+        // No-op if the mic wiring is unchanged (avoid a needless stream rebuild).
+        if self.mic_node == next {
+            return Ok(());
+        }
+        self.mic_node = next;
+        self.rebuild_stream();
+        Ok(())
     }
 
     /// Scan `dirs` for hostable third-party plugins (VST3 / CLAP, + AU on
@@ -1436,25 +1542,46 @@ mod tests {
         }
     }
 
-    /// Speaker volume is a real round trip; device / mic are HONEST `NotRoutable`
-    /// errors rather than silent UI-vs-reality lies (the cpal re-open / duplex
-    /// input is the deferred device-rebuild wave).
+    /// Speaker volume, device selection, and mic capture are all REAL round trips
+    /// now (the cpal re-open / duplex-input routing landed). In a device-free
+    /// sandbox the stream rebuild cannot open a host, but the calls must never
+    /// panic and must RECORD the routing state (the chosen device id / the mic
+    /// node), so a device appearing on the next push resumes on the right routing.
     #[test]
-    fn speaker_and_mic_controls_are_honest() {
+    fn speaker_and_mic_controls_route_for_real() {
         let mut be = EngineBackend::new();
         // Two SetParams (volume, mute) enqueue cleanly on the live ring.
         be.set_speaker_volume(NodeIdx(1), 0.7, false)
             .expect("speaker volume enqueues");
-        // Device selection / mic capture are not yet routable on native: they
-        // report the truth instead of silently succeeding.
-        assert!(matches!(
-            be.set_speaker_device(NodeIdx(1), "device-2"),
-            Err(BackendError::NotRoutable(_))
-        ));
-        assert!(matches!(
-            be.set_mic(NodeIdx(1), true),
-            Err(BackendError::NotRoutable(_))
-        ));
+
+        // Selecting an output device records the choice and triggers the (here
+        // device-less, so no-op) rebuild — never an error, never a panic.
+        be.set_speaker_device(NodeIdx(1), "device-2")
+            .expect("device selection is routable");
+        assert_eq!(
+            be.selected_output_device.as_deref(),
+            Some("device-2"),
+            "the chosen output device id is recorded"
+        );
+        // An empty id resets to the system default.
+        be.set_speaker_device(NodeIdx(1), "")
+            .expect("default device selection is routable");
+        assert_eq!(
+            be.selected_output_device, None,
+            "an empty id resets to the system default"
+        );
+
+        // Enabling mic capture records the target MicIn node; disabling clears it.
+        be.set_mic(NodeIdx(1), true)
+            .expect("mic enable is routable");
+        assert_eq!(
+            be.mic_node,
+            Some(NodeIdx(1)),
+            "mic capture target node is recorded while enabled"
+        );
+        be.set_mic(NodeIdx(1), false)
+            .expect("mic disable is routable");
+        assert_eq!(be.mic_node, None, "mic capture target cleared on disable");
     }
 
     /// `load_sample` with a previously pushed graph binds the asset to the
