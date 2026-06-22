@@ -153,19 +153,27 @@ describe('PluginManifest derivation', () => {
         expect(manifestFor('keyboard-visual').dsp).toBe('none');
     });
 
-    it('routes rich bespoke nodes to ui:react and the rest to ui:auto', () => {
-        // The ~12 rich bespoke surfaces.
+    it("derives manifest.ui from the single-source nodeDefinitions[type].ui (no magic count)", () => {
+        // The manifest's `ui` is DERIVED from the def's `ui` field (the single
+        // source of truth, kept in lockstep with NodeWrapper by the node-registry
+        // gate). It must equal the def for EVERY type — a derivation, not a list.
+        for (const [type, def] of Object.entries(nodeDefinitions)) {
+            expect(manifestFor(type as NodeType).ui).toBe(def.ui);
+        }
+    });
+
+    it('spot-checks bespoke (ui:react) vs free (ui:auto) per NodeWrapper reality', () => {
+        // Rich bespoke surfaces (a NodeWrapper branch).
         expect(manifestFor('looper').ui).toBe('react');
+        expect(manifestFor('effect').ui).toBe('react');
         expect(manifestFor('multiplier').ui).toBe('react');
         expect(manifestFor('sampler').ui).toBe('react');
-        expect(manifestFor('effect').ui).toBe('react');
-        // Simple nodes get the free AutoParamPanel.
-        expect(manifestFor('container').ui).toBe('auto');
-        expect(manifestFor('piano').ui).toBe('auto');
-
-        // Exactly the documented "~12 rich ones" are ui:react.
-        const reactCount = allManifests().filter((m) => m.ui === 'react').length;
-        expect(reactCount).toBe(12);
+        expect(manifestFor('container').ui).toBe('react'); // ContainerNode (schematic switch)
+        expect(manifestFor('piano').ui).toBe('react'); // InstrumentNode (schematic switch)
+        expect(manifestFor('recorder').ui).toBe('react'); // RecorderNode (content switch)
+        // Free AutoParamPanel surfaces (NO NodeWrapper branch).
+        expect(manifestFor('instrument').ui).toBe('auto'); // generic node falls through to AutoParamPanel
+        expect(manifestFor('keyboard-key').ui).toBe('auto');
     });
 
     it('counts ports from defaultPorts', () => {

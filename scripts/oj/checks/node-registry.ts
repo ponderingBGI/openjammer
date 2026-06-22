@@ -16,14 +16,16 @@
 //      AND it FLAGS a node whose NAME implies a distinct primitive but maps to a
 //      stand-in (a NodeType with a same-named PrimitiveKind in the SSOT that
 //      KIND_BY_TYPE points elsewhere — exactly the looper->Delay signature);
-//   3. the REACT_UI set AGREES with how NodeWrapper actually renders it
-//      (REACT_UI membership <=> a bespoke NodeWrapper branch exists);
-//   4. a component file exists for each bespoke type.
+//   3. the SINGLE-SOURCE `nodeDefinition.ui` field AGREES with how NodeWrapper
+//      actually renders it (`ui:'react'` <=> a bespoke NodeWrapper branch exists).
+//      The old hand-maintained `REACT_UI` set is GONE — `ui` lives on the
+//      NodeDefinition (registry.ts) and the manifest derives from it.
 //
-// RAMP (docs/node-standards.md §6): this lands WARN-level — it reports the
-// pre-existing registration drift as findings without red-lining CI, the
-// documented warn -> fix -> flip-to-fail ramp. Flip `RAMP_STATUS` to 'fail' once
-// the registration-unify unit lands and the findings are zero.
+// RAMP (docs/node-standards.md §6): the registration-unify unit landed and the
+// findings are ZERO, so this now FAILS CI (the warn -> fix -> flip-to-fail ramp is
+// complete). The one intentional name-implies-kind stand-in (recorder ->
+// SpeakerOut: Recorder has no kernel, it is host-bridged) is ALLOWLISTED so it is
+// not a false finding.
 //
 // We parse the source TEXT (with line tracking) the same way the sibling
 // `ssot-set-equality` check does — ts-morph is not a dependency, and the coupling
@@ -36,8 +38,8 @@ import type { CheckResult } from '../lib/report';
 export const id = 'node-registry';
 export const name = 'Node registry coupling (types <-> registry <-> KIND_BY_TYPE <-> NodeWrapper)';
 
-/** Warn-level during the ramp; flip to 'fail' once the unify unit zeroes findings. */
-const RAMP_STATUS: 'warn' | 'fail' = 'warn';
+/** Ramp complete: findings are zero, so the gate now ENFORCES (fails CI on drift). */
+const RAMP_STATUS: 'warn' | 'fail' = 'fail';
 
 // ----------------------------------------------------------------------------
 // Source paths (relative to repo root)
@@ -68,8 +70,12 @@ export interface CouplingModel {
   registryTypes: Map<string, number>;
   /** NodeType -> PrimitiveKind from KIND_BY_TYPE (line-tracked). */
   kindByType: MapEntry[];
-  /** The hand-maintained REACT_UI bespoke-UI set. */
-  reactUi: Set<string>;
+  /**
+   * The SINGLE-SOURCE set of NodeTypes whose `nodeDefinitions` entry declares
+   * `ui: 'react'` (a bespoke component). Derived from registry.ts, NOT a separate
+   * hand-maintained list — this is what makes the coupling drift-proof.
+   */
+  reactTypes: Set<string>;
   /** Types NodeWrapper ACTUALLY renders bespoke (schematic switch + content switch). */
   bespokeRendered: Set<string>;
   /** The closed SSOT PrimitiveKind set. */
@@ -124,6 +130,56 @@ export function parseRegistryTypes(registryText: string): Map<string, number> {
     }
     const m = line.match(/^\s*type:\s*'([^']+)'/);
     if (m?.[1] && !out.has(m[1])) out.set(m[1], i + 1);
+  }
+  return out;
+}
+
+/**
+ * The SINGLE-SOURCE bespoke-UI set: every `nodeDefinitions` entry whose `type`
+ * carries a sibling `ui: 'react'` field. We pair each entry's self-declared
+ * `type:` with the nearest `ui:` literal that follows it (within the same entry,
+ * before the next `type:`), so it is robust against field ORDER. This REPLACES the
+ * old `REACT_UI` set parse — `ui` now lives on the NodeDefinition.
+ */
+export function parseReactTypes(registryText: string): Set<string> {
+  const out = new Set<string>();
+  const lines = registryText.split('\n');
+  let inDefs = false;
+  // Track the current TOP-LEVEL entry: at brace depth 1 inside nodeDefinitions a
+  // `type:`/`ui:` field belongs to the same entry, in ANY order. We buffer both
+  // and pair them when the entry closes (depth drops back to 1).
+  let depth = 0;
+  let entryType: string | null = null;
+  let entryUi: string | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? '';
+    if (!inDefs) {
+      if (/export const nodeDefinitions/.test(line)) {
+        inDefs = true;
+        depth += (line.match(/\{/g)?.length ?? 0) - (line.match(/\}/g)?.length ?? 0);
+      }
+      continue;
+    }
+    const before = depth;
+    // An entry FIELD lives at depth 2 (inside `{ nodeDefinitions { entry { ... } } }`
+    // -> the object literal is depth 1, the entry body is depth 2). Capture before
+    // mutating depth so a same-line field is attributed to its current entry.
+    const t = line.match(/^\s*type:\s*'([^']+)'/);
+    if (t?.[1]) entryType = t[1];
+    const u = line.match(/^\s*ui:\s*'([^']+)'/);
+    if (u?.[1]) entryUi = u[1];
+
+    depth += (line.match(/\{/g)?.length ?? 0) - (line.match(/\}/g)?.length ?? 0);
+
+    // Entry closed: we dropped from an entry body (depth 2) back to the object
+    // body (depth 1). Pair and reset.
+    if (before >= 2 && depth <= 1 && entryType) {
+      if (entryUi === 'react') out.add(entryType);
+      entryType = null;
+      entryUi = null;
+    }
+    // Left the nodeDefinitions object entirely.
+    if (depth <= 0) break;
   }
   return out;
 }
@@ -198,6 +254,21 @@ export function parsePrimitiveKinds(kindsJson: string): Set<string> {
 const UNMAPPED_OK = 'Passthrough';
 
 /**
+ * INTENTIONAL name-implies-kind stand-ins: a `type -> kind` pair where the
+ * NodeType has a same-named PrimitiveKind in the SSOT, yet it deliberately lowers
+ * to a DIFFERENT (host-bridged) kind because it has no kernel of its own. These
+ * are allowlisted so the looper->Delay heuristic doesn't flag a by-design bridge.
+ *
+ *   • `recorder` -> `SpeakerOut`: the Recorder has NO RT kernel; it is a
+ *     host-bridged sink (the executor taps the master/SpeakerOut bus to capture
+ *     audio to a WAV). The same-named `Recorder` PrimitiveKind exists in the SSOT
+ *     for the wire contract, but there is no `recorder` kernel to lower to, so it
+ *     intentionally rides the SpeakerOut sink. This is a deliberate stand-in, not
+ *     the looper->Delay drift.
+ */
+const NAME_KIND_STANDINS = new Set<string>(['recorder->SpeakerOut']);
+
+/**
  * NodeTypes that are purely visual/internal sub-nodes (never lowered, never a
  * bespoke top-level NodeWrapper branch on their own). These legitimately have no
  * KIND_BY_TYPE entry — they are not RT primitives. Listed so the gate doesn't
@@ -245,7 +316,10 @@ export function evaluate(model: CouplingModel): Finding[] {
       const sameNamed = titleCase(type);
       if (
         model.primitiveKinds.has(sameNamed) &&
-        entry.value !== sameNamed
+        entry.value !== sameNamed &&
+        // Skip deliberate host-bridged stand-ins (e.g. recorder -> SpeakerOut:
+        // the Recorder has no kernel, it taps the master sink).
+        !NAME_KIND_STANDINS.has(`${type}->${entry.value}`)
       ) {
         findings.push({
           where: `${P.manifest}:${entry.line}`,
@@ -272,20 +346,23 @@ export function evaluate(model: CouplingModel): Finding[] {
       }
     }
 
-    // (3) REACT_UI <=> NodeWrapper agreement.
-    const inReactUi = model.reactUi.has(type);
+    // (3) nodeDefinition.ui (single source) <=> NodeWrapper agreement.
+    const isReact = model.reactTypes.has(type);
     const isRendered = model.bespokeRendered.has(type);
-    if (inReactUi && !isRendered) {
+    if (isReact && !isRendered) {
       findings.push({
-        where: `${P.manifest}`,
-        message: `REACT_UI lists '${type}' but NodeWrapper has NO bespoke branch for it`,
+        where: `${P.registry}`,
+        message:
+          `nodeDefinitions['${type}'].ui is 'react' but NodeWrapper has NO bespoke ` +
+          `branch for it (set ui:'auto', or add the bespoke branch)`,
       });
-    } else if (!inReactUi && isRendered) {
+    } else if (!isReact && isRendered) {
       findings.push({
         where: `${P.wrapper}`,
         message:
-          `NodeWrapper renders '${type}' with a bespoke branch but REACT_UI ` +
-          `OMITS it (REACT_UI-vs-NodeWrapper disagreement: manifest will report ui:'auto')`,
+          `NodeWrapper renders '${type}' with a bespoke branch but ` +
+          `nodeDefinitions['${type}'].ui is NOT 'react' (manifest will report ` +
+          `ui:'auto'); set ui:'react' on the def to match`,
       });
     }
   }
@@ -335,7 +412,7 @@ export async function run(): Promise<CheckResult> {
     nodeTypes: parseNodeTypes(typesText),
     registryTypes: parseRegistryTypes(registryText),
     kindByType: parseKindByType(manifestText),
-    reactUi: parseStringSet(manifestText, 'REACT_UI'),
+    reactTypes: parseReactTypes(registryText),
     bespokeRendered: parseBespokeRendered(wrapperText),
     primitiveKinds: parsePrimitiveKinds(kindsText),
   };
@@ -346,7 +423,7 @@ export async function run(): Promise<CheckResult> {
   if (model.nodeTypes.length === 0) parseGaps.push(`no NodeType union parsed from ${P.types}`);
   if (model.registryTypes.size === 0) parseGaps.push(`no nodeDefinitions entries parsed from ${P.registry}`);
   if (model.kindByType.length === 0) parseGaps.push(`no KIND_BY_TYPE entries parsed from ${P.manifest}`);
-  if (model.reactUi.size === 0) parseGaps.push(`no REACT_UI set parsed from ${P.manifest}`);
+  if (model.reactTypes.size === 0) parseGaps.push(`no ui:'react' nodeDefinitions parsed from ${P.registry}`);
   if (model.bespokeRendered.size === 0) parseGaps.push(`no bespoke render branches parsed from ${P.wrapper}`);
   if (model.primitiveKinds.size === 0) parseGaps.push(`no PrimitiveKind SSOT parsed from ${P.kinds}`);
 
@@ -367,12 +444,12 @@ export async function run(): Promise<CheckResult> {
       id,
       name,
       status: 'pass',
-      detail: `${model.nodeTypes.length} NodeTypes coupled cleanly across registry, KIND_BY_TYPE (SSOT), REACT_UI, and NodeWrapper`,
+      detail: `${model.nodeTypes.length} NodeTypes coupled cleanly across registry, KIND_BY_TYPE (SSOT), nodeDefinition.ui, and NodeWrapper`,
     };
   }
 
   const detail = [
-    `${findings.length} coupling finding(s) across ${model.nodeTypes.length} NodeTypes (ramp: ${RAMP_STATUS}-level, not failing CI yet):`,
+    `${findings.length} coupling finding(s) across ${model.nodeTypes.length} NodeTypes (enforced, ${RAMP_STATUS}-level):`,
     ...findings.map((f) => `  ${f.where} — ${f.message}`),
   ].join('\n');
 
@@ -381,6 +458,6 @@ export async function run(): Promise<CheckResult> {
     name,
     status: RAMP_STATUS,
     detail,
-    fix: 'unify the registration sources (NodeType union <-> nodeDefinitions <-> KIND_BY_TYPE <-> REACT_UI <-> NodeWrapper); see docs/node-standards.md §6. Flip RAMP_STATUS to "fail" once zero.',
+    fix: 'unify the registration sources (NodeType union <-> nodeDefinitions(.ui) <-> KIND_BY_TYPE <-> NodeWrapper); see docs/node-standards.md §6.',
   };
 }

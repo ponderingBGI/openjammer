@@ -9,6 +9,7 @@ import {
   evaluate,
   parseNodeTypes,
   parseRegistryTypes,
+  parseReactTypes,
   parseKindByType,
   parseStringSet,
   parseBespokeRendered,
@@ -32,7 +33,8 @@ function correctModel(): CouplingModel {
       { type: 'looper', value: 'Looper', line: 100 },
       { type: 'amplifier', value: 'Gain', line: 101 },
     ],
-    reactUi: new Set(['looper', 'amplifier']),
+    // Single source: the nodeDefinitions whose `ui` field is 'react'.
+    reactTypes: new Set(['looper', 'amplifier']),
     bespokeRendered: new Set(['looper', 'amplifier']),
     primitiveKinds: SSOT,
   };
@@ -72,25 +74,46 @@ test('evaluate FLAGS a NodeType with no nodeDefinitions entry', () => {
   expect(findings.some((f) => f.message.includes("'looper' has NO nodeDefinitions entry"))).toBe(true);
 });
 
-test('evaluate FLAGS REACT_UI-vs-NodeWrapper disagreement both directions', () => {
+test('evaluate FLAGS ui:react-vs-NodeWrapper disagreement (rendered but ui not react)', () => {
   const m = correctModel();
-  m.reactUi = new Set(['looper']); // amplifier dropped from REACT_UI
+  m.reactTypes = new Set(['looper']); // amplifier's def.ui is NOT 'react'
   m.bespokeRendered = new Set(['looper', 'amplifier', 'add']); // but add IS rendered
   const findings = evaluate(m);
-  // amplifier: rendered but not in REACT_UI
-  expect(findings.some((f) => f.message.includes("renders 'amplifier'") && f.message.includes('OMITS'))).toBe(true);
-  // add: rendered but not in REACT_UI
+  // amplifier: rendered but def.ui not react
+  expect(findings.some((f) => f.message.includes("renders 'amplifier'") && f.message.includes("ui is NOT 'react'"))).toBe(true);
+  // add: rendered but def.ui not react
   expect(findings.some((f) => f.message.includes("renders 'add'"))).toBe(true);
 });
 
-test('evaluate FLAGS REACT_UI listing a type NodeWrapper does not render', () => {
+test("evaluate FLAGS a def.ui:'react' that NodeWrapper does not render (the old 'instrument' mis-declaration)", () => {
   const m = correctModel();
   m.nodeTypes = ['looper', 'amplifier', 'add', 'instrument'];
   m.registryTypes.set('instrument', 40);
-  m.reactUi = new Set(['looper', 'amplifier', 'instrument']);
+  m.reactTypes = new Set(['looper', 'amplifier', 'instrument']);
   m.bespokeRendered = new Set(['looper', 'amplifier']);
   const findings = evaluate(m);
-  expect(findings.some((f) => f.message.includes("REACT_UI lists 'instrument'"))).toBe(true);
+  expect(
+    findings.some(
+      (f) => f.message.includes("nodeDefinitions['instrument'].ui is 'react'") && f.message.includes('NO bespoke'),
+    ),
+  ).toBe(true);
+});
+
+test('evaluate ALLOWLISTS the recorder -> SpeakerOut host-bridged stand-in (no finding)', () => {
+  const m = correctModel();
+  m.nodeTypes = ['looper', 'amplifier', 'add', 'recorder'];
+  m.registryTypes.set('recorder', 50);
+  m.reactTypes = new Set(['looper', 'amplifier', 'recorder']);
+  m.bespokeRendered = new Set(['looper', 'amplifier', 'recorder']);
+  // recorder has a same-named PrimitiveKind 'Recorder' but deliberately lowers to
+  // 'SpeakerOut' (no kernel; host-bridged sink). This must NOT be flagged.
+  m.kindByType = [
+    { type: 'looper', value: 'Looper', line: 100 },
+    { type: 'amplifier', value: 'Gain', line: 101 },
+    { type: 'recorder', value: 'SpeakerOut', line: 123 },
+  ];
+  const findings = evaluate(m);
+  expect(findings.some((f) => f.message.includes('name-implies-kind mismap'))).toBe(false);
 });
 
 // ---------------------------------------------------------------------------
@@ -127,8 +150,36 @@ test('parseKindByType reads NodeType -> PrimitiveKind with line', () => {
 });
 
 test('parseStringSet reads a named Set of literals', () => {
-  const src = `const REACT_UI: ReadonlySet<NodeType> = new Set<NodeType>(['looper', 'effect']);`;
-  expect(parseStringSet(src, 'REACT_UI')).toEqual(new Set(['looper', 'effect']));
+  const src = `const PURELY_VISUAL = new Set<NodeType>(['looper', 'effect']);`;
+  expect(parseStringSet(src, 'PURELY_VISUAL')).toEqual(new Set(['looper', 'effect']));
+});
+
+test("parseReactTypes reads each entry's ui:'react' from nodeDefinitions (the single source)", () => {
+  const src = [
+    'export const nodeDefinitions = {',
+    '  looper: {',
+    "    type: 'looper',",
+    "    ui: 'react',",
+    '  },',
+    "  'keyboard-key': {",
+    "    type: 'keyboard-key',",
+    "    ui: 'auto',",
+    '  },',
+    '};',
+  ].join('\n');
+  expect(parseReactTypes(src)).toEqual(new Set(['looper']));
+});
+
+test('parseReactTypes pairs ui to its entry regardless of field order', () => {
+  const src = [
+    'export const nodeDefinitions = {',
+    '  effect: {',
+    "    ui: 'react',",
+    "    type: 'effect',",
+    '  },',
+    '};',
+  ].join('\n');
+  expect(parseReactTypes(src)).toEqual(new Set(['effect']));
 });
 
 test('parseBespokeRendered reads switch case literals', () => {
@@ -146,9 +197,11 @@ test('parsePrimitiveKinds reads the SSOT json', () => {
 // Real-tree ramp behaviour
 // ---------------------------------------------------------------------------
 
-test('run() on the real tree is WARN-level (ramp) and never throws or fails CI', async () => {
+test('run() on the real tree PASSES (zero findings) now that the sources are unified', async () => {
   const res = await run();
-  // The pre-existing registration drift is reported, but as warn (CI-green), never fail.
-  expect(res.status === 'warn' || res.status === 'pass').toBe(true);
+  // The registration sources are unified: nodeDefinition.ui matches NodeWrapper for
+  // every type, and the one host-bridged stand-in (recorder->SpeakerOut) is
+  // allowlisted. The gate is enforcing (RAMP_STATUS 'fail') and must report PASS.
+  expect(res.status).toBe('pass');
   expect(res.id).toBe('node-registry');
 });

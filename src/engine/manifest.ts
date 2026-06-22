@@ -13,7 +13,7 @@
  * lists are never hand-duplicated here.
  */
 
-import type { EffectType, NodeDefinition, NodeType } from './types';
+import type { EffectType, NodeDefinition, NodeType, UiKind } from './types';
 import { get as getNodeDefinition, nodeDefinitions } from './registry';
 import { AI_MANIFEST_PARAMS_KEY } from './dynamicRegistry';
 // The ONE closed PrimitiveKind set, imported from the wire-contract SSOT so this
@@ -37,8 +37,13 @@ export type { PrimitiveKind };
 /** How a node's audio is computed (selects the executor backend). Frozen v1. */
 export type DspKind = 'builtin' | 'faust' | 'wasm' | 'none';
 
-/** How a node's control surface is presented. Frozen v1. */
-export type UiKind = 'auto' | 'react';
+/**
+ * How a node's control surface is presented (frozen v1). Re-exported from the
+ * registry type module, where it is declared as the SINGLE-SOURCE field on
+ * {@link NodeDefinition} — the manifest's `ui` is DERIVED from that field, never a
+ * second hand-maintained list.
+ */
+export type { UiKind };
 
 /** Declares one numeric parameter, addressed at runtime by `id` (u16). */
 export interface ParamDecl {
@@ -73,26 +78,6 @@ export interface PluginManifest {
 // `nodeDefinitions`; these only annotate the closed RT/dispatch facets the
 // visual registry doesn't carry).
 // ============================================================================
-
-/**
- * Node types that own a bespoke React component (rendered by NodeWrapper's
- * switch). Everything else falls back to the FREE {@link AutoParamPanel} UI.
- * This is the ONLY hand-maintained list, and it mirrors NodeWrapper exactly.
- */
-const REACT_UI: ReadonlySet<NodeType> = new Set<NodeType>([
-    'looper',
-    'effect',
-    'multiplier',
-    'recorder',
-    'sampler',
-    'library',
-    'midi',
-    'minilab-3',
-    'keyboard',
-    'speaker',
-    'microphone',
-    'instrument', // generic sampled instrument (rich sample picker)
-]);
 
 /**
  * Maps a NodeType to the CLOSED {@link PrimitiveKind} the RT loop lowers it to.
@@ -274,8 +259,15 @@ function dspFor(kind: PrimitiveKind | undefined): DspKind {
     return 'builtin';
 }
 
-function uiFor(type: NodeType): UiKind {
-    return REACT_UI.has(type) ? 'react' : 'auto';
+/**
+ * The node's UI facet is DERIVED from the single-source {@link NodeDefinition.ui}
+ * field — never a second hand-maintained list (the old `REACT_UI` set, deleted).
+ * `def.ui` is `'react'` IFF NodeWrapper renders the type with a bespoke component
+ * (enforced by the node-registry coupling gate). A def predating the field falls
+ * back to `'auto'` (the safe FREE AutoParamPanel).
+ */
+function uiFor(def: NodeDefinition): UiKind {
+    return def.ui ?? 'auto';
 }
 
 /** Count a definition's declared ports into a {@link PortDecl}. */
@@ -341,7 +333,7 @@ export function manifestFromDefinition(def: NodeDefinition): PluginManifest {
         id: manifestIdFor(def.type),
         name: def.name,
         dsp: dspFor(kind),
-        ui: uiFor(def.type),
+        ui: uiFor(def),
         params: PARAMS_BY_TYPE[def.type] ?? paramsFor(def),
         ports: portsFor(def),
     };
