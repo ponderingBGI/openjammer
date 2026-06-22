@@ -27,14 +27,6 @@ const audioInput: PortDefinition = {
     position: { x: 0, y: 0.5 }  // Left side, centered
 };
 
-const controlInput: PortDefinition = {
-    id: 'control-in',
-    name: 'Control',
-    type: 'control',
-    direction: 'input',
-    position: { x: 0, y: 0.5 }
-};
-
 // ============================================================================
 // Node Definitions
 // ============================================================================

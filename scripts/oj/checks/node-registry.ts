@@ -167,7 +167,7 @@ export function parseStringSet(text: string, name: string): Set<string> {
  * The set of types NodeWrapper ACTUALLY renders with a bespoke component. Two
  * sources, mirroring the component:
  *   • the SCHEMATIC_TYPES array's `switch (node.type)` cases, and
- *   • the renderNodeContent `switch (node.type)` cases (effect/amplifier/recorder).
+ *   • the renderNodeContent `switch (node.type)` cases (effect/multiplier/recorder).
  * Every `case '<type>':` literal inside either switch is a bespoke branch.
  */
 export function parseBespokeRendered(wrapperText: string): Set<string> {

@@ -168,7 +168,7 @@ describe('agentSessionStore chat', () => {
     });
 
     it('a silent read tool produces no action chip', async () => {
-        useGraphStore.getState().addNode('amplifier', { x: 0, y: 0 }, null);
+        useGraphStore.getState().addNode('multiplier', { x: 0, y: 0 }, null);
         const script: AgentEvent[] = [
             { kind: 'tool-call', id: 'r1', call: { name: 'get_graph', args: {} } },
             { kind: 'result', summary: 'Inspected the graph.' },
@@ -189,7 +189,7 @@ describe('agentSessionStore chat', () => {
                         calls: [
                             { name: 'add_node', args: { type: 'looper' as NodeType } },
                             { name: 'add_node', args: { type: 'speaker' as NodeType } },
-                            { name: 'add_node', args: { type: 'amplifier' as NodeType } },
+                            { name: 'add_node', args: { type: 'multiplier' as NodeType } },
                         ],
                     },
                 },

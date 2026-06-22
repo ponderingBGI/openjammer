@@ -264,57 +264,91 @@ describe('emitOjGraph — keyboard -> instrument -> effect -> speaker', () => {
 // ---------------------------------------------------------------------------
 
 describe('emitOjGraph — params', () => {
-    it('carries amplifier gain from node.data through the manifest decl', () => {
-        const amp = makeNode('amplifier', { id: 'amp', data: { gain: 2.5 } });
+    it('carries multiplier factor from node.data through the manifest decl', () => {
+        const mul = makeNode('multiplier', { id: 'mul', data: { factor: 2.5 } });
         const speaker = makeNode('speaker', { id: 'spk' });
-        const conn = makeConn(amp.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(amp, speaker), connMap(conn));
+        const conn = makeConn(mul.id, 'out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(mul, speaker), connMap(conn));
 
-        const gainNode = graph.nodes.find((n) => n.kind === 'Gain');
-        expect(gainNode).toBeDefined();
-        // amplifier defaultData has `gain` -> a single numeric ParamDecl id 0.
-        const gainParam = gainNode!.params.find((p) => p.id === 0);
-        expect(gainParam?.value).toBe(2.5);
+        const mulNode = graph.nodes.find((n) => n.kind === 'Multiply');
+        expect(mulNode).toBeDefined();
+        // multiplier `factor` -> the kernel FACTOR param id 0.
+        const factorParam = mulNode!.params.find((p) => p.id === 0);
+        expect(factorParam?.value).toBe(2.5);
     });
 
     it('uses the manifest default when data omits the param', () => {
-        const amp = makeNode('amplifier', { id: 'amp', data: {} });
-        // Force-remove the gain field so it falls back to the decl default (1).
-        amp.data = {};
+        const mul = makeNode('multiplier', { id: 'mul', data: {} });
+        // Force-remove the factor field so it falls back to the decl default (1).
+        mul.data = {};
         const speaker = makeNode('speaker', { id: 'spk' });
-        const conn = makeConn(amp.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(amp, speaker), connMap(conn));
-        const gainNode = graph.nodes.find((n) => n.kind === 'Gain')!;
-        expect(gainNode.params[0]?.value).toBe(1);
+        const conn = makeConn(mul.id, 'out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(mul, speaker), connMap(conn));
+        const mulNode = graph.nodes.find((n) => n.kind === 'Multiply')!;
+        expect(mulNode.params.find((p) => p.id === 0)?.value).toBe(1);
     });
 
-    // GAIN-1/GAIN-2: the amplifier gain is CLAMPED to its declared [0,4] range at
-    // the seam (mirrors the kernel manifest in crates/ojcore/src/builtin.rs). The
-    // kernel `GainNode` accepts any float, so a negative would PHASE-INVERT and a
-    // large value would RUN AWAY past +12 dB — both impossible after the clamp.
-    function ampGain(gain: number): number {
-        const amp = makeNode('amplifier', { id: 'amp', data: { gain } });
+    // The multiplier `factor` is CLAMPED to its declared range at the seam: floored
+    // at 0 (a negative multiplier is meaningless once ×0 mutes) with NO musical
+    // ceiling (1e6 ≈ unbounded, per the user's "0 to ∞"). The kernel accepts any
+    // float, so this seam is where the floor is honoured.
+    function mulFactor(factor: number): number {
+        const mul = makeNode('multiplier', { id: 'mul', data: { factor } });
         const speaker = makeNode('speaker', { id: 'spk' });
-        const conn = makeConn(amp.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(amp, speaker), connMap(conn));
-        const gainNode = graph.nodes.find((n) => n.kind === 'Gain')!;
-        return gainNode.params.find((p) => p.id === 0)!.value;
+        const conn = makeConn(mul.id, 'out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(mul, speaker), connMap(conn));
+        const mulNode = graph.nodes.find((n) => n.kind === 'Multiply')!;
+        return mulNode.params.find((p) => p.id === 0)!.value;
     }
 
-    it('clamps a negative gain up to 0 (no phase inversion)', () => {
-        expect(ampGain(-1.5)).toBe(0);
-        expect(ampGain(-0.001)).toBe(0);
+    it('clamps a negative factor up to 0 (no phase inversion)', () => {
+        expect(mulFactor(-1.5)).toBe(0);
+        expect(mulFactor(-0.001)).toBe(0);
     });
 
-    it('clamps a runaway gain down to the declared ceiling (4x / +12 dB)', () => {
-        expect(ampGain(9)).toBe(4);
-        expect(ampGain(4.0001)).toBe(4);
+    it('passes a large factor through (no musical ceiling)', () => {
+        expect(mulFactor(9)).toBe(9);
+        expect(mulFactor(1000)).toBe(1000);
     });
 
-    it('passes an in-range gain through unchanged', () => {
-        expect(ampGain(0)).toBe(0);
-        expect(ampGain(2.5)).toBe(2.5);
-        expect(ampGain(4)).toBe(4);
+    it('passes an in-range factor through unchanged', () => {
+        expect(mulFactor(0)).toBe(0);
+        expect(mulFactor(0.5)).toBe(0.5);
+        expect(mulFactor(2.5)).toBe(2.5);
+    });
+});
+
+describe('emitOjGraph — multiplier (×) factor_active', () => {
+    // The kernel can't see whether 'in-2' is connected (a disconnected input is
+    // zero-filled, not absent), so emit bakes FACTOR_ACTIVE (id 1) from the edges:
+    // 1 => multiply the two input signals (VCA), 0 => multiply by the on-node number.
+    it('sets factor_active = 0 when only the signal input is connected', () => {
+        const src = makeNode('piano', { id: 'src' });
+        const mul = makeNode('multiplier', { id: 'mul', data: { factor: 2 } });
+        const speaker = makeNode('speaker', { id: 'spk' });
+        const a1 = makeConn(src.id, 'audio-out', mul.id, 'in-1', 'audio');
+        const a2 = makeConn(mul.id, 'out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(src, mul, speaker), connMap(a1, a2));
+        const mulNode = graph.nodes.find((n) => n.kind === 'Multiply')!;
+        expect(mulNode.params.find((p) => p.id === 1)?.value).toBe(0);
+        expect(mulNode.params.find((p) => p.id === 0)?.value).toBe(2);
+    });
+
+    it('sets factor_active = 1 when the second input is connected (VCA)', () => {
+        const s1 = makeNode('piano', { id: 's1' });
+        const s2 = makeNode('piano', { id: 's2' });
+        const mul = makeNode('multiplier', { id: 'mul' });
+        const speaker = makeNode('speaker', { id: 'spk' });
+        const a1 = makeConn(s1.id, 'audio-out', mul.id, 'in-1', 'audio');
+        const a2 = makeConn(s2.id, 'audio-out', mul.id, 'in-2', 'audio');
+        const a3 = makeConn(mul.id, 'out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(s1, s2, mul, speaker), connMap(a1, a2, a3));
+        const mulNode = graph.nodes.find((n) => n.kind === 'Multiply')!;
+        expect(mulNode.params.find((p) => p.id === 1)?.value).toBe(1);
+        // Two distinct audio inputs routed to ports 0 and 1 (kept separate, not mixed).
+        expect(mulNode.n_in).toBe(2);
+        const toMul = graph.edges.filter((e) => e.to_node === mulNode.id && e.kind === 'Audio');
+        expect(new Set(toMul.map((e) => e.to_port))).toEqual(new Set([0, 1]));
     });
 });
 
@@ -529,26 +563,26 @@ describe('emitOjGraph — hierarchy / bundle flattening', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Control edges between real IrNodes (e.g. amplifier gain modulation)
+// Control edges between real IrNodes
 // ---------------------------------------------------------------------------
 
 describe('emitOjGraph — control edges', () => {
     it('emits a control IrEdge when both endpoints are real IrNodes', () => {
-        // microphone (MicIn, audio source) -> amplifier gain-in (control).
+        // microphone (MicIn, audio source) -> multiplier in-1, forced control.
         const mic = makeNode('microphone', { id: 'mic' });
-        const amp = makeNode('amplifier', { id: 'amp' });
+        const mul = makeNode('multiplier', { id: 'mul' });
         const speaker = makeNode('speaker', { id: 's' });
 
-        const ctrl = makeConn(mic.id, 'audio-out', amp.id, 'gain-in', 'control');
-        const audio = makeConn(amp.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(mic, amp, speaker), connMap(ctrl, audio));
+        const ctrl = makeConn(mic.id, 'audio-out', mul.id, 'in-1', 'control');
+        const audio = makeConn(mul.id, 'out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(mic, mul, speaker), connMap(ctrl, audio));
 
         const controlEdges = graph.edges.filter((e) => e.kind === 'Control');
         expect(controlEdges).toHaveLength(1);
         const micIr = graph.nodes.find((n) => n.kind === 'MicIn')!;
-        const ampIr = graph.nodes.find((n) => n.kind === 'Gain')!;
+        const mulIr = graph.nodes.find((n) => n.kind === 'Multiply')!;
         expect(controlEdges[0].from_node).toBe(micIr.id);
-        expect(controlEdges[0].to_node).toBe(ampIr.id);
+        expect(controlEdges[0].to_node).toBe(mulIr.id);
     });
 });
 
@@ -650,20 +684,20 @@ describe('emitOjGraph — compile-readiness invariants', () => {
 describe('emitOjGraph — arity', () => {
     it('sources have n_out>=1 and n_in 0; processors 1/1; master 1/0', () => {
         const piano = makeNode('piano', { id: 'p' });
-        const amp = makeNode('amplifier', { id: 'a' });
+        const fx = makeNode('effect', { id: 'a' });
         const speaker = makeNode('speaker', { id: 's' });
-        const a1 = makeConn(piano.id, 'audio-out', amp.id, 'audio-in', 'audio');
-        const a2 = makeConn(amp.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(piano, amp, speaker), connMap(a1, a2));
+        const a1 = makeConn(piano.id, 'audio-out', fx.id, 'audio-in', 'audio');
+        const a2 = makeConn(fx.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(piano, fx, speaker), connMap(a1, a2));
 
         const sampler = graph.nodes.find((n) => n.kind === 'Sampler')!;
-        const gain = graph.nodes.find((n) => n.kind === 'Gain')!;
+        const proc = graph.nodes.find((n) => n.kind === 'Waveshaper')!;
         const spk = graph.nodes.find((n) => n.kind === 'SpeakerOut')!;
 
         expect(sampler.n_in).toBe(0);
         expect(sampler.n_out).toBeGreaterThanOrEqual(1);
-        expect(gain.n_in).toBe(1);
-        expect(gain.n_out).toBe(1);
+        expect(proc.n_in).toBe(1);
+        expect(proc.n_out).toBe(1);
         expect(spk.n_in).toBe(1);
         expect(spk.n_out).toBe(0);
     });

@@ -6,10 +6,11 @@
 
 import { describe, expect, it } from 'vitest';
 import { emitOjGraph } from '../emit';
-import { remapForBackend, ENGINE_IDS } from '../backendMap';
+import { remapForBackend, ENGINE_IDS, type EngineBackend } from '../backendMap';
 import { getNodeDefinition } from '../../../engine/registry';
 import type { Connection, GraphNode, NodeType } from '../../../engine/types';
-import type { OjGraph } from '../../../../packages/oj-protocol-ts/src/index';
+import { PRIMITIVE_KINDS } from '../../../../packages/oj-protocol-ts/src/index';
+import type { OjGraph, PrimitiveKind } from '../../../../packages/oj-protocol-ts/src/index';
 
 let counter = 0;
 function makeNode(type: NodeType, id: string, data: Record<string, unknown> = {}): GraphNode {
@@ -45,6 +46,7 @@ const NATIVE_REGISTRY = new Set<string>([
     ENGINE_IDS.looper,
     ENGINE_IDS.add,
     ENGINE_IDS.subtract,
+    ENGINE_IDS.multiply,
 ]);
 // U-WASM-PARITY: the wasm registry now holds the FULL common set (instruments +
 // effects + structural I/O), minus SF2 — the same as native plus structural — so
@@ -61,6 +63,7 @@ const WASM_REGISTRY = new Set<string>([
     ENGINE_IDS.looper,
     ENGINE_IDS.add,
     ENGINE_IDS.subtract,
+    ENGINE_IDS.multiply,
     ENGINE_IDS.passthrough,
     ENGINE_IDS.hostGraphIn,
     ENGINE_IDS.hostMicIn,
@@ -72,16 +75,16 @@ function buildRichPatch() {
     const kb = makeNode('keyboard', 'kb');
     const inst = makeNode('instrument', 'inst');
     const fx = makeNode('effect', 'fx');
-    const amp = makeNode('amplifier', 'amp');
+    const mul = makeNode('multiplier', 'mul');
     const spk = makeNode('speaker', 'spk');
     const conns = [
         makeConn('kb', 'bundle-out', 'inst', 'bundle-in', 'control'),
         makeConn('inst', 'audio-out', 'fx', 'audio-in', 'audio'),
-        makeConn('fx', 'audio-out', 'amp', 'audio-in', 'audio'),
-        makeConn('amp', 'audio-out', 'spk', 'audio-in', 'audio'),
+        makeConn('fx', 'audio-out', 'mul', 'in-1', 'audio'),
+        makeConn('mul', 'out', 'spk', 'audio-in', 'audio'),
     ];
     return emitOjGraph(
-        new Map([kb, inst, fx, amp, spk].map((n) => [n.id, n])),
+        new Map([kb, inst, fx, mul, spk].map((n) => [n.id, n])),
         new Map(conns.map((c) => [c.id, c])),
     );
 }
@@ -202,4 +205,55 @@ describe('remapForBackend', () => {
             expect(looper.manifest_id, `${backend} Looper not gain`).not.toBe(ENGINE_IDS.gain);
         }
     });
+});
+
+// ---------------------------------------------------------------------------
+// The gain-fallback trap guard. `manifestIdForKind` returns builtin.gain for any
+// kind it has no case for — a UNITY PASSTHROUGH that silently NO-OPs the node.
+// This bit Looper, Subtract, every effect, and would have bitten Multiply: a real
+// kernel exists and is registered, but the remap drops the node to gain before the
+// engine sees it, so the feature does nothing with every test still green. This
+// guard fails the moment a NEW processing kind is added without a remap case.
+// ---------------------------------------------------------------------------
+
+// Kinds that LEGITIMATELY load via the gain placeholder, per backend:
+//  • Gain itself (it IS the gain kernel);
+//  • the host-bridged extension kinds (FaustHost/WasmHost/PluginHost are registered
+//    dynamically per-node, not by this static remap, and fall back to gain so an
+//    unrunnable host node stays audible rather than failing the whole push);
+//  • Recorder (a host-side master tap; the recorder NODE lowers to SpeakerOut, so
+//    this kind is never actually emitted);
+//  • on NATIVE only, the IO/master/routing kinds — the executor KIND-GATES them, so
+//    the gain placeholder instance is never processed (wasm loads real host.* loaders
+//    for these, so they must NOT be gain there).
+const GAIN_FALLBACK_OK: Record<EngineBackend, ReadonlySet<PrimitiveKind>> = {
+    native: new Set<PrimitiveKind>([
+        'Gain', 'FaustHost', 'WasmHost', 'PluginHost', 'Recorder',
+        'MicIn', 'SpeakerOut', 'GraphIn', 'GraphOut', 'Passthrough',
+    ]),
+    wasm: new Set<PrimitiveKind>(['Gain', 'FaustHost', 'WasmHost', 'PluginHost', 'Recorder']),
+};
+
+describe('backendMap — no audio kind silently no-ops via the gain fallback', () => {
+    for (const backend of ['native', 'wasm'] as const) {
+        it(`${backend}: every processing kind maps to a real loader, never builtin.gain`, () => {
+            const trapped: string[] = [];
+            for (const kind of PRIMITIVE_KINDS) {
+                const graph: OjGraph = {
+                    ir_version: 1,
+                    sample_rate: 48_000,
+                    block_size: 128,
+                    nodes: [{ id: 1, manifest_id: 'x', kind, params: [], assets: [], n_in: 1, n_out: 1 }],
+                    edges: [],
+                    schedule: [],
+                };
+                const id = remapForBackend(graph, backend).nodes[0].manifest_id;
+                if (id === ENGINE_IDS.gain && !GAIN_FALLBACK_OK[backend].has(kind)) trapped.push(kind);
+            }
+            expect(
+                trapped,
+                `these kinds silently no-op via the builtin.gain fallback on ${backend} — add a manifestIdForKind case + ENGINE_IDS entry (the looper/subtract/effects/multiply trap). If a kind is intentionally gain-backed, allowlist it in GAIN_FALLBACK_OK.`,
+            ).toEqual([]);
+        });
+    }
 });

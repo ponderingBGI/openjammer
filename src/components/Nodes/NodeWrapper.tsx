@@ -15,7 +15,7 @@ import { KeyboardVisualNode } from './KeyboardVisualNode';
 import { InstrumentVisualNode } from './InstrumentVisualNode';
 import { LooperNode } from './LooperNode';
 import { EffectNode } from './EffectNode';
-import { AmplifierNode } from './AmplifierNode';
+import { MultiplierNode } from './MultiplierNode';
 import { SpeakerNode } from './SpeakerNode';
 import { RecorderNode } from './RecorderNode';
 import { CanvasIONode } from './CanvasIONode';
@@ -466,8 +466,8 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
         switch (node.type) {
             case 'effect':
                 return <EffectNode node={node} />;
-            case 'amplifier':
-                return <AmplifierNode node={node} />;
+            case 'multiplier':
+                return <MultiplierNode node={node} />;
             case 'recorder':
                 return <RecorderNode node={node} />;
             default: {
@@ -485,11 +485,11 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     };
 
     const renderPort = (port: GraphNode['ports'][number], side: 'input' | 'output') => {
-        // GATED port (declared but not engine-wired yet, e.g. amplifier `gain-in`):
-        // render it visibly inert — dimmed, a "why" tooltip, and NO pointer
-        // handlers — so a player can't start/land a connection that would silently
-        // do nothing. It stays in the DOM so it lights up the instant its routing
-        // lands; canConnect already rejects it as a belt-and-braces guard.
+        // GATED port (declared but not engine-wired yet): render it visibly inert
+        // — dimmed, a "why" tooltip, and NO pointer handlers — so a player can't
+        // start/land a connection that would silently do nothing. It stays in the
+        // DOM so it lights up the instant its routing lands; canConnect already
+        // rejects it as a belt-and-braces guard.
         if (port.disabled) {
             return (
                 <PortRow
@@ -509,11 +509,19 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
                 />
             );
         }
+        // Universal ports (e.g. the Multiplier's in/out) render violet and adopt
+        // the resolved wire color once typed; audio is blue, everything else grey.
+        const portKind = port.type === 'audio' ? 'audio' : port.type === 'universal' ? 'universal' : 'control';
+        const resolved =
+            (node.data as { resolvedType?: 'audio' | 'control' | null }).resolvedType ??
+            port.resolvedType ??
+            undefined;
         return (
             <PortRow
                 key={port.id}
                 side={side}
-                kind={port.type === 'audio' ? 'audio' : 'control'}
+                kind={portKind}
+                {...(port.type === 'universal' && resolved ? { resolvedKind: resolved } : {})}
                 connected={hasConnection(port.id)}
                 hideLabel={!!port.hideExternalLabel}
                 label={port.name}

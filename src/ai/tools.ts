@@ -65,7 +65,7 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
         name: 'add_node',
         description:
             'Add a node of the given registry `type` to the canvas (e.g. "looper", ' +
-            '"amplifier", "sampler", "speaker"). Mirrors the UI add-node action.',
+            '"multiplier", "sampler", "speaker"). Mirrors the UI add-node action.',
     },
     {
         name: 'remove_node',

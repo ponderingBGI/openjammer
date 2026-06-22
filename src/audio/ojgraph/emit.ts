@@ -21,7 +21,7 @@
  *     that drive note triggering (RtCommands), not audio wires. We mirror that:
  *     audio edges become audio `IrEdge`s between audio IrNodes; control edges
  *     are emitted as control `IrEdge`s only when BOTH endpoints survive as
- *     IrNodes (e.g. an amplifier's `gain-in`), and are otherwise dropped (the
+ *     IrNodes (a node with a real control input), and are otherwise dropped (the
  *     control endpoint is a keyboard/MIDI/visual node with no IrNode).
  *
  *   • HIERARCHY + BUNDLES are FLATTENED. Purely-structural nodes
@@ -303,6 +303,27 @@ export function emitWithIndex(
         syntheticMaster,
     });
 
+    // 6b) MUL: a Multiply node's second input ('in-2' / port 1) being connected
+    // switches its kernel from "× the on-node number" to "× the incoming signal"
+    // (a VCA). The kernel can't detect connectedness — a disconnected input reaches
+    // `process` as a zero-filled buffer, indistinguishable from a connected-but-
+    // silent one — so derive it HERE from the resolved edges and bake it as the
+    // FACTOR_ACTIVE flag param (multiply_param::FACTOR_ACTIVE = 1). Without this an
+    // unconnected 'in-2' would multiply the signal by silence => out = 0.
+    const MULTIPLY_FACTOR_ACTIVE_ID = 1;
+    const nodesWithSecondInput = new Set<NodeIdx>();
+    for (const e of edges) {
+        if (e.kind === 'Audio' && e.to_port === 1) nodesWithSecondInput.add(e.to_node);
+    }
+    for (const irNode of irNodes) {
+        if (irNode.kind !== 'Multiply') continue;
+        const active = nodesWithSecondInput.has(irNode.id) ? 1 : 0;
+        irNode.params = [
+            ...irNode.params.filter((p) => p.id !== MULTIPLY_FACTOR_ACTIVE_ID),
+            { id: MULTIPLY_FACTOR_ACTIVE_ID, value: active },
+        ];
+    }
+
     // The id -> NodeIdx interning (surviving nodes only).
     const index: NodeIdxMap = new Map();
     for (const [id, e] of emitted) index.set(id, e.idx);
@@ -366,10 +387,9 @@ function buildIrNode(e: EmittedNode, demoteMaster: boolean): IrNode {
  *
  * The resolved value is CLAMPED to the decl's declared `[min,max]` envelope, so a
  * UI / AI / imported `node.data` value can never drive a kernel param outside the
- * range it declares. For the amplifier this is the GAIN-1/GAIN-2 guarantee: a
- * negative gain (phase invert) is clamped up to 0 (mute) and a runaway boost is
- * clamped down to the declared ceiling (+12 dB / 4x) — the kernel `GainNode`
- * itself accepts any float, so this seam is where the range is honoured.
+ * range it declares. For the multiplier `factor` this floors a negative multiplier
+ * up to 0 (a negative is meaningless once ×0 already mutes) with no musical ceiling
+ * — the kernel accepts any float, so this seam is where the floor is honoured.
  */
 function paramsFromData(node: GraphNode, decls: ParamDecl[]): Param[] {
     const out: Param[] = [];
@@ -551,9 +571,9 @@ function buildEdges(args: BuildEdgesArgs): IrEdge[] {
             }
         } else {
             // Control edge: only meaningful if the TARGET is also a real IrNode
-            // with a control surface (e.g. amplifier gain-in). Otherwise the
-            // target is a keyboard/visual/instrument-bundle endpoint driven by
-            // RtCommands, not a routed buffer — drop it.
+            // with a control surface. Otherwise the target is a keyboard/visual/
+            // instrument-bundle endpoint driven by RtCommands, not a routed buffer
+            // — drop it.
             const targetEmitted = emitted.get(conn.targetNodeId);
             if (!targetEmitted) continue;
             pushEdge({

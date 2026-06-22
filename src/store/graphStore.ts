@@ -120,7 +120,7 @@ export function getNodeDimensions(node: GraphNode): { width: number; height: num
             };
         }
         default:
-            // Standard nodes (microphone, effect, amplifier, recorder)
+            // Standard nodes (microphone, effect, multiplier, recorder)
             return {
                 width: NODE_DIMENSIONS.DEFAULT_WIDTH,
                 height: NODE_DIMENSIONS.DEFAULT_HEIGHT
@@ -1293,8 +1293,8 @@ export const useGraphStore = create<GraphStore>()(
                             resolvedType = targetPort.type as 'audio' | 'control';
                         }
 
-                        // Update source node if it has universal ports (add/subtract)
-                        if ((sourceNode.type === 'add' || sourceNode.type === 'subtract') &&
+                        // Update source node if it has universal ports (add/subtract/multiplier)
+                        if ((sourceNode.type === 'add' || sourceNode.type === 'subtract' || sourceNode.type === 'multiplier') &&
                             sourcePort.type === 'universal') {
                             const currentSource = newNodes.get(sourceNodeId) || sourceNode;
                             newNodes.set(sourceNodeId, {
@@ -1303,8 +1303,8 @@ export const useGraphStore = create<GraphStore>()(
                             });
                         }
 
-                        // Update target node if it has universal ports (add/subtract)
-                        if ((targetNode.type === 'add' || targetNode.type === 'subtract') &&
+                        // Update target node if it has universal ports (add/subtract/multiplier)
+                        if ((targetNode.type === 'add' || targetNode.type === 'subtract' || targetNode.type === 'multiplier') &&
                             targetPort.type === 'universal') {
                             const currentTarget = newNodes.get(targetNodeId) || targetNode;
                             newNodes.set(targetNodeId, {
@@ -1337,7 +1337,7 @@ export const useGraphStore = create<GraphStore>()(
 
                         for (const nodeId of nodesToCheck) {
                             const node = newNodes.get(nodeId);
-                            if (node && (node.type === 'add' || node.type === 'subtract')) {
+                            if (node && (node.type === 'add' || node.type === 'subtract' || node.type === 'multiplier')) {
                                 // Check if node has any remaining connections
                                 const remainingConnections = Array.from(newConnections.values()).some(
                                     conn => conn.sourceNodeId === nodeId || conn.targetNodeId === nodeId
