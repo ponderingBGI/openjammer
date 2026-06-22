@@ -66,9 +66,9 @@ describe('UpdatesPanel', () => {
 
         render(<UpdatesPanel />);
 
-        expect(screen.getByRole('group', { name: /release channel/i })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Stable' })).toHaveAttribute('aria-pressed', 'true');
-        expect(screen.getByRole('button', { name: 'Canari' })).toBeInTheDocument();
+        expect(screen.getByRole('tablist', { name: /release channel/i })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Stable' })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('tab', { name: 'Canari' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Download Stable/i })).toBeInTheDocument();
         expect(screen.getByText(/Browser\/PWA updates apply on reload/i)).toBeInTheDocument();
     });
@@ -88,8 +88,8 @@ describe('UpdatesPanel', () => {
 
         render(<UpdatesPanel />);
 
-        expect(screen.getByRole('group', { name: /release channel/i })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Canari' })).toBeInTheDocument();
+        expect(screen.getByRole('tablist', { name: /release channel/i })).toBeInTheDocument();
+        expect(screen.getByRole('tab', { name: 'Canari' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Download Stable/i })).toBeInTheDocument();
         expect(screen.getAllByText(/Manual \.dmg updates/i).length).toBeGreaterThan(0);
     });
@@ -99,7 +99,7 @@ describe('UpdatesPanel', () => {
         const updater = mockUpdater({ status: status({ can_auto_update: true }) });
 
         render(<UpdatesPanel />);
-        fireEvent.click(screen.getByRole('button', { name: 'Canari' }));
+        fireEvent.click(screen.getByRole('tab', { name: 'Canari' }));
 
         await waitFor(() => expect(updater.checkNow).toHaveBeenCalledWith('canary'));
     });

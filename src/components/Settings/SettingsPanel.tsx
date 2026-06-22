@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Button } from '@openjammer/oj-ui';
+import { useEffect, useState } from 'react';
+import { Button, Tabs } from '@openjammer/oj-ui';
 import { themes, applyTheme, getThemeById, getSavedThemeId, saveThemeId } from '@openjammer/oj-tokens';
 import { KeybindingsPanel } from './KeybindingsPanel';
 import { AudioSettingsPanel } from './AudioSettingsPanel';
@@ -8,9 +8,26 @@ import { AboutPanel } from './AboutPanel';
 import { ScrollContainer } from '../common/ScrollContainer';
 import './SettingsPanel.css';
 
+const TABS = [
+    { value: 'graphics', label: 'Graphics' },
+    { value: 'keybindings', label: 'Keybindings' },
+    { value: 'audio', label: 'Audio' },
+    { value: 'updates', label: 'Updates' },
+    { value: 'about', label: 'About' },
+];
+
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
     const [activeTab, setActiveTab] = useState('graphics');
     const [selectedTheme, setSelectedTheme] = useState(getSavedThemeId());
+
+    // Esc closes the panel — keyboard-first, never trap the performer (PRODUCT.md).
+    useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onClose();
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [onClose]);
 
     const handleThemeChange = (themeId: string) => {
         setSelectedTheme(themeId);
@@ -23,27 +40,29 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
     return (
         <div className="minimal-settings-overlay" onClick={onClose}>
-            <div className="minimal-settings-container" onClick={e => e.stopPropagation()}>
+            <div
+                className="minimal-settings-container"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Settings"
+                onClick={e => e.stopPropagation()}
+            >
                 <div className="minimal-settings-header">
                     <h2>Settings</h2>
-                    <Button variant="ghost" iconOnly onClick={onClose}>
+                    <Button variant="ghost" iconOnly onClick={onClose} aria-label="Close settings">
                         ✕
                     </Button>
                 </div>
 
                 <div className="minimal-settings-content">
-                    {/* Sidebar */}
+                    {/* Sidebar — the canonical vertical SegmentedControl (Tabs). */}
                     <div className="minimal-sidebar">
-                        {['graphics', 'keybindings', 'audio', 'updates', 'about'].map(tab => (
-                            <Button
-                                key={tab}
-                                variant="ghost"
-                                className={`minimal-tab-btn ${activeTab === tab ? 'active' : ''}`}
-                                onClick={() => setActiveTab(tab)}
-                            >
-                                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                            </Button>
-                        ))}
+                        <Tabs
+                            aria-label="Settings sections"
+                            value={activeTab}
+                            onChange={setActiveTab}
+                            options={TABS}
+                        />
                     </div>
 
                     {/* Main Content */}

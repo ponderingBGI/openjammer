@@ -53,6 +53,14 @@
     color: var(--text-on-accent);
 }
 
+/* Whole control frozen (e.g. channel locked while an update is pinned). The
+   per-button :disabled already mutes the segments; dim the pill so the inked
+   active fill reads as inactive too, and block the pointer. */
+.oj-seg.is-disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
 /* ── Vertical: the Settings sidebar (was .minimal-tab-btn) ── */
 .oj-seg--vertical {
     display: flex;

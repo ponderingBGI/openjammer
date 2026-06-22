@@ -31,6 +31,17 @@ const fakeContext = {
     destination: {},
     audioWorklet: { addModule: vi.fn(() => Promise.resolve()) },
     createMediaStreamSource: vi.fn(() => fakeMediaStreamSource),
+    // The default-voice path builds an AudioBuffer from synthesized PCM; a minimal
+    // mono buffer is enough for `OjcoreSamplerHandle.setBuffer` to downmix + load.
+    createBuffer: (channels: number, length: number, sampleRate: number) => {
+        const data = new Float32Array(length);
+        return {
+            numberOfChannels: channels,
+            length,
+            sampleRate,
+            getChannelData: () => data,
+        };
+    },
 };
 vi.mock('../../audioContext', () => ({
     getAudioContext: () => fakeContext,
@@ -403,6 +414,109 @@ describe('OjcoreWasmExecutor health on startup failure (mocked worklet)', () => 
         await Promise.resolve();
         await Promise.resolve();
         expect(useEngineHealthStore.getState().health).toBe('DEAD');
+        ex.dispose();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Instrument-switch voice binding (browser parity with the native fix). The
+// built-in default voice must NOT read back as a USER sample, so a picker change
+// always re-binds; and a node that switches to a plucked/bass (Karplus) instrument
+// must never receive a stale sampler asset.
+// ---------------------------------------------------------------------------
+
+describe('OjcoreWasmExecutor instrument-switch voice binding (mocked worklet)', () => {
+    beforeEach(() => {
+        MockWorkletNode.last = null;
+        fakeMediaStreamSource.connect.mockClear();
+        vi.stubGlobal('AudioWorkletNode', MockWorkletNode);
+        vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) })));
+        vi.stubGlobal('WebAssembly', { ...globalThis.WebAssembly, compile: vi.fn(() => Promise.resolve({})) });
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    /** A `keys` instrument -> speaker graph carrying a picker `instrumentId`. */
+    function instrumentGraph(instrumentId: string): {
+        nodes: Map<string, GraphNode>;
+        connections: Map<string, Connection>;
+    } {
+        const inst = makeNode('keys', 'keys-1');
+        inst.data = { ...inst.data, instrumentId };
+        const speaker = makeNode('speaker', 'speaker-1');
+        const out = inst.ports.find((p) => p.direction === 'output' && p.type === 'audio');
+        const spkIn = speaker.ports.find((p) => p.direction === 'input');
+        const conns = new Map<string, Connection>();
+        if (out && spkIn) {
+            const c = makeConn(inst.id, out.id, speaker.id, spkIn.id);
+            conns.set(c.id, c);
+        }
+        return {
+            nodes: new Map([
+                [inst.id, inst],
+                [speaker.id, speaker],
+            ]),
+            connections: conns,
+        };
+    }
+
+    it('re-binds the voice on a picker change (a default voice is NOT a user sample)', async () => {
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const graph = instrumentGraph('gm-acoustic-grand-piano');
+        const ex = new OjcoreWasmExecutor();
+        const { port, fireNodeChange } = await bringUp(ex, graph);
+
+        // On ready, the piano default voice loads (a load-sample for the keys node).
+        const firstLoad = port.posted.find((m) => m.type === 'load-sample');
+        expect(firstLoad, 'a default voice was loaded on ready').toBeTruthy();
+        const node = firstLoad!.node as number;
+        // Complete the round trip so the default voice is recorded — in
+        // `defaultVoiceBindings`, NOT `sampleBindings` (the conflation that used to
+        // make the next picker change a no-op).
+        port.emit({ type: 'sample-stored', node, assetId: 100, rootNote: 60 });
+
+        // Switch to another piano (same family). It MUST re-bind a new voice.
+        const inst = graph.nodes.get('keys-1') as GraphNode;
+        inst.data = { ...inst.data, instrumentId: 'gm-bright-acoustic-piano' };
+        port.posted.length = 0;
+        fireNodeChange();
+        const reload = port.posted.find((m) => m.type === 'load-sample');
+        expect(reload, 'switching instruments re-binds a new voice').toBeTruthy();
+        ex.dispose();
+    });
+
+    it('does not bind a stale sampler asset onto a node that switched to Karplus', async () => {
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const graph = instrumentGraph('gm-acoustic-grand-piano');
+        const ex = new OjcoreWasmExecutor();
+        const { port, fireNodeChange } = await bringUp(ex, graph);
+
+        const firstLoad = port.posted.find((m) => m.type === 'load-sample')!;
+        const node = firstLoad.node as number;
+        port.emit({ type: 'sample-stored', node, assetId: 100, rootNote: 60 });
+
+        // Switch to Harpsichord (a 'piano'-category instrument that lowers to the
+        // Karplus primitive). The re-pushed graph node must NOT carry the stale piano
+        // sampler asset/param, and no PCM is loaded — Karplus is note-triggered.
+        const inst = graph.nodes.get('keys-1') as GraphNode;
+        inst.data = { ...inst.data, instrumentId: 'gm-harpsichord' };
+        port.posted.length = 0;
+        fireNodeChange();
+
+        const graphMsg = [...port.posted].reverse().find((m) => m.type === 'graph');
+        expect(graphMsg, 'a graph was re-pushed for the Karplus switch').toBeTruthy();
+        const pushed = JSON.parse(new TextDecoder().decode(graphMsg!.bytes as Uint8Array)) as OjGraph;
+        const karplus = pushed.nodes.find((n) => n.id === node)!;
+        expect(karplus.kind).toBe('KarplusString');
+        expect(karplus.assets.some((a) => a.slot === 0), 'no stale sampler asset on Karplus').toBe(
+            false,
+        );
+        expect(karplus.params.some((p) => p.id === 16), 'no stale root-note param on Karplus').toBe(
+            false,
+        );
+        expect(port.posted.some((m) => m.type === 'load-sample'), 'Karplus loads no PCM').toBe(false);
         ex.dispose();
     });
 });

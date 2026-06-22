@@ -5,36 +5,41 @@
 import { create } from 'zustand';
 import { getExecutor } from '../audio/executor';
 import { resumeAudio } from '../audio/audioContext';
+import type { LatencyClassification } from '../audio/executor/latency';
 import { getConnectionsForRow, getConnectionsForPedal } from '../utils/connectionActivity';
+
+// Re-exported for back-compat: the classification type now lives with the
+// latency seam (`audio/executor/latency`), its single source of truth.
+export type { LatencyClassification };
 
 // ============================================================================
 // Audio Configuration Types
 // ============================================================================
 
 export interface AudioConfig {
-    sampleRate: number; // 44100, 48000, 96000
+    sampleRate: number; // User-requested or auto-detected engine/device rate in Hz.
     latencyHint: AudioContextLatencyCategory | number;
     lowLatencyMode: boolean; // Disables echo cancellation, noise suppression, AGC
 }
 
-export type LatencyClassification = 'excellent' | 'good' | 'acceptable' | 'poor' | 'bad';
-
 export interface AudioMetrics {
-    baseLatency: number;           // From AudioContext.baseLatency (ms)
-    outputLatency: number;         // From AudioContext.outputLatency (ms)
-    totalLatency: number;          // baseLatency + outputLatency (ms)
-    toneJsLookAhead: number;       // Tone.js scheduling buffer (ms)
-    estimatedRoundTrip: number;    // Total perceived latency for live playing (ms)
+    source: 'native' | 'browser'; // Which backend produced this snapshot
+    running: boolean;             // Whether that backend is actually making sound
+    baseLatency: number;          // Browser processing (ms); 0 on native
+    outputLatency: number;        // Output device / cpal buffering floor (ms)
+    totalLatency: number;         // baseLatency + outputLatency (ms)
+    estimatedRoundTrip: number;   // Total perceived latency for live playing (ms)
     classification: LatencyClassification;
-    isBluetoothSuspected: boolean; // True if outputLatency > 100ms
-    sampleRate: number;            // Current sample rate (Hz)
-    lastUpdated: number;           // Timestamp
+    isBluetoothSuspected: boolean; // True if outputLatency > 100ms (browser only)
+    bufferFrames: number | null;  // Native fixed buffer; null = device period / browser
+    sampleRate: number;           // Current sample rate (Hz)
+    lastUpdated: number;          // Timestamp
 }
 
 export interface DeviceInfo {
     isUSBAudioInterface: boolean;
     deviceLabel: string;
-    sampleRate: number | null;
+    sampleRate: number | null; // Last detected engine/device rate, if known.
 }
 
 // ============================================================================
@@ -49,6 +54,13 @@ interface AudioStore {
     // Audio Configuration
     audioConfig: AudioConfig;
     setAudioConfig: (config: Partial<AudioConfig>) => void;
+
+    // True once the player has explicitly chosen a low-latency state this session.
+    // Gates the USB auto-enable (useUsbLowLatencyDefault) so we never override an
+    // explicit choice. Deliberately NOT persisted — each launch re-evaluates the
+    // USB default, but an explicit toggle wins for the rest of the session.
+    lowLatencyUserSet: boolean;
+    setLowLatencyUserSet: (userSet: boolean) => void;
 
     // Audio Metrics
     audioMetrics: AudioMetrics;
@@ -125,15 +137,20 @@ export const useAudioStore = create<AudioStore>((set, get) => ({
         audioConfig: { ...state.audioConfig, ...config }
     })),
 
+    lowLatencyUserSet: false,
+    setLowLatencyUserSet: (userSet) => set({ lowLatencyUserSet: userSet }),
+
     // Audio Metrics
     audioMetrics: {
+        source: 'browser' as const,
+        running: false,
         baseLatency: 0,
         outputLatency: 0,
         totalLatency: 0,
-        toneJsLookAhead: 100, // Default before Tone.js is configured
         estimatedRoundTrip: 0,
         classification: 'good' as LatencyClassification,
         isBluetoothSuspected: false,
+        bufferFrames: null,
         sampleRate: 48000,
         lastUpdated: 0
     },

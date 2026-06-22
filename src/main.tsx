@@ -7,6 +7,7 @@ import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
 import { installConsoleCapture, installGlobalErrorHandlers } from './utils/log'
+import { recoverFromStaleBundle } from './utils/staleBundleGuard'
 import './components/AppErrorBoundary.css'
 
 // Route every console.* line into the DevLog ring (and thereby the AI agent's
@@ -18,6 +19,12 @@ installConsoleCapture()
 // extension noise never pollutes the DevLog. Must run before app code so an
 // early throw is still captured.
 installGlobalErrorHandlers()
+
+// Desktop only: if the webview's HTTP cache is serving a stale bundle after an
+// in-place update, reload once from a cache-busted URL so the player opens on the
+// new version (no manual hard refresh). Fire-and-forget — never blocks first
+// paint; a no-op in the browser (which has its own service-worker update path).
+void recoverFromStaleBundle()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

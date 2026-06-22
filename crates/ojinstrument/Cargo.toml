@@ -37,3 +37,9 @@ codspeed-criterion-compat = "4.7.0"
 [[bench]]
 name = "instruments"
 harness = false
+
+# End-to-end MIDI->audio latency at the production buffer (the latency-budget
+# gate). Auto-picked up by the CodSpeed build (`-p ojinstrument`).
+[[bench]]
+name = "latency"
+harness = false

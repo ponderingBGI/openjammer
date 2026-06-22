@@ -24,7 +24,7 @@ import { useAudioClipStore } from '../../store/audioClipStore';
 import { useLibraryStore, getSampleFile } from '../../store/libraryStore';
 import { createClipFromSample, generateWaveformPeaksAsync } from '../../utils/clipUtils';
 import { getAudioContext } from '../../audio/audioContext';
-import { isEditableTarget } from '../../utils/editableTarget';
+import { hasNativeTextSelection, isEditableTarget } from '../../utils/editableTarget';
 import { AudioClipVisual } from '../Clips/AudioClipVisual';
 import { ClipDragLayer } from '../Clips/ClipDragLayer';
 // The waveform editor is a heavy, on-demand modal (canvas rendering + clip DSP)
@@ -549,6 +549,17 @@ export function NodeCanvas() {
             // Skip if typing in an editable control. Backspace/Delete must edit text,
             // not delete canvas nodes, while focus is in the AI composer or any textarea.
             if (isEditableTarget(e.target)) return;
+
+            // Selected prose/labels/help text own the OS clipboard. The canvas has
+            // an internal node clipboard, so Ctrl/Cmd+C must yield whenever the
+            // browser has a text selection (Settings, guides, agent answers, etc.).
+            if (
+                (e.ctrlKey || e.metaKey) &&
+                e.key.toLowerCase() === 'c' &&
+                hasNativeTextSelection()
+            ) {
+                return;
+            }
 
             // ESC Key - Unified escape behavior (works in all modes)
             if (e.key === 'Escape') {

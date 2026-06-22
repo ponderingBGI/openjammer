@@ -4,12 +4,14 @@
  *
  * OpenJammer's melodic instrument nodes lower to the engine's `builtin.sampler`,
  * which is silent until PCM is bound (the repo ships no samples). Rather than
- * leave 133 catalogue entries either silent or all sharing one tone, we
- * SYNTHESIZE a recognizable mono one-shot per instrument FAMILY here — a struck
- * string for pianos, a bowed saw for strings, a reedy buzz for saxes, a metallic
- * ring for mallets, drawbar harmonics for organs, and so on. The engine sampler
- * pitch-shifts the one-shot across the keyboard (`2^((note-root)/12)`) and its
- * ADSR release fades it on note-off, so one C4 render plays the whole range.
+ * leave 133 catalogue entries either silent or all sharing one tone, each instrument
+ * FAMILY has a recipe — a struck string for pianos, a bowed saw for strings, a reedy
+ * buzz for saxes, a metallic ring for mallets, drawbar harmonics for organs, and so
+ * on — and each specific instrument SYNTHESIZES a deterministic per-instrument
+ * variation of its family recipe (see {@link getInstrumentVoice}), so two pianos
+ * differ instead of sharing one waveform. The engine sampler pitch-shifts the
+ * one-shot across the keyboard (`2^((note-root)/12)`) and its ADSR release fades it
+ * on note-off, so one C4 render plays the whole range.
  *
  * Everything here is PURE + DETERMINISTIC (seeded noise), so it is unit-testable
  * and identical every run. A user who brings their own sample / SoundFont /
@@ -196,22 +198,23 @@ const FAMILY_SPECS: Record<VoiceFamily, VoiceSpec> = {
             { mult: 4, amp: 0.1, decay: 6.0 },
         ],
     },
-    // Bowed strings (violin/cello/ensemble): sustained saw, vibrato, bow noise, slow swell.
+    // Bowed strings (violin/cello/ensemble): sustained, vibrato, a touch of bow
+    // noise. A steep harmonic rolloff (vs the old near-flat saw) keeps it WARM —
+    // the flat 7-harmonic stack read as a harsh buzz on a held note.
     strings: {
         durationS: 2.2,
-        attackS: 0.06,
-        releaseS: 0.18,
-        vibratoHz: 5.2,
-        vibratoDepth: 0.006,
-        noise: 0.04,
+        attackS: 0.09,
+        releaseS: 0.2,
+        vibratoHz: 5.0,
+        vibratoDepth: 0.005,
+        noise: 0.02,
         partials: [
             { mult: 1, amp: 1.0, decay: 0 },
-            { mult: 2, amp: 0.6, decay: 0 },
-            { mult: 3, amp: 0.45, decay: 0 },
-            { mult: 4, amp: 0.32, decay: 0 },
-            { mult: 5, amp: 0.24, decay: 0 },
-            { mult: 6, amp: 0.18, decay: 0 },
-            { mult: 7, amp: 0.12, decay: 0 },
+            { mult: 2, amp: 0.5, decay: 0 },
+            { mult: 3, amp: 0.28, decay: 0 },
+            { mult: 4, amp: 0.15, decay: 0 },
+            { mult: 5, amp: 0.08, decay: 0 },
+            { mult: 6, amp: 0.04, decay: 0 },
         ],
     },
     // Brass (trumpet/trombone/horn/tuba): bright rising harmonics, sustained, light vibrato.
@@ -326,7 +329,11 @@ const FAMILY_KEYWORDS: ReadonlyArray<readonly [RegExp, VoiceFamily]> = [
     [/bell|tubular|chime/, 'bell'],
     [/\bkeys\b/, 'keys'],
     [/piano|grand|honky/, 'piano'],
-    [/bass/, 'bass'],
+    // `\bbass\b` (word-bounded) so real basses ("acoustic bass", "synth bass")
+    // match, but "contra<bass>" and "<bass>oon" do NOT — a bowed contrabass falls
+    // through to the `strings` rule and a bassoon to `reed`, instead of being
+    // misrouted to the plucked-bass Karplus family.
+    [/\bbass\b/, 'bass'],
     [/guitar|harp|banjo|sitar|koto|shamisen|\blute\b|mandolin|dulcimer|pluck|pizz/, 'pluck'],
     [/violin|viola|cello|contrabass|fiddle|string|orchestra|ensemble|erhu/, 'strings'],
     [/choir|voice|vocal|aah|ooh|pad|warm|sweep|halo|atmosphere|new age/, 'pad'],
@@ -468,17 +475,53 @@ function synthesize(spec: VoiceSpec, seed: number): Float32Array {
     return pcm;
 }
 
-// Cache one rendered voice per FAMILY (12-ish renders, shared across the 133 ids).
+// Cache one rendered voice per FAMILY (the bare-category / no-id fallback).
 const familyCache = new Map<VoiceFamily, SynthVoice>();
+// Cache one rendered voice per INSTRUMENT id (a per-instrument variation of its
+// family recipe), so two instruments in the same family sound distinct.
+const instrumentCache = new Map<string, SynthVoice>();
 
-/** A stable per-family seed so the (deterministic) noise differs between families. */
-function familySeed(family: VoiceFamily): number {
+/** A stable FNV-1a seed from any label, so the (deterministic) synthesis differs
+ *  between families AND between instruments. */
+function stableSeed(label: string): number {
     let h = 2166136261;
-    for (let i = 0; i < family.length; i++) {
-        h ^= family.charCodeAt(i);
+    for (let i = 0; i < label.length; i++) {
+        h ^= label.charCodeAt(i);
         h = Math.imul(h, 16777619);
     }
     return h >>> 0;
+}
+
+/**
+ * A deterministic, MODEST per-instrument variation of a family `VoiceSpec`, so two
+ * instruments in one family (e.g. Grand vs Honky-tonk piano) render audibly
+ * different one-shots instead of sharing one cached family waveform. It stays
+ * WITHIN the family's character — nudging overtone brightness, decay length, and
+ * attack, never the partial structure — and `synthesize` re-normalizes the result,
+ * so loudness stays even. PURE + deterministic (seeded). This is still the FLOOR;
+ * a user sample / SoundFont / plugin is the ceiling.
+ */
+function varyForInstrument(spec: VoiceSpec, seed: number): VoiceSpec {
+    const rng = mulberry32(seed ^ 0x9e3779b9);
+    // Brightness tilt, kept GENTLE and mostly-neutral (0.80..1.10). The earlier
+    // 0.6..1.4 range, applied as `tilt^index`, blew the upper partials of a
+    // many-partial voice (strings has 7) up to ~7× — a harsh buzz. We also CAP the
+    // exponent at 3 so high overtones are never exaggerated, only the lower few are
+    // nudged — audible per-instrument variation without turning a string into a saw.
+    const tilt = 0.8 + rng() * 0.3; // 0.80..1.10
+    // How fast a struck/plucked tone dies (sustained families keep decay 0).
+    const decayScale = 0.8 + rng() * 0.4; // 0.8..1.2x
+    // Softer or sharper onset (floored click-free).
+    const attackScale = 0.7 + rng() * 0.6; // 0.7..1.3x
+    const partials = spec.partials.map((p, i) => ({
+        mult: p.mult,
+        // Leave the fundamental; tilt only the lower overtones (exponent capped) so
+        // the timbre varies while pitch + overall energy stay sane (peak-normalized
+        // in `synthesize`) and high partials never get exaggerated into harshness.
+        amp: i === 0 ? p.amp : Math.max(0.0001, p.amp * Math.pow(tilt, Math.min(i, 3))),
+        decay: p.decay === 0 ? 0 : Math.max(0.1, p.decay * decayScale),
+    }));
+    return { ...spec, partials, attackS: Math.max(0.0005, spec.attackS * attackScale) };
 }
 
 /** Synthesize (and cache) the voice for a {@link VoiceFamily}. */
@@ -486,7 +529,7 @@ export function getFamilyVoice(family: VoiceFamily): SynthVoice {
     const hit = familyCache.get(family);
     if (hit) return hit;
     const voice: SynthVoice = {
-        pcm: synthesize(FAMILY_SPECS[family], familySeed(family)),
+        pcm: synthesize(FAMILY_SPECS[family], stableSeed(family)),
         sampleRate: SAMPLE_RATE,
         rootNote: ROOT_NOTE,
     };
@@ -495,19 +538,32 @@ export function getFamilyVoice(family: VoiceFamily): SynthVoice {
 }
 
 /**
- * The voice for a specific instrument selection: resolve its family, return that
- * family's (cached) synthesized one-shot. This is what the executors bind into
- * the engine sampler when an instrument node carries an `instrumentId`.
+ * The voice for a specific instrument selection: resolve its family, then render a
+ * deterministic per-instrument variation of that family's recipe (cached by id).
+ * This is what the executors bind into the engine sampler when an instrument node
+ * carries an `instrumentId`. With no id it falls back to the plain family voice.
  */
 export function getInstrumentVoice(
     instrumentId: string | undefined,
     name?: string,
     category?: string,
 ): SynthVoice {
-    return getFamilyVoice(resolveVoiceFamily(instrumentId, name, category));
+    const family = resolveVoiceFamily(instrumentId, name, category);
+    if (!instrumentId) return getFamilyVoice(family);
+    const hit = instrumentCache.get(instrumentId);
+    if (hit) return hit;
+    const seed = stableSeed(instrumentId);
+    const voice: SynthVoice = {
+        pcm: synthesize(varyForInstrument(FAMILY_SPECS[family], seed), seed),
+        sampleRate: SAMPLE_RATE,
+        rootNote: ROOT_NOTE,
+    };
+    instrumentCache.set(instrumentId, voice);
+    return voice;
 }
 
-/** Test-only: clear the per-family render cache. */
+/** Test-only: clear the per-family + per-instrument render caches. */
 export function _resetVoiceCacheForTests(): void {
     familyCache.clear();
+    instrumentCache.clear();
 }

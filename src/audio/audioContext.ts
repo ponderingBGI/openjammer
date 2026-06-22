@@ -25,17 +25,10 @@ export interface AudioContextConfig {
     lowLatencyMode?: boolean;
 }
 
-export type LatencyClassification = 'excellent' | 'good' | 'acceptable' | 'poor' | 'bad';
-
-export interface LatencyMetrics {
-    baseLatency: number; // ms - browser processing overhead
-    outputLatency: number; // ms - output device delay
-    totalLatency: number; // ms - combined one-way latency
-    estimatedRoundTrip: number; // ms - total perceived latency for live playing
-    classification: LatencyClassification;
-    isBluetoothSuspected: boolean; // true if outputLatency > 100ms
-    sampleRate: number; // Hz - current sample rate
-}
+// Latency measurement no longer lives here. It is a backend concern, owned by the
+// active executor via `Executor.getLatency()` (see `audio/executor/latency.ts`):
+// the wasm tier reads this AudioContext, the native tier reads the cpal stream.
+// This module is now only the browser-context lifecycle + decode/waveform host.
 
 // ============================================================================
 // Audio Context Initialization
@@ -120,65 +113,4 @@ export async function resumeAudio(): Promise<void> {
     if (audioContext && audioContext.state === 'suspended') {
         await audioContext.resume();
     }
-}
-
-// ============================================================================
-// Latency Monitoring
-// ============================================================================
-
-/**
- * Classify latency based on professional audio standards.
- * @param roundTripMs - Estimated round-trip latency in milliseconds.
- */
-function classifyLatency(roundTripMs: number): LatencyClassification {
-    if (roundTripMs <= 10) return 'excellent';
-    if (roundTripMs <= 20) return 'good';
-    if (roundTripMs <= 30) return 'acceptable';
-    if (roundTripMs <= 50) return 'poor';
-    return 'bad';
-}
-
-/** Get current latency metrics from the AudioContext (null if uninitialized). */
-export function getLatencyMetrics(): LatencyMetrics | null {
-    if (!audioContext) return null;
-
-    const baseLatency = (audioContext.baseLatency ?? 0) * 1000;
-    const outputLatency = (audioContext.outputLatency ?? 0) * 1000;
-    const totalLatency = baseLatency + outputLatency;
-
-    // Round-trip estimate for live playing: input + processing + output (×2).
-    const estimatedRoundTrip = totalLatency * 2;
-
-    // Detect likely Bluetooth audio (typically adds 100-200ms).
-    const isBluetoothSuspected = outputLatency > 100;
-
-    return {
-        baseLatency,
-        outputLatency,
-        totalLatency,
-        estimatedRoundTrip,
-        classification: classifyLatency(estimatedRoundTrip),
-        isBluetoothSuspected,
-        sampleRate: audioContext.sampleRate,
-    };
-}
-
-/**
- * Start periodic latency monitoring.
- * @param callback Function called with latency metrics.
- * @param intervalMs Update interval in milliseconds (default 1000ms).
- * @returns Cleanup function to stop monitoring.
- */
-export function startLatencyMonitoring(
-    callback: (metrics: LatencyMetrics) => void,
-    intervalMs: number = 1000
-): () => void {
-    const intervalId = setInterval(() => {
-        const metrics = getLatencyMetrics();
-        if (metrics) {
-            callback(metrics);
-        }
-    }, intervalMs);
-
-    return () => clearInterval(intervalId);
 }

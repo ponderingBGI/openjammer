@@ -75,6 +75,46 @@ fn estimate_freq(buf: &[f32], sample_rate: f32) -> f32 {
     cycles / span * sample_rate
 }
 
+/// Estimate the fundamental frequency by AUTOCORRELATION — robust for a
+/// harmonically rich signal (a plucked Karplus string) where naive zero-crossing
+/// counting reads the upper harmonics. Picks the smallest lag whose correlation is
+/// near the global peak, so it locks to the fundamental period (not a harmonic).
+fn estimate_freq_autocorr(buf: &[f32], sample_rate: f32) -> f32 {
+    let start = buf.len() / 4; // skip the broadband pluck attack
+    let win = &buf[start..];
+    if win.len() < 64 {
+        return 0.0;
+    }
+    let min_lag = (sample_rate / 1200.0) as usize; // search up to ~1200 Hz
+    let max_lag = ((sample_rate / 80.0) as usize).min(win.len() / 2); // down to ~80 Hz
+    let mut corr = vec![0.0f32; max_lag + 1];
+    let mut best = 0.0f32;
+    for lag in min_lag..=max_lag {
+        let mut sum = 0.0f32;
+        for i in 0..(win.len() - lag) {
+            sum += win[i] * win[i + lag];
+        }
+        corr[lag] = sum;
+        if sum > best {
+            best = sum;
+        }
+    }
+    // Smallest lag that is a local peak within 85% of the global max = the
+    // fundamental period (guards against an octave-up read on a strong harmonic).
+    let mut lag = 0usize;
+    for l in (min_lag + 1)..max_lag {
+        if corr[l] >= 0.85 * best && corr[l] >= corr[l - 1] && corr[l] >= corr[l + 1] {
+            lag = l;
+            break;
+        }
+    }
+    if lag == 0 {
+        0.0
+    } else {
+        sample_rate / lag as f32
+    }
+}
+
 // ===========================================================================
 // Osc
 // ===========================================================================
@@ -163,7 +203,9 @@ fn karplus_pitch_matches_midi_note() {
     k.activate(SR, BLOCK);
     k.note_on(69, 100); // A4 = 440 Hz
     let out = render(&mut k, 8);
-    let f = estimate_freq(&out, SR);
+    // A plucked string is harmonically rich; use autocorrelation (zero-crossing
+    // counting would read an upper harmonic).
+    let f = estimate_freq_autocorr(&out, SR);
     assert!(
         (f - 440.0).abs() < 25.0,
         "karplus A4 measured {f} Hz, expected ~440"

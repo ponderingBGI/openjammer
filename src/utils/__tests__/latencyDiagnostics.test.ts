@@ -8,7 +8,6 @@ import {
     isMacPlatform,
     getPlatformLatencyExpectation,
     WARNING_DISMISSAL_DURATION_MS,
-    HIGH_LOOKAHEAD_THRESHOLD_MS,
     type LatencyMetricsInput
 } from '../latencyDiagnostics';
 
@@ -18,7 +17,6 @@ function createMockMetrics(overrides: Partial<LatencyMetricsInput> = {}): Latenc
         baseLatency: 5,
         outputLatency: 10,
         totalLatency: 15,
-        toneJsLookAhead: 10,
         estimatedRoundTrip: 40,
         classification: 'good',
         isBluetoothSuspected: false,
@@ -103,26 +101,6 @@ describe('latencyDiagnostics', () => {
             const diagnosis = diagnoseLatency(metrics, true); // lowLatencyMode enabled
 
             expect(diagnosis.suggestions.some(s => s.includes('Enable Low Latency Mode'))).toBe(false);
-        });
-
-        it('should detect high Tone.js lookAhead', () => {
-            const metrics = createMockMetrics({
-                toneJsLookAhead: HIGH_LOOKAHEAD_THRESHOLD_MS + 10, // Above threshold
-                classification: 'acceptable'
-            });
-            const diagnosis = diagnoseLatency(metrics, true);
-
-            expect(diagnosis.issues.some(i => i.issue.includes('scheduler buffer'))).toBe(true);
-        });
-
-        it('should not flag lookAhead at or below threshold', () => {
-            const metrics = createMockMetrics({
-                toneJsLookAhead: HIGH_LOOKAHEAD_THRESHOLD_MS, // At threshold
-                classification: 'excellent'
-            });
-            const diagnosis = diagnoseLatency(metrics, true);
-
-            expect(diagnosis.issues.some(i => i.issue.includes('scheduler buffer'))).toBe(false);
         });
 
         it('should suggest closing audio apps for poor latency', () => {

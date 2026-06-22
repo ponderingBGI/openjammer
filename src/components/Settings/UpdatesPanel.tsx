@@ -7,7 +7,17 @@
  * manual download button, so Settings never hides the path to Stable/Canari.
  */
 
-import { Button, Toggle } from '@openjammer/oj-ui';
+import {
+    Button,
+    Callout,
+    Chip,
+    IconDownload,
+    SegmentedControl,
+    Spinner,
+    StatusDot,
+    Surface,
+    Toggle,
+} from '@openjammer/oj-ui';
 import { useState } from 'react';
 
 import { isTauri, openExternal } from '../../ai/tauri';
@@ -210,161 +220,189 @@ export function UpdatesPanel() {
         }
     };
 
+    const checkFailed = !!error && !checking;
+    const headline = checkFailed ? 'Couldn’t check for updates' : statusText;
+    const heroStatus = checkFailed
+        ? 'bad'
+        : pending
+          ? 'info'
+          : autoUpdateAvailable
+            ? 'ok'
+            : 'idle';
+
+    const primaryAction =
+        pending && pendingVersion ? (
+            <Button variant="primary" onClick={() => void handleInstallNow()}>
+                Update &amp; restart now
+            </Button>
+        ) : autoUpdateAvailable && !checking ? (
+            <Button
+                variant="secondary"
+                onClick={() => void checkNow(updateChannel)}
+                disabled={!!pinnedVersion}
+            >
+                Check now
+            </Button>
+        ) : null;
+
     return (
         <div className="oj-upd">
-            <h3 className="oj-upd-title">Updates</h3>
-
             {pinnedVersion && (
-                <div className="oj-upd-pinned" role="status">
-                    <div>
-                        <strong>Pinned to <code className="oj-upd-ver">{pinnedVersion}</code></strong>
-                        <p>Auto-update is off after a rollback. Resume when you’re ready.</p>
+                <Callout
+                    variant="warning"
+                    className="oj-upd-callout"
+                    title={
+                        <>
+                            Pinned to <code className="oj-upd-ver">{pinnedVersion}</code>
+                        </>
+                    }
+                >
+                    <div className="oj-upd-callout-row">
+                        <span>Auto-update is paused after a rollback. Resume when you’re ready.</span>
+                        <Button variant="secondary" onClick={resumeUpdates}>
+                            Resume updates
+                        </Button>
                     </div>
-                    <Button variant="secondary" onClick={resumeUpdates}>
-                        Resume updates
-                    </Button>
-                </div>
+                </Callout>
             )}
 
-            <div className="oj-upd-status">
-                <div className="oj-upd-status-line">
-                    <span className="oj-upd-label">You’re on</span>
-                    <code className="oj-upd-ver">{currentVersion}</code>
-                    <span className="oj-upd-chip">{channelLabel(updateChannel)}</span>
-                    {status?.install_kind && <span className="oj-upd-chip">{status.install_kind}</span>}
+            <Surface
+                className="oj-upd-hero"
+                elevation="rest"
+                radius="lg"
+                role="status"
+                aria-live="polite"
+            >
+                <div className="oj-upd-hero-main">
+                    <div className="oj-upd-hero-state">
+                        {checking ? (
+                            <Spinner size={18} />
+                        ) : (
+                            <StatusDot status={heroStatus} />
+                        )}
+                        <span className="oj-upd-hero-head">{headline}</span>
+                    </div>
+                    <div className="oj-upd-hero-meta">
+                        <code className="oj-upd-ver">{currentVersion}</code>
+                        <Chip>{channelLabel(updateChannel)}</Chip>
+                        {status?.install_kind && <Chip>{status.install_kind}</Chip>}
+                    </div>
                 </div>
-                <div className="oj-upd-state">
-                    {statusText}
-                    {autoUpdateAvailable && !checking && (
-                        <Button
-                            variant="link"
-                            className="oj-upd-check"
-                            onClick={() => void checkNow(updateChannel)}
-                            disabled={!!pinnedVersion}
-                        >
-                            Check now
-                        </Button>
-                    )}
-                </div>
-            </div>
+                {primaryAction}
+            </Surface>
 
-            {autoUpdateAvailable ? (
-                <div className="oj-upd-row">
+            {installNote && <p className="oj-upd-note">{installNote}</p>}
+
+            <div className="oj-upd-group">
+                {autoUpdateAvailable ? (
                     <Toggle
-                        label="Keep OpenJammer up to date automatically"
+                        label="Automatic updates"
+                        description="Downloads in the background, installs silently after you close OpenJammer."
                         checked={autoUpdateEnabled}
                         disabled={!!pinnedVersion}
                         onChange={setAutoUpdateEnabled}
                     />
-                    <p className="oj-upd-desc">
-                        Updates download in the background and install silently after you close OpenJammer.
-                        The app won’t reopen itself or interrupt a session.
-                    </p>
-                </div>
-            ) : (
-                <div className="oj-upd-row oj-upd-manual-info">
-                    <span className="oj-upd-label">Automatic updates</span>
-                    <p className="oj-upd-desc">
-                        {native
-                            ? status?.manual_reason ?? 'This build uses manual downloads for updates.'
-                            : 'The browser version updates through its service worker. Desktop release channels are manual downloads here.'}
-                    </p>
-                </div>
-            )}
-
-            <div className="oj-upd-row">
-                <span className="oj-upd-label">Release channel</span>
-                <div className="oj-upd-seg" role="group" aria-label="Release channel">
-                    {(['stable', 'canary'] as const).map((c) => (
-                        <button
-                            key={c}
-                            className={`oj-upd-seg-btn ${updateChannel === c ? 'is-active' : ''}`}
-                            aria-pressed={updateChannel === c}
-                            disabled={!!pinnedVersion}
-                            onClick={() => void switchChannel(c)}
-                        >
-                            {channelLabel(c)}
-                        </button>
-                    ))}
-                </div>
-                <p className="oj-upd-desc">{CHANNEL_BLURB[updateChannel]}</p>
-            </div>
-
-            <div className="oj-upd-card oj-upd-card-manual">
-                <div className="oj-upd-card-body">
-                    <strong>Download {channelLabel(updateChannel)} manually</strong>
-                    <p>
-                        Use this for a clean reinstall, macOS updates, Linux package-manager installs,
-                        or a stale shortcut that still launches an old copy.
-                    </p>
-                </div>
-                <Button variant="secondary" disabled={manualOpening} onClick={() => void handleManualDownload()}>
-                    {manualOpening ? 'Opening…' : `Download ${channelLabel(updateChannel)}`}
-                </Button>
-            </div>
-
-            {pending && pendingVersion ? (
-                <div className="oj-upd-card" role="status">
-                    <div className="oj-upd-card-body">
-                        <strong>
-                            {channelLabel(updateChannel)} <code className="oj-upd-ver">{pendingVersion}</code> is
-                            ready.
-                        </strong>
-                        <p>It’ll install silently after you close OpenJammer — or get it now.</p>
-                        {installNote && <p className="oj-upd-installnote">{installNote}</p>}
+                ) : (
+                    <div className="oj-upd-row">
+                        <div className="oj-upd-row-text">
+                            <span className="oj-upd-row-label">Automatic updates</span>
+                            <span className="oj-upd-row-desc">
+                                {native
+                                    ? status?.manual_reason ?? 'This build uses manual downloads.'
+                                    : 'The browser version updates on reload; desktop channels are manual downloads here.'}
+                            </span>
+                        </div>
                     </div>
-                    <Button variant="primary" onClick={() => void handleInstallNow()}>
-                        Update &amp; restart now
+                )}
+
+                <div className="oj-upd-row">
+                    <div className="oj-upd-row-text">
+                        <span className="oj-upd-row-label">Release channel</span>
+                        <span className="oj-upd-row-desc">
+                            {updateChannel === 'stable' && isCanariBuild
+                                ? 'You’re ahead of Stable — you’ll move over when it catches up, no downgrade.'
+                                : CHANNEL_BLURB[updateChannel]}
+                        </span>
+                    </div>
+                    <SegmentedControl
+                        aria-label="Release channel"
+                        options={[
+                            { value: 'stable', label: 'Stable' },
+                            { value: 'canary', label: 'Canari' },
+                        ]}
+                        value={updateChannel}
+                        disabled={!!pinnedVersion}
+                        onChange={(c) => void switchChannel(c)}
+                    />
+                </div>
+            </div>
+
+            <div className="oj-upd-group">
+                <div className="oj-upd-row">
+                    <div className="oj-upd-row-text">
+                        <span className="oj-upd-row-label">Download installer</span>
+                        <span className="oj-upd-row-desc">
+                            For a clean reinstall, another platform, or a stale shortcut.
+                        </span>
+                    </div>
+                    <Button
+                        variant="secondary"
+                        className="oj-upd-dl"
+                        disabled={manualOpening}
+                        onClick={() => void handleManualDownload()}
+                    >
+                        <IconDownload size={16} aria-hidden="true" />
+                        {manualOpening ? 'Opening…' : `Download ${channelLabel(updateChannel)}`}
                     </Button>
                 </div>
-            ) : updateChannel === 'stable' && isCanariBuild ? (
-                <p className="oj-upd-desc oj-upd-ahead">
-                    You’re ahead of Stable. You’ll move to Stable when it reaches your version — no
-                    downgrade.
-                </p>
-            ) : null}
 
-            {lastGood && !pinnedVersion && (
-                <div className="oj-upd-rollback">
-                    {!confirmingRollback ? (
-                        <Button
-                            variant="danger"
-                            onClick={() => setConfirmingRollback(true)}
-                        >
-                            Roll back to <code className="oj-upd-ver">{lastGood}</code>
-                        </Button>
-                    ) : (
-                        <div className="oj-upd-confirm">
-                            <p>
-                                Restores your projects, settings &amp; AI memory from before the last
-                                update and turns auto-update off, so the bad build can’t come back.
-                                Restart OpenJammer afterwards to finish. To revert the app itself,
-                                reinstall <code className="oj-upd-ver">{lastGood}</code> from the{' '}
-                                <Button
-                                    variant="link"
-                                    onClick={() => void openExternal(RELEASES_URL)}
-                                >
-                                    releases page
+                {lastGood && !pinnedVersion && (
+                    <div className="oj-upd-row">
+                        {!confirmingRollback ? (
+                            <>
+                                <div className="oj-upd-row-text">
+                                    <span className="oj-upd-row-label">Roll back</span>
+                                    <span className="oj-upd-row-desc">
+                                        Restore <code className="oj-upd-ver">{lastGood}</code> and your
+                                        projects, settings &amp; AI memory.
+                                    </span>
+                                </div>
+                                <Button variant="danger" onClick={() => setConfirmingRollback(true)}>
+                                    Roll back…
                                 </Button>
-                                .
-                            </p>
-                            <div className="oj-upd-confirm-actions">
-                                <Button
-                                    variant="danger"
-                                    onClick={() => void handleRollback()}
-                                >
-                                    Yes, roll back
-                                </Button>
-                                <Button variant="secondary" onClick={() => setConfirmingRollback(false)}>
-                                    Cancel
-                                </Button>
+                            </>
+                        ) : (
+                            <div className="oj-upd-confirm">
+                                <p className="oj-upd-row-desc">
+                                    Restores your data from before the last update and turns auto-update
+                                    off. Restart afterwards; to revert the app itself, reinstall from the{' '}
+                                    <Button variant="link" onClick={() => void openExternal(RELEASES_URL)}>
+                                        releases page
+                                    </Button>
+                                    .
+                                </p>
+                                <div className="oj-upd-confirm-actions">
+                                    <Button variant="danger" onClick={() => void handleRollback()}>
+                                        Yes, roll back to <code className="oj-upd-ver">{lastGood}</code>
+                                    </Button>
+                                    <Button
+                                        variant="secondary"
+                                        onClick={() => setConfirmingRollback(false)}
+                                    >
+                                        Cancel
+                                    </Button>
+                                </div>
                             </div>
-                        </div>
-                    )}
-                </div>
-            )}
+                        )}
+                    </div>
+                )}
+            </div>
 
-            {error && <p className="oj-upd-error">Couldn’t check for updates: {error}</p>}
+            {checkFailed && (
+                <Callout variant="danger" className="oj-upd-callout">
+                    {error}
+                </Callout>
+            )}
         </div>
     );
 }

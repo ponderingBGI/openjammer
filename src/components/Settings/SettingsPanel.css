@@ -9,25 +9,28 @@
 .minimal-settings-overlay {
     position: fixed;
     inset: 0;
-    background: color-mix(in srgb, var(--sketch-black) 30%, transparent);
-    backdrop-filter: blur(4px);
+    /* Clean ink scrim, no glass blur (DESIGN.md: no glassmorphism by default). */
+    background: color-mix(in srgb, var(--sketch-black) 45%, transparent);
     display: flex;
     justify-content: center;
     align-items: center;
-    z-index: 2000;
+    padding: var(--space-lg);
+    z-index: var(--z-modal, 2000);
 }
 
 .minimal-settings-container {
     background: var(--bg-node);
     border: var(--border-sketch-width) solid var(--sketch-black);
     border-radius: var(--radius-xl);
-    width: 600px;
-    height: 500px;
+    /* Responsive breathing room — was a cramped fixed 600×500. */
+    width: min(680px, 100%);
+    height: min(580px, 90vh);
     display: flex;
     flex-direction: column;
     overflow: hidden;
     color: var(--text-primary);
-    box-shadow: var(--shadow-menu);
+    /* Hard, blur-free lift — sticker pressed on paper (Hard-Shadow Rule). */
+    box-shadow: 4px 5px 0 var(--sketch-black);
 }
 
 .minimal-settings-header {
@@ -52,35 +55,13 @@
     overflow: hidden;
 }
 
+/* Sidebar holds the vertical Tabs (SegmentedControl). No horizontal padding so
+   the active tab's inked edge meets the divider; tabs carry their own styling. */
 .minimal-sidebar {
-    width: 180px;
+    flex: none;
+    width: 160px;
     border-right: 1px solid var(--border-subtle);
     padding: var(--space-md) 0;
-}
-
-.minimal-tab-btn {
-    width: 100%;
-    text-align: left;
-    padding: var(--space-sm) var(--space-lg);
-    background: none;
-    border: none;
-    font-family: var(--font-sketch);
-    font-size: var(--text-md);
-    font-weight: 500;
-    cursor: pointer;
-    color: var(--text-muted);
-    transition: all var(--transition-fast);
-}
-
-.minimal-tab-btn:hover {
-    color: var(--text-primary);
-    background: var(--bg-tertiary);
-}
-
-.minimal-tab-btn.active {
-    color: var(--text-primary);
-    background: var(--bg-tertiary);
-    border-right: 3px solid var(--sketch-black);
 }
 
 .minimal-main {
@@ -88,6 +69,38 @@
     padding: var(--space-lg);
     overflow-y: auto;
     min-height: 0; /* Required for overflow to work in flex container */
+}
+
+/* Narrow viewports: drop the sidebar to a horizontal tab strip above content. */
+@media (max-width: 560px) {
+    .minimal-settings-content {
+        flex-direction: column;
+    }
+
+    .minimal-sidebar {
+        width: auto;
+        border-right: none;
+        border-bottom: 1px solid var(--border-subtle);
+        padding: var(--space-sm) var(--space-sm) 0;
+    }
+
+    /* Wrap to as many rows as needed so no tab is clipped or hidden behind a
+       horizontal scroll (the "About" tab was getting cut off otherwise). */
+    .minimal-sidebar .oj-seg--vertical {
+        flex-flow: row wrap;
+        gap: var(--space-xs);
+    }
+
+    .minimal-sidebar .oj-seg--vertical .oj-seg__btn {
+        width: auto;
+        white-space: nowrap;
+        padding: var(--space-xs) var(--space-sm);
+    }
+
+    /* Active marker moves from the right edge to the bottom edge in the strip. */
+    .minimal-sidebar .oj-seg--vertical .oj-seg__btn.is-active {
+        box-shadow: inset 0 calc(-1 * var(--border-sketch-width)) 0 0 var(--sketch-black);
+    }
 }
 
 .minimal-theme-grid {

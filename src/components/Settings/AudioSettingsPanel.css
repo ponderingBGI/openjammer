@@ -1,434 +1,239 @@
-/**
- * Audio Settings Panel Styles
- */
+/* Settings → Audio.
+   One emphasized "hero" surface for the live latency readout, everything else
+   flat on the panel ground and divided by hairlines — the same calm one-screen
+   language as the Updates tab. Tokens only; the latency number is the mono face
+   (Mono-Means-Exact), never Courier or a rainbow of literal colors. */
 
-.audio-settings-panel {
-    padding: 0;
-}
-
-/* Guide Launch Button */
-.guide-launch-btn {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-    padding: 16px 20px;
-    background: linear-gradient(135deg, rgba(66, 133, 244, 0.15), rgba(156, 39, 176, 0.1));
-    border: 2px solid rgba(66, 133, 244, 0.3);
-    border-radius: 12px;
-    color: var(--text-primary);
-    font-size: 1rem;
-    font-weight: 600;
-    font-family: inherit;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    margin-bottom: 24px;
-}
-
-.guide-launch-btn:hover {
-    background: linear-gradient(135deg, rgba(66, 133, 244, 0.25), rgba(156, 39, 176, 0.15));
-    border-color: rgba(66, 133, 244, 0.5);
-    transform: translateY(-1px);
-}
-
-.guide-launch-btn:active {
-    transform: translateY(0);
-}
-
-.guide-launch-btn svg {
-    flex-shrink: 0;
-    color: var(--accent-primary, #4285f4);
-}
-
-.guide-launch-btn .arrow-icon {
-    margin-left: auto;
-    opacity: 0.5;
-    transition: transform 0.2s ease, opacity 0.2s ease;
-}
-
-.guide-launch-btn:hover .arrow-icon {
-    transform: translateX(4px);
-    opacity: 1;
-}
-
-.audio-info-banner {
-    padding: 16px;
-    border-radius: 8px;
-    background: var(--bg-secondary);
-    border: 2px solid var(--border-color, #ccc);
-    margin-bottom: 24px;
-    display: flex;
-    gap: 12px;
-    align-items: flex-start;
-}
-
-.audio-info-banner.usb-detected {
-    background: rgba(76, 175, 80, 0.1);
-    border-color: rgba(76, 175, 80, 0.3);
-}
-
-.audio-info-banner svg {
-    flex-shrink: 0;
-    margin-top: 2px;
-}
-
-.audio-info-banner strong {
-    display: block;
-    margin-bottom: 4px;
-    font-size: 1rem;
-}
-
-.audio-info-banner p {
-    margin: 4px 0;
-    font-size: 0.9rem;
-    opacity: 0.8;
-}
-
-.audio-info-banner .suggestion {
-    margin-top: 8px;
-    font-style: italic;
-    color: var(--accent-primary, #2196f3);
-}
-
-.audio-metrics-section {
-    margin-bottom: 32px;
-}
-
-.audio-metrics-section h3 {
-    margin-top: 0;
-    margin-bottom: 16px;
-}
-
-.metrics-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-}
-
-.metric-card {
-    padding: 16px;
-    background: var(--bg-secondary);
-    border-radius: 8px;
-    border: 2px solid var(--border-color, #ccc);
-    text-align: center;
-}
-
-.metric-card.total {
-    background: rgba(33, 150, 243, 0.1);
-    border-color: rgba(33, 150, 243, 0.3);
-}
-
-.metric-label {
-    display: block;
-    font-size: 0.85rem;
-    opacity: 0.7;
-    margin-bottom: 8px;
-}
-
-.metric-value {
-    display: block;
-    font-size: 1.5rem;
-    font-weight: 600;
-    font-family: 'Courier New', monospace;
-}
-
-.audio-config-section {
-    margin-bottom: 32px;
-}
-
-.audio-config-section h3 {
-    margin-top: 0;
-    margin-bottom: 16px;
-}
-
-.setting-group {
-    margin-bottom: 24px;
-}
-
-.setting-group label {
-    display: block;
-    font-weight: 500;
-    margin-bottom: 8px;
-}
-
-.setting-group select,
-.setting-group input[type="number"] {
-    width: 100%;
-    padding: 10px;
-    border: 2px solid var(--border-color, #ccc);
-    border-radius: 6px;
-    background: var(--bg-primary);
-    font-size: 0.95rem;
-    font-family: inherit;
-    color: inherit;
-}
-
-.setting-group select:focus,
-.setting-group input:focus {
-    outline: none;
-    border-color: var(--accent-primary, #2196f3);
-}
-
-.setting-description {
-    margin-top: 8px;
-    font-size: 0.85rem;
-    opacity: 0.7;
-    line-height: 1.4;
-}
-
-.setting-description strong {
-    display: block;
-    margin-top: 4px;
-    color: var(--accent-primary, #2196f3);
-}
-
-.toggle-label {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    cursor: pointer;
-}
-
-.toggle-label input[type="checkbox"] {
-    width: 20px;
-    height: 20px;
-    cursor: pointer;
-}
-
-.apply-config-btn {
-    width: 100%;
-    padding: 12px;
-    background: var(--accent-primary, #2196f3);
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity 0.2s;
-}
-
-.apply-config-btn:hover:not(:disabled) {
-    opacity: 0.9;
-}
-
-.apply-config-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.audio-info-section h3 {
-    margin-top: 0;
-    margin-bottom: 12px;
-}
-
-.info-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-}
-
-.info-list li {
-    padding: 8px 0;
-    font-size: 0.9rem;
-    line-height: 1.5;
-}
-
-.info-list strong {
-    color: var(--accent-primary, #2196f3);
-}
-
-/* ==========================================================================
-   Enhanced Latency Indicator
-   ========================================================================== */
-
-.latency-status-section {
-    margin-bottom: 24px;
-}
-
-.latency-status-card {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 20px;
-    background: var(--bg-secondary);
-    border-radius: 12px;
-    border: 2px solid var(--border-color, #ccc);
-}
-
-.latency-status-indicator {
+.oj-aud {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-width: 100px;
-    padding: 16px;
-    border-radius: 12px;
-    text-align: center;
+    gap: var(--space-md);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    animation: oj-aud-fade var(--transition-normal) ease-out;
 }
 
-.latency-status-indicator.excellent {
-    background: rgba(34, 197, 94, 0.15);
-    border: 2px solid rgba(34, 197, 94, 0.4);
-}
-
-.latency-status-indicator.good {
-    background: rgba(132, 204, 22, 0.15);
-    border: 2px solid rgba(132, 204, 22, 0.4);
-}
-
-.latency-status-indicator.acceptable {
-    background: rgba(234, 179, 8, 0.15);
-    border: 2px solid rgba(234, 179, 8, 0.4);
-}
-
-.latency-status-indicator.poor {
-    background: rgba(249, 115, 22, 0.15);
-    border: 2px solid rgba(249, 115, 22, 0.4);
-}
-
-.latency-status-indicator.bad {
-    background: rgba(239, 68, 68, 0.15);
-    border: 2px solid rgba(239, 68, 68, 0.4);
-}
-
-.latency-value-large {
-    font-size: 2rem;
-    font-weight: 700;
-    font-family: 'Courier New', monospace;
-    line-height: 1;
-}
-
-.latency-value-large.excellent { color: #22c55e; }
-.latency-value-large.good { color: #84cc16; }
-.latency-value-large.acceptable { color: #eab308; }
-.latency-value-large.poor { color: #f97316; }
-.latency-value-large.bad { color: #ef4444; }
-
-.latency-label-small {
-    font-size: 0.75rem;
-    opacity: 0.7;
-    margin-top: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.latency-status-info {
-    flex: 1;
-}
-
-.latency-status-message {
-    font-size: 1.1rem;
-    font-weight: 500;
-    margin-bottom: 4px;
-}
-
-.latency-status-hint {
-    font-size: 0.85rem;
-    opacity: 0.7;
-}
-
-/* Bluetooth Warning */
-.bluetooth-warning {
+/* ── Latency hero (the one lifted surface) ── */
+.oj-aud-hero {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-top: 16px;
-    padding: 12px 16px;
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    border-radius: 8px;
-    color: #ef4444;
-    font-size: 0.9rem;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+    padding: var(--space-md);
 }
 
-.bluetooth-warning svg {
+.oj-aud-hero-main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.oj-aud-hero-state {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.oj-aud-ms {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+.oj-aud-ms-num {
+    font-family: var(--font-mono);
+    font-size: var(--text-xl);
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.oj-aud-verdict {
+    font-family: var(--font-sketch);
+    font-size: var(--text-lg);
+    font-weight: 600;
+    line-height: 1.1;
+    color: var(--text-primary);
+}
+
+.oj-aud-hero-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+.oj-aud-hero-hint {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+/* ── Callouts (bluetooth / tips) reuse oj-ui Callout; keep tip lists tidy ── */
+.oj-aud-tips {
+    margin: 0;
+    padding-left: 1.1em;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.oj-aud-tips li {
+    font-size: var(--text-sm);
+    line-height: 1.4;
+}
+
+/* ── Flat control group, divided by a hairline ── */
+.oj-aud-group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    padding-top: var(--space-md);
+    border-top: 1px solid var(--border-subtle);
+}
+
+.oj-aud-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+}
+
+.oj-aud-row-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1 1 240px;
+    min-width: 0;
+}
+
+.oj-aud-row-label {
+    font-family: var(--font-sketch);
+    font-size: var(--text-md);
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.oj-aud-row-desc {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.4;
+    max-width: 60ch;
+}
+
+.oj-aud-control {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+/* The low-latency bolt rides beside the selected pro device (Signal-Not-Brand:
+   it sits with a name, not on a surface). */
+.oj-aud-bolt {
+    color: var(--accent-success);
     flex-shrink: 0;
 }
 
-/* Latency Breakdown */
-.latency-breakdown {
-    margin-top: 16px;
+.oj-aud-low-label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
 }
 
-.latency-breakdown summary {
+/* ── Advanced disclosure — engineer depth on demand ── */
+.oj-aud-advanced {
+    border-top: 1px solid var(--border-subtle);
+    padding-top: var(--space-sm);
+}
+
+.oj-aud-advanced > summary {
     cursor: pointer;
-    font-size: 0.9rem;
-    color: var(--accent-primary, #2196f3);
-    padding: 8px 0;
     user-select: none;
+    font-family: var(--font-sketch);
+    font-size: var(--text-md);
+    font-weight: 600;
+    color: var(--text-secondary);
+    padding: var(--space-xs) 0;
+    transition: color var(--transition-fast);
 }
 
-.latency-breakdown summary:hover {
-    text-decoration: underline;
+.oj-aud-advanced > summary:hover {
+    color: var(--text-primary);
 }
 
-.latency-breakdown-content {
-    margin-top: 12px;
-    padding: 16px;
-    background: var(--bg-tertiary, rgba(0,0,0,0.05));
-    border-radius: 8px;
-}
-
-.latency-breakdown-row {
+.oj-aud-advanced-body {
     display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    padding-top: var(--space-sm);
+}
+
+/* Numeric breakdown — the detail, set in mono, on a quiet inset. */
+.oj-aud-breakdown {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    display: flex;
+    flex-direction: column;
+}
+
+.oj-aud-bd-row {
+    display: flex;
+    align-items: center;
     justify-content: space-between;
+    gap: var(--space-md);
+    padding: 4px 0;
+}
+
+.oj-aud-bd-row + .oj-aud-bd-row {
+    border-top: 1px solid var(--border-subtle);
+}
+
+.oj-aud-bd-label {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+.oj-aud-bd-val {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+}
+
+.oj-aud-bd-total .oj-aud-bd-label,
+.oj-aud-bd-total .oj-aud-bd-val {
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+/* ── Apply (the one controlled restart) + quiet footer link ── */
+.oj-aud-apply {
+    width: 100%;
+    display: inline-flex;
     align-items: center;
-    padding: 8px 0;
-    border-bottom: 1px solid var(--border-color, rgba(0,0,0,0.1));
+    justify-content: center;
+    gap: var(--space-xs);
 }
 
-.latency-breakdown-row:last-child {
-    border-bottom: none;
-}
-
-.latency-breakdown-row.total {
-    margin-top: 8px;
-    padding-top: 12px;
-    border-top: 2px solid var(--border-color, rgba(0,0,0,0.2));
-    border-bottom: none;
-    font-weight: 600;
-}
-
-.breakdown-label {
-    font-size: 0.9rem;
-    opacity: 0.8;
-}
-
-.breakdown-value {
-    font-family: 'Courier New', monospace;
-    font-size: 0.95rem;
-}
-
-.breakdown-value.highlight {
-    color: var(--accent-primary, #2196f3);
-    font-weight: 600;
-}
-
-/* Latency Suggestions */
-.latency-suggestions {
-    margin-top: 16px;
-    padding: 16px;
-    background: rgba(33, 150, 243, 0.08);
-    border: 1px solid rgba(33, 150, 243, 0.2);
-    border-radius: 8px;
-}
-
-.latency-suggestions h4 {
-    margin: 0 0 12px 0;
-    font-size: 0.95rem;
+.oj-aud-foot {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    justify-content: center;
+    padding-top: var(--space-xs);
 }
 
-.latency-suggestions ul {
-    margin: 0;
-    padding-left: 20px;
+@keyframes oj-aud-fade {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
 }
 
-.latency-suggestions li {
-    font-size: 0.85rem;
-    margin-bottom: 6px;
-    line-height: 1.4;
+@media (prefers-reduced-motion: reduce) {
+    .oj-aud {
+        animation: none;
+    }
 }

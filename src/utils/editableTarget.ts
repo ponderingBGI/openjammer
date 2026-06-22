@@ -16,6 +16,33 @@ export function isEditableTarget(target: EventTarget | null): boolean {
     );
 }
 
+/**
+ * True when the browser currently owns a real text selection.
+ *
+ * Canvas shortcuts have an internal clipboard for graph nodes, but they must
+ * never steal Ctrl/Cmd+C from selected UI copy in Settings, guides, logs, or
+ * agent answers. Letting the native copy command run is the only way those
+ * selections reach the OS clipboard.
+ */
+export function hasNativeTextSelection(): boolean {
+    if (typeof window !== 'undefined') {
+        const selection = window.getSelection?.();
+        if (selection && !selection.isCollapsed && selection.toString().length > 0) {
+            return true;
+        }
+    }
+
+    if (typeof document === 'undefined') return false;
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) {
+        const start = active.selectionStart;
+        const end = active.selectionEnd;
+        return start !== null && end !== null && start !== end;
+    }
+
+    return false;
+}
+
 function isContentEditableElement(target: Element): boolean {
     if (target instanceof HTMLElement && target.isContentEditable) return true;
     const editable = target.closest('[contenteditable]');

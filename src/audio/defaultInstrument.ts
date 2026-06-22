@@ -83,14 +83,16 @@ export function getDefaultInstrumentVoice(): DefaultVoice {
     return getFamilyVoice('keys');
 }
 
-/** The resolved voice for one instrument node + a stable cache KEY (its family). */
+/** The resolved voice for one instrument node + a stable cache KEY. */
 export interface NodeVoice {
     /** The synthesized PCM voice to bind into the engine sampler. */
     voice: DefaultVoice;
     /**
-     * A stable key identifying WHICH voice this is (the resolved family). The
-     * executors compare it against the last-bound key so a voice is only re-sent
-     * when the instrument selection actually changes.
+     * A stable key identifying WHICH voice this is — the picker `instrumentId` when
+     * one is selected, else `type:<nodeType>`. The executors compare it against the
+     * last-bound key so a voice is only re-sent when the selection actually changes.
+     * Keying on the INSTRUMENT (not its family) is what lets two instruments in one
+     * family (e.g. Grand vs Honky-tonk piano) re-bind and sound different.
      */
     key: string;
 }
@@ -98,7 +100,7 @@ export interface NodeVoice {
 /**
  * Resolve the built-in voice for an instrument node from its `type` and its
  * `data.instrumentId` (the picker selection). A node-type maps to a category
- * voice; an `instrumentId` refines it to the specific instrument's family.
+ * voice; an `instrumentId` refines it to that specific instrument's voice.
  */
 export function getVoiceForInstrumentNode(
     nodeType: string,
@@ -107,11 +109,17 @@ export function getVoiceForInstrumentNode(
     const instrumentId = typeof data?.instrumentId === 'string' ? data.instrumentId : undefined;
     if (instrumentId) {
         const def = CATALOG_BY_ID.get(instrumentId);
-        const family = resolveVoiceFamily(instrumentId, def?.name, def?.category);
-        return { voice: getInstrumentVoice(instrumentId, def?.name, def?.category), key: family };
+        // Key on the INSTRUMENT, not its family, so switching between two instruments
+        // in one family re-binds — paired with voiceSynth's per-instrument timbre
+        // variation, the two now sound different instead of sharing one cached
+        // family waveform.
+        return {
+            voice: getInstrumentVoice(instrumentId, def?.name, def?.category),
+            key: instrumentId,
+        };
     }
     // No picker selection: resolve a voice from the node TYPE itself (e.g. the
     // `cello` / `saxophone` category nodes), falling back to the warm default.
     const family = resolveVoiceFamily(nodeType);
-    return { voice: getFamilyVoice(family), key: family };
+    return { voice: getFamilyVoice(family), key: `type:${nodeType}` };
 }

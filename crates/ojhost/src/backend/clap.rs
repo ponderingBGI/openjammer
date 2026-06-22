@@ -76,7 +76,18 @@ fn cstr_to_string(s: Option<&std::ffi::CStr>) -> String {
 /// Probe a `.clap` file: load it, enumerate its plugin descriptors, and close.
 /// (The entry is dropped at end of scope, unloading the library.)
 pub(super) fn probe(path: &Path, format: PluginFormat) -> Result<Vec<PluginDescriptor>, HostError> {
-    debug_assert_eq!(format, PluginFormat::Clap, "clap backend only probes CLAP");
+    // The CLAP backend hosts CLAP only, but `scan` enumerates every plugin
+    // format it recognizes — on Windows that includes the `.vst3` bundles in
+    // `Common Files\VST3`. A non-CLAP candidate is NOT an error and must never
+    // crash the scan: skip it so the result degrades to "no CLAP plugin here",
+    // exactly as the scaffold backend reports nothing. VST3/AU need the JUCE
+    // backend (feature = "juce"); until that is compiled in they are silently
+    // unhosted. (Previously a `debug_assert_eq!` here aborted the whole app the
+    // moment a user with VST3s installed opened the Plugins panel — a held note
+    // beats a glitch: a stray installed plugin can't take down the instrument.)
+    if format != PluginFormat::Clap {
+        return Ok(Vec::new());
+    }
 
     // SAFETY: loading any dynamic library can run arbitrary init code; the
     // scan-time blacklist (see `scan`) is what makes a crash here recoverable.
@@ -370,5 +381,25 @@ impl HostedBackend for ClapBackend {
         // Dropping the processor (sole Arc owner) stops processing, deactivates,
         // and destroys the instance via clack's PluginInstanceInner::drop.
         self.processor = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{probe, PluginFormat};
+    use std::path::Path;
+
+    /// A non-CLAP candidate (a `.vst3`/`.component` the scan turns up next to
+    /// real CLAPs) must be SKIPPED, never asserted on. Regression guard for the
+    /// crash that aborted the app when the Plugins panel scanned a machine with
+    /// VST3 plugins installed. The early return fires before any dynamic-library
+    /// load, so the bogus path never touches the filesystem.
+    #[test]
+    fn probe_skips_non_clap_without_panicking() {
+        for fmt in [PluginFormat::Vst3, PluginFormat::Au] {
+            let got = probe(Path::new("/nonexistent/Plug.bin"), fmt)
+                .expect("non-CLAP probe must be Ok(empty), never a panic or error");
+            assert!(got.is_empty(), "non-CLAP probe must yield no descriptors");
+        }
     }
 }
