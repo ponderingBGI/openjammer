@@ -45,6 +45,23 @@ pub trait BlockProcessor: Send {
     fn drain_commands(&mut self, rx: &mut CommandConsumer);
     /// Render `nframes` of mono audio into `out`.
     fn render(&mut self, out: &mut [f32], nframes: usize);
+    /// Render `nframes` into each of `outs.len()` PLANAR device channels. Default:
+    /// render one mono block into channel 0 and copy it to the rest (the legacy
+    /// mono fan-out), so existing processors need no change. The [`Engine`]
+    /// overrides this for true per-channel stereo via `process_block_into`.
+    /// RT-safe: the default is one mono render + per-channel copies, no allocation.
+    fn render_into(&mut self, outs: &mut [&mut [f32]], nframes: usize) {
+        let Some((first, rest)) = outs.split_first_mut() else {
+            return;
+        };
+        let first: &mut [f32] = first; // reborrow &mut &mut [f32] -> &mut [f32]
+        self.render(&mut *first, nframes);
+        let n = nframes.min(first.len());
+        for ch in rest {
+            let m = n.min(ch.len());
+            ch[..m].copy_from_slice(&first[..m]);
+        }
+    }
     /// Stream every RECORDING looper node's just-captured block into the per-
     /// looper capture sink (Stage 3 finalize-PCM). Called by [`render_block`]
     /// AFTER each engine block, so the off-RT side reassembles each take and, on
@@ -62,6 +79,12 @@ impl BlockProcessor for Engine {
     #[inline]
     fn render(&mut self, out: &mut [f32], nframes: usize) {
         self.process_block(out, nframes);
+    }
+    #[inline]
+    fn render_into(&mut self, outs: &mut [&mut [f32]], nframes: usize) {
+        // True per-channel stereo: each device channel receives the master's
+        // resolved input mapped lane->channel (docs/CHANNELS.md §4).
+        self.process_block_into(outs, nframes);
     }
     #[inline]
     fn capture_loopers(&self, sink: &mut LooperCaptureSink) {
@@ -118,19 +141,30 @@ impl BlockProcessor for MicFedEngine<'_> {
     }
 }
 
-/// Render one cpal output block: drain commands, render mono, fan out to all
-/// interleaved channels. `data` is cpal's interleaved output buffer
-/// (`frames * channels` samples); `mono` is a reusable scratch buffer at least
-/// `data.len() / channels` long. Pure and allocation-free — the hot path.
+/// Hard cap on device channels rendered per block, so the per-channel row-slice
+/// array lives on the stack (the render path allocates nothing). Real devices are
+/// mono/stereo (a handful of surround channels at most); extras degrade to silence.
+const MAX_OUT_CH: usize = 32;
+
+/// Render one cpal output block: drain commands, render PLANAR per channel, then
+/// interleave into the device buffer. `data` is cpal's interleaved output buffer
+/// (`frames * channels` samples); `scratch` is a reusable PLANAR scratch of at
+/// least `channels * (data.len() / channels)` samples (one engine-block row per
+/// channel). Pure and allocation-free — the hot path.
 ///
-/// RT-SAFETY: no allocation, no locks. `mono` is pre-sized by the caller (it
-/// lives in the callback closure, allocated once before the stream starts).
+/// A mono graph renders identically to the historical mono fan-out (every device
+/// channel receives the same mono master mix); a stereo source/graph plays TRUE
+/// stereo via the engine's `process_block_into`. See docs/CHANNELS.md.
+///
+/// RT-SAFETY: no allocation, no locks. `scratch` is pre-sized by the caller (it
+/// lives in the callback closure, allocated once before the stream starts); the
+/// per-channel row slices are built on the stack with `split_at_mut`.
 pub fn render_block<P: BlockProcessor>(
     proc: &mut P,
     rx: &mut CommandConsumer,
     data: &mut [f32],
     channels: usize,
-    mono: &mut [f32],
+    scratch: &mut [f32],
     mut capture: Option<&mut RecorderSink>,
     mut looper_capture: Option<&mut LooperCaptureSink>,
 ) {
@@ -143,32 +177,48 @@ pub fn render_block<P: BlockProcessor>(
 
     // The callback buffer can be MUCH larger than the engine's block size — WASAPI
     // shared mode hands us the device period (hundreds of frames), not our 64. Render
-    // the WHOLE buffer in `mono`-sized (engine-block) chunks so it is filled with
-    // continuous audio instead of one block followed by silence (the gappy-playback
-    // bug on a `BufferSize::Default` stream). No allocation on the RT path.
+    // the WHOLE buffer in engine-block-sized chunks so it is filled with continuous
+    // audio instead of one block followed by silence. No allocation on the RT path.
     let total_frames = data.len() / channels;
-    let block = mono.len().max(1);
+    // The planar scratch holds `channels` rows; one row is the engine-block size.
+    let block = (scratch.len() / channels).max(1);
+    let nc = channels.min(MAX_OUT_CH);
     let mut done = 0;
     while done < total_frames {
         let n = (total_frames - done).min(block);
-        proc.render(&mut mono[..n], n);
-        // Tap the rendered MONO master into the output recorder when a recording
-        // is armed. Wait-free + allocation-free (a ring push); the RT thread never
-        // blocks or locks here, and it is a no-op when `capture` is `None`.
+        // Split the planar scratch into `nc` row-slices of length `n` on the stack —
+        // no allocation, the same pattern the engine uses on its own hot path.
+        let mut rows: [&mut [f32]; MAX_OUT_CH] = Default::default();
+        let mut rest = &mut scratch[..channels * block];
+        for row in rows.iter_mut().take(nc) {
+            let (head, tail) = rest.split_at_mut(block);
+            *row = &mut head[..n];
+            rest = tail;
+        }
+        proc.render_into(&mut rows[..nc], n);
+        // Tap channel 0 into the master recorder when armed (== the mono master for
+        // a mono graph). Wait-free + allocation-free; a no-op when `capture` is None.
         if let Some(sink) = capture.as_deref_mut() {
-            sink.capture(&mono[..n]);
+            sink.capture(rows[0]);
         }
         // Stream every recording looper's just-captured block into the per-looper
-        // capture ring (Stage 3). Per ENGINE block (inside this chunk loop) so a
-        // large cpal buffer streams continuously, not just its final block.
-        // Wait-free; a no-op when no sink is wired or no looper is recording.
+        // capture ring (Stage 3). Per ENGINE block so a large cpal buffer streams
+        // continuously. Wait-free; a no-op when no sink/looper is recording.
         if let Some(sink) = looper_capture.as_deref_mut() {
             proc.capture_loopers(sink);
         }
-        // Fan each mono frame out across all interleaved channels.
-        for (f, &s) in mono[..n].iter().enumerate() {
-            let base = (done + f) * channels;
-            data[base..base + channels].fill(s);
+        // Interleave the planar rows into the device buffer. Channels beyond `nc`
+        // (only on an unrealistic >MAX_OUT_CH device) are silenced first; then each
+        // rendered row is written into its channel with the device stride.
+        for ch in nc..channels {
+            for f in 0..n {
+                data[(done + f) * channels + ch] = 0.0;
+            }
+        }
+        for (ch, row) in rows[..nc].iter().enumerate() {
+            for (f, &s) in row.iter().take(n).enumerate() {
+                data[(done + f) * channels + ch] = s;
+            }
         }
         done += n;
     }
@@ -883,8 +933,9 @@ impl AudioHost {
         let buffer_frames = req.buffer_frames;
         let sample_rate = req.sample_rate;
         let ch = channels as usize;
-        // Mono render scratch, allocated ONCE here (off the RT thread).
-        let mut mono = vec![0.0f32; buffer_frames as usize];
+        // PLANAR render scratch (`channels` rows × one engine block), allocated ONCE
+        // here (off the RT thread). `render_block` splits it into per-channel rows.
+        let mut scratch = vec![0.0f32; ch.max(1) * buffer_frames as usize];
         // Output capture: a mono master recorder fed by the callback ONLY while
         // armed. The SINK (RT producer) moves into the callback; the consumer is
         // wrapped in a `Mutex` and drained off-RT by a thread spawned once the
@@ -971,7 +1022,7 @@ impl AudioHost {
                                 &mut rx,
                                 data,
                                 ch,
-                                &mut mono,
+                                &mut scratch,
                                 cap,
                                 Some(&mut looper_sink),
                             );
@@ -981,7 +1032,7 @@ impl AudioHost {
                             &mut rx,
                             data,
                             ch,
-                            &mut mono,
+                            &mut scratch,
                             cap,
                             Some(&mut looper_sink),
                         ),
@@ -1180,7 +1231,8 @@ mod tests {
         let channels = 2;
         let frames = 4;
         let mut data = vec![0.0f32; frames * channels];
-        let mut mono = vec![0.0f32; frames];
+        // Planar render scratch: `channels` rows of one engine block (`frames`).
+        let mut mono = vec![0.0f32; frames * channels];
 
         render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None, None);
 
@@ -1226,7 +1278,9 @@ mod tests {
         let channels = 2;
         let frames = 64;
         let mut data = vec![0.0f32; frames * channels];
-        let mut mono = vec![0.0f32; 16];
+        // Planar scratch (16-frame engine block × `channels`); small to exercise
+        // the multi-chunk path against a 64-frame buffer.
+        let mut mono = vec![0.0f32; 16 * channels];
 
         render_block(
             &mut proc,
@@ -1257,7 +1311,8 @@ mod tests {
         let channels = 2;
         let frames = 8;
         let mut data = vec![0.0f32; frames * channels];
-        let mut mono = vec![0.0f32; frames];
+        // Planar render scratch: `channels` rows of one engine block (`frames`).
+        let mut mono = vec![0.0f32; frames * channels];
 
         render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None, None);
 
@@ -1276,7 +1331,8 @@ mod tests {
         let channels = 2;
         let big_frames = 10;
         let mut data = vec![9.0f32; big_frames * channels];
-        let mut mono = vec![0.0f32; 4]; // engine block fits 4 frames
+        // Planar scratch: a 4-frame engine block × `channels`.
+        let mut mono = vec![0.0f32; 4 * channels];
 
         render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None, None);
 
