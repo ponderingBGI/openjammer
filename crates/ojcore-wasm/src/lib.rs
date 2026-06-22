@@ -594,6 +594,88 @@ pub fn drain_meters() -> Vec<f32> {
     out
 }
 
+// --- Looper transport (Stage 2): return path back to the UI -------------------
+
+/// Drain every looper node's transport snapshot as a FLAT
+/// `[node, state, pos, loop_len, peak, ...]` `f32` array (one 5-tuple per looper
+/// node). The wasm tier has no return-frame ring (those are `std`-only), so this
+/// reads each looper instance's [`ojcore::DspInstance::looper_snapshot`] DIRECTLY
+/// — exactly how [`drain_meters`] reads `meters_mut` instead of a ring. UNGATED by
+/// metering: the looper's row/playhead must surface even when level meters are
+/// off (the looper return path is published every block on native, ungated too —
+/// see `exec.rs::publish_looper`). Off the render path (the worklet calls it
+/// between `process` calls), so the `Vec` allocation is fine; an empty `Vec` when
+/// there are no looper nodes / no host costs nothing on the common path.
+#[wasm_bindgen]
+pub fn drain_looper() -> Vec<f32> {
+    let Some(host) = host_mut() else {
+        return Vec::new();
+    };
+    let program = host.engine.program();
+    // Snapshot ids + kinds before borrowing instances (disjoint reads).
+    let n_slots = program.instances.len();
+    let mut out: Vec<f32> = Vec::new();
+    for slot in 0..n_slots {
+        if program.kinds[slot] != PrimitiveKind::Looper {
+            continue;
+        }
+        let id = program.ids[slot].0;
+        if let Some((state, pos, loop_len, peak)) = program.instances[slot].looper_snapshot() {
+            out.push(id as f32);
+            out.push(state as f32);
+            out.push(pos as f32);
+            out.push(loop_len as f32);
+            out.push(peak);
+        }
+    }
+    out
+}
+
+/// Drain any pending looper state-machine EDGE per looper node as a JSON
+/// `Vec<Event>` of [`EventKind::LooperEdge`] — the SAME wire shape `drain_events`
+/// (faults) returns, so the worklet rides them on the existing `events`
+/// postMessage and the one TS fault-pipe seam routes the LooperEdge tag (a commit
+/// signal, not a fault) to the looper handle. UNGATED, off the render path: an
+/// edge (cycle wrap / STOP commit) is the AUTHORITATIVE row-create signal and must
+/// never be dropped, so unlike snapshots it is loss-proof per-node (the kernel
+/// coalesces onto one pending slot until drained). Returns an empty `Vec` (no
+/// allocation) when no looper edge is pending — the common case.
+#[wasm_bindgen]
+pub fn drain_looper_edges() -> Vec<u8> {
+    let Some(host) = host_mut() else {
+        return Vec::new();
+    };
+    // Disjoint field borrows: `engine` (the program) and `event_seq`.
+    let Host {
+        engine, event_seq, ..
+    } = host;
+    let program = engine.program_mut();
+    let n_slots = program.instances.len();
+    let mut events: Vec<Event> = Vec::new();
+    for slot in 0..n_slots {
+        if program.kinds[slot] != PrimitiveKind::Looper {
+            continue;
+        }
+        let node = program.ids[slot];
+        if let Some((from, to)) = program.instances[slot].take_looper_edge() {
+            *event_seq = event_seq.wrapping_add(1);
+            events.push(Event {
+                v: SCHEMA_VERSION,
+                seq: *event_seq,
+                severity: Severity::Info,
+                kind: EventKind::LooperEdge { node, from, to },
+                source: Source::Wasm,
+                ts_us: 0,
+                corr_id: 0,
+            });
+        }
+    }
+    if events.is_empty() {
+        return Vec::new();
+    }
+    serde_json::to_vec(&events).unwrap_or_default()
+}
+
 // --- Fault events (Wave 4): node faults back to the UI ------------------------
 
 /// Build a `NodeFault` [`Event`] with the native wire shape. `ts_us` is left `0`

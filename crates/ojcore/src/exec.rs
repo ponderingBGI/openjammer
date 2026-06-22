@@ -353,9 +353,9 @@ impl Engine {
             RtCommand::TransportPlay => self.playing = true,
             RtCommand::TransportPause => self.playing = false,
             RtCommand::Seek { samples } => self.sample_pos = samples,
-            RtCommand::Looper { node, action } => {
+            RtCommand::Looper { node, action, arg } => {
                 if let Some(slot) = self.program.slot_of_id(node) {
-                    self.program.instances[slot].looper_action(action);
+                    self.program.instances[slot].looper_action(action, arg);
                 }
             }
         }
@@ -702,7 +702,7 @@ mod apply_rt_tests {
         last_note_on: Cell<Option<(u8, u8)>>,
         last_note_off: Cell<Option<u8>>,
         last_set_param: Cell<Option<(u16, f32)>>,
-        last_looper: Cell<Option<u8>>,
+        last_looper: Cell<Option<(u8, u32)>>,
     }
 
     /// A mock node that records every RT call it receives into a shared
@@ -727,8 +727,8 @@ mod apply_rt_tests {
         fn note_off(&mut self, note: u8) {
             self.state.last_note_off.set(Some(note));
         }
-        fn looper_action(&mut self, action: u8) {
-            self.state.last_looper.set(Some(action));
+        fn looper_action(&mut self, action: u8, arg: u32) {
+            self.state.last_looper.set(Some((action, arg)));
         }
     }
 
@@ -808,8 +808,21 @@ mod apply_rt_tests {
         engine.apply_rt(RtCommand::Looper {
             node: NodeIdx(7),
             action: looper_action::RECORD,
+            arg: 0,
         });
-        assert_eq!(probe.last_looper.get(), Some(looper_action::RECORD));
+        assert_eq!(probe.last_looper.get(), Some((looper_action::RECORD, 0)));
+
+        // An indexed action carries its layer index (and packed flags) verbatim
+        // through to the instance.
+        engine.apply_rt(RtCommand::Looper {
+            node: NodeIdx(7),
+            action: looper_action::SET_MUTE,
+            arg: 3 | looper_action::MUTE_FLAG,
+        });
+        assert_eq!(
+            probe.last_looper.get(),
+            Some((looper_action::SET_MUTE, 3 | looper_action::MUTE_FLAG))
+        );
     }
 
     #[test]

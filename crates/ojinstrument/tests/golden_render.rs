@@ -735,6 +735,7 @@ fn looper_records_plays_overdubs_and_clears() {
     engine.apply(RtCommand::Looper {
         node: NodeIdx(2),
         action: looper_action::RECORD,
+        arg: 0,
     });
     if let Some(b) = engine.input_mut(NodeIdx(1), 0) {
         b.copy_from_slice(&first);
@@ -757,6 +758,7 @@ fn looper_records_plays_overdubs_and_clears() {
     engine.apply(RtCommand::Looper {
         node: NodeIdx(2),
         action: looper_action::OVERDUB,
+        arg: 0,
     });
     if let Some(b) = engine.input_mut(NodeIdx(1), 0) {
         b.copy_from_slice(&second);
@@ -768,6 +770,7 @@ fn looper_records_plays_overdubs_and_clears() {
     engine.apply(RtCommand::Looper {
         node: NodeIdx(2),
         action: looper_action::PLAY,
+        arg: 0,
     });
     if let Some(b) = engine.input_mut(NodeIdx(1), 0) {
         b.fill(0.0);
@@ -787,6 +790,7 @@ fn looper_records_plays_overdubs_and_clears() {
     engine.apply(RtCommand::Looper {
         node: NodeIdx(2),
         action: looper_action::CLEAR,
+        arg: 0,
     });
     if let Some(b) = engine.input_mut(NodeIdx(1), 0) {
         b.fill(0.0);

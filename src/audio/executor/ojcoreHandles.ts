@@ -24,7 +24,11 @@
 import { audioBufferToWAV } from '../wav';
 import { getAudioContext } from '../audioContext';
 import type { NodeIdx } from '../../../packages/oj-protocol-ts/src/index';
-import { LooperAction } from '../../../packages/oj-protocol-ts/src/index';
+import {
+    LooperAction,
+    LooperState,
+    LOOPER_MUTE_FLAG,
+} from '../../../packages/oj-protocol-ts/src/index';
 import type { RtCommand } from '../../../packages/oj-protocol-ts/src/index';
 import {
     isInfiniteDuration,
@@ -77,8 +81,9 @@ const LOOP_WAVEFORM_POINTS = 100;
 /** ojcore `looper_param::LOOP_SECS` id (kernel param 0): quantized loop length in
  *  seconds (<= 0 => free-run). Mirrors crates/ojcore/src/looper.rs. */
 const LOOPER_LOOP_SECS_PARAM = 0;
-/** ms between synthetic live-waveform-history ticks while recording. */
-const WAVEFORM_TICK_MS = 50;
+/** ojcore `looper_param::WET` id (kernel param 1): the gain applied to the summed
+ *  loop layers — the loop-level balance control. Mirrors crates/ojcore/src/looper.rs. */
+const LOOPER_WET_PARAM = 1;
 
 /**
  * Generate a deterministic, decaying-pulse waveform shape for visualization when
@@ -149,11 +154,16 @@ function waveformFromBuffer(buffer: AudioBuffer, points = LOOP_WAVEFORM_POINTS):
  */
 export class OjcoreLooperHandle implements LooperHandle {
     private duration = 10;
+    /** Loop-level wet gain (0..1) applied to the summed layers — the balance
+     *  control that tames the "loop adds on top" loudness. Kernel default 1.0. */
+    private wet = 1;
     private recording = false;
+    /** UI rows in commit order: `loops[i]` mirrors kernel layer index `i`. */
     private loops: LoopLayer[] = [];
-    private tickId: number | null = null;
+    /** Live trace amplitudes (peak per engine frame), driven by `onEngineFrame`. */
     private liveHistory: number[] = [];
-    private cycleStart = 0;
+    /** Latest engine looper state (drives the record/overdub edge semantics). */
+    private engineState: LooperState = LooperState.IDLE;
 
     private onLoopAdded: ((loop: LoopLayer) => void) | null = null;
     private onLoopDeleted: ((loop: LoopLayer) => void) | null = null;
@@ -169,11 +179,17 @@ export class OjcoreLooperHandle implements LooperHandle {
         this.bridge = bridge;
     }
 
-    /** Send a `RtCommand::Looper` action to this node, if it is in the graph. */
-    private action(action: LooperAction): void {
+    /**
+     * Send a `RtCommand::Looper` action to this node, if it is in the graph.
+     * `arg` addresses a layer for the indexed actions (`SET_MUTE` /
+     * `DELETE_LAYER`) and is ignored by the transport actions; it defaults to 0.
+     * Coerced through `>>> 0` so a packed `MUTE_FLAG` arg stays an unsigned
+     * 32-bit value on the wire (matching the Rust `u32`).
+     */
+    private action(action: LooperAction, arg = 0): void {
         const idx = this.bridge.nodeIndex(this.nodeId);
         if (idx === undefined) return;
-        this.bridge.sendCommand({ Looper: { node: idx, action } });
+        this.bridge.sendCommand({ Looper: { node: idx, action, arg: arg >>> 0 } });
     }
 
     setDuration(duration: number): void {
@@ -195,58 +211,147 @@ export class OjcoreLooperHandle implements LooperHandle {
         return this.loops;
     }
 
+    /** The set loop cycle length in seconds (`< 0` == infinite / free-run). */
+    getDuration(): number {
+        return this.duration;
+    }
+
+    /** The latest engine looper state (IDLE/ARMED/RECORDING/PLAYING/OVERDUBBING),
+     *  driven by the return frames — the SSOT for transport UI. */
+    getEngineState(): LooperState {
+        return this.engineState;
+    }
+
+    /** The current loop-level wet gain (0..1). */
+    getWet(): number {
+        return this.wet;
+    }
+
+    /**
+     * Set the loop-level wet gain (0..1) and drive it into the kernel as
+     * `SetParam(WET)` immediately (RT-3: a continuous control sends a SetParam,
+     * not a recompile). This is the balance knob for the summed loop layers — it
+     * is how the user tames the "loop adds on top" loudness. No-op until the node
+     * is in the graph; the baked param then applies on first compile.
+     */
+    setWet(wet: number): void {
+        this.wet = Math.max(0, Math.min(1, wet));
+        const idx = this.bridge.nodeIndex(this.nodeId);
+        if (idx === undefined) return;
+        this.bridge.sendCommand({
+            SetParam: { node: idx, param: LOOPER_WET_PARAM, value: this.wet },
+        });
+    }
+
     startRecording(): Promise<void> {
         if (this.recording) return Promise.resolve();
         this.recording = true;
-        this.cycleStart = performance.now();
         this.liveHistory = [];
-        // Drive the engine looper: arm + record.
-        this.action(LooperAction.ARM);
+        // Drive the engine looper: RECORD only — NEVER ARM (ARM clears existing
+        // layers; the new flow keeps them). A from-scratch first take records;
+        // a take begun while layers exist is handled by the kernel as an
+        // OVERDUBBING pass that layers a new, phase-locked row on commit.
         this.action(LooperAction.RECORD);
-        this.startTick();
         return Promise.resolve();
     }
 
     stopRecording(): void {
         if (!this.recording) return;
         this.recording = false;
-        this.stopTick();
+        // Tell the engine to commit the pass. The actual ROW is created in
+        // `onEngineEdge` when the engine reports RECORDING|OVERDUBBING -> PLAYING
+        // (the AUTHORITATIVE cycle-wrap commit), not here — so the row appears at
+        // the engine's real loop boundary, and on a manual stop alike.
         this.action(LooperAction.STOP);
-        // The engine is now playing the captured loop. Mirror a loop layer so
-        // the UI shows it (waveform synthesized; engine buffer is not read back).
-        const id = `oj-loop-${Date.now()}`;
+    }
+
+    /**
+     * Engine return frame for this looper node (drained by the executor each
+     * block). Drives the REAL playhead from the engine's sample position and the
+     * live trace from the engine peak — replacing the old synthetic local-clock
+     * tick entirely (the engine is the single source of truth for transport).
+     */
+    onEngineFrame(state: number, pos: number, loop_len: number, peak: number): void {
+        this.engineState = state as LooperState;
+        const recording =
+            state === LooperState.RECORDING || state === LooperState.OVERDUBBING;
+        // Accumulate the live trace only while a pass is being recorded; the
+        // peak is the engine's real per-block amplitude for THIS looper node.
+        if (recording) {
+            this.liveHistory.push(peak);
+            if (this.liveHistory.length > LOOP_WAVEFORM_POINTS * 4) {
+                this.liveHistory.shift();
+            }
+        }
+        // REAL playhead: engine sample position over the loop length (0..100).
+        const playhead = loop_len > 0 ? (pos / loop_len) * 100 : 0;
+        this.onWaveformHistory?.(this.liveHistory.slice(), playhead);
+    }
+
+    /**
+     * Engine state-machine edge for this looper node. A transition from
+     * RECORDING|OVERDUBBING -> PLAYING is the AUTHORITATIVE commit of a captured
+     * pass (cycle wrap or manual STOP): the new layer now exists in the kernel,
+     * so we create its mirror ROW HERE — in commit order, so `loops[i]` lines up
+     * with kernel layer index `i`.
+     */
+    onEngineEdge(from: number, to: number): void {
+        this.engineState = to as LooperState;
+        const committed =
+            to === LooperState.PLAYING &&
+            (from === LooperState.RECORDING || from === LooperState.OVERDUBBING);
+        if (!committed) return;
+        const id = `oj-loop-${Date.now()}-${this.loops.length}`;
         const waveformData =
             this.liveHistory.length > 1
                 ? this.liveHistory.slice(0, LOOP_WAVEFORM_POINTS)
                 : syntheticWaveform(LOOP_WAVEFORM_POINTS, this.loops.length + 1);
         const layer = makeLoopLayer(id, null, waveformData);
         this.loops.push(layer);
+        // Reset the trace for the next overdub pass.
+        this.liveHistory = [];
         this.onLoopAdded?.(layer);
     }
 
     toggleLoopMute(loopId: string): void {
-        const loop = this.loops.find((l) => l.id === loopId);
-        if (!loop) return;
+        const idx = this.loops.findIndex((l) => l.id === loopId);
+        if (idx === -1) return;
+        const loop = this.loops[idx];
         loop.isMuted = !loop.isMuted;
-        // v1: a single engine looper has no per-layer mute; muting the last
-        // (active) layer stops the engine loop, unmuting plays it again.
-        const anyAudible = this.loops.some((l) => !l.isMuted);
-        this.action(anyAudible ? LooperAction.PLAY : LooperAction.STOP);
+        // Indexed per-layer mute: SET_MUTE packs the layer index in the low 31
+        // bits and the muted state in the high MUTE_FLAG bit.
+        const arg = loop.isMuted ? (idx | LOOPER_MUTE_FLAG) >>> 0 : idx;
+        this.action(LooperAction.SET_MUTE, arg);
     }
 
     deleteLoop(loopId: string): void {
         const idx = this.loops.findIndex((l) => l.id === loopId);
         if (idx === -1) return;
         const [removed] = this.loops.splice(idx, 1);
-        if (this.loops.length === 0) {
-            // No layers left: clear the engine loop buffer back to silence.
-            this.action(LooperAction.CLEAR);
-        }
+        // Indexed delete: tell the kernel to drop layer `idx`. The kernel
+        // compacts its layers, so the remaining UI rows (already spliced) stay
+        // aligned with kernel indices.
+        this.action(LooperAction.DELETE_LAYER, idx);
+        this.onLoopDeleted?.(removed);
+    }
+
+    /**
+     * Undo the most-recently committed layer (LIFO). The kernel pops its last
+     * layer; we drop the last UI row to match, and report it as deleted.
+     */
+    undoLast(): void {
+        if (this.loops.length === 0) return;
+        const removed = this.loops.pop()!;
+        this.action(LooperAction.UNDO_LAST);
         this.onLoopDeleted?.(removed);
     }
 
     addLoopFromBuffer(buffer: AudioBuffer): void {
-        const layer = makeLoopLayer(`oj-loop-${Date.now()}`, buffer, waveformFromBuffer(buffer));
+        const layer = makeLoopLayer(
+            `oj-loop-${Date.now()}-${this.loops.length}`,
+            buffer,
+            waveformFromBuffer(buffer)
+        );
         this.loops.push(layer);
         // Overdub the dropped buffer into the engine loop (best-effort: the PCM
         // is not transferred to the looper node across the control seam in v1, so
@@ -271,39 +376,6 @@ export class OjcoreLooperHandle implements LooperHandle {
         callback: (history: number[], playheadPosition: number) => void
     ): void {
         this.onWaveformHistory = callback;
-    }
-
-    /** Drive the live-waveform/playhead while the engine records. The amplitude
-     *  is the REAL per-node output level from the engine meter (VIS-1) — not a
-     *  synthetic sine — so the trace reflects what the performer is actually
-     *  playing. (The playhead is still derived from the local clock against the
-     *  set duration; a sample-accurate engine playhead awaits the LooperState
-     *  return frame.) */
-    private startTick(): void {
-        if (this.tickId !== null) return;
-        const tick = () => {
-            if (!this.recording) return;
-            const elapsed = (performance.now() - this.cycleStart) / 1000;
-            // Real input amplitude from the engine meter for THIS looper node.
-            const level = this.bridge.nodeLevel(this.nodeId);
-            this.liveHistory.push(level);
-            if (this.liveHistory.length > LOOP_WAVEFORM_POINTS * 4) {
-                this.liveHistory.shift();
-            }
-            const playhead = isInfiniteDuration(this.duration)
-                ? 0
-                : ((elapsed % this.duration) / this.duration) * 100;
-            this.onWaveformHistory?.(this.liveHistory.slice(), playhead);
-            this.tickId = window.setTimeout(tick, WAVEFORM_TICK_MS);
-        };
-        this.tickId = window.setTimeout(tick, WAVEFORM_TICK_MS);
-    }
-
-    private stopTick(): void {
-        if (this.tickId !== null) {
-            clearTimeout(this.tickId);
-            this.tickId = null;
-        }
     }
 }
 

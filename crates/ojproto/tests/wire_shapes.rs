@@ -180,15 +180,44 @@ fn rt_command_external_tagging() {
         &RtCommand::Seek { samples: 9000 },
         r#"{"Seek":{"samples":9000}}"#,
     );
-    // Looper carries a node + a u8 action (one of `looper_action::*`); `action`
-    // serializes as a bare number, mirrored on the TS side as `number`.
+    // Looper carries a node + a u8 action (one of `looper_action::*`) + a u32
+    // `arg` (layer index / packed flags for the indexed actions, ignored by the
+    // transport actions). `action`/`arg` serialize as bare numbers, mirrored on
+    // the TS side as `number`.
     assert_json(
         &RtCommand::Looper {
             node: NodeIdx(3),
             action: looper_action::OVERDUB,
+            arg: 0,
         },
-        r#"{"Looper":{"node":3,"action":5}}"#,
+        r#"{"Looper":{"node":3,"action":5,"arg":0}}"#,
     );
+    // Indexed action: SET_MUTE of layer 2 with the mute flag set in `arg`'s high
+    // bit — pins both the action code (7) and the MUTE_FLAG packing.
+    assert_json(
+        &RtCommand::Looper {
+            node: NodeIdx(3),
+            action: looper_action::SET_MUTE,
+            arg: 2 | looper_action::MUTE_FLAG,
+        },
+        r#"{"Looper":{"node":3,"action":7,"arg":2147483650}}"#,
+    );
+}
+
+/// Pin the numeric looper-action codes so the TS mirror's `LooperAction` union
+/// can never silently drift from the Rust consts.
+#[test]
+fn looper_action_codes() {
+    assert_eq!(looper_action::ARM, 0);
+    assert_eq!(looper_action::RECORD, 1);
+    assert_eq!(looper_action::PLAY, 2);
+    assert_eq!(looper_action::STOP, 3);
+    assert_eq!(looper_action::CLEAR, 4);
+    assert_eq!(looper_action::OVERDUB, 5);
+    assert_eq!(looper_action::UNDO_LAST, 6);
+    assert_eq!(looper_action::SET_MUTE, 7);
+    assert_eq!(looper_action::DELETE_LAYER, 8);
+    assert_eq!(looper_action::MUTE_FLAG, 0x8000_0000);
 }
 
 #[test]

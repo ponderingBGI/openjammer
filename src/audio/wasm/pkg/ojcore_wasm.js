@@ -51,6 +51,45 @@ export function drain_events() {
 }
 
 /**
+ * Drain every looper node's transport snapshot as a FLAT
+ * `[node, state, pos, loop_len, peak, ...]` `f32` array (one 5-tuple per looper
+ * node). The wasm tier has no return-frame ring (those are `std`-only), so this
+ * reads each looper instance's [`ojcore::DspInstance::looper_snapshot`] DIRECTLY
+ * — exactly how [`drain_meters`] reads `meters_mut` instead of a ring. UNGATED by
+ * metering: the looper's row/playhead must surface even when level meters are
+ * off (the looper return path is published every block on native, ungated too —
+ * see `exec.rs::publish_looper`). Off the render path (the worklet calls it
+ * between `process` calls), so the `Vec` allocation is fine; an empty `Vec` when
+ * there are no looper nodes / no host costs nothing on the common path.
+ * @returns {Float32Array}
+ */
+export function drain_looper() {
+    const ret = wasm.drain_looper();
+    var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
+ * Drain any pending looper state-machine EDGE per looper node as a JSON
+ * `Vec<Event>` of [`EventKind::LooperEdge`] — the SAME wire shape `drain_events`
+ * (faults) returns, so the worklet rides them on the existing `events`
+ * postMessage and the one TS fault-pipe seam routes the LooperEdge tag (a commit
+ * signal, not a fault) to the looper handle. UNGATED, off the render path: an
+ * edge (cycle wrap / STOP commit) is the AUTHORITATIVE row-create signal and must
+ * never be dropped, so unlike snapshots it is loss-proof per-node (the kernel
+ * coalesces onto one pending slot until drained). Returns an empty `Vec` (no
+ * allocation) when no looper edge is pending — the common case.
+ * @returns {Uint8Array}
+ */
+export function drain_looper_edges() {
+    const ret = wasm.drain_looper_edges();
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
  * Drain the current per-node + master meter windows as a FLAT `[node, peak, ...]`
  * `f32` array (node ids are exact integers within `f32`'s safe range for any
  * realistic node count). The master level is appended last under the master
@@ -309,9 +348,6 @@ export function store_asset(pcm, sample_rate) {
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
-        __wbg___wbindgen_throw_ea4887a5f8f9a9db: function(arg0, arg1) {
-            throw new Error(getStringFromWasm0(arg0, arg1));
-        },
         __wbindgen_init_externref_table: function() {
             const table = wasm.__wbindgen_externrefs;
             const offset = table.grow(4);
@@ -346,10 +382,6 @@ function getFloat32ArrayMemory0() {
     return cachedFloat32ArrayMemory0;
 }
 
-function getStringFromWasm0(ptr, len) {
-    return decodeText(ptr >>> 0, len);
-}
-
 let cachedUint8ArrayMemory0 = null;
 function getUint8ArrayMemory0() {
     if (cachedUint8ArrayMemory0 === null || cachedUint8ArrayMemory0.byteLength === 0) {
@@ -370,20 +402,6 @@ function passArrayF32ToWasm0(arg, malloc) {
     getFloat32ArrayMemory0().set(arg, ptr / 4);
     WASM_VECTOR_LEN = arg.length;
     return ptr;
-}
-
-let cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
-cachedTextDecoder.decode();
-const MAX_SAFARI_DECODE_BYTES = 2146435072;
-let numBytesDecoded = 0;
-function decodeText(ptr, len) {
-    numBytesDecoded += len;
-    if (numBytesDecoded >= MAX_SAFARI_DECODE_BYTES) {
-        cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
-        cachedTextDecoder.decode();
-        numBytesDecoded = len;
-    }
-    return cachedTextDecoder.decode(getUint8ArrayMemory0().subarray(ptr, ptr + len));
 }
 
 let WASM_VECTOR_LEN = 0;

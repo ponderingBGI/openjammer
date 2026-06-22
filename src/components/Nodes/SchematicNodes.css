@@ -946,6 +946,99 @@
     50% { opacity: 0.5; }
 }
 
+/* Live transport status pill in the header (engine-driven, non-focus-stealing) */
+.looper-status {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    line-height: 1.4;
+}
+
+.looper-status.recording {
+    background: color-mix(in srgb, var(--accent-danger) 18%, transparent);
+    color: var(--accent-danger);
+    animation: looper-record-pulse 1s ease-in-out infinite;
+}
+
+.looper-status.playing {
+    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+    color: var(--accent-primary);
+}
+
+/* Inline export-name editor (replaces the focus-stealing window.prompt) */
+.looper-rename-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--accent-primary);
+    border-radius: 4px;
+    padding: 0 6px;
+    outline: none;
+}
+
+/* Loop-level balance (wet) control row */
+.looper-balance-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 2px var(--space-md) var(--space-xs);
+}
+
+.looper-balance-label {
+    font-family: var(--font-sketch);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.looper-balance-slider {
+    flex: 1;
+    height: 4px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+    min-width: 0;
+}
+
+.looper-balance-value {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-primary);
+    width: 22px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+/* Undo-last-layer affordance (LIFO engine UNDO_LAST) */
+.looper-undo-btn {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    flex-shrink: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-node);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.looper-undo-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+}
+
 /* ============================================
  * Microphone Node - Compact Layout
  * ============================================ */

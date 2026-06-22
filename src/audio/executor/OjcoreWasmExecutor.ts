@@ -241,6 +241,7 @@ export class OjcoreWasmExecutor implements Executor {
                 ok?: boolean;
                 message?: string;
                 levels?: Array<{ node: number; peak: number }>;
+                frames?: Float32Array;
                 node?: number;
                 pcm?: Float32Array;
                 sampleRate?: number;
@@ -264,6 +265,9 @@ export class OjcoreWasmExecutor implements Executor {
                     break;
                 case 'meters':
                     this.onMeterFrame(data.levels ?? []);
+                    break;
+                case 'looper':
+                    this.onLooperFrames(data.frames);
                     break;
                 case 'events':
                     this.onEngineEvents(data.bytes);
@@ -535,6 +539,43 @@ export class OjcoreWasmExecutor implements Executor {
         }
     }
 
+    /**
+     * Route a worklet looper drain (a FLAT `[node, state, pos, loop_len, peak, ...]`
+     * `f32` array, one 5-tuple per looper node) to each looper handle's
+     * `onEngineFrame` — the REAL transport snapshot that drives the row/playhead.
+     * Ungated by metering (the worklet drains it regardless), so the looper UI
+     * updates even with level meters off.
+     */
+    private onLooperFrames(frames?: Float32Array): void {
+        if (!frames || frames.length < 5) return;
+        for (let i = 0; i + 4 < frames.length; i += 5) {
+            const node = frames[i];
+            const state = frames[i + 1];
+            const pos = frames[i + 2];
+            const loopLen = frames[i + 3];
+            const peak = frames[i + 4];
+            const nodeId = this.reverseIndex.get(node);
+            if (nodeId === undefined) continue;
+            this.caps.looper(nodeId).onEngineFrame(state, pos, loopLen, peak);
+        }
+    }
+
+    /** Route any `LooperEdge` events in a drained batch to their looper handle's
+     *  `onEngineEdge` — the AUTHORITATIVE commit signal that creates the row.
+     *  Shared shape with the native tier (which taps the same edge off
+     *  `poll_events`); LooperEdge rides the `events` postMessage but is NOT a
+     *  fault, so it is routed here and still passed through to the fault pipe. */
+    private routeLooperEdges(events: EngineEvent[]): void {
+        for (const ev of events) {
+            const kind = ev?.kind;
+            if (typeof kind !== 'object' || !('LooperEdge' in kind)) continue;
+            const { node, from, to } = kind.LooperEdge;
+            const nodeId = this.reverseIndex.get(node);
+            if (nodeId === undefined) continue;
+            this.caps.looper(nodeId).onEngineEdge(from, to);
+        }
+    }
+
     /** Route worklet meter frames to signal-level subscribers, keyed by node id. */
     private onMeterFrame(levels: Array<{ node: number; peak: number }>): void {
         let changed = false;
@@ -571,6 +612,10 @@ export class OjcoreWasmExecutor implements Executor {
         for (const ev of events) {
             if (ev.ts_us === 0) ev.ts_us = nowUs;
         }
+        // Tap LooperEdge transitions (a commit signal, not a fault) to the looper
+        // handle BEFORE the shared fault sink — the event ring is loss-proof, so a
+        // RECORDING|OVERDUBBING -> PLAYING edge reliably creates the row.
+        this.routeLooperEdges(events);
         ingestEngineEvents(events);
     }
 

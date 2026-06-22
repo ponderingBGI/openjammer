@@ -155,7 +155,7 @@ export interface OjGraph {
  *   "TransportPlay"
  *   "TransportPause"
  *   { "Seek": { "samples": 9000 } }
- *   { "Looper": { "node": 3, "action": 5 } }
+ *   { "Looper": { "node": 3, "action": 5, "arg": 0 } }
  */
 export type RtCommand =
   | { SetParam: { node: NodeIdx; param: number; value: number } }
@@ -165,15 +165,24 @@ export type RtCommand =
   | "TransportPlay"
   | "TransportPause"
   | { Seek: { samples: number } }
-  | { Looper: { node: NodeIdx; action: LooperAction } };
+  | { Looper: { node: NodeIdx; action: LooperAction; arg: number } };
 
 /**
  * Looper transport actions carried by `RtCommand.Looper.action` (a bare `u8` on
  * the wire). Mirrors Rust's `ojproto::looper_action` consts — kept as a numeric
- * union so the JSON shape stays `{ "Looper": { "node": n, "action": k } }`.
- *   ARM = 0, RECORD = 1, PLAY = 2, STOP = 3, CLEAR = 4, OVERDUB = 5
+ * union so the JSON shape stays `{ "Looper": { "node": n, "action": k, "arg": a } }`.
+ *
+ * The transport actions (ARM..OVERDUB) ignore `arg`; the indexed actions address
+ * a layer through it:
+ *   - UNDO_LAST   — `arg` ignored (pops the most-recent layer, LIFO).
+ *   - SET_MUTE    — `arg` low bits = layer index; high bit (`LOOPER_MUTE_FLAG`)
+ *                   set = muted, clear = unmuted.
+ *   - DELETE_LAYER — `arg` = layer index.
+ *
+ *   ARM=0, RECORD=1, PLAY=2, STOP=3, CLEAR=4, OVERDUB=5,
+ *   UNDO_LAST=6, SET_MUTE=7, DELETE_LAYER=8
  */
-export type LooperAction = 0 | 1 | 2 | 3 | 4 | 5;
+export type LooperAction = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 /** Named `LooperAction` values, mirroring Rust's `ojproto::looper_action`. */
 export const LooperAction = {
@@ -183,7 +192,21 @@ export const LooperAction = {
   STOP: 3,
   CLEAR: 4,
   OVERDUB: 5,
+  UNDO_LAST: 6,
+  SET_MUTE: 7,
+  DELETE_LAYER: 8,
 } as const satisfies Record<string, LooperAction>;
+
+/**
+ * High bit of `RtCommand.Looper.arg` for `LooperAction.SET_MUTE`: set = the
+ * addressed layer is muted, clear = unmuted. The remaining bits are the layer
+ * index. Mirrors Rust's `ojproto::looper_action::MUTE_FLAG` (`1 << 31`).
+ *
+ * Use `>>> 0` when packing so the result stays an unsigned 32-bit number on the
+ * wire (matching the Rust `u32`):
+ *   `(layerIdx | LOOPER_MUTE_FLAG) >>> 0`
+ */
+export const LOOPER_MUTE_FLAG = 0x8000_0000 as const;
 
 /**
  * Looper state-machine state codes, carried as a bare `u8` by

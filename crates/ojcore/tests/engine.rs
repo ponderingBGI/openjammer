@@ -722,6 +722,7 @@ fn looper_records_then_plays_back_through_engine() {
     tx.push(RtCommand::Looper {
         node: NodeIdx(2),
         action: looper_action::RECORD,
+        arg: 0,
     })
     .unwrap();
     engine.drain(&mut rx);
@@ -744,6 +745,7 @@ fn looper_records_then_plays_back_through_engine() {
     tx.push(RtCommand::Looper {
         node: NodeIdx(2),
         action: looper_action::CLEAR,
+        arg: 0,
     })
     .unwrap();
     engine.drain(&mut rx);
@@ -772,17 +774,22 @@ fn looper_process_is_allocation_free() {
     // Cycle the looper through every state INSIDE the gate: applying the command
     // (looper_action) and rendering must both be allocation-free.
     assert_no_alloc(|| {
-        for &action in &[
-            looper_action::ARM,
-            looper_action::RECORD,
-            looper_action::OVERDUB,
-            looper_action::PLAY,
-            looper_action::STOP,
-            looper_action::CLEAR,
+        for &(action, arg) in &[
+            (looper_action::ARM, 0),
+            (looper_action::RECORD, 0),
+            (looper_action::OVERDUB, 0),
+            (looper_action::PLAY, 0),
+            // Indexed actions are allocation-free too: undo / mute / delete.
+            (looper_action::SET_MUTE, 0 | looper_action::MUTE_FLAG),
+            (looper_action::DELETE_LAYER, 0),
+            (looper_action::UNDO_LAST, 0),
+            (looper_action::STOP, 0),
+            (looper_action::CLEAR, 0),
         ] {
             tx.push(RtCommand::Looper {
                 node: NodeIdx(2),
                 action,
+                arg,
             })
             .unwrap();
             engine.drain(&mut rx);

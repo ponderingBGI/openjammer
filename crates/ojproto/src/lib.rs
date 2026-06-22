@@ -83,6 +83,19 @@ pub mod looper_action {
     pub const CLEAR: u8 = 4;
     /// Overdub: sum the input into the existing loop while playing it back.
     pub const OVERDUB: u8 = 5;
+    /// Undo the most-recently committed layer (LIFO). `arg` is ignored.
+    pub const UNDO_LAST: u8 = 6;
+    /// Set a layer's mute flag. `arg` is the layer index in its low 31 bits;
+    /// the high bit ([`MUTE_FLAG`]) carries the desired muted state (set =
+    /// muted, clear = unmuted). One action covers both mute and unmute.
+    pub const SET_MUTE: u8 = 7;
+    /// Delete a layer by index. `arg` is the layer index.
+    pub const DELETE_LAYER: u8 = 8;
+
+    /// High bit of [`RtCommand::Looper`](crate::RtCommand::Looper)'s `arg` for
+    /// [`SET_MUTE`]: when set, the addressed layer is muted; when clear, it is
+    /// unmuted. The remaining bits are the layer index.
+    pub const MUTE_FLAG: u32 = 1 << 31;
 }
 
 /// Looper state-machine state codes carried by [`EngineFrame::Looper`] and the
@@ -206,11 +219,16 @@ pub enum RtCommand {
         samples: u64,
     },
     /// Drive a looper node's state machine. `action` is one of the
-    /// [`looper_action`] consts (arm / record / play / stop / clear / overdub).
-    /// `NodeIdx(u32)` + `u8` is 5 payload bytes — well within the 16-byte cap.
+    /// [`looper_action`] consts (arm / record / play / stop / clear / overdub /
+    /// undo_last / set_mute / delete_layer). `arg` addresses a layer for the
+    /// indexed actions (set_mute / delete_layer) — see [`looper_action`] for the
+    /// per-action encoding (e.g. set_mute packs the muted flag in
+    /// [`looper_action::MUTE_FLAG`]) — and is ignored by the transport actions.
+    /// `NodeIdx(u32)` + `u8` + `u32` is 9 payload bytes — within the 16-byte cap.
     Looper {
         node: NodeIdx,
         action: u8,
+        arg: u32,
     },
 }
 

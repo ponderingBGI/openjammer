@@ -315,6 +315,9 @@ export interface LooperNodeData extends NodeData {
     isRecording: boolean;
     loops: LoopData[];
     currentTime: number;
+    /** Loop-level wet gain (0..1): balances the summed loop layers against the
+     *  live/dry signal — drives SetParam(WET) on the looper. Default 1. */
+    loopVolume?: number;
 }
 
 export interface LoopData {

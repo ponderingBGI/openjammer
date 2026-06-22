@@ -435,9 +435,11 @@ impl LooperNode {
         }
     }
 
-    /// Drive the state machine from an [`ojproto::looper_action`] code. RT-safe:
-    /// bounded work, no allocation. Unknown actions are ignored.
-    pub fn action(&mut self, action: u8) {
+    /// Drive the state machine from an [`ojproto::looper_action`] code. `arg`
+    /// addresses a layer for the indexed actions (set_mute / delete_layer) and
+    /// is ignored by the transport actions. RT-safe: bounded work, no
+    /// allocation. Unknown actions are ignored.
+    pub fn action(&mut self, action: u8, arg: u32) {
         match action {
             looper_action::ARM => {
                 // In the multi-track model ARM no longer wipes anything; it just
@@ -474,6 +476,19 @@ impl LooperNode {
             }
             looper_action::CLEAR => {
                 self.clear_all();
+            }
+            looper_action::UNDO_LAST => {
+                self.undo_last();
+            }
+            looper_action::SET_MUTE => {
+                // `arg` packs the layer index in its low bits; the high
+                // MUTE_FLAG bit carries the desired muted state.
+                let muted = arg & looper_action::MUTE_FLAG != 0;
+                let idx = (arg & !looper_action::MUTE_FLAG) as usize;
+                self.set_layer_muted(idx, muted);
+            }
+            looper_action::DELETE_LAYER => {
+                self.delete_layer(arg as usize);
             }
             _ => {}
         }
@@ -602,9 +617,9 @@ impl DspInstance for LooperNode {
         }
     }
 
-    fn looper_action(&mut self, action: u8) {
+    fn looper_action(&mut self, action: u8, arg: u32) {
         // Delegate the trait hook to the inherent state-machine driver.
-        self.action(action);
+        self.action(action, arg);
     }
 
     fn looper_snapshot(&self) -> Option<(u8, u32, u32, f32)> {
@@ -674,7 +689,7 @@ mod tests {
         let input = ramp(BLOCK, 0.013);
         // Record one block — exactly fills the quantized loop and auto-commits
         // to Playing with one layer.
-        node.action(looper_action::RECORD);
+        node.action(looper_action::RECORD, 0);
         let rec_out = run_block(&mut node, &input);
         assert_eq!(node.state(), LooperState::Playing);
         assert_eq!(node.loop_len(), BLOCK);
@@ -708,7 +723,7 @@ mod tests {
 
         // First layer captured.
         let first = ramp(BLOCK, 0.01);
-        node.action(looper_action::RECORD);
+        node.action(looper_action::RECORD, 0);
         let _ = run_block(&mut node, &first);
         assert_eq!(node.layer_count(), 1);
         assert_eq!(node.state(), LooperState::Playing);
@@ -717,7 +732,7 @@ mod tests {
         // dry*x + wet*(layer0) ONLY — the live input is NOT also summed from the
         // recording buffer (that is the "way louder" double-count bug).
         let second = ramp(BLOCK, 0.007);
-        node.action(looper_action::OVERDUB);
+        node.action(looper_action::OVERDUB, 0);
         assert_eq!(node.state(), LooperState::Overdubbing);
         let out = run_block(&mut node, &second);
         for i in 0..BLOCK {
@@ -742,12 +757,12 @@ mod tests {
         node.set_param(looper_param::DRY, 0.0);
 
         let a = ramp(BLOCK, 0.01);
-        node.action(looper_action::RECORD);
+        node.action(looper_action::RECORD, 0);
         let _ = run_block(&mut node, &a);
         let len_after_first = node.loop_len();
 
         let b = ramp(BLOCK, 0.005);
-        node.action(looper_action::OVERDUB);
+        node.action(looper_action::OVERDUB, 0);
         let _ = run_block(&mut node, &b);
         assert_eq!(node.layer_count(), 2);
         // Phase-lock: the loop length did not change with the 2nd layer.
@@ -776,10 +791,10 @@ mod tests {
         node.set_param(looper_param::DRY, 0.0);
 
         let a = ramp(BLOCK, 0.01);
-        node.action(looper_action::RECORD);
+        node.action(looper_action::RECORD, 0);
         let _ = run_block(&mut node, &a);
         let b = ramp(BLOCK, 0.005);
-        node.action(looper_action::OVERDUB);
+        node.action(looper_action::OVERDUB, 0);
         let _ = run_block(&mut node, &b);
         assert_eq!(node.layer_count(), 2);
 
@@ -816,10 +831,10 @@ mod tests {
         node.set_param(looper_param::DRY, 0.0);
 
         let a = ramp(BLOCK, 0.01);
-        node.action(looper_action::RECORD);
+        node.action(looper_action::RECORD, 0);
         let _ = run_block(&mut node, &a);
         let b = ramp(BLOCK, 0.005);
-        node.action(looper_action::OVERDUB);
+        node.action(looper_action::OVERDUB, 0);
         let _ = run_block(&mut node, &b);
         assert_eq!(node.layer_count(), 2);
 
@@ -853,13 +868,13 @@ mod tests {
         node.set_param(looper_param::DRY, 0.0);
 
         let a = ramp(BLOCK, 0.01);
-        node.action(looper_action::RECORD);
+        node.action(looper_action::RECORD, 0);
         let _ = run_block(&mut node, &a);
         let b = ramp(BLOCK, 0.005);
-        node.action(looper_action::OVERDUB);
+        node.action(looper_action::OVERDUB, 0);
         let _ = run_block(&mut node, &b);
         let c = ramp(BLOCK, 0.003);
-        node.action(looper_action::OVERDUB);
+        node.action(looper_action::OVERDUB, 0);
         let _ = run_block(&mut node, &c);
         assert_eq!(node.layer_count(), 3);
 
@@ -874,6 +889,41 @@ mod tests {
         }
     }
 
+    /// The indexed action codes route through `action(action, arg)` to the
+    /// inherent layer ops — this is the gap the command-protocol stage closes.
+    #[test]
+    fn indexed_actions_route_through_action_arg() {
+        let mut node = LooperNode::new();
+        node.activate(SR, BLOCK);
+        node.set_param(looper_param::LOOP_SECS, BLOCK as f32 / SR);
+
+        let a = ramp(BLOCK, 0.01);
+        node.action(looper_action::RECORD, 0);
+        let _ = run_block(&mut node, &a);
+        let b = ramp(BLOCK, 0.005);
+        node.action(looper_action::OVERDUB, 0);
+        let _ = run_block(&mut node, &b);
+        let c = ramp(BLOCK, 0.003);
+        node.action(looper_action::OVERDUB, 0);
+        let _ = run_block(&mut node, &c);
+        assert_eq!(node.layer_count(), 3);
+
+        // SET_MUTE with the MUTE_FLAG high bit set mutes the addressed layer.
+        node.action(looper_action::SET_MUTE, 1 | looper_action::MUTE_FLAG);
+        assert!(node.layer_muted(1));
+        // SET_MUTE with the flag clear unmutes it.
+        node.action(looper_action::SET_MUTE, 1);
+        assert!(!node.layer_muted(1));
+
+        // DELETE_LAYER addresses the layer via `arg`.
+        node.action(looper_action::DELETE_LAYER, 0);
+        assert_eq!(node.layer_count(), 2);
+
+        // UNDO_LAST pops the most-recent layer (ignores `arg`).
+        node.action(looper_action::UNDO_LAST, 0);
+        assert_eq!(node.layer_count(), 1);
+    }
+
     #[test]
     fn clear_resets_to_silence() {
         let mut node = LooperNode::new();
@@ -883,12 +933,12 @@ mod tests {
         node.set_param(looper_param::DRY, 0.0);
 
         let input = ramp(BLOCK, 0.02);
-        node.action(looper_action::RECORD);
+        node.action(looper_action::RECORD, 0);
         let _ = run_block(&mut node, &input);
         assert!(node.loop_len() > 0);
         assert_eq!(node.layer_count(), 1);
 
-        node.action(looper_action::CLEAR);
+        node.action(looper_action::CLEAR, 0);
         assert_eq!(node.state(), LooperState::Idle);
         assert_eq!(node.loop_len(), 0);
         assert_eq!(node.layer_count(), 0);
@@ -905,10 +955,10 @@ mod tests {
         node.activate(SR, BLOCK);
         assert_eq!(node.state(), LooperState::Idle);
 
-        node.action(looper_action::ARM);
+        node.action(looper_action::ARM, 0);
         assert_eq!(node.state(), LooperState::Armed);
 
-        node.action(looper_action::RECORD);
+        node.action(looper_action::RECORD, 0);
         assert_eq!(node.state(), LooperState::Recording);
 
         // Free-run (no quantized length): a block does not auto-stop.
@@ -916,19 +966,19 @@ mod tests {
         let _ = run_block(&mut node, &input);
         assert_eq!(node.state(), LooperState::Recording);
 
-        node.action(looper_action::STOP);
+        node.action(looper_action::STOP, 0);
         assert_eq!(node.state(), LooperState::Playing);
         assert_eq!(node.loop_len(), BLOCK, "free-run loop length == captured");
         assert_eq!(node.layer_count(), 1);
 
         // A second record/overdub starts a new take while layers exist.
-        node.action(looper_action::OVERDUB);
+        node.action(looper_action::OVERDUB, 0);
         assert_eq!(node.state(), LooperState::Overdubbing);
 
-        node.action(looper_action::PLAY);
+        node.action(looper_action::PLAY, 0);
         assert_eq!(node.state(), LooperState::Playing);
 
-        node.action(looper_action::CLEAR);
+        node.action(looper_action::CLEAR, 0);
         assert_eq!(node.state(), LooperState::Idle);
     }
 
@@ -940,13 +990,13 @@ mod tests {
         node.set_param(looper_param::WET, 1.0);
         node.set_param(looper_param::DRY, 0.0);
 
-        node.action(looper_action::RECORD);
+        node.action(looper_action::RECORD, 0);
         // Record two blocks (128 frames) then stop.
         let a = ramp(BLOCK, 0.01);
         let b = ramp(BLOCK, 0.02);
         let _ = run_block(&mut node, &a);
         let _ = run_block(&mut node, &b);
-        node.action(looper_action::STOP);
+        node.action(looper_action::STOP, 0);
         assert_eq!(node.loop_len(), 2 * BLOCK);
         assert_eq!(node.state(), LooperState::Playing);
         assert_eq!(node.layer_count(), 1);
@@ -985,7 +1035,7 @@ mod tests {
         assert_eq!(pos, 0);
         assert_eq!(len, 0);
 
-        node.action(looper_action::RECORD);
+        node.action(looper_action::RECORD, 0);
         // An Idle->Recording edge is pending.
         assert_eq!(node.take_looper_edge(), Some((IDLE, RECORDING)));
         // Drained.
@@ -1010,7 +1060,7 @@ mod tests {
         // Record MAX_LAYERS + 3 takes; only MAX_LAYERS should be retained.
         for k in 0..(MAX_LAYERS + 3) {
             let take = ramp(BLOCK, 0.001 * (k as f32 + 1.0));
-            node.action(looper_action::OVERDUB);
+            node.action(looper_action::OVERDUB, 0);
             let _ = run_block(&mut node, &take);
         }
         assert_eq!(node.layer_count(), MAX_LAYERS);

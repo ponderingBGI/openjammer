@@ -201,15 +201,22 @@ fn ai_faust_compile(source: String) -> Result<Option<ai::FaustCompileResult>, St
 // --- U-EXEC-PARITY: looper / sampler / recorder / metering / speaker / mic ---
 
 /// Drive a looper node's state machine: enqueue an `RtCommand::Looper` carrying
-/// `action` (one of the `ojproto::looper_action` codes). The control-rate seam
-/// the looper UI's record/stop/overdub/clear buttons reach the engine through.
+/// `action` (one of the `ojproto::looper_action` codes) and `arg` (layer index /
+/// packed flags for the indexed actions, ignored by the transport actions). The
+/// control-rate seam the looper UI's record/stop/overdub/clear/mute/delete/undo
+/// controls reach the engine through.
 #[tauri::command]
-fn looper_cmd(node: u32, action: u8, state: tauri::State<'_, BackendState>) -> Result<(), String> {
+fn looper_cmd(
+    node: u32,
+    action: u8,
+    arg: u32,
+    state: tauri::State<'_, BackendState>,
+) -> Result<(), String> {
     state
         .0
         .lock()
         .map_err(|_| "engine backend mutex poisoned".to_string())?
-        .looper_cmd(NodeIdx(node), action)
+        .looper_cmd(NodeIdx(node), action, arg)
         .map_err(|e| e.to_string())
 }
 
