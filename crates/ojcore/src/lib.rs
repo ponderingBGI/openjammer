@@ -86,10 +86,13 @@ pub use compile::{
     compile, compile_with_assets, AssetPcm, AssetResolver, CompileError, CompiledProgram, NoAssets,
     NodeRouting, Source,
 };
-pub use dsp::{DspInstance, ProcessCtx};
+pub use dsp::{kernel_supports_capability, DspInstance, ExtId, ProcessCtx, KERNEL_CONTRACT};
 pub use exec::Engine;
 pub use loader::PluginLoader;
-pub use manifest::{DspKind, ParamDecl, PluginManifest, PortDecl, UiKind};
+pub use manifest::{
+    Abi, AbiUnsupported, Capability, ContractVersion, DspKind, ParamDecl, Permission,
+    PluginManifest, PortDecl, UiKind,
+};
 pub use registry::PluginRegistry;
 
 // --- U-COVERAGE built-in set: effects, structural, and the shared registrar --

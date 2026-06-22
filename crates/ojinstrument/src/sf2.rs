@@ -203,6 +203,7 @@ impl PluginLoader for Sf2Loader {
 
 fn sf2_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(SF2_ID),
         name: String::from("SoundFont"),
         kind: PrimitiveKind::Sf2,

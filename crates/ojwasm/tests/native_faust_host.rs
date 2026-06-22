@@ -14,6 +14,7 @@ use ojwasm::{compile_faust_to_dll, WasmHostLoader};
 
 fn mono_gain_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: "ai.native.gain".into(),
         name: "Faust Gain (native)".into(),
         kind: PrimitiveKind::WasmHost,

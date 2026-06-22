@@ -311,6 +311,7 @@ impl PluginLoader for SamplerLoader {
 
 fn sampler_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(SAMPLER_ID),
         name: String::from("Sampler"),
         kind: PrimitiveKind::Sampler,

@@ -371,6 +371,7 @@ mod tests {
 
     fn mono_manifest(bytes: &[u8]) -> PluginManifest {
         PluginManifest {
+            abi: None,
             id: crate::wasm_id_for(bytes),
             name: "Test Code Node".into(),
             kind: PrimitiveKind::WasmHost,

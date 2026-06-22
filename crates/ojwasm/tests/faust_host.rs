@@ -66,6 +66,7 @@ fn parse_json_usize(json: &str, key: &str) -> Option<usize> {
 
 fn mono_gain_manifest(bytes: &[u8]) -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: wasm_id_for(bytes),
         name: "Faust Gain".into(),
         kind: PrimitiveKind::WasmHost,

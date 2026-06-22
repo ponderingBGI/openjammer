@@ -158,6 +158,7 @@ impl PluginLoader for OscLoader {
 
 fn osc_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(OSC_ID),
         name: String::from("Oscillator"),
         kind: PrimitiveKind::Osc,

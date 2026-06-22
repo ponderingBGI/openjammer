@@ -117,6 +117,7 @@ impl LooperState {
 
 fn looper_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(LOOPER_ID),
         name: String::from("Looper"),
         kind: PrimitiveKind::Looper,

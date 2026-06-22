@@ -67,6 +67,38 @@ export interface PortDecl {
     control_out: number;
 }
 
+/** A contract/ABI version, `major.minor` (see {@link Abi}, docs/STABILITY.md §4). */
+export interface ContractVersion {
+    major: number;
+    minor: number;
+}
+
+/**
+ * One capability a plugin declares against the kernel contract. `id` is an OPEN
+ * namespaced string — `oj.*` is kernel-reserved, `vendor.*` is community.
+ * `required` = the plugin cannot run without it (an unknown REQUIRED capability
+ * degrades the node to a labeled passthrough stub); otherwise optional.
+ */
+export interface Capability {
+    id: string;
+    required?: boolean;
+}
+
+/** A coarse permission a plugin declares; DECLARED here, ENFORCED out-of-process. */
+export type Permission = 'fs' | 'net' | 'native';
+
+/**
+ * The additive ABI / capability-negotiation block (docs/STABILITY.md §4). OPTIONAL
+ * and strictly additive — absent = a pre-`abi` plugin targeting the base contract.
+ * Mirrors `ojcore::Abi` + the v1 JSON Schema.
+ */
+export interface Abi {
+    contract: ContractVersion;
+    min_contract: ContractVersion;
+    capabilities?: Capability[];
+    permissions?: Permission[];
+}
+
 /** The complete static description of a registrable node type. */
 export interface PluginManifest {
     id: string;
@@ -76,6 +108,11 @@ export interface PluginManifest {
     ui: UiKind;
     params: ParamDecl[];
     ports: PortDecl;
+    /**
+     * The additive ABI / capability-negotiation block (docs/STABILITY.md §4).
+     * Omitted for pre-`abi` plugins (the common built-in case) — matches Rust `None`.
+     */
+    abi?: Abi;
 }
 
 // ============================================================================

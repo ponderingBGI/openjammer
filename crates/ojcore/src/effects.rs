@@ -71,6 +71,7 @@ pub fn biquad_type(idx: f32) -> FilterType {
 
 fn biquad_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(BIQUAD_ID),
         name: String::from("Biquad"),
         kind: PrimitiveKind::Biquad,
@@ -233,6 +234,7 @@ const WAVESHAPER_CURVE_SAMPLES: usize = 2_048;
 
 fn waveshaper_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(WAVESHAPER_ID),
         name: String::from("Waveshaper"),
         kind: PrimitiveKind::Waveshaper,
@@ -378,6 +380,7 @@ const DELAY_MAX_SECONDS: f32 = 2.0;
 
 fn delay_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(DELAY_ID),
         name: String::from("Delay"),
         kind: PrimitiveKind::Delay,
@@ -543,6 +546,7 @@ pub const CONVOLUTION_MAX_TAPS: usize = 24_000;
 
 fn convolution_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(CONVOLUTION_ID),
         name: String::from("Convolution"),
         kind: PrimitiveKind::Convolution,
