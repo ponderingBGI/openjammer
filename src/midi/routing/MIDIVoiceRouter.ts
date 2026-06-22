@@ -5,8 +5,7 @@
  * resolving, against the current node graph, *which* input node a device drives
  * and *which* row/key/velocity the event maps to. This is pure control-side TS
  * resolution: it computes the address and forwards to the existing audio
- * Executor seam (`noteOn`/`noteOff`/`controlDown`/`controlUp`) — it is not a
- * per-sample audio edge.
+ * Executor seam (`noteOn`/`noteOff`) — it is not a per-sample audio edge.
  *
  * Responsibilities:
  *  - Device -> node binding: an input node (`midi` / `minilab-3` / `keyboard`)
@@ -17,7 +16,9 @@
  *    classified via the device preset; pads map to a dedicated pad row.
  *  - Note/velocity mapping: raw MIDI note -> (row, keyIndex) using the node's
  *    per-row octaves; raw velocity -> normalized 0-1.
- *  - Sustain pedal (CC 64) -> controlDown / controlUp.
+ *  - Sustain pedal (CC 64) -> per-note hold: while down, note-offs are held;
+ *    on release every held voice gets exactly one note-off (see
+ *    {@link SustainController}). Shared with the computer-keyboard sustain key.
  *
  * Unbound devices (no input node references the device id) are a no-op.
  */
@@ -36,6 +37,7 @@ import type {
     VoiceExecutor
 } from './types';
 import { getPresetRegistry } from '../MIDIDevicePresets';
+import { SustainController } from './SustainController';
 import type { GraphNode, MIDIInputNodeData } from '../../engine/types';
 import type { MIDIDevicePreset, MIDIEvent, MIDINoteEvent } from '../types';
 
@@ -106,11 +108,26 @@ export class MIDIVoiceRouter {
     private readonly executor: VoiceExecutor;
     private readonly midi: RoutingContext['midi'];
     private subscription: MIDISubscriptionLike | null = null;
+    /**
+     * Per-note sustain state (CC64 / spacebar). Runtime control state only —
+     * never persisted, never in undo history. Exposed via {@link sustain} so the
+     * computer-keyboard path shares this exact mechanism.
+     */
+    private readonly sustainCtl = new SustainController();
 
     constructor(ctx: RoutingContext) {
         this.graph = ctx.graph;
         this.executor = ctx.executor;
         this.midi = ctx.midi;
+    }
+
+    /**
+     * The shared per-note sustain controller. The computer-keyboard path
+     * (audioStore spacebar) drives this directly so hardware CC64 and the
+     * keyboard sustain key flow through one mechanism.
+     */
+    get sustain(): SustainController {
+        return this.sustainCtl;
     }
 
     /**
@@ -136,7 +153,12 @@ export class MIDIVoiceRouter {
     }
 
     /** Route a single parsed MIDI event. Public for direct/unit invocation. */
-    handleEvent(event: MIDIEvent): void {
+    handleEvent(event: MIDIEvent | null | undefined): void {
+        // MIDIManager only publishes parsed events, but this is an external/control
+        // boundary. Ignore malformed callbacks instead of throwing
+        // "Cannot read properties of undefined (reading 'type')" mid-performance.
+        if (!event || typeof (event as { type?: unknown }).type !== 'string') return;
+
         switch (event.type) {
             case 'noteOn':
             case 'noteOff':
@@ -155,6 +177,9 @@ export class MIDIVoiceRouter {
         const voices = this.resolveNoteVoices(event);
         for (const voice of voices) {
             if (event.type === 'noteOn') {
+                // Re-pressing a held (sustained) note must own the voice cleanly:
+                // drop any stale held entry so pedal-up never double-releases it.
+                this.sustainCtl.onNoteOn(voice.nodeId, voice.row, voice.keyIndex);
                 this.executor.noteOn(voice.nodeId, voice.row, voice.keyIndex, voice.velocity);
                 // Light the cables leaving this input node so the player sees the
                 // signal flow — parity with the computer-keyboard path
@@ -167,6 +192,10 @@ export class MIDIVoiceRouter {
                     this.executor.activateControlSignal(id);
                 }
             } else {
+                // Pedal down -> hold the voice (suppress note-off) until flush.
+                if (this.sustainCtl.onNoteOff(voice.nodeId, voice.row, voice.keyIndex)) {
+                    continue;
+                }
                 this.executor.noteOff(voice.nodeId, voice.row, voice.keyIndex);
                 for (const id of this.outgoingConnectionIds(voice.nodeId)) {
                     this.executor.releaseControlSignal(id);
@@ -194,11 +223,26 @@ export class MIDIVoiceRouter {
         const engaged = value >= CC_ENGAGED_THRESHOLD;
         for (const bound of this.boundInputNodes(deviceId)) {
             if (!channelMatches(bound.data.activeChannel, channel)) continue;
-            if (engaged) {
-                this.executor.controlDown(bound.node.id);
-            } else {
-                this.executor.controlUp(bound.node.id);
-            }
+            this.applySustain(bound.node.id, engaged);
+        }
+    }
+
+    /**
+     * Apply a per-note sustain (damper) transition to one input node. Down arms
+     * the hold; up flushes every voice held while the pedal was down, releasing
+     * each exactly once. The pedal's own UI/cable glow lives in audioStore; this
+     * router only emits the held note releases.
+     */
+    applySustain(nodeId: string, down: boolean): void {
+        const released = this.sustainCtl.setPedal(nodeId, down);
+        if (released.length === 0) return;
+        for (const voice of released) {
+            this.executor.noteOff(nodeId, voice.row, voice.keyIndex);
+        }
+        // Fade the input node's outgoing cables once the held voices let go,
+        // mirroring the immediate-release path's signal-flow glow.
+        for (const id of this.outgoingConnectionIds(nodeId)) {
+            this.executor.releaseControlSignal(id);
         }
     }
 

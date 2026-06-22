@@ -16,10 +16,6 @@ export interface VoiceExecutor {
     noteOn(keyboardId: string, row: number, keyIndex: number, velocity?: number): void;
     /** Release a previously triggered note. */
     noteOff(keyboardId: string, row: number, keyIndex: number): void;
-    /** Press the control (sustain pedal) for an input node. */
-    controlDown(keyboardId: string): void;
-    /** Release the control (sustain pedal) for an input node. */
-    controlUp(keyboardId: string): void;
     /** Light a connection cable to visualize signal flowing through it. */
     activateControlSignal(connectionId: string): void;
     /** Begin the fade-out of a connection cable's signal-flow glow. */

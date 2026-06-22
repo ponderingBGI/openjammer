@@ -61,6 +61,16 @@ export function initMidiVoiceRouting(
     return router;
 }
 
+/**
+ * The live router singleton, or null if routing has not been initialized. The
+ * computer-keyboard sustain path (audioStore) uses this to drive the *same*
+ * per-note {@link SustainController} as hardware CC64, so both share one
+ * mechanism instead of forking parallel hold logic.
+ */
+export function getMidiVoiceRouter(): MIDIVoiceRouter | null {
+    return router;
+}
+
 /** Tear down MIDI -> voice routing and release the subscription. */
 export function disposeMidiVoiceRouting(): void {
     if (router) {
