@@ -395,17 +395,29 @@ impl Engine {
         core::mem::replace(&mut self.program, program)
     }
 
-    /// Render one block of `nframes` into `out` (mono master output).
-    ///
-    /// RT-SAFETY: this path performs NO heap allocation and takes NO locks. It
-    /// walks the pre-computed, cycle-free schedule; for each node it mixes the
-    /// node's inputs into the pre-sized `in_scratch`, points reusable
-    /// channel-pointer arrays at the pre-sized buffers, and calls the node's
-    /// `process`. Finally it sums the master-output node's resolved input into
-    /// `out`.
+    /// Render one block of `nframes` into `out` (a single mono device channel).
+    /// Thin wrapper over [`Engine::process_block_into`] — kept so every existing
+    /// mono caller (the native host, the wasm worklet, the render/loopback bins)
+    /// compiles unchanged and stays byte-identical.
     pub fn process_block(&mut self, out: &mut [f32], nframes: usize) {
+        let mut outs: [&mut [f32]; 1] = [out];
+        self.process_block_into(&mut outs, nframes);
+    }
+
+    /// Render one block of `nframes` into `outs.len()` device channels (the master
+    /// node's resolved input, mapped across the channels — see docs/CHANNELS.md).
+    /// A single channel is bit-identical to the historical mono path.
+    ///
+    /// RT-SAFETY: NO heap allocation, NO locks. It walks the pre-computed,
+    /// cycle-free schedule; for each node it mixes the node's inputs into the
+    /// pre-sized `in_scratch`, points reusable channel-pointer arrays at the
+    /// pre-sized buffers, and calls the node's `process`. Then it emits the
+    /// master-output node's resolved input into every device channel, per-channel
+    /// gained / guarded / limited / metered.
+    pub fn process_block_into(&mut self, outs: &mut [&mut [f32]], nframes: usize) {
         debug_assert!(nframes <= self.program.block_size, "block overrun");
-        let nframes = nframes.min(self.program.block_size).min(out.len());
+        let dev_len = outs.iter().map(|o| o.len()).min().unwrap_or(0);
+        let nframes = nframes.min(self.program.block_size).min(dev_len);
 
         for si in 0..self.program.schedule.len() {
             let node = self.program.schedule[si];
@@ -470,68 +482,71 @@ impl Engine {
             self.meter_node(node, nframes);
         }
 
-        // Emit the master node's RESOLVED INPUT. The master sink (SpeakerOut /
-        // GraphOut) does not itself produce audio; the engine's output IS the
-        // mix feeding its input port 0.
-        for o in out.iter_mut().take(nframes) {
-            *o = 0.0;
-        }
+        // Emit the master node's RESOLVED INPUT into EVERY device channel. The
+        // master sink (SpeakerOut / GraphOut) produces no audio of its own; the
+        // engine's output IS the mix feeding its input port 0. A mono master
+        // upmixes that mix to every device channel (centred); a true stereo master
+        // mapping lane->channel arrives with the adaptation step. Per channel:
+        // master gain, NaN/denormal guard, brickwall limiter. A SINGLE device
+        // channel is bit-identical to the historical mono path.
         let master = self.program.master_out;
-        if let Some(port0) = self
-            .program
-            .routing
-            .get(master)
-            .and_then(|r| r.inputs.first())
-        {
-            // Borrow split: read sources from `out_bufs`, write `out` (caller's
-            // buffer, disjoint). No allocation.
-            for k in 0..port0.len() {
-                let src = self.program.routing[master].inputs[0][k];
-                let src_buf = &self.program.out_bufs[src.node][src.port as usize];
-                for (o, &s) in out.iter_mut().zip(src_buf.iter()).take(nframes) {
-                    *o += s;
+        // Master volume / mute: a single field read; default unity, so graphs whose
+        // SpeakerOut never set a volume stay bit-identical.
+        let mg = self.program.instances[master].master_gain();
+        let mut master_dirty = false;
+        for (ch, out) in outs.iter_mut().enumerate() {
+            for o in out.iter_mut().take(nframes) {
+                *o = 0.0;
+            }
+            if let Some(port0) = self
+                .program
+                .routing
+                .get(master)
+                .and_then(|r| r.inputs.first())
+            {
+                // Borrow split: read sources from `out_bufs` (on `self`), write the
+                // caller's `out` (disjoint). No allocation.
+                for k in 0..port0.len() {
+                    let src = self.program.routing[master].inputs[0][k];
+                    let src_buf = &self.program.out_bufs[src.node][src.port as usize];
+                    for (o, &s) in out.iter_mut().zip(src_buf.iter()).take(nframes) {
+                        *o += s;
+                    }
                 }
             }
-        }
-        // Master volume / mute: scale the resolved master mix by the master
-        // sink's `master_gain` (volume, or 0 when muted). Default is unity, so
-        // graphs whose SpeakerOut never set a volume are bit-identical to before.
-        // A single field read + per-sample multiply — RT-safe, no allocation.
-        let mg = self.program.instances[master].master_gain();
-        if mg != 1.0 {
+            if mg != 1.0 {
+                for o in out.iter_mut().take(nframes) {
+                    *o *= mg;
+                }
+            }
+            // Zero any trailing frames beyond our valid range.
+            for o in out.iter_mut().skip(nframes) {
+                *o = 0.0;
+            }
+            // U16: guard the master output (a non-finite source would otherwise reach
+            // the device). Flag if ANY channel produced non-finite.
+            if sanitize(&mut out[..nframes]) {
+                master_dirty = true;
+            }
+            // Master brickwall limiter — AFTER sanitize (so a master-level NaN/Inf is
+            // still flagged, not swallowed) and BEFORE metering (so the meter reflects
+            // what is heard). Reuses the shared `ojcore-dsp` soft knee; its linear
+            // region passes through untouched, so quiet/normal graphs stay
+            // bit-identical (the committed golden fingerprints hold).
             for o in out.iter_mut().take(nframes) {
-                *o *= mg;
+                *o = ojcore_dsp::guards::soft_limit(*o);
+            }
+            // U15 metering: only the FIRST device channel folds into the single master
+            // meter, so a mono graph is byte-identical to the pre-stereo path.
+            if ch == 0 && self.meters.enabled {
+                self.meters.master.accumulate(&out[..nframes]);
             }
         }
-
-        // Zero any trailing frames beyond our valid range.
-        for o in out.iter_mut().skip(nframes) {
-            *o = 0.0;
-        }
-
-        // U16: guard the master output too (a non-finite source would otherwise
-        // reach the device). U15: fold it into the master meter.
-        if sanitize(&mut out[..nframes]) {
+        if master_dirty {
             // Flag the master node so the control plane sees the garbage.
             self.budget.non_finite[self.program.master_out] = true;
             #[cfg(feature = "std")]
             self.emit_node_fault(self.program.master_out, ojproto::FaultKind::NonFinite);
-        }
-        // Master brickwall limiter (Track A P0b — founder decision #1): keep the
-        // FINAL output within +/-0.999 (`LIMITER_CEILING`) so summed over-unity
-        // graphs can never clip the device — the last line of defence the performer
-        // actually hears. Applied AFTER `sanitize` (so a master-level NaN/Inf is
-        // still flagged + reported, not silently swallowed) and BEFORE metering (so
-        // the meter reflects what is truly heard). Reuses the shared `ojcore-dsp`
-        // kernel — the same soft knee the per-graph guard chain uses — rather than
-        // forking a second limiter. The linear region (|x| <= ceiling/2 = 0.4995)
-        // passes through untouched, so quiet/normal graphs stay bit-identical; the
-        // committed golden fingerprints were re-captured for the limited chain.
-        for o in out.iter_mut().take(nframes) {
-            *o = ojcore_dsp::guards::soft_limit(*o);
-        }
-        if self.meters.enabled {
-            self.meters.master.accumulate(&out[..nframes]);
         }
 
         // Advance the minimal transport clock once per block while playing.
@@ -871,5 +886,65 @@ mod apply_rt_tests {
             vel: 64,
         });
         assert_eq!(probe.last_note_on.get(), None);
+    }
+
+    /// `process_block_into` emits the mono master mix into EVERY device channel
+    /// (the mono->N upmix). Slot 0 is a `GraphIn` source the executor leaves intact,
+    /// so its pre-filled buffer reaches the `SpeakerOut` master at slot 1.
+    #[test]
+    fn process_block_into_upmixes_master_mix_to_every_channel() {
+        use crate::compile::{CompiledProgram, NodeRouting, Source};
+        let instances: Vec<Box<dyn DspInstance>> = vec![
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }),
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }),
+        ];
+        let program = CompiledProgram {
+            instances,
+            // Master (slot 1) input port 0 is fed by the source (slot 0).
+            routing: vec![
+                NodeRouting::default(),
+                NodeRouting {
+                    inputs: vec![vec![Source { node: 0, port: 0 }]],
+                },
+            ],
+            out_bufs: vec![vec![vec![0.1f32; 4]], vec![]], // source emits 0.1
+            out_channels: vec![1, 1],
+            in_channels: vec![1, 1],
+            bypassed: vec![false, false],
+            // GraphIn => the executor leaves slot 0's buffer intact (no process call).
+            kinds: vec![PrimitiveKind::GraphIn, PrimitiveKind::SpeakerOut],
+            ids: vec![NodeIdx(1), NodeIdx(2)],
+            id_index: vec![(NodeIdx(1), 0), (NodeIdx(2), 1)],
+            master_out: 1,
+            block_size: 4,
+            in_scratch: vec![vec![0.0; 4]],
+            max_in: 1,
+            max_out: 1,
+            schedule: vec![0, 1],
+        };
+        let mut engine = Engine::new(program);
+
+        let mut l = [0.0f32; 4];
+        let mut r = [0.0f32; 4];
+        {
+            let mut outs: [&mut [f32]; 2] = [&mut l, &mut r];
+            engine.process_block_into(&mut outs, 4);
+        }
+        // Both device channels receive the same mono master mix (0.1), upmixed.
+        // (0.1 is below the limiter's linear-region ceiling, so it passes through.)
+        assert!(l.iter().all(|&x| (x - 0.1).abs() < 1e-6), "left = mono mix");
+        assert!(
+            r.iter().all(|&x| (x - 0.1).abs() < 1e-6),
+            "right = mono mix (upmixed)"
+        );
+
+        // And the mono wrapper still yields exactly one channel of the same mix.
+        let mut mono = [0.0f32; 4];
+        engine.process_block(&mut mono, 4);
+        assert!(mono.iter().all(|&x| (x - 0.1).abs() < 1e-6));
     }
 }
