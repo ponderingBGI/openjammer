@@ -54,6 +54,13 @@ pub mod structural;
 // and is registered through the SAME shared `register_builtins` path.
 pub mod looper;
 
+// --- The stereo panner -------------------------------------------------------
+// `pan` is the first built-in node with a 2-channel audio output
+// (`audio_out_channels = 2`): one mono in -> a stereo L/R out. `no_std` (alloc
+// only) so it compiles unchanged for the `wasm32` worklet and registers through
+// the SAME shared `register_builtins` path. See `docs/CHANNELS.md`.
+pub mod pan;
+
 // --- U4 engine core ---------------------------------------------------------
 // `compile` + `exec` are the engine proper and stay `no_std` (alloc only) so
 // they compile unchanged for the `wasm32` AudioWorklet. `command` (rtrb ring)
@@ -104,6 +111,8 @@ pub use register::{register_builtins, BuiltinOpts};
 
 // --- U-STATEFUL: looper surface ---
 pub use looper::{LooperLoader, LooperNode, LooperState, LOOPER_ID, MAX_LOOP_SECS};
+
+pub use pan::{pan_param, PanLoader, PanNode, PAN_ID};
 
 pub use structural::{
     master_param, StructuralLoader, StructuralNode, ADD_ID, GRAPH_IN_ID, GRAPH_OUT_ID, MIC_IN_ID,

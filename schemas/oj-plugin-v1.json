@@ -29,6 +29,7 @@
         "Waveshaper",
         "Delay",
         "Convolution",
+        "Pan",
         "FaustHost",
         "WasmHost",
         "PluginHost",
