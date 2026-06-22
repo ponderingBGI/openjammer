@@ -85,6 +85,27 @@ pub mod looper_action {
     pub const OVERDUB: u8 = 5;
 }
 
+/// Looper state-machine state codes carried by [`EngineFrame::Looper`] and the
+/// `from`/`to` fields of [`RtEvent::LooperEdge`] / [`EventKind::LooperEdge`].
+///
+/// These MIRROR the `ojcore::LooperState` discriminant order exactly (it has
+/// explicit discriminants and an `as_u8` plain-cast), so the engine emits these
+/// bytes verbatim and the TS mirror reads them as bare numbers. Kept as `u8`
+/// consts (not a serde enum) so the wire frames stay a flat number — the same
+/// pattern as [`looper_action`].
+pub mod looper_state {
+    /// No loop captured / not running.
+    pub const IDLE: u8 = 0;
+    /// Armed: the next record begins capture.
+    pub const ARMED: u8 = 1;
+    /// Recording a from-scratch first take (sets the loop length).
+    pub const RECORDING: u8 = 2;
+    /// Playing back the committed layers.
+    pub const PLAYING: u8 = 3;
+    /// Recording a new layer on top of existing playing layers.
+    pub const OVERDUBBING: u8 = 4;
+}
+
 /// Edge signal kind. The UI's `universal` ports are RESOLVED to `Audio` or
 /// `Control` at emit time and never reach the IR unresolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -250,6 +271,18 @@ pub enum EngineFrame {
         beat: u32,
         phase: f32,
     },
+    /// Control-rate looper telemetry for one looper node, published every block
+    /// from the (ungated) looper-publish path. Carries NO audio buffer — only
+    /// the playhead/length/state needed to draw the loop row + playhead. `state`
+    /// is one of the [`looper_state`] codes; `pos`/`loop_len` are sample frames;
+    /// `peak` is the node's last-block output peak for the level meter.
+    Looper {
+        node: NodeIdx,
+        state: u8,
+        pos: u32,
+        loop_len: u32,
+        peak: f32,
+    },
     Error {
         code: u16,
         message: String,
@@ -314,6 +347,10 @@ pub enum EventKind {
     Xrun { dropped: u32 },
     /// A per-node DSP fault (NaN / over-budget / auto-bypass).
     NodeFault { node: NodeIdx, fault: FaultKind },
+    /// A looper node's state machine transitioned (e.g. recording -> playing on
+    /// commit). `from`/`to` are [`looper_state`] codes. Rides the loss-proof
+    /// EVENT ring (not the lossy meter ring) so a transition is never dropped.
+    LooperEdge { node: NodeIdx, from: u8, to: u8 },
     /// The event ring overflowed and dropped frames (drop-and-count).
     RingFull,
     /// Asset (sample / IR / SF2) load or decode event.
@@ -337,6 +374,10 @@ pub enum RtEvent {
     Xrun { dropped: u32 },
     /// A per-node DSP fault.
     NodeFault { node: NodeIdx, fault: FaultKind },
+    /// A looper node's state machine transitioned. `from`/`to` are
+    /// [`looper_state`] codes. `NodeIdx(u32)` + two `u8` = 6 payload bytes,
+    /// well within the 16-byte cap proven below.
+    LooperEdge { node: NodeIdx, from: u8, to: u8 },
     /// The event ring overflowed (drop-and-count).
     RingFull,
 }

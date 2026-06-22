@@ -219,7 +219,7 @@ impl Engine {
     /// into a stack buffer and `push`es into the pre-allocated ring, dropping
     /// frames rather than blocking when the ring is full.
     #[cfg(feature = "std")]
-    fn publish_meters(&mut self) {
+    fn publish_levels(&mut self) {
         let Some(ring) = self.meter_ring.as_ref() else {
             return;
         };
@@ -244,6 +244,46 @@ impl Engine {
         let pos = self.transport_pos();
         let n = return_frame::encode_beat(pos.bar, pos.beat, pos.phase, &mut buf);
         let _ = ring.push(&buf[..n]);
+    }
+
+    /// UNGATED looper return path: published every block regardless of the
+    /// metering toggle, because the looper's transport state (the row, the
+    /// playhead) must surface even when level meters are off. For each
+    /// looper-kind slot it pushes a control-rate [`ojproto::EngineFrame::Looper`]
+    /// snapshot onto the (lossy) meter ring AND drains any state-transition edge
+    /// onto the (loss-proof) EVENT ring as [`ojproto::RtEvent::LooperEdge`] —
+    /// exactly like [`Self::emit_node_fault`], so a commit transition is never
+    /// dropped. Allocation-free: stack-buffer encode + ring `push`; non-looper
+    /// nodes inherit `looper_snapshot()/take_looper_edge() == None` and are skipped.
+    #[cfg(feature = "std")]
+    fn publish_looper(&mut self) {
+        use crate::meter::{event_frame, return_frame};
+        let n_slots = self.program.instances.len();
+        for slot in 0..n_slots {
+            if self.program.kinds[slot] != PrimitiveKind::Looper {
+                continue;
+            }
+            let id = self.program.ids[slot];
+
+            // Snapshot -> Looper frame on the meter ring (always, ungated).
+            if let Some((state, pos, loop_len, peak)) =
+                self.program.instances[slot].looper_snapshot()
+            {
+                if let Some(ring) = self.meter_ring.as_ref() {
+                    let mut buf = [0u8; return_frame::MAX_LEN];
+                    let n = return_frame::encode_looper(id, state, pos, loop_len, peak, &mut buf);
+                    let _ = ring.push(&buf[..n]);
+                }
+            }
+
+            // Transition edge -> LooperEdge on the loss-proof EVENT ring.
+            if let Some((from, to)) = self.program.instances[slot].take_looper_edge() {
+                if let Some(ring) = self.event_ring.as_ref() {
+                    let ev = ojproto::RtEvent::LooperEdge { node: id, from, to };
+                    let _ = event_frame::emit(ring, ev);
+                }
+            }
+        }
     }
 
     /// Emit a compact, RT-safe node fault event onto the attached event ring.
@@ -504,11 +544,16 @@ impl Engine {
         self.transport.playing = self.playing;
 
         // U15: non-blocking publish of the meter snapshot + beat at block end.
-        // Only when metering is on (and a ring is attached); alloc-free.
+        // Levels are gated by the metering toggle; alloc-free.
         #[cfg(feature = "std")]
         if self.meters.enabled {
-            self.publish_meters();
+            self.publish_levels();
         }
+        // Looper telemetry is UNGATED: the loop row + playhead must surface even
+        // with level metering off. Pushes Looper frames + drains transition
+        // edges onto the loss-proof event ring. Alloc-free; skips non-loopers.
+        #[cfg(feature = "std")]
+        self.publish_looper();
     }
 
     /// Mix `node`'s inputs into `in_scratch`, then render it into its own

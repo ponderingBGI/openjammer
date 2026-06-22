@@ -186,6 +186,24 @@ export const LooperAction = {
 } as const satisfies Record<string, LooperAction>;
 
 /**
+ * Looper state-machine state codes, carried as a bare `u8` by
+ * `EngineFrame.Looper.state` and the `from`/`to` fields of
+ * `RtEvent.LooperEdge` / `EventKind.LooperEdge`. Mirrors Rust's
+ * `ojproto::looper_state` consts (which in turn mirror `ojcore::LooperState`).
+ *   IDLE = 0, ARMED = 1, RECORDING = 2, PLAYING = 3, OVERDUBBING = 4
+ */
+export type LooperState = 0 | 1 | 2 | 3 | 4;
+
+/** Named `LooperState` values, mirroring Rust's `ojproto::looper_state`. */
+export const LooperState = {
+  IDLE: 0,
+  ARMED: 1,
+  RECORDING: 2,
+  PLAYING: 3,
+  OVERDUBBING: 4,
+} as const satisfies Record<string, LooperState>;
+
+/**
  * Hot parameter patch: a hand-packed 7-byte frame on the highest-rate UI->RT
  * path. Rust: `struct ParamPatch { node: u16, param: u8, value: f32 }` with
  * `to_bytes() -> [u8; 7]` / `from_bytes([u8; 7])`.
@@ -243,6 +261,7 @@ export function paramPatchFromBytes(bytes: Uint8Array): ParamPatch {
  *   { "Meter":  { "node": 3, "rms": 0.1, "peak": 0.9 } }
  *   { "IrAck":  { "ir_version": 1, "ok": true } }
  *   { "Beat":   { "bar": 2, "beat": 3, "phase": 0.5 } }
+ *   { "Looper": { "node": 3, "state": 3, "pos": 1024, "loop_len": 48000, "peak": 0.5 } }
  *   { "Error":  { "code": 42, "message": "boom" } }
  */
 export type EngineFrame =
@@ -257,6 +276,15 @@ export type EngineFrame =
   | { Meter: { node: NodeIdx; rms: number; peak: number } }
   | { IrAck: { ir_version: number; ok: boolean } }
   | { Beat: { bar: number; beat: number; phase: number } }
+  | {
+      Looper: {
+        node: NodeIdx;
+        state: LooperState;
+        pos: number;
+        loop_len: number;
+        peak: number;
+      };
+    }
   | { Error: { code: number; message: string } };
 
 // ============================================================================
@@ -290,6 +318,7 @@ export type FaultKind = "NonFinite" | "OverBudget" | "AutoBypassed";
  *   "GraphSwap"
  *   { "Xrun": { "dropped": 3 } }
  *   { "NodeFault": { "node": 3, "fault": "NonFinite" } }
+ *   { "LooperEdge": { "node": 3, "from": 2, "to": 3 } }
  *   "RingFull"
  *   "Asset"
  *   "Plugin"
@@ -302,6 +331,7 @@ export type EventKind =
   | "GraphSwap"
   | { Xrun: { dropped: number } }
   | { NodeFault: { node: NodeIdx; fault: FaultKind } }
+  | { LooperEdge: { node: NodeIdx; from: LooperState; to: LooperState } }
   | "RingFull"
   | "Asset"
   | "Plugin"
@@ -345,9 +375,11 @@ export interface Event {
  * Wire examples (pinned by wire_shapes.rs):
  *   { "Xrun": { "dropped": 5 } }
  *   { "NodeFault": { "node": 3, "fault": "OverBudget" } }
+ *   { "LooperEdge": { "node": 3, "from": 2, "to": 3 } }
  *   "RingFull"
  */
 export type RtEvent =
   | { Xrun: { dropped: number } }
   | { NodeFault: { node: NodeIdx; fault: FaultKind } }
+  | { LooperEdge: { node: NodeIdx; from: LooperState; to: LooperState } }
   | "RingFull";
