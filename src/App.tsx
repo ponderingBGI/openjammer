@@ -50,6 +50,7 @@ import { useAutoDetectedSampleRate } from './hooks/useAutoDetectedSampleRate';
 import { writeEmergencyBackup } from './persistence/recovery';
 import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens';
 import { isEditableTarget } from './utils/editableTarget';
+import { logger } from './utils/log';
 import './styles/global.css';
 
 function App() {
@@ -106,14 +107,28 @@ function App() {
   useEffect(() => {
     if (!isAudioContextReady) return;
 
-    // Create subscription wrappers for graph store
-    // Zustand's subscribe returns an unsubscribe function
+    // Create subscription wrappers for graph store.
+    // Zustand's subscribe returns an unsubscribe function. CRITICAL: the executor
+    // reconcile (graph → engine lowering) runs INSIDE this Zustand listener, and a
+    // throw here would ABORT the store's listener loop — starving every subscriber
+    // registered after it (the canvas re-render via `useGraphStore`, and the
+    // persist middleware's post-loop `setItem`). That is exactly the "deleting a
+    // node wedges the canvas + the delete doesn't persist" bug. So the reconcile is
+    // isolated: a lowering error is logged and contained, never propagated, so a
+    // graph edit ALWAYS re-renders live and ALWAYS persists.
+    const log = logger('graph');
     const subscribeToNodes = (callback: (nodes: Map<string, GraphNode>) => void) => {
       let prevNodes = useGraphStore.getState().nodes;
       return useGraphStore.subscribe((state) => {
         if (state.nodes !== prevNodes) {
           prevNodes = state.nodes;
-          callback(state.nodes);
+          try {
+            callback(state.nodes);
+          } catch (err) {
+            log.error('node reconcile failed (contained; UI + persistence preserved)', {
+              error: err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err),
+            });
+          }
         }
       });
     };
@@ -123,7 +138,13 @@ function App() {
       return useGraphStore.subscribe((state) => {
         if (state.connections !== prevConnections) {
           prevConnections = state.connections;
-          callback(state.connections);
+          try {
+            callback(state.connections);
+          } catch (err) {
+            log.error('connection reconcile failed (contained; UI + persistence preserved)', {
+              error: err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err),
+            });
+          }
         }
       });
     };

@@ -53,6 +53,10 @@ pub const MIC_IN_ID: &str = "host.mic_in";
 /// Manifest id of the built-in summing node (input 0 -> output 0; the executor
 /// pre-mixes fan-in into input 0).
 pub const ADD_ID: &str = "builtin.add";
+/// Manifest id of the built-in difference node (`out = in0 - in1`). Unlike
+/// [`ADD_ID`], it declares TWO distinct audio inputs so the executor mixes each
+/// side into its OWN port row — the kernel subtracts the second from the first.
+pub const SUBTRACT_ID: &str = "builtin.subtract";
 /// Manifest id of the built-in passthrough (input 0 -> output 0).
 pub const PASSTHROUGH_ID: &str = "builtin.passthrough";
 
@@ -139,6 +143,13 @@ impl StructuralLoader {
         Self::new(ADD_ID, "Add", PrimitiveKind::Add, 1, 1)
     }
 
+    /// A difference node: TWO audio ins (in0 / in1), one out (`out = in0 - in1`).
+    /// Two ports (not the `Add`'s pre-mixed single port) so the minuend and
+    /// subtrahend stay distinct for the kernel.
+    pub fn subtract() -> Self {
+        Self::new(SUBTRACT_ID, "Subtract", PrimitiveKind::Subtract, 2, 1)
+    }
+
     /// A passthrough: one audio in, one out.
     pub fn passthrough() -> Self {
         Self::new(
@@ -195,8 +206,25 @@ impl DspInstance for StructuralNode {
     fn activate(&mut self, _sample_rate: f32, _max_block: usize) {}
 
     fn process(&mut self, ctx: &mut ProcessCtx<'_, '_>) {
-        // Forward input 0 -> output 0 if both exist; otherwise leave outputs as
-        // the engine pre-mixed them (silence). Tolerates any port count.
+        // Subtract is the one structural kind whose two distinct input ports
+        // matter: out = in0 - in1. A missing second input acts as silence, so a
+        // lone-input Subtract degrades to a passthrough rather than panicking.
+        if self.kind == PrimitiveKind::Subtract {
+            if let Some(output) = ctx.outputs.first_mut() {
+                let in0 = ctx.inputs.first().copied().unwrap_or(&[]);
+                let in1 = ctx.inputs.get(1).copied().unwrap_or(&[]);
+                let n = ctx.nframes.min(output.len());
+                for i in 0..n {
+                    let a = in0.get(i).copied().unwrap_or(0.0);
+                    let b = in1.get(i).copied().unwrap_or(0.0);
+                    output[i] = a - b;
+                }
+            }
+            return;
+        }
+        // Every other structural kind forwards input 0 -> output 0 if both exist;
+        // otherwise leave outputs as the engine pre-mixed them (silence).
+        // Tolerates any port count.
         if let (Some(input), Some(output)) = (ctx.inputs.first(), ctx.outputs.first_mut()) {
             let n = ctx.nframes.min(input.len()).min(output.len());
             output[..n].copy_from_slice(&input[..n]);
@@ -337,6 +365,105 @@ mod tests {
         engine.process_block(&mut out, 64);
         for &s in out.iter() {
             assert!((s - 0.5).abs() < 1e-6, "passthrough should preserve input");
+        }
+    }
+
+    /// Two distinct sources into a Subtract node produce `out = in0 - in1` at
+    /// the master. Proves the difference kernel routes its TWO input ports
+    /// separately (in0 = port 0, in1 = port 1) rather than pre-mixing them like
+    /// Add. Uses two GraphIn sources so the minuend/subtrahend are independent.
+    #[test]
+    fn subtract_outputs_in0_minus_in1() {
+        let mut reg = PluginRegistry::new();
+        reg.register(Box::new(StructuralLoader::graph_in()));
+        reg.register(Box::new(StructuralLoader::subtract()));
+        reg.register(Box::new(StructuralLoader::speaker_out()));
+
+        // Two GraphIn sources (ids 0,1) feed Subtract (id 2) ports 0 and 1; the
+        // difference flows to SpeakerOut (id 3).
+        let graph = OjGraph {
+            ir_version: ojproto::SCHEMA_VERSION,
+            sample_rate: 48_000,
+            block_size: 64,
+            nodes: vec![
+                IrNode {
+                    id: NodeIdx(0),
+                    manifest_id: String::from(GRAPH_IN_ID),
+                    kind: PrimitiveKind::GraphIn,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 0,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(1),
+                    manifest_id: String::from(GRAPH_IN_ID),
+                    kind: PrimitiveKind::GraphIn,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 0,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(2),
+                    manifest_id: String::from(SUBTRACT_ID),
+                    kind: PrimitiveKind::Subtract,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 2,
+                    n_out: 1,
+                },
+                IrNode {
+                    id: NodeIdx(3),
+                    manifest_id: String::from(SPEAKER_OUT_ID),
+                    kind: PrimitiveKind::SpeakerOut,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 0,
+                },
+            ],
+            edges: vec![
+                IrEdge {
+                    from_node: NodeIdx(0),
+                    from_port: 0,
+                    to_node: NodeIdx(2),
+                    to_port: 0,
+                    kind: ojproto::ConnectionType::Audio,
+                },
+                IrEdge {
+                    from_node: NodeIdx(1),
+                    from_port: 0,
+                    to_node: NodeIdx(2),
+                    to_port: 1,
+                    kind: ojproto::ConnectionType::Audio,
+                },
+                IrEdge {
+                    from_node: NodeIdx(2),
+                    from_port: 0,
+                    to_node: NodeIdx(3),
+                    to_port: 0,
+                    kind: ojproto::ConnectionType::Audio,
+                },
+            ],
+            schedule: vec![],
+        };
+        let prog = compile(&graph, &reg).expect("subtract graph compiles");
+        let mut engine = Engine::new(prog);
+        // in0 = 0.7, in1 = 0.2  =>  out = 0.5.
+        if let Some(buf) = engine.input_mut(NodeIdx(0), 0) {
+            buf.iter_mut().for_each(|s| *s = 0.7);
+        }
+        if let Some(buf) = engine.input_mut(NodeIdx(1), 0) {
+            buf.iter_mut().for_each(|s| *s = 0.2);
+        }
+        let mut out = vec![0.0f32; 64];
+        engine.process_block(&mut out, 64);
+        for &s in out.iter() {
+            assert!(
+                (s - 0.5).abs() < 1e-6,
+                "subtract should emit in0 - in1 (got {s})"
+            );
         }
     }
 

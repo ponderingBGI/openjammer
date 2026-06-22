@@ -54,3 +54,17 @@
 .oj-port-row.is-placeholder .oj-port-row__label {
     color: var(--text-muted);
 }
+
+/* A GATED row (declared but not engine-wired yet) reads as visibly inert: dimmed
+   and non-interactive, so the player sees the surface exists but can't wire a
+   connection that would silently do nothing. The `title` carries the why. */
+.oj-port-row.is-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.oj-port-row.is-disabled .oj-port-row__label {
+    color: var(--text-muted);
+    font-style: italic;
+}

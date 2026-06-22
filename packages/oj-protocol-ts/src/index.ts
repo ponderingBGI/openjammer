@@ -80,6 +80,7 @@ export const PRIMITIVE_KINDS = [
   "PluginHost",
   // routing / io
   "Add",
+  "Subtract",
   "MicIn",
   "SpeakerOut",
   "GraphIn",

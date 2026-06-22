@@ -7,11 +7,14 @@
  * `ojcore::compile` hard-errors (`UnknownManifest`) on any `manifest_id` its
  * registry doesn't contain:
  *
- *   • NATIVE (`src-tauri`):  builtin.gain, builtin.osc, builtin.sampler,
- *                            builtin.karplus  (no host structural loader; the
- *                            master `SpeakerOut` instance is loaded via the
- *                            GAIN loader — see `EngineBackend::starter_graph`).
- *   • WASM  (`ojcore-wasm`): builtin.gain, host.speaker_out.
+ *   • NATIVE (`src-tauri`):  the FULL set via `register_all(RegisterOpts::full())`
+ *                            (`EngineBackend::build_registry`) — every effect
+ *                            (gain/biquad/waveshaper/delay/convolution), the
+ *                            mix/routing nodes (add/subtract), every instrument,
+ *                            and SF2. IO/master kinds load via the GAIN placeholder
+ *                            (the `kind` flag marks them and the executor kind-gates
+ *                            them, so the placeholder is never processed).
+ *   • WASM  (`ojcore-wasm`): the same full set MINUS SF2 (`register_all(wasm())`).
  *
  * So before pushing, each executor remaps every IrNode's `manifest_id` to an id
  * its registry actually has, chosen by the node's closed {@link PrimitiveKind}.
@@ -38,6 +41,7 @@ export const ENGINE_IDS = {
     delay: 'builtin.delay',
     convolution: 'builtin.convolution',
     add: 'builtin.add',
+    subtract: 'builtin.subtract',
     passthrough: 'builtin.passthrough',
     hostGraphIn: 'host.graph_in',
     hostMicIn: 'host.mic_in',
@@ -63,9 +67,26 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
                 return ENGINE_IDS.sampler;
             case 'KarplusString':
                 return ENGINE_IDS.karplus;
-            // SpeakerOut/GraphOut: native loads the master instance via GAIN
-            // (the `kind` flag is what marks it master) — matches starter_graph.
-            // Gain / Add / Passthrough / processors / IO: GAIN passthrough.
+            // Effects + mix/routing: native registers the FULL set via
+            // register_all(RegisterOpts::full()), so these load their REAL kernels
+            // — NOT a gain passthrough (the prior collapse silently no-op'd every
+            // effect on the native/Tauri target and made Subtract == passthrough).
+            case 'Biquad':
+                return ENGINE_IDS.biquad;
+            case 'Waveshaper':
+                return ENGINE_IDS.waveshaper;
+            case 'Delay':
+                return ENGINE_IDS.delay;
+            case 'Convolution':
+                return ENGINE_IDS.convolution;
+            case 'Add':
+                return ENGINE_IDS.add;
+            case 'Subtract':
+                return ENGINE_IDS.subtract;
+            // SpeakerOut/GraphOut/GraphIn/MicIn/Passthrough/Gain: the master/IO
+            // instance loads via GAIN (the `kind` flag marks it; the executor
+            // kind-gates it so the placeholder is never processed) — matches
+            // starter_graph.
             default:
                 return ENGINE_IDS.gain;
         }
@@ -98,6 +119,8 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
             return ENGINE_IDS.convolution;
         case 'Add':
             return ENGINE_IDS.add;
+        case 'Subtract':
+            return ENGINE_IDS.subtract;
         case 'Passthrough':
             return ENGINE_IDS.passthrough;
         case 'GraphIn':

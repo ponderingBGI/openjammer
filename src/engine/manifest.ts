@@ -13,7 +13,7 @@
  * lists are never hand-duplicated here.
  */
 
-import type { NodeDefinition, NodeType } from './types';
+import type { EffectType, NodeDefinition, NodeType } from './types';
 import { nodeDefinitions } from './registry';
 import { AI_MANIFEST_PARAMS_KEY } from './dynamicRegistry';
 // The ONE closed PrimitiveKind set, imported from the wire-contract SSOT so this
@@ -117,7 +117,7 @@ const KIND_BY_TYPE: Partial<Record<NodeType, PrimitiveKind>> = {
     looper: 'Looper',
     // routing / io
     add: 'Add',
-    subtract: 'Add',
+    subtract: 'Subtract',
     microphone: 'MicIn',
     speaker: 'SpeakerOut',
     recorder: 'SpeakerOut',
@@ -158,7 +158,101 @@ const PARAMS_BY_TYPE: Partial<Record<NodeType, ParamDecl[]>> = {
         { id: 0, name: 'volume', min: 0, max: 1, default: 1 },
         { id: 1, name: 'isMuted', min: 0, max: 1, default: 0 },
     ],
+    // builtin.gain — ojcore GAIN_PARAM id 0 (linear multiplier). Declared
+    // explicitly so the seam carries the KERNEL's authoritative range
+    // ([min,max] = [0,4], crates/ojcore/src/builtin.rs `gain_manifest`) instead
+    // of the conservative range auto-derived from `defaultData` ORDER
+    // (`rangeFor(1)` => [0,1], which would silently cap a 2x boost at unity).
+    // `paramsFromData` CLAMPS the live value to this range at emit time, so a UI
+    // (or AI/import) value can never phase-invert the signal (negative gain) or
+    // run it away past +12 dB (>4x) — GAIN-1/GAIN-2 of the node standard.
+    amplifier: [{ id: 0, name: 'gain', min: 0, max: 4, default: 1 }],
 };
+
+/**
+ * EffectNode lowering (SEAM-4 for the effect node). The `effect` node carries an
+ * `effectType` discriminator + a `data.params.*` bag in the visual model; here we
+ * map each chosen effect to the REAL ojcore primitive it lowers to AND the exact
+ * kernel param ids each UI control drives, so the engine actually applies the
+ * effect (previously `effect` ALWAYS lowered to `Waveshaper` and the params lived
+ * under `data.params.*` which the top-level `paramsFromData` never read — every
+ * non-distortion option + every slider was DEAD).
+ *
+ * `param.name` is the key inside `node.data.params` the live value is read from
+ * (see {@link effectParamsFromData}); `param.id` MUST equal the kernel's param id
+ * (crates/ojcore/src/effects.rs `{biquad,waveshaper,delay,convolution}_param`).
+ * A decl with no matching UI control (e.g. Waveshaper LEVEL) holds its `default`,
+ * which is the kernel-correct unity value.
+ */
+export interface EffectLowering {
+    kind: PrimitiveKind;
+    params: ParamDecl[];
+}
+const EFFECT_LOWERING: Record<EffectType, EffectLowering> = {
+    // distortion -> Waveshaper. UI `amount` drives AMOUNT(0); LEVEL(1) held at
+    // unity (1.0) so the curve doesn't also re-gain the signal.
+    distortion: {
+        kind: 'Waveshaper',
+        params: [
+            { id: 0, name: 'amount', min: 0, max: 1, default: 0.5 },
+            { id: 1, name: 'level', min: 0, max: 2, default: 1 },
+        ],
+    },
+    // filter -> Biquad. UI `frequency`/`q` drive FREQ(1)/Q(2); TYPE(0) defaults
+    // to lowpass and GAIN_DB(3) to 0 (flat) — both holdable from data if present.
+    filter: {
+        kind: 'Biquad',
+        params: [
+            { id: 0, name: 'type', min: 0, max: 7, default: 0 },
+            { id: 1, name: 'frequency', min: 20, max: 20_000, default: 1_000 },
+            { id: 2, name: 'q', min: 0.1, max: 20, default: 0.707 },
+            { id: 3, name: 'gain_db', min: -24, max: 24, default: 0 },
+        ],
+    },
+    // reverb -> Convolution. The kernel exposes only MIX(0) (the wet IR tail is
+    // the reverb); UI `mix` drives it. (No `decay` kernel param exists — the IR
+    // length is the decay, so a decay slider would be fictional and is omitted.)
+    reverb: {
+        kind: 'Convolution',
+        params: [{ id: 0, name: 'mix', min: 0, max: 1, default: 0.3 }],
+    },
+    // delay -> Delay. UI `time`/`feedback`/`mix` drive TIME(0)/FEEDBACK(1)/MIX(2).
+    delay: {
+        kind: 'Delay',
+        params: [
+            { id: 0, name: 'time', min: 0, max: 2, default: 0.25 },
+            { id: 1, name: 'feedback', min: 0, max: 0.9, default: 0.4 },
+            { id: 2, name: 'mix', min: 0, max: 1, default: 0.3 },
+        ],
+    },
+};
+
+/** Default effect type when a node carries none (mirrors the registry default). */
+const DEFAULT_EFFECT_TYPE: EffectType = 'distortion';
+
+/** Resolve an effect node's chosen {@link EffectLowering} from its data. */
+export function effectLoweringFor(data: Record<string, unknown> | undefined): EffectLowering {
+    const t = (data?.effectType as EffectType | undefined) ?? DEFAULT_EFFECT_TYPE;
+    return EFFECT_LOWERING[t] ?? EFFECT_LOWERING[DEFAULT_EFFECT_TYPE];
+}
+
+/**
+ * Resolve an effect node's kernel {@link Param}s from `node.data.params.*`. A
+ * decl whose name is present (finite-numeric) in `data.params` carries its live
+ * value; otherwise the decl default (the kernel-correct value). Addressed by the
+ * decl `id` (the kernel param id).
+ */
+export function effectParamsFromData(
+    data: Record<string, unknown> | undefined,
+): { id: number; value: number }[] {
+    const lowering = effectLoweringFor(data);
+    const bag = (data?.params as Record<string, unknown> | undefined) ?? {};
+    return lowering.params.map((decl) => {
+        const raw = bag[decl.name];
+        const value = typeof raw === 'number' && Number.isFinite(raw) ? raw : decl.default;
+        return { id: decl.id, value };
+    });
+}
 
 /**
  * Node types whose audio is computed by a built-in DSP kernel. Everything else

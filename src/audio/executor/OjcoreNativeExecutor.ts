@@ -449,6 +449,21 @@ export class OjcoreNativeExecutor implements Executor {
 
     /** Emit + remap + push the current graph to the native engine. */
     private pushGraph(): void {
+        // Isolate the reconcile: lowering the visual graph to the engine IR must
+        // NEVER throw out of a store-change subscriber — that would abort Zustand's
+        // listener loop and wedge the canvas (later subscribers, and the persist
+        // middleware's post-loop setItem, are skipped). Contain it: keep the last
+        // good audio, log for the DevLog, and let the next edit retry.
+        try {
+            this.pushGraphInner();
+        } catch (err) {
+            log.error('graph lowering failed; keeping last good audio', {
+                detail: err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err),
+            });
+        }
+    }
+
+    private pushGraphInner(): void {
         if (!this.getNodes || !this.getConnections) return;
         // The native engine registers a WasmHost loader per AI-authored faust node
         // (author_faust_native), so lower compiled code nodes to their real WasmHost

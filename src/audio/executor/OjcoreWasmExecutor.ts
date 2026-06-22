@@ -61,6 +61,10 @@ import {
 } from './ojcoreHandles';
 import { ingestEngineEvents } from './faultPipe';
 import { setEngineHealth } from '../../store/engineHealthStore';
+import { logger } from '../../utils/log';
+
+/** Scope-bound DevLog logger for the wasm executor. */
+const log = logger('wasm');
 
 // Vite resolves these to URLs/assets at build time.
 // The worklet processor module (bundled as an ES module worklet).
@@ -408,6 +412,20 @@ export class OjcoreWasmExecutor implements Executor {
     // --- Graph push --------------------------------------------------------
 
     private pushGraph(): void {
+        // Isolate the reconcile: lowering the visual graph must NEVER throw out of
+        // a store-change subscriber — that would abort Zustand's listener loop and
+        // wedge the canvas (later subscribers + the persist setItem are skipped).
+        // Contain it: keep the last good audio, log, and let the next edit retry.
+        try {
+            this.pushGraphInner();
+        } catch (err) {
+            log.error('graph lowering failed; keeping last good audio', {
+                detail: err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err),
+            });
+        }
+    }
+
+    private pushGraphInner(): void {
         if (!this.getNodes || !this.getConnections) return;
         const { graph, index } = emitWithIndex(this.getNodes(), this.getConnections(), {
             blockSize: WORKLET_BLOCK_SIZE,
