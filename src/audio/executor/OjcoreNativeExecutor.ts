@@ -147,6 +147,7 @@ export class OjcoreNativeExecutor implements Executor {
     private readonly bridge: OjcoreBridge = {
         nodeIndex: (nodeId) => this.index.get(nodeId),
         sendCommand: (cmd) => this.send(cmd),
+        nodeLevel: (nodeId) => this.levels.get(nodeId) ?? 0,
         loadSample: (nodeId, pcm, sampleRate, rootNote) =>
             this.loadSampleNative(nodeId, pcm, sampleRate, rootNote),
         startCapture: (nodeId) => this.recorderStartNative(nodeId),
