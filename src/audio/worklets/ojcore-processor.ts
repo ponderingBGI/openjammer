@@ -388,18 +388,29 @@ class OjcoreProcessor extends AudioWorkletProcessor {
         // in which case the copy is skipped.
         this.feedMicInput(inputs);
 
-        // Render one block into the wasm output buffer, then copy mono -> all
-        // output channels at UNITY. Speaker volume / mute is already baked into the
-        // engine's master mix (SpeakerOut `master_param` -> exec.rs `master_gain`),
-        // so a second scale here would DOUBLE-apply gain — the worklet stays a
-        // straight copy.
+        // Render one block into the wasm PLANAR output buffer, then copy each engine
+        // channel into the matching worklet output channel at UNITY. Speaker volume /
+        // mute is already baked into the engine's master mix (SpeakerOut
+        // `master_param` -> exec.rs `master_gain`), so the worklet stays a straight
+        // copy. A mono graph fills every engine channel identically (byte-identical
+        // to the old fan-out); a Pan/stereo graph plays true L/R.
         wasm.process(frames);
         const ptr = wasm.output_ptr();
-        const mono = new Float32Array(this.exports.memory.buffer, ptr, Math.min(frames, this.blockSize));
+        const engineChannels = wasm.output_channels() as number;
+        const stride = this.blockSize;
+        const frameCount = Math.min(frames, this.blockSize);
+        // One view over the whole planar buffer; per-channel rows are cheap sub-views.
+        const planar = new Float32Array(this.exports.memory.buffer, ptr, engineChannels * stride);
+        // Channel 0 (left) doubles as the "master" the recorder taps (matches native).
+        const mono = planar.subarray(0, frameCount);
         for (let ch = 0; ch < out.length; ch++) {
             const channel = out[ch];
-            const n = Math.min(channel.length, mono.length);
-            channel.set(mono.subarray(0, n));
+            // Map each output channel to its engine row, clamping to the last engine
+            // channel (a mono output context reads channel 0).
+            const srcCh = Math.min(ch, engineChannels - 1);
+            const src = planar.subarray(srcCh * stride, srcCh * stride + frameCount);
+            const n = Math.min(channel.length, src.length);
+            channel.set(src.subarray(0, n));
             // zero any tail beyond the rendered block
             for (let i = n; i < channel.length; i++) channel[i] = 0;
         }
