@@ -520,6 +520,22 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         dimensions: { width: 160, height: 100 }
     },
 
+    pan: {
+        type: 'pan',
+        category: 'effects',
+        name: 'Pan',
+        description: 'Place a mono signal in the stereo field (−1 left … +1 right)',
+        ui: 'auto', // AutoParamPanel (one pan knob) — no bespoke NodeWrapper branch
+        defaultPorts: [
+            { ...audioInput, position: { x: 0, y: 0.5 } },
+            { ...audioOutput, position: { x: 1, y: 0.5 } }
+        ],
+        defaultData: {
+            pan: 0
+        },
+        dimensions: { width: 150, height: 90 }
+    },
+
     multiplier: {
         type: 'multiplier',
         category: 'utility',

@@ -173,6 +173,7 @@ export type NodeType =
     | 'instrument' // Generic instrument node (uses instrumentId in data)
     | 'looper'
     | 'effect'
+    | 'pan'             // Stereo panner (mono -> L/R; the first stereo built-in)
     | 'multiplier'
     | 'speaker'
     | 'recorder'
@@ -229,6 +230,7 @@ export const KNOWN_PLUGIN_IDS = [
     'instrument',
     'looper',
     'effect',
+    'pan',
     'multiplier',
     'speaker',
     'recorder',
