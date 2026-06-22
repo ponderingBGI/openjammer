@@ -790,3 +790,52 @@ fn looper_process_is_allocation_free() {
         }
     });
 }
+
+/// THE USER SCENARIO, A/B: `GraphIn -> SpeakerOut` (direct) vs
+/// `GraphIn -> Looper -> SpeakerOut` with the production param defaults the
+/// manifest emits (LOOP_SECS=duration, WET=1, DRY=1) and NO record action, so the
+/// looper sits IDLE. An idle looper inserted in the chain MUST be a perfect
+/// passthrough — both paths produce bit-identical output. Regression guard for
+/// "the looper massively amplifies anything that goes through it." If this FAILS,
+/// the gain bug is in the engine; if it PASSES, the bug is in the graph the UI
+/// emits (e.g. a surviving second path) — not the kernel.
+#[test]
+fn idle_looper_in_path_matches_direct_path() {
+    use ojcore::looper::looper_param;
+    let reg = looper_registry();
+
+    // A: GraphIn(1) -> SpeakerOut(3) — the "no looper" baseline.
+    let mut a = OjGraph::empty(SR, BLOCK);
+    a.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
+    a.nodes.push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    a.edges.push(audio_edge(1, 0, 3, 0));
+    let mut ea = Engine::new(compile(&a, &reg).expect("compile A"));
+
+    // B: GraphIn(1) -> Looper(2, idle, prod defaults) -> SpeakerOut(3).
+    let mut b = OjGraph::empty(SR, BLOCK);
+    b.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
+    let mut lp = node(2, ojcore::LOOPER_ID, PrimitiveKind::Looper, 1, 1);
+    lp.params.push(Param { id: looper_param::LOOP_SECS, value: 10.0 });
+    lp.params.push(Param { id: looper_param::WET, value: 1.0 });
+    lp.params.push(Param { id: looper_param::DRY, value: 1.0 });
+    b.nodes.push(lp);
+    b.nodes.push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    b.edges.push(audio_edge(1, 0, 2, 0));
+    b.edges.push(audio_edge(2, 0, 3, 0));
+    let mut eb = Engine::new(compile(&b, &reg).expect("compile B"));
+
+    let signal = ramp();
+    let mut oa = vec![0.0f32; NB];
+    let mut ob = vec![0.0f32; NB];
+    inject(&mut ea, &signal);
+    ea.process_block(&mut oa, NB);
+    inject(&mut eb, &signal);
+    eb.process_block(&mut ob, NB);
+
+    for (i, (&da, &db)) in oa.iter().zip(ob.iter()).enumerate() {
+        assert!(
+            (da - db).abs() < 1e-6,
+            "idle looper changed the signal at frame {i}: direct {da} vs through-looper {db}"
+        );
+    }
+}

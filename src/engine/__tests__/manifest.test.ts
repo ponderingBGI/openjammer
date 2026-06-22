@@ -178,4 +178,26 @@ describe('PluginManifest derivation', () => {
             expect(p.default).toBeLessThanOrEqual(p.max);
         }
     });
+
+    it('lowers the looper to the real Looper kernel (not Delay)', () => {
+        // Regression guard for the SSOT drift: the looper node MUST lower to the
+        // closed `Looper` primitive (the kernel id resolved at runtime is
+        // `builtin.looper`). It was mismapped to `Delay`.
+        expect(manifestFor('looper').kind).toBe('Looper');
+    });
+
+    it('gives the looper explicit kernel param ids (SEAM-4), not field-order ones', () => {
+        // The kernel ids are LOOP_SECS=0, WET=1, DRY=2. Auto-derivation from
+        // defaultData ORDER put `currentTime`(0) on WET, forcing the captured
+        // loop to play back SILENT. These MUST be the explicit kernel contract.
+        const looper = manifestFor('looper');
+        const byId = new Map(looper.params.map((p) => [p.id, p]));
+        expect(byId.get(0)?.name).toBe('duration'); // LOOP_SECS reads node.data.duration
+        expect(byId.get(1)?.name).toBe('wet');
+        expect(byId.get(1)?.default).toBe(1); // WET audible (was 0)
+        expect(byId.get(2)?.name).toBe('dry');
+        expect(byId.get(2)?.default).toBe(1);
+        // currentTime must NOT leak in as a kernel param (it would clobber WET).
+        expect(looper.params.some((p) => p.name === 'currentTime')).toBe(false);
+    });
 });
