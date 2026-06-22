@@ -12,9 +12,6 @@ import type { LatencyClassification } from '../store/audioStore';
 /** Threshold in ms above which we suspect Bluetooth audio */
 export const BLUETOOTH_LATENCY_THRESHOLD_MS = 100;
 
-/** Threshold in ms above which Tone.js lookAhead is considered too high */
-export const HIGH_LOOKAHEAD_THRESHOLD_MS = 50;
-
 /** Duration in ms to suppress warning after dismissal (1 hour) */
 export const WARNING_DISMISSAL_DURATION_MS = 60 * 60 * 1000; // 1 hour
 
@@ -40,7 +37,6 @@ export interface LatencyMetricsInput {
     baseLatency: number;
     outputLatency: number;
     totalLatency: number;
-    toneJsLookAhead: number;
     estimatedRoundTrip: number;
     classification: LatencyClassification;
     isBluetoothSuspected: boolean;
@@ -93,17 +89,7 @@ export function diagnoseLatency(
         suggestions.push('Enable Low Latency Mode in Audio Settings');
     }
 
-    // 4. Check Tone.js lookAhead (should be ~10ms after our optimization)
-    if (metrics.toneJsLookAhead > HIGH_LOOKAHEAD_THRESHOLD_MS) {
-        issues.push({
-            severity: 'medium',
-            issue: 'Audio scheduler buffer is unusually high',
-            fix: 'Restart the audio engine to apply optimizations',
-            icon: '🔄'
-        });
-    }
-
-    // 5. Browser-specific suggestions using feature detection (more reliable than UA sniffing)
+    // 4. Browser-specific suggestions using feature detection (more reliable than UA sniffing)
     // Note: User-agent sniffing is unreliable - Edge includes "chrome", browsers spoof UAs
     if (metrics.classification === 'poor') {
         // Feature detection for browser engine
@@ -121,7 +107,7 @@ export function diagnoseLatency(
         }
     }
 
-    // 6. General suggestions for poor latency
+    // 5. General suggestions for poor latency
     if (metrics.classification === 'poor' || metrics.classification === 'bad') {
         suggestions.push('Close other audio applications (Spotify, YouTube, etc.)');
         suggestions.push('Use a USB audio interface for professional results');

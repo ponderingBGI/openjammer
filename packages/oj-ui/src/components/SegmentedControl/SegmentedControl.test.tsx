@@ -1,4 +1,4 @@
-import { render } from '@testing-library/react';
+import { render, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { SegmentedControl, Tabs } from './SegmentedControl';
 
@@ -57,6 +57,51 @@ describe('SegmentedControl', () => {
         const tabs = container.querySelectorAll<HTMLButtonElement>('[role="tab"]');
         tabs[2]!.click();
         expect(onChange).toHaveBeenCalledWith('c');
+    });
+
+    it('moves and selects with arrow keys, wrapping at the ends', () => {
+        const onChange = vi.fn();
+        const { container } = render(
+            <SegmentedControl aria-label="g" options={OPTIONS} value="a" onChange={onChange} />,
+        );
+        const list = container.querySelector('[role="tablist"]')!;
+        fireEvent.keyDown(list, { key: 'ArrowRight' });
+        expect(onChange).toHaveBeenLastCalledWith('b');
+        fireEvent.keyDown(list, { key: 'ArrowLeft' });
+        expect(onChange).toHaveBeenLastCalledWith('c'); // wraps past the start
+        fireEvent.keyDown(list, { key: 'End' });
+        expect(onChange).toHaveBeenLastCalledWith('c');
+        fireEvent.keyDown(list, { key: 'Home' });
+        expect(onChange).toHaveBeenLastCalledWith('a');
+    });
+
+    it('uses up/down arrows when vertical', () => {
+        const onChange = vi.fn();
+        const { container } = render(
+            <SegmentedControl
+                aria-label="g"
+                orientation="vertical"
+                options={OPTIONS}
+                value="a"
+                onChange={onChange}
+            />,
+        );
+        fireEvent.keyDown(container.querySelector('[role="tablist"]')!, { key: 'ArrowDown' });
+        expect(onChange).toHaveBeenLastCalledWith('b');
+    });
+
+    it('blocks clicks and keys, and marks the group, when disabled', () => {
+        const onChange = vi.fn();
+        const { container } = render(
+            <SegmentedControl aria-label="g" options={OPTIONS} value="a" onChange={onChange} disabled />,
+        );
+        const list = container.querySelector('[role="tablist"]')!;
+        expect(list.className).toContain('is-disabled');
+        const tabs = container.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+        expect(tabs[0]!.disabled).toBe(true);
+        tabs[2]!.click();
+        fireEvent.keyDown(list, { key: 'ArrowRight' });
+        expect(onChange).not.toHaveBeenCalled();
     });
 
     it('applies the vertical orientation modifier and aria-orientation', () => {

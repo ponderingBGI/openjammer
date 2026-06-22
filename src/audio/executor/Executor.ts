@@ -13,12 +13,16 @@
 
 import type { Connection, GraphNode } from '../../engine/types';
 import type { EngineCapabilities } from '../../engine/capabilities';
+import type { LatencyReport } from './latency';
 import type {
     LooperHandle,
     RecorderHandle,
     SamplerHandle,
     SignalLevelsCallback,
 } from './capabilities';
+
+export type { LatencyReport, LatencyClassification } from './latency';
+export { classifyLatency } from './latency';
 
 export type {
     LooperHandle,
@@ -73,6 +77,16 @@ export interface Executor {
      * reports the desktop row, the wasm executor the browser row.
      */
     getCapabilities(): EngineCapabilities;
+
+    /**
+     * The latency of THIS executor's audio backend — the one number the UI shows.
+     * The native executor reports its cpal stream's negotiated buffer (over the
+     * `query_stream` IPC); the wasm executor reports the AudioContext it renders
+     * into. Resolves `null` while the backend is not yet up (no context / device).
+     * Because the UI always asks the active executor, the inactive tier's latency
+     * (e.g. the WebView2 decode context on native) can never be shown.
+     */
+    getLatency(): Promise<LatencyReport | null>;
 
     // --- Note / control input ---------------------------------------------
 

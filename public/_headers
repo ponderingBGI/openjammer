@@ -13,3 +13,22 @@
 /*
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: require-corp
+
+# Cache policy (mirrors vercel.json). Every matching block is applied, so the
+# COOP/COEP above still hold for these paths — we only ADD Cache-Control here.
+#
+# The service worker + web manifest must NEVER be HTTP-cached: if the browser
+# serves a cached sw.js it can't detect a new deploy, so the app stays on the old
+# version until a manual hard refresh. The HTML shell must revalidate so a fresh
+# deploy (with new hashed asset names) is picked up on the next load. The
+# content-hashed build assets are immutable — a new build emits new filenames.
+/sw.js
+  Cache-Control: no-cache
+/manifest.webmanifest
+  Cache-Control: no-cache
+/
+  Cache-Control: public, max-age=0, must-revalidate
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

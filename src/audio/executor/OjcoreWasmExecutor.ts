@@ -41,6 +41,7 @@ import type {
     SignalLevelsCallback,
 } from './Executor';
 import { getAudioContext } from '../audioContext';
+import { classifyLatency, type LatencyReport } from './latency';
 import {
     DEFAULT_VOICE_INSTRUMENTS,
     getVoiceForInstrumentNode,
@@ -123,12 +124,26 @@ export class OjcoreWasmExecutor implements Executor {
     /** Pending recorder-capture resolvers, keyed by NodeIdx, for the worklet's
      *  `recorder-data` reply. */
     private captureResolvers = new Map<number, (blob: Blob | null) => void>();
-    /** Live sampler asset bindings keyed by VISUAL node id: the worklet-assigned
-     *  `AssetId` + root note. Re-applied onto the emitted graph on every push so a
-     *  loaded sample survives subsequent node/connection edits (the wasm analogue
-     *  of native's persistent graph binding). */
+    /** Live USER-loaded sampler asset bindings keyed by VISUAL node id: the
+     *  worklet-assigned `AssetId` + root note. Re-applied onto the emitted graph on
+     *  every push so a loaded sample survives subsequent node/connection edits (the
+     *  wasm analogue of native's persistent graph binding). RESERVED for samples the
+     *  user loaded — the built-in default voice lives in `defaultVoiceBindings`, so
+     *  it never reads back as a user sample (the conflation that made the picker's
+     *  next change a no-op). */
     private sampleBindings = new Map<string, { assetId: number; rootNote: number }>();
-    /** Which built-in voice (family key) is currently bound per instrument node,
+    /** AssetIds for SYNTHESIZED built-in default voices, keyed by VISUAL node id —
+     *  the analogue of native binding the default voice into its kept graph. Applied
+     *  onto every emitted graph like `sampleBindings`, but a user sample on the same
+     *  node wins, and the entry is dropped when the node leaves the sampler path
+     *  (goes Karplus), so a return to a sampler instrument re-binds instead of
+     *  staying silent. */
+    private defaultVoiceBindings = new Map<string, { assetId: number; rootNote: number }>();
+    /** Visual node ids whose in-flight `load-sample` is a DEFAULT voice (not a user
+     *  sample), so the worklet's `sample-stored` reply is routed to
+     *  `defaultVoiceBindings` rather than `sampleBindings`. */
+    private pendingDefaultVoiceNodes = new Set<string>();
+    /** Which built-in voice (its bind key) is currently bound per instrument node,
      *  so a voice is re-synthesized + re-bound only when the picker selection
      *  changes (not on every graph push). */
     private boundVoiceKey = new Map<string, string>();
@@ -307,6 +322,33 @@ export class OjcoreWasmExecutor implements Executor {
         return BROWSER_CAPABILITIES;
     }
 
+    /**
+     * Latency of the browser backend: this executor renders its worklet into the
+     * shared {@link getAudioContext} destination, so that context's reported
+     * `baseLatency` + `outputLatency` ARE the output path. Round-trip doubles the
+     * one-way figure (input → engine → output), matching the honest browser-tier
+     * `~15-25 ms`. Resolves `null` before the context exists.
+     */
+    async getLatency(): Promise<LatencyReport | null> {
+        const ctx = getAudioContext();
+        if (!ctx) return null;
+        const baseLatency = (ctx.baseLatency ?? 0) * 1000;
+        const outputLatency = (ctx.outputLatency ?? 0) * 1000;
+        const roundTripMs = (baseLatency + outputLatency) * 2;
+        return {
+            source: 'browser',
+            running: ctx.state === 'running',
+            baseLatency,
+            outputLatency,
+            roundTripMs,
+            sampleRate: ctx.sampleRate,
+            bufferFrames: null,
+            classification: classifyLatency(roundTripMs),
+            // Bluetooth output typically adds 100-200 ms one-way.
+            isBluetoothSuspected: outputLatency > 100,
+        };
+    }
+
     dispose(): void {
         this.unsub?.();
         this.unsub = null;
@@ -329,6 +371,9 @@ export class OjcoreWasmExecutor implements Executor {
         for (const resolve of this.sampleLoadResolvers.values()) resolve();
         this.sampleLoadResolvers.clear();
         this.sampleBindings.clear();
+        this.defaultVoiceBindings.clear();
+        this.pendingDefaultVoiceNodes.clear();
+        this.boundVoiceKey.clear();
         this.getNodes = null;
         this.getConnections = null;
         this.index = new Map();
@@ -362,25 +407,33 @@ export class OjcoreWasmExecutor implements Executor {
     }
 
     /**
-     * Lower the built-in default voice into each instrument node that has no
-     * sample yet (see {@link DEFAULT_VOICE_INSTRUMENTS}). Once per node: the load
-     * round-trips through the worklet and records a `sampleBindings` entry, so this
-     * skips it next time and {@link applySampleBindings} keeps it bound. Needs the
-     * worklet ready + an AudioContext to build the buffer.
+     * Lower the built-in default voice into each instrument node that has no USER
+     * sample yet (see {@link DEFAULT_VOICE_INSTRUMENTS}). Re-binds when the picker
+     * selection changes ({@link boundVoiceKey}); the load round-trips through the
+     * worklet and records a `defaultVoiceBindings` entry (kept apart from USER
+     * `sampleBindings`), so {@link applySampleBindings} keeps it bound across later
+     * edits. Needs the worklet ready + an AudioContext to build the buffer.
      */
     private loadDefaultInstrumentVoices(): void {
         if (!this.ready || !this.getNodes) return;
         const ctx = getAudioContext();
         if (!ctx || typeof ctx.createBuffer !== 'function') return;
-        // Cache one AudioBuffer per voice family across nodes in this pass.
+        // Cache one AudioBuffer per voice key across nodes in this pass.
         const bufferByKey = new Map<string, AudioBuffer>();
         for (const node of this.getNodes().values()) {
             if (!DEFAULT_VOICE_INSTRUMENTS.has(node.type)) continue;
             if (this.index.get(node.id) === undefined) continue;
-            if (this.sampleBindings.has(node.id)) continue; // user-bound sample wins
             // Karplus-routed plucked strings are note-triggered; they need no PCM.
-            if (instrumentUsesKarplus(node.type, node.data as Record<string, unknown> | undefined))
+            // FORGET this node's default voice when it leaves the sampler path, so a
+            // later return to a sampler instrument re-binds instead of going silent
+            // (mirrors the native executor; without this, a switch through a Karplus
+            // instrument like Harpsichord/Clavinet could leave the node mute).
+            if (instrumentUsesKarplus(node.type, node.data as Record<string, unknown> | undefined)) {
+                this.boundVoiceKey.delete(node.id);
+                this.defaultVoiceBindings.delete(node.id);
                 continue;
+            }
+            if (this.sampleBindings.has(node.id)) continue; // USER-loaded sample wins
             try {
                 const { voice, key } = getVoiceForInstrumentNode(
                     node.type,
@@ -397,6 +450,9 @@ export class OjcoreWasmExecutor implements Executor {
                     buffer.getChannelData(0).set(voice.pcm);
                     bufferByKey.set(key, buffer);
                 }
+                // Flag this as a DEFAULT-voice load so `onSampleStored` records the
+                // returned AssetId in `defaultVoiceBindings`, NOT `sampleBindings`.
+                this.pendingDefaultVoiceNodes.add(node.id);
                 this.getSamplerAdapter(node.id).setBuffer(buffer);
                 this.boundVoiceKey.set(node.id, key);
             } catch (err) {
@@ -412,14 +468,32 @@ export class OjcoreWasmExecutor implements Executor {
      * sampler's root-note param and an `AssetRef` in slot 0, so
      * `compile_with_assets` in the worklet resolves + installs the PCM into the
      * live Sampler. Pure data shaping over the emitted IR (off any render path).
+     *
+     * Built-in default voices are applied FIRST, then USER samples, so a
+     * user-loaded sample overrides the synthesized default on the same node.
      */
     private applySampleBindings(graph: OjGraph): void {
-        if (this.sampleBindings.size === 0) return;
-        for (const [nodeId, { assetId, rootNote }] of this.sampleBindings) {
+        if (this.sampleBindings.size === 0 && this.defaultVoiceBindings.size === 0) return;
+        this.bindAssetsOntoSamplers(graph, this.defaultVoiceBindings);
+        this.bindAssetsOntoSamplers(graph, this.sampleBindings);
+    }
+
+    /**
+     * Bind each `nodeId -> { assetId, rootNote }` onto its node in `graph`, but ONLY
+     * when that node still lowered to a `Sampler`. A node that switched to a
+     * plucked/bass instrument lowers to `KarplusString` (note-triggered, no PCM);
+     * forcing a stale sampler asset/param onto it is wrong — native guards the same
+     * way (`forward_merge_sample_bindings` carries a binding only Sampler->Sampler).
+     */
+    private bindAssetsOntoSamplers(
+        graph: OjGraph,
+        bindings: Map<string, { assetId: number; rootNote: number }>,
+    ): void {
+        for (const [nodeId, { assetId, rootNote }] of bindings) {
             const idx = this.index.get(nodeId);
             if (idx === undefined) continue;
             const ir = graph.nodes.find((n) => n.id === idx);
-            if (!ir) continue;
+            if (!ir || ir.kind !== 'Sampler') continue;
             // Root note -> the sampler's root-note param (compiler applies params
             // before assets), matching native `bind_sample_to_node`.
             const existing = ir.params.find((p) => p.id === SAMPLER_PCM_PARAM);
@@ -441,7 +515,16 @@ export class OjcoreWasmExecutor implements Executor {
         if (node === undefined || assetId === undefined) return;
         const nodeId = this.reverseIndex.get(node);
         if (nodeId === undefined) return;
-        this.sampleBindings.set(nodeId, { assetId, rootNote: rootNote ?? 60 });
+        const binding = { assetId, rootNote: rootNote ?? 60 };
+        // A DEFAULT-voice load (flagged when issued) records into `defaultVoiceBindings`;
+        // a USER sample load records into `sampleBindings` (which then wins over the
+        // default on the same node). Keeping the two apart is what lets the picker
+        // change the voice — a built-in default no longer reads back as a user sample.
+        if (this.pendingDefaultVoiceNodes.delete(nodeId)) {
+            this.defaultVoiceBindings.set(nodeId, binding);
+        } else {
+            this.sampleBindings.set(nodeId, binding);
+        }
         // Re-emit + push so the bound AssetRef reaches the worklet's recompile.
         this.pushGraph();
         const resolve = this.sampleLoadResolvers.get(nodeId);

@@ -460,7 +460,11 @@ impl KarplusString {
             buf: vec![0.0; max_len.max(2)],
             idx: 0,
             len: 2,
-            damp: 0.996,
+            // Per-sample feedback gain. Closer to 1.0 = longer ring; 0.999 gives a
+            // natural plucked decay (~tens of ms, note-dependent) instead of the
+            // near-staccato 0.996 click — so a guitar/harpsichord/bass actually
+            // sings rather than just blipping.
+            damp: 0.999,
         }
     }
 
@@ -469,9 +473,44 @@ impl KarplusString {
         let l = ((sample_rate / freq) as usize).clamp(2, self.buf.len());
         self.len = l;
         self.idx = 0;
-        // simple bipolar excitation
-        for (i, s) in self.buf[..l].iter_mut().enumerate() {
-            *s = if i % 2 == 0 { 1.0 } else { -1.0 };
+        // Classic Karplus-Strong: excite the delay line with a (low-passed) NOISE
+        // burst.
+        //
+        // The previous alternating ±1 excitation was a degenerate input for this
+        // synthesis: `tick`'s averaging lowpass `0.5 * (cur + nxt)` sums adjacent
+        // samples, and for ±1,∓1 pairs that sum is ZERO — so the whole string
+        // collapsed to silence within a single period (~one wavelength), audible
+        // only as an extremely faint high-frequency click. A noise burst has
+        // non-cancelling neighbours, so the filter rings it down gradually into a
+        // real plucked tone.
+        //
+        // We one-pole low-pass the noise before loading it: a raw white burst is a
+        // harsh broadband attack and is slow to settle onto the fundamental, so a
+        // warmer (rolled-off) burst sounds like a string, not a buzz, and the pitch
+        // reads cleanly almost immediately. The burst is then peak-normalized so the
+        // pluck level is consistent across pitches and seeds. Seeded deterministically
+        // from the period length (`| 1` keeps the xorshift state non-zero) so a given
+        // pitch always renders identically — unit/golden tests stay reproducible.
+        let mut state: u32 = (0x2545_f491 ^ (l as u32).wrapping_mul(2_654_435_761)) | 1;
+        let mut lp = 0.0f32;
+        let mut peak = 0.0f32;
+        for s in self.buf[..l].iter_mut() {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            let white = (state as f32 / u32::MAX as f32) * 2.0 - 1.0; // [-1, 1)
+            lp += 0.35 * (white - lp); // one-pole low-pass (warm, fast-settling)
+            *s = lp;
+            let a = if lp < 0.0 { -lp } else { lp };
+            if a > peak {
+                peak = a;
+            }
+        }
+        if peak > 0.0 {
+            let g = 0.9 / peak;
+            for s in self.buf[..l].iter_mut() {
+                *s *= g;
+            }
         }
     }
 
@@ -658,5 +697,30 @@ mod tests {
             late < early,
             "string did not decay: early={early} late={late}"
         );
+    }
+
+    #[test]
+    fn karplus_rings_past_one_period() {
+        // Regression: an alternating ±1 excitation is annihilated by tick()'s
+        // averaging lowpass within a SINGLE period (adjacent samples cancel),
+        // collapsing the string to a faint click — the "extremely silent" bug. A
+        // proper noise burst keeps ringing. Skip two full periods, then assert the
+        // string still has real energy.
+        let mut k = KarplusString::new(2048);
+        k.pluck(220.0, SR);
+        let period = (SR / 220.0) as usize; // ~218 samples
+        for _ in 0..period * 2 {
+            k.tick();
+        }
+        let n = 512;
+        let rms = {
+            let mut e = 0.0f32;
+            for _ in 0..n {
+                let s = k.tick();
+                e += s * s;
+            }
+            (e / n as f32).sqrt()
+        };
+        assert!(rms > 0.05, "string collapsed to a click: rms after 2 periods = {rms}");
     }
 }

@@ -60,6 +60,7 @@ import {
     monoPcmToWavBlob,
     type OjcoreBridge,
 } from './ojcoreHandles';
+import { classifyLatency, type LatencyReport } from './latency';
 import { logger } from '../../utils/log';
 import { setEngineHealth, useEngineHealthStore } from '../../store/engineHealthStore';
 import { ingestEngineEvents } from './faultPipe';
@@ -197,6 +198,42 @@ export class OjcoreNativeExecutor implements Executor {
         return DESKTOP_CAPABILITIES;
     }
 
+    /**
+     * Latency of the native backend: the cpal stream's negotiated buffering floor
+     * over the `query_stream` IPC (`engine::StreamInfo`). THIS — not the WebView2
+     * decode AudioContext — is what the MOTU is actually playing through, so it is
+     * the only honest native number. `StreamInfo` serializes with serde's default
+     * snake_case keys. Resolves `null` off the native tier or if the engine is not
+     * up yet, so the UI simply shows no reading rather than a wrong one.
+     */
+    async getLatency(): Promise<LatencyReport | null> {
+        const invoke = getInvoke();
+        if (!invoke) return null;
+        try {
+            const s = (await invoke('query_stream')) as {
+                running: boolean;
+                sample_rate: number;
+                channels: number;
+                buffer_frames: number | null;
+                latency_ms: number;
+            };
+            return {
+                source: 'native',
+                running: s.running,
+                baseLatency: 0,
+                outputLatency: s.latency_ms,
+                roundTripMs: s.latency_ms,
+                sampleRate: s.sample_rate,
+                bufferFrames: s.buffer_frames ?? null,
+                classification: classifyLatency(s.latency_ms),
+                isBluetoothSuspected: false,
+            };
+        } catch {
+            // IPC unavailable / engine down — no reading beats a wrong one.
+            return null;
+        }
+    }
+
     dispose(): void {
         this.unsub?.();
         this.unsub = null;
@@ -215,6 +252,10 @@ export class OjcoreNativeExecutor implements Executor {
         this.getConnections = null;
         this.index = new Map();
         this.reverseIndex = new Map();
+        // Forget which default voices were bound: a re-initialize starts a fresh
+        // engine with NO assets, so a stale key would make `loadDefaultInstrumentVoices`
+        // skip the (now-needed) re-bind and leave melodic nodes silent.
+        this.boundVoiceKey.clear();
         // Reset the dedupe cache so a re-initialize re-pushes the graph.
         this.lastPushedGraph = null;
     }
@@ -323,7 +364,17 @@ export class OjcoreNativeExecutor implements Executor {
         // means "nothing to push" — skip the IPC entirely. This keeps a noisy
         // subscriber (or a render loop) from hammering the native engine.
         const serialized = JSON.stringify(native);
-        if (serialized === this.lastPushedGraph) return;
+        if (serialized === this.lastPushedGraph) {
+            // The audio IR is unchanged, but an instrument PICKER change does not
+            // alter the emitted graph (the default voice is bound out-of-band via
+            // load_sample, not as graph data), so a deduped push would otherwise
+            // skip the voice swap and every instrument in a family would keep one
+            // sound. Reconcile default voices against the current node data here,
+            // off the IPC: it re-binds only when a node's selection actually changed
+            // (boundVoiceKey miss) and is a cheap no-op otherwise.
+            this.loadDefaultInstrumentVoices();
+            return;
+        }
         // Remember the prior accepted graph so a REJECTED push can roll the dedupe
         // cache back — keeping the last good audio AND letting the next store
         // notification re-attempt instead of being deduped away (held-note rule).
@@ -398,14 +449,24 @@ export class OjcoreNativeExecutor implements Executor {
             if (!DEFAULT_VOICE_INSTRUMENTS.has(node.type)) continue;
             if (this.index.get(node.id) === undefined) continue;
             // Karplus-routed plucked strings are note-triggered; they need no PCM.
-            if (instrumentUsesKarplus(node.type, node.data as Record<string, unknown> | undefined))
+            // FORGET this node's bound voice when it leaves the sampler path: the
+            // engine forward-merges a sample binding only Sampler->Sampler
+            // (engine.rs forward_merge_sample_bindings), so on the way BACK to a
+            // sampler instrument the asset is dropped — and a stale `boundVoiceKey`
+            // would suppress the re-bind, leaving the node silent until reload.
+            // Clearing it here makes any return re-bind the default voice, so a
+            // picker switch (even one that passes through a Karplus instrument like
+            // Harpsichord/Clavinet) never goes mute.
+            if (instrumentUsesKarplus(node.type, node.data as Record<string, unknown> | undefined)) {
+                this.boundVoiceKey.delete(node.id);
                 continue;
+            }
             const { voice, key } = getVoiceForInstrumentNode(
                 node.type,
                 node.data as Record<string, unknown> | undefined,
             );
-            // Re-send only when the instrument selection (its voice family) changed,
-            // so changing the picker re-binds but a plain re-push does not.
+            // Re-send only when the instrument selection changed, so changing the
+            // picker re-binds but a plain re-push does not.
             if (this.boundVoiceKey.get(node.id) === key) continue;
             this.boundVoiceKey.set(node.id, key);
             void this.loadSampleNative(node.id, voice.pcm, voice.sampleRate, voice.rootNote);

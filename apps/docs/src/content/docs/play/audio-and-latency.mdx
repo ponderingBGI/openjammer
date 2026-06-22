@@ -38,8 +38,9 @@ Open **Settings** (the gear icon) → **Audio** tab. Three settings do most of t
 1. **Low Latency Mode** — *Enable.* This disables echo cancellation and other input
    processing for a 20–50 ms improvement. It is safe with a USB interface in a quiet room
    (see the headphones note below).
-2. **Sample Rate** — **48 kHz** is recommended; choose 96 kHz only if your interface supports
-   it and you need it.
+2. **Sample Rate** — OpenJammer detects the running device rate when audio starts and
+   sets this automatically when the platform reports it. **48 kHz** is a good manual
+   target; choose 96 kHz only if your interface supports it and you need it.
 3. **Latency Mode** — **Interactive** for the lowest latency. Drop to **Balanced** if you
    hear crackle.
 
@@ -71,7 +72,7 @@ converters, and class-compliant USB that works without drivers on every platform
    are bus-powered (no external power needed).
 2. **Grant permissions** (browser). Click **Start OpenJammer**, grant microphone access when
    asked, then open **Settings → Audio** and select your interface from the device dropdown.
-3. **Enable the optimizations** above (Low Latency Mode, 48 kHz, Interactive).
+3. **Enable the optimizations** above (Low Latency Mode, the detected sample rate or 48 kHz, Interactive).
 
 **Expected result:** built-in audio is 30–80 ms; a basic USB interface is 10–20 ms; an
 optimized USB interface is 3–10 ms.

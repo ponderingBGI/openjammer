@@ -569,3 +569,129 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         ex.dispose();
     });
 });
+
+// ---------------------------------------------------------------------------
+// Instrument-switch voice binding: the "switching instruments mutes / collapses
+// every voice to one" regression. A melodic node's default voice is bound
+// out-of-band via `load_sample` (its `instrumentId` is NOT graph data), so the
+// executor's bound-voice state machine must (a) re-bind on EVERY picker change,
+// even when the emitted graph is byte-identical (deduped), and (b) survive a
+// round trip through a Karplus instrument without leaving the node silent.
+// ---------------------------------------------------------------------------
+
+describe('OjcoreNativeExecutor instrument-switch voice binding (mocked Tauri invoke)', () => {
+    afterEach(() => {
+        delete (window as unknown as { __TAURI__?: unknown }).__TAURI__;
+        vi.useRealTimers();
+    });
+
+    /** A `keys` instrument -> speaker graph carrying a picker `instrumentId`. */
+    function instrumentGraph(instrumentId: string): {
+        nodes: Map<string, GraphNode>;
+        connections: Map<string, Connection>;
+    } {
+        const inst = makeNode('keys', 'keys-1');
+        inst.data = { ...inst.data, instrumentId };
+        const speaker = makeNode('speaker', 'speaker-1');
+        const out = inst.ports.find((p) => p.direction === 'output' && p.type === 'audio');
+        const spkIn = speaker.ports.find((p) => p.direction === 'input');
+        const conns = new Map<string, Connection>();
+        if (out && spkIn) {
+            const c = makeConn(inst.id, out.id, speaker.id, spkIn.id);
+            conns.set(c.id, c);
+        }
+        return {
+            nodes: new Map([
+                [inst.id, inst],
+                [speaker.id, speaker],
+            ]),
+            connections: conns,
+        };
+    }
+
+    async function flush(): Promise<void> {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+    }
+
+    function initCapturingNodeCb(
+        ex: OjcoreNativeExecutor,
+        graph: { nodes: Map<string, GraphNode>; connections: Map<string, Connection> },
+    ): () => void {
+        let nodeCb: (() => void) | null = null;
+        ex.initialize(
+            () => () => {},
+            (cb) => {
+                nodeCb = cb as unknown as () => void;
+                return () => {};
+            },
+            () => graph.nodes,
+            () => graph.connections,
+        );
+        return () => nodeCb?.();
+    }
+
+    const loadSampleCalls = (calls: InvokeCall[]): InvokeCall[] =>
+        calls.filter((c) => c.cmd === 'load_sample');
+
+    it('never goes silent across a Sampler→Karplus→Sampler switch (the mute repro)', async () => {
+        const calls = installMockTauri();
+        const graph = instrumentGraph('gm-acoustic-grand-piano'); // a Sampler-family piano
+        const ex = new OjcoreNativeExecutor();
+        const fire = initCapturingNodeCb(ex, graph);
+        await flush();
+        // Initial: the piano default voice was bound (a load_sample fired).
+        expect(loadSampleCalls(calls).length).toBeGreaterThan(0);
+
+        // Switch to Harpsichord — a 'piano'-category instrument that lowers to the
+        // Karplus primitive (note-triggered, NO PCM). The graph kind changes so the
+        // push is not deduped.
+        const node = graph.nodes.get('keys-1')!;
+        node.data = { ...node.data, instrumentId: 'gm-harpsichord' };
+        calls.length = 0;
+        fire();
+        await flush();
+        expect(loadSampleCalls(calls), 'Karplus needs no sample load').toHaveLength(0);
+
+        // Switch BACK to the piano. The engine forward-merges a sample binding only
+        // Sampler->Sampler, so the asset is dropped on the way back; the executor
+        // MUST re-bind the default voice or the node stays silent until reload.
+        node.data = { ...node.data, instrumentId: 'gm-acoustic-grand-piano' };
+        calls.length = 0;
+        fire();
+        await flush();
+        expect(
+            loadSampleCalls(calls).length,
+            'voice re-bound on return — not silent',
+        ).toBeGreaterThan(0);
+        ex.dispose();
+    });
+
+    it('re-binds when switching between two instruments in one family (deduped graph)', async () => {
+        const calls = installMockTauri();
+        const graph = instrumentGraph('gm-acoustic-grand-piano');
+        const ex = new OjcoreNativeExecutor();
+        const fire = initCapturingNodeCb(ex, graph);
+        await flush();
+
+        // Switch to another piano: same family, so the emitted OjGraph is byte-
+        // identical and `push_graph` is deduped — but the picker change must still
+        // re-bind the per-instrument voice (load_sample), or every piano sounds the
+        // same (the "they all sound the same" fix).
+        const node = graph.nodes.get('keys-1')!;
+        node.data = { ...node.data, instrumentId: 'gm-bright-acoustic-piano' };
+        calls.length = 0;
+        fire();
+        await flush();
+        expect(
+            calls.filter((c) => c.cmd === 'push_graph'),
+            'identical audio graph is deduped',
+        ).toHaveLength(0);
+        expect(
+            loadSampleCalls(calls).length,
+            'within-family switch still re-binds the voice',
+        ).toBeGreaterThan(0);
+        ex.dispose();
+    });
+});

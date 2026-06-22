@@ -573,9 +573,17 @@ fn karplus_instrument_note_is_audible_then_rings_down() {
         note: 60,
         vel: 127,
     });
-    let attack = render(&mut engine, 4);
+    let attack = render(&mut engine, 1);
     assert_all_finite(&attack);
     assert!(peak(&attack) > 0.02, "karplus pluck silent");
+
+    // SUSTAIN past the first wavelength. A degenerate ±1 excitation is annihilated
+    // by the averaging lowpass within ONE period (note 60 ≈ 184 samples < one
+    // 256-frame block), so this later window would be ~0 — the "extremely silent"
+    // bug. A proper noise burst keeps ringing, so the string is still audible here.
+    let sustain = render(&mut engine, 8);
+    assert_all_finite(&sustain);
+    assert!(peak(&sustain) > 0.02, "karplus collapsed to a click — no sustained ring");
 
     engine.apply(RtCommand::NoteOff {
         node: NodeIdx(1),

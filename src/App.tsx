@@ -34,7 +34,7 @@ import { PluginsPanel } from './components/Plugins/PluginsPanel';
 import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
-import { initAudioContext, isAudioReady, getLatencyMetrics } from './audio/audioContext';
+import { initAudioContext, isAudioReady } from './audio/audioContext';
 import { getExecutor, isTauri } from './audio/executor';
 import type { GraphNode, Connection } from './engine/types';
 import { initMidiVoiceRouting, disposeMidiVoiceRouting } from './midi';
@@ -45,6 +45,8 @@ import { useCanvasStore } from './store/canvasStore';
 import { useKeybindingsStore } from './store/keybindingsStore';
 import { useEngineHealthStore, setEngineLive } from './store/engineHealthStore';
 import { useCrashRecovery } from './persistence/recovery/useCrashRecovery';
+import { useUsbLowLatencyDefault } from './hooks/useUsbLowLatencyDefault';
+import { useAutoDetectedSampleRate } from './hooks/useAutoDetectedSampleRate';
 import { writeEmergencyBackup } from './persistence/recovery';
 import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens';
 import { isEditableTarget } from './utils/editableTarget';
@@ -63,6 +65,14 @@ function App() {
   // Calm, deduped engine-dead toast (Phase 2). The ONLY toast the health store
   // raises — DEGRADED stays ambient; a fault storm yields one signal, not many.
   useEngineHealthToast();
+
+  // Default Low Latency Mode ON when a USB / pro audio interface is in use — a
+  // default, never an override, and never a mid-set restart (see the hook).
+  useUsbLowLatencyDefault();
+
+  // Once a backend reports its negotiated device rate, make Settings reflect the
+  // truth. This is UI/store sync only — no stream rebuild, no surprise dropout.
+  useAutoDetectedSampleRate();
 
   // Crash recovery (Track B P0): at boot, restore work that survived an unclean
   // shutdown — or, after repeated crashes, drop to Safe Mode rather than reopening
@@ -406,17 +416,9 @@ function App() {
         // localStorage may be unavailable (private mode) — the hint is optional.
       }
 
-      // Web-Audio latency metrics are only meaningful in the browser tier; on
-      // native, latency comes from the Rust/cpal engine, not this AudioContext.
-      if (!isTauri()) {
-        const metrics = getLatencyMetrics();
-        if (metrics) {
-          updateAudioMetrics({
-            ...metrics,
-            lastUpdated: Date.now()
-          });
-        }
-      }
+      // Latency is no longer read here. It is polled centrally from the ACTIVE
+      // executor's backend (the effect below), so the native cpal stream and the
+      // browser AudioContext never get confused for one another.
     } catch (err) {
       console.error('Failed to initialize audio:', err);
       // On native, sound is the Rust/cpal engine over IPC — it does NOT need the
@@ -432,7 +434,7 @@ function App() {
           'Check your browser/OS audio permissions and device, then try again. Open “Audio health” (Ctrl/Cmd+Shift+H) or ask the AI for help.',
       });
     }
-  }, [setAudioContextReady, audioConfig, updateAudioMetrics]);
+  }, [setAudioContextReady, audioConfig]);
 
   // Native (Tauri) auto-start: no autoplay gate. Run the same activation sequence
   // on mount so the Rust engine wires up (the App-init effect keyed on
@@ -444,6 +446,40 @@ function App() {
       void handleActivate();
     }
   }, [handleActivate]);
+
+  // Central latency readout. Poll the ACTIVE executor's backend — the native cpal
+  // stream (via `query_stream`) or the browser AudioContext — on a calm 1 s
+  // cadence and publish the one honest number into the store. This replaces the
+  // two old populators (the browser-only App-init read and the Settings-panel
+  // monitor), so the native readout can never show the WebView2 decode context's
+  // latency — the ghost that made a sub-5 ms MOTU stream report ~111 ms.
+  useEffect(() => {
+    if (!isAudioContextReady) return;
+    let cancelled = false;
+    const poll = async () => {
+      const report = await getExecutor().getLatency();
+      if (cancelled || !report) return;
+      updateAudioMetrics({
+        source: report.source,
+        running: report.running,
+        baseLatency: report.baseLatency,
+        outputLatency: report.outputLatency,
+        totalLatency: report.baseLatency + report.outputLatency,
+        estimatedRoundTrip: report.roundTripMs,
+        classification: report.classification,
+        isBluetoothSuspected: report.isBluetoothSuspected,
+        bufferFrames: report.bufferFrames,
+        sampleRate: report.sampleRate,
+        lastUpdated: Date.now(),
+      });
+    };
+    void poll();
+    const id = setInterval(() => void poll(), 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [isAudioContextReady, updateAudioMetrics]);
 
   return (
     <>
