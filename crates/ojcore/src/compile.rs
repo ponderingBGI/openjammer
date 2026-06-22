@@ -366,13 +366,15 @@ pub fn compile_with_assets(
     }
     let master_out = master.ok_or(CompileError::NoMasterOutput)?;
 
-    // Pre-size the hot-path scratch: one mix row per input port of the widest
-    // node, and channel-pointer arrays as wide as the widest port count. Sized
-    // here so `process_block` never grows or allocates them.
+    // Pre-size the hot-path scratch: one mix row per input LANE (audio ports ×
+    // channels) of the widest node, and channel-pointer arrays as wide as the
+    // widest lane count. Sized here so `process_block` never grows or allocates.
+    // Equals the widest port count when mono.
     let max_in = graph
         .nodes
         .iter()
-        .map(|nd| nd.n_in as usize)
+        .zip(in_channels.iter())
+        .map(|(nd, &ic)| nd.n_in as usize * ic.max(1) as usize)
         .max()
         .unwrap_or(0);
     // Widest output LANE count (ports × channels) — the Engine sizes its output
