@@ -38,6 +38,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'input',
         name: 'Keyboard',
         description: 'Virtual keyboard controller (auto-assigned key)',
+        ui: 'react', // KeyboardNode (schematic switch)
         defaultPorts: [], // Ports generated from internal canvas-input/output nodes
         defaultData: {
             assignedKey: 2,
@@ -56,6 +57,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'input',
         name: 'Key',
         description: 'Individual keyboard key signal generator',
+        ui: 'auto', // no bespoke NodeWrapper branch -> AutoParamPanel
         defaultPorts: [
             {
                 id: 'out',
@@ -78,6 +80,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'input',
         name: 'Keyboard',
         description: 'Visual keyboard with per-key outputs',
+        ui: 'react', // KeyboardVisualNode (schematic switch)
         defaultPorts: [
             // Row 1 (Q-P): 10 keys - ports on right edge, y: 0.05-0.22
             { id: 'key-q', name: 'Q', type: 'control', direction: 'output', position: { x: 1, y: 0.05 } },
@@ -123,6 +126,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Instrument',
         description: 'Visual instrument with row configuration (internal node)',
+        ui: 'react', // InstrumentVisualNode (schematic switch)
         defaultPorts: [
             // Input ports on left (connected from input-panel rows)
             { id: 'row-in', name: 'Rows', type: 'control', direction: 'input', position: { x: 0, y: 0.5 } },
@@ -139,6 +143,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'input',
         name: 'Microphone',
         description: 'Live audio input from microphone',
+        ui: 'react', // MicrophoneNode (schematic switch)
         defaultPorts: [{ ...audioOutput, position: { x: 1, y: 0.5 } }],
         defaultData: {
             isMuted: false,
@@ -153,6 +158,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'input',
         name: 'Midi',
         description: 'Connect MIDI controllers (keyboards, pads, knobs)',
+        ui: 'react', // MIDINode (schematic switch)
         defaultPorts: [
             // Bundle outputs (expanded to per-control inside)
             { id: 'keys', name: 'Keys', type: 'control', direction: 'output' },
@@ -185,6 +191,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'input',
         name: 'MIDI Device',
         description: 'Visual MIDI device representation (internal node)',
+        ui: 'react', // MIDIVisualNode (schematic switch)
         defaultPorts: [
             // Touch strips (left side) - ports at bottom of strips
             { id: 'pitch-bend', name: 'Pitch', type: 'control', direction: 'output', position: { x: 0.055, y: 0.45 } },
@@ -253,6 +260,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'input',
         name: MINILAB3_CONFIG.name,
         description: MINILAB3_CONFIG.description || 'Arturia MiniLab 3 MIDI Controller',
+        ui: 'react', // MiniLab3Node (schematic switch)
         defaultPorts: [], // Ports synced from internal output-panel
         defaultData: {
             deviceId: null,
@@ -277,6 +285,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'input',
         name: 'MiniLab 3',
         description: 'Visual MiniLab 3 with per-control outputs (internal node)',
+        ui: 'react', // MiniLab3VisualNode (schematic switch)
         // Ports generated from device config - positions determined by DOM lookup
         // The visual component's port markers have data-node-id and data-port-id
         // attributes that NodeCanvas uses for accurate position lookup
@@ -292,6 +301,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Classic Piano',
         description: 'Grand piano instrument',
+        ui: 'react', // InstrumentNode (schematic switch)
         defaultPorts: [], // Ports generated from internal canvas-input/output nodes
         defaultData: {
             offsets: { 'input-1': 0 },
@@ -310,6 +320,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Cello',
         description: 'Orchestral cello',
+        ui: 'react', // InstrumentNode (schematic switch)
         defaultPorts: [], // Ports generated from internal canvas-input/output nodes
         defaultData: {
             offsets: { 'input-1': -12 }, // Default octaves lower
@@ -328,6 +339,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Electric Cello',
         description: 'Modern electric cello with saturation and chorus',
+        ui: 'react', // InstrumentNode (schematic switch)
         defaultPorts: [], // Ports generated from internal canvas-input/output nodes
         defaultData: {
             offsets: { 'input-1': -12 }, // Same range as acoustic cello
@@ -346,6 +358,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Violin',
         description: 'Orchestral violin',
+        ui: 'react', // InstrumentNode (schematic switch)
         defaultPorts: [], // Ports generated from internal canvas-input/output nodes
         defaultData: {
             offsets: { 'input-1': 12 }, // Higher pitch
@@ -364,6 +377,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Saxophone',
         description: 'Jazz saxophone',
+        ui: 'react', // InstrumentNode (schematic switch)
         defaultPorts: [], // Ports generated from internal canvas-input/output nodes
         defaultData: {
             offsets: { 'input-1': 0 },
@@ -383,6 +397,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Strings',
         description: 'String Ensemble',
+        ui: 'react', // InstrumentNode (schematic switch)
         defaultPorts: [
             { id: 'bundle-in', name: 'Bundle', type: 'control', direction: 'input', isBundled: true },
             { id: 'pedal', name: 'Pedal', type: 'control', direction: 'input' },
@@ -404,6 +419,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Keys',
         description: 'Keyboards',
+        ui: 'react', // InstrumentNode (schematic switch)
         defaultPorts: [
             { id: 'bundle-in', name: 'Bundle', type: 'control', direction: 'input', isBundled: true },
             { id: 'pedal', name: 'Pedal', type: 'control', direction: 'input' },
@@ -425,6 +441,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Winds',
         description: 'Wind Instruments',
+        ui: 'react', // InstrumentNode (schematic switch)
         defaultPorts: [
             { id: 'bundle-in', name: 'Bundle', type: 'control', direction: 'input', isBundled: true },
             { id: 'pedal', name: 'Pedal', type: 'control', direction: 'input' },
@@ -448,6 +465,11 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Instrument',
         description: 'Generic sampled instrument',
+        // NodeWrapper has NO bespoke branch for 'instrument' (it is NOT in
+        // SCHEMATIC_TYPES nor a renderNodeContent case) — it falls through to the
+        // FREE AutoParamPanel. The old REACT_UI listed it as react, which was the
+        // single mis-declaration; reality is 'auto'.
+        ui: 'auto',
         defaultPorts: [
             { id: 'bundle-in', name: 'Bundle', type: 'control', direction: 'input', isBundled: true },
             { id: 'pedal', name: 'Pedal', type: 'control', direction: 'input' },
@@ -467,6 +489,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'routing',
         name: 'Looper',
         description: 'Record and loop audio with auto-detection',
+        ui: 'react', // LooperNode (schematic switch)
         defaultPorts: [
             { ...audioInput, position: { x: 0, y: 0.5 } },
             { ...audioOutput, position: { x: 1, y: 0.5 } }
@@ -485,6 +508,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'effects',
         name: 'Effect',
         description: 'Audio effect processor',
+        ui: 'react', // EffectNode (renderNodeContent switch)
         defaultPorts: [
             { ...audioInput, position: { x: 0, y: 0.5 } },
             { ...audioOutput, position: { x: 1, y: 0.5 } }
@@ -505,6 +529,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         // is the second operand only while 'in-2' is unconnected.
         name: 'Multiplier',
         description: 'Multiply a signal by a number, or by a second signal (×)',
+        ui: 'react', // MultiplierNode (renderNodeContent switch)
         defaultPorts: [
             { id: 'in-1', name: 'In 1', type: 'universal', direction: 'input', position: { x: 0, y: 0.33 } },
             { id: 'in-2', name: 'In 2', type: 'universal', direction: 'input', position: { x: 0, y: 0.67 } },
@@ -523,6 +548,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'output',
         name: 'Speaker',
         description: 'Audio output to device speakers',
+        ui: 'react', // SpeakerNode (schematic switch)
         defaultPorts: [
             { ...audioInput, position: { x: 0, y: 0.5 } }
         ],
@@ -540,6 +566,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'output',
         name: 'Recorder',
         description: 'Record audio to WAV file',
+        ui: 'react', // RecorderNode (renderNodeContent switch)
         defaultPorts: [
             { ...audioInput, position: { x: 0, y: 0.5 } }
         ],
@@ -556,6 +583,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'routing',
         name: 'Input',
         description: 'Receives signal from parent canvas',
+        ui: 'react', // CanvasIONode (schematic switch)
         defaultPorts: [
             { id: 'out', name: 'Out', type: 'control', direction: 'output', position: { x: 1, y: 0.5 } }
         ],
@@ -570,6 +598,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'routing',
         name: 'Output',
         description: 'Sends signal to parent canvas',
+        ui: 'react', // CanvasIONode (schematic switch)
         defaultPorts: [
             { id: 'in', name: 'In', type: 'control', direction: 'input', position: { x: 0, y: 0.5 } }
         ],
@@ -584,6 +613,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'routing',
         name: 'Outputs',
         description: 'Multi-port output panel with editable labels',
+        ui: 'react', // OutputPanelNode (schematic switch)
         defaultPorts: [
             // Default 4 ports for keyboard (Row 1, Row 2, Row 3, Pedal)
             { id: 'port-1', name: 'Row 1 (Q-P)', type: 'control', direction: 'input', position: { x: 0, y: 0.15 } },
@@ -608,6 +638,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'routing',
         name: 'Inputs',
         description: 'Multi-port input panel with editable labels',
+        ui: 'react', // InputPanelNode (schematic switch)
         defaultPorts: [],  // Empty by default
         defaultData: {
             portLabels: {}
@@ -621,6 +652,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'utility',
         name: 'Empty Node',
         description: 'Empty node for grouping and organizing other nodes',
+        ui: 'react', // ContainerNode (schematic switch)
         defaultPorts: [],  // Ports synced from internal canvas-input/output nodes
         defaultData: {
             displayName: 'Untitled'
@@ -634,6 +666,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'utility',
         name: 'Add',
         description: 'Add two signals together (audio mixing or number addition)',
+        ui: 'react', // MathNode (schematic switch)
         defaultPorts: [
             { id: 'in-1', name: 'In 1', type: 'universal', direction: 'input', position: { x: 0, y: 0.33 } },
             { id: 'in-2', name: 'In 2', type: 'universal', direction: 'input', position: { x: 0, y: 0.67 } },
@@ -651,6 +684,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'utility',
         name: 'Subtract',
         description: 'Subtract second signal from first (audio phase cancellation or number subtraction)',
+        ui: 'react', // MathNode (schematic switch)
         defaultPorts: [
             { id: 'in-1', name: 'In 1', type: 'universal', direction: 'input', position: { x: 0, y: 0.33 } },
             { id: 'in-2', name: 'In 2', type: 'universal', direction: 'input', position: { x: 0, y: 0.67 } },
@@ -669,6 +703,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'input',
         name: 'Library',
         description: 'Local audio file library with tag management',
+        ui: 'react', // LibraryNode (schematic switch)
         // SEAM-1: only the REAL seam is declared. The library's one engine effect is
         // feeding a selected/connected sample's PCM into connected Sampler nodes (via
         // the executor `sendSampleBuffer`), so `sample-out` is the single live port.
@@ -701,6 +736,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Sampler',
         description: 'Play audio samples chromatically via keyboard',
+        ui: 'react', // SamplerNode (schematic switch)
         defaultPorts: [
             // Bundled control input on left (accepts keyboard bundles)
             { id: 'bundle-in', name: 'Keys', type: 'control', direction: 'input', isBundled: true },
@@ -737,6 +773,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Sampler Visual',
         description: 'Internal view with row-based key mapping',
+        ui: 'react', // SamplerVisualNode (schematic switch)
         defaultPorts: [
             // Placeholder port for new connections (bundles or single)
             { id: 'placeholder-in', name: '', type: 'control', direction: 'input', position: { x: 0, y: 0.5 } }
@@ -810,6 +847,9 @@ const MISSING_DEFINITION: NodeDefinition = {
     category: 'utility',
     name: 'Unknown',
     description: 'Unknown node type (definition missing)',
+    // Inert placeholder: render via the FREE AutoParamPanel (no bespoke surface
+    // for an unknown type), never assume a bespoke component exists.
+    ui: 'auto',
     defaultPorts: [],
     defaultData: {},
     dimensions: { width: 160, height: 100 },

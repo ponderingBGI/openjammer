@@ -142,6 +142,16 @@ export type NodeCategory =
     | 'output'
     | 'utility';
 
+/**
+ * How a node's control surface is presented (frozen v1, mirrors the manifest
+ * `ui` facet). It is declared HERE — on the {@link NodeDefinition} — as the
+ * SINGLE source of truth for whether a node owns a bespoke React component
+ * (`'react'`, rendered by NodeWrapper's switch) or falls back to the FREE
+ * AutoParamPanel (`'auto'`). The manifest's `ui` is DERIVED from this field, so
+ * there is no second hand-maintained list to drift (was the old `REACT_UI` set).
+ */
+export type UiKind = 'auto' | 'react';
+
 export type NodeType =
     | 'keyboard'
     | 'keyboard-key'    // Individual keyboard key (signal generator)
@@ -603,6 +613,16 @@ export interface NodeDefinition {
     category: NodeCategory;
     name: string;
     description: string;
+
+    /**
+     * SINGLE SOURCE OF TRUTH for the node's control surface (see {@link UiKind}).
+     * `'react'` IFF NodeWrapper renders this type with a bespoke component (its
+     * schematic switch OR the renderNodeContent switch); `'auto'` otherwise (the
+     * FREE AutoParamPanel). The manifest's `ui` is derived from this — keep it in
+     * lockstep with NodeWrapper (the node-registry gate enforces the equivalence).
+     */
+    ui: UiKind;
+
     defaultPorts: PortDefinition[];
     defaultData: NodeData;
 

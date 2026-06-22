@@ -133,6 +133,10 @@ export function makeDspNodeDefinition(desc: DspNodeDescriptor): NodeDefinition {
         category: 'effects',
         name: desc.name,
         description: desc.description ?? 'AI-authored DSP effect',
+        // An AI code node renders its REAL compiled params via the FREE
+        // AutoParamPanel (manifestForDynamic also reports ui:'auto'), never a
+        // bespoke component — so the single-source `ui` field is 'auto' here.
+        ui: 'auto',
         defaultPorts: EFFECT_DYNAMIC_PORTS.map((port) => ({ ...port })),
         defaultData: {
             effectType: 'distortion',
