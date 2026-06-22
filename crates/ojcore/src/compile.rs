@@ -126,9 +126,17 @@ pub struct CompiledProgram {
     pub instances: Vec<Box<dyn DspInstance>>,
     /// Per-node routing plan (same indexing as `instances`).
     pub routing: Vec<NodeRouting>,
-    /// Per-node output scratch: `out_bufs[node][port]` is a `block_size`-long
-    /// buffer the node writes its `port`th output into. Pre-sized here.
+    /// Per-node output scratch: `out_bufs[node][lane]` is a `block_size`-long buffer
+    /// the node writes its `lane`th output into. A node has `n_out × out_channels`
+    /// audio LANES (a lane == a port when mono); pre-sized here. See docs/CHANNELS.md.
     pub out_bufs: Vec<Vec<Vec<f32>>>,
+    /// Audio OUTPUT channels per port for each node, derived from its manifest
+    /// (`PortDecl::audio_out_channels`, clamped `>= 1`). `out_bufs[node]` holds
+    /// `n_out × out_channels[node]` lanes; `1` (mono) makes a lane a port.
+    pub out_channels: Vec<u8>,
+    /// Audio INPUT channels per port for each node (`PortDecl::audio_in_channels`).
+    /// Drives input-lane adaptation (a later step); `1` today.
+    pub in_channels: Vec<u8>,
     /// Per-node bypass flag (init false). Toggled by `RtCommand::Bypass`.
     pub bypassed: Vec<bool>,
     /// Lowered [`PrimitiveKind`] per node, so the RT loop never touches strings.
@@ -268,10 +276,17 @@ pub fn compile_with_assets(
     let mut kinds: Vec<PrimitiveKind> = Vec::with_capacity(n);
     let mut ids: Vec<NodeIdx> = Vec::with_capacity(n);
     let mut out_bufs: Vec<Vec<Vec<f32>>> = Vec::with_capacity(n);
+    let mut out_channels: Vec<u8> = Vec::with_capacity(n);
+    let mut in_channels: Vec<u8> = Vec::with_capacity(n);
     for node in &graph.nodes {
         let loader = registry
             .get(&node.manifest_id)
             .ok_or_else(|| CompileError::UnknownManifest(node.manifest_id.clone()))?;
+        // Channels are a node-TYPE property (docs/CHANNELS.md): derive them from the
+        // loader's manifest. The IR's `n_out` is the AUDIO port count, so the node has
+        // `n_out × out_channels` audio output LANES (`1` = mono => a lane is a port).
+        let oc = loader.manifest().ports.audio_out_channels.max(1);
+        let ic = loader.manifest().ports.audio_in_channels.max(1);
         let mut inst = loader.instantiate(sample_rate, block_size);
         inst.activate(sample_rate, block_size);
         // Apply any baked-in param defaults from the IR, then snap smoothers.
@@ -290,13 +305,15 @@ pub fn compile_with_assets(
         instances.push(inst);
         kinds.push(node.kind);
         ids.push(node.id);
-        // One pre-sized output buffer per declared output port.
-        let n_out = node.n_out as usize;
-        let mut bufs = Vec::with_capacity(n_out);
-        for _ in 0..n_out {
+        // One pre-sized buffer per output LANE (`n_out` audio ports × channels).
+        let lanes = node.n_out as usize * oc as usize;
+        let mut bufs = Vec::with_capacity(lanes);
+        for _ in 0..lanes {
             bufs.push(vec![0.0f32; block_size]);
         }
         out_bufs.push(bufs);
+        out_channels.push(oc);
+        in_channels.push(ic);
     }
 
     // --- build routing: for each node input port, the producer buffers -----
@@ -358,12 +375,9 @@ pub fn compile_with_assets(
         .map(|nd| nd.n_in as usize)
         .max()
         .unwrap_or(0);
-    let max_out = graph
-        .nodes
-        .iter()
-        .map(|nd| nd.n_out as usize)
-        .max()
-        .unwrap_or(0);
+    // Widest output LANE count (ports × channels) — the Engine sizes its output
+    // channel-pointer scratch to this. Equals the widest port count when mono.
+    let max_out = out_bufs.iter().map(|b| b.len()).max().unwrap_or(0);
     let in_scratch = (0..max_in).map(|_| vec![0.0f32; block_size]).collect();
 
     // No reorder of the by-slot tables is needed: the RT loop walks `schedule`
@@ -372,6 +386,8 @@ pub fn compile_with_assets(
         instances,
         routing,
         out_bufs,
+        out_channels,
+        in_channels,
         bypassed: vec![false; n],
         kinds,
         ids,
@@ -474,5 +490,104 @@ mod asset_pcm_tests {
         let src = [3.0_f32, 6.0, 9.0, 1.0, 2.0];
         let a = AssetPcm::from_interleaved(&src, 3, 48_000.0);
         assert_eq!(a.pcm.as_ref(), &[6.0_f32]);
+    }
+}
+
+#[cfg(test)]
+mod channel_lane_tests {
+    use super::*;
+    use crate::dsp::{DspInstance, ProcessCtx};
+    use crate::loader::PluginLoader;
+    use crate::manifest::{DspKind, PluginManifest, PortDecl, UiKind};
+    use alloc::boxed::Box;
+    use alloc::string::String;
+    use alloc::vec;
+    use ojproto::{ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph};
+
+    /// A no-op node whose manifest declares a STEREO (2-channel) audio output port.
+    struct StereoNode;
+    impl DspInstance for StereoNode {
+        fn activate(&mut self, _sr: f32, _mb: usize) {}
+        fn process(&mut self, _ctx: &mut ProcessCtx<'_, '_>) {}
+        fn set_param(&mut self, _id: u16, _v: f32) {}
+    }
+    struct StereoLoader {
+        manifest: PluginManifest,
+    }
+    impl PluginLoader for StereoLoader {
+        fn manifest(&self) -> &PluginManifest {
+            &self.manifest
+        }
+        fn instantiate(&self, _sr: f32, _mb: usize) -> Box<dyn DspInstance> {
+            Box::new(StereoNode)
+        }
+    }
+
+    /// The compiler derives a node's audio output channel count from its manifest
+    /// and allocates `n_out × channels` output LANES — so a stereo node gets two
+    /// output buffers while a mono master keeps one. (docs/CHANNELS.md step 1.)
+    #[test]
+    fn stereo_manifest_allocates_two_output_lanes() {
+        let mut reg = PluginRegistry::new();
+        reg.register(Box::new(StereoLoader {
+            manifest: PluginManifest {
+                abi: None,
+                id: String::from("test.stereo"),
+                name: String::from("Stereo"),
+                kind: PrimitiveKind::Osc,
+                dsp: DspKind::Builtin,
+                ui: UiKind::Auto,
+                params: vec![],
+                ports: PortDecl {
+                    audio_in: 0,
+                    audio_out: 1,
+                    control_in: 0,
+                    control_out: 0,
+                    audio_in_channels: 1,
+                    audio_out_channels: 2,
+                },
+            },
+        }));
+        reg.register(Box::new(crate::structural::StructuralLoader::speaker_out()));
+
+        let mut g = OjGraph::empty(48_000, 64);
+        g.nodes.push(IrNode {
+            id: NodeIdx(1),
+            manifest_id: String::from("test.stereo"),
+            kind: PrimitiveKind::Osc,
+            params: vec![],
+            assets: vec![],
+            n_in: 0,
+            n_out: 1,
+        });
+        g.nodes.push(IrNode {
+            id: NodeIdx(2),
+            manifest_id: String::from(crate::SPEAKER_OUT_ID),
+            kind: PrimitiveKind::SpeakerOut,
+            params: vec![],
+            assets: vec![],
+            n_in: 1,
+            n_out: 0,
+        });
+        g.edges.push(IrEdge {
+            from_node: NodeIdx(1),
+            from_port: 0,
+            to_node: NodeIdx(2),
+            to_port: 0,
+            kind: ConnectionType::Audio,
+        });
+
+        let prog = compile(&g, &reg).expect("compiles");
+        let stereo = prog.slot_of_id(NodeIdx(1)).unwrap();
+        assert_eq!(prog.out_channels[stereo], 2);
+        assert_eq!(
+            prog.out_bufs[stereo].len(),
+            2,
+            "1 audio out port × 2 channels = 2 output lanes"
+        );
+        // The mono master sink is unchanged: 1 channel, no output lanes.
+        let spk = prog.slot_of_id(NodeIdx(2)).unwrap();
+        assert_eq!(prog.out_channels[spk], 1);
+        assert!(prog.out_bufs[spk].is_empty());
     }
 }

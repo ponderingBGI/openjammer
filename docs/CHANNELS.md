@@ -24,6 +24,12 @@ The kernel is **mono**, but *less* mono than it looks — the per-node path is a
   `ProcessCtx`'s doc already calls each slice "one per channel."
 - **Routing is per-(node, port).** An `IrEdge` connects `from_port → to_port`; the mix step sums all
   sources of an input port into `in_scratch[port]` (`exec.rs::mix_input`).
+- **The wire IR counts ONLY audio ports.** `emit.ts::portCounts` sizes `n_in`/`n_out` to the manifest's
+  *audio* port counts (with per-kind floors); control ports are addressed by param/command, never by
+  routed buffers, and never enter `n_in`/`n_out`. So **every IR port is an audio port** — which means the
+  compiler can expand output lanes as `n_out × out_channels` with **no audio-vs-control ordering
+  ambiguity**, and `out_bufs[node]` simply grows from `n_out` rows to `n_out × out_channels` lane rows
+  (identical when `out_channels == 1`).
 
 So the engine is, structurally, **N independent mono channels routed per port.** The mono-ness lives
 at exactly **three boundaries**:
