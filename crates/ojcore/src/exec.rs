@@ -755,6 +755,8 @@ mod apply_rt_tests {
             instances,
             routing: vec![NodeRouting::default(), NodeRouting::default()],
             out_bufs: vec![vec![vec![0.0; 4]], vec![]],
+            out_channels: vec![1, 1],
+            in_channels: vec![1, 1],
             bypassed: vec![false, false],
             kinds: vec![PrimitiveKind::Osc, PrimitiveKind::SpeakerOut],
             ids,
