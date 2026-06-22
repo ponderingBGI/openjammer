@@ -750,9 +750,6 @@ export class OjcoreWasmExecutor implements Executor {
         }
     }
 
-    controlDown(_keyboardId: string): void {}
-    controlUp(_keyboardId: string): void {}
-
     activateControlSignal(connectionId: string): void {
         this.emitSignal(connectionId, 1);
     }
