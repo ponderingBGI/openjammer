@@ -68,6 +68,9 @@ export interface OjcoreBridge {
 
 /** Number of synthetic waveform points generated for a captured loop layer. */
 const LOOP_WAVEFORM_POINTS = 100;
+/** ojcore `looper_param::LOOP_SECS` id (kernel param 0): quantized loop length in
+ *  seconds (<= 0 => free-run). Mirrors crates/ojcore/src/looper.rs. */
+const LOOPER_LOOP_SECS_PARAM = 0;
 /** ms between synthetic live-waveform-history ticks while recording. */
 const WAVEFORM_TICK_MS = 50;
 
@@ -169,6 +172,17 @@ export class OjcoreLooperHandle implements LooperHandle {
 
     setDuration(duration: number): void {
         this.duration = duration;
+        // Drive the kernel's LOOP_SECS immediately so a duration change takes
+        // effect without waiting for a full graph re-emit (RT-3: a continuous
+        // control sends a SetParam, not a recompile). Infinite (< 0) -> 0 =
+        // free-run; clamped to the kernel's 60 s ceiling. No-op until the node is
+        // in the graph — its baked param then applies on first compile.
+        const idx = this.bridge.nodeIndex(this.nodeId);
+        if (idx === undefined) return;
+        const secs = isInfiniteDuration(duration) ? 0 : Math.max(0, Math.min(60, duration));
+        this.bridge.sendCommand({
+            SetParam: { node: idx, param: LOOPER_LOOP_SECS_PARAM, value: secs },
+        });
     }
 
     getLoops(): LoopLayer[] {
