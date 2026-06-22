@@ -82,7 +82,7 @@ export interface PluginManifest {
 const REACT_UI: ReadonlySet<NodeType> = new Set<NodeType>([
     'looper',
     'effect',
-    'amplifier',
+    'multiplier',
     'recorder',
     'sampler',
     'library',
@@ -112,12 +112,12 @@ const KIND_BY_TYPE: Partial<Record<NodeType, PrimitiveKind>> = {
     sampler: 'Sampler',
     library: 'Sampler',
     // processors
-    amplifier: 'Gain',
     effect: 'Waveshaper',
     looper: 'Looper',
     // routing / io
     add: 'Add',
     subtract: 'Subtract',
+    multiplier: 'Multiply',
     microphone: 'MicIn',
     speaker: 'SpeakerOut',
     recorder: 'SpeakerOut',
@@ -158,15 +158,15 @@ const PARAMS_BY_TYPE: Partial<Record<NodeType, ParamDecl[]>> = {
         { id: 0, name: 'volume', min: 0, max: 1, default: 1 },
         { id: 1, name: 'isMuted', min: 0, max: 1, default: 0 },
     ],
-    // builtin.gain — ojcore GAIN_PARAM id 0 (linear multiplier). Declared
-    // explicitly so the seam carries the KERNEL's authoritative range
-    // ([min,max] = [0,4], crates/ojcore/src/builtin.rs `gain_manifest`) instead
-    // of the conservative range auto-derived from `defaultData` ORDER
-    // (`rangeFor(1)` => [0,1], which would silently cap a 2x boost at unity).
-    // `paramsFromData` CLAMPS the live value to this range at emit time, so a UI
-    // (or AI/import) value can never phase-invert the signal (negative gain) or
-    // run it away past +12 dB (>4x) — GAIN-1/GAIN-2 of the node standard.
-    amplifier: [{ id: 0, name: 'gain', min: 0, max: 4, default: 1 }],
+    // builtin.multiply — ojcore multiply_param FACTOR id 0 (the on-node number).
+    // Declared explicitly so the seam carries the kernel's param id rather than a
+    // field-order auto-derivation. `paramsFromData` CLAMPS the live value to
+    // [min,max] at emit: floored at 0 (a negative multiplier is meaningless once
+    // ×0 already mutes) with no musical ceiling (1e6 ≈ unbounded, per the user's
+    // "0 to ∞"). The FACTOR_ACTIVE flag (id 1) is NOT here — it's edge-derived and
+    // injected by the emitter (a disconnected input can't be detected in the
+    // kernel), see `emit.ts`.
+    multiplier: [{ id: 0, name: 'factor', min: 0, max: 1_000_000, default: 1 }],
 };
 
 /**

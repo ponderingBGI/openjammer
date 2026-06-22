@@ -40,8 +40,10 @@ export const ENGINE_IDS = {
     waveshaper: 'builtin.waveshaper',
     delay: 'builtin.delay',
     convolution: 'builtin.convolution',
+    looper: 'builtin.looper',
     add: 'builtin.add',
     subtract: 'builtin.subtract',
+    multiply: 'builtin.multiply',
     passthrough: 'builtin.passthrough',
     hostGraphIn: 'host.graph_in',
     hostMicIn: 'host.mic_in',
@@ -79,10 +81,18 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
                 return ENGINE_IDS.delay;
             case 'Convolution':
                 return ENGINE_IDS.convolution;
+            // The looper is a stateful built-in (register_builtins registers it on
+            // BOTH backends): it MUST load its real kernel, not the gain placeholder
+            // — a Gain instance no-ops looper_action/looper_snapshot, so record does
+            // nothing and the engine never emits a transport frame.
+            case 'Looper':
+                return ENGINE_IDS.looper;
             case 'Add':
                 return ENGINE_IDS.add;
             case 'Subtract':
                 return ENGINE_IDS.subtract;
+            case 'Multiply':
+                return ENGINE_IDS.multiply;
             // SpeakerOut/GraphOut/GraphIn/MicIn/Passthrough/Gain: the master/IO
             // instance loads via GAIN (the `kind` flag marks it; the executor
             // kind-gates it so the placeholder is never processed) — matches
@@ -117,10 +127,16 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
             return ENGINE_IDS.delay;
         case 'Convolution':
             return ENGINE_IDS.convolution;
+        // Stateful built-in, registered on the wasm registry too — load the real
+        // looper kernel, never the gain placeholder (see the native branch).
+        case 'Looper':
+            return ENGINE_IDS.looper;
         case 'Add':
             return ENGINE_IDS.add;
         case 'Subtract':
             return ENGINE_IDS.subtract;
+        case 'Multiply':
+            return ENGINE_IDS.multiply;
         case 'Passthrough':
             return ENGINE_IDS.passthrough;
         case 'GraphIn':

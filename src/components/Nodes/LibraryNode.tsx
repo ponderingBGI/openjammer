@@ -14,6 +14,7 @@
  */
 
 import { useState, useCallback, useEffect, useMemo, useRef, memo } from 'react';
+import { Port } from '@openjammer/oj-ui';
 import { toast } from 'sonner';
 import type { GraphNode, LibraryNodeData, LibraryItemRef, NodeData } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
@@ -41,6 +42,14 @@ interface LibraryNodeProps {
   isSelected: boolean;
   isDragging: boolean;
   style: React.CSSProperties;
+  // Port wiring (SEAM-1): the library declares one live seam — `sample-out` — that
+  // feeds a selected sample's PCM into connected Sampler nodes. These come from
+  // NodeWrapper's shared schematic props so the port is draggable like any other.
+  handlePortMouseDown?: (portId: string, e: React.MouseEvent) => void;
+  handlePortMouseUp?: (portId: string, e: React.MouseEvent) => void;
+  handlePortMouseEnter?: (portId: string) => void;
+  handlePortMouseLeave?: () => void;
+  hasConnection?: (portId: string) => boolean;
 }
 
 // Minimum dimensions for resizing - must match CSS .library-node min-width/min-height
@@ -68,6 +77,11 @@ export const LibraryNode = memo(function LibraryNode({
   isSelected,
   isDragging,
   style,
+  handlePortMouseDown,
+  handlePortMouseUp,
+  handlePortMouseEnter,
+  handlePortMouseLeave,
+  hasConnection,
 }: LibraryNodeProps) {
   // Validate node data with type guard and provide defaults
   const data: LibraryNodeData = isLibraryNodeData(node.data) ? node.data : {
@@ -320,6 +334,60 @@ export const LibraryNode = memo(function LibraryNode({
     },
     [node.id, updateNodeData]
   );
+
+  // PERSIST-1 / SEAM-1: the library feed is a PERSISTENT feed, not a one-shot. The
+  // currently-selected item's PCM must reach connected samplers (a) when a sampler
+  // is freshly WIRED to this library, and (b) on RELOAD (the sampler's engine
+  // binding does not survive a fresh session, and the library re-resolves the file
+  // from disk). Decode the current item once and broadcast it to every connected
+  // sampler via the executor's `sendSampleBuffer` (which fans out by node type).
+  // Reads node data / connections via getState() so the callback identity is stable.
+  const pushCurrentSampleToSamplers = useCallback(async () => {
+    const currentNode = useGraphStore.getState().nodes.get(node.id);
+    const itemId = (currentNode?.data as LibraryNodeData | undefined)?.currentItemId;
+    if (!itemId) return;
+    // Only do the (costly) decode if at least one sampler is actually wired here.
+    const conns = useGraphStore.getState().getConnectionsForNode(node.id);
+    const nodes = useGraphStore.getState().nodes;
+    const feedsASampler = conns.some(
+      (c) => c.sourceNodeId === node.id && nodes.get(c.targetNodeId)?.type === 'sampler',
+    );
+    if (!feedsASampler) return;
+    try {
+      const file = await getSampleFile(itemId);
+      if (!file) return; // re-resolve failed; selecting again surfaces the toast
+      const ctx = getAudioContext();
+      if (!ctx) return;
+      const arrayBuffer = await file.arrayBuffer();
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+      getExecutor().sendSampleBuffer(node.id, audioBuffer);
+    } catch (err) {
+      console.error('[LibraryNode] Failed to re-feed sample to samplers:', err);
+    }
+  }, [node.id]);
+
+  // Re-fire the feed on CONNECT and on RELOAD. The dependency is a stable string
+  // signature of the connected sampler ids (sorted) + the current item id: it
+  // changes exactly when a sampler is wired/unwired or the selection changes, so a
+  // newly-connected sampler (or a reloaded project) re-receives the live PCM. The
+  // worklet/IPC seam ignores duplicate buffers, so a redundant push is harmless.
+  const connectedSamplerSignature = useGraphStore((s) => {
+    const conns = s.connectionsByNode.get(node.id);
+    if (!conns) return '';
+    const ids: string[] = [];
+    for (const cid of conns) {
+      const c = s.connections.get(cid);
+      if (c && c.sourceNodeId === node.id && s.nodes.get(c.targetNodeId)?.type === 'sampler') {
+        ids.push(c.targetNodeId);
+      }
+    }
+    return ids.sort().join(',');
+  });
+
+  useEffect(() => {
+    if (!connectedSamplerSignature) return; // no sampler wired -> nothing to feed
+    void pushCurrentSampleToSamplers();
+  }, [connectedSamplerSignature, data.currentItemId, pushCurrentSampleToSamplers]);
 
   // Handle preview (C1: track active sources, C5: toast errors, I7: proper error logging)
   // Uses isMountedRef to prevent state updates after unmount
@@ -1117,6 +1185,13 @@ export const LibraryNode = memo(function LibraryNode({
     height: nodeHeight,
   };
 
+  // SEAM-1: the single live seam — the sample feed into connected samplers. Resolve
+  // it from the node's ports (id may be 'sample-out'; fall back by type/direction so
+  // a migrated node still finds it).
+  const sampleOutPort =
+    node.ports.find((p) => p.id === 'sample-out') ??
+    node.ports.find((p) => p.type === 'audio' && p.direction === 'output');
+
   return (
     <div
       ref={nodeRef}
@@ -1127,6 +1202,25 @@ export const LibraryNode = memo(function LibraryNode({
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => e.stopPropagation()}
     >
+      {/* Sample feed output port (SEAM-1): wire Library -> Sampler. The selected
+          item's PCM is fed to every connected sampler via `sendSampleBuffer`. */}
+      {sampleOutPort && (
+        <Port
+          kind="audio"
+          direction="output"
+          connected={!!hasConnection?.(sampleOutPort.id)}
+          className={`library-sample-out-port ${hasConnection?.(sampleOutPort.id) ? 'connected' : ''}`}
+          data-node-id={node.id}
+          data-port-id={sampleOutPort.id}
+          data-port-type="audio"
+          onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(sampleOutPort.id, e); }}
+          onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(sampleOutPort.id, e)}
+          onMouseEnter={() => handlePortMouseEnter?.(sampleOutPort.id)}
+          onMouseLeave={handlePortMouseLeave}
+          title="Sample out — wire to a Sampler"
+        />
+      )}
+
       {/* Header */}
       <div className="schematic-header" onMouseDown={handleHeaderMouseDown}>
         <span className="schematic-title">

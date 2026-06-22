@@ -62,6 +62,10 @@ function migrateNodePorts(node: GraphNode): GraphNode {
 
     node.ports = node.ports
         .filter(port => !(node.type === 'looper' && port.id === 'sample-out'))
+        // SEAM-1: the library node's only live seam is `sample-out` (the sampler PCM
+        // feed). Its former `audio-out` / `trigger` ports had no engine consumer —
+        // drop them from saved projects so no dead port lingers on the canvas.
+        .filter(port => !(node.type === 'library' && (port.id === 'audio-out' || port.id === 'trigger')))
         .map(port => ({
             ...port,
             type: (port.type as string) === 'technical' ? 'control' : port.type

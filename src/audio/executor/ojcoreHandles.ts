@@ -86,25 +86,6 @@ const LOOPER_LOOP_SECS_PARAM = 0;
 const LOOPER_WET_PARAM = 1;
 
 /**
- * Generate a deterministic, decaying-pulse waveform shape for visualization when
- * the real engine loop buffer is not readable back across the control seam.
- * Purely cosmetic — the audible loop is engine-rendered.
- */
-function syntheticWaveform(points: number, seed: number): number[] {
-    const out: number[] = new Array(points);
-    let s = seed || 1;
-    for (let i = 0; i < points; i++) {
-        // xorshift-ish deterministic pseudo-random in [0,1)
-        s ^= s << 13;
-        s ^= s >>> 17;
-        s ^= s << 5;
-        const r = ((s >>> 0) % 1000) / 1000;
-        out[i] = 0.15 + r * 0.7;
-    }
-    return out;
-}
-
-/**
  * Construct a full `Loop`-shaped {@link LoopLayer}. The Web-Audio-only
  * bookkeeping fields (`gainNode` / `sourceNode` / `startTime` / pause state) are
  * nulled — the audible loop is engine-rendered, so they carry no meaning on the
@@ -148,22 +129,10 @@ function waveformFromPcm(data: Float32Array, points = LOOP_WAVEFORM_POINTS): num
     return out;
 }
 
-/** Build a waveform array from a real AudioBuffer (peak per segment). */
+/** Build a waveform array from a real AudioBuffer (peak per segment) — its mono
+ *  channel through the shared {@link waveformFromPcm}. */
 function waveformFromBuffer(buffer: AudioBuffer, points = LOOP_WAVEFORM_POINTS): number[] {
-    const data = buffer.getChannelData(0);
-    const seg = Math.max(1, Math.floor(data.length / points));
-    const out: number[] = [];
-    for (let i = 0; i < points; i++) {
-        const start = i * seg;
-        const end = Math.min(start + seg, data.length);
-        let peak = 0;
-        for (let j = start; j < end; j++) {
-            const a = Math.abs(data[j]);
-            if (a > peak) peak = a;
-        }
-        out.push(peak);
-    }
-    return out;
+    return waveformFromPcm(buffer.getChannelData(0), points);
 }
 
 /**
@@ -176,6 +145,12 @@ export class OjcoreLooperHandle implements LooperHandle {
     /** Loop-level wet gain (0..1) applied to the summed layers — the balance
      *  control that tames the "loop adds on top" loudness. Kernel default 1.0. */
     private wet = 1;
+    /** Optimistic "a pass was started" intent: set on `startRecording` so an
+     *  immediate `stopRecording` commits, and RECONCILED from the engine state on
+     *  every return frame/edge (see `onEngineFrame`/`onEngineEdge`). Reconciling
+     *  against the SSOT means it can NEVER latch out of sync — a pass that never
+     *  reaches the engine is corrected by the next frame, instead of wedging every
+     *  later click. */
     private recording = false;
     /** UI rows in commit order: `loops[i]` mirrors kernel layer index `i`. */
     private loops: LoopLayer[] = [];
@@ -311,6 +286,9 @@ export class OjcoreLooperHandle implements LooperHandle {
         this.engineState = state as LooperState;
         const recording =
             state === LooperState.RECORDING || state === LooperState.OVERDUBBING;
+        // Reconcile the optimistic intent against the engine SSOT so it can never
+        // latch (a started-but-unreached pass is corrected here, not wedged).
+        this.recording = recording;
         // Accumulate the live trace only while a pass is being recorded; the
         // peak is the engine's real per-block amplitude for THIS looper node.
         if (recording) {
@@ -333,15 +311,23 @@ export class OjcoreLooperHandle implements LooperHandle {
      */
     onEngineEdge(from: number, to: number): void {
         this.engineState = to as LooperState;
+        // Reconcile the optimistic intent against the authoritative edge: a commit
+        // to PLAYING ends the pass, a start edge begins one — never latches.
+        this.recording =
+            to === LooperState.RECORDING || to === LooperState.OVERDUBBING;
         const committed =
             to === LooperState.PLAYING &&
             (from === LooperState.RECORDING || from === LooperState.OVERDUBBING);
         if (!committed) return;
         const id = `oj-loop-${Date.now()}-${this.loops.length}`;
+        // Use the live meter trace gathered during the pass. If the pass was too
+        // short to gather one, leave it empty — an honest flat line until the TRUE
+        // captured PCM lands on its separate seam and upgrades the row's shape (we
+        // never fabricate a waveform the audio doesn't have).
         const waveformData =
             this.liveHistory.length > 1
                 ? this.liveHistory.slice(0, LOOP_WAVEFORM_POINTS)
-                : syntheticWaveform(LOOP_WAVEFORM_POINTS, this.loops.length + 1);
+                : [];
         const layer = makeLoopLayer(id, null, waveformData);
         this.loops.push(layer);
         // Reset the trace for the next overdub pass.

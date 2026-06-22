@@ -61,6 +61,7 @@ import {
 } from './ojcoreHandles';
 import { ingestEngineEvents } from './faultPipe';
 import { setEngineHealth } from '../../store/engineHealthStore';
+import { setNodeVoiceLoadError } from './voiceLoadError';
 import { logger } from '../../utils/log';
 
 /** Scope-bound DevLog logger for the wasm executor. */
@@ -498,10 +499,24 @@ export class OjcoreWasmExecutor implements Executor {
                 this.pendingDefaultVoiceNodes.add(node.id);
                 this.getSamplerAdapter(node.id).setBuffer(buffer);
                 this.boundVoiceKey.set(node.id, key);
+                // This node's voice loaded — clear any stale error badge (ERR-1).
+                setNodeVoiceLoadError(node.id, false);
             } catch (err) {
-                // A buffer-creation failure must never break the graph push.
-                console.error('[OjcoreWasmExecutor] default voice load failed:', err);
-                return;
+                // A single node's buffer-creation failure must NOT abort the pass and
+                // starve LATER nodes of their default voice (a held note beats a
+                // glitch): per-node try/catch, CONTINUE past it. The failing node is
+                // flagged for its own non-focus-stealing "!" badge (ERR-1) — never a
+                // modal — and the diagnostic goes to the DevLog.
+                log.error('default voice load failed for node; continuing', {
+                    detail: `${node.id}: ${err instanceof Error ? err.message : String(err)}`,
+                });
+                // Drop the in-flight default-voice flag so a later `sample-stored`
+                // (if any) is not misrouted, and forget the bound key so a retry
+                // re-attempts the load instead of being deduped away.
+                this.pendingDefaultVoiceNodes.delete(node.id);
+                this.boundVoiceKey.delete(node.id);
+                setNodeVoiceLoadError(node.id, true);
+                continue;
             }
         }
     }

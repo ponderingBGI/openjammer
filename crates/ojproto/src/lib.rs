@@ -53,6 +53,7 @@ pub enum PrimitiveKind {
     // routing / io
     Add,
     Subtract,
+    Multiply,
     MicIn,
     SpeakerOut,
     GraphIn,

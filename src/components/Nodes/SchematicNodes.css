@@ -1832,6 +1832,38 @@
     max-width: 320px;
 }
 
+/* SEAM-1: the library's single live seam — the sample feed to connected samplers.
+   Right edge, vertically centered (matches the registry port position y:0.5). */
+.library-sample-out-port {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    right: -7px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: 50%;
+    background: var(--audio-output);
+    cursor: crosshair;
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+    z-index: 10;
+}
+
+.library-sample-out-port:hover,
+.library-sample-out-port:focus-visible {
+    transform: translateY(-50%) scale(1.2);
+}
+
+.library-sample-out-port:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+}
+
+.library-sample-out-port.connected {
+    background: var(--audio-connected);
+    box-shadow: 0 0 6px var(--audio-connected);
+}
+
 .library-node .schematic-header {
     display: flex;
     justify-content: space-between;
@@ -2812,6 +2844,54 @@
 .sampler-sample-area.has-sample:hover {
     border-color: var(--audio-connected);
     box-shadow: 0 0 6px color-mix(in srgb, var(--audio-connected) 30%, transparent);
+}
+
+/* ERR-1: a persisted sample whose PCM could not be re-resolved this mount. The
+   slot looks loaded (name + cached waveform) but the engine is silent, so it is
+   marked distinctly — a dashed warning border, dimmed waveform — and never
+   confused with an empty or a working slot. Non-modal: it never steals focus. */
+.sampler-sample-area.load-error {
+    border-style: dashed;
+    border-color: var(--status-warning, #e0a458);
+    background: color-mix(in srgb, var(--status-warning, #e0a458) 8%, transparent);
+}
+
+.sampler-sample-area.load-error .sampler-waveform-path {
+    opacity: 0.4;
+}
+
+.sampler-load-error-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    margin-right: 4px;
+    border-radius: 50%;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--bg-primary, #1a1a1a);
+    background: var(--status-warning, #e0a458);
+}
+
+/* ERR-1: per-node "!" badge when an instrument's built-in default voice failed to
+   load (DEFECT 3). Same calm warning style as the sampler load-error badge. */
+.instrument-voice-error-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    margin-left: 6px;
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--bg-primary, #1a1a1a);
+    background: var(--status-warning, #e0a458);
 }
 
 /* Drop text when empty */
