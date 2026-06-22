@@ -145,6 +145,7 @@ const KIND_BY_TYPE: Partial<Record<NodeType, PrimitiveKind>> = {
     library: 'Sampler',
     // processors
     effect: 'Waveshaper',
+    pan: 'Pan',
     looper: 'Looper',
     // routing / io
     add: 'Add',
@@ -199,6 +200,11 @@ const PARAMS_BY_TYPE: Partial<Record<NodeType, ParamDecl[]>> = {
     // injected by the emitter (a disconnected input can't be detected in the
     // kernel), see `emit.ts`.
     multiplier: [{ id: 0, name: 'factor', min: 0, max: 1_000_000, default: 1 }],
+    // builtin.pan — ojcore pan_param PAN id 0, range [-1, 1] (−1 L, 0 centre, +1 R).
+    // Declared explicitly because pan is a SIGNED range the conservative auto-
+    // derivation (`rangeFor(0)` => [0,1]) cannot express; AutoParamPanel renders it.
+    // `paramsFromData` reads node.data.pan and clamps to [-1, 1].
+    pan: [{ id: 0, name: 'pan', min: -1, max: 1, default: 0 }],
 };
 
 /**
