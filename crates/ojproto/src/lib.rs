@@ -46,6 +46,9 @@ pub enum PrimitiveKind {
     Waveshaper,
     Delay,
     Convolution,
+    /// Stereo panner: one mono audio input -> a 2-channel (stereo) audio output.
+    /// The first built-in node with `audio_out_channels = 2` (docs/CHANNELS.md).
+    Pan,
     // host-bridged / extension
     FaustHost,
     WasmHost,

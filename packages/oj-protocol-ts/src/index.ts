@@ -74,6 +74,7 @@ export const PRIMITIVE_KINDS = [
   "Waveshaper",
   "Delay",
   "Convolution",
+  "Pan",
   // host-bridged / extension
   "FaustHost",
   "WasmHost",

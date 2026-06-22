@@ -40,6 +40,7 @@ export const ENGINE_IDS = {
     waveshaper: 'builtin.waveshaper',
     delay: 'builtin.delay',
     convolution: 'builtin.convolution',
+    pan: 'builtin.pan',
     looper: 'builtin.looper',
     add: 'builtin.add',
     subtract: 'builtin.subtract',
@@ -81,6 +82,12 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
                 return ENGINE_IDS.delay;
             case 'Convolution':
                 return ENGINE_IDS.convolution;
+            // The stereo panner (the first 2-channel-output built-in), registered on
+            // BOTH backends via register_builtins — it MUST load its real kernel so
+            // it produces L/R; the GAIN placeholder writes a single lane and would
+            // silently collapse the stereo to mono.
+            case 'Pan':
+                return ENGINE_IDS.pan;
             // The looper is a stateful built-in (register_builtins registers it on
             // BOTH backends): it MUST load its real kernel, not the gain placeholder
             // — a Gain instance no-ops looper_action/looper_snapshot, so record does
@@ -127,6 +134,10 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
             return ENGINE_IDS.delay;
         case 'Convolution':
             return ENGINE_IDS.convolution;
+        // The stereo panner — registered on both backends; load its real kernel so
+        // it produces L/R rather than the single-lane gain placeholder.
+        case 'Pan':
+            return ENGINE_IDS.pan;
         // Stateful built-in, registered on the wasm registry too — load the real
         // looper kernel, never the gain placeholder (see the native branch).
         case 'Looper':
