@@ -33,25 +33,28 @@ The app will be available at `http://localhost:5173` (Vite's default).
 
 ### Native desktop (Tauri)
 
-The browser tier (`bun dev`) needs only Bun. The native low-latency tier additionally needs the
-Rust toolchain plus the per-OS Tauri prerequisites (Windows: MSVC "Desktop development with C++"
-+ WebView2; macOS: Xcode CLT; Linux: the `libwebkit2gtk-4.1`/`gtk-3`/`libsoup-3` set). **One command
-provisions all of it:**
+This is the canonical reference for running the native low-latency app. Two commands:
 
 ```bash
-bun run oj setup              # detect + install the native prerequisites (confirms first; --dry-run to preview)
-bun run dev:native            # one command: Vite HMR + the ojcore-native engine (alias: just dev)
-bun run dev:native --engine   # windowless engine inner-loop via bacon (cargo install --locked bacon)
+bun run oj setup   # one-time: install the native prerequisites (first run only)
+bun native         # run the desktop app — opens the window, streams logs live
 ```
 
-`oj setup` derives its prerequisite set from CI (`.github/actions/setup-rust/action.yml`), installs
-via winget / `xcode-select` + rustup / apt·dnf·pacman, and adds the browser-worklet wasm nightly with
-`--wasm`. `bun run oj doctor --check native-readiness` reports status without installing; `bun run
-tauri info` gives a full environment dump.
+`bun native` is the desktop counterpart to `bun dev`. The window opens on its own once the
+engine builds; **edit `src/**`** and it hot-reloads, **edit Rust (`crates/**`, `src-tauri/**`)**
+and it rebuilds + restarts the window, **Ctrl+C** stops everything. (There's no Vite-style
+keypress menu: the loop hands its whole lifecycle and clean Ctrl+C teardown to the Tauri CLI,
+so it behaves identically on Windows/macOS/Linux — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).)
 
-`oj dev` delegates lifecycle + Ctrl+C teardown to the Tauri CLI, so it behaves identically on
-Windows/macOS/Linux. Editing `src/**` hot-reloads in place; editing Rust (`crates/**`,
-`src-tauri/**`) restarts the native window — use `--engine` for fast DSP iteration.
+`oj setup` detects every native prerequisite (Rust; **Win:** MSVC "Desktop development with C++"
+\+ WebView2; **macOS:** Xcode CLT; **Linux:** the `libwebkit2gtk-4.1`/`gtk-3`/`libsoup-3` set) and
+installs the missing ones after a confirm. Its set is derived from CI, so local matches CI;
+`--dry-run` previews, `--wasm` adds the browser-worklet nightly, and `bun run oj doctor --check
+native-readiness` reports without installing.
+
+<sub>Power-user extras: `bun native --engine` is a windowless Rust/DSP inner-loop (bacon over the
+`render`/`nextest` harnesses — `cargo install --locked bacon`); `OJ_DEV_SKIP_PI=1` skips the
+Ctrl+K AI sidecar build. `bun native` is also reachable as `just dev` / `bun run dev:native`.</sub>
 
 ### Design system
 

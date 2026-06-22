@@ -86,6 +86,86 @@ fn scan_plugins(
         .map_err(|e| e.to_string())
 }
 
+/// A CLAP plugin folder shown in the Plugins panel, tagged by scope so the UI can
+/// explain why there are two — a per-user folder and a system-wide one — and lead
+/// with the admin-free one.
+#[derive(serde::Serialize)]
+struct PluginDir {
+    path: String,
+    /// `"user"` (under the profile dir — no admin to drop a plugin in) or
+    /// `"system"` (all users; usually needs admin).
+    scope: &'static str,
+}
+
+/// The OS-standard CLAP plugin folders for THIS machine, tagged by scope. The
+/// Plugins panel shows these in its empty state so the player sees the real paths
+/// (and can open one with [`reveal_path`]) instead of generic cross-platform
+/// examples — CLAP is the format the native build hosts. The per-user folder is
+/// listed first because it needs no admin rights.
+#[tauri::command]
+fn plugin_dirs() -> Vec<PluginDir> {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from);
+    let mut dirs: Vec<PluginDir> = ojhost::clap_plugin_dirs()
+        .into_iter()
+        .map(|p| {
+            let user = home.as_ref().is_some_and(|h| p.starts_with(h));
+            PluginDir {
+                path: p.to_string_lossy().into_owned(),
+                scope: if user { "user" } else { "system" },
+            }
+        })
+        .collect();
+    // Lead with the per-user folder — it needs no admin to drop a plugin into.
+    dirs.sort_by_key(|d| d.scope != "user");
+    dirs
+}
+
+/// Open one of the plugin folders in the OS file manager (Explorer / Finder /
+/// `xdg-open`). The path MUST be one of the known plugin dirs — we never open an
+/// arbitrary path handed in from the webview. The folder is created first
+/// (best-effort) so a not-yet-existing user CLAP dir still opens, giving the player
+/// somewhere to drop a `.clap`.
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    if !ojhost::clap_plugin_dirs().iter().any(|d| d == &target) {
+        return Err("refusing to open a path that is not a plugin folder".into());
+    }
+    let _ = std::fs::create_dir_all(&target);
+    open_in_file_manager(&target)
+}
+
+#[cfg(target_os = "windows")]
+fn open_in_file_manager(path: &std::path::Path) -> Result<(), String> {
+    // `explorer` returns a non-zero exit code even on success, so spawn-and-forget
+    // rather than inspect the status.
+    std::process::Command::new("explorer")
+        .arg(path)
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn open_in_file_manager(path: &std::path::Path) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(path)
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_in_file_manager(path: &std::path::Path) -> Result<(), String> {
+    std::process::Command::new("xdg-open")
+        .arg(path)
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
 /// Whether the native audio engine is currently running (false in a device-less
 /// environment, where the UI still runs and the engine starts when a device
 /// appears on the next `push_graph`).
@@ -457,6 +537,8 @@ pub fn run() {
             query_stream,
             engine_running,
             scan_plugins,
+            plugin_dirs,
+            reveal_path,
             ai::ai_run,
             ai::ai_command,
             ai::ai_prewarm,
