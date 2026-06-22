@@ -225,6 +225,19 @@ fn engine_frame_external_tagging() {
         },
         r#"{"Beat":{"bar":2,"beat":3,"phase":0.5}}"#,
     );
+    // Looper telemetry frame: node + state(u8) + pos(u32) + loop_len(u32) + peak(f32).
+    // `state` is a bare number (one of `looper_state::*`); mirrored on the TS
+    // side by the `LooperState` numeric union.
+    assert_json(
+        &EngineFrame::Looper {
+            node: NodeIdx(3),
+            state: looper_state::PLAYING,
+            pos: 1024,
+            loop_len: 48_000,
+            peak: 0.5,
+        },
+        r#"{"Looper":{"node":3,"state":3,"pos":1024,"loop_len":48000,"peak":0.5}}"#,
+    );
     assert_json(
         &EngineFrame::Error {
             code: 42,
@@ -248,6 +261,14 @@ fn event_taxonomy_shapes_match_ts_mirror() {
         },
         r#"{"NodeFault":{"node":4,"fault":"NonFinite"}}"#,
     );
+    assert_json(
+        &EventKind::LooperEdge {
+            node: NodeIdx(3),
+            from: looper_state::RECORDING,
+            to: looper_state::PLAYING,
+        },
+        r#"{"LooperEdge":{"node":3,"from":2,"to":3}}"#,
+    );
     assert_json(&EventKind::RingFull, "\"RingFull\"");
     assert_json(
         &EventKind::Message {
@@ -263,6 +284,16 @@ fn event_taxonomy_shapes_match_ts_mirror() {
             fault: FaultKind::AutoBypassed,
         },
         r#"{"NodeFault":{"node":4,"fault":"AutoBypassed"}}"#,
+    );
+
+    // The RT-safe LooperEdge subset rides the event ring; same external tagging.
+    assert_json(
+        &RtEvent::LooperEdge {
+            node: NodeIdx(3),
+            from: looper_state::RECORDING,
+            to: looper_state::PLAYING,
+        },
+        r#"{"LooperEdge":{"node":3,"from":2,"to":3}}"#,
     );
 
     assert_json(

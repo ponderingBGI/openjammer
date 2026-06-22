@@ -70,6 +70,25 @@ pub trait DspInstance: Send {
     /// implementors MUST NOT allocate. Carried by [`ojproto::RtCommand::Looper`].
     fn looper_action(&mut self, _action: u8) {}
 
+    /// RT-thread looper telemetry snapshot for the (ungated) return path:
+    /// `(state_u8, pos, loop_len, last_block_peak)`. `state` is an
+    /// [`ojproto::looper_state`] code; `pos`/`loop_len` are sample frames.
+    /// Default `None` so non-looper nodes contribute no looper frame (same
+    /// pattern as [`looper_action`](DspInstance::looper_action));
+    /// [`crate::LooperNode`] overrides it. RT-safe: field reads, no allocation.
+    fn looper_snapshot(&self) -> Option<(u8, u32, u32, f32)> {
+        None
+    }
+
+    /// RT-thread drain of a just-occurred looper state transition as
+    /// `(from_u8, to_u8)` ([`ojproto::looper_state`] codes), consumed once per
+    /// block onto the loss-proof event ring. Default `None`;
+    /// [`crate::LooperNode`] overrides it. RT-safe: an `Option::take`, no
+    /// allocation.
+    fn take_looper_edge(&mut self) -> Option<(u8, u8)> {
+        None
+    }
+
     /// OFF-RT asset-resolution seam (the U6 sample / IR loading point).
     ///
     /// Called by [`crate::compile`] (or any host that resolves an
