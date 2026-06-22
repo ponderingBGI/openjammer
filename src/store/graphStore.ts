@@ -227,6 +227,13 @@ interface GraphStore {
     undo: () => void;
     redo: () => void;
     pushHistory: () => void;
+    /** Begin a user gesture: brackets the following param mutations into ONE undo
+     *  entry (pre-gesture state is snapshotted on the first mutation). Nestable;
+     *  pair every call with {@link endGesture}. Mutations outside a gesture are
+     *  not recorded, so system/per-frame writes never spam history. */
+    beginGesture: () => void;
+    /** End a gesture started with {@link beginGesture}. */
+    endGesture: () => void;
 
     // Getters
     getNode: (nodeId: string) => GraphNode | undefined;
@@ -273,6 +280,27 @@ function rebuildConnectionIndex(connections: Map<string, Connection>): Map<strin
     return index;
 }
 
+// ---------------------------------------------------------------------------
+// Gesture coalescing for undo (REV-1). A user gesture — a scrub/drag, or a single
+// discrete edit — brackets a run of param mutations into ONE undo entry. The
+// pre-gesture snapshot is DEFERRED to the first actual mutation inside the
+// gesture, so an empty gesture creates no history. Mutations OUTSIDE a gesture
+// (system events like MIDI device propagation, per-frame writes) take NO snapshot
+// — so this is ZERO regression until a UI call site opts in via beginGesture()/
+// endGesture(). Module-scoped: transient (never persisted) and correct for the
+// process-wide singleton store.
+// ---------------------------------------------------------------------------
+let _gestureDepth = 0;
+let _gestureSnapshotted = false;
+
+/** Snapshot history ONCE, before the first mutation of an active gesture. */
+function gestureSnapshot(get: () => GraphStore): void {
+    if (_gestureDepth > 0 && !_gestureSnapshotted) {
+        _gestureSnapshotted = true;
+        get().pushHistory();
+    }
+}
+
 export const useGraphStore = create<GraphStore>()(
     persist(
         (set, get) => ({
@@ -314,8 +342,20 @@ export const useGraphStore = create<GraphStore>()(
                 });
             },
 
+            beginGesture: () => {
+                _gestureDepth += 1;
+            },
+
+            endGesture: () => {
+                if (_gestureDepth > 0) _gestureDepth -= 1;
+                if (_gestureDepth === 0) _gestureSnapshotted = false;
+            },
+
             // Undo
             undo: () => {
+                // A jump through history ends any in-flight gesture cleanly.
+                _gestureDepth = 0;
+                _gestureSnapshotted = false;
                 const state = get();
                 if (state.historyIndex < 0) return;
 
@@ -346,6 +386,8 @@ export const useGraphStore = create<GraphStore>()(
 
             // Redo
             redo: () => {
+                _gestureDepth = 0;
+                _gestureSnapshotted = false;
                 const state = get();
                 if (state.historyIndex >= state.history.length - 1) return;
 
@@ -599,6 +641,7 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             updateNodeData: (nodeId, data) => {
+                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
@@ -659,6 +702,7 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             updateNodePorts: (nodeId, ports) => {
+                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
@@ -670,6 +714,7 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             updateNodeType: (nodeId, type) => {
+                gestureSnapshot(get);
                 const definition = getNodeDefinition(type);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
@@ -700,6 +745,7 @@ export const useGraphStore = create<GraphStore>()(
 
             // Instrument Row Actions
             updateInstrumentRow: (nodeId, rowId, updates) => {
+                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
@@ -733,6 +779,7 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             updateKeyGain: (nodeId, rowId, keyIndex, gain) => {
+                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
@@ -762,6 +809,7 @@ export const useGraphStore = create<GraphStore>()(
 
             // Sampler Row Actions
             updateSamplerRow: (nodeId, rowId, updates) => {
+                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node || node.type !== 'sampler') return state;
