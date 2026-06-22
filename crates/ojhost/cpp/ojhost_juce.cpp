@@ -19,6 +19,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_audio_basics/juce_audio_basics.h>
 
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -38,9 +39,26 @@ char* dupString(const String& s) {
     return out;
 }
 
+OjHostedParam* copyParams(AudioPluginInstance& inst) {
+    auto& params = inst.getParameters();
+    if (params.isEmpty()) return nullptr;
+    auto* out = static_cast<OjHostedParam*>(std::calloc(static_cast<size_t>(params.size()), sizeof(OjHostedParam)));
+    if (out == nullptr) return nullptr;
+    for (int i = 0; i < params.size(); ++i) {
+        auto* p = params[i];
+        out[i].id = static_cast<uint32_t>(i);
+        out[i].name = dupString(p != nullptr ? p->getName(96) : String("param") + String(i));
+        out[i].min = 0.0;
+        out[i].max = 1.0;
+        out[i].default_value = p != nullptr ? static_cast<double>(p->getDefaultValue()) : 0.0;
+    }
+    return out;
+}
+
 AudioPluginFormat* formatFor(AudioPluginFormatManager& mgr, OjPluginFormat fmt) {
     const char* wanted = nullptr;
     switch (fmt) {
+        case OJ_FORMAT_VST2: wanted = "VST"; break;
         case OJ_FORMAT_VST3: wanted = "VST3"; break;
         case OJ_FORMAT_CLAP: wanted = "CLAP"; break;
         case OJ_FORMAT_AU:   wanted = "AudioUnit"; break;
@@ -58,6 +76,7 @@ AudioPluginFormat* formatFor(AudioPluginFormatManager& mgr, OjPluginFormat fmt) 
 // Host context: owns the format manager (VST3 + CLAP, + AU on macOS).
 // ---------------------------------------------------------------------------
 struct OjHost {
+    ScopedJuceInitialiser_GUI gui;
     AudioPluginFormatManager formats;
     String lastError;
 
@@ -78,6 +97,12 @@ struct OjPlugin {
     std::vector<float*> channelPtrs;
     int maxBlock = 0;
     int preparedChannels = 0;
+};
+
+struct OjPluginEditor {
+    OjHost* host = nullptr;
+    OjPlugin* plugin = nullptr;
+    std::unique_ptr<AudioProcessorEditor> editor;
 };
 
 extern "C" {
@@ -125,14 +150,24 @@ OjScanResult ojhost_scan(OjHost* host, const char* const* dirs, size_t dir_count
         d.name = dupString(desc.name);
         d.vendor = dupString(desc.manufacturerName);
         d.path = dupString(desc.fileOrIdentifier);
-        if (desc.pluginFormatName.equalsIgnoreCase("VST3")) d.format = OJ_FORMAT_VST3;
+        if (desc.pluginFormatName.equalsIgnoreCase("VST") ||
+            desc.pluginFormatName.equalsIgnoreCase("VST2")) d.format = OJ_FORMAT_VST2;
+        else if (desc.pluginFormatName.equalsIgnoreCase("VST3")) d.format = OJ_FORMAT_VST3;
         else if (desc.pluginFormatName.equalsIgnoreCase("CLAP")) d.format = OJ_FORMAT_CLAP;
         else d.format = OJ_FORMAT_AU;
         d.is_instrument = desc.isInstrument ? 1 : 0;
         d.audio_in = static_cast<uint16_t>(jmax(0, desc.numInputChannels));
         d.audio_out = static_cast<uint16_t>(jmax(0, desc.numOutputChannels));
-        d.param_count = 0;       // refined on load
-        d.latency_samples = 0;   // refined on prepare
+        d.param_count = 0;
+        d.params = nullptr;
+        d.latency_samples = 0;
+        String loadError;
+        auto inst = host->formats.createPluginInstance(desc, 44100.0, 512, loadError);
+        if (inst != nullptr) {
+            d.param_count = static_cast<uint32_t>(inst->getParameters().size());
+            d.params = copyParams(*inst);
+            d.latency_samples = static_cast<uint32_t>(jmax(0, inst->getLatencySamples()));
+        }
         found.push_back(d);
     }
 
@@ -152,6 +187,12 @@ void ojhost_free_scan(OjScanResult result) {
         std::free(const_cast<char*>(result.items[i].name));
         std::free(const_cast<char*>(result.items[i].vendor));
         std::free(const_cast<char*>(result.items[i].path));
+        if (result.items[i].params != nullptr) {
+            for (uint32_t p = 0; p < result.items[i].param_count; ++p) {
+                std::free(const_cast<char*>(result.items[i].params[p].name));
+            }
+            std::free(const_cast<OjHostedParam*>(result.items[i].params));
+        }
     }
     std::free(result.items);
 }
@@ -197,7 +238,10 @@ void ojhost_prepare(OjPlugin* plugin, double sample_rate, int32_t max_block) {
     plugin->preparedChannels = jmax(1, channels);
     plugin->buffer.setSize(plugin->preparedChannels, max_block, false, true, false);
     plugin->channelPtrs.assign(static_cast<size_t>(plugin->preparedChannels), nullptr);
-    plugin->midi.ensureSize(256);
+    // Pre-size MIDI storage generously so note delivery in `ojhost_note_*` does
+    // not grow the buffer in normal live use. The Rust/JUCE boundary never
+    // allocates channel scratch after this point.
+    plugin->midi.ensureSize(4096);
     plugin->instance->setRateAndBufferSizeDetails(sample_rate, max_block);
     plugin->instance->prepareToPlay(sample_rate, max_block);
 }
@@ -268,6 +312,77 @@ uint32_t ojhost_param_count(const OjPlugin* plugin) {
 
 void ojhost_unload(OjPlugin* plugin) {
     delete plugin;
+}
+
+OjPluginEditor* ojhost_editor_open(const char* path, const char* uid,
+                                   OjPluginFormat format, const char** err) {
+    auto* host = ojhost_create();
+    if (host == nullptr) { if (err) *err = "could not create host"; return nullptr; }
+    auto* plugin = ojhost_load(host, path, uid, format, err);
+    if (plugin == nullptr || plugin->instance == nullptr) {
+        ojhost_destroy(host);
+        return nullptr;
+    }
+
+    MessageManagerLock mmLock;
+    if (!mmLock.lockWasGained()) {
+        if (err) *err = "could not lock JUCE message manager";
+        ojhost_unload(plugin);
+        ojhost_destroy(host);
+        return nullptr;
+    }
+
+    std::unique_ptr<AudioProcessorEditor> ed(plugin->instance->createEditorIfNeeded());
+    if (ed == nullptr) {
+        if (err) *err = "plugin has no native editor";
+        ojhost_unload(plugin);
+        ojhost_destroy(host);
+        return nullptr;
+    }
+    if (ed->getWidth() <= 0 || ed->getHeight() <= 0) ed->setSize(640, 480);
+    ed->setName(plugin->instance->getName());
+    ed->addToDesktop(ComponentPeer::windowHasTitleBar |
+                     ComponentPeer::windowIsResizable |
+                     ComponentPeer::windowHasCloseButton);
+    ed->centreWithSize(ed->getWidth(), ed->getHeight());
+    ed->setVisible(true);
+    ed->toFront(true);
+
+    auto* handle = new (std::nothrow) OjPluginEditor();
+    if (handle == nullptr) {
+        if (err) *err = "out of memory";
+        ed->removeFromDesktop();
+        ojhost_unload(plugin);
+        ojhost_destroy(host);
+        return nullptr;
+    }
+    handle->host = host;
+    handle->plugin = plugin;
+    handle->editor = std::move(ed);
+    return handle;
+}
+
+void ojhost_editor_focus(OjPluginEditor* editor) {
+    if (editor == nullptr || editor->editor == nullptr) return;
+    MessageManagerLock mmLock;
+    if (!mmLock.lockWasGained()) return;
+    editor->editor->setVisible(true);
+    editor->editor->toFront(true);
+    if (auto* peer = editor->editor->getPeer()) peer->grabFocus();
+}
+
+void ojhost_editor_close(OjPluginEditor* editor) {
+    if (editor == nullptr) return;
+    {
+        MessageManagerLock mmLock;
+        if (mmLock.lockWasGained() && editor->editor != nullptr) {
+            editor->editor->removeFromDesktop();
+            editor->editor.reset();
+        }
+    }
+    if (editor->plugin != nullptr) ojhost_unload(editor->plugin);
+    if (editor->host != nullptr) ojhost_destroy(editor->host);
+    delete editor;
 }
 
 } // extern "C"

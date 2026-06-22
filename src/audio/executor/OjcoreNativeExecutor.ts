@@ -471,6 +471,7 @@ export class OjcoreNativeExecutor implements Executor {
         // manifest — they play the actual DSP instead of the effect fallback.
         const { graph, index } = emitWithIndex(this.getNodes(), this.getConnections(), {
             codeNodesAsWasmHost: true,
+            hostedPluginsAsPluginHost: true,
         });
         // Build the next NodeIdx interning + reverse (NodeIdx -> visual id) maps as
         // LOCALS — they are committed to `this.index`/`this.reverseIndex` only once

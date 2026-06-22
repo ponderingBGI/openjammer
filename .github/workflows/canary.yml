@@ -136,6 +136,11 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_CANARY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD_CANARY }}
           OPENJAMMER_PI_TARGET: ${{ matrix.piTarget }}
+          # VST2 is owner-provisioned only. Empty/default -> VST2 disabled;
+          # provision both values before advertising VST2 in public installers.
+          OJHOST_ENABLE_VST2: ${{ secrets.OJHOST_ENABLE_VST2 }}
+          VST2_SDK_DIR: ${{ secrets.VST2_SDK_DIR }}
+          VST3_SDK_DIR: ${{ secrets.VST3_SDK_DIR }}
           VITE_OJ_CANARY: 'true'
         with:
           tagName: ${{ needs.prepare.outputs.tag }}

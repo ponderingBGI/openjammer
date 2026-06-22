@@ -38,6 +38,9 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "bench": "cargo bench -p ojcore -p ojcore-dsp -p ojproto -p ojinstrument -p ojhost",
+    "bench:codspeed:build": "cargo codspeed build -m simulation -m memory -p ojcore -p ojcore-dsp -p ojproto -p ojinstrument -p ojhost",
+    "bench:codspeed:run": "cargo codspeed run -m simulation && cargo codspeed run -m memory",
     "tauri": "tauri"
   },
   "dependencies": {

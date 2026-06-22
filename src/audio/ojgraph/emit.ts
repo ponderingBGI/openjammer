@@ -54,7 +54,7 @@ import {
     type PluginManifest,
     type PrimitiveKind,
 } from '../../engine/manifest';
-import { AI_WASM_ID_PREFIX, getDynamicPlugin } from '../../engine/dynamicRegistry';
+import { AI_WASM_ID_PREFIX, HOSTED_PLUGIN_ID_PREFIX, getDynamicPlugin } from '../../engine/dynamicRegistry';
 import { instrumentUsesKarplus } from '../defaultInstrument';
 import type {
     ConnectionType,
@@ -88,6 +88,12 @@ export interface EmitOptions {
      * fallback, so an unrunnable `WasmHost` node never reaches a loader-less engine.
      */
     codeNodesAsWasmHost?: boolean;
+    /**
+     * When set, hosted plugin dynamic nodes (`host.plugin.*`) lower to their real
+     * `PluginHost` manifests. Only the native executor sets this; browser/default
+     * paths keep the closed effect fallback so loader-less graphs stay runnable.
+     */
+    hostedPluginsAsPluginHost?: boolean;
 }
 
 /**
@@ -191,6 +197,7 @@ export function emitWithIndex(
     // 2) Classify every node: which become IrNodes (audio DSP/IO) vs which are
     //    structural passthroughs that get flattened.
     const codeNodesAsWasmHost = opts.codeNodesAsWasmHost ?? false;
+    const hostedPluginsAsPluginHost = opts.hostedPluginsAsPluginHost ?? false;
     const manifestByType = new Map<NodeType, PluginManifest>();
     const manifestOf = (type: NodeType): PluginManifest => {
         let m = manifestByType.get(type);
@@ -208,7 +215,11 @@ export function emitWithIndex(
      */
     const manifestForNode = (node: GraphNode): PluginManifest => {
         const pid = node.pluginId;
-        if (codeNodesAsWasmHost && pid && pid.startsWith(AI_WASM_ID_PREFIX)) {
+        if (
+            pid &&
+            ((codeNodesAsWasmHost && pid.startsWith(AI_WASM_ID_PREFIX)) ||
+                (hostedPluginsAsPluginHost && pid.startsWith(HOSTED_PLUGIN_ID_PREFIX)))
+        ) {
             const def = getDynamicPlugin(pid);
             if (def) return manifestForDynamic(pid, def);
         }

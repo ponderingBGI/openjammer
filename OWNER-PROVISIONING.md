@@ -182,6 +182,30 @@ unset to disable the bots entirely.
 
 ---
 
+## 9. 🔴 VST2 SDK input for public VST2-enabled installers
+
+VST2 is discontinued by Steinberg. OpenJammer source and CI must **not vendor,
+mirror, or auto-download** VST2 headers. Full VST2 support in public binaries is
+allowed only when the owner provides a legally obtained SDK/header checkout to the
+release builders.
+
+Provisioning contract for the VST2-enabled JUCE host:
+
+1. Keep the VST2 SDK/header checkout outside the repository.
+2. Local builds opt in with:
+   ```sh
+   OJHOST_ENABLE_VST2=1 VST2_SDK_DIR=/path/to/vst2-sdk bun run tauri build
+   ```
+3. GitHub release/canari builders must receive the SDK through a private owner
+   mechanism (for example an encrypted artifact restored into the workspace) and
+   export the same two variables. Do not print, cache, or upload the SDK.
+4. If the SDK is not provisioned, the app must still build with VST3/CLAP/AU and
+   surface VST2 as unavailable rather than pretending it is supported.
+
+This is a hard release gate for the user's requested “full VST2 support”.
+
+---
+
 ## Quick reference: what's already done vs. what you flip
 
 | Concern | In-repo (done) | Owner action (this doc) |

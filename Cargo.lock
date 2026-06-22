@@ -3386,6 +3386,7 @@ dependencies = [
  "clack-extensions",
  "clack-host",
  "cmake",
+ "codspeed-criterion-compat",
  "ojcore",
  "ojproto",
  "serde",

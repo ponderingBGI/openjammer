@@ -21,16 +21,53 @@ use crate::backend::{self, HostedBackend};
 use crate::descriptor::PluginDescriptor;
 use crate::error::HostError;
 
-/// The OPEN manifest id every hosted plugin registers under. The specific
-/// plugin is selected by the [`PluginDescriptor`] the loader was built with, not
-/// by the id (so all hosted plugins share one closed [`PrimitiveKind`]).
+/// Historical/base hosted-plugin id prefix. Concrete hosted plugins register
+/// under `host.plugin.<format>.<hash>` so multiple scanned plugins coexist in the
+/// registry instead of overwriting each other.
 pub const PLUGIN_HOST_ID: &str = "host.plugin";
+
+/// Build the stable manifest id for one scanned hosted plugin.
+pub fn hosted_plugin_id(desc: &PluginDescriptor) -> String {
+    let key = format!("{}\0{}\0{}", desc.format.slug(), desc.uid, desc.path);
+    format!("{PLUGIN_HOST_ID}.{}.{}", desc.format.slug(), fnv1a32_hex(key.as_bytes()))
+}
+
+fn fnv1a32_hex(bytes: &[u8]) -> String {
+    let mut hash: u32 = 0x811c9dc5;
+    for b in bytes {
+        hash ^= u32::from(*b);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    format!("{hash:08x}")
+}
 
 /// A loaded, processable third-party plugin. The safe wrapper over a
 /// backend-specific [`HostedBackend`]. Construct via [`HostedPlugin::load`].
 pub struct HostedPlugin {
     backend: Box<dyn HostedBackend>,
     descriptor: PluginDescriptor,
+}
+
+/// A native top-level editor window for a hosted plugin. This is control/UI-rate
+/// only and intentionally separate from the audio-thread DSP instance.
+pub struct PluginEditor {
+    backend: Box<dyn backend::EditorBackend>,
+}
+
+impl PluginEditor {
+    pub fn open(desc: &PluginDescriptor) -> Result<Self, HostError> {
+        Ok(Self {
+            backend: backend::open_editor(desc)?,
+        })
+    }
+
+    pub fn focus(&mut self) {
+        self.backend.focus();
+    }
+
+    pub fn close(&mut self) {
+        self.backend.close();
+    }
 }
 
 impl HostedPlugin {
@@ -114,8 +151,8 @@ impl DspInstance for PluginHostNode {
 
 /// A [`PluginLoader`] that mints [`PluginHostNode`]s for ONE scanned plugin.
 ///
-/// Each scanned [`PluginDescriptor`] produces one loader; they all share the
-/// `host.plugin` manifest id (the open key) and lower to
+/// Each scanned [`PluginDescriptor`] produces one loader under a stable unique
+/// manifest id (`host.plugin.<format>.<hash>`) and lowers to
 /// [`PrimitiveKind::PluginHost`] (the closed kind), per "everything is a plugin".
 /// The manifest's name/ports reflect the specific plugin so the UI can label and
 /// wire it.
@@ -163,7 +200,7 @@ impl PluginHostLoader {
                 .collect()
         };
         let manifest = PluginManifest {
-            id: PLUGIN_HOST_ID.to_string(),
+            id: hosted_plugin_id(&descriptor),
             name: descriptor.name.clone(),
             kind: PrimitiveKind::PluginHost,
             dsp: DspKind::None, // hosting is native-only; not one of builtin/faust/wasm
@@ -274,9 +311,11 @@ mod tests {
 
     #[test]
     fn loader_manifest_lowers_to_plugin_host() {
-        let loader = PluginHostLoader::new(sample_desc(3));
+        let desc = sample_desc(3);
+        let expected_id = hosted_plugin_id(&desc);
+        let loader = PluginHostLoader::new(desc);
         let m = loader.manifest();
-        assert_eq!(m.id, PLUGIN_HOST_ID);
+        assert_eq!(m.id, expected_id);
         assert_eq!(m.kind, PrimitiveKind::PluginHost);
         assert_eq!(m.name, "Acme Synth");
         assert_eq!(m.ports.audio_out, 2);

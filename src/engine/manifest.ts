@@ -15,7 +15,12 @@
 
 import type { EffectType, NodeDefinition, NodeType, UiKind } from './types';
 import { get as getNodeDefinition, nodeDefinitions } from './registry';
-import { AI_MANIFEST_PARAMS_KEY } from './dynamicRegistry';
+import {
+    AI_MANIFEST_PARAMS_KEY,
+    HOSTED_PLUGIN_DESCRIPTOR_KEY,
+    type HostedParamDescriptor,
+    type HostedPluginDescriptor,
+} from './dynamicRegistry';
 // The ONE closed PrimitiveKind set, imported from the wire-contract SSOT so this
 // file never holds a fourth hand-written copy that can drift (see below).
 import type { PrimitiveKind } from '../../packages/oj-protocol-ts/src/index';
@@ -370,7 +375,44 @@ export function allManifests(): PluginManifest[] {
  * we report the manifest's `kind`/`dsp` honestly as the wasm code-node lowering.
  */
 export function manifestForDynamic(id: string, def: NodeDefinition): PluginManifest {
-    const stashed = (def.defaultData as Record<string, unknown>)[AI_MANIFEST_PARAMS_KEY];
+    const data = def.defaultData as Record<string, unknown>;
+    const hosted = data[HOSTED_PLUGIN_DESCRIPTOR_KEY] as HostedPluginDescriptor | undefined;
+    if (hosted !== undefined) {
+        const detailed = Array.isArray(hosted.params) ? hosted.params : [];
+        const params: ParamDecl[] = (detailed.length > 0
+            ? detailed
+            : Array.from({ length: Math.min(hosted.param_count ?? 0, 256) }, (_, paramId) => ({
+                  id: paramId,
+                  name: `param${paramId}`,
+                  min: 0,
+                  max: 1,
+                  default: 0,
+              } as HostedParamDescriptor))
+        ).map((p, index) => ({
+            // The native host currently addresses hosted plugin params by index.
+            id: index,
+            name: p.name,
+            min: p.min,
+            max: p.max,
+            default: p.default,
+        }));
+        return {
+            id,
+            name: def.name,
+            kind: 'PluginHost',
+            dsp: 'none',
+            ui: 'auto',
+            params,
+            ports: {
+                audio_in: hosted.ports?.audio_in ?? 0,
+                audio_out: hosted.ports?.audio_out ?? 0,
+                control_in: 0,
+                control_out: 0,
+            },
+        };
+    }
+
+    const stashed = data[AI_MANIFEST_PARAMS_KEY];
     const params: ParamDecl[] = Array.isArray(stashed) ? (stashed as ParamDecl[]) : [];
     return {
         id,

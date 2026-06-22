@@ -15,7 +15,13 @@ import { describe, expect, it } from 'vitest';
 import { emitOjGraph, SYNTHETIC_MASTER_ID } from '../emit';
 import { getNodeDefinition } from '../../../engine/registry';
 import { manifestIdFor } from '../../../engine/manifest';
-import { makeDspNodeDefinition, registerDynamicPlugin } from '../../../engine/dynamicRegistry';
+import {
+    hostedPluginIdFor,
+    makeDspNodeDefinition,
+    makeHostedPluginDefinition,
+    registerDynamicPlugin,
+    type HostedPluginDescriptor,
+} from '../../../engine/dynamicRegistry';
 import type { Connection, GraphNode, NodeType, PortDefinition } from '../../../engine/types';
 import type { IrEdge, IrNode, OjGraph } from '../../../../packages/oj-protocol-ts/src/index';
 
@@ -520,6 +526,49 @@ describe('emitOjGraph — AI-authored code nodes (WasmHost)', () => {
 // ---------------------------------------------------------------------------
 // Hierarchy / container flattening
 // ---------------------------------------------------------------------------
+
+describe('emitOjGraph — hosted plugin nodes (PluginHost)', () => {
+    it('lowers a hosted plugin dynamic node to PluginHost only for the native host path', () => {
+        const desc: HostedPluginDescriptor = {
+            uid: 'com.acme.echo',
+            name: 'Acme Echo',
+            vendor: 'Acme',
+            path: '/plugins/AcmeEcho.vst3',
+            format: 'vst3',
+            is_instrument: false,
+            ports: { audio_in: 2, audio_out: 2 },
+            param_count: 1,
+            params: [{ id: 0, name: 'mix', min: 0, max: 1, default: 0.5 }],
+            latency_samples: 0,
+        };
+        const pluginId = hostedPluginIdFor(desc);
+        const unregister = registerDynamicPlugin(pluginId, makeHostedPluginDefinition(desc));
+        try {
+            const fx = makeNode('effect', {
+                id: 'hosted',
+                data: makeHostedPluginDefinition(desc).defaultData,
+                ports: makeHostedPluginDefinition(desc).defaultPorts,
+            });
+            fx.pluginId = pluginId;
+            const speaker = makeNode('speaker', { id: 'spk' });
+            const conn = makeConn(fx.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+
+            const native = emitOjGraph(nodeMap(fx, speaker), connMap(conn), {
+                hostedPluginsAsPluginHost: true,
+            });
+            const hosted = native.nodes.find((n) => n.manifest_id === pluginId);
+            expect(hosted?.kind).toBe('PluginHost');
+            expect(hosted?.n_in).toBe(2);
+            expect(hosted?.n_out).toBe(2);
+
+            const fallback = emitOjGraph(nodeMap(fx, speaker), connMap(conn));
+            expect(fallback.nodes.some((n) => n.manifest_id === pluginId)).toBe(false);
+            expect(fallback.nodes.some((n) => n.kind === 'Waveshaper')).toBe(true);
+        } finally {
+            unregister();
+        }
+    });
+});
 
 describe('emitOjGraph — hierarchy / bundle flattening', () => {
     it('flattens audio THROUGH a container (passthrough) node', () => {

@@ -16,8 +16,8 @@ use std::ffi::{c_char, c_float, c_int, CStr, CString};
 use std::path::Path;
 use std::ptr;
 
-use super::HostedBackend;
-use crate::descriptor::{PluginDescriptor, PluginFormat, PortCounts};
+use super::{EditorBackend, HostedBackend};
+use crate::descriptor::{HostedParam, PluginDescriptor, PluginFormat, PortCounts};
 use crate::error::HostError;
 
 // --- raw ABI (mirrors cpp/ojhost_juce.h) -----------------------------------
@@ -29,6 +29,19 @@ struct OjHost {
 #[repr(C)]
 struct OjPlugin {
     _opaque: [u8; 0],
+}
+#[repr(C)]
+struct OjPluginEditor {
+    _opaque: [u8; 0],
+}
+
+#[repr(C)]
+struct OjHostedParam {
+    id: u32,
+    name: *const c_char,
+    min: f64,
+    max: f64,
+    default_value: f64,
 }
 
 #[repr(C)]
@@ -42,6 +55,7 @@ struct OjPluginDesc {
     audio_in: u16,
     audio_out: u16,
     param_count: u32,
+    params: *const OjHostedParam,
     latency_samples: u32,
 }
 
@@ -51,9 +65,10 @@ struct OjScanResult {
     count: usize,
 }
 
-const OJ_FORMAT_VST3: c_int = 0;
-const OJ_FORMAT_CLAP: c_int = 1;
-const OJ_FORMAT_AU: c_int = 2;
+const OJ_FORMAT_VST2: c_int = 0;
+const OJ_FORMAT_VST3: c_int = 1;
+const OJ_FORMAT_CLAP: c_int = 2;
+const OJ_FORMAT_AU: c_int = 3;
 
 extern "C" {
     fn ojhost_create() -> *mut OjHost;
@@ -83,10 +98,19 @@ extern "C" {
     fn ojhost_latency_samples(plugin: *const OjPlugin) -> u32;
     fn ojhost_param_count(plugin: *const OjPlugin) -> u32;
     fn ojhost_unload(plugin: *mut OjPlugin);
+    fn ojhost_editor_open(
+        path: *const c_char,
+        uid: *const c_char,
+        format: c_int,
+        err: *mut *const c_char,
+    ) -> *mut OjPluginEditor;
+    fn ojhost_editor_focus(editor: *mut OjPluginEditor);
+    fn ojhost_editor_close(editor: *mut OjPluginEditor);
 }
 
 fn fmt_to_c(f: PluginFormat) -> c_int {
     match f {
+        PluginFormat::Vst2 => OJ_FORMAT_VST2,
         PluginFormat::Vst3 => OJ_FORMAT_VST3,
         PluginFormat::Clap => OJ_FORMAT_CLAP,
         PluginFormat::Au => OJ_FORMAT_AU,
@@ -95,6 +119,7 @@ fn fmt_to_c(f: PluginFormat) -> c_int {
 
 fn fmt_from_c(f: c_int) -> PluginFormat {
     match f {
+        OJ_FORMAT_VST2 => PluginFormat::Vst2,
         OJ_FORMAT_VST3 => PluginFormat::Vst3,
         OJ_FORMAT_AU => PluginFormat::Au,
         _ => PluginFormat::Clap,
@@ -158,9 +183,7 @@ pub(super) fn probe(
                     audio_out: d.audio_out,
                 },
                 param_count: d.param_count,
-                // The JUCE C shim reports only a count; the node falls back to
-                // generic index-named params. CLAP via clack fills this list.
-                params: Vec::new(),
+                params: params_from_c(d.params, d.param_count),
                 latency_samples: d.latency_samples,
             });
         }
@@ -168,6 +191,26 @@ pub(super) fn probe(
         ojhost_destroy(host);
     }
     Ok(out)
+}
+
+unsafe fn params_from_c(ptr: *const OjHostedParam, count: u32) -> Vec<HostedParam> {
+    if ptr.is_null() || count == 0 {
+        return Vec::new();
+    }
+    // SAFETY: caller passes `ptr`/`count` from one `OjPluginDesc`; C++ owns the
+    // array until `ojhost_free_scan`, and this function clones every field.
+    let slice = unsafe { std::slice::from_raw_parts(ptr, count as usize) };
+    slice
+        .iter()
+        .map(|p| HostedParam {
+            id: p.id,
+            // SAFETY: C++ stores each param name as a valid NUL-terminated string.
+            name: unsafe { cstr_owned(p.name) },
+            min: p.min,
+            max: p.max,
+            default: p.default_value,
+        })
+        .collect()
 }
 
 /// Open a plugin into a live [`HostedBackend`].
@@ -179,6 +222,56 @@ pub(super) fn open(
     let mut backend = JuceBackend::load(desc)?;
     backend.activate(sample_rate, max_block);
     Ok(Box::new(backend))
+}
+
+pub(super) fn open_editor(desc: &PluginDescriptor) -> Result<Box<dyn EditorBackend>, HostError> {
+    let path = CString::new(desc.path.as_bytes()).map_err(|_| HostError::Load {
+        message: "plugin path contains an interior NUL".into(),
+    })?;
+    let uid = CString::new(desc.uid.as_bytes()).map_err(|_| HostError::Load {
+        message: "plugin uid contains an interior NUL".into(),
+    })?;
+    let mut err: *const c_char = ptr::null();
+    let handle = unsafe {
+        ojhost_editor_open(
+            path.as_ptr(),
+            uid.as_ptr(),
+            fmt_to_c(desc.format),
+            &mut err as *mut *const c_char,
+        )
+    };
+    if handle.is_null() {
+        let message = unsafe { cstr_owned(err) };
+        return Err(HostError::Load {
+            message: if message.is_empty() { "plugin editor failed to open".into() } else { message },
+        });
+    }
+    Ok(Box::new(JuceEditor { handle }))
+}
+
+struct JuceEditor {
+    handle: *mut OjPluginEditor,
+}
+
+unsafe impl Send for JuceEditor {}
+
+impl EditorBackend for JuceEditor {
+    fn focus(&mut self) {
+        unsafe { ojhost_editor_focus(self.handle) };
+    }
+
+    fn close(&mut self) {
+        if !self.handle.is_null() {
+            unsafe { ojhost_editor_close(self.handle) };
+            self.handle = ptr::null_mut();
+        }
+    }
+}
+
+impl Drop for JuceEditor {
+    fn drop(&mut self) {
+        self.close();
+    }
 }
 
 /// One live JUCE-hosted plugin. Owns the C++ host + instance and the pre-sized

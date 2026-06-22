@@ -12,10 +12,15 @@ import type {
 } from './types';
 import { get as getNodeDefinition, isRegisteredPluginId } from './registry';
 import {
+    HOSTED_PLUGIN_DESCRIPTOR_KEY,
+    HOSTED_PLUGIN_ID_PREFIX,
     dspPluginIdFor,
     getDynamicPlugin,
+    hostedPluginIdFor,
     makeDspNodeDefinition,
-    registerDynamicPlugin
+    makeHostedPluginDefinition,
+    registerDynamicPlugin,
+    type HostedPluginDescriptor,
 } from './dynamicRegistry';
 
 /**
@@ -239,6 +244,23 @@ function selfHealDynamicPlugin(serialized: SerializedNode): void {
     const pluginId = serialized.pluginId;
     if (pluginId === undefined) return;
     if (getDynamicPlugin(pluginId)) return; // already resolves
+
+    if (pluginId.startsWith(HOSTED_PLUGIN_ID_PREFIX)) {
+        const desc = (serialized.data as Record<string, unknown>)[HOSTED_PLUGIN_DESCRIPTOR_KEY] as
+            | HostedPluginDescriptor
+            | undefined;
+        if (desc !== undefined) {
+            const resolvedId = hostedPluginIdFor(desc);
+            registerDynamicPlugin(pluginId, makeHostedPluginDefinition(desc));
+            // If a hand-edited workflow changed path/uid/format, keep the stored
+            // pluginId authoritative for this project but leave a breadcrumb for
+            // diagnostics/re-resolution UX.
+            if (resolvedId !== pluginId) {
+                (serialized.data as Record<string, unknown>).hostedPluginResolvedId = resolvedId;
+            }
+        }
+        return;
+    }
 
     // On a normal M5 export `faustSource` is always present, so the re-derived def
     // is keyed on the same kernel that produced `pluginId` and stays consistent.

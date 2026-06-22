@@ -8,13 +8,16 @@
 
 use serde::{Deserialize, Serialize};
 
-/// A hosted-plugin binary format. The set is closed: VST3, CLAP, and (macOS
-/// only) Audio Unit. We carry AU in the enum on every platform so a cache file
-/// written on macOS still deserializes elsewhere; scanning only *emits* AU on
-/// macOS.
+/// A hosted-plugin binary format. The set is closed: VST2, VST3, CLAP, and
+/// (macOS only) Audio Unit. We carry AU in the enum on every platform so a cache
+/// file written on macOS still deserializes elsewhere; scanning only *emits* AU
+/// on macOS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PluginFormat {
+    /// Steinberg VST2 (`.dll` Windows, `.vst` macOS, `.so` Linux). JUCE-hosted;
+    /// owner-provisioned only because Steinberg discontinued the VST2 SDK.
+    Vst2,
     /// Steinberg VST3 (`.vst3`). JUCE-hosted; the VST3 SDK terms apply.
     Vst3,
     /// CLEVER Audio Plugin (`.clap`). Hostable by both `clack` and JUCE; MIT.
@@ -24,9 +27,27 @@ pub enum PluginFormat {
 }
 
 impl PluginFormat {
+    /// Stable lowercase format slug for ids / UI.
+    pub fn slug(self) -> &'static str {
+        match self {
+            PluginFormat::Vst2 => "vst2",
+            PluginFormat::Vst3 => "vst3",
+            PluginFormat::Clap => "clap",
+            PluginFormat::Au => "au",
+        }
+    }
+
     /// The conventional on-disk extension (no dot) for this format.
     pub fn extension(self) -> &'static str {
         match self {
+            #[cfg(target_os = "windows")]
+            PluginFormat::Vst2 => "dll",
+            #[cfg(target_os = "macos")]
+            PluginFormat::Vst2 => "vst",
+            #[cfg(all(unix, not(target_os = "macos")))]
+            PluginFormat::Vst2 => "so",
+            #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
+            PluginFormat::Vst2 => "vst",
             PluginFormat::Vst3 => "vst3",
             PluginFormat::Clap => "clap",
             PluginFormat::Au => "component",
@@ -38,6 +59,12 @@ impl PluginFormat {
     /// elsewhere and we never host it off-macOS).
     pub fn from_extension(ext: &str) -> Option<PluginFormat> {
         match ext.to_ascii_lowercase().as_str() {
+            #[cfg(target_os = "windows")]
+            "dll" => Some(PluginFormat::Vst2),
+            #[cfg(target_os = "macos")]
+            "vst" => Some(PluginFormat::Vst2),
+            #[cfg(all(unix, not(target_os = "macos")))]
+            "so" => Some(PluginFormat::Vst2),
             "vst3" => Some(PluginFormat::Vst3),
             "clap" => Some(PluginFormat::Clap),
             #[cfg(target_os = "macos")]
@@ -115,6 +142,12 @@ mod tests {
 
     #[test]
     fn format_extension_roundtrip() {
+        #[cfg(target_os = "windows")]
+        assert_eq!(PluginFormat::Vst2.extension(), "dll");
+        #[cfg(target_os = "macos")]
+        assert_eq!(PluginFormat::Vst2.extension(), "vst");
+        #[cfg(all(unix, not(target_os = "macos")))]
+        assert_eq!(PluginFormat::Vst2.extension(), "so");
         assert_eq!(PluginFormat::Vst3.extension(), "vst3");
         assert_eq!(PluginFormat::Clap.extension(), "clap");
         assert_eq!(PluginFormat::Au.extension(), "component");
