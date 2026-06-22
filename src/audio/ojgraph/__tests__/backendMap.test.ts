@@ -42,6 +42,7 @@ const NATIVE_REGISTRY = new Set<string>([
     ENGINE_IDS.waveshaper,
     ENGINE_IDS.delay,
     ENGINE_IDS.convolution,
+    ENGINE_IDS.looper,
     ENGINE_IDS.add,
     ENGINE_IDS.subtract,
 ]);
@@ -57,6 +58,7 @@ const WASM_REGISTRY = new Set<string>([
     ENGINE_IDS.waveshaper,
     ENGINE_IDS.delay,
     ENGINE_IDS.convolution,
+    ENGINE_IDS.looper,
     ENGINE_IDS.add,
     ENGINE_IDS.subtract,
     ENGINE_IDS.passthrough,
@@ -173,6 +175,31 @@ describe('remapForBackend', () => {
             expect(idOf('Delay'), `${backend} Delay`).toBe(ENGINE_IDS.delay);
             // None collapsed to the gain placeholder.
             expect(idOf('Subtract')).not.toBe(ENGINE_IDS.gain);
+        }
+    });
+
+    it('maps the Looper kind to its REAL kernel (not gain) on BOTH backends', () => {
+        // REGRESSION: the looper kind had no remap case, so it fell through to the
+        // gain placeholder. A Gain instance no-ops looper_action/looper_snapshot, so
+        // pressing record did absolutely nothing and the engine emitted no transport
+        // frame — on native AND wasm. The looper is registered on both registries
+        // (register_builtins, effects-on), so it must load builtin.looper.
+        const graph: OjGraph = {
+            ir_version: 1,
+            sample_rate: 48_000,
+            block_size: 128,
+            nodes: [
+                { id: 1, manifest_id: 'builtin.looper', kind: 'Looper', params: [], assets: [], n_in: 1, n_out: 1 },
+                { id: 2, manifest_id: 'builtin.speaker', kind: 'SpeakerOut', params: [], assets: [], n_in: 1, n_out: 0 },
+            ],
+            edges: [],
+            schedule: [],
+        };
+        for (const backend of ['native', 'wasm'] as const) {
+            const g = remapForBackend(graph, backend);
+            const looper = g.nodes.find((n) => n.kind === 'Looper')!;
+            expect(looper.manifest_id, `${backend} Looper`).toBe(ENGINE_IDS.looper);
+            expect(looper.manifest_id, `${backend} Looper not gain`).not.toBe(ENGINE_IDS.gain);
         }
     });
 });

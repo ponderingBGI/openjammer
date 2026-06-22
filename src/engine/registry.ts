@@ -504,32 +504,25 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         dimensions: { width: 160, height: 100 }
     },
 
-    amplifier: {
-        type: 'amplifier',
-        category: 'effects',
-        name: 'Amplifier',
-        description: 'Gain control for audio signals',
+    multiplier: {
+        type: 'multiplier',
+        category: 'utility',
+        // Multiply a signal by a number — or, when 'in-2' is wired, by a second
+        // signal (a VCA / ring-mod). The math sibling of Add / Subtract: two
+        // universal inputs kept distinct, one universal output. The on-node number
+        // is the second operand only while 'in-2' is unconnected.
+        name: 'Multiplier',
+        description: 'Multiply a signal by a number, or by a second signal (×)',
         defaultPorts: [
-            { ...audioInput, position: { x: 0, y: 0.35 } },
-            { ...audioOutput, position: { x: 1, y: 0.5 } },
-            // GATED: declared so the control surface is visible, but DISABLED until
-            // control-edge kernel routing exists (the compiler currently drops
-            // control edges, so audio-rate gain modulation would be a no-op). Not
-            // shipped silently dead — canConnect rejects it and the UI renders it
-            // inert with an affordance. Use the gain SLIDER until this lights up.
-            {
-                ...controlInput,
-                id: 'gain-in',
-                name: 'Gain',
-                position: { x: 0, y: 0.65 },
-                disabled: true,
-                disabledReason: 'Gain modulation input is not wired yet — use the gain slider.'
-            }
+            { id: 'in-1', name: 'In 1', type: 'universal', direction: 'input', position: { x: 0, y: 0.33 } },
+            { id: 'in-2', name: 'In 2', type: 'universal', direction: 'input', position: { x: 0, y: 0.67 } },
+            { id: 'out', name: 'Out', type: 'universal', direction: 'output', position: { x: 1, y: 0.5 } }
         ],
         defaultData: {
-            gain: 1
+            factor: 1,
+            resolvedType: null
         },
-        dimensions: { width: 140, height: 100 }
+        dimensions: { width: 150, height: 100 }
     },
 
     // Outputs
@@ -684,10 +677,14 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'input',
         name: 'Library',
         description: 'Local audio file library with tag management',
+        // SEAM-1: only the REAL seam is declared. The library's one engine effect is
+        // feeding a selected/connected sample's PCM into connected Sampler nodes (via
+        // the executor `sendSampleBuffer`), so `sample-out` is the single live port.
+        // The former `audio-out` (no engine audio bus from the library) and `trigger`
+        // (no engine consumer) were dead ports — wiring them did nothing — so they are
+        // removed here and stripped from saved projects by `migrateNodePorts`.
         defaultPorts: [
-            { id: 'trigger', name: 'Trigger', type: 'control', direction: 'input', position: { x: 0, y: 0.3 } },
-            { id: 'audio-out', name: 'Audio', type: 'audio', direction: 'output', position: { x: 1, y: 0.3 } },
-            { id: 'sample-out', name: 'Sample', type: 'audio', direction: 'output', position: { x: 1, y: 0.7 } }
+            { id: 'sample-out', name: 'Sample', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } }
         ],
         defaultData: {
             libraryId: undefined,
@@ -792,12 +789,12 @@ export const menuCategories: MenuCategory[] = [
     {
         name: 'Effects',
         icon: '✨',
-        items: ['effect', 'amplifier']
+        items: ['effect']
     },
     {
         name: 'Utility',
         icon: '🔧',
-        items: ['container', 'add', 'subtract']
+        items: ['container', 'add', 'subtract', 'multiplier']
     },
     {
         name: 'Output',
@@ -887,10 +884,11 @@ export function canConnect(
         return false;
     }
 
-    // GATED ports (declared but not engine-wired yet, e.g. the amplifier
-    // `gain-in`) reject all connections — never let a player wire a control edge
-    // that would silently do nothing. The port stays visible (rendered inert) so
-    // it can light up the moment its routing lands.
+    // GATED ports (declared but not engine-wired yet) reject all connections —
+    // never let a player wire an edge that would silently do nothing. The port
+    // stays visible (rendered inert) so it can light up the moment its routing
+    // lands. (No built-in currently ships one; the affordance is kept for future
+    // nodes whose routing is staged behind the kernel.)
     if (sourcePort.disabled || targetPort.disabled) {
         return false;
     }

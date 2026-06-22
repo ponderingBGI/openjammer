@@ -163,10 +163,15 @@ describe('looper handle maps actions to the right RtCommand::Looper', () => {
         const added: string[] = [];
         looper.setOnLoopAdded((l) => added.push(l.id));
         await looper.startRecording();
+        // The engine streams live-trace frames during the pass (the real meter
+        // peak per block); these accumulate and build the committed row's waveform.
+        looper.onEngineFrame(2 /* RECORDING */, 10, 480, 0.4);
+        looper.onEngineFrame(2 /* RECORDING */, 20, 480, 0.6);
         looper.stopRecording();
         // No row yet — stopRecording only sends STOP.
         expect(added).toHaveLength(0);
-        // The authoritative commit creates the row.
+        // The authoritative commit creates the row, carrying the live trace (the
+        // TRUE captured PCM upgrades the shape later on its own seam).
         looper.onEngineEdge(2 /* RECORDING */, 3 /* PLAYING */);
         expect(added).toHaveLength(1);
         const [loop] = looper.getLoops();

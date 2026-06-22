@@ -64,6 +64,7 @@ import { classifyLatency, type LatencyReport } from './latency';
 import { logger } from '../../utils/log';
 import { setEngineHealth, useEngineHealthStore } from '../../store/engineHealthStore';
 import { ingestEngineEvents } from './faultPipe';
+import { setNodeVoiceLoadError } from './voiceLoadError';
 
 // Re-exported for back-compat: `coalesceEvents` moved to the shared `faultPipe`
 // seam (Wave 4) so both executor tiers share one fault path. Existing importers
@@ -583,15 +584,29 @@ export class OjcoreNativeExecutor implements Executor {
                 this.boundVoiceKey.delete(node.id);
                 continue;
             }
-            const { voice, key } = getVoiceForInstrumentNode(
-                node.type,
-                node.data as Record<string, unknown> | undefined,
-            );
-            // Re-send only when the instrument selection changed, so changing the
-            // picker re-binds but a plain re-push does not.
-            if (this.boundVoiceKey.get(node.id) === key) continue;
-            this.boundVoiceKey.set(node.id, key);
-            void this.loadSampleNative(node.id, voice.pcm, voice.sampleRate, voice.rootNote);
+            // Per-node try/catch: one node's voice-resolution failure must NOT abort
+            // the pass and starve LATER nodes of their default voice (a held note
+            // beats a glitch). The failing node gets its own non-focus-stealing "!"
+            // badge (ERR-1) — never a modal — and the diagnostic goes to the DevLog.
+            try {
+                const { voice, key } = getVoiceForInstrumentNode(
+                    node.type,
+                    node.data as Record<string, unknown> | undefined,
+                );
+                // Re-send only when the instrument selection changed, so changing the
+                // picker re-binds but a plain re-push does not.
+                if (this.boundVoiceKey.get(node.id) === key) continue;
+                this.boundVoiceKey.set(node.id, key);
+                void this.loadSampleNative(node.id, voice.pcm, voice.sampleRate, voice.rootNote);
+                setNodeVoiceLoadError(node.id, false);
+            } catch (err) {
+                log.error('default voice load failed for node; continuing', {
+                    detail: `${node.id}: ${err instanceof Error ? err.message : String(err)}`,
+                });
+                this.boundVoiceKey.delete(node.id);
+                setNodeVoiceLoadError(node.id, true);
+                continue;
+            }
         }
     }
 

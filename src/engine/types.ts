@@ -32,10 +32,9 @@ export interface PortDefinition {
     // GATED port: the surface is declared (so it can light up the moment its
     // routing lands) but is NOT wired to the engine yet, so connections to it are
     // REJECTED (canConnect) and the UI renders it visibly inert instead of
-    // shipping a silently-dead port. Used for the amplifier `gain-in` control
-    // port: control-edge kernel routing is unimplemented (crates/ojcore/src/
-    // compile.rs drops control edges), so an audio-rate gain modulation would do
-    // nothing. `disabledReason` is the affordance copy shown to the player.
+    // shipping a silently-dead port. `disabledReason` is the affordance copy shown
+    // to the player. No built-in currently ships one — the affordance is kept for
+    // future nodes whose routing is staged behind the kernel.
     // Default: false (the port is live).
     disabled?: boolean;
     disabledReason?: string;
@@ -164,7 +163,7 @@ export type NodeType =
     | 'instrument' // Generic instrument node (uses instrumentId in data)
     | 'looper'
     | 'effect'
-    | 'amplifier'
+    | 'multiplier'
     | 'speaker'
     | 'recorder'
     | 'canvas-input'   // Input node (receives from parent level)
@@ -220,7 +219,7 @@ export const KNOWN_PLUGIN_IDS = [
     'instrument',
     'looper',
     'effect',
-    'amplifier',
+    'multiplier',
     'speaker',
     'recorder',
     'canvas-input',
@@ -298,6 +297,10 @@ export interface InstrumentNodeData extends NodeData {
     noteOffsets?: { [portId: string]: number }; // Per-input note adjustment (0-6 for C-B)
     activeInputs?: string[]; // List of active input port IDs
     isLoading?: boolean; // For UI loading indicator
+    // PERSIST-1 / ERR-1: set true by the executor when this node's built-in default
+    // voice failed to load (a bad PCM build). Non-focus-stealing: drives a small "!"
+    // badge on the node, never a modal/toast. Written outside any undo gesture.
+    voiceLoadError?: boolean;
 }
 
 export interface KeyConfig {
@@ -354,8 +357,13 @@ export interface EffectNodeData extends NodeData {
     params: Record<string, number>;
 }
 
-export interface AmplifierNodeData extends NodeData {
-    gain: number; // Multiplier: 2 = double, -2 = half
+export interface MultiplierNodeData extends NodeData {
+    /** The on-node multiplier, used when the second input ('in-2') is unconnected.
+     *  Floors at 0 (×0 mutes); no ceiling. When 'in-2' is wired, that signal is the
+     *  multiplier instead and this value is overridden. */
+    factor: number;
+    /** Resolved wire type for the universal ports once connected (audio/control). */
+    resolvedType?: 'audio' | 'control' | null;
 }
 
 export interface SpeakerNodeData extends NodeData {
@@ -422,6 +430,12 @@ export interface SamplerNodeData extends NodeData {
     // Visual data for waveform display
     waveformData?: number[];       // 50-point waveform peaks
     duration?: number;             // Sample duration in seconds
+
+    // True when the persisted sampleId could not be re-resolved to PCM on the
+    // last mount (file moved/deleted, permission revoked). Drives the ERR-1
+    // non-modal "failed to load" slot so a broken sample is visually distinct
+    // from an empty one. Cleared on any successful (re)load or clear.
+    sampleLoadError?: boolean;
 
     // Core audio parameters
     rootNote: number;              // MIDI note (default: 60 = C4)

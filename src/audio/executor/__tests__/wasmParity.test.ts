@@ -286,6 +286,47 @@ describe('OjcoreWasmExecutor sampler live-load (mocked worklet)', () => {
         ex.dispose();
     });
 
+    it('sendSampleBuffer feeds a wired Library -> Sampler (DEFECT 2 feed reaches the sampler)', async () => {
+        // The library's one live seam: a Library -> Sampler connection makes
+        // `sendSampleBuffer(library, buffer)` install the PCM into that sampler. The
+        // executor fans out by TARGET node type (sampler), so the connection just has
+        // to exist (the sampler has no dedicated sample-in port — bundle-in is fine).
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const library = makeNode('library', 'library-1');
+        const sampler = makeNode('sampler', 'sampler-1');
+        const speaker = makeNode('speaker', 'speaker-1');
+        const libOut = library.ports.find((p) => p.id === 'sample-out')!;
+        const samplerIn = sampler.ports.find((p) => p.direction === 'input')!;
+        const samplerOut = sampler.ports.find((p) => p.direction === 'output')!;
+        const spkIn = speaker.ports.find((p) => p.direction === 'input')!;
+        const conns = new Map<string, Connection>();
+        const c1 = makeConn(library.id, libOut.id, sampler.id, samplerIn.id);
+        const c2 = makeConn(sampler.id, samplerOut.id, speaker.id, spkIn.id);
+        conns.set(c1.id, c1);
+        conns.set(c2.id, c2);
+        const graph = {
+            nodes: new Map([
+                [library.id, library],
+                [sampler.id, sampler],
+                [speaker.id, speaker],
+            ]),
+            connections: conns,
+        };
+
+        const ex = new OjcoreWasmExecutor();
+        const { port } = await bringUp(ex, graph);
+
+        port.posted.length = 0;
+        ex.sendSampleBuffer('library-1', fakeBuffer());
+
+        const load = port.posted.find((m) => m.type === 'load-sample');
+        expect(load, 'the library feed reached the sampler as a load-sample').toBeTruthy();
+        const samplerIdx = (ex as unknown as { index: Map<string, number> }).index.get('sampler-1');
+        expect(load!.node).toBe(samplerIdx);
+        expect((load!.pcm as Float32Array).length).toBe(8);
+        ex.dispose();
+    });
+
     it('the binding survives a later graph push (node/connection edit)', async () => {
         const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
         const graph = samplerGraph();
@@ -798,6 +839,56 @@ describe('OjcoreWasmExecutor instrument-switch voice binding (mocked worklet)', 
         fireNodeChange();
         const reload = port.posted.find((m) => m.type === 'load-sample');
         expect(reload, 'switching instruments re-binds a new voice').toBeTruthy();
+        ex.dispose();
+    });
+
+    it('one node\'s default-voice failure does NOT starve later nodes (per-node try/catch)', async () => {
+        // DEFECT 3: a single node's buffer build throwing must not `return` out of the
+        // whole pass and leave LATER instrument nodes without their default voice. We
+        // make the FIRST instrument's `createBuffer` throw; the SECOND must still load.
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+
+        // Two distinct piano instruments (different voice keys => two createBuffer
+        // calls). Insertion order fixes the iteration order: bad node first.
+        const bad = makeNode('keys', 'bad-1');
+        bad.data = { ...bad.data, instrumentId: 'gm-acoustic-grand-piano' };
+        const good = makeNode('keys', 'good-1');
+        good.data = { ...good.data, instrumentId: 'gm-bright-acoustic-piano' };
+        const speaker = makeNode('speaker', 'speaker-1');
+        const graph = {
+            nodes: new Map([
+                [bad.id, bad],
+                [good.id, good],
+                [speaker.id, speaker],
+            ]),
+            connections: new Map<string, Connection>(),
+        };
+
+        // Throw on the FIRST createBuffer (the bad node), succeed afterwards.
+        const realCreateBuffer = fakeContext.createBuffer;
+        let calls = 0;
+        const spy = vi
+            .spyOn(fakeContext, 'createBuffer')
+            .mockImplementation((ch: number, len: number, sr: number) => {
+                calls += 1;
+                if (calls === 1) throw new Error('boom: bad PCM build');
+                return realCreateBuffer(ch, len, sr);
+            });
+
+        const ex = new OjcoreWasmExecutor();
+        const { port } = await bringUp(ex, graph);
+
+        // The good node must still receive its default voice despite the bad node's
+        // throw — proof the pass CONTINUED instead of aborting on the first failure.
+        const loads = port.posted.filter((m) => m.type === 'load-sample');
+        const goodIdx = (ex as unknown as { index: Map<string, number> }).index.get('good-1');
+        expect(goodIdx, 'good node was interned').toBeTypeOf('number');
+        expect(
+            loads.some((m) => m.node === goodIdx),
+            'the later node still got its default voice',
+        ).toBe(true);
+
+        spy.mockRestore();
         ex.dispose();
     });
 

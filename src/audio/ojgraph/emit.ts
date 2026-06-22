@@ -430,10 +430,12 @@ function portCounts(manifest: PluginManifest): { n_in: number; n_out: number } {
             minIn = 1;
             minOut = 1;
             break;
-        // Mixer / difference: two in, one out. (Add pre-mixes its two sources
-        // into one port; Subtract keeps in0 / in1 distinct, so out = in0 - in1.)
+        // Mixer / difference / product: two in, one out. (Add pre-mixes its two
+        // sources into one port; Subtract and Multiply keep in0 / in1 distinct, so
+        // out = in0 - in1 and out = in0 * in1 respectively.)
         case 'Add':
         case 'Subtract':
+        case 'Multiply':
             minIn = 2;
             minOut = 1;
             break;

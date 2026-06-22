@@ -81,6 +81,7 @@ export const PRIMITIVE_KINDS = [
   // routing / io
   "Add",
   "Subtract",
+  "Multiply",
   "MicIn",
   "SpeakerOut",
   "GraphIn",

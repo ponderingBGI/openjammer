@@ -15,6 +15,7 @@
     "PluginHost",
     "Add",
     "Subtract",
+    "Multiply",
     "MicIn",
     "SpeakerOut",
     "GraphIn",
