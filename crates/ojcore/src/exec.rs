@@ -593,18 +593,26 @@ impl Engine {
         let n_in = self.program.routing[node].inputs.len();
         let n_out = self.program.out_bufs[node].len();
 
-        // --- mix step: fold every source of each input port into its row of
-        // `in_scratch`, then publish a pointer to that row.
+        // --- mix step: fold every source of each input port's CHANNELS into its
+        // `in_scratch` LANES (lane = port*in_ch + channel), with the §4 adaptation,
+        // then publish a pointer to each lane. At in_ch == 1 this is one lane per
+        // port — byte-identical to the historical mono mix (docs/CHANNELS.md).
+        let in_ch = self.program.in_channels[node].max(1) as usize;
+        let n_in_lanes = (n_in * in_ch).min(MAX_CH);
         for port in 0..n_in {
-            self.mix_input(node, port, nframes);
-            self.in_ptrs[port] = self.program.in_scratch[port].as_ptr();
+            for c in 0..in_ch {
+                let lane = port * in_ch + c;
+                self.mix_input_lane(node, port, c, in_ch, nframes);
+                if lane < self.in_ptrs.len() {
+                    self.in_ptrs[lane] = self.program.in_scratch[lane].as_ptr();
+                }
+            }
         }
-        // --- point outputs at the node's own buffers.
+        // --- point outputs at the node's own buffers (already per-lane).
         for port in 0..n_out {
             self.out_ptrs[port] = self.program.out_bufs[node][port].as_mut_ptr();
         }
 
-        let n_in_ch = n_in.min(MAX_CH);
         let n_out_ch = n_out.min(MAX_CH);
         let mut ins: [&[f32]; MAX_CH] = [&[]; MAX_CH];
         let mut outs: [&mut [f32]; MAX_CH] = Default::default();
@@ -612,7 +620,7 @@ impl Engine {
         // the input rows (`in_scratch`) and output rows (`out_bufs[node]`) are
         // disjoint allocations, so these views never alias.
         unsafe {
-            for (i, &p) in self.in_ptrs.iter().take(n_in_ch).enumerate() {
+            for (i, &p) in self.in_ptrs.iter().take(n_in_lanes).enumerate() {
                 ins[i] = core::slice::from_raw_parts(p, nframes);
             }
             for (i, &p) in self.out_ptrs.iter().take(n_out_ch).enumerate() {
@@ -620,28 +628,56 @@ impl Engine {
             }
         }
         let mut ctx = ProcessCtx {
-            inputs: &ins[..n_in_ch],
+            inputs: &ins[..n_in_lanes],
             outputs: &mut outs[..n_out_ch],
             nframes,
         };
         self.program.instances[node].process(&mut ctx);
     }
 
-    /// Sum every source feeding `(node, port)` into `in_scratch[port]`.
-    ///
-    /// `in_scratch` and `out_bufs` are DISTINCT fields, so this needs no raw
-    /// pointers: we split the program's borrows by field. The destination row
-    /// (`in_scratch`) and the producer rows (`out_bufs`) never alias.
+    /// Sum every source feeding `(node, port)` channel 0 into the port's first
+    /// input lane — the mono / bypass-passthrough path. Thin wrapper over
+    /// [`Engine::mix_input_lane`] so there is one mix implementation.
     fn mix_input(&mut self, node: usize, port: usize, nframes: usize) {
+        let in_ch = self.program.in_channels[node].max(1) as usize;
+        self.mix_input_lane(node, port, 0, in_ch, nframes);
+    }
+
+    /// Sum every source feeding `(node, port)` CHANNEL `channel` into the input
+    /// scratch LANE `port*in_ch + channel`, applying the §4 channel adaptation: a
+    /// mono source (out_channels == 1) contributes its one lane to every dest
+    /// channel; a stereo source maps lane->channel (clamped to its last lane). At
+    /// `in_ch == 1` this is one lane per port — byte-identical to the historical
+    /// mono mix (docs/CHANNELS.md).
+    ///
+    /// `in_scratch`, `routing`, `out_bufs`, `out_channels` are DISTINCT fields, so
+    /// this needs no raw pointers: the program's borrows split by field, and the
+    /// destination row (`in_scratch`) never aliases the producer rows (`out_bufs`)
+    /// — the Kahn schedule guarantees a node is never its own source. Alloc-free.
+    fn mix_input_lane(
+        &mut self,
+        node: usize,
+        port: usize,
+        channel: usize,
+        in_ch: usize,
+        nframes: usize,
+    ) {
+        let dest_lane = port * in_ch + channel;
         let prog = &mut self.program;
-        let dst = &mut prog.in_scratch[port][..nframes];
+        if dest_lane >= prog.in_scratch.len() {
+            return;
+        }
+        let dst = &mut prog.in_scratch[dest_lane][..nframes];
         for d in dst.iter_mut() {
             *d = 0.0;
         }
         for src in &prog.routing[node].inputs[port] {
-            let src_buf = &prog.out_bufs[src.node][src.port as usize];
-            for (d, &s) in dst.iter_mut().zip(src_buf.iter()).take(nframes) {
-                *d += s;
+            let src_oc = prog.out_channels[src.node].max(1) as usize;
+            let src_lane = src.port as usize * src_oc + channel.min(src_oc - 1);
+            if let Some(src_buf) = prog.out_bufs[src.node].get(src_lane) {
+                for (d, &s) in dst.iter_mut().zip(src_buf.iter()).take(nframes) {
+                    *d += s;
+                }
             }
         }
     }
@@ -1019,6 +1055,96 @@ mod apply_rt_tests {
         assert!(
             mono.iter().all(|&x| (x - 0.1).abs() < 1e-6),
             "mono = left lane"
+        );
+    }
+
+    /// A STEREO signal flows THROUGH a mid-graph node: a stereo source feeds a node
+    /// with a 2-channel input+output port (a per-lane copy), which feeds the master.
+    /// Proves `mix_input_lane` hands the mid node TWO distinct input lanes (L != R)
+    /// and the §4 adaptation carries them end to end. (The general lane-aware mix.)
+    #[test]
+    fn stereo_signal_flows_through_a_mid_graph_node() {
+        use crate::compile::{CompiledProgram, NodeRouting, Source};
+
+        /// Copies each input lane to the matching output lane.
+        struct CopyNode;
+        unsafe impl Send for CopyNode {}
+        impl DspInstance for CopyNode {
+            fn activate(&mut self, _sr: f32, _mb: usize) {}
+            fn process(&mut self, ctx: &mut ProcessCtx<'_, '_>) {
+                let n = ctx.inputs.len().min(ctx.outputs.len());
+                let frames = ctx.nframes;
+                for i in 0..n {
+                    let len = frames.min(ctx.inputs[i].len()).min(ctx.outputs[i].len());
+                    for f in 0..len {
+                        ctx.outputs[i][f] = ctx.inputs[i][f];
+                    }
+                }
+            }
+            fn set_param(&mut self, _id: u16, _v: f32) {}
+        }
+
+        let instances: Vec<Box<dyn DspInstance>> = vec![
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }), // slot 0: stereo source (GraphIn — buffer left intact)
+            Box::new(CopyNode), // slot 1: stereo-in/out copy (rendered)
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }), // slot 2: SpeakerOut master
+        ];
+        let program = CompiledProgram {
+            instances,
+            routing: vec![
+                NodeRouting::default(),
+                // copy node input port 0 fed by the source's port 0.
+                NodeRouting {
+                    inputs: vec![vec![Source { node: 0, port: 0 }]],
+                },
+                // master input port 0 fed by the copy node's port 0.
+                NodeRouting {
+                    inputs: vec![vec![Source { node: 1, port: 0 }]],
+                },
+            ],
+            // Source: 2 lanes L=0.1/R=0.2. Copy: 2 output lanes. Master: none.
+            out_bufs: vec![
+                vec![vec![0.1f32; 4], vec![0.2f32; 4]],
+                vec![vec![0.0f32; 4], vec![0.0f32; 4]],
+                vec![],
+            ],
+            out_channels: vec![2, 2, 1],
+            in_channels: vec![1, 2, 1], // the copy node takes a 2-channel input port
+            bypassed: vec![false, false, false],
+            kinds: vec![
+                PrimitiveKind::GraphIn,
+                PrimitiveKind::Gain,
+                PrimitiveKind::SpeakerOut,
+            ],
+            ids: vec![NodeIdx(1), NodeIdx(2), NodeIdx(3)],
+            id_index: vec![(NodeIdx(1), 0), (NodeIdx(2), 1), (NodeIdx(3), 2)],
+            master_out: 2,
+            block_size: 4,
+            in_scratch: vec![vec![0.0; 4], vec![0.0; 4]], // 2 input lanes for the copy node
+            max_in: 2,
+            max_out: 2,
+            schedule: vec![0, 1, 2],
+        };
+        let mut engine = Engine::new(program);
+
+        let mut l = [0.0f32; 4];
+        let mut r = [0.0f32; 4];
+        {
+            let mut outs: [&mut [f32]; 2] = [&mut l, &mut r];
+            engine.process_block_into(&mut outs, 4);
+        }
+        // The stereo signal survived the trip through the mid node, lane-distinct.
+        assert!(
+            l.iter().all(|&x| (x - 0.1).abs() < 1e-6),
+            "L carried through"
+        );
+        assert!(
+            r.iter().all(|&x| (x - 0.2).abs() < 1e-6),
+            "R carried through"
         );
     }
 }
