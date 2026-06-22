@@ -155,6 +155,26 @@ function micGraph(): { nodes: Map<string, GraphNode>; connections: Map<string, C
     };
 }
 
+/** A looper -> speaker graph so the looper interns to a stable NodeIdx (0). */
+function looperGraph(): { nodes: Map<string, GraphNode>; connections: Map<string, Connection> } {
+    const looper = makeNode('looper', 'looper-1');
+    const speaker = makeNode('speaker', 'speaker-1');
+    const out = looper.ports.find((p) => p.direction === 'output');
+    const spkIn = speaker.ports.find((p) => p.direction === 'input');
+    const conns = new Map<string, Connection>();
+    if (out && spkIn) {
+        const c = makeConn(looper.id, out.id, speaker.id, spkIn.id);
+        conns.set(c.id, c);
+    }
+    return {
+        nodes: new Map([
+            [looper.id, looper],
+            [speaker.id, speaker],
+        ]),
+        connections: conns,
+    };
+}
+
 /** A stereo-ish fake AudioBuffer the sampler handle downmixes to mono PCM. */
 function fakeBuffer(): AudioBuffer {
     return {
@@ -285,6 +305,64 @@ describe('OjcoreWasmExecutor sampler live-load (mocked worklet)', () => {
         expect(bound, 'the loaded sampler keeps its binding after a later push').toBeTruthy();
         expect(bound!.params.some((p) => p.id === 16 && p.value === 48)).toBe(true);
         void node;
+        ex.dispose();
+    });
+});
+
+describe('OjcoreWasmExecutor looper return path (mocked worklet)', () => {
+    beforeEach(() => {
+        MockWorkletNode.last = null;
+        vi.stubGlobal('AudioWorkletNode', MockWorkletNode);
+        vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) })));
+        vi.stubGlobal('WebAssembly', { ...globalThis.WebAssembly, compile: vi.fn(() => Promise.resolve({})) });
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        vi.useRealTimers();
+    });
+
+    it('routes a worklet looper frame to the looper handle onEngineFrame', async () => {
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const ex = new OjcoreWasmExecutor();
+        const { port } = await bringUp(ex, looperGraph());
+
+        // The worklet posts a flat [node, state, pos, loop_len, peak] frame for the
+        // looper node (interned to NodeIdx 0).
+        const frames = new Float32Array([0, 3 /* PLAYING */, 240, 480, 0.5]);
+        port.emit({ type: 'looper', frames });
+
+        const looper = ex.getLooper('looper-1') as unknown as { getEngineState(): number };
+        expect(looper.getEngineState()).toBe(3);
+        ex.dispose();
+    });
+
+    it('routes a worklet LooperEdge event (on the events message) to onEngineEdge — creates a row', async () => {
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const ex = new OjcoreWasmExecutor();
+        const { port } = await bringUp(ex, looperGraph());
+
+        const looper = ex.getLooper('looper-1');
+        const added: string[] = [];
+        (
+            looper as unknown as { setOnLoopAdded(cb: (l: { id: string }) => void): void }
+        ).setOnLoopAdded((l) => added.push(l.id));
+
+        // A LooperEdge RECORDING->PLAYING rides the existing `events` postMessage as a
+        // JSON Event[] (the same wire shape faults use).
+        const event = {
+            v: 1,
+            seq: 1,
+            severity: 'Info',
+            kind: { LooperEdge: { node: 0, from: 2 /* RECORDING */, to: 3 /* PLAYING */ } },
+            source: 'Wasm',
+            ts_us: 0,
+            corr_id: 0,
+        };
+        const bytes = new TextEncoder().encode(JSON.stringify([event]));
+        port.emit({ type: 'events', bytes });
+
+        expect(added).toHaveLength(1);
+        expect(looper.getLoops()).toHaveLength(1);
         ex.dispose();
     });
 });

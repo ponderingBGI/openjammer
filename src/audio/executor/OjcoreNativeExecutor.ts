@@ -275,9 +275,16 @@ export class OjcoreNativeExecutor implements Executor {
         }, METER_POLL_MS);
     }
 
-    /** Poll the engine for the latest meter frames and deliver level snapshots. */
+    /**
+     * Poll the engine for the latest return frames. The drain is UNCONDITIONAL —
+     * the single meter ring now carries both `Meter` AND `Looper` frames (one
+     * consumer decodes all tags, see engine.rs drain_meters), and a looper's
+     * transport frames must reach its handle whether or not a signal-level meter
+     * is mounted. So we always drain, route every `Looper` frame to its handle,
+     * and only fan `Meter` levels out when a signal subscriber actually exists.
+     */
     private async pollMeters(): Promise<void> {
-        if (!this.invoke || this.signalCallbacks.size === 0) return;
+        if (!this.invoke) return;
         let frames: EngineFrame[];
         try {
             frames = (await this.invoke('poll_meters', {})) as EngineFrame[];
@@ -285,15 +292,37 @@ export class OjcoreNativeExecutor implements Executor {
             return; // transient; next tick retries
         }
         if (!Array.isArray(frames) || frames.length === 0) return;
+        const haveSignalSubs = this.signalCallbacks.size > 0;
         let changed = false;
         for (const frame of frames) {
-            if (!frame || typeof frame !== 'object' || !('Meter' in frame)) continue;
-            const { node, peak } = (frame as { Meter: { node: NodeIdx; rms: number; peak: number } })
-                .Meter;
-            const nodeId = this.reverseIndex.get(node);
-            if (nodeId === undefined) continue;
-            this.levels.set(nodeId, Math.max(0, Math.min(1, peak)));
-            changed = true;
+            if (!frame || typeof frame !== 'object') continue;
+            if ('Looper' in frame) {
+                // Looper transport snapshot — ALWAYS routed (ungated by metering).
+                const { node, state, pos, loop_len, peak } = (
+                    frame as {
+                        Looper: {
+                            node: NodeIdx;
+                            state: number;
+                            pos: number;
+                            loop_len: number;
+                            peak: number;
+                        };
+                    }
+                ).Looper;
+                const nodeId = this.reverseIndex.get(node);
+                if (nodeId === undefined) continue;
+                this.caps.looper(nodeId).onEngineFrame(state, pos, loop_len, peak);
+                continue;
+            }
+            if (haveSignalSubs && 'Meter' in frame) {
+                const { node, peak } = (
+                    frame as { Meter: { node: NodeIdx; rms: number; peak: number } }
+                ).Meter;
+                const nodeId = this.reverseIndex.get(node);
+                if (nodeId === undefined) continue;
+                this.levels.set(nodeId, Math.max(0, Math.min(1, peak)));
+                changed = true;
+            }
         }
         if (changed) {
             const snapshot = new Map(this.levels);
@@ -336,9 +365,29 @@ export class OjcoreNativeExecutor implements Executor {
             return; // transient; next tick retries
         }
         if (!Array.isArray(events) || events.length === 0) return;
+        // Tap the loss-proof event stream for LooperEdge transitions BEFORE the
+        // fault sink: the event ring is the AUTHORITATIVE commit signal (a cycle
+        // wrap / STOP), so a RECORDING|OVERDUBBING -> PLAYING edge must reach the
+        // looper handle to create its row. Routing here (not in the fault pipe)
+        // keeps the fault path tag-agnostic — LooperEdge is not a fault.
+        this.routeLooperEdges(events);
         // The ONE shared fault sink (coalesce -> ingest -> health), identical for
         // the wasm tier — see `faultPipe.ts`. No second owner of the fault path.
         ingestEngineEvents(events);
+    }
+
+    /** Route any `LooperEdge` events in a drained batch to their looper handle's
+     *  `onEngineEdge`. Shared shape with the wasm tier (which taps the same edge
+     *  off its `events` postMessage). */
+    private routeLooperEdges(events: EngineEvent[]): void {
+        for (const ev of events) {
+            const kind = ev?.kind;
+            if (typeof kind !== 'object' || !('LooperEdge' in kind)) continue;
+            const { node, from, to } = kind.LooperEdge;
+            const nodeId = this.reverseIndex.get(node);
+            if (nodeId === undefined) continue;
+            this.caps.looper(nodeId).onEngineEdge(from, to);
+        }
     }
 
     /** Emit + remap + push the current graph to the native engine. */

@@ -143,6 +143,13 @@ export function describeEventKind(kind: EventKind): { message: string; fields?: 
         const { node, fault } = kind.NodeFault;
         return { message: `NodeFault: ${fault} (node ${node})`, fields: { node, fault } };
     }
+    if ('LooperEdge' in kind) {
+        const { node, from, to } = kind.LooperEdge;
+        return {
+            message: `LooperEdge: ${from} -> ${to} (node ${node})`,
+            fields: { node, from, to },
+        };
+    }
     // Message — the only String-carrying variant.
     const { code, text } = kind.Message;
     return { message: text, fields: { code } };

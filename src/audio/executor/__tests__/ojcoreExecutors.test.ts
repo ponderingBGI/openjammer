@@ -126,42 +126,48 @@ describe('ojcore executors return real (never-null) capability handles', () => {
 // ---------------------------------------------------------------------------
 
 describe('looper handle maps actions to the right RtCommand::Looper', () => {
-    it('record sends ARM then RECORD; stop sends STOP', async () => {
+    it('record sends RECORD (not ARM); stop sends STOP', async () => {
         const { bridge, sent } = mockBridge();
         const looper = new OjcoreLooperHandle('looper-1', bridge);
 
         await looper.startRecording();
-        expect(sent).toEqual([
-            { Looper: { node: 7, action: LooperAction.ARM } },
-            { Looper: { node: 7, action: LooperAction.RECORD } },
-        ]);
+        // New engine-driven flow: RECORD only — ARM would clear existing layers.
+        expect(sent).toEqual([{ Looper: { node: 7, action: LooperAction.RECORD, arg: 0 } }]);
 
         sent.length = 0;
         looper.stopRecording();
-        expect(sent).toEqual([{ Looper: { node: 7, action: LooperAction.STOP } }]);
+        expect(sent).toEqual([{ Looper: { node: 7, action: LooperAction.STOP, arg: 0 } }]);
     });
 
-    it('deleting the last loop clears the engine buffer', async () => {
+    it('deleting a loop sends the indexed DELETE_LAYER command', async () => {
         const { bridge, sent } = mockBridge();
         const looper = new OjcoreLooperHandle('looper-1', bridge);
         await looper.startRecording();
         looper.stopRecording();
+        // The row is created by the engine commit edge, not stopRecording.
+        looper.onEngineEdge(2 /* RECORDING */, 3 /* PLAYING */);
         const loops = looper.getLoops();
         expect(loops).toHaveLength(1);
 
         sent.length = 0;
         looper.deleteLoop(loops[0].id);
-        expect(sent).toEqual([{ Looper: { node: 7, action: LooperAction.CLEAR } }]);
+        expect(sent).toEqual([
+            { Looper: { node: 7, action: LooperAction.DELETE_LAYER, arg: 0 } },
+        ]);
         expect(looper.getLoops()).toHaveLength(0);
     });
 
-    it('stopRecording mirrors a loop layer the UI can render', async () => {
+    it('the engine commit edge (RECORDING -> PLAYING) mirrors a loop layer the UI can render', async () => {
         const { bridge } = mockBridge();
         const looper = new OjcoreLooperHandle('looper-1', bridge);
         const added: string[] = [];
         looper.setOnLoopAdded((l) => added.push(l.id));
         await looper.startRecording();
         looper.stopRecording();
+        // No row yet — stopRecording only sends STOP.
+        expect(added).toHaveLength(0);
+        // The authoritative commit creates the row.
+        looper.onEngineEdge(2 /* RECORDING */, 3 /* PLAYING */);
         expect(added).toHaveLength(1);
         const [loop] = looper.getLoops();
         expect(loop.waveformData.length).toBeGreaterThan(0);
@@ -355,7 +361,8 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
                     typeof cmd === 'object' && cmd !== null && 'Looper' in cmd,
             );
         const actions = looperCmds.map((c) => c.Looper.action);
-        expect(actions).toContain(LooperAction.ARM);
+        // New engine-driven flow: RECORD (never ARM) then STOP.
+        expect(actions).not.toContain(LooperAction.ARM);
         expect(actions).toContain(LooperAction.RECORD);
         expect(actions).toContain(LooperAction.STOP);
         // Every looper command addresses the same interned NodeIdx.
@@ -531,6 +538,71 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         expect(latest.has('keys-1'), 'rejected interning was not committed').toBe(false);
 
         unsub();
+        ex.dispose();
+    });
+
+    it('routes a drained Looper frame to the looper handle onEngineFrame (ungated by meters)', async () => {
+        // The single meter ring now carries Meter AND Looper frames; the executor
+        // must route a Looper frame to the handle WITHOUT any signal-level
+        // subscriber mounted (the row/playhead surfaces even with meters off).
+        vi.useFakeTimers();
+        const graph = looperGraph();
+        // looper-1 interns to NodeIdx 0. poll_meters returns a Looper frame for it.
+        const looperFrame: EngineFrame = {
+            Looper: { node: 0, state: 3 /* PLAYING */, pos: 240, loop_len: 480, peak: 0.5 },
+        };
+        installMockTauri((cmd) => {
+            if (cmd === 'poll_meters') return [looperFrame];
+            return undefined;
+        });
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, graph);
+        await flush();
+
+        // NO subscribeSignalLevels here — proves the looper drain is ungated.
+        const looper = ex.getLooper('looper-1') as unknown as {
+            getEngineState(): number;
+        };
+        await vi.advanceTimersByTimeAsync(120);
+
+        // The frame's state drove the handle (3 == PLAYING).
+        expect(looper.getEngineState()).toBe(3);
+        ex.dispose();
+    });
+
+    it('routes a drained LooperEdge event to the looper handle onEngineEdge (creates a row)', async () => {
+        // A RECORDING->PLAYING edge on the loss-proof event ring is the authoritative
+        // commit: it must reach onEngineEdge and create exactly one UI row.
+        vi.useFakeTimers();
+        const graph = looperGraph();
+        // poll_events returns one LooperEdge for the looper node (NodeIdx 0).
+        const edgeEvent = {
+            v: 1,
+            seq: 1,
+            severity: 'Info',
+            kind: { LooperEdge: { node: 0, from: 2 /* RECORDING */, to: 3 /* PLAYING */ } },
+            source: 'Native',
+            ts_us: 0,
+            corr_id: 0,
+        };
+        installMockTauri((cmd) => {
+            if (cmd === 'poll_events') return [edgeEvent];
+            return undefined;
+        });
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, graph);
+        await flush();
+
+        const looper = ex.getLooper('looper-1');
+        const added: string[] = [];
+        (looper as unknown as { setOnLoopAdded(cb: (l: { id: string }) => void): void }).setOnLoopAdded(
+            (l) => added.push(l.id),
+        );
+        // Advance past the event-drain cadence (100 ms).
+        await vi.advanceTimersByTimeAsync(150);
+
+        expect(added).toHaveLength(1);
+        expect(looper.getLoops()).toHaveLength(1);
         ex.dispose();
     });
 

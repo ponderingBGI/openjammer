@@ -64,11 +64,14 @@ pub trait DspInstance: Send {
     fn note_off(&mut self, _note: u8) {}
 
     /// RT-thread looper transport action (one of the [`ojproto::looper_action`]
-    /// codes: arm / record / play / stop / clear / overdub). Default no-op so
+    /// codes: arm / record / play / stop / clear / overdub / undo_last /
+    /// set_mute / delete_layer). `arg` addresses a layer for the indexed actions
+    /// (set_mute / delete_layer) and is ignored by the transport actions — see
+    /// [`ojproto::looper_action`] for the per-action encoding. Default no-op so
     /// non-looper nodes ignore it; [`crate::LooperNode`] consumes it to drive its
     /// state machine. RT-safe: invoked from the same thread as `process`;
     /// implementors MUST NOT allocate. Carried by [`ojproto::RtCommand::Looper`].
-    fn looper_action(&mut self, _action: u8) {}
+    fn looper_action(&mut self, _action: u8, _arg: u32) {}
 
     /// RT-thread looper telemetry snapshot for the (ungated) return path:
     /// `(state_u8, pos, loop_len, last_block_peak)`. `state` is an

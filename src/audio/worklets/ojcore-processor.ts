@@ -151,6 +151,9 @@ class OjcoreProcessor extends AudioWorkletProcessor {
     private meterTick = 0;
     /** Block counter so faults drain at a fixed cadence, not every render quantum. */
     private eventTick = 0;
+    /** Block counter so looper snapshots/edges drain at ~UI rate (every ~4 blocks),
+     *  ungated by metering — the row/playhead must surface even with meters off. */
+    private looperTick = 0;
     /** Blocks between fault drains (~10 Hz). Recomputed from the rate in init. */
     private eventDrainBlocks = 38;
     /** Master output scale (speaker volume). */
@@ -392,6 +395,28 @@ class OjcoreProcessor extends AudioWorkletProcessor {
                     }
                     this.port.postMessage({ type: 'meters', levels });
                 }
+            }
+        }
+
+        // Looper transport: drain every looper node's snapshot + any commit edge
+        // and post them to the UI, UNCONDITIONALLY (outside the `metersEnabled`
+        // block) — the looper's row/playhead must surface even when level meters
+        // are off (mirrors the native ungated `publish_looper`). Snapshots ride a
+        // dedicated `looper` message; an edge (the AUTHORITATIVE row-create signal,
+        // never dropped) rides the SAME `events` message the fault pipe uses, so
+        // the LooperEdge tag reaches the looper handle through one seam. The drain
+        // runs at the meter cadence (~10 ms) — fast enough for a smooth playhead,
+        // and the per-block kernel snapshot is coalesced to the latest each tick.
+        this.looperTick++;
+        if (this.looperTick >= 4) {
+            this.looperTick = 0;
+            const lframes = wasm.drain_looper() as Float32Array;
+            if (lframes && lframes.length >= 5) {
+                this.port.postMessage({ type: 'looper', frames: lframes }, [lframes.buffer]);
+            }
+            const ebytes = wasm.drain_looper_edges() as Uint8Array;
+            if (ebytes && ebytes.length > 0) {
+                this.port.postMessage({ type: 'events', bytes: ebytes }, [ebytes.buffer]);
             }
         }
 

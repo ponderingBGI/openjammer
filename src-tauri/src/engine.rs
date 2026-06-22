@@ -720,10 +720,12 @@ impl EngineBackend {
     // --- U-EXEC-PARITY capability seam (control-rate) ----------------------
 
     /// Drive a looper node's state machine: enqueue an [`RtCommand::Looper`] with
-    /// the given action code (one of the [`ojproto::looper_action`] consts). The
-    /// audio thread applies it via `DspInstance::looper_action`.
-    pub fn looper_cmd(&mut self, node: NodeIdx, action: u8) -> Result<(), BackendError> {
-        self.send_command(RtCommand::Looper { node, action })
+    /// the given action code (one of the [`ojproto::looper_action`] consts) and
+    /// `arg` (layer index / packed flags for the indexed actions, ignored by the
+    /// transport actions). The audio thread applies it via
+    /// `DspInstance::looper_action`.
+    pub fn looper_cmd(&mut self, node: NodeIdx, action: u8, arg: u32) -> Result<(), BackendError> {
+        self.send_command(RtCommand::Looper { node, action, arg })
     }
 
     /// Enable / disable the engine's level metering. While off, the render loop
@@ -743,14 +745,22 @@ impl EngineBackend {
     /// Drain the engine's meter return ring into a batch of [`EngineFrame`]s for
     /// the UI's `meters` event. Control-rate: called on a UI-driven poll, never
     /// the audio thread. Decodes the compact wire frames the audio thread pushed.
+    ///
+    /// SINGLE CONSUMER, ALL TAGS: the meter ring is one SPSC queue, so this is the
+    /// only place the wire frames are decoded. It surfaces both `Meter` frames
+    /// (the signal-level stream consumes their peaks) AND `Looper` frames (the
+    /// looper UI consumes their transport snapshot) — folding both into one drain
+    /// keeps a single ring consumer (a second drainer would race-steal frames).
+    /// `Beat` still rides the transport path and is filtered out here.
     pub fn drain_meters(&mut self) -> Vec<EngineFrame> {
         let mut out = Vec::new();
         let mut buf = [0u8; return_frame::MAX_LEN];
         while let Some(n) = self.meter_ring.pop(&mut buf) {
             if let Some(frame) = return_frame::decode(&buf[..n]) {
-                // Surface only Meter frames here (Beat goes via the transport
-                // path); the UI's signal-level stream consumes Meter peaks.
-                if matches!(frame, EngineFrame::Meter { .. }) {
+                // Surface Meter + Looper frames here (Beat goes via the transport
+                // path). One drain decodes every tag because there is exactly one
+                // consumer of the meter ring.
+                if matches!(frame, EngineFrame::Meter { .. } | EngineFrame::Looper { .. }) {
                     out.push(frame);
                 }
             }
@@ -1306,6 +1316,14 @@ fn render_event_kind(kind: &EventKind) -> (&'static str, String, Option<String>)
             text.clone(),
             Some(format!("{{\"code\":{code}}}")),
         ),
+        EventKind::LooperEdge { node, from, to } => (
+            "LooperEdge",
+            format!("looper {} edge: {from} -> {to}", node.0),
+            Some(format!(
+                "{{\"node\":{},\"from\":{from},\"to\":{to}}}",
+                node.0
+            )),
+        ),
     }
 }
 
@@ -1314,6 +1332,7 @@ fn lift_event(rt: RtEvent, seq: u32, ts_us: u64) -> Event {
         RtEvent::Xrun { dropped } => EventKind::Xrun { dropped },
         RtEvent::NodeFault { node, fault } => EventKind::NodeFault { node, fault },
         RtEvent::RingFull => EventKind::RingFull,
+        RtEvent::LooperEdge { node, from, to } => EventKind::LooperEdge { node, from, to },
     };
     let severity = match kind {
         EventKind::NodeFault { .. } => Severity::Error,
@@ -1474,9 +1493,9 @@ mod tests {
     #[test]
     fn looper_cmd_enqueues_looper_command() {
         let mut be = EngineBackend::new();
-        for action in 0u8..=5 {
+        for action in 0u8..=8 {
             assert!(
-                be.looper_cmd(NodeIdx(3), action).is_ok(),
+                be.looper_cmd(NodeIdx(3), action, 0).is_ok(),
                 "looper action {action} should enqueue"
             );
         }
@@ -1534,29 +1553,59 @@ mod tests {
         assert!(be.metering);
     }
 
-    /// `drain_meters` returns only `Meter` frames decoded from the ring. With no
-    /// audio device the ring is empty, so the drain is an empty batch (no panic).
+    /// `drain_meters` surfaces `Meter` AND `Looper` frames (one ring, one consumer,
+    /// all tags), and filters out `Beat` (it rides the transport path). With no
+    /// audio device the ring is otherwise empty, so the drain never panics.
     #[test]
-    fn drain_meters_decodes_only_meter_frames() {
+    fn drain_meters_decodes_meter_and_looper_frames() {
         let mut be = EngineBackend::new();
-        // Push one encoded Meter frame and one Beat frame directly onto the ring
+        // Drain any frames a live audio device (present in this sandbox) already
+        // published, so the assertions only see the frames we push below — the test
+        // must be deterministic with OR without a device.
+        let _ = be.drain_meters();
+        // Push one Meter, one Looper, and one Beat frame directly onto the ring
         // (simulating the audio thread's publish), then drain.
         let mut buf = [0u8; return_frame::MAX_LEN];
         let n = return_frame::encode_meter(NodeIdx(5), 0.1, 0.8, &mut buf);
+        assert!(be.meter_ring.push(&buf[..n]));
+        let n = return_frame::encode_looper(NodeIdx(9), 3, 240, 480, 0.5, &mut buf);
         assert!(be.meter_ring.push(&buf[..n]));
         let n = return_frame::encode_beat(1, 2, 0.5, &mut buf);
         assert!(be.meter_ring.push(&buf[..n]));
 
         let frames = be.drain_meters();
-        // Only the Meter frame survives the filter.
-        assert_eq!(frames.len(), 1);
-        match &frames[0] {
-            EngineFrame::Meter { node, peak, .. } => {
-                assert_eq!(*node, NodeIdx(5));
-                assert!((peak - 0.8).abs() < 1e-6);
+        // The Meter and Looper frames survive the filter; the Beat is dropped. A
+        // live device may interleave its own Meter/Beat frames, so assert on the
+        // SPECIFIC frames we pushed rather than an exact count.
+        let meter = frames.iter().find_map(|f| match f {
+            EngineFrame::Meter { node, peak, .. } if *node == NodeIdx(5) => Some(*peak),
+            _ => None,
+        });
+        assert!(meter.is_some(), "the pushed Meter frame survived");
+        assert!((meter.unwrap() - 0.8).abs() < 1e-6);
+
+        let looper = frames.iter().find(|f| {
+            matches!(f, EngineFrame::Looper { node, .. } if *node == NodeIdx(9))
+        });
+        match looper {
+            Some(EngineFrame::Looper { state, pos, loop_len, peak, .. }) => {
+                assert_eq!(*state, 3);
+                assert_eq!(*pos, 240);
+                assert_eq!(*loop_len, 480);
+                assert!((peak - 0.5).abs() < 1e-6);
             }
-            other => panic!("expected Meter, got {other:?}"),
+            other => panic!("expected the pushed Looper frame, got {other:?}"),
         }
+
+        // No Beat frame from OUR push survives the filter (a device may still emit
+        // its own transport beats; we only assert ours is gone by checking the
+        // pushed Beat shape — bar=1, beat=2 — is absent).
+        assert!(
+            !frames
+                .iter()
+                .any(|f| matches!(f, EngineFrame::Beat { bar: 1, beat: 2, .. })),
+            "Beat frames are filtered out of the meter drain",
+        );
     }
 
     /// Speaker volume, device selection, and mic capture are all REAL round trips
