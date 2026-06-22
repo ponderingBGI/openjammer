@@ -168,8 +168,9 @@ struct Host {
     /// Worker -> worklet MIDI byte ring. Boxed for the same reason. Reserved for
     /// the MIDI input path; exposed to JS now so the SAB layout is fixed.
     midi_ring: Box<MidiRing>,
-    /// Mono master output the worklet copies to its render quantum. Pre-sized to
-    /// `block_size`; written in place by [`process`], never reallocated there.
+    /// PLANAR stereo master output the worklet copies to its render quantum:
+    /// `OUT_CHANNELS` rows of `block_size` (channel `c` at `c*block_size`). Written
+    /// in place by [`process`] via `process_block_into`; never reallocated there.
     out_buf: Vec<f32>,
     /// Scratch popped command frame bytes (reused; never grows on the RT path).
     cmd_scratch: Vec<u8>,
@@ -270,7 +271,7 @@ pub fn init(sample_rate: u32, block_size: u32) {
         engine,
         cmd_ring: Box::new(CmdRing::new()),
         midi_ring: Box::new(MidiRing::new()),
-        out_buf: vec![0.0f32; block_size],
+        out_buf: vec![0.0f32; OUT_CHANNELS * block_size],
         cmd_scratch: vec![0u8; CMD_FRAME_MAX],
         assets,
         block_size,
@@ -382,14 +383,20 @@ pub fn mic_in_len() -> u32 {
     }
 }
 
+/// Output channel count the wasm tier renders (stereo). The worklet copies each
+/// of these planar rows (per-channel stride = `block_size`) into its output.
+const OUT_CHANNELS: usize = 2;
+
 /// Render one block. The AudioWorklet calls this every render quantum.
 ///
 /// Steps, all allocation-free:
 ///   1. drain the command ring, applying each [`RtCommand`] to the engine;
-///   2. render `nframes` into the pre-sized output buffer.
+///   2. render `nframes` PLANAR into the output buffer via `process_block_into`.
 ///
 /// `nframes` is clamped to the configured block size. Read the result from
-/// [`output_ptr`] (`nframes` f32s of mono master output).
+/// [`output_ptr`] + [`output_channels`]: channel `c` is the `block_size`-strided
+/// row at `c*block_size` (a mono graph fills every row identically — true stereo
+/// only when a Pan/stereo node feeds the master).
 #[wasm_bindgen]
 pub fn process(nframes: u32) {
     let Some(host) = host_mut() else { return };
@@ -397,8 +404,18 @@ pub fn process(nframes: u32) {
 
     drain_commands(host);
 
-    let out = &mut host.out_buf[..nframes];
-    host.engine.process_block(out, nframes);
+    // Render PLANAR: channel `c` occupies out_buf[c*block .. c*block+nframes]. The
+    // row-slices are built on the stack (split_at_mut) so the RT path allocates
+    // nothing — the same pattern the native host uses.
+    let block = host.block_size;
+    let mut rows: [&mut [f32]; OUT_CHANNELS] = Default::default();
+    let mut rest = &mut host.out_buf[..OUT_CHANNELS * block];
+    for row in rows.iter_mut() {
+        let (head, tail) = rest.split_at_mut(block);
+        *row = &mut head[..nframes];
+        rest = tail;
+    }
+    host.engine.process_block_into(&mut rows, nframes);
 }
 
 /// Drain every pending command frame from the ring and apply it. Wait-free and
@@ -449,11 +466,19 @@ fn apply_command(engine: &mut Engine, cmd: RtCommand) {
 // --- Memory / layout getters: let JS build SAB + typed-array views directly
 // over wasm linear memory, with zero copying across the boundary. ------------
 
-/// Pointer (byte offset into wasm linear memory) of the mono output buffer.
-/// JS reads `nframes` little-endian f32s starting here after each [`process`].
+/// Pointer (byte offset into wasm linear memory) of the PLANAR output buffer.
+/// JS reads each channel's `block_size`-strided row starting here after each
+/// [`process`] (channel `c` at `output_ptr() + c*block_size`).
 #[wasm_bindgen]
 pub fn output_ptr() -> *const f32 {
     host_ref().map_or(core::ptr::null(), |h| h.out_buf.as_ptr())
+}
+
+/// Number of PLANAR output channels [`process`] writes (stereo). Each channel row
+/// is `block_size` f32s; channel `c` starts at `output_ptr() + c*block_size`.
+#[wasm_bindgen]
+pub fn output_channels() -> u32 {
+    OUT_CHANNELS as u32
 }
 
 /// Configured render quantum (frames per [`process`] call / `output` length).
