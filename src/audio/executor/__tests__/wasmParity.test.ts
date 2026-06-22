@@ -40,6 +40,12 @@ const fakeContext = {
             length,
             sampleRate,
             getChannelData: () => data,
+            // Stage 3 finalize-PCM: the looper handle builds a real AudioBuffer
+            // from the take PCM via copyToChannel, then reads it back for the true
+            // waveform — so the fake must actually store the copied samples.
+            copyToChannel: (src: Float32Array, _ch: number) => {
+                data.set(src.subarray(0, length));
+            },
         };
     },
 };
@@ -363,6 +369,66 @@ describe('OjcoreWasmExecutor looper return path (mocked worklet)', () => {
 
         expect(added).toHaveLength(1);
         expect(looper.getLoops()).toHaveLength(1);
+        ex.dispose();
+    });
+
+    it('routes a worklet looper-take message to onLayerPcm — the committed row gains a real buffer + true waveform', async () => {
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const ex = new OjcoreWasmExecutor();
+        const { port } = await bringUp(ex, looperGraph());
+
+        const looper = ex.getLooper('looper-1');
+        // Create the committed row first (the commit edge, as Stage 2 does).
+        const event = {
+            v: 1,
+            seq: 1,
+            severity: 'Info',
+            kind: { LooperEdge: { node: 0, from: 2 /* RECORDING */, to: 3 /* PLAYING */ } },
+            source: 'Wasm',
+            ts_us: 0,
+            corr_id: 0,
+        };
+        port.emit({ type: 'events', bytes: new TextEncoder().encode(JSON.stringify([event])) });
+        expect(looper.getLoops()[0].buffer, 'row starts with no real buffer').toBeNull();
+
+        // The worklet ships the just-committed take's TRUE PCM (a ramp) on the
+        // dedicated `looper-take` message — the buffer is transferred.
+        const pcm = new Float32Array([0, 0.25, 0.5, 1.0]);
+        port.emit({ type: 'looper-take', node: 0, pcm, sampleRate: 48000 });
+
+        const layer = looper.getLoops()[0];
+        expect(layer.buffer, 'row now carries a real AudioBuffer (drag/export light up)').not.toBeNull();
+        expect(layer.buffer!.getChannelData(0)[3]).toBeCloseTo(1.0, 5);
+        // The true waveform replaced the meter envelope — its peak is the PCM peak.
+        expect(Math.max(...layer.waveformData)).toBeCloseTo(1.0, 5);
+        ex.dispose();
+    });
+
+    it('a looper-take that races AHEAD of its commit edge still lands on the row', async () => {
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const ex = new OjcoreWasmExecutor();
+        const { port } = await bringUp(ex, looperGraph());
+
+        const looper = ex.getLooper('looper-1');
+        // PCM arrives BEFORE the commit edge (the two seams race; either can win).
+        port.emit({ type: 'looper-take', node: 0, pcm: new Float32Array([0.2, 0.8]), sampleRate: 48000 });
+        expect(looper.getLoops(), 'no row yet — PCM is buffered').toHaveLength(0);
+
+        // Now the commit edge creates the row; the buffered PCM attaches to it.
+        const event = {
+            v: 1,
+            seq: 1,
+            severity: 'Info',
+            kind: { LooperEdge: { node: 0, from: 2, to: 3 } },
+            source: 'Wasm',
+            ts_us: 0,
+            corr_id: 0,
+        };
+        port.emit({ type: 'events', bytes: new TextEncoder().encode(JSON.stringify([event])) });
+
+        const layer = looper.getLoops()[0];
+        expect(layer.buffer, 'the buffered PCM attached to the new row').not.toBeNull();
+        expect(layer.buffer!.getChannelData(0)[1]).toBeCloseTo(0.8, 5);
         ex.dispose();
     });
 });

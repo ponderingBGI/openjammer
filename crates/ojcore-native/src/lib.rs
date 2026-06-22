@@ -31,6 +31,7 @@ pub mod fs;
 pub mod host;
 pub mod latency;
 pub mod log;
+pub mod looper_capture;
 #[cfg(feature = "persist")]
 pub mod logstore;
 pub mod recorder;
@@ -52,6 +53,9 @@ pub use host::{
 };
 pub use latency::{
     detect_onset, frames_to_ms, measure_round_trip_frames, ms_to_frames, LatencyEstimate,
+};
+pub use looper_capture::{
+    LooperCapture, LooperCaptureSink, DEFAULT_RING_FRAMES as LOOPER_CAPTURE_RING_FRAMES,
 };
 pub use log::init_logging;
 #[cfg(feature = "persist")]

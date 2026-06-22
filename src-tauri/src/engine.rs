@@ -778,6 +778,15 @@ impl EngineBackend {
             return false;
         };
         self.host = None; // tear down the dead stream before re-opening
+        // Follow the (possibly new) default device's sample rate BEFORE adopting:
+        // a format change (e.g. the interface switching 96 kHz → 48 kHz) or a
+        // replacement device at a different rate must rebuild at that rate, or the
+        // patch would resume detuned. `adopt` compiles the graph at
+        // `self.stream.sample_rate`. (The cpal stream is gone here, so this just
+        // queries the OS default — off-RT.)
+        if let Some(rate) = ojcore_native::default_output_sample_rate() {
+            self.stream.sample_rate = rate;
+        }
         let _ = self.adopt(&graph); // start failure is non-fatal (emits Lifecycle)
         self.host.is_some()
     }
@@ -1009,6 +1018,34 @@ impl EngineBackend {
             cap.sample_rate = pcm.sample_rate;
         }
         Some((cap.pcm.clone(), cap.sample_rate))
+    }
+
+    /// STAGE-3 finalize-PCM: take looper `node`'s just-COMMITTED take as MONO PCM
+    /// + its sample rate, so the UI can build a real `AudioBuffer` for the layer's
+    /// row (true waveform + drag-to-library/export). Called by the control thread
+    /// when it drains a commit `LooperEdge` for `node` (the
+    /// Recording|Overdubbing→Playing edge): the host's off-RT per-looper capture
+    /// has the streamed take by then, and `loop_len` (from the looper snapshot the
+    /// UI already tracks) trims it to the committed cycle. Returns `None` when no
+    /// stream is live (device-less sandbox) or nothing was captured for the node.
+    ///
+    /// The PCM rides the Tauri command RETURN value (exactly like
+    /// [`recorder_stop`]), NOT an `EngineFrame` — keeping the wire/ojproto
+    /// unchanged: only `OjGraph` / `RtCommand` / the existing return frames cross
+    /// the boundary, and bulk PCM rides command returns.
+    pub fn take_looper_pcm(&self, node: NodeIdx, loop_len: usize) -> Option<(Vec<f32>, u32)> {
+        let host = self.host.as_ref()?;
+        let pcm = host.take_looper_pcm(node, loop_len)?;
+        Some((pcm, host.sample_rate()))
+    }
+
+    /// Discard looper `node`'s accumulated (uncommitted) capture — on CLEAR /
+    /// undo / delete with no commit — so a later take never inherits a stale tail.
+    /// No-op in the device-less sandbox. Off-RT.
+    pub fn discard_looper_pcm(&self, node: NodeIdx) {
+        if let Some(host) = self.host.as_ref() {
+            host.discard_looper_pcm(node);
+        }
     }
 
     /// Export a node's captured recording to a WAV file at `path` via the

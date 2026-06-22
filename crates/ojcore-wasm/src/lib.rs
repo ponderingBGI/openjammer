@@ -676,6 +676,43 @@ pub fn drain_looper_edges() -> Vec<u8> {
     serde_json::to_vec(&events).unwrap_or_default()
 }
 
+/// Copy the MOST-RECENTLY-COMMITTED layer's loop PCM for looper `node` into a
+/// fresh `Float32Array` (`loop_len` mono f32s), or an empty array when the node
+/// is not a looper / has no committed layer yet. This is the WASM end of the
+/// Stage-3 finalize-PCM seam: when the worklet drains a commit `LooperEdge` for
+/// `node` (the Recording|Overdubbing→Playing edge from [`drain_looper_edges`]),
+/// it calls this and `postMessage`s the bytes so the UI can build the real
+/// `AudioBuffer` for that layer's row (true waveform + drag-to-library/export).
+///
+/// The committed layer is read-only on the render path (only read back for
+/// playback, never written), so reading it off the render path between `process`
+/// calls is sound — exactly how [`output_ptr`] exposes the render output buffer.
+/// Off the render path (the worklet calls it from a drained-edge handler), so the
+/// copy into the returned `Vec` is fine. Returns an empty `Vec` (no allocation)
+/// when the host is absent / the id is unknown / nothing is committed.
+#[wasm_bindgen]
+pub fn looper_take_pcm(node: u32) -> Vec<f32> {
+    let Some(host) = host_ref() else {
+        return Vec::new();
+    };
+    let program = host.engine.program();
+    let target = NodeIdx(node);
+    for slot in 0..program.instances.len() {
+        if program.kinds[slot] != PrimitiveKind::Looper {
+            continue;
+        }
+        if program.ids[slot] != target {
+            continue;
+        }
+        let pcm = program.instances[slot].last_committed_layer_pcm();
+        if pcm.is_empty() {
+            return Vec::new();
+        }
+        return pcm.to_vec();
+    }
+    Vec::new()
+}
+
 // --- Fault events (Wave 4): node faults back to the UI ------------------------
 
 /// Build a `NodeFault` [`Event`] with the native wire shape. `ts_us` is left `0`
@@ -1255,6 +1292,117 @@ mod tests {
             out.iter().all(|s| s.abs() <= 1e-6),
             "an unresolved sampler asset stays silent"
         );
+    }
+
+    /// STAGE-3 finalize-PCM (wasm): a Looper that records a known block then
+    /// commits exposes that take's TRUE per-sample PCM via the engine instance's
+    /// `last_committed_layer_pcm` (what `looper_take_pcm` copies out). Drives the
+    /// kernel through a real compiled program: GraphIn -> Looper -> SpeakerOut,
+    /// inject a ramp, RECORD one quantized block (auto-commits to Playing), then
+    /// read the committed PCM back and assert it equals the injected input.
+    #[test]
+    fn looper_committed_layer_pcm_round_trips() {
+        use ojcore::looper::looper_param;
+        use ojcore::{LooperLoader, GAIN_ID, LOOPER_ID};
+        use ojproto::{looper_action, ConnectionType, IrEdge, Param, RtCommand};
+
+        let mut reg = PluginRegistry::new();
+        register_all(&mut reg, RegisterOpts::wasm());
+        reg.register(Box::new(LooperLoader::new()));
+
+        const SR: u32 = 48_000;
+        const BLOCK: usize = 64;
+        // One-block quantized loop, wet=1/dry=0 so the take auto-commits in a block.
+        let mut looper = IrNode {
+            id: NodeIdx(1),
+            manifest_id: String::from(LOOPER_ID),
+            kind: PrimitiveKind::Looper,
+            params: vec![],
+            assets: vec![],
+            n_in: 1,
+            n_out: 1,
+        };
+        looper.params.push(Param {
+            id: looper_param::LOOP_SECS,
+            value: BLOCK as f32 / SR as f32,
+        });
+        looper.params.push(Param {
+            id: looper_param::WET,
+            value: 1.0,
+        });
+        looper.params.push(Param {
+            id: looper_param::DRY,
+            value: 0.0,
+        });
+        let graph = OjGraph {
+            ir_version: SCHEMA_VERSION,
+            sample_rate: SR,
+            block_size: BLOCK as u32,
+            nodes: vec![
+                IrNode {
+                    id: NodeIdx(0),
+                    manifest_id: String::from(GAIN_ID),
+                    kind: PrimitiveKind::GraphIn,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 0,
+                    n_out: 1,
+                },
+                looper,
+                IrNode {
+                    id: NodeIdx(2),
+                    manifest_id: String::from(SPEAKER_OUT_ID),
+                    kind: PrimitiveKind::SpeakerOut,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 0,
+                },
+            ],
+            edges: vec![
+                IrEdge {
+                    from_node: NodeIdx(0),
+                    from_port: 0,
+                    to_node: NodeIdx(1),
+                    to_port: 0,
+                    kind: ConnectionType::Audio,
+                },
+                IrEdge {
+                    from_node: NodeIdx(1),
+                    from_port: 0,
+                    to_node: NodeIdx(2),
+                    to_port: 0,
+                    kind: ConnectionType::Audio,
+                },
+            ],
+            schedule: vec![],
+        };
+        let store = WasmAssetStore::default();
+        let program = compile_with_assets(&graph, &reg, &store).expect("looper graph compiles");
+        let mut engine = Engine::new(program);
+
+        // RECORD, inject a known ramp, render one block -> auto-commit to Playing.
+        engine.apply_rt(RtCommand::Looper {
+            node: NodeIdx(1),
+            action: looper_action::RECORD,
+            arg: 0,
+        });
+        let signal: Vec<f32> = (0..BLOCK).map(|i| (i as f32) * 0.013 - 0.4).collect();
+        let buf = engine.input_mut(NodeIdx(0), 0).expect("graphin buffer");
+        buf[..BLOCK].copy_from_slice(&signal);
+        let mut out = vec![0.0f32; BLOCK];
+        engine.process_block(&mut out, BLOCK);
+
+        // The committed layer's PCM (what `looper_take_pcm` returns) == the input.
+        let slot = engine
+            .program()
+            .slot_of_id(NodeIdx(1))
+            .expect("looper slot");
+        let pcm = engine.program().instances[slot].last_committed_layer_pcm();
+        assert_eq!(pcm.len(), BLOCK, "committed loop is one block long");
+        for (i, (&x, &y)) in signal.iter().zip(pcm.iter()).enumerate() {
+            assert!((x - y).abs() < 1e-6, "wasm commit pcm frame {i}: {x} != {y}");
+        }
     }
 
     /// A `MicIn` source node, fed externally via `Engine::input_mut` (the buffer

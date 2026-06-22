@@ -269,6 +269,9 @@ export class OjcoreWasmExecutor implements Executor {
                 case 'looper':
                     this.onLooperFrames(data.frames);
                     break;
+                case 'looper-take':
+                    this.onLooperTake(data.node, data.pcm, data.sampleRate);
+                    break;
                 case 'events':
                     this.onEngineEvents(data.bytes);
                     break;
@@ -558,6 +561,22 @@ export class OjcoreWasmExecutor implements Executor {
             if (nodeId === undefined) continue;
             this.caps.looper(nodeId).onEngineFrame(state, pos, loopLen, peak);
         }
+    }
+
+    /**
+     * Route a committed take's TRUE captured PCM (Stage 3) from the worklet's
+     * `looper-take` postMessage to the looper handle's `onLayerPcm`, which builds
+     * a real AudioBuffer + true waveform and attaches it to the row the commit
+     * edge created (matched in commit order). The worklet read the just-committed
+     * layer off the read-only render buffer and TRANSFERRED the PCM here, so this
+     * is a move, not a copy — off any render path.
+     */
+    private onLooperTake(node?: number, pcm?: Float32Array, sampleRate?: number): void {
+        if (node === undefined || !pcm || pcm.length === 0) return;
+        const nodeId = this.reverseIndex.get(node);
+        if (nodeId === undefined) return;
+        const ctx = getAudioContext();
+        this.caps.looper(nodeId).onLayerPcm(pcm, sampleRate ?? ctx?.sampleRate ?? 48000);
     }
 
     /** Route any `LooperEdge` events in a drained batch to their looper handle's

@@ -17,6 +17,7 @@
 //! and written against the [`BlockProcessor`] trait, so it is unit-tested with a
 //! mock engine and a real command ring — no audio device required.
 
+use std::mem::ManuallyDrop;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -33,6 +34,7 @@ use ojproto::NodeIdx;
 
 use crate::asset::Pcm;
 use crate::device::{classify, device_fault_channel, DeviceFault, DeviceFaultRx};
+use crate::looper_capture::{LooperCapture, LooperCaptureSink};
 use crate::recorder::{Recorder, RecorderSink};
 
 /// The minimal slice of [`Engine`] the audio callback needs. Abstracting it lets
@@ -43,6 +45,13 @@ pub trait BlockProcessor: Send {
     fn drain_commands(&mut self, rx: &mut CommandConsumer);
     /// Render `nframes` of mono audio into `out`.
     fn render(&mut self, out: &mut [f32], nframes: usize);
+    /// Stream every RECORDING looper node's just-captured block into the per-
+    /// looper capture sink (Stage 3 finalize-PCM). Called by [`render_block`]
+    /// AFTER each engine block, so the off-RT side reassembles each take and, on
+    /// the commit edge, has its true PCM. Default no-op (the mock processor in
+    /// tests has no loopers). RT-safe: a slice borrow + a wait-free ring push per
+    /// recording looper; nothing when `sink` is `None` or no looper is recording.
+    fn capture_loopers(&self, _sink: &mut LooperCaptureSink) {}
 }
 
 impl BlockProcessor for Engine {
@@ -53,6 +62,21 @@ impl BlockProcessor for Engine {
     #[inline]
     fn render(&mut self, out: &mut [f32], nframes: usize) {
         self.process_block(out, nframes);
+    }
+    #[inline]
+    fn capture_loopers(&self, sink: &mut LooperCaptureSink) {
+        // Walk every looper slot; push the block it just captured (if any) tagged
+        // by node id. `last_captured_block` is `None` unless the looper is mid-
+        // take, so an idle/playing looper costs one match + one trait call here.
+        let prog = self.program();
+        for slot in 0..prog.instances.len() {
+            if prog.kinds[slot] != ojproto::PrimitiveKind::Looper {
+                continue;
+            }
+            if let Some(block) = prog.instances[slot].last_captured_block() {
+                sink.capture(prog.ids[slot].0, block);
+            }
+        }
     }
 }
 
@@ -86,6 +110,12 @@ impl BlockProcessor for MicFedEngine<'_> {
         }
         self.engine.process_block(out, nframes);
     }
+    #[inline]
+    fn capture_loopers(&self, sink: &mut LooperCaptureSink) {
+        // Forward to the wrapped engine so looper PCM capture is not lost when mic
+        // capture is wired (the MicFedEngine path).
+        self.engine.capture_loopers(sink);
+    }
 }
 
 /// Render one cpal output block: drain commands, render mono, fan out to all
@@ -102,6 +132,7 @@ pub fn render_block<P: BlockProcessor>(
     channels: usize,
     mono: &mut [f32],
     mut capture: Option<&mut RecorderSink>,
+    mut looper_capture: Option<&mut LooperCaptureSink>,
 ) {
     proc.drain_commands(rx);
 
@@ -126,6 +157,13 @@ pub fn render_block<P: BlockProcessor>(
         // blocks or locks here, and it is a no-op when `capture` is `None`.
         if let Some(sink) = capture.as_deref_mut() {
             sink.capture(&mono[..n]);
+        }
+        // Stream every recording looper's just-captured block into the per-looper
+        // capture ring (Stage 3). Per ENGINE block (inside this chunk loop) so a
+        // large cpal buffer streams continuously, not just its final block.
+        // Wait-free; a no-op when no sink is wired or no looper is recording.
+        if let Some(sink) = looper_capture.as_deref_mut() {
+            proc.capture_loopers(sink);
         }
         // Fan each mono frame out across all interleaved channels.
         for (f, &s) in mono[..n].iter().enumerate() {
@@ -408,10 +446,11 @@ impl StreamFault {
 /// through the [`CommandConsumer`] the callback drains.
 pub struct AudioHost {
     /// The output stream; kept alive for the host's lifetime (cpal stops the
-    /// stream when the handle drops).
-    _output: Stream,
-    /// Optional duplex input stream, held alive the same way.
-    _input: Option<Stream>,
+    /// stream when the handle drops). In `ManuallyDrop` so [`Drop`] can SKIP cpal's
+    /// stream teardown when the device faulted — see the `Drop` impl for why.
+    _output: ManuallyDrop<Stream>,
+    /// Optional duplex input stream, held alive the same way (also `ManuallyDrop`).
+    _input: ManuallyDrop<Option<Stream>>,
     /// The negotiated stream config, exposed for the latency estimate.
     config: StreamConfig,
     /// Shared device-fault signal SET by the cpal output `err_fn` (off the render
@@ -435,6 +474,12 @@ pub struct AudioHost {
     drain_stop: Arc<AtomicBool>,
     /// The off-RT capture-drain worker; joined in [`Drop`].
     drain_thread: Option<JoinHandle<()>>,
+    /// Control-side per-looper PCM capture (Stage 3): the RT sink streams each
+    /// recording looper's captured block into this off-RT demuxer (drained by the
+    /// same `drain_thread`), so [`AudioHost::take_looper_pcm`] yields a committed
+    /// take's true samples on its commit edge. The RT thread owns only the sink
+    /// half (moved into the callback); this `Mutex` is contended off-RT only.
+    looper_capture: Arc<Mutex<LooperCapture>>,
 }
 
 impl Drop for AudioHost {
@@ -444,6 +489,26 @@ impl Drop for AudioHost {
         self.drain_stop.store(true, Ordering::Relaxed);
         if let Some(handle) = self.drain_thread.take() {
             let _ = handle.join();
+        }
+
+        // Retire the cpal stream(s). cpal's `Stream::Drop` sends a `Terminate`
+        // command via `SetEvent` on its event handle (cpal 0.18.1
+        // `wasapi/stream.rs`). When the OS has INVALIDATED the device — a format /
+        // sample-rate change or a removal, which the output `err_fn` flags in
+        // `fault` BEFORE cpal's worker exits and closes that handle — that
+        // `SetEvent` hits a closed handle and cpal `.unwrap()`s, which ABORTS the
+        // whole process (a held note beats a glitch: a device hiccup must never
+        // kill the instrument). On a faulted stream the worker has already exited
+        // and freed its real OS resources, so we LEAK the now-inert `Stream` shell
+        // rather than run its abort-prone teardown; the control plane has already
+        // rebuilt onto a fresh stream. A healthy host drops normally to stop audio
+        // cleanly. SAFETY: `ManuallyDrop::drop` runs at most once (the host is
+        // being dropped and the fields are not touched afterwards).
+        if !self.fault.is_set() {
+            unsafe {
+                ManuallyDrop::drop(&mut self._output);
+                ManuallyDrop::drop(&mut self._input);
+            }
         }
     }
 }
@@ -584,6 +649,35 @@ impl AudioHost {
             Ok(mut rec) => rec.take(),
             Err(poisoned) => poisoned.into_inner().take(),
         }
+    }
+
+    /// Take looper `node`'s committed take as MONO PCM on its commit edge (Stage
+    /// 3). Drains the per-looper capture ring, then returns the LAST `loop_len`
+    /// streamed samples for the node (the committed cycle; the kernel's
+    /// `loop_len` from the looper snapshot is authoritative). The capture is the
+    /// stream-during-record samples reassembled off-RT — the same off-RT
+    /// philosophy the master [`Recorder`] uses, multiplexed per looper. Returns
+    /// `None` when nothing was captured for the node. Off-RT (control thread).
+    pub fn take_looper_pcm(&self, node: NodeIdx, loop_len: usize) -> Option<Vec<f32>> {
+        match self.looper_capture.lock() {
+            Ok(mut lc) => lc.take(node.0, loop_len),
+            Err(poisoned) => poisoned.into_inner().take(node.0, loop_len),
+        }
+    }
+
+    /// Discard looper `node`'s accumulated (uncommitted) capture — e.g. on CLEAR
+    /// or a delete with no commit, so a later take never inherits a stale tail.
+    /// Off-RT (control thread).
+    pub fn discard_looper_pcm(&self, node: NodeIdx) {
+        if let Ok(mut lc) = self.looper_capture.lock() {
+            lc.discard(node.0);
+        }
+    }
+
+    /// The negotiated stream sample rate (Hz) — the rate a captured looper take
+    /// was recorded at, for stamping its `AudioBuffer`.
+    pub fn sample_rate(&self) -> u32 {
+        self.config.sample_rate
     }
 
     /// Open the stream(s) and start rendering `engine` through the callback.
@@ -799,6 +893,13 @@ impl AudioHost {
             Recorder::with_default_ring(1, config.sample_rate);
         let capture_armed = Arc::new(AtomicBool::new(false));
         let cap_armed_cb = Arc::clone(&capture_armed);
+        // Per-looper PCM capture (Stage 3): the SINK (RT producer) moves into the
+        // callback and streams each recording looper's block; the demuxer is
+        // drained off-RT by the same `drain_thread` below. Unlike the master
+        // recorder this is ALWAYS streaming — each looper self-gates via
+        // `last_captured_block` (only a mid-take looper pushes), so there is no
+        // arm flag to check on the RT path.
+        let (looper_capture, mut looper_sink) = LooperCapture::with_default_ring();
         // Promote-once guard for realtime priority.
         let mut promoted = false;
 
@@ -865,9 +966,25 @@ impl AudioHost {
                                 mic,
                                 mic_node: node,
                             };
-                            render_block(&mut fed, &mut rx, data, ch, &mut mono, cap);
+                            render_block(
+                                &mut fed,
+                                &mut rx,
+                                data,
+                                ch,
+                                &mut mono,
+                                cap,
+                                Some(&mut looper_sink),
+                            );
                         }
-                        _ => render_block(&mut engine, &mut rx, data, ch, &mut mono, cap),
+                        _ => render_block(
+                            &mut engine,
+                            &mut rx,
+                            data,
+                            ch,
+                            &mut mono,
+                            cap,
+                            Some(&mut looper_sink),
+                        ),
                     }
                 },
                 err_fn,
@@ -888,27 +1005,35 @@ impl AudioHost {
         // from the audio callback. Spawned only after the stream is live so a
         // failed start never leaks a thread.
         let capture = Arc::new(Mutex::new(capture_recorder));
+        let looper_capture = Arc::new(Mutex::new(looper_capture));
         let drain_stop = Arc::new(AtomicBool::new(false));
         let drain_thread = {
             let capture = Arc::clone(&capture);
+            let looper_capture = Arc::clone(&looper_capture);
             let drain_stop = Arc::clone(&drain_stop);
             thread::spawn(move || {
                 while !drain_stop.load(Ordering::Relaxed) {
                     if let Ok(mut rec) = capture.lock() {
                         rec.drain();
                     }
+                    if let Ok(mut lc) = looper_capture.lock() {
+                        lc.drain();
+                    }
                     thread::sleep(Duration::from_millis(20));
                 }
-                // Final drain so a just-stopped recording keeps its tail.
+                // Final drain so a just-stopped recording / take keeps its tail.
                 if let Ok(mut rec) = capture.lock() {
                     rec.drain();
+                }
+                if let Ok(mut lc) = looper_capture.lock() {
+                    lc.drain();
                 }
             })
         };
 
         Ok(Self {
-            _output: output,
-            _input: input,
+            _output: ManuallyDrop::new(output),
+            _input: ManuallyDrop::new(input),
             config,
             fault,
             device_faults: fault_rx,
@@ -916,6 +1041,7 @@ impl AudioHost {
             capture,
             drain_stop,
             drain_thread: Some(drain_thread),
+            looper_capture,
         })
     }
 
@@ -1056,7 +1182,7 @@ mod tests {
         let mut data = vec![0.0f32; frames * channels];
         let mut mono = vec![0.0f32; frames];
 
-        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None);
+        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None, None);
 
         // Commands were drained, in order, before any render.
         assert_eq!(proc.drained.len(), 2);
@@ -1079,7 +1205,7 @@ mod tests {
         let mut data = vec![0.0f32; frames]; // mono: channels == 1
         let mut mono = vec![0.0f32; frames];
 
-        render_block(&mut proc, &mut rx, &mut data, 1, &mut mono, None);
+        render_block(&mut proc, &mut rx, &mut data, 1, &mut mono, None, None);
 
         assert_eq!(proc.last_nframes, frames);
         for (i, &s) in data.iter().enumerate() {
@@ -1109,6 +1235,7 @@ mod tests {
             channels,
             &mut mono,
             Some(&mut sink),
+            None,
         );
 
         // One MONO sample captured per output frame (not per interleaved sample).
@@ -1132,7 +1259,7 @@ mod tests {
         let mut data = vec![0.0f32; frames * channels];
         let mut mono = vec![0.0f32; frames];
 
-        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None);
+        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None, None);
 
         assert!(data.iter().all(|&s| (s - 0.25).abs() < 1e-9));
     }
@@ -1151,7 +1278,7 @@ mod tests {
         let mut data = vec![9.0f32; big_frames * channels];
         let mut mono = vec![0.0f32; 4]; // engine block fits 4 frames
 
-        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None);
+        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None, None);
 
         // 10 frames in 4-frame chunks → 4 + 4 + 2 = three render calls, last = 2.
         assert_eq!(proc.renders, 3);
@@ -1213,7 +1340,7 @@ mod tests {
         let mut data = vec![7.0f32; 8];
         let mut mono = vec![0.0f32; 8];
 
-        render_block(&mut proc, &mut rx, &mut data, 0, &mut mono, None);
+        render_block(&mut proc, &mut rx, &mut data, 0, &mut mono, None, None);
 
         // Degenerate channel count: output silenced, no render, no panic.
         assert_eq!(proc.renders, 0);
@@ -1338,12 +1465,155 @@ mod tests {
         };
         let mut out = vec![0.0f32; signal.len()];
         let mut mono = vec![0.0f32; signal.len()];
-        render_block(&mut fed, &mut rx, &mut out, 1, &mut mono, None);
+        render_block(&mut fed, &mut rx, &mut out, 1, &mut mono, None, None);
 
         for (i, (&a, &b)) in signal.iter().zip(out.iter()).enumerate() {
             assert!(
                 (a - b).abs() < 1e-6,
                 "mic frame {i} reached output: {a} != {b}"
+            );
+        }
+    }
+
+    /// STAGE-3 native finalize-PCM: `render_block` streams a RECORDING looper's
+    /// captured block into the per-looper `LooperCaptureSink`, and the off-RT
+    /// `LooperCapture` demuxer reassembles the take and yields its true PCM on the
+    /// commit edge — all device-free, through a real compiled looper graph.
+    #[test]
+    fn render_block_streams_looper_take_into_capture() {
+        use crate::looper_capture::LooperCapture;
+        use ojcore::looper::looper_param;
+        use ojcore::{compile, LooperLoader, GainLoader, PluginRegistry, GAIN_ID, LOOPER_ID};
+        use ojproto::{
+            looper_action, ConnectionType, IrEdge, IrNode, OjGraph, Param, PrimitiveKind, RtCommand,
+        };
+
+        const SR: u32 = 48_000;
+        const BLOCK: usize = 64;
+
+        let mut reg = PluginRegistry::new();
+        reg.register(Box::new(GainLoader::new()));
+        reg.register(Box::new(LooperLoader::new()));
+
+        // GraphIn(1) -> Looper(2) -> SpeakerOut(3), free-run (no quantize) so the
+        // take keeps recording across blocks until STOP commits it.
+        let mut looper = IrNode {
+            id: NodeIdx(2),
+            manifest_id: LOOPER_ID.into(),
+            kind: PrimitiveKind::Looper,
+            params: vec![],
+            assets: vec![],
+            n_in: 1,
+            n_out: 1,
+        };
+        looper.params.push(Param { id: looper_param::WET, value: 1.0 });
+        looper.params.push(Param { id: looper_param::DRY, value: 0.0 });
+        let graph = OjGraph {
+            ir_version: ojproto::SCHEMA_VERSION,
+            sample_rate: SR,
+            block_size: BLOCK as u32,
+            nodes: vec![
+                IrNode {
+                    id: NodeIdx(1),
+                    manifest_id: GAIN_ID.into(),
+                    kind: PrimitiveKind::GraphIn,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 0,
+                    n_out: 1,
+                },
+                looper,
+                IrNode {
+                    id: NodeIdx(3),
+                    manifest_id: GAIN_ID.into(),
+                    kind: PrimitiveKind::SpeakerOut,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 0,
+                },
+            ],
+            edges: vec![
+                IrEdge {
+                    from_node: NodeIdx(1),
+                    from_port: 0,
+                    to_node: NodeIdx(2),
+                    to_port: 0,
+                    kind: ConnectionType::Audio,
+                },
+                IrEdge {
+                    from_node: NodeIdx(2),
+                    from_port: 0,
+                    to_node: NodeIdx(3),
+                    to_port: 0,
+                    kind: ConnectionType::Audio,
+                },
+            ],
+            schedule: vec![],
+        };
+        let mut engine = Engine::new(compile(&graph, &reg).expect("looper graph compiles"));
+
+        let (mut cap, mut sink) = LooperCapture::new(8192);
+        let (mut tx, rx) = ojcore::CommandQueue::split(8);
+        let mut rx = rx;
+
+        // RECORD, then render two blocks of a known input through render_block,
+        // injecting the GraphIn buffer before each block (mono out, 1 channel).
+        tx.push(RtCommand::Looper {
+            node: NodeIdx(2),
+            action: looper_action::RECORD,
+            arg: 0,
+        })
+        .unwrap();
+
+        let a: Vec<f32> = (0..BLOCK).map(|i| i as f32 * 0.01 - 0.3).collect();
+        let b: Vec<f32> = (0..BLOCK).map(|i| i as f32 * 0.02 - 0.6).collect();
+        let mut mono = vec![0.0f32; BLOCK];
+        for block in [&a, &b] {
+            // Inject the input the looper will capture this block.
+            let buf = engine.input_mut(NodeIdx(1), 0).expect("graphin buffer");
+            buf[..BLOCK].copy_from_slice(block);
+            let mut data = vec![0.0f32; BLOCK]; // mono
+            render_block(
+                &mut engine,
+                &mut rx,
+                &mut data,
+                1,
+                &mut mono,
+                None,
+                Some(&mut sink),
+            );
+        }
+
+        // STOP commits the take to a single layer of length 2*BLOCK.
+        tx.push(RtCommand::Looper {
+            node: NodeIdx(2),
+            action: looper_action::STOP,
+            arg: 0,
+        })
+        .unwrap();
+        // Apply STOP + render one more (silent) block so the command lands.
+        let mut data = vec![0.0f32; BLOCK];
+        render_block(
+            &mut engine,
+            &mut rx,
+            &mut data,
+            1,
+            &mut mono,
+            None,
+            Some(&mut sink),
+        );
+
+        // The off-RT demuxer reassembled the streamed take; on the commit edge,
+        // take the last loop_len (== 2*BLOCK) samples for node 2.
+        cap.drain();
+        let loop_len = 2 * BLOCK;
+        let pcm = cap.take(2, loop_len).expect("captured take");
+        assert_eq!(pcm.len(), loop_len, "committed take is two blocks long");
+        for (i, (&x, &y)) in a.iter().chain(b.iter()).zip(pcm.iter()).enumerate() {
+            assert!(
+                (x - y).abs() < 1e-6,
+                "streamed take frame {i}: input {x} != captured {y}"
             );
         }
     }
