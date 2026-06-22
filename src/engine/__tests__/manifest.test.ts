@@ -119,6 +119,14 @@ describe('PluginManifest derivation', () => {
         }
     });
 
+    it('falls back to the inert Unknown manifest for stale runtime node types', () => {
+        // Runtime data can outlive the TS union (e.g. old localStorage/workflows).
+        // This must not crash NodeWrapper's AutoParamPanel fallback.
+        const manifest = manifestFor('stale-node-type' as NodeType);
+        expect(manifest.name).toBe('Unknown');
+        expect(manifest.dsp).toBe('none');
+    });
+
     it('covers every nodeDefinition exactly once', () => {
         const manifests = allManifests();
         const ids = manifests.map((m) => m.id);

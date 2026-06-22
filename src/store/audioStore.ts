@@ -7,6 +7,7 @@ import { getExecutor } from '../audio/executor';
 import { resumeAudio } from '../audio/audioContext';
 import type { LatencyClassification } from '../audio/executor/latency';
 import { getConnectionsForRow, getConnectionsForPedal } from '../utils/connectionActivity';
+import { getMidiVoiceRouter } from '../midi/routing';
 
 // Re-exported for back-compat: the classification type now lives with the
 // latency seam (`audio/executor/latency`), its single source of truth.
@@ -257,6 +258,11 @@ export const useAudioStore = create<AudioStore>((set, get) => ({
             activeKeys: new Set(state.activeKeys).add(keyId)
         }));
 
+        // Re-pressing a sustained (held) note must own the voice cleanly: drop
+        // any stale held entry so the sustain flush never double-releases it.
+        // Shares the SAME per-note sustain controller as hardware CC64.
+        getMidiVoiceRouter()?.sustain.onNoteOn(keyboardId, row, keyIndex);
+
         // Trigger note on connected instruments via the executor with normalized velocity
         const velocity = get().defaultVelocity;
         const executor = getExecutor();
@@ -268,13 +274,22 @@ export const useAudioStore = create<AudioStore>((set, get) => ({
     },
 
     releaseKeyboardSignal: (keyboardId, row, keyIndex) => {
-        // Remove active key
+        // Remove active key — the physical key is up regardless of sustain, so the
+        // visual feedback always clears.
         const keyId = `${keyboardId}-${row}-${keyIndex}`;
         set(state => {
             const newKeys = new Set(state.activeKeys);
             newKeys.delete(keyId);
             return { activeKeys: newKeys };
         });
+
+        // Per-note sustain: if the spacebar (or CC64) pedal is down for this
+        // input node, HOLD the voice — record it and suppress the engine note-off
+        // (and the cable fade). It releases on pedal-up via applySustain. "A held
+        // note beats a glitch": the player chose to sustain, so we keep sounding.
+        if (getMidiVoiceRouter()?.sustain.onNoteOff(keyboardId, row, keyIndex)) {
+            return;
+        }
 
         // Release note on connected instruments
         const executor = getExecutor();
@@ -285,23 +300,28 @@ export const useAudioStore = create<AudioStore>((set, get) => ({
         connectionIds.forEach(id => executor.releaseControlSignal(id));
     },
 
-    // Control signal emission (sustain pedal)
+    // Sustain pedal (spacebar) — per-note hold via the SAME SustainController as
+    // hardware CC64. Down arms the hold so note-offs are suppressed; up flushes
+    // every held voice with exactly one engine note-off (done inside
+    // router.applySustain). The pedal itself emits no note; it only changes how
+    // releases are handled. `controlDown` remains the UI's visual pedal state.
     emitControlDown: (keyboardId) => {
         set({ controlDown: true });
-        const executor = getExecutor();
-        executor.controlDown(keyboardId);
+        getMidiVoiceRouter()?.applySustain(keyboardId, true);
 
         // Activate visual feedback on pedal connection cables
+        const executor = getExecutor();
         const connectionIds = getConnectionsForPedal(keyboardId);
         connectionIds.forEach(id => executor.activateControlSignal(id));
     },
 
     emitControlUp: (keyboardId) => {
         set({ controlDown: false });
-        const executor = getExecutor();
-        executor.controlUp(keyboardId);
+        // Flush held voices: applySustain emits one note-off per held voice.
+        getMidiVoiceRouter()?.applySustain(keyboardId, false);
 
         // Release visual feedback on pedal connection cables
+        const executor = getExecutor();
         const connectionIds = getConnectionsForPedal(keyboardId);
         connectionIds.forEach(id => executor.releaseControlSignal(id));
     },

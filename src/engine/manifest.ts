@@ -14,7 +14,7 @@
  */
 
 import type { EffectType, NodeDefinition, NodeType } from './types';
-import { nodeDefinitions } from './registry';
+import { get as getNodeDefinition, nodeDefinitions } from './registry';
 import { AI_MANIFEST_PARAMS_KEY } from './dynamicRegistry';
 // The ONE closed PrimitiveKind set, imported from the wire-contract SSOT so this
 // file never holds a fourth hand-written copy that can drift (see below).
@@ -349,9 +349,15 @@ export function manifestFromDefinition(def: NodeDefinition): PluginManifest {
     return manifest;
 }
 
-/** Derive the manifest for a node type (single source: {@link nodeDefinitions}). */
+/**
+ * Derive the manifest for a node type (single source: {@link nodeDefinitions}).
+ *
+ * Use the registry resolver instead of indexing `nodeDefinitions` directly so a
+ * stale/corrupt persisted node type lands on the inert Unknown definition rather
+ * than crashing the render path while reading `def.type`.
+ */
 export function manifestFor(type: NodeType): PluginManifest {
-    return manifestFromDefinition(nodeDefinitions[type]);
+    return manifestFromDefinition(getNodeDefinition(type));
 }
 
 /** Every node's manifest, derived from {@link nodeDefinitions}. */
