@@ -92,11 +92,6 @@ interface MetersMsg {
     type: 'meters';
     enabled: boolean;
 }
-/** Scale the master output (speaker volume). */
-interface MasterGainMsg {
-    type: 'master-gain';
-    gain: number;
-}
 /** Install mono PCM as a node's sampler buffer (best-effort, see handler). */
 interface LoadSampleMsg {
     type: 'load-sample';
@@ -120,7 +115,6 @@ type InboundMsg =
     | GraphMsg
     | CommandMsg
     | MetersMsg
-    | MasterGainMsg
     | LoadSampleMsg
     | RecorderStartMsg
     | RecorderStopMsg;
@@ -151,13 +145,17 @@ class OjcoreProcessor extends AudioWorkletProcessor {
     private meterTick = 0;
     /** Block counter so faults drain at a fixed cadence, not every render quantum. */
     private eventTick = 0;
+    // NOTE: speaker volume / mute is NO LONGER a worklet concern. It is applied
+    // ONCE by the engine via the SpeakerOut sink's `master_param` (VOLUME/MUTE)
+    // `SetParam`s the executor sends over the command ring (exec.rs `master_gain`).
+    // The old `master-gain` postMessage path scaled a SECOND time after the engine
+    // and risked double-applying gain; it has been removed. The mono->channel copy
+    // below is now a straight unity copy.
     /** Block counter so looper snapshots/edges drain at ~UI rate (every ~4 blocks),
      *  ungated by metering — the row/playhead must surface even with meters off. */
     private looperTick = 0;
     /** Blocks between fault drains (~10 Hz). Recomputed from the rate in init. */
     private eventDrainBlocks = 38;
-    /** Master output scale (speaker volume). */
-    private masterGain = 1;
     /** Per-node recorder captures: node id -> accumulated mono PCM chunks. */
     private captures = new Map<number, Float32Array[]>();
 
@@ -184,9 +182,6 @@ class OjcoreProcessor extends AudioWorkletProcessor {
                 case 'meters':
                     this.metersEnabled = msg.enabled;
                     if (this.ready) wasm.set_metering(msg.enabled);
-                    break;
-                case 'master-gain':
-                    this.masterGain = Math.max(0, msg.gain);
                     break;
                 case 'load-sample':
                     this.handleLoadSample(msg);
@@ -394,19 +389,17 @@ class OjcoreProcessor extends AudioWorkletProcessor {
         this.feedMicInput(inputs);
 
         // Render one block into the wasm output buffer, then copy mono -> all
-        // output channels (scaled by the master gain / speaker volume).
+        // output channels at UNITY. Speaker volume / mute is already baked into the
+        // engine's master mix (SpeakerOut `master_param` -> exec.rs `master_gain`),
+        // so a second scale here would DOUBLE-apply gain — the worklet stays a
+        // straight copy.
         wasm.process(frames);
         const ptr = wasm.output_ptr();
         const mono = new Float32Array(this.exports.memory.buffer, ptr, Math.min(frames, this.blockSize));
-        const gain = this.masterGain;
         for (let ch = 0; ch < out.length; ch++) {
             const channel = out[ch];
             const n = Math.min(channel.length, mono.length);
-            if (gain === 1) {
-                channel.set(mono.subarray(0, n));
-            } else {
-                for (let i = 0; i < n; i++) channel[i] = mono[i] * gain;
-            }
+            channel.set(mono.subarray(0, n));
             // zero any tail beyond the rendered block
             for (let i = n; i < channel.length; i++) channel[i] = 0;
         }

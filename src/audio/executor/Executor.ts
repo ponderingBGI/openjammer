@@ -123,8 +123,20 @@ export interface Executor {
 
     // --- Microphone --------------------------------------------------------
 
-    /** Set the AudioNode a microphone node should route its output into. */
-    setMicrophoneOutput(nodeId: string, outputNode: AudioNode): void;
+    /**
+     * Drive a microphone node's ENGINE input from the executor — the SINGLE owner
+     * of the OS mic device. The UI never opens its own `getUserMedia`; it only
+     * declares intent here. `isMuted` is provably silent at the engine seam: the
+     * executor feeds SILENCE into the engine's `MicIn` (wasm: disconnects the
+     * worklet input; native: `set_mic(node, false)`), so a muted mic is truly off
+     * on stage, not merely visually dimmed. `deviceId` selects the OS input device
+     * ('default' or undefined => system default); a change re-acquires the one
+     * owned stream. Idempotent; never throws (permission denial stays unrouted).
+     */
+    setMicrophoneInput(
+        nodeId: string,
+        options: { isMuted: boolean; deviceId?: string },
+    ): void;
 
     // --- Continuous sources (loopers, etc.) -------------------------------
 

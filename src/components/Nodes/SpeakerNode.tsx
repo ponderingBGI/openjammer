@@ -51,9 +51,12 @@ export const SpeakerNode = memo(function SpeakerNode({
 }: SpeakerNodeProps) {
     const data = node.data as SpeakerNodeData;
     const updateNodeData = useGraphStore((s) => s.updateNodeData);
+    const beginGesture = useGraphStore((s) => s.beginGesture);
+    const endGesture = useGraphStore((s) => s.endGesture);
     const audioConfig = useAudioStore((s) => s.audioConfig);
     const setAudioConfig = useAudioStore((s) => s.setAudioConfig);
     const setAudioContextReady = useAudioStore((s) => s.setAudioContextReady);
+    const isAudioContextReady = useAudioStore((s) => s.isAudioContextReady);
 
     const [devices, setDevices] = useState<EnhancedAudioDevice[]>([]);
     const [showDevices, setShowDevices] = useState(false);
@@ -62,6 +65,11 @@ export const SpeakerNode = memo(function SpeakerNode({
         return typeof (audio as HTMLAudioElement & { setSinkId?: unknown }).setSinkId === 'function';
     });
     const isMuted = data.isMuted ?? false;
+    const volume = data.volume ?? 1;
+    // Live output level (0..1) from the engine's per-node meter — the REAL master
+    // mix leaving this SpeakerOut (VIS-1), not a parallel analyser. When muted, the
+    // engine's `master_gain` is 0, so the meter naturally reads ~0.
+    const [outputLevel, setOutputLevel] = useState(0);
 
     // Track if we've done auto-selection to avoid re-selecting on every render
     const hasAutoSelected = useRef(false);
@@ -189,13 +197,56 @@ export const SpeakerNode = memo(function SpeakerNode({
         }
     };
 
-    // Handle mute toggle
+    // Re-apply the persisted volume/mute to the engine on (re)load once the audio
+    // context is ready, and whenever they change (PERSIST-1). The engine bakes both
+    // into the SpeakerOut `master_param`s and re-applies them on graph load, so a
+    // project saved muted/quiet reloads muted/quiet at the engine seam — this drives
+    // the live engine to match the SSOT in node.data.
+    useEffect(() => {
+        if (!isAudioContextReady) return;
+        getExecutor().setSpeakerVolume(node.id, volume, isMuted);
+    }, [isAudioContextReady, node.id, volume, isMuted]);
+
+    // Drive the output meter from the engine's per-node level (the REAL master mix),
+    // keyed by this node's id (VIS-1) — no parallel AnalyserNode.
+    useEffect(() => {
+        const unsubscribe = getExecutor().subscribeSignalLevels((levels) => {
+            setOutputLevel(Math.max(0, Math.min(1, levels.get(node.id) ?? 0)));
+        });
+        return unsubscribe;
+    }, [node.id]);
+
+    // Handle mute toggle. Bracket the data edit in a gesture so undo/redo treats it
+    // as one reversible step (REV-1); the persist effect above drives the engine.
     const handleMuteToggle = () => {
-        const newMuted = !isMuted;
-        updateNodeData<SpeakerNodeData>(node.id, { isMuted: newMuted });
-        // Update the actual audio node
-        getExecutor().setSpeakerVolume(node.id, data.volume ?? 1, newMuted);
+        beginGesture();
+        updateNodeData<SpeakerNodeData>(node.id, { isMuted: !isMuted });
+        endGesture();
     };
+
+    // Volume slider: live drag updates node.data (the SSOT) on every input; the
+    // effect re-applies to the engine so volume is heard immediately. The whole
+    // drag is one gesture (begin on first change, end on release) so a slider sweep
+    // is a single Ctrl+Z step (REV-1).
+    const gestureActiveRef = useRef(false);
+    const beginVolumeGesture = useCallback(() => {
+        if (gestureActiveRef.current) return;
+        gestureActiveRef.current = true;
+        beginGesture();
+    }, [beginGesture]);
+    const endVolumeGesture = useCallback(() => {
+        if (!gestureActiveRef.current) return;
+        gestureActiveRef.current = false;
+        endGesture();
+    }, [endGesture]);
+    const handleVolumeChange = useCallback(
+        (e: React.ChangeEvent<HTMLInputElement>) => {
+            beginVolumeGesture();
+            const next = Math.max(0, Math.min(1, Number(e.target.value)));
+            updateNodeData<SpeakerNodeData>(node.id, { volume: next });
+        },
+        [node.id, updateNodeData, beginVolumeGesture],
+    );
 
     // Get input port for the speaker
     const inputPort = node.ports.find(p => p.direction === 'input' && p.type === 'audio');
@@ -261,6 +312,33 @@ export const SpeakerNode = memo(function SpeakerNode({
                             )}
                         </svg>
                     </button>
+                </div>
+
+                {/* Master volume + live output meter. The slider drives node.data
+                    (the SSOT); the engine applies it ONCE via the SpeakerOut master
+                    param. The meter reads the engine's per-node level (VIS-1). */}
+                <div className="speaker-volume-row" onMouseDown={(e) => e.stopPropagation()}>
+                    <input
+                        className="speaker-volume-slider"
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={volume}
+                        disabled={isMuted}
+                        onChange={handleVolumeChange}
+                        onPointerUp={endVolumeGesture}
+                        onPointerCancel={endVolumeGesture}
+                        onBlur={endVolumeGesture}
+                        title={`Volume ${Math.round(volume * 100)}%`}
+                        aria-label="Speaker volume"
+                    />
+                    <div className="speaker-output-meter" aria-hidden="true">
+                        <div
+                            className="speaker-output-meter-fill"
+                            style={{ width: `${Math.round((isMuted ? 0 : outputLevel) * 100)}%` }}
+                        />
+                    </div>
                 </div>
 
                 {/* Output Device Selector */}

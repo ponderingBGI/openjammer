@@ -397,11 +397,53 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
 
         ex.setSpeakerVolume('speaker-1', 0.7, false);
         ex.setSpeakerDevice('speaker-1', 'dev-2');
-        ex.setMicrophoneOutput('looper-1', {} as AudioNode);
+        ex.setMicrophoneInput('looper-1', { isMuted: false });
 
         expect(calls.some((c) => c.cmd === 'set_speaker_volume')).toBe(true);
         expect(calls.some((c) => c.cmd === 'set_speaker_device')).toBe(true);
         expect(calls.some((c) => c.cmd === 'set_mic')).toBe(true);
+        ex.dispose();
+    });
+
+    it('speaker volume forwards volume + muted to set_speaker_volume (engine bakes master VOLUME/MUTE)', async () => {
+        // The native engine's `set_speaker_volume` routes BOTH a SetParam(master
+        // VOLUME=0) and SetParam(master MUTE=1) to the live engine (engine.rs), so
+        // volume is applied ONCE by exec.rs `master_gain`. Here we pin the IPC seam:
+        // the executor forwards the UI's volume + mute intent verbatim.
+        const calls = installMockTauri();
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, looperGraph());
+        await flush();
+
+        ex.setSpeakerVolume('speaker-1', 0.3, false);
+        ex.setSpeakerVolume('speaker-1', 0.9, true);
+
+        const volCalls = calls.filter((c) => c.cmd === 'set_speaker_volume');
+        expect(volCalls).toHaveLength(2);
+        // Live: volume passed through, muted false.
+        expect(volCalls[0].args).toMatchObject({ volume: 0.3, muted: false });
+        // Muted: the executor sends volume 0 + muted true (engine forces gain to 0).
+        expect(volCalls[1].args).toMatchObject({ volume: 0, muted: true });
+        // Every call addresses the interned SpeakerOut NodeIdx (not undefined).
+        expect(typeof volCalls[0].args?.node).toBe('number');
+        ex.dispose();
+    });
+
+    it('mic mute maps to set_mic(enabled=false); unmute to enabled=true', async () => {
+        const calls = installMockTauri();
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, looperGraph());
+        await flush();
+
+        // Unmuted intent enables the engine mic; muted intent disables it — the
+        // engine MicIn then reads silence, so a "muted" mic is provably off.
+        ex.setMicrophoneInput('looper-1', { isMuted: false });
+        ex.setMicrophoneInput('looper-1', { isMuted: true });
+
+        const micCalls = calls.filter((c) => c.cmd === 'set_mic');
+        expect(micCalls.length).toBe(2);
+        expect(micCalls[0].args).toMatchObject({ enabled: true });
+        expect(micCalls[1].args).toMatchObject({ enabled: false });
         ex.dispose();
     });
 
