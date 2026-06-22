@@ -271,6 +271,47 @@ owns UI shapes — TypeScript.
 
 ---
 
+## 9. One core, two clocks — offline render is not a third executor
+
+The full-DAW trajectory (bounce, stems, freeze, a timeline) needs to render audio *faster
+(or slower) than real time*, which sounds like it violates the Tier-1 rule that the core
+"blocks for nothing." It does not — and the reason is the keystone of how the studio grows
+without forking `ojcore`.
+
+**"Never block" is a property of *who calls* `process_block`, not of the core.** The
+real-time obligation lives entirely in the Tier-3 *driver*: the cpal / AudioWorklet device
+callback runs under a hard deadline, so it must never wait. The *kernel itself* is just a
+pure function from `(program, input block) → output block`. Drive it from a device callback
+and it is the live instrument; drive it from a plain `for` loop with a virtual transport and
+it is an offline renderer — **the same compiled program, the same `process_block`, the same
+DSP** — at whatever rate the loop chooses.
+
+This already exists in-tree: `crates/ojcore-native/src/bin/render.rs` runs the identical
+`Engine::process_block` device-lessly, and `crates/ojinstrument/tests/golden_render.rs` gates
+it bit-deterministic. Promoting that loop to a first-class Tier-3 `OfflineDriver` is therefore
+**not** the "third executor that re-implements the membrane" of §8's first trigger: it
+*imports* the same engine and the same TypeScript-lowered `OjGraph`; it does not re-derive
+lowering or note-routing. The §8 trigger fires only if an offline path ever resolves notes or
+lowers a graph *server-side* (re-implementing, not importing) — which the OfflineDriver does not.
+
+Two consequences are load-bearing and must stay true:
+
+1. **There is never a second, parallel non-RT "mixdown" engine** (code-value #2). A bounce that
+   drifts from the live take is the lie to the performer's hands the project forbids; reusing one
+   `process_block` makes the bounce **bit-identical by construction**, and the `golden_render`
+   fingerprint is the standing CI gate on every kernel change.
+2. **The timeline, arrangement, automation, and mixer are Tier-4** (TypeScript) that compile
+   *down* to the flat `OjGraph` + an off-RT event stream — exactly as `emitOjGraph` already lowers
+   the visual graph. `ojcore` gains zero timeline lines; the only kernel additions the DAW
+   genuinely forces are a few additive, CLAP-precedented hooks (sample-accurate `at_frame`
+   scheduling, latency reporting, the `ExtId` extension-query of [STABILITY.md](./STABILITY.md) §4)
+   plus the stereo `n_channels` widening of `ProcessCtx`.
+
+So the offline / produce world is reached by *more nodes and more TypeScript*, driven by a second
+clock over the one unchanged kernel — never by forking the core.
+
+---
+
 *Related: [agents.md](../agents.md) (the two beliefs + code values this is derived from) ·
 [ARCHITECTURE.md](./ARCHITECTURE.md) (the crate map + the CI gates that enforce Tier 1) ·
 [PRODUCT.md](../PRODUCT.md) (why the medium is unforgiving).*
