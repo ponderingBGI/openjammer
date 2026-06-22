@@ -15,8 +15,8 @@
  *     locks. All buffers it needs are sized by `ojhost_prepare`.
  *
  * Licensing note: JUCE 8 is used under AGPL-3.0 (OpenJammer is AGPL-3.0). The
- * VST3 hosting path additionally requires the Steinberg VST3 SDK (its own
- * license). CLAP is MIT. See crates/ojhost/README.md.
+ * VST2 is owner-provisioned only; VST3 additionally requires the Steinberg VST3
+ * SDK/license. CLAP is MIT. See crates/ojhost/README.md.
  */
 #ifndef OJHOST_JUCE_H
 #define OJHOST_JUCE_H
@@ -30,15 +30,24 @@ extern "C" {
 
 /* Binary format tags — kept numerically in sync with Rust `PluginFormat`. */
 typedef enum OjPluginFormat {
-    OJ_FORMAT_VST3 = 0,
-    OJ_FORMAT_CLAP = 1,
-    OJ_FORMAT_AU = 2, /* macOS only; never emitted off-macOS */
+    OJ_FORMAT_VST2 = 0,
+    OJ_FORMAT_VST3 = 1,
+    OJ_FORMAT_CLAP = 2,
+    OJ_FORMAT_AU = 3, /* macOS only; never emitted off-macOS */
 } OjPluginFormat;
+
+typedef struct OjHostedParam {
+    uint32_t id;
+    const char* name;
+    double min;
+    double max;
+    double default_value;
+} OjHostedParam;
 
 /* One scanned plugin. All `const char*` are NUL-terminated and owned by the
  * C++ side until `ojhost_free_scan` is called on the owning array. */
 typedef struct OjPluginDesc {
-    const char* uid;            /* stable per-plugin id (CLAP id / VST3 UID)  */
+    const char* uid;            /* stable per-plugin id (CLAP id / VST UID)   */
     const char* name;           /* display name                               */
     const char* vendor;         /* manufacturer                               */
     const char* path;           /* binary/bundle path that was scanned        */
@@ -47,6 +56,7 @@ typedef struct OjPluginDesc {
     uint16_t audio_in;          /* main input channel count                   */
     uint16_t audio_out;         /* main output channel count                  */
     uint32_t param_count;       /* number of automatable parameters           */
+    const OjHostedParam* params; /* parameter descriptors, length param_count  */
     uint32_t latency_samples;   /* reported processing latency in samples     */
 } OjPluginDesc;
 
@@ -59,6 +69,7 @@ typedef struct OjScanResult {
 /* Opaque handles. */
 typedef struct OjHost OjHost;       /* a scanning/format-manager context     */
 typedef struct OjPlugin OjPlugin;   /* one loaded, processable plugin        */
+typedef struct OjPluginEditor OjPluginEditor; /* one native plugin editor window */
 
 /* ----------------------------------------------------------------------------
  * Lifecycle / scanning (all OFF the audio thread).
@@ -123,6 +134,16 @@ uint32_t ojhost_param_count(const OjPlugin* plugin);
 
 /* Destroy a loaded plugin instance. */
 void ojhost_unload(OjPlugin* plugin);
+
+/* ----------------------------------------------------------------------------
+ * Native editor windows (OFF the audio thread).
+ * ------------------------------------------------------------------------- */
+OjPluginEditor* ojhost_editor_open(const char* path,
+                                   const char* uid,
+                                   OjPluginFormat format,
+                                   const char** err);
+void ojhost_editor_focus(OjPluginEditor* editor);
+void ojhost_editor_close(OjPluginEditor* editor);
 
 #ifdef __cplusplus
 } /* extern "C" */

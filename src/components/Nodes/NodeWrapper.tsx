@@ -458,7 +458,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
             const dynamic = getDynamicPlugin(node.pluginId);
             if (dynamic) {
                 const dynManifest = manifestForDynamic(node.pluginId, dynamic);
-                if (dynManifest.params.length > 0) {
+                if (dynManifest.ui === 'auto') {
                     return <AutoParamPanel node={node} manifest={dynManifest} />;
                 }
             }

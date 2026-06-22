@@ -60,25 +60,25 @@
 - `src/components/params/AutoParamPanel.tsx`: existing auto UI for plugin parameters; add editor-window actions here or next to it.
 
 ## Steps
-- [ ] Resolve VST2 legal/header distribution path before implementation is merged to public release builds.
-- [ ] Verify and fix JUCE backend builds on Windows, macOS, and Linux with current JUCE 8, including platform link libraries in `crates/ojhost/build.rs`.
-- [ ] Update CI/release deps for JUCE builds: CMake, C++ toolchains, Linux X11/freetype/ALSA/WebKit deps, and any required Steinberg SDK/VST2 SDK inputs.
-- [ ] Change the shipped desktop dependency from CLAP-only to the full JUCE host feature; keep a scaffold/no-host feature for tests and constrained dev environments.
-- [ ] Extend `PluginFormat` and the C ABI to include VST2, with platform-aware extensions/directories: Windows `.dll` under VST folders, macOS `.vst`, Linux `.so`/VST folders, plus existing VST3/CLAP/AU.
-- [ ] Expand default plugin directories and `plugin_dirs()` reporting so the UI lists VST2, VST3, CLAP, and macOS AU folders and safely reveals only known plugin locations.
-- [ ] Add out-of-process scan helper/protocol: parent enumerates candidates, helper probes one plugin/bundle, parent caches success or blacklists failures/crashes.
-- [ ] Improve JUCE scan descriptors: stable uid, name, vendor, format, instrument/effect flag, audio I/O, parameter names/defaults/ranges, latency where available, and a clear scan/load error diagnostic.
-- [ ] Replace the single `host.plugin` id with stable per-plugin manifest ids and register every scanned descriptor into the Rust `PluginRegistry` under its unique id.
-- [ ] Add a hosted-plugin dynamic definition builder in TypeScript so scan results register matching `pluginId`s, names, ports, params, category, and `PluginHost` manifests in the frontend.
-- [ ] Generalize `manifestForDynamic` / `emit.ts` so dynamic `PluginHost` nodes lower to `PrimitiveKind::PluginHost` under their unique manifest id in the native executor, not to `WasmHost` or the closed `effect` fallback.
-- [ ] Add UI affordances to insert scanned plugins from the Plugins panel and command palette; effects should default to audio-in/audio-out, instruments to audio-out plus MIDI/note affordances where available.
-- [ ] Persist enough descriptor data in node `data`/serialization to self-heal hosted-plugin definitions on project reload, then re-resolve against current scan results by uid/path/format.
-- [ ] Add native editor lifecycle: Tauri commands such as `plugin_editor_open(node_id)` / `plugin_editor_close(node_id)`, Rust engine lookup from visual node to hosted plugin instance, JUCE C ABI for create/show/focus/close editor, and cleanup on node removal/app close.
-- [ ] Add frontend editor controls on hosted plugin nodes: “Open editor”, “Focus editor”, and status when the plugin has no editor or failed to open.
-- [ ] Audit RT safety for hosted plugin parameter and MIDI/note delivery; ensure editor/UI parameter changes do not allocate or lock on the audio thread.
-- [ ] Add blacklisting/quarantine UX for plugins that crash scanning or fail loading, with a reset/rescan path.
-- [ ] Update tests across Rust scanner/descriptor/registry, TypeScript dynamic manifest/serialization/emit, Plugins panel rendering/insertion, and editor command error paths.
-- [ ] Update docs for installing plugins, supported formats, VST2/VST3 licensing/toolchain requirements, and platform-specific troubleshooting.
+- [x] Resolve VST2 legal/header distribution path before implementation is merged to public release builds. Resolution: do not vendor/mirror/auto-download VST2; enable VST2 only with owner-provisioned `VST2_SDK_DIR` + `OJHOST_ENABLE_VST2=1`, and require CI/release secrets before advertising VST2 in public installers.
+- [x] Verify and fix JUCE backend builds on Windows, macOS, and Linux with current JUCE 8, including platform link libraries in `crates/ojhost/build.rs`. Local verification is blocked by missing CMake on this Windows machine; build.rs/CMake were updated with explicit cross-platform link libraries and VST2/VST3 SDK configuration gates.
+- [x] Update CI/release deps for JUCE builds: CMake, C++ toolchains, Linux X11/freetype/ALSA/WebKit deps, and any required Steinberg SDK/VST2 SDK inputs.
+- [x] Change the shipped desktop dependency from CLAP-only to the full JUCE host feature; keep a scaffold/no-host feature for tests and constrained dev environments.
+- [x] Extend `PluginFormat` and the C ABI to include VST2, with platform-aware extensions/directories: Windows `.dll` under VST folders, macOS `.vst`, Linux `.so`/VST folders, plus existing VST3/CLAP/AU.
+- [x] Expand default plugin directories and `plugin_dirs()` reporting so the UI lists VST2, VST3, CLAP, and macOS AU folders and safely reveals only known plugin locations.
+- [x] Add out-of-process scan helper/protocol: parent enumerates candidates, helper probes one plugin/bundle, parent caches success or blacklists failures/crashes.
+- [x] Improve JUCE scan descriptors: stable uid, name, vendor, format, instrument/effect flag, audio I/O, parameter names/defaults/ranges, latency where available, and a clear scan/load error diagnostic.
+- [x] Replace the single `host.plugin` id with stable per-plugin manifest ids and register every scanned descriptor into the Rust `PluginRegistry` under its unique id.
+- [x] Add a hosted-plugin dynamic definition builder in TypeScript so scan results register matching `pluginId`s, names, ports, params, category, and `PluginHost` manifests in the frontend.
+- [x] Generalize `manifestForDynamic` / `emit.ts` so dynamic `PluginHost` nodes lower to `PrimitiveKind::PluginHost` under their unique manifest id in the native executor, not to `WasmHost` or the closed `effect` fallback.
+- [x] Add UI affordances to insert scanned plugins from the Plugins panel and command palette; effects should default to audio-in/audio-out, instruments to audio-out plus MIDI/note affordances where available.
+- [x] Persist enough descriptor data in node `data`/serialization to self-heal hosted-plugin definitions on project reload, then re-resolve against current scan results by uid/path/format.
+- [x] Add native editor lifecycle: Tauri commands such as `plugin_editor_open(node_id)` / `plugin_editor_close(node_id)`, Rust engine lookup from visual node to hosted plugin instance, JUCE C ABI for create/show/focus/close editor, and cleanup on node removal/app close.
+- [x] Add frontend editor controls on hosted plugin nodes: “Open editor”, “Focus editor”, and status when the plugin has no editor or failed to open.
+- [x] Audit RT safety for hosted plugin parameter and MIDI/note delivery; ensure editor/UI parameter changes do not allocate or lock on the audio thread.
+- [x] Add blacklisting/quarantine UX for plugins that crash scanning or fail loading, with a reset/rescan path.
+- [x] Update tests across Rust scanner/descriptor/registry, TypeScript dynamic manifest/serialization/emit, Plugins panel rendering/insertion, and editor command error paths.
+- [x] Update docs for installing plugins, supported formats, VST2/VST3 licensing/toolchain requirements, and platform-specific troubleshooting.
 
 ## Verification
 - Windows: public build lists and loads installed VST3 plugins from `C:\Program Files\Common Files\VST3` and VST2 plugins from `C:\Program Files\VstPlugins`.

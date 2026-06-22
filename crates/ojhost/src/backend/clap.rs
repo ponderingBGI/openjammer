@@ -30,7 +30,7 @@ use std::path::Path;
 
 use clack_host::prelude::*;
 
-use super::HostedBackend;
+use super::{EditorBackend, HostedBackend};
 use crate::descriptor::{HostedParam, PluginDescriptor, PluginFormat, PortCounts};
 use crate::error::HostError;
 
@@ -272,6 +272,12 @@ struct ClapBackend {
     param_ids: Vec<clack_host::utils::ClapId>,
 }
 
+pub(super) fn open_editor(
+    _desc: &PluginDescriptor,
+) -> Result<Box<dyn EditorBackend>, HostError> {
+    Err(HostError::Unavailable)
+}
+
 impl HostedBackend for ClapBackend {
     fn activate(&mut self, _sample_rate: f32, _max_block: usize) {
         // Already activated + processing in `open` (clack requires activation to
@@ -396,7 +402,7 @@ mod tests {
     /// load, so the bogus path never touches the filesystem.
     #[test]
     fn probe_skips_non_clap_without_panicking() {
-        for fmt in [PluginFormat::Vst3, PluginFormat::Au] {
+        for fmt in [PluginFormat::Vst2, PluginFormat::Vst3, PluginFormat::Au] {
             let got = probe(Path::new("/nonexistent/Plug.bin"), fmt)
                 .expect("non-CLAP probe must be Ok(empty), never a panic or error");
             assert!(got.is_empty(), "non-CLAP probe must yield no descriptors");

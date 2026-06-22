@@ -40,23 +40,47 @@ bun native     # run the native desktop app — or launch the installed build
 
 ## 3. Third-party plugins
 ```bash
-cargo build -p oj-tauri --features ojhost/clap-host   # CLAP (pure Rust, no extra deps)
-# JUCE VST3/AU also needs CMake; see crates/ojhost/README.md
-```
-From the UI, `scan_plugins` your plugin dirs (`~/.clap`, `~/.vst3`, macOS AU
-`~/Library/Audio/Plug-Ins/Components`), insert one, confirm it processes audio.
+# Shipped desktop path: JUCE host (VST3 + CLAP, AU on macOS; VST2 when owner-provisioned)
+cargo build -p oj-tauri
 
-## 4. Live Faust DSP (AI-authored nodes)
+# Constrained/dev fallback: no plugin host
+cargo build -p oj-tauri --no-default-features
+
+# Pure-Rust CLAP-only fallback
+cargo build -p oj-tauri --no-default-features --features plugin-host-clap
+```
+JUCE builds need CMake + a C++ toolchain. Linux also needs ALSA, freetype,
+fontconfig, X11/Xext/Xinerama/Xrandr/Xcursor, and OpenGL dev packages. VST2 is
+owner-provisioned only: set `OJHOST_ENABLE_VST2=1` and `VST2_SDK_DIR` to a
+legally obtained SDK/header checkout; never commit the SDK.
+
+From the UI, open Plugins → Re-scan. Verify installed VST3, CLAP, VST2 (when
+provisioned), and macOS AU folders are listed, insert one effect and one
+instrument, open/focus/close the native editor, and confirm audio/notes work.
+
+## 4. Benchmarks / CodSpeed
+```bash
+bun run bench                  # local Criterion-compatible benchmark run
+cargo codspeed --version       # should print cargo-codspeed 4.7.0+
+bun run bench:codspeed:build   # build CodSpeed simulation+memory instruments
+bun run bench:codspeed:run     # local smoke run (real metrics appear only in CodSpeed CI)
+```
+CodSpeed CI measures `ojcore`, `ojcore-dsp`, `ojinstrument`, `ojproto`, and
+`ojhost`. The `ojhost` bench intentionally uses the scaffold backend, so it never
+loads third-party binaries during CI; it tracks hosted-plugin ids, registry
+insertion, and scan-cache JSON costs.
+
+## 5. Live Faust DSP (AI-authored nodes)
 Install **libfaust** (+ LLVM), then `cargo build -p ojfaust --features libfaust`.
 Without it, AI-authored Faust source is stored against the node for later compile.
 
-## 5. Ctrl+K AI (Pi)
+## 6. Ctrl+K AI (Pi)
 Install Pi (`bun add -g @earendil-works/pi-coding-agent`; `pi --version`), set ONE
 provider key (in `~/.pi`, or via the env var the app forwards). Ctrl+K → type a
 prompt → **Tab** → the agent builds/edits nodes live; use plain Ctrl+Z to undo.
 Browser shows “AI requires the desktop app”.
 
-## 6. LAN collaboration
+## 7. LAN collaboration
 Open two clients, host/join a session (share the code), confirm live patch edits +
 presence (cursors/peer list) converge. For peers across NAT, provide STUN/TURN +
 a signaling relay (see `src/collab/README.md`); the realtime audio plane is a

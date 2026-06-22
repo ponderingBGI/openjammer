@@ -25,7 +25,10 @@
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::backend;
 use crate::descriptor::{PluginDescriptor, PluginFormat};
@@ -158,8 +161,8 @@ pub fn scan(dirs: &[PathBuf]) -> Result<Vec<PluginDescriptor>, HostError> {
     scan_with(dirs, &mut blacklist, None)
 }
 
-/// The OS-standard plugin install directories (CLAP everywhere, VST3 too where
-/// the backend can host it). The "scan my installed plugins with no arguments"
+/// The OS-standard plugin install directories (VST2/VST3/CLAP everywhere, AU on
+/// macOS). The "scan my installed plugins with no arguments"
 /// default the UI uses — a missing directory is simply skipped by [`scan`], so
 /// this is always safe to pass. Reads `$HOME` / the Windows program-files env
 /// vars; pure path construction, no filesystem access.
@@ -172,9 +175,13 @@ pub fn default_plugin_dirs() -> Vec<PathBuf> {
         if let Some(h) = home.as_ref() {
             dirs.push(h.join("Library/Audio/Plug-Ins/CLAP"));
             dirs.push(h.join("Library/Audio/Plug-Ins/VST3"));
+            dirs.push(h.join("Library/Audio/Plug-Ins/VST"));
+            dirs.push(h.join("Library/Audio/Plug-Ins/Components"));
         }
         dirs.push(PathBuf::from("/Library/Audio/Plug-Ins/CLAP"));
         dirs.push(PathBuf::from("/Library/Audio/Plug-Ins/VST3"));
+        dirs.push(PathBuf::from("/Library/Audio/Plug-Ins/VST"));
+        dirs.push(PathBuf::from("/Library/Audio/Plug-Ins/Components"));
     }
 
     #[cfg(target_os = "windows")]
@@ -182,9 +189,16 @@ pub fn default_plugin_dirs() -> Vec<PathBuf> {
         if let Some(cf) = std::env::var_os("COMMONPROGRAMFILES").map(PathBuf::from) {
             dirs.push(cf.join("CLAP"));
             dirs.push(cf.join("VST3"));
+            dirs.push(cf.join("VST2"));
+        }
+        if let Some(pf) = std::env::var_os("ProgramFiles").map(PathBuf::from) {
+            dirs.push(pf.join("VstPlugins"));
+            dirs.push(pf.join("Steinberg/VstPlugins"));
         }
         if let Some(la) = std::env::var_os("LOCALAPPDATA").map(PathBuf::from) {
             dirs.push(la.join("Programs/Common/CLAP"));
+            dirs.push(la.join("Programs/Common/VST3"));
+            dirs.push(la.join("Programs/Common/VST2"));
         }
     }
 
@@ -193,9 +207,14 @@ pub fn default_plugin_dirs() -> Vec<PathBuf> {
         if let Some(h) = home.as_ref() {
             dirs.push(h.join(".clap"));
             dirs.push(h.join(".vst3"));
+            dirs.push(h.join(".vst"));
         }
         dirs.push(PathBuf::from("/usr/lib/clap"));
         dirs.push(PathBuf::from("/usr/local/lib/clap"));
+        dirs.push(PathBuf::from("/usr/lib/vst3"));
+        dirs.push(PathBuf::from("/usr/local/lib/vst3"));
+        dirs.push(PathBuf::from("/usr/lib/vst"));
+        dirs.push(PathBuf::from("/usr/local/lib/vst"));
     }
 
     let _ = home; // used per-cfg above
@@ -262,7 +281,7 @@ pub fn scan_with(
 
         // Guard the probe: blacklist BEFORE, clear AFTER a clean probe.
         blacklist.mark_before_probe(&path_str)?;
-        match backend::probe(&path, format) {
+        match probe_candidate_prefer_helper(&path, format) {
             Ok(found) => {
                 blacklist.clear_after_probe(&path_str)?;
                 for d in found {
@@ -283,6 +302,120 @@ pub fn scan_with(
         cache.save(file)?;
     }
     Ok(out)
+}
+
+/// Probe a single plugin candidate in-process. Public for the optional scan
+/// helper binary; normal callers should use [`scan`] / [`scan_with`] so cache,
+/// blacklist, and out-of-process crash isolation are applied.
+pub fn probe_candidate(path: &Path) -> Result<Vec<PluginDescriptor>, HostError> {
+    let format = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .and_then(PluginFormat::from_extension)
+        .ok_or_else(|| HostError::Load {
+            message: format!("unsupported plugin extension: {}", path.display()),
+        })?;
+    backend::probe(path, format)
+}
+
+fn probe_candidate_prefer_helper(
+    path: &Path,
+    format: PluginFormat,
+) -> Result<Vec<PluginDescriptor>, HostError> {
+    match probe_via_helper(path) {
+        Ok(found) => Ok(found),
+        Err(ProbeHelperError::Unavailable) => backend::probe(path, format),
+        Err(ProbeHelperError::Failed(message)) => Err(HostError::Load { message }),
+    }
+}
+
+#[derive(Debug)]
+enum ProbeHelperError {
+    Unavailable,
+    Failed(String),
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ProbeHelperResponse {
+    pub ok: bool,
+    pub descriptors: Vec<PluginDescriptor>,
+    pub error: Option<String>,
+}
+
+fn probe_via_helper(path: &Path) -> Result<Vec<PluginDescriptor>, ProbeHelperError> {
+    let helper = scan_helper_path().ok_or(ProbeHelperError::Unavailable)?;
+    let mut child = Command::new(&helper)
+        .arg(path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| ProbeHelperError::Failed(format!("failed to spawn scan helper: {e}")))?;
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut stdout = String::new();
+                if let Some(mut out) = child.stdout.take() {
+                    let _ = out.read_to_string(&mut stdout);
+                }
+                let mut stderr = String::new();
+                if let Some(mut err) = child.stderr.take() {
+                    let _ = err.read_to_string(&mut stderr);
+                }
+                if !status.success() {
+                    return Err(ProbeHelperError::Failed(format!(
+                        "scan helper exited with {status}: {stderr}"
+                    )));
+                }
+                let response: ProbeHelperResponse = serde_json::from_str(&stdout).map_err(|e| {
+                    ProbeHelperError::Failed(format!("bad scan helper response: {e}"))
+                })?;
+                return if response.ok {
+                    Ok(response.descriptors)
+                } else {
+                    Err(ProbeHelperError::Failed(
+                        response.error.unwrap_or_else(|| "scan helper failed".into()),
+                    ))
+                };
+            }
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(ProbeHelperError::Failed(format!(
+                        "scan helper timed out probing {}",
+                        path.display()
+                    )));
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            Err(e) => {
+                let _ = child.kill();
+                return Err(ProbeHelperError::Failed(format!(
+                    "scan helper wait failed: {e}"
+                )));
+            }
+        }
+    }
+}
+
+fn scan_helper_path() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("OJHOST_SCAN_HELPER").map(PathBuf::from) {
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    let name = if cfg!(windows) {
+        "ojhost-scan-helper.exe"
+    } else {
+        "ojhost-scan-helper"
+    };
+    let candidate = dir.join(name);
+    candidate.is_file().then_some(candidate)
 }
 
 /// Enumerate candidate plugin paths under `dirs` (one level of recursion into

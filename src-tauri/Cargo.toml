@@ -36,11 +36,11 @@ ojinstrument = { path = "../crates/ojinstrument" }
 ojproto = { path = "../crates/ojproto" }
 
 # --- third-party plugin host (U-JUCE) ----------------------------------------
-# Scans for and hosts CLAP plugins as ojcore nodes (NATIVE-ONLY). The shipped
-# desktop app enables `clap-host` (pure-Rust `clack`, MIT — no C++/CMake), so
-# CLAP hosting works out of the box. VST3 / AU need the heavier `juce` feature
-# (bundled C++ JUCE 8 + CMake) and stay opt-in — see crates/ojhost/README.md.
-ojhost = { path = "../crates/ojhost", features = ["clap-host"] }
+# Scans for and hosts VST2/VST3/CLAP/AU plugins as ojcore nodes (NATIVE-ONLY).
+# The shipped desktop app enables the full JUCE host via this crate's default
+# `plugin-host-juce` feature. Constrained/test builds can opt out with
+# `--no-default-features` (scaffold/no-host) or select `plugin-host-clap`.
+ojhost = { path = "../crates/ojhost" }
 
 # --- AI DSP-node authoring (U20) ---------------------------------------------
 # Host-side Faust compilation behind the AI agent's `author_dsp_node` tool.
@@ -76,6 +76,15 @@ tracing = { workspace = true }
 tracing-appender = { workspace = true }
 
 [features]
+# Shipped desktop default: full JUCE host (VST2 when owner-provisioned, VST3,
+# CLAP, and AU on macOS). Use `--no-default-features` for the scaffold/no-host
+# test build, or `--no-default-features --features plugin-host-clap` for the
+# pure-Rust CLAP-only backend.
+default = ["plugin-host-juce"]
+plugin-host-juce = ["ojhost/juce"]
+plugin-host-clap = ["ojhost/clap-host"]
+plugin-host-scaffold = []
+
 # This feature must be enabled when building the app in production, so the
 # webview loads the bundled frontend instead of the dev server. Tauri's CLI sets
 # it via `tauri build`; harmless in `cargo build`.

@@ -32,6 +32,11 @@ use crate::error::HostError;
 /// pre-allocate all scratch in [`HostedBackend::activate`].
 ///
 /// `Send` so the engine can move a freshly-loaded plugin onto the audio thread.
+pub trait EditorBackend: Send {
+    fn focus(&mut self);
+    fn close(&mut self);
+}
+
 pub trait HostedBackend: Send {
     /// Off-RT: bind to the sample rate and the max block size any later
     /// `process` will request. Backends allocate their channel/buffer scratch
@@ -73,6 +78,10 @@ pub(crate) fn open(
     active::open(desc, sample_rate, max_block)
 }
 
+pub(crate) fn open_editor(desc: &PluginDescriptor) -> Result<Box<dyn EditorBackend>, HostError> {
+    active::open_editor(desc)
+}
+
 // Select the single active backend. `juce` is the superset, so it wins when both
 // features are requested.
 #[cfg(all(feature = "clap-host", not(feature = "juce")))]
@@ -104,6 +113,12 @@ mod scaffold {
         _sample_rate: f32,
         _max_block: usize,
     ) -> Result<Box<dyn HostedBackend>, HostError> {
+        Err(HostError::Unavailable)
+    }
+
+    pub(super) fn open_editor(
+        _desc: &PluginDescriptor,
+    ) -> Result<Box<dyn EditorBackend>, HostError> {
         Err(HostError::Unavailable)
     }
 }

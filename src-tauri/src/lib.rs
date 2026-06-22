@@ -20,10 +20,12 @@ mod engine;
 mod sandbox;
 mod updater;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use engine::BackendState;
-use ojhost::PluginDescriptor;
+use ojhost::{PluginDescriptor, PluginEditor};
 use ojproto::{EngineFrame, Event, NodeIdx, OjGraph, RtCommand};
 use tauri::Manager;
 
@@ -86,55 +88,146 @@ fn scan_plugins(
         .map_err(|e| e.to_string())
 }
 
-/// A CLAP plugin folder shown in the Plugins panel, tagged by scope so the UI can
-/// explain why there are two — a per-user folder and a system-wide one — and lead
-/// with the admin-free one.
+/// A plugin folder shown in the Plugins panel, tagged by scope + format so the UI
+/// can explain exactly where VST2/VST3/CLAP/AU plugins are discovered.
 #[derive(serde::Serialize)]
 struct PluginDir {
     path: String,
     /// `"user"` (under the profile dir — no admin to drop a plugin in) or
     /// `"system"` (all users; usually needs admin).
     scope: &'static str,
+    /// Human format tag: `"VST2"`, `"VST3"`, `"CLAP"`, or `"AU"`.
+    format: &'static str,
 }
 
-/// The OS-standard CLAP plugin folders for THIS machine, tagged by scope. The
+/// The OS-standard plugin folders for THIS machine, tagged by scope + format. The
 /// Plugins panel shows these in its empty state so the player sees the real paths
 /// (and can open one with [`reveal_path`]) instead of generic cross-platform
-/// examples — CLAP is the format the native build hosts. The per-user folder is
-/// listed first because it needs no admin rights.
+/// examples. Per-user folders are listed first because they need no admin rights.
 #[tauri::command]
 fn plugin_dirs() -> Vec<PluginDir> {
     let home = std::env::var_os("USERPROFILE")
         .or_else(|| std::env::var_os("HOME"))
         .map(PathBuf::from);
-    let mut dirs: Vec<PluginDir> = ojhost::clap_plugin_dirs()
+    let mut dirs: Vec<PluginDir> = ojhost::default_plugin_dirs()
         .into_iter()
-        .map(|p| {
+        .filter_map(|p| {
+            let format = plugin_dir_format(&p)?;
             let user = home.as_ref().is_some_and(|h| p.starts_with(h));
-            PluginDir {
+            Some(PluginDir {
                 path: p.to_string_lossy().into_owned(),
                 scope: if user { "user" } else { "system" },
-            }
+                format,
+            })
         })
         .collect();
-    // Lead with the per-user folder — it needs no admin to drop a plugin into.
-    dirs.sort_by_key(|d| d.scope != "user");
+    // Lead with the per-user folder, then stable by format/path.
+    dirs.sort_by_key(|d| (d.scope != "user", d.format, d.path.clone()));
     dirs
+}
+
+fn plugin_dir_format(path: &std::path::Path) -> Option<&'static str> {
+    let leaf = path.file_name()?.to_str()?.to_ascii_lowercase();
+    if leaf == "clap" || leaf == ".clap" {
+        Some("CLAP")
+    } else if leaf == "vst3" || leaf == ".vst3" {
+        Some("VST3")
+    } else if leaf == "components" {
+        Some("AU")
+    } else if leaf == "vst" || leaf == ".vst" || leaf == "vst2" || leaf == "vstplugins" {
+        Some("VST2")
+    } else {
+        None
+    }
 }
 
 /// Open one of the plugin folders in the OS file manager (Explorer / Finder /
 /// `xdg-open`). The path MUST be one of the known plugin dirs — we never open an
 /// arbitrary path handed in from the webview. The folder is created first
-/// (best-effort) so a not-yet-existing user CLAP dir still opens, giving the player
-/// somewhere to drop a `.clap`.
+/// (best-effort) so a not-yet-existing user plugin dir still opens, giving the
+/// player somewhere to drop a plugin.
 #[tauri::command]
 fn reveal_path(path: String) -> Result<(), String> {
     let target = PathBuf::from(&path);
-    if !ojhost::clap_plugin_dirs().iter().any(|d| d == &target) {
+    if !ojhost::default_plugin_dirs().iter().any(|d| d == &target) {
         return Err("refusing to open a path that is not a plugin folder".into());
     }
     let _ = std::fs::create_dir_all(&target);
     open_in_file_manager(&target)
+}
+
+#[derive(Default)]
+struct PluginEditorState(Mutex<HashMap<String, PluginEditor>>);
+
+#[tauri::command]
+fn plugin_quarantine_reset() -> Result<(), String> {
+    let pedal = std::env::temp_dir().join("ojhost_dead_mans_pedal.txt");
+    match std::fs::remove_file(&pedal) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn plugin_editor_open(
+    node_id: String,
+    descriptor: PluginDescriptor,
+    state: tauri::State<'_, PluginEditorState>,
+) -> Result<(), String> {
+    let mut editors = state
+        .0
+        .lock()
+        .map_err(|_| "plugin editor mutex poisoned".to_string())?;
+    if let Some(editor) = editors.get_mut(&node_id) {
+        editor.focus();
+        return Ok(());
+    }
+    let mut editor = PluginEditor::open(&descriptor).map_err(|e| e.to_string())?;
+    editor.focus();
+    editors.insert(node_id, editor);
+    Ok(())
+}
+
+#[tauri::command]
+fn plugin_editor_focus(
+    node_id: String,
+    state: tauri::State<'_, PluginEditorState>,
+) -> Result<(), String> {
+    let mut editors = state
+        .0
+        .lock()
+        .map_err(|_| "plugin editor mutex poisoned".to_string())?;
+    let editor = editors
+        .get_mut(&node_id)
+        .ok_or_else(|| "plugin editor is not open".to_string())?;
+    editor.focus();
+    Ok(())
+}
+
+#[tauri::command]
+fn plugin_editor_close(
+    node_id: String,
+    state: tauri::State<'_, PluginEditorState>,
+) -> Result<(), String> {
+    let mut editors = state
+        .0
+        .lock()
+        .map_err(|_| "plugin editor mutex poisoned".to_string())?;
+    if let Some(mut editor) = editors.remove(&node_id) {
+        editor.close();
+    }
+    Ok(())
+}
+
+fn close_all_plugin_editors(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<PluginEditorState>() {
+        if let Ok(mut editors) = state.0.lock() {
+            for (_, mut editor) in editors.drain() {
+                editor.close();
+            }
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -520,6 +613,7 @@ pub fn run() {
         // quitting. macOS: no-op until the build is notarized.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
+                close_all_plugin_editors(window.app_handle());
                 updater::install_on_quit(window.app_handle());
             }
         })
@@ -557,6 +651,7 @@ pub fn run() {
                 }
             }
             app.manage(backend);
+            app.manage(PluginEditorState::default());
             // The at-most-one warm Pi child for the session (Phase 1: instant feel).
             app.manage(ai::WarmChildState::default());
             // The loopback tool bridge (Phase 3: real graph reads round-trip to Pi).
@@ -587,6 +682,10 @@ pub fn run() {
             scan_plugins,
             plugin_dirs,
             reveal_path,
+            plugin_quarantine_reset,
+            plugin_editor_open,
+            plugin_editor_focus,
+            plugin_editor_close,
             ai::ai_run,
             ai::ai_command,
             ai::ai_prewarm,
