@@ -212,6 +212,10 @@ impl PluginHostLoader {
                 audio_out: descriptor.ports.audio_out.min(u8::MAX as u16) as u8,
                 control_in: 0,
                 control_out: 0,
+                // Hosted plugins are treated as mono-per-port for now; stereo
+                // hosting wires the descriptor's channel layout in a later step.
+                audio_in_channels: 1,
+                audio_out_channels: 1,
             },
         };
         Self {

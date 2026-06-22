@@ -59,12 +59,17 @@ export interface ParamDecl {
     default: number;
 }
 
-/** Declares a node's port topology (audio + control, in + out). */
+/** Declares a node's port topology (audio + control, in + out) + per-audio-port
+ * channel counts (1=mono, 2=stereo; default 1). See docs/CHANNELS.md. */
 export interface PortDecl {
     audio_in: number;
     audio_out: number;
     control_in: number;
     control_out: number;
+    /** Channels per audio INPUT port (default 1 = mono). */
+    audio_in_channels?: number;
+    /** Channels per audio OUTPUT port (default 1 = mono). */
+    audio_out_channels?: number;
 }
 
 /** A contract/ABI version, `major.minor` (see {@link Abi}, docs/STABILITY.md §4). */

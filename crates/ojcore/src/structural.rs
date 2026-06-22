@@ -150,6 +150,8 @@ impl StructuralLoader {
                     audio_out,
                     control_in: 0,
                     control_out: 0,
+                    audio_in_channels: 1,
+                    audio_out_channels: 1,
                 },
             },
         }

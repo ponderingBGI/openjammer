@@ -112,6 +112,8 @@ fn biquad_manifest() -> PluginManifest {
             audio_out: 1,
             control_in: 0,
             control_out: 0,
+            audio_in_channels: 1,
+            audio_out_channels: 1,
         },
     }
 }
@@ -261,6 +263,8 @@ fn waveshaper_manifest() -> PluginManifest {
             audio_out: 1,
             control_in: 0,
             control_out: 0,
+            audio_in_channels: 1,
+            audio_out_channels: 1,
         },
     }
 }
@@ -414,6 +418,8 @@ fn delay_manifest() -> PluginManifest {
             audio_out: 1,
             control_in: 0,
             control_out: 0,
+            audio_in_channels: 1,
+            audio_out_channels: 1,
         },
     }
 }
@@ -564,6 +570,8 @@ fn convolution_manifest() -> PluginManifest {
             audio_out: 1,
             control_in: 0,
             control_out: 0,
+            audio_in_channels: 1,
+            audio_out_channels: 1,
         },
     }
 }

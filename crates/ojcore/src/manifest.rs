@@ -54,13 +54,44 @@ pub struct ParamDecl {
     pub default: f32,
 }
 
-/// Declares a node's port topology (audio + control, in + out).
+/// serde default for the additive per-port channel counts: `1` (mono), so a
+/// manifest authored before stereo deserializes as mono.
+fn one_channel() -> u8 {
+    1
+}
+
+/// Declares a node's port topology (audio + control, in + out) and how many
+/// CHANNELS each audio port carries (`1` = mono, `2` = stereo).
+///
+/// Per `docs/CHANNELS.md`: a port carries `n_channels` (one stereo cable, not paired
+/// mono wires). The channel counts are a node-TYPE property declared here and DERIVED
+/// by the compiler from the registry — additive and `1` by default, so the wire IR
+/// never grows and a mono node is byte-identical to before.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortDecl {
     pub audio_in: u8,
     pub audio_out: u8,
     pub control_in: u8,
     pub control_out: u8,
+    /// Channels carried by EACH audio INPUT port (`1` = mono, `2` = stereo). Default `1`.
+    #[serde(default = "one_channel")]
+    pub audio_in_channels: u8,
+    /// Channels carried by EACH audio OUTPUT port. Default `1` (mono).
+    #[serde(default = "one_channel")]
+    pub audio_out_channels: u8,
+}
+
+impl PortDecl {
+    /// Total audio INPUT lanes (`ports × channels`) a node's input scratch must hold.
+    /// Channels clamp to `>= 1` so a malformed `0` never under-allocates.
+    pub fn audio_in_lanes(&self) -> usize {
+        self.audio_in as usize * self.audio_in_channels.max(1) as usize
+    }
+
+    /// Total audio OUTPUT lanes (`ports × channels`) a node's output buffers must hold.
+    pub fn audio_out_lanes(&self) -> usize {
+        self.audio_out as usize * self.audio_out_channels.max(1) as usize
+    }
 }
 
 /// A contract/ABI version, `major.minor` (see [`Abi`] and `docs/STABILITY.md` §4).
@@ -282,5 +313,44 @@ mod abi_tests {
         };
         let req: alloc::vec::Vec<&str> = abi.required_capabilities().collect();
         assert_eq!(req, vec!["oj.state"]);
+    }
+
+    #[test]
+    fn port_decl_channel_lanes() {
+        // Mono (default 1 channel per port): lanes == ports (byte-identical world).
+        let mono = PortDecl {
+            audio_in: 1,
+            audio_out: 1,
+            control_in: 0,
+            control_out: 0,
+            audio_in_channels: 1,
+            audio_out_channels: 1,
+        };
+        assert_eq!(mono.audio_in_lanes(), 1);
+        assert_eq!(mono.audio_out_lanes(), 1);
+
+        // A stereo-out node: one output port carrying two channels = two lanes.
+        let stereo_out = PortDecl {
+            audio_in: 1,
+            audio_out: 1,
+            control_in: 0,
+            control_out: 0,
+            audio_in_channels: 1,
+            audio_out_channels: 2,
+        };
+        assert_eq!(stereo_out.audio_in_lanes(), 1);
+        assert_eq!(stereo_out.audio_out_lanes(), 2);
+
+        // A malformed 0 channel-count clamps to >= 1 per port (never under-allocates).
+        let malformed = PortDecl {
+            audio_in: 2,
+            audio_out: 0,
+            control_in: 0,
+            control_out: 0,
+            audio_in_channels: 0,
+            audio_out_channels: 0,
+        };
+        assert_eq!(malformed.audio_in_lanes(), 2);
+        assert_eq!(malformed.audio_out_lanes(), 0);
     }
 }
