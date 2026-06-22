@@ -369,4 +369,70 @@ describe('graphStore', () => {
             expect(useGraphStore.getState().nodes.size).toBe(currentSize);
         });
     });
+
+    describe('gesture-bracketed undo (REV-1)', () => {
+        function addSpeaker(): string {
+            useGraphStore.getState().addNode('speaker', { x: 0, y: 0 });
+            const roots = useGraphStore.getState().getRootNodes();
+            return roots[roots.length - 1].id;
+        }
+        const volOf = (id: string) =>
+            (useGraphStore.getState().getNode(id)!.data as { volume: number }).volume;
+
+        it('a param mutation OUTSIDE a gesture records NO history (system/per-frame safe)', () => {
+            const id = addSpeaker();
+            const idx = useGraphStore.getState().historyIndex;
+            useGraphStore.getState().updateNodeData(id, { volume: 0.5 });
+            // The data changed...
+            expect(volOf(id)).toBe(0.5);
+            // ...but no new undo entry was created (zero-regression: this is the
+            // path MIDI propagation / per-frame writes take).
+            expect(useGraphStore.getState().historyIndex).toBe(idx);
+        });
+
+        it('a gesture brackets multiple mutations into ONE undo entry', () => {
+            const id = addSpeaker();
+            const before = volOf(id);
+            const idx = useGraphStore.getState().historyIndex;
+
+            const s = useGraphStore.getState();
+            s.beginGesture();
+            s.updateNodeData(id, { volume: 0.3 });
+            s.updateNodeData(id, { volume: 0.7 });
+            s.endGesture();
+
+            // Exactly one snapshot (deferred to the first mutation in the gesture).
+            expect(useGraphStore.getState().historyIndex).toBe(idx + 1);
+            expect(volOf(id)).toBe(0.7);
+
+            // ONE undo reverts the WHOLE gesture to the pre-gesture value.
+            useGraphStore.getState().undo();
+            expect(volOf(id)).toBe(before);
+        });
+
+        it('an empty gesture creates no history entry', () => {
+            addSpeaker();
+            const idx = useGraphStore.getState().historyIndex;
+            const s = useGraphStore.getState();
+            s.beginGesture();
+            s.endGesture();
+            expect(useGraphStore.getState().historyIndex).toBe(idx);
+        });
+
+        it('nested gestures coalesce into a single undo entry', () => {
+            const id = addSpeaker();
+            const before = volOf(id);
+            const idx = useGraphStore.getState().historyIndex;
+            const s = useGraphStore.getState();
+            s.beginGesture();
+            s.beginGesture();
+            s.updateNodeData(id, { volume: 0.1 });
+            s.updateNodeData(id, { volume: 0.2 });
+            s.endGesture();
+            s.endGesture();
+            expect(useGraphStore.getState().historyIndex).toBe(idx + 1);
+            useGraphStore.getState().undo();
+            expect(volOf(id)).toBe(before);
+        });
+    });
 });
