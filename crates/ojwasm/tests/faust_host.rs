@@ -84,6 +84,8 @@ fn mono_gain_manifest(bytes: &[u8]) -> PluginManifest {
             audio_out: 1,
             control_in: 0,
             control_out: 0,
+            audio_in_channels: 1,
+            audio_out_channels: 1,
         },
     }
 }
