@@ -214,6 +214,38 @@ export const LooperNode = memo(function LooperNode({
                 syncRowsFromHandle(getLooper());
             });
 
+            // Stage 3: a committed layer's TRUE captured PCM arrived after the row
+            // was created (it crosses the seam on a separate path). Re-sync rows so
+            // the meter-envelope trace swaps to the real waveform shape, and
+            // auto-save the now-real buffer to the library (parity with the
+            // clip-dropped path in onLoopAdded). The row's `buffer` is now non-null,
+            // so drag-to-library + export light up for recorded loops.
+            l.setOnLoopUpdated(async (updatedLoop: Loop) => {
+                syncRowsFromHandle(getLooper());
+                if (updatedLoop.buffer && !updatedLoop.libraryItemId) {
+                    try {
+                        const itemId = await saveAudioToLibraryRef.current(
+                            updatedLoop.buffer,
+                            'Loop',
+                            ['loop'],
+                        );
+                        if (itemId) {
+                            updatedLoop.libraryItemId = itemId;
+                            setLoops((prev) =>
+                                prev.map((loop) =>
+                                    loop.id === updatedLoop.id
+                                        ? { ...loop, libraryItemId: itemId }
+                                        : loop,
+                                ),
+                            );
+                        }
+                    } catch (err) {
+                        // Background convenience; a held note beats a glitch.
+                        console.warn('[Looper] Failed to auto-save finalized loop:', err);
+                    }
+                }
+            });
+
             l.setOnWaveformHistoryUpdate((history: number[], playhead: number) => {
                 // Every engine return frame drives the transport state, the live
                 // trace and the real playhead. This is the ONLY clock — no rAF, no
@@ -270,6 +302,7 @@ export const LooperNode = memo(function LooperNode({
             if (l) {
                 l.setOnLoopAdded(() => {});
                 l.setOnLoopDeleted(() => {});
+                l.setOnLoopUpdated(() => {});
                 l.setOnWaveformHistoryUpdate(() => {});
             }
         };

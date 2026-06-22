@@ -92,6 +92,25 @@ pub trait DspInstance: Send {
         None
     }
 
+    /// The MOST-RECENTLY-COMMITTED looper layer's loop PCM `[0, loop_len)`, or an
+    /// empty slice for non-looper nodes / before the first commit. The committed
+    /// layer is read-only on the render path, so this is a borrow, not a copy.
+    /// The WASM host reads it on the commit edge to ship the take's true waveform
+    /// to the UI (see `ojcore-wasm::looper_take_pcm`). Default empty;
+    /// [`crate::LooperNode`] overrides it. RT-safe: a slice borrow, no allocation.
+    fn last_committed_layer_pcm(&self) -> &[f32] {
+        &[]
+    }
+
+    /// The input block the active looper take just CAPTURED this `process` call,
+    /// or `None` when not recording / for non-looper nodes. The NATIVE host reads
+    /// it after each block and streams it into the per-looper capture ring (the
+    /// `RecorderSink`) so the off-RT side has the take by the commit edge. Default
+    /// `None`; [`crate::LooperNode`] overrides it. RT-safe: a slice borrow.
+    fn last_captured_block(&self) -> Option<&[f32]> {
+        None
+    }
+
     /// OFF-RT asset-resolution seam (the U6 sample / IR loading point).
     ///
     /// Called by [`crate::compile`] (or any host that resolves an

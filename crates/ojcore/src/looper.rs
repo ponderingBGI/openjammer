@@ -237,6 +237,11 @@ pub struct LooperNode {
     /// A just-occurred state transition `(from, to)` (as protocol `u8`s), waiting
     /// to be drained onto the loss-proof event ring. Set by `process`/`action`.
     pending_edge: Option<(u8, u8)>,
+    /// The write head (`pos`) at the START of the current `process` block, so
+    /// [`last_captured_block`](Self::last_captured_block) can hand the native
+    /// capture ring exactly the samples written this block. Reset each `process`
+    /// call (and to `0` on a wrap-commit, where the captured tail is `None`).
+    block_capture_start: usize,
 }
 
 impl Default for LooperNode {
@@ -260,6 +265,7 @@ impl LooperNode {
             dry: 1.0,
             last_block_peak: 0.0,
             pending_edge: None,
+            block_capture_start: 0,
         }
     }
 
@@ -312,6 +318,51 @@ impl LooperNode {
     #[inline]
     pub fn take_looper_edge(&mut self) -> Option<(u8, u8)> {
         self.pending_edge.take()
+    }
+
+    /// The MOST-RECENTLY-COMMITTED layer's loop content as a read-only slice
+    /// `[0, loop_len)` — the just-captured take's true per-sample PCM. The
+    /// committed layer is read-only on the render path (never written again, only
+    /// read for playback), so handing back a borrow is RT-safe: no copy, no
+    /// allocation. Returns an empty slice before the first commit. This is the
+    /// WASM read-on-commit seam: the worklet calls
+    /// [`crate::DspInstance::last_committed_layer_pcm`] when it drains a commit
+    /// `LooperEdge` and ships the bytes to the UI (mirroring `output_ptr`).
+    #[inline]
+    pub fn last_committed_layer_pcm(&self) -> &[f32] {
+        match self.layers.last() {
+            Some(layer) => {
+                let n = self.loop_len.min(layer.buf.len());
+                &layer.buf[..n]
+            }
+            None => &[],
+        }
+    }
+
+    /// The block of input samples the active take just CAPTURED this `process`
+    /// call, as a read-only slice — or `None` when no take is recording. This is
+    /// the NATIVE stream-during-record seam: the cpal callback reads it after each
+    /// `process_block` and pushes it into the per-looper capture ring (the
+    /// `RecorderSink`), so the off-RT side assembles the take's PCM by the commit
+    /// edge. RT-safe: a plain slice borrow into the pre-allocated `recording`
+    /// buffer, no copy/alloc.
+    ///
+    /// The slice is the window `[block_start, pos)` written this block. On the
+    /// block where the take WRAPS and commits, the wrap resets `pos` and moves the
+    /// buffer into a layer, so this returns `None` that block; the streamed
+    /// samples up to the wrap already rode the ring, and the off-RT assembler
+    /// trims to `loop_len`.
+    #[inline]
+    pub fn last_captured_block(&self) -> Option<&[f32]> {
+        if !matches!(self.state, LooperState::Recording | LooperState::Overdubbing) {
+            return None;
+        }
+        let start = self.block_capture_start;
+        let end = self.pos.min(self.recording.len());
+        if start >= end {
+            return None;
+        }
+        Some(&self.recording[start..end])
     }
 
     /// Record a state transition, coalescing onto the single pending slot. If an
@@ -518,6 +569,7 @@ impl DspInstance for LooperNode {
         self.state = LooperState::Idle;
         self.last_block_peak = 0.0;
         self.pending_edge = None;
+        self.block_capture_start = 0;
     }
 
     fn process(&mut self, ctx: &mut ProcessCtx<'_, '_>) {
@@ -538,6 +590,14 @@ impl DspInstance for LooperNode {
         // The quantized first-take length (only meaningful when no loop yet).
         let quant = self.quantized_len();
         let mut peak = 0.0f32;
+
+        // Snapshot the write head at block start so the native capture seam
+        // ([`last_captured_block`]) can hand the per-looper ring exactly the
+        // samples written this block. When a take wraps + commits mid-block, the
+        // state leaves Recording/Overdubbing and `last_captured_block` returns
+        // `None` for the block (the streamed tail up to the wrap already rode the
+        // ring on prior blocks; the off-RT assembler trims to `loop_len`).
+        self.block_capture_start = self.pos;
 
         for i in 0..n {
             let x = input[i];
@@ -632,6 +692,16 @@ impl DspInstance for LooperNode {
         // Delegate to the inherent drainer (fully-qualified). RT-safe:
         // an `Option::take`, no allocation.
         LooperNode::take_looper_edge(self)
+    }
+
+    fn last_committed_layer_pcm(&self) -> &[f32] {
+        // Delegate to the inherent accessor. RT-safe: a slice borrow.
+        LooperNode::last_committed_layer_pcm(self)
+    }
+
+    fn last_captured_block(&self) -> Option<&[f32]> {
+        // Delegate to the inherent accessor. RT-safe: a slice borrow.
+        LooperNode::last_captured_block(self)
     }
 
     fn reset(&mut self) {
@@ -1065,6 +1135,85 @@ mod tests {
         }
         assert_eq!(node.layer_count(), MAX_LAYERS);
         assert_eq!(node.state(), LooperState::Playing);
+    }
+
+    /// WASM read-on-commit seam: after a take commits, `last_committed_layer_pcm`
+    /// returns the captured take's true per-sample PCM `[0, loop_len)`, intact.
+    #[test]
+    fn last_committed_layer_pcm_returns_captured_take() {
+        let mut node = LooperNode::new();
+        node.activate(SR, BLOCK);
+        node.set_param(looper_param::LOOP_SECS, BLOCK as f32 / SR);
+
+        // Before any commit, the slice is empty.
+        assert!(node.last_committed_layer_pcm().is_empty());
+
+        let signal = ramp(BLOCK, 0.013);
+        node.action(looper_action::RECORD, 0);
+        let _ = run_block(&mut node, &signal);
+        assert_eq!(node.state(), LooperState::Playing);
+        assert_eq!(node.layer_count(), 1);
+
+        // The committed layer's PCM is exactly the recorded input, loop_len long.
+        let pcm = node.last_committed_layer_pcm();
+        assert_eq!(pcm.len(), BLOCK);
+        for (i, (&x, &y)) in signal.iter().zip(pcm.iter()).enumerate() {
+            assert!((x - y).abs() < 1e-9, "commit pcm frame {i}: {x} != {y}");
+        }
+
+        // A SECOND take's commit replaces what the accessor returns (most-recent).
+        let second = ramp(BLOCK, 0.005);
+        node.action(looper_action::OVERDUB, 0);
+        let _ = run_block(&mut node, &second);
+        assert_eq!(node.layer_count(), 2);
+        let pcm2 = node.last_committed_layer_pcm();
+        assert_eq!(pcm2.len(), BLOCK);
+        for (i, (&x, &y)) in second.iter().zip(pcm2.iter()).enumerate() {
+            assert!((x - y).abs() < 1e-9, "2nd commit pcm frame {i}: {x} != {y}");
+        }
+    }
+
+    /// NATIVE stream-during-record seam: while a free-run take is recording,
+    /// `last_captured_block` hands back exactly the samples written each block, so
+    /// the off-RT recorder ring reassembles the take. Concatenated across blocks
+    /// they equal the input; once the take is not recording it returns `None`.
+    #[test]
+    fn last_captured_block_streams_recorded_input() {
+        let mut node = LooperNode::new();
+        node.activate(SR, BLOCK);
+        // Free-run so the take does not auto-commit mid-block (no quantize).
+        node.set_param(looper_param::WET, 1.0);
+        node.set_param(looper_param::DRY, 0.0);
+
+        // Not recording yet -> nothing to stream.
+        assert!(node.last_captured_block().is_none());
+
+        node.action(looper_action::RECORD, 0);
+        let a = ramp(BLOCK, 0.01);
+        let b = ramp(BLOCK, 0.02);
+
+        let mut assembled: Vec<f32> = Vec::new();
+        let _ = run_block(&mut node, &a);
+        assembled.extend_from_slice(node.last_captured_block().expect("block a captured"));
+        let _ = run_block(&mut node, &b);
+        assembled.extend_from_slice(node.last_captured_block().expect("block b captured"));
+
+        assert_eq!(assembled.len(), 2 * BLOCK);
+        for (i, (&x, &y)) in a.iter().chain(b.iter()).zip(assembled.iter()).enumerate() {
+            assert!((x - y).abs() < 1e-9, "streamed frame {i}: {x} != {y}");
+        }
+
+        // STOP commits; no longer recording, so the stream window closes.
+        node.action(looper_action::STOP, 0);
+        assert_eq!(node.state(), LooperState::Playing);
+        assert!(node.last_captured_block().is_none());
+
+        // And the committed layer equals the full captured take.
+        let pcm = node.last_committed_layer_pcm();
+        assert_eq!(pcm.len(), 2 * BLOCK);
+        for (i, (&x, &y)) in a.iter().chain(b.iter()).zip(pcm.iter()).enumerate() {
+            assert!((x - y).abs() < 1e-9, "committed frame {i}: {x} != {y}");
+        }
     }
 
     #[test]

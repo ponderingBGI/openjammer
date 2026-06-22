@@ -189,6 +189,31 @@ export function load_graph(bytes) {
 }
 
 /**
+ * Copy the MOST-RECENTLY-COMMITTED layer's loop PCM for looper `node` into a
+ * fresh `Float32Array` (`loop_len` mono f32s), or an empty array when the node
+ * is not a looper / has no committed layer yet. This is the WASM end of the
+ * Stage-3 finalize-PCM seam: when the worklet drains a commit `LooperEdge` for
+ * `node` (the Recording|Overdubbing→Playing edge from [`drain_looper_edges`]),
+ * it calls this and `postMessage`s the bytes so the UI can build the real
+ * `AudioBuffer` for that layer's row (true waveform + drag-to-library/export).
+ *
+ * The committed layer is read-only on the render path (only read back for
+ * playback, never written), so reading it off the render path between `process`
+ * calls is sound — exactly how [`output_ptr`] exposes the render output buffer.
+ * Off the render path (the worklet calls it from a drained-edge handler), so the
+ * copy into the returned `Vec` is fine. Returns an empty `Vec` (no allocation)
+ * when the host is absent / the id is unknown / nothing is committed.
+ * @param {number} node
+ * @returns {Float32Array}
+ */
+export function looper_take_pcm(node) {
+    const ret = wasm.looper_take_pcm(node);
+    var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
  * Length (in f32s) of the `MicIn` output buffer the worklet may write — the
  * configured block size — or `0` when the program has no `MicIn` node. Pairs
  * with [`mic_in_ptr`]; the worklet clamps its write to this.

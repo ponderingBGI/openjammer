@@ -129,6 +129,25 @@ function makeLoopLayer(
     };
 }
 
+/** Build a waveform array from raw mono PCM (peak per segment). The shared core
+ *  used by {@link waveformFromBuffer}; usable without an AudioContext (headless /
+ *  before the context is resumed) so the TRUE shape is honest either way. */
+function waveformFromPcm(data: Float32Array, points = LOOP_WAVEFORM_POINTS): number[] {
+    const seg = Math.max(1, Math.floor(data.length / points));
+    const out: number[] = [];
+    for (let i = 0; i < points; i++) {
+        const start = i * seg;
+        const end = Math.min(start + seg, data.length);
+        let peak = 0;
+        for (let j = start; j < end; j++) {
+            const a = Math.abs(data[j]);
+            if (a > peak) peak = a;
+        }
+        out.push(peak);
+    }
+    return out;
+}
+
 /** Build a waveform array from a real AudioBuffer (peak per segment). */
 function waveformFromBuffer(buffer: AudioBuffer, points = LOOP_WAVEFORM_POINTS): number[] {
     const data = buffer.getChannelData(0);
@@ -170,6 +189,23 @@ export class OjcoreLooperHandle implements LooperHandle {
     private onWaveformHistory:
         | ((history: number[], playheadPosition: number) => void)
         | null = null;
+    private onLoopUpdated: ((loop: LoopLayer) => void) | null = null;
+
+    /**
+     * Committed layers that do not yet carry their TRUE captured PCM, oldest
+     * first — the front of the FIFO is the next take whose PCM is expected
+     * (Stage 3). A take's PCM (`onLayerPcm`) and its commit edge (`onEngineEdge`)
+     * cross the control seam on DIFFERENT paths (command return / postMessage vs
+     * the event ring), so either can land first. We match by COMMIT ORDER: the
+     * Nth committed layer <-> the Nth take PCM for this node.
+     */
+    private layersAwaitingPcm: LoopLayer[] = [];
+    /**
+     * Take PCM that arrived BEFORE its commit edge created the row (the PCM seam
+     * raced ahead of the event ring), oldest first. Drained onto the next
+     * committed layer that still lacks a real buffer.
+     */
+    private pcmAwaitingLayers: { pcm: Float32Array; sampleRate: number }[] = [];
 
     private readonly nodeId: string;
     private readonly bridge: OjcoreBridge;
@@ -310,7 +346,65 @@ export class OjcoreLooperHandle implements LooperHandle {
         this.loops.push(layer);
         // Reset the trace for the next overdub pass.
         this.liveHistory = [];
+        // Stage 3: this layer's TRUE captured PCM arrives on a SEPARATE seam
+        // (the command return / `looper-take` postMessage). If it already raced
+        // ahead of this edge, attach it now; otherwise queue the layer to receive
+        // it (commit-order matching: Nth layer <-> Nth take PCM).
+        const buffered = this.pcmAwaitingLayers.shift();
+        if (buffered) {
+            this.attachPcm(layer, buffered.pcm, buffered.sampleRate);
+        } else {
+            this.layersAwaitingPcm.push(layer);
+        }
         this.onLoopAdded?.(layer);
+    }
+
+    /**
+     * Stage-3 finalize-PCM. The engine captured this take's TRUE per-sample PCM
+     * and shipped it across the control seam (NATIVE: the `looper_take_pcm`
+     * command return; WASM: the worklet `looper-take` postMessage). Build a real
+     * AudioBuffer, compute the TRUE waveform shape, and SET both on the layer the
+     * matching commit edge created — in COMMIT ORDER, so the Nth PCM upgrades the
+     * Nth still-unbuffered layer. If the PCM raced ahead of its edge, buffer it
+     * until the row exists. With a non-null buffer the row's drag-to-library and
+     * export paths light up and it renders the real shape instead of the meter
+     * envelope.
+     */
+    onLayerPcm(pcm: Float32Array, sampleRate: number): void {
+        if (!pcm || pcm.length === 0) return;
+        const layer = this.layersAwaitingPcm.shift();
+        if (layer) {
+            this.attachPcm(layer, pcm, sampleRate);
+        } else {
+            // The PCM seam beat the commit edge — hold it for the next row.
+            this.pcmAwaitingLayers.push({ pcm, sampleRate });
+        }
+    }
+
+    /**
+     * Build a real AudioBuffer from the take PCM, compute the true waveform, and
+     * set both on `layer`, then notify the UI so the row swaps its live
+     * meter-envelope trace for the real shape. No AudioContext (headless / not
+     * yet resumed) means no AudioBuffer can be built; the buffer stays null but
+     * the TRUE waveform is still set from the raw PCM so the shape is honest.
+     */
+    private attachPcm(layer: LoopLayer, pcm: Float32Array, sampleRate: number): void {
+        // Copy into a fresh ArrayBuffer-backed view: the source may be a
+        // transferred / SAB-backed buffer that `copyToChannel` rejects.
+        const samples = new Float32Array(pcm.length);
+        samples.set(pcm);
+        const ctx = getAudioContext();
+        if (ctx && typeof ctx.createBuffer === 'function') {
+            const buffer = ctx.createBuffer(1, samples.length, sampleRate);
+            buffer.copyToChannel(samples, 0);
+            layer.buffer = buffer;
+            layer.waveformData = waveformFromBuffer(buffer);
+        } else {
+            // No context: keep the buffer null (drag/export need a real
+            // AudioBuffer) but still upgrade the waveform to the true shape.
+            layer.waveformData = waveformFromPcm(samples);
+        }
+        this.onLoopUpdated?.(layer);
     }
 
     toggleLoopMute(loopId: string): void {
@@ -328,6 +422,9 @@ export class OjcoreLooperHandle implements LooperHandle {
         const idx = this.loops.findIndex((l) => l.id === loopId);
         if (idx === -1) return;
         const [removed] = this.loops.splice(idx, 1);
+        // Drop it from the PCM-awaiting FIFO too, so a future take's PCM never
+        // lands on a row that no longer exists (commit-order matching stays sound).
+        this.dropAwaitingLayer(removed);
         // Indexed delete: tell the kernel to drop layer `idx`. The kernel
         // compacts its layers, so the remaining UI rows (already spliced) stay
         // aligned with kernel indices.
@@ -342,8 +439,16 @@ export class OjcoreLooperHandle implements LooperHandle {
     undoLast(): void {
         if (this.loops.length === 0) return;
         const removed = this.loops.pop()!;
+        this.dropAwaitingLayer(removed);
         this.action(LooperAction.UNDO_LAST);
         this.onLoopDeleted?.(removed);
+    }
+
+    /** Remove `layer` from the PCM-awaiting FIFO if it is still queued (it was
+     *  deleted/undone before its TRUE PCM arrived). */
+    private dropAwaitingLayer(layer: LoopLayer): void {
+        const i = this.layersAwaitingPcm.indexOf(layer);
+        if (i !== -1) this.layersAwaitingPcm.splice(i, 1);
     }
 
     addLoopFromBuffer(buffer: AudioBuffer): void {
@@ -376,6 +481,12 @@ export class OjcoreLooperHandle implements LooperHandle {
         callback: (history: number[], playheadPosition: number) => void
     ): void {
         this.onWaveformHistory = callback;
+    }
+
+    /** Notified when an existing layer is upgraded in place (Stage 3: its TRUE
+     *  captured PCM/waveform arrived after the row was created). */
+    setOnLoopUpdated(callback: (loop: LoopLayer) => void): void {
+        this.onLoopUpdated = callback;
     }
 }
 

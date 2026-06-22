@@ -606,6 +606,82 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         ex.dispose();
     });
 
+    it('a commit edge pulls the take PCM via looper_take_pcm and upgrades the row (Stage 3)', async () => {
+        // On a RECORDING|OVERDUBBING -> PLAYING commit edge the native executor must
+        // ALSO call `looper_take_pcm` (the take PCM rides the command RETURN, not an
+        // EngineFrame) and feed the result into the handle's onLayerPcm — so the row
+        // gets the TRUE waveform (and, with a context, a real buffer for drag/export).
+        vi.useFakeTimers();
+        const graph = looperGraph();
+        // A Looper frame first establishes the cached loop_len; then the commit edge.
+        const looperFrame: EngineFrame = {
+            Looper: { node: 0, state: 2 /* RECORDING */, pos: 100, loop_len: 480, peak: 0.4 },
+        };
+        const edgeEvent = {
+            v: 1,
+            seq: 1,
+            severity: 'Info',
+            kind: { LooperEdge: { node: 0, from: 2 /* RECORDING */, to: 3 /* PLAYING */ } },
+            source: 'Native',
+            ts_us: 0,
+            corr_id: 0,
+        };
+        // The take PCM the engine returns for the committed cycle (a ramp).
+        const takePcm = [0, 0.3, 0.6, 0.9];
+        const takeCalls: Array<Record<string, unknown> | undefined> = [];
+        installMockTauri((cmd, args) => {
+            if (cmd === 'poll_meters') return [looperFrame];
+            if (cmd === 'poll_events') return [edgeEvent];
+            if (cmd === 'looper_take_pcm') {
+                takeCalls.push(args);
+                return { pcm: takePcm, sample_rate: 48000 };
+            }
+            return undefined;
+        });
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, graph);
+        await flush();
+
+        const looper = ex.getLooper('looper-1');
+        // Advance past BOTH the meter poll (50 ms, caches loop_len) and the event
+        // drain (100 ms, fires the commit edge + looper_take_pcm), then let the
+        // async take fetch + onLayerPcm settle.
+        await vi.advanceTimersByTimeAsync(160);
+        await flush();
+
+        // The commit edge created the row...
+        expect(looper.getLoops()).toHaveLength(1);
+        // ...and looper_take_pcm was invoked for node 0 with the cached loop length.
+        expect(takeCalls.length).toBeGreaterThan(0);
+        expect(takeCalls[0]).toMatchObject({ node: 0, loopLen: 480 });
+        // The returned PCM became the row's TRUE waveform (peak == PCM peak 0.9).
+        const layer = looper.getLoops()[0];
+        expect(Math.max(...layer.waveformData)).toBeCloseTo(0.9, 5);
+        ex.dispose();
+    });
+
+    it('a looper CLEAR discards the engine take buffer (looper_discard_pcm)', async () => {
+        // A CLEAR aborts an in-flight take, so the native executor must also tell the
+        // engine to discard the off-RT captured PCM — otherwise a later take inherits
+        // a stale tail.
+        const calls = installMockTauri();
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, looperGraph());
+        await flush();
+
+        // Drive a raw CLEAR through send_command (the handle has no public clear, so
+        // exercise the send seam directly via a looper action the bridge forwards).
+        // toggleLoopMute/delete address committed layers; CLEAR is the abort verb.
+        (ex as unknown as { send(cmd: RtCommand): void }).send({
+            Looper: { node: 0, action: LooperAction.CLEAR, arg: 0 },
+        });
+
+        expect(calls.some((c) => c.cmd === 'looper_discard_pcm')).toBe(true);
+        const discard = calls.find((c) => c.cmd === 'looper_discard_pcm');
+        expect(discard!.args).toMatchObject({ node: 0 });
+        ex.dispose();
+    });
+
     it('recovers engine health from DEGRADED to LIVE after a later accepted push', async () => {
         const graph = looperGraph();
         let pushes = 0;

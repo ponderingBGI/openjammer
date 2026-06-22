@@ -142,6 +142,10 @@ export class OjcoreNativeExecutor implements Executor {
     /** Serialized last-pushed OjGraph, to skip redundant `push_graph` IPC when a
      *  store notification fires but the audio graph is unchanged (dedupe). */
     private lastPushedGraph: string | null = null;
+    /** Latest engine loop length (samples) per looper NodeIdx, cached from the
+     *  drained `Looper` frames. On a commit edge we pass it to `looper_take_pcm`
+     *  so the streamed capture is trimmed to the committed cycle (Stage 3). */
+    private looperLoopLen = new Map<number, number>();
 
     /** The engine-side seam the capability handles drive (native impl). */
     private readonly bridge: OjcoreBridge = {
@@ -248,6 +252,7 @@ export class OjcoreNativeExecutor implements Executor {
         }
         this.signalCallbacks.clear();
         this.levels.clear();
+        this.looperLoopLen.clear();
         this.caps.clear();
         this.getNodes = null;
         this.getConnections = null;
@@ -311,6 +316,9 @@ export class OjcoreNativeExecutor implements Executor {
                 ).Looper;
                 const nodeId = this.reverseIndex.get(node);
                 if (nodeId === undefined) continue;
+                // Cache the loop length per NodeIdx so a commit edge can trim the
+                // streamed capture to the committed cycle (Stage 3 take PCM).
+                if (loop_len > 0) this.looperLoopLen.set(node, loop_len);
                 this.caps.looper(nodeId).onEngineFrame(state, pos, loop_len, peak);
                 continue;
             }
@@ -376,9 +384,18 @@ export class OjcoreNativeExecutor implements Executor {
         ingestEngineEvents(events);
     }
 
+    /** ojcore `LooperState` codes mirrored for the commit-edge filter (kept in
+     *  sync with the protocol enum the wasm worklet also hard-codes). */
+    private static readonly LOOPER_RECORDING = 2;
+    private static readonly LOOPER_PLAYING = 3;
+    private static readonly LOOPER_OVERDUBBING = 4;
+
     /** Route any `LooperEdge` events in a drained batch to their looper handle's
      *  `onEngineEdge`. Shared shape with the wasm tier (which taps the same edge
-     *  off its `events` postMessage). */
+     *  off its `events` postMessage). On a COMMIT edge (Recording|Overdubbing ->
+     *  Playing) ALSO pull the just-committed take's TRUE PCM off-RT via the
+     *  `looper_take_pcm` command return (Stage 3) and hand it to the handle's
+     *  `onLayerPcm`, so the row gains a real AudioBuffer + true waveform. */
     private routeLooperEdges(events: EngineEvent[]): void {
         for (const ev of events) {
             const kind = ev?.kind;
@@ -387,7 +404,47 @@ export class OjcoreNativeExecutor implements Executor {
             const nodeId = this.reverseIndex.get(node);
             if (nodeId === undefined) continue;
             this.caps.looper(nodeId).onEngineEdge(from, to);
+            const committed =
+                to === OjcoreNativeExecutor.LOOPER_PLAYING &&
+                (from === OjcoreNativeExecutor.LOOPER_RECORDING ||
+                    from === OjcoreNativeExecutor.LOOPER_OVERDUBBING);
+            if (committed) void this.fetchLooperTake(node, nodeId);
         }
+    }
+
+    /**
+     * Pull the just-committed take's TRUE captured PCM for `node` off the engine
+     * via the `looper_take_pcm` command (the PCM rides the command RETURN, like
+     * `recorder_stop` — NOT an EngineFrame, so no new wire shape). The off-RT
+     * per-looper buffer keeps only the LATEST take per node (the take clears it),
+     * so this must be called promptly on the commit edge. Best-effort: a null
+     * result (device-less sandbox / nothing captured) simply leaves the row on
+     * its meter-envelope waveform with a null buffer. The committed-cycle length
+     * (cached from the drained frames) trims the streamed capture to one cycle.
+     */
+    private async fetchLooperTake(node: NodeIdx, nodeId: string): Promise<void> {
+        if (!this.invoke) return;
+        const loopLen = this.looperLoopLen.get(node) ?? 0;
+        try {
+            const res = (await this.invoke('looper_take_pcm', {
+                node,
+                loopLen,
+            })) as { pcm: number[]; sample_rate: number } | null;
+            if (!res || !res.pcm || res.pcm.length === 0) return;
+            this.caps.looper(nodeId).onLayerPcm(Float32Array.from(res.pcm), res.sample_rate);
+        } catch (err) {
+            log.warn('looper_take_pcm failed', { detail: String(err) });
+        }
+    }
+
+    /** Tell the engine to discard a looper's pending captured take (Stage 3) on a
+     *  CLEAR / undo / delete-before-commit, so a later take never inherits a stale
+     *  tail. Best-effort fire-and-forget. */
+    private discardLooperTake(node: NodeIdx): void {
+        if (!this.invoke) return;
+        this.invoke('looper_discard_pcm', { node }).catch((err: unknown) => {
+            log.warn('looper_discard_pcm failed', { detail: String(err) });
+        });
     }
 
     /** Emit + remap + push the current graph to the native engine. */
@@ -525,6 +582,14 @@ export class OjcoreNativeExecutor implements Executor {
 
     private send(cmd: RtCommand): void {
         if (!this.invoke) return;
+        // Stage 3: a looper CLEAR aborts any in-flight take, so also discard the
+        // off-RT captured PCM for that node — otherwise a later take could inherit
+        // a stale tail. (Committed-layer delete/undo operate on layers whose PCM
+        // is already in the UI; only the in-flight capture buffer needs clearing.)
+        if (typeof cmd === 'object' && cmd !== null && 'Looper' in cmd) {
+            const { node, action } = cmd.Looper;
+            if (action === 4 /* CLEAR */) this.discardLooperTake(node as NodeIdx);
+        }
         this.invoke('send_command', { cmd }).catch((err: unknown) => {
             log.error('send_command failed', { detail: String(err) });
         });

@@ -310,6 +310,47 @@ fn recorder_stop(
         .map(|(pcm, sample_rate)| RecorderStopResult { pcm, sample_rate }))
 }
 
+/// Looper take PCM + rate returned by [`looper_take_pcm`] for the UI to build a
+/// real `AudioBuffer` (true waveform + drag-to-library/export) for a committed
+/// layer's row.
+#[derive(serde::Serialize)]
+struct LooperTakeResult {
+    pcm: Vec<f32>,
+    sample_rate: u32,
+}
+
+/// STAGE-3 finalize-PCM: take looper `node`'s just-COMMITTED take as MONO PCM +
+/// rate. The UI calls this when it processes a commit `LooperEdge` for `node`
+/// (Recording|Overdubbing→Playing), passing `loop_len` from the looper snapshot
+/// it already tracks, so the off-RT per-looper capture is trimmed to the
+/// committed cycle. Returns null when no stream is live / nothing was captured.
+/// The bulk PCM rides this command RETURN (like `recorder_stop`), not the wire.
+#[tauri::command]
+fn looper_take_pcm(
+    node: u32,
+    loop_len: u32,
+    state: tauri::State<'_, BackendState>,
+) -> Result<Option<LooperTakeResult>, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .take_looper_pcm(NodeIdx(node), loop_len as usize)
+        .map(|(pcm, sample_rate)| LooperTakeResult { pcm, sample_rate }))
+}
+
+/// Discard looper `node`'s accumulated (uncommitted) capture — on CLEAR / undo /
+/// delete with no commit — so a later take never inherits a stale tail.
+#[tauri::command]
+fn looper_discard_pcm(node: u32, state: tauri::State<'_, BackendState>) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .discard_looper_pcm(NodeIdx(node));
+    Ok(())
+}
+
 /// Export a node's captured recording to a WAV file at `path`.
 #[tauri::command]
 fn recorder_export(
@@ -571,6 +612,8 @@ pub fn run() {
             load_sample,
             recorder_start,
             recorder_stop,
+            looper_take_pcm,
+            looper_discard_pcm,
             recorder_export,
             set_speaker_volume,
             set_speaker_device,

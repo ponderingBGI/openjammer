@@ -337,6 +337,48 @@ class OjcoreProcessor extends AudioWorkletProcessor {
         for (let i = n; i < len; i++) dst[i] = 0;
     }
 
+    /**
+     * STAGE-3 finalize-PCM (wasm): given the JSON `events` bytes the looper-edge
+     * drain produced, find every COMMIT edge (a looper transition into Playing=3
+     * from Recording=2 / Overdubbing=4) and, for each committed node, read the
+     * just-committed layer's true PCM via the `looper_take_pcm` export and post it
+     * to the UI as `{ type:'looper-take', node, pcm, sampleRate }` (the PCM buffer
+     * transferred). The committed layer is read-only on the render path, so this
+     * read between `process` calls is sound (like `output_ptr`).
+     *
+     * Off the hot path: edges arrive at most every ~4 blocks and only when a
+     * transition happened, so the JSON parse + copy here is rare. A parse failure
+     * is swallowed (the edge still rides the `events` message; only the waveform
+     * upgrade is skipped) so a bad frame never silences the engine.
+     */
+    private postCommittedLooperTakes(eventBytes: Uint8Array): void {
+        const PLAYING = 3;
+        const RECORDING = 2;
+        const OVERDUBBING = 4;
+        let events: unknown;
+        try {
+            events = JSON.parse(new TextDecoder().decode(eventBytes));
+        } catch {
+            return; // not parseable; the edge still rides the events message
+        }
+        if (!Array.isArray(events)) return;
+        for (const ev of events) {
+            const edge = (ev as { kind?: { LooperEdge?: { node: number; from: number; to: number } } })
+                ?.kind?.LooperEdge;
+            if (!edge) continue;
+            if (edge.to !== PLAYING) continue;
+            if (edge.from !== RECORDING && edge.from !== OVERDUBBING) continue;
+            // A commit: pull the committed take's PCM and ship it to the UI.
+            const pcm = wasm.looper_take_pcm(edge.node) as Float32Array;
+            if (pcm && pcm.length > 0) {
+                this.port.postMessage(
+                    { type: 'looper-take', node: edge.node, pcm, sampleRate },
+                    [pcm.buffer],
+                );
+            }
+        }
+    }
+
     process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
         if (!this.ready || !this.exports) return true;
 
@@ -416,6 +458,14 @@ class OjcoreProcessor extends AudioWorkletProcessor {
             }
             const ebytes = wasm.drain_looper_edges() as Uint8Array;
             if (ebytes && ebytes.length > 0) {
+                // STAGE-3 finalize-PCM: BEFORE transferring the edge bytes (which
+                // detaches the buffer), scan them for COMMIT edges
+                // (Recording=2|Overdubbing=4 -> Playing=3). For each committed
+                // looper node, read the just-committed layer's TRUE PCM off the
+                // (read-only) render buffer via `looper_take_pcm` and postMessage
+                // it to the UI so the row gets a real AudioBuffer (true waveform +
+                // drag-to-library/export). Read PCM first, THEN transfer `ebytes`.
+                this.postCommittedLooperTakes(ebytes);
                 this.port.postMessage({ type: 'events', bytes: ebytes }, [ebytes.buffer]);
             }
         }

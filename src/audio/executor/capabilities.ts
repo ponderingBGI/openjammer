@@ -99,6 +99,14 @@ export interface LooperHandle {
     setOnLoopAdded(callback: (loop: LoopLayer) => void): void;
     /** Notified when a loop layer is deleted (for library trash handling). */
     setOnLoopDeleted(callback: (loop: LoopLayer) => void): void;
+    /** Notified when an existing loop layer is upgraded in place — Stage 3: its
+     *  TRUE captured PCM/waveform arrived after the row was created, so the row
+     *  swaps its live meter-envelope trace for the real shape and gains a
+     *  non-null `buffer` (drag-to-library / export light up). */
+    setOnLoopUpdated(callback: (loop: LoopLayer) => void): void;
+    /** Deliver a committed take's TRUE captured PCM (Stage 3). Matched to the
+     *  layer its commit edge created, in COMMIT ORDER (Nth PCM <-> Nth layer). */
+    onLayerPcm(pcm: Float32Array, sampleRate: number): void;
     /** Notified with the live recording waveform + playhead (0-100) each frame. */
     setOnWaveformHistoryUpdate(
         callback: (history: number[], playheadPosition: number) => void

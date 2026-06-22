@@ -165,6 +165,68 @@ describe('OjcoreLooperHandle.onEngineEdge -> authoritative row creation', () => 
     });
 });
 
+describe('OjcoreLooperHandle.onLayerPcm -> Stage 3 finalize-PCM (true waveform)', () => {
+    // No AudioContext is mocked in this file, so getAudioContext() returns null and
+    // attachPcm keeps `buffer` null but still upgrades `waveformData` to the TRUE
+    // per-sample shape. The buffer-build path is covered with a fake context in
+    // wasmParity.test.ts; here we pin the COMMIT-ORDER matching + the waveform swap.
+
+    it('upgrades the committed row to the TRUE waveform (peak == PCM peak)', () => {
+        const { bridge } = mockBridge();
+        const h = new OjcoreLooperHandle('looper-1', bridge);
+        const updated: LoopLayer[] = [];
+        h.setOnLoopUpdated((l) => updated.push(l));
+        h.onEngineEdge(LooperState.RECORDING, LooperState.PLAYING); // row 0
+        h.onLayerPcm(new Float32Array([0, 0.4, 0.9, 0.2]), 48000);
+        expect(updated).toHaveLength(1);
+        expect(Math.max(...h.getLoops()[0].waveformData)).toBeCloseTo(0.9, 5);
+    });
+
+    it('matches the Nth take PCM to the Nth committed layer (commit order)', () => {
+        const { bridge } = mockBridge();
+        const h = new OjcoreLooperHandle('looper-1', bridge);
+        h.onEngineEdge(LooperState.RECORDING, LooperState.PLAYING); // layer 0
+        h.onEngineEdge(LooperState.OVERDUBBING, LooperState.PLAYING); // layer 1
+        // PCM arrives in commit order: first take (peak 0.5) then second (peak 1.0).
+        h.onLayerPcm(new Float32Array([0.1, 0.5]), 48000);
+        h.onLayerPcm(new Float32Array([0.2, 1.0]), 48000);
+        expect(Math.max(...h.getLoops()[0].waveformData)).toBeCloseTo(0.5, 5);
+        expect(Math.max(...h.getLoops()[1].waveformData)).toBeCloseTo(1.0, 5);
+    });
+
+    it('buffers PCM that arrives BEFORE its commit edge and attaches it on the edge', () => {
+        const { bridge } = mockBridge();
+        const h = new OjcoreLooperHandle('looper-1', bridge);
+        // PCM beats the edge (the two seams race).
+        h.onLayerPcm(new Float32Array([0.3, 0.7]), 48000);
+        expect(h.getLoops()).toHaveLength(0);
+        // The edge creates the row; the buffered PCM attaches to it.
+        h.onEngineEdge(LooperState.RECORDING, LooperState.PLAYING);
+        expect(Math.max(...h.getLoops()[0].waveformData)).toBeCloseTo(0.7, 5);
+    });
+
+    it('an empty/zero-length take PCM is ignored (no row upgrade, no crash)', () => {
+        const { bridge } = mockBridge();
+        const h = new OjcoreLooperHandle('looper-1', bridge);
+        h.onEngineEdge(LooperState.RECORDING, LooperState.PLAYING);
+        const before = h.getLoops()[0].waveformData;
+        h.onLayerPcm(new Float32Array(0), 48000);
+        expect(h.getLoops()[0].waveformData).toBe(before);
+    });
+
+    it('deleting a row before its PCM arrives means a later take never mis-attaches', () => {
+        const { bridge } = mockBridge();
+        const h = new OjcoreLooperHandle('looper-1', bridge);
+        h.onEngineEdge(LooperState.RECORDING, LooperState.PLAYING); // layer 0 (awaiting PCM)
+        h.deleteLoop(h.getLoops()[0].id); // removed before any PCM
+        h.onEngineEdge(LooperState.OVERDUBBING, LooperState.PLAYING); // layer 1 (awaiting PCM)
+        // The single take PCM must land on the surviving layer, not the deleted one.
+        h.onLayerPcm(new Float32Array([0.6]), 48000);
+        expect(h.getLoops()).toHaveLength(1);
+        expect(Math.max(...h.getLoops()[0].waveformData)).toBeCloseTo(0.6, 5);
+    });
+});
+
 describe('OjcoreLooperHandle.onEngineFrame -> real playhead + trace', () => {
     it('sets the playhead from engine pos/loop_len (0..100)', () => {
         const { bridge } = mockBridge();

@@ -772,7 +772,12 @@ fn looper_process_is_allocation_free() {
     engine.process_block(&mut out, NB);
 
     // Cycle the looper through every state INSIDE the gate: applying the command
-    // (looper_action) and rendering must both be allocation-free.
+    // (looper_action) and rendering must both be allocation-free. The Stage-3
+    // capture accessors (`last_captured_block` / `last_committed_layer_pcm`) are
+    // read on the RT thread (native streams the captured block each block; both
+    // are borrows into pre-allocated buffers), so they MUST be alloc-free too —
+    // exercise them inside the gate after each render.
+    let looper_slot = engine.program().slot_of_id(NodeIdx(2)).unwrap();
     assert_no_alloc(|| {
         for &(action, arg) in &[
             (looper_action::ARM, 0),
@@ -794,6 +799,11 @@ fn looper_process_is_allocation_free() {
             .unwrap();
             engine.drain(&mut rx);
             engine.process_block(&mut out, NB);
+            // The native capture seam reads these every block; a borrow must
+            // never allocate. `core::hint::black_box` keeps the reads observable.
+            let inst = &engine.program().instances[looper_slot];
+            let _ = core::hint::black_box(inst.last_captured_block().map(|s| s.len()));
+            let _ = core::hint::black_box(inst.last_committed_layer_pcm().len());
         }
     });
 }
