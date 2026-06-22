@@ -60,7 +60,7 @@ export function AmplifierNode({ node }: AmplifierNodeProps) {
             <div className="node-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
                 <Slider
                     aria-label="Gain"
-                    min={-2}
+                    min={0}
                     max={4}
                     step={0.1}
                     value={gain}
@@ -74,8 +74,8 @@ export function AmplifierNode({ node }: AmplifierNodeProps) {
                     color: 'var(--text-muted)',
                     marginTop: '4px'
                 }}>
-                    <span>-2x (half)</span>
-                    <span>4x</span>
+                    <span>0x (mute)</span>
+                    <span>4x (+12 dB)</span>
                 </div>
             </div>
 

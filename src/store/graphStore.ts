@@ -548,6 +548,7 @@ export const useGraphStore = create<GraphStore>()(
                     return {
                         nodes: newNodes,
                         connections: newConnections,
+                        connectionsByNode: rebuildConnectionIndex(newConnections),
                         rootNodeIds: newRootNodeIds,
                         version: state.version + 1
                     };
@@ -622,6 +623,7 @@ export const useGraphStore = create<GraphStore>()(
                     return {
                         nodes: newNodes,
                         connections: newConnections,
+                        connectionsByNode: rebuildConnectionIndex(newConnections),
                         selectedNodeIds: newSelectedNodes,
                         rootNodeIds: newRootNodeIds,
                         version: state.version + 1

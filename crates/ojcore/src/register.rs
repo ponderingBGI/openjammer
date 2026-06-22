@@ -55,7 +55,7 @@ impl BuiltinOpts {
 /// * effects:    `builtin.gain`, `builtin.biquad`, `builtin.waveshaper`,
 ///   `builtin.delay`, `builtin.convolution`, `builtin.looper`
 /// * structural: `host.graph_in`, `host.mic_in`, `host.graph_out`,
-///   `host.speaker_out`, `builtin.add`, `builtin.passthrough`
+///   `host.speaker_out`, `builtin.add`, `builtin.subtract`, `builtin.passthrough`
 pub fn register_builtins(reg: &mut PluginRegistry, opts: BuiltinOpts) {
     if opts.effects {
         reg.register(Box::new(GainLoader::new()));
@@ -73,6 +73,7 @@ pub fn register_builtins(reg: &mut PluginRegistry, opts: BuiltinOpts) {
         reg.register(Box::new(StructuralLoader::graph_out()));
         reg.register(Box::new(StructuralLoader::speaker_out()));
         reg.register(Box::new(StructuralLoader::add()));
+        reg.register(Box::new(StructuralLoader::subtract()));
         reg.register(Box::new(StructuralLoader::passthrough()));
     }
 }
@@ -84,7 +85,7 @@ mod tests {
     use crate::effects::{BIQUAD_ID, CONVOLUTION_ID, DELAY_ID, WAVESHAPER_ID};
     use crate::looper::LOOPER_ID;
     use crate::structural::{
-        ADD_ID, GRAPH_IN_ID, GRAPH_OUT_ID, MIC_IN_ID, PASSTHROUGH_ID, SPEAKER_OUT_ID,
+        ADD_ID, GRAPH_IN_ID, GRAPH_OUT_ID, MIC_IN_ID, PASSTHROUGH_ID, SPEAKER_OUT_ID, SUBTRACT_ID,
     };
 
     /// The shared path registers exactly the expected built-in id set.
@@ -105,12 +106,13 @@ mod tests {
             GRAPH_OUT_ID,
             SPEAKER_OUT_ID,
             ADD_ID,
+            SUBTRACT_ID,
             PASSTHROUGH_ID,
         ] {
             assert!(reg.contains(id), "missing built-in id: {id}");
         }
-        // 6 effects (incl. looper) + 6 structural == 12 loaders.
-        assert_eq!(reg.len(), 12);
+        // 6 effects (incl. looper) + 7 structural == 13 loaders.
+        assert_eq!(reg.len(), 13);
     }
 
     /// Opting structural off registers effects only (and vice versa).
@@ -138,8 +140,9 @@ mod tests {
             },
         );
         assert!(structural_only.contains(SPEAKER_OUT_ID));
+        assert!(structural_only.contains(SUBTRACT_ID));
         assert!(!structural_only.contains(GAIN_ID));
-        assert_eq!(structural_only.len(), 6);
+        assert_eq!(structural_only.len(), 7);
     }
 
     /// Every registered manifest lowers to its closed primitive kind.

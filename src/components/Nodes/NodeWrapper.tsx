@@ -484,23 +484,49 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
         }
     };
 
-    const renderPort = (port: GraphNode['ports'][number], side: 'input' | 'output') => (
-        <PortRow
-            key={port.id}
-            side={side}
-            kind={port.type === 'audio' ? 'audio' : 'control'}
-            connected={hasConnection(port.id)}
-            hideLabel={!!port.hideExternalLabel}
-            label={port.name}
-            data-node-id={node.id}
-            data-port-id={port.id}
-            data-port-type={port.type}
-            onMouseDown={(e: React.MouseEvent) => handlePortMouseDown(port.id, e)}
-            onMouseUp={(e: React.MouseEvent) => handlePortMouseUp(port.id, e)}
-            onMouseEnter={() => handlePortMouseEnter(port.id)}
-            onMouseLeave={handlePortMouseLeave}
-        />
-    );
+    const renderPort = (port: GraphNode['ports'][number], side: 'input' | 'output') => {
+        // GATED port (declared but not engine-wired yet, e.g. amplifier `gain-in`):
+        // render it visibly inert — dimmed, a "why" tooltip, and NO pointer
+        // handlers — so a player can't start/land a connection that would silently
+        // do nothing. It stays in the DOM so it lights up the instant its routing
+        // lands; canConnect already rejects it as a belt-and-braces guard.
+        if (port.disabled) {
+            return (
+                <PortRow
+                    key={port.id}
+                    side={side}
+                    kind={port.type === 'audio' ? 'audio' : 'control'}
+                    connected={false}
+                    hideLabel={!!port.hideExternalLabel}
+                    label={port.name}
+                    className="is-disabled"
+                    title={port.disabledReason}
+                    aria-disabled={true}
+                    data-node-id={node.id}
+                    data-port-id={port.id}
+                    data-port-type={port.type}
+                    data-port-disabled="true"
+                />
+            );
+        }
+        return (
+            <PortRow
+                key={port.id}
+                side={side}
+                kind={port.type === 'audio' ? 'audio' : 'control'}
+                connected={hasConnection(port.id)}
+                hideLabel={!!port.hideExternalLabel}
+                label={port.name}
+                data-node-id={node.id}
+                data-port-id={port.id}
+                data-port-type={port.type}
+                onMouseDown={(e: React.MouseEvent) => handlePortMouseDown(port.id, e)}
+                onMouseUp={(e: React.MouseEvent) => handlePortMouseUp(port.id, e)}
+                onMouseEnter={() => handlePortMouseEnter(port.id)}
+                onMouseLeave={handlePortMouseLeave}
+            />
+        );
+    };
 
     return (
         <NodeFrame

@@ -33,6 +33,7 @@
         "WasmHost",
         "PluginHost",
         "Add",
+        "Subtract",
         "MicIn",
         "SpeakerOut",
         "GraphIn",

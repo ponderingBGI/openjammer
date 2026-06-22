@@ -45,8 +45,11 @@
 
 import type { Connection, GraphNode, NodeType, PortDefinition } from '../../engine/types';
 import {
+    effectLoweringFor,
+    effectParamsFromData,
     manifestFor,
     manifestForDynamic,
+    manifestIdFor,
     type ParamDecl,
     type PluginManifest,
     type PrimitiveKind,
@@ -237,6 +240,14 @@ export function emitWithIndex(
         if (kind === 'Sampler' && instrumentUsesKarplus(node.type, node.data as Record<string, unknown> | undefined)) {
             kind = 'KarplusString';
         }
+        // EffectNode lowering is DATA-DRIVEN by `effectType`: distortion->Waveshaper,
+        // filter->Biquad, reverb->Convolution, delay->Delay (the real ojcore
+        // primitives). Skip AI-authored code nodes (WasmHost), which keep their own
+        // manifest kind. The kind drives both the RT kernel and the backend remap
+        // (manifestIdForKind), so the right loader is selected per chosen effect.
+        if (node.type === 'effect' && manifest.id === manifestIdFor('effect')) {
+            kind = effectLoweringFor(node.data as Record<string, unknown> | undefined).kind;
+        }
         emitted.set(id, { idx: nextIdx as NodeIdx, node, manifest, kind });
         nextIdx++;
     }
@@ -316,7 +327,15 @@ export function emitWithIndex(
  */
 function buildIrNode(e: EmittedNode, demoteMaster: boolean): IrNode {
     const { idx, node, manifest } = e;
-    const params = paramsFromData(node, manifest.params);
+    // EffectNode params live under `node.data.params.*` and address the chosen
+    // effect's kernel param ids (resolved by `effectParamsFromData`), NOT the
+    // top-level `node.data[name]` the generic `paramsFromData` reads. Routing them
+    // through the generic path produced ZERO params (every slider dead). Resolve
+    // them per chosen effect; any other node keeps the generic manifest-decl path.
+    const isEffect = node.type === 'effect' && manifest.id === manifestIdFor('effect');
+    const params = isEffect
+        ? effectParamsFromData(node.data as Record<string, unknown> | undefined)
+        : paramsFromData(node, manifest.params);
     if (demoteMaster) {
         return {
             id: idx,
@@ -344,14 +363,22 @@ function buildIrNode(e: EmittedNode, demoteMaster: boolean): IrNode {
  * Resolve numeric params from `node.data` against the manifest `ParamDecl[]`.
  * A decl whose name is present (and finite-numeric) in `data` carries its live
  * value; otherwise the decl default is used. Addressed by the decl `id` (u16).
+ *
+ * The resolved value is CLAMPED to the decl's declared `[min,max]` envelope, so a
+ * UI / AI / imported `node.data` value can never drive a kernel param outside the
+ * range it declares. For the amplifier this is the GAIN-1/GAIN-2 guarantee: a
+ * negative gain (phase invert) is clamped up to 0 (mute) and a runaway boost is
+ * clamped down to the declared ceiling (+12 dB / 4x) — the kernel `GainNode`
+ * itself accepts any float, so this seam is where the range is honoured.
  */
 function paramsFromData(node: GraphNode, decls: ParamDecl[]): Param[] {
     const out: Param[] = [];
+    const data = node?.data ?? {};
     for (const decl of decls) {
-        const raw = node.data[decl.name];
+        const raw = data[decl.name];
         // Coerce a boolean node.data field (e.g. a speaker's `isMuted`) to 0/1 so a
         // declared param can carry it; otherwise a finite number, else the default.
-        const value =
+        const resolved =
             typeof raw === 'boolean'
                 ? raw
                     ? 1
@@ -359,6 +386,8 @@ function paramsFromData(node: GraphNode, decls: ParamDecl[]): Param[] {
                 : typeof raw === 'number' && Number.isFinite(raw)
                   ? raw
                   : decl.default;
+        // Clamp to the declared range (no phase-invert, no runaway over-unity).
+        const value = Math.min(decl.max, Math.max(decl.min, resolved));
         out.push({ id: decl.id, value });
     }
     return out;
@@ -401,8 +430,10 @@ function portCounts(manifest: PluginManifest): { n_in: number; n_out: number } {
             minIn = 1;
             minOut = 1;
             break;
-        // Mixer: two in, one out.
+        // Mixer / difference: two in, one out. (Add pre-mixes its two sources
+        // into one port; Subtract keeps in0 / in1 distinct, so out = in0 - in1.)
         case 'Add':
+        case 'Subtract':
             minIn = 2;
             minOut = 1;
             break;
@@ -618,7 +649,7 @@ function portConcreteType(port: PortDefinition | undefined): 'audio' | 'control'
  * or its trailing component.
  */
 function findPort(node: GraphNode | undefined, portId: string): PortDefinition | undefined {
-    if (!node) return undefined;
+    if (!node?.ports) return undefined;
     const direct = node.ports.find((p) => p.id === portId);
     if (direct) return direct;
     const tail = portId.includes(':') ? portId.slice(portId.indexOf(':') + 1) : portId;
@@ -647,7 +678,11 @@ function audioPortIndex(
         if (tail === 'in-1') return 0;
     }
 
-    const audioPorts = node.ports.filter(
+    // Defensive: a node missing its `ports` (a malformed / mid-construction node
+    // that slips into a reconcile) must NOT throw out of graph lowering — that
+    // would abort the store's listener loop and wedge the canvas. Fall back to the
+    // canonical single-audio-port index 0.
+    const audioPorts = (node?.ports ?? []).filter(
         (p) =>
             p.direction === direction &&
             (p.type === 'audio' || (p.type === 'universal' && p.resolvedType === 'audio')),

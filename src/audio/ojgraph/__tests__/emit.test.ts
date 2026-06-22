@@ -123,6 +123,37 @@ describe('emitOjGraph — basic shape', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Resilience: lowering must NEVER throw on a transiently-inconsistent graph.
+// The reconcile runs inside a Zustand listener; a throw there aborts the store's
+// notification loop, starving later subscribers (the canvas re-render) AND the
+// persist middleware's post-loop write — the "delete a node and new nodes stop
+// appearing until a refresh, which also revives the delete" bug.
+// ---------------------------------------------------------------------------
+
+describe('emitOjGraph — resilience (never throws on an inconsistent graph)', () => {
+    it('tolerates a node present in the map but missing its ports / data', () => {
+        const speaker = makeNode('speaker', { id: 'spk' });
+        // The transient shape a reconcile can briefly see mid-edit: a node that
+        // exists but whose `ports`/`data` are absent. Lowering must not crash.
+        const broken = {
+            ...makeNode('instrument', { id: 'broken' }),
+            ports: undefined,
+            data: undefined,
+        } as unknown as GraphNode;
+        const conn = makeConn(broken.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        expect(() => emitOjGraph(nodeMap(broken, speaker), connMap(conn))).not.toThrow();
+    });
+
+    it('tolerates a connection whose endpoint node is gone (dangling edge)', () => {
+        const speaker = makeNode('speaker', { id: 'spk2' });
+        // Source id absent from the node map (a node just deleted) — the edge is
+        // dropped, never a crash.
+        const dangling = makeConn('ghost', 'audio-out', speaker.id, 'audio-in', 'audio');
+        expect(() => emitOjGraph(nodeMap(speaker), connMap(dangling))).not.toThrow();
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Instrument family routing (Sampler vs the real Karplus primitive)
 // ---------------------------------------------------------------------------
 
@@ -255,6 +286,104 @@ describe('emitOjGraph — params', () => {
         const graph = emitOjGraph(nodeMap(amp, speaker), connMap(conn));
         const gainNode = graph.nodes.find((n) => n.kind === 'Gain')!;
         expect(gainNode.params[0]?.value).toBe(1);
+    });
+
+    // GAIN-1/GAIN-2: the amplifier gain is CLAMPED to its declared [0,4] range at
+    // the seam (mirrors the kernel manifest in crates/ojcore/src/builtin.rs). The
+    // kernel `GainNode` accepts any float, so a negative would PHASE-INVERT and a
+    // large value would RUN AWAY past +12 dB — both impossible after the clamp.
+    function ampGain(gain: number): number {
+        const amp = makeNode('amplifier', { id: 'amp', data: { gain } });
+        const speaker = makeNode('speaker', { id: 'spk' });
+        const conn = makeConn(amp.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(amp, speaker), connMap(conn));
+        const gainNode = graph.nodes.find((n) => n.kind === 'Gain')!;
+        return gainNode.params.find((p) => p.id === 0)!.value;
+    }
+
+    it('clamps a negative gain up to 0 (no phase inversion)', () => {
+        expect(ampGain(-1.5)).toBe(0);
+        expect(ampGain(-0.001)).toBe(0);
+    });
+
+    it('clamps a runaway gain down to the declared ceiling (4x / +12 dB)', () => {
+        expect(ampGain(9)).toBe(4);
+        expect(ampGain(4.0001)).toBe(4);
+    });
+
+    it('passes an in-range gain through unchanged', () => {
+        expect(ampGain(0)).toBe(0);
+        expect(ampGain(2.5)).toBe(2.5);
+        expect(ampGain(4)).toBe(4);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// EffectNode: DATA-DRIVEN kind + params reach the engine (SEAM-4)
+//
+// Previously `effect` ALWAYS lowered to Waveshaper and the sliders lived under
+// `data.params.*`, which the generic top-level paramsFromData never read — every
+// non-distortion menu option and every slider was DEAD. These pin the fix: the
+// chosen effectType selects the REAL ojcore primitive, and each slider lands on
+// the right kernel param id with its live value.
+// ---------------------------------------------------------------------------
+
+describe('emitOjGraph — effect lowering is data-driven', () => {
+    function effectIr(effectType: string, params: Record<string, number>): IrNode {
+        const fx = makeNode('effect', { id: 'fx', data: { effectType, params } });
+        const speaker = makeNode('speaker', { id: 'spk' });
+        const conn = makeConn(fx.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(fx, speaker), connMap(conn));
+        const ir = graph.nodes.find((n) => n.manifest_id === manifestIdFor('effect'));
+        expect(ir, `no effect IrNode for ${effectType}`).toBeDefined();
+        return ir!;
+    }
+
+    it('distortion -> Waveshaper, amount slider on AMOUNT (id 0)', () => {
+        const ir = effectIr('distortion', { amount: 0.8 });
+        expect(ir.kind).toBe('Waveshaper');
+        expect(ir.params.find((p) => p.id === 0)?.value).toBe(0.8);
+        // LEVEL(1) held at unity so the curve doesn't also re-gain.
+        expect(ir.params.find((p) => p.id === 1)?.value).toBe(1);
+    });
+
+    it('filter -> Biquad, frequency/q sliders on FREQ(1)/Q(2)', () => {
+        const ir = effectIr('filter', { frequency: 800, q: 2 });
+        expect(ir.kind).toBe('Biquad');
+        expect(ir.params.find((p) => p.id === 1)?.value).toBe(800);
+        expect(ir.params.find((p) => p.id === 2)?.value).toBe(2);
+    });
+
+    it('reverb -> Convolution, mix slider on MIX(0)', () => {
+        const ir = effectIr('reverb', { mix: 0.6 });
+        expect(ir.kind).toBe('Convolution');
+        expect(ir.params.find((p) => p.id === 0)?.value).toBe(0.6);
+    });
+
+    it('delay -> Delay, time/feedback/mix on TIME(0)/FEEDBACK(1)/MIX(2)', () => {
+        const ir = effectIr('delay', { time: 0.5, feedback: 0.7, mix: 0.4 });
+        expect(ir.kind).toBe('Delay');
+        expect(ir.params.find((p) => p.id === 0)?.value).toBe(0.5);
+        expect(ir.params.find((p) => p.id === 1)?.value).toBe(0.7);
+        expect(ir.params.find((p) => p.id === 2)?.value).toBe(0.4);
+    });
+
+    it('an omitted slider falls back to the kernel-correct default, not zero', () => {
+        // delay with NO params bag at all: TIME/FEEDBACK/MIX hold their defaults so
+        // the effect is audible (a 0-mix delay would be a silent, dead control).
+        const ir = effectIr('delay', {});
+        expect(ir.kind).toBe('Delay');
+        expect(ir.params.find((p) => p.id === 0)?.value).toBe(0.25);
+        expect(ir.params.find((p) => p.id === 1)?.value).toBe(0.4);
+        expect(ir.params.find((p) => p.id === 2)?.value).toBe(0.3);
+    });
+
+    it('the effect IrNode is a 1-in/1-out processor for every kind', () => {
+        for (const t of ['distortion', 'filter', 'reverb', 'delay']) {
+            const ir = effectIr(t, {});
+            expect(ir.n_in, `${t} n_in`).toBe(1);
+            expect(ir.n_out, `${t} n_out`).toBe(1);
+        }
     });
 });
 

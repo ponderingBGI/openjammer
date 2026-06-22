@@ -512,7 +512,19 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         defaultPorts: [
             { ...audioInput, position: { x: 0, y: 0.35 } },
             { ...audioOutput, position: { x: 1, y: 0.5 } },
-            { ...controlInput, id: 'gain-in', name: 'Gain', position: { x: 0, y: 0.65 } }
+            // GATED: declared so the control surface is visible, but DISABLED until
+            // control-edge kernel routing exists (the compiler currently drops
+            // control edges, so audio-rate gain modulation would be a no-op). Not
+            // shipped silently dead — canConnect rejects it and the UI renders it
+            // inert with an affordance. Use the gain SLIDER until this lights up.
+            {
+                ...controlInput,
+                id: 'gain-in',
+                name: 'Gain',
+                position: { x: 0, y: 0.65 },
+                disabled: true,
+                disabledReason: 'Gain modulation input is not wired yet — use the gain slider.'
+            }
         ],
         defaultData: {
             gain: 1
@@ -872,6 +884,14 @@ export function canConnect(
     // FIRST: Enforce direction for ALL connection types
     // Can't connect output→output or input→input regardless of signal type
     if (sourcePort.direction === targetPort.direction) {
+        return false;
+    }
+
+    // GATED ports (declared but not engine-wired yet, e.g. the amplifier
+    // `gain-in`) reject all connections — never let a player wire a control edge
+    // that would silently do nothing. The port stays visible (rendered inert) so
+    // it can light up the moment its routing lands.
+    if (sourcePort.disabled || targetPort.disabled) {
         return false;
     }
 

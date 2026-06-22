@@ -49,6 +49,7 @@ fn primitive_kind_is_bare_variant_string() {
         (PrimitiveKind::WasmHost, "\"WasmHost\""),
         (PrimitiveKind::PluginHost, "\"PluginHost\""),
         (PrimitiveKind::Add, "\"Add\""),
+        (PrimitiveKind::Subtract, "\"Subtract\""),
         (PrimitiveKind::MicIn, "\"MicIn\""),
         (PrimitiveKind::SpeakerOut, "\"SpeakerOut\""),
         (PrimitiveKind::GraphIn, "\"GraphIn\""),

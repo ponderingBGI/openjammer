@@ -9,6 +9,7 @@ import { emitOjGraph } from '../emit';
 import { remapForBackend, ENGINE_IDS } from '../backendMap';
 import { getNodeDefinition } from '../../../engine/registry';
 import type { Connection, GraphNode, NodeType } from '../../../engine/types';
+import type { OjGraph } from '../../../../packages/oj-protocol-ts/src/index';
 
 let counter = 0;
 function makeNode(type: NodeType, id: string, data: Record<string, unknown> = {}): GraphNode {
@@ -29,11 +30,20 @@ function makeConn(s: string, sp: string, t: string, tp: string, type: 'audio' | 
     return { id: `c${counter}`, sourceNodeId: s, sourcePortId: sp, targetNodeId: t, targetPortId: tp, type };
 }
 
+// Native registers the FULL set via register_all(RegisterOpts::full()) — every
+// effect + mix/routing (add/subtract) + instruments. IO/master kinds remap to the
+// GAIN placeholder (kind-gated), so the ids a native-remapped graph can carry are:
 const NATIVE_REGISTRY = new Set<string>([
     ENGINE_IDS.gain,
     ENGINE_IDS.osc,
     ENGINE_IDS.sampler,
     ENGINE_IDS.karplus,
+    ENGINE_IDS.biquad,
+    ENGINE_IDS.waveshaper,
+    ENGINE_IDS.delay,
+    ENGINE_IDS.convolution,
+    ENGINE_IDS.add,
+    ENGINE_IDS.subtract,
 ]);
 // U-WASM-PARITY: the wasm registry now holds the FULL common set (instruments +
 // effects + structural I/O), minus SF2 — the same as native plus structural — so
@@ -48,6 +58,7 @@ const WASM_REGISTRY = new Set<string>([
     ENGINE_IDS.delay,
     ENGINE_IDS.convolution,
     ENGINE_IDS.add,
+    ENGINE_IDS.subtract,
     ENGINE_IDS.passthrough,
     ENGINE_IDS.hostGraphIn,
     ENGINE_IDS.hostMicIn,
@@ -131,5 +142,37 @@ describe('remapForBackend', () => {
         expect(sampler?.manifest_id).toBe(ENGINE_IDS.sampler);
         // native loads the master instance via GAIN (kind flag marks it master).
         expect(master?.manifest_id).toBe(ENGINE_IDS.gain);
+    });
+
+    it('maps Subtract + effect kinds to their REAL loaders (not gain) on BOTH backends', () => {
+        // Direct IR: the seam where the loader is chosen. A Subtract or an effect
+        // kind must NOT collapse to builtin.gain (that made subtract == passthrough
+        // and silenced every native effect).
+        const graph: OjGraph = {
+            ir_version: 1,
+            sample_rate: 48_000,
+            block_size: 128,
+            nodes: [
+                { id: 1, manifest_id: 'builtin.subtract', kind: 'Subtract', params: [], assets: [], n_in: 2, n_out: 1 },
+                { id: 2, manifest_id: 'builtin.effect', kind: 'Biquad', params: [], assets: [], n_in: 1, n_out: 1 },
+                { id: 3, manifest_id: 'builtin.effect', kind: 'Waveshaper', params: [], assets: [], n_in: 1, n_out: 1 },
+                { id: 4, manifest_id: 'builtin.effect', kind: 'Convolution', params: [], assets: [], n_in: 1, n_out: 1 },
+                { id: 5, manifest_id: 'builtin.effect', kind: 'Delay', params: [], assets: [], n_in: 1, n_out: 1 },
+                { id: 6, manifest_id: 'builtin.speaker', kind: 'SpeakerOut', params: [], assets: [], n_in: 1, n_out: 0 },
+            ],
+            edges: [],
+            schedule: [],
+        };
+        for (const backend of ['native', 'wasm'] as const) {
+            const g = remapForBackend(graph, backend);
+            const idOf = (k: string) => g.nodes.find((n) => n.kind === k)!.manifest_id;
+            expect(idOf('Subtract'), `${backend} Subtract`).toBe(ENGINE_IDS.subtract);
+            expect(idOf('Biquad'), `${backend} Biquad`).toBe(ENGINE_IDS.biquad);
+            expect(idOf('Waveshaper'), `${backend} Waveshaper`).toBe(ENGINE_IDS.waveshaper);
+            expect(idOf('Convolution'), `${backend} Convolution`).toBe(ENGINE_IDS.convolution);
+            expect(idOf('Delay'), `${backend} Delay`).toBe(ENGINE_IDS.delay);
+            // None collapsed to the gain placeholder.
+            expect(idOf('Subtract')).not.toBe(ENGINE_IDS.gain);
+        }
     });
 });

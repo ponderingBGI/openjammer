@@ -52,6 +52,7 @@ pub enum PrimitiveKind {
     PluginHost,
     // routing / io
     Add,
+    Subtract,
     MicIn,
     SpeakerOut,
     GraphIn,

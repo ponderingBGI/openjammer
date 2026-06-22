@@ -28,6 +28,17 @@ export interface PortDefinition {
     // Hide label on parent node's external port (label still shows inside panel)
     // Default: false (labels are shown on parent)
     hideExternalLabel?: boolean;
+
+    // GATED port: the surface is declared (so it can light up the moment its
+    // routing lands) but is NOT wired to the engine yet, so connections to it are
+    // REJECTED (canConnect) and the UI renders it visibly inert instead of
+    // shipping a silently-dead port. Used for the amplifier `gain-in` control
+    // port: control-edge kernel routing is unimplemented (crates/ojcore/src/
+    // compile.rs drops control edges), so an audio-rate gain modulation would do
+    // nothing. `disabledReason` is the affordance copy shown to the player.
+    // Default: false (the port is live).
+    disabled?: boolean;
+    disabledReason?: string;
 }
 
 // Port layout configuration for dynamic port positioning
@@ -329,8 +340,14 @@ export interface LoopData {
     effects: string[]; // Effect node IDs applied to this loop
 }
 
-/** Audio effect kinds an EffectNode can apply. */
-export type EffectType = 'distortion' | 'pitch' | 'reverb' | 'delay';
+/**
+ * Audio effect kinds an EffectNode can apply. Each lowers to a REAL ojcore DSP
+ * primitive (see {@link EFFECT_KIND_BY_TYPE} in the emitter): distortion ->
+ * Waveshaper, filter -> Biquad, reverb -> Convolution, delay -> Delay. The old
+ * `pitch` option was removed — no pitch-shift primitive exists, so it was a dead
+ * menu entry that silently no-op'd (honesty over a fictional control).
+ */
+export type EffectType = 'distortion' | 'filter' | 'reverb' | 'delay';
 
 export interface EffectNodeData extends NodeData {
     effectType: EffectType;

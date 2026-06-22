@@ -179,6 +179,22 @@ describe('PluginManifest derivation', () => {
         }
     });
 
+    it('gives the amplifier an explicit gain decl matching the kernel range (SEAM-4, GAIN-1/2)', () => {
+        // The gain param MUST carry the KERNEL's authoritative range
+        // ([min,max] = [0,4], crates/ojcore/src/builtin.rs `gain_manifest`) — NOT
+        // the conservative [0,1] auto-derived from `defaultData`. emit clamps the
+        // live value to this range, so a negative (phase-invert) or runaway boost
+        // can never reach the kernel.
+        const amp = manifestFor('amplifier');
+        expect(amp.params).toHaveLength(1);
+        const gain = amp.params[0];
+        expect(gain.id).toBe(0);
+        expect(gain.name).toBe('gain');
+        expect(gain.min).toBe(0);
+        expect(gain.max).toBe(4);
+        expect(gain.default).toBe(1);
+    });
+
     it('lowers the looper to the real Looper kernel (not Delay)', () => {
         // Regression guard for the SSOT drift: the looper node MUST lower to the
         // closed `Looper` primitive (the kernel id resolved at runtime is
