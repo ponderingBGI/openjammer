@@ -506,11 +506,21 @@ impl Engine {
             {
                 // Borrow split: read sources from `out_bufs` (on `self`), write the
                 // caller's `out` (disjoint). No allocation.
+                //
+                // CHANNEL ADAPTATION (docs/CHANNELS.md §4): a source PORT `p` owns the
+                // `out_bufs` lanes `[p*oc .. p*oc+oc)`. A MONO source (oc == 1) feeds
+                // its one lane to EVERY device channel (centred upmix); a STEREO source
+                // maps lane->channel (clamped to its last lane), so stereo content
+                // plays true stereo. At oc == 1 this is `lane == src.port` — byte-
+                // identical to the historical mono path.
                 for k in 0..port0.len() {
                     let src = self.program.routing[master].inputs[0][k];
-                    let src_buf = &self.program.out_bufs[src.node][src.port as usize];
-                    for (o, &s) in out.iter_mut().zip(src_buf.iter()).take(nframes) {
-                        *o += s;
+                    let src_oc = self.program.out_channels[src.node].max(1) as usize;
+                    let lane = src.port as usize * src_oc + ch.min(src_oc - 1);
+                    if let Some(src_buf) = self.program.out_bufs[src.node].get(lane) {
+                        for (o, &s) in out.iter_mut().zip(src_buf.iter()).take(nframes) {
+                            *o += s;
+                        }
                     }
                 }
             }
@@ -946,5 +956,69 @@ mod apply_rt_tests {
         let mut mono = [0.0f32; 4];
         engine.process_block(&mut mono, 4);
         assert!(mono.iter().all(|&x| (x - 0.1).abs() < 1e-6));
+    }
+
+    /// A STEREO source (one output port, two channels) maps lane->channel: its left
+    /// lane reaches device channel 0, its right lane device channel 1. (The §4
+    /// adaptation — true stereo, not an upmix.)
+    #[test]
+    fn process_block_into_maps_stereo_source_lanes_to_channels() {
+        use crate::compile::{CompiledProgram, NodeRouting, Source};
+        let instances: Vec<Box<dyn DspInstance>> = vec![
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }),
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }),
+        ];
+        let program = CompiledProgram {
+            instances,
+            routing: vec![
+                NodeRouting::default(),
+                NodeRouting {
+                    // Master input port 0 fed by the stereo source's PORT 0.
+                    inputs: vec![vec![Source { node: 0, port: 0 }]],
+                },
+            ],
+            // Slot 0: ONE output port × 2 channels = 2 lanes: L=0.1, R=0.2.
+            out_bufs: vec![vec![vec![0.1f32; 4], vec![0.2f32; 4]], vec![]],
+            out_channels: vec![2, 1],
+            in_channels: vec![1, 1],
+            bypassed: vec![false, false],
+            kinds: vec![PrimitiveKind::GraphIn, PrimitiveKind::SpeakerOut],
+            ids: vec![NodeIdx(1), NodeIdx(2)],
+            id_index: vec![(NodeIdx(1), 0), (NodeIdx(2), 1)],
+            master_out: 1,
+            block_size: 4,
+            in_scratch: vec![vec![0.0; 4]],
+            max_in: 1,
+            max_out: 2,
+            schedule: vec![0, 1],
+        };
+        let mut engine = Engine::new(program);
+
+        let mut l = [0.0f32; 4];
+        let mut r = [0.0f32; 4];
+        {
+            let mut outs: [&mut [f32]; 2] = [&mut l, &mut r];
+            engine.process_block_into(&mut outs, 4);
+        }
+        assert!(
+            l.iter().all(|&x| (x - 0.1).abs() < 1e-6),
+            "left = source L lane"
+        );
+        assert!(
+            r.iter().all(|&x| (x - 0.2).abs() < 1e-6),
+            "right = source R lane (true stereo, not upmix)"
+        );
+
+        // A mono (1-channel) call folds the stereo source to its LEFT lane (clamp).
+        let mut mono = [0.0f32; 4];
+        engine.process_block(&mut mono, 4);
+        assert!(
+            mono.iter().all(|&x| (x - 0.1).abs() < 1e-6),
+            "mono = left lane"
+        );
     }
 }
