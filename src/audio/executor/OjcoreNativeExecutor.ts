@@ -663,10 +663,6 @@ export class OjcoreNativeExecutor implements Executor {
         }
     }
 
-    // Sustain pedal: no dedicated RtCommand yet (CC handled engine-side later).
-    controlDown(_keyboardId: string): void {}
-    controlUp(_keyboardId: string): void {}
-
     // Control-signal VISUALIZATION is a UI affordance; the native path drives no
     // Web Audio analyser, so flashes are emitted as 1/0 levels to subscribers.
     activateControlSignal(connectionId: string): void {

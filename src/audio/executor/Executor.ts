@@ -96,12 +96,6 @@ export interface Executor {
     /** Release a previously triggered keyboard note. */
     noteOff(keyboardId: string, row: number, keyIndex: number): void;
 
-    /** Press the control (sustain pedal) for a keyboard node. */
-    controlDown(keyboardId: string): void;
-
-    /** Release the control (sustain pedal) for a keyboard node. */
-    controlUp(keyboardId: string): void;
-
     /** Flash a control connection's signal-level visualization on. */
     activateControlSignal(connectionId: string): void;
 
