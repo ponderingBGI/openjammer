@@ -148,6 +148,16 @@ const PARAMS_BY_TYPE: Partial<Record<NodeType, ParamDecl[]>> = {
         { id: 1, name: 'wet', min: 0, max: 1, default: 1 },
         { id: 2, name: 'dry', min: 0, max: 1, default: 1 },
     ],
+    // builtin.speaker (master sink) — ojcore master_param ids: VOLUME=0, MUTE=1.
+    // Declared explicitly so MUTE (a boolean in node.data) is BAKED into the IR and
+    // re-applied to the engine on project load (PERSIST-1) — otherwise a project
+    // saved muted reloads at FULL VOLUME (stage-critical). VOLUME reads
+    // node.data.volume; MUTE reads node.data.isMuted (bool coerced to 0/1 by
+    // paramsFromData). Mirrors crates/ojcore/src/structural.rs master_param.
+    speaker: [
+        { id: 0, name: 'volume', min: 0, max: 1, default: 1 },
+        { id: 1, name: 'isMuted', min: 0, max: 1, default: 0 },
+    ],
 };
 
 /**

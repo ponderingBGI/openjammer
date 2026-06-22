@@ -579,3 +579,33 @@ describe('emitOjGraph — looper inserted between instrument and speaker', () =>
         expect(kindOfNodeId(graph, fromInst[0].to_node)).toBe('Looper');
     });
 });
+
+// ---------------------------------------------------------------------------
+// Speaker master params persist + re-apply on load (PERSIST-1, stage-critical)
+// ---------------------------------------------------------------------------
+
+describe('emitOjGraph — speaker master params (reload safety)', () => {
+    it('bakes volume AND mute into the SpeakerOut IR (master_param VOLUME=0, MUTE=1)', () => {
+        const piano = makeNode('piano', { id: 'p' });
+        const speaker = makeNode('speaker', { id: 's', data: { volume: 0.4, isMuted: true } });
+        const conn = makeConn(piano.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(piano, speaker), connMap(conn));
+
+        const spk = graph.nodes.find((n) => n.kind === 'SpeakerOut')!;
+        // VOLUME (id 0) carries node.data.volume; MUTE (id 1) carries the coerced
+        // boolean isMuted -> so a muted project re-applies mute to the engine on load
+        // instead of coming back at full volume.
+        expect(spk.params.find((p) => p.id === 0)?.value).toBe(0.4);
+        expect(spk.params.find((p) => p.id === 1)?.value).toBe(1);
+    });
+
+    it('an unmuted speaker bakes mute=0 (no regression)', () => {
+        const piano = makeNode('piano', { id: 'p' });
+        const speaker = makeNode('speaker', { id: 's' }); // defaults: volume 1, isMuted false
+        const conn = makeConn(piano.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(piano, speaker), connMap(conn));
+        const spk = graph.nodes.find((n) => n.kind === 'SpeakerOut')!;
+        expect(spk.params.find((p) => p.id === 0)?.value).toBe(1);
+        expect(spk.params.find((p) => p.id === 1)?.value).toBe(0);
+    });
+});

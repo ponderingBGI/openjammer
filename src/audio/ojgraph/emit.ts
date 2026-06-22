@@ -349,7 +349,16 @@ function paramsFromData(node: GraphNode, decls: ParamDecl[]): Param[] {
     const out: Param[] = [];
     for (const decl of decls) {
         const raw = node.data[decl.name];
-        const value = typeof raw === 'number' && Number.isFinite(raw) ? raw : decl.default;
+        // Coerce a boolean node.data field (e.g. a speaker's `isMuted`) to 0/1 so a
+        // declared param can carry it; otherwise a finite number, else the default.
+        const value =
+            typeof raw === 'boolean'
+                ? raw
+                    ? 1
+                    : 0
+                : typeof raw === 'number' && Number.isFinite(raw)
+                  ? raw
+                  : decl.default;
         out.push({ id: decl.id, value });
     }
     return out;
