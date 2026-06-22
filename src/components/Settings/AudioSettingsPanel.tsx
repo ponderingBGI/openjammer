@@ -15,7 +15,7 @@ import type { LatencyClassification } from '../../store/audioStore';
 import { reinitAudioContext } from '../../audio/audioContext';
 import { getExecutor, isTauri } from '../../audio/executor';
 import { useGraphStore } from '../../store/graphStore';
-import type { SpeakerNodeData } from '../../engine/types';
+import type { MicrophoneNodeData, SpeakerNodeData } from '../../engine/types';
 import { detectLowLatencyDevice } from '../../utils/audioDeviceDetection';
 import { LowLatencyGuide } from '../Guides';
 import { useLowLatencyGuide } from '../../store/guideStore';
@@ -171,13 +171,17 @@ export function AudioSettingsPanel() {
         [speakerNode],
     );
 
-    // Route the (existing) Microphone node into the engine's input bus. Native mic
-    // capture is an engine duplex concern; the executor ignores the Web-Audio node
-    // arg on this tier, so we pass a throwaway placeholder. Only offered when a
+    // Route the (existing) Microphone node into the engine's input bus. The
+    // executor is the single owner of the OS device; we declare intent (the node's
+    // persisted mute/device) and it acquires/feeds the engine. Only offered when a
     // Microphone node is on the canvas — removing that node (Ctrl+Z) stops capture.
     const handleRouteMic = useCallback(() => {
         if (!micNode) return;
-        getExecutor().setMicrophoneOutput(micNode.id, {} as AudioNode);
+        const micData = micNode.data as MicrophoneNodeData;
+        getExecutor().setMicrophoneInput(micNode.id, {
+            isMuted: micData.isMuted ?? false,
+            deviceId: micData.deviceId,
+        });
     }, [micNode]);
 
     // Sync pendingConfig with audioConfig when it changes externally (e.g. the USB

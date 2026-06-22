@@ -105,6 +105,13 @@ function whisperBrowserEngineDegrade(
  *  this alongside the `AssetRef` lands the sample at unity at `rootNote`. */
 const SAMPLER_PCM_PARAM = 16;
 
+/** Master-output param ids on the SpeakerOut sink — mirror `ojcore::structural::
+ *  master_param` (VOLUME=0, MUTE=1). The engine's `exec.rs` scales the master mix
+ *  by the resolved `master_gain()`, so volume/mute are applied EXACTLY ONCE here
+ *  (not in the worklet). */
+const MASTER_PARAM_VOLUME = 0;
+const MASTER_PARAM_MUTE = 1;
+
 export class OjcoreWasmExecutor implements Executor {
     private getNodes: (() => Map<string, GraphNode>) | null = null;
     private getConnections: (() => Map<string, Connection>) | null = null;
@@ -151,9 +158,19 @@ export class OjcoreWasmExecutor implements Executor {
      *  worklet replies `sample-stored` (or on a safety timeout). */
     private sampleLoadResolvers = new Map<string, () => void>();
     /** Active microphone capture: stream + worklet input source, so it can be
-     *  torn down on dispose / re-route. */
+     *  torn down on dispose / re-route. The executor is the SINGLE owner of the OS
+     *  mic device — the UI never opens its own `getUserMedia`. */
     private micStream: MediaStream | null = null;
     private micSource: MediaStreamAudioSourceNode | null = null;
+    /** Desired mute state for the mic feed. When muted, the source is DISCONNECTED
+     *  from the worklet input so the engine's `MicIn` reads silence — provably off
+     *  at the seam, not just visually dimmed. */
+    private micMuted = false;
+    /** The OS device id the owned stream was acquired for ('default'/undefined =>
+     *  system default), so a device change re-acquires exactly one stream. */
+    private micDeviceId: string | undefined = undefined;
+    /** Guards against overlapping `getUserMedia` calls (a re-acquire mid-flight). */
+    private micAcquiring = false;
 
     /** The engine-side seam the capability handles drive (wasm impl). */
     private readonly bridge: OjcoreBridge = {
@@ -717,10 +734,18 @@ export class OjcoreWasmExecutor implements Executor {
     }
 
     // --- Speaker output ----------------------------------------------------
-    // The wasm engine renders into the AudioContext destination; master volume is
-    // a worklet `gain` message (the SpeakerOut node is unparameterized).
-    setSpeakerVolume(_nodeId: string, volume: number, isMuted: boolean): void {
-        this.node?.port.postMessage({ type: 'master-gain', gain: isMuted ? 0 : volume });
+    // Master volume / mute is applied ONCE, BY THE ENGINE: the SpeakerOut sink
+    // carries the real `volume`/`mute` master params (structural.rs
+    // `master_param::VOLUME=0` / `MUTE=1`), and the shared `exec.rs` scales the
+    // master mix by the resolved `master_gain()`. We route both as `SetParam`s
+    // through the SAME command ring native uses — NOT the old worklet `master-gain`
+    // postMessage, which scaled a SECOND time after the engine and risked
+    // double-applying gain. The worklet's `masterGain` is now pinned at unity.
+    setSpeakerVolume(nodeId: string, volume: number, isMuted: boolean): void {
+        const node = this.index.get(nodeId);
+        if (node === undefined) return;
+        this.send({ SetParam: { node, param: MASTER_PARAM_VOLUME, value: Math.max(0, volume) } });
+        this.send({ SetParam: { node, param: MASTER_PARAM_MUTE, value: isMuted ? 1 : 0 } });
     }
 
     // Per-device output routing. The browser has ONE AudioContext with ONE
@@ -751,22 +776,57 @@ export class OjcoreWasmExecutor implements Executor {
     }
 
     // --- Microphone --------------------------------------------------------
-    // Wasm mic capture: open the microphone via `getUserMedia`, wrap it in a
-    // `MediaStreamSource`, and connect it to the worklet `AudioWorkletNode`'s
-    // input. The worklet copies that input block into the engine's `MicIn` node
-    // output buffer each render quantum (see ojcore-processor `feedMicInput`), so
-    // the mic flows through the engine graph. The Web-Audio `outputNode` is
-    // unused: the engine owns routing via the `MicIn` graph node (mirrors native,
-    // where only the node id crosses the seam). Permission denial is handled
-    // gracefully — it logs and leaves the mic unrouted, never throws.
-    setMicrophoneOutput(_nodeId: string, _outputNode: AudioNode): void {
-        void this.enableMicrophone();
+    // The executor is the SINGLE owner of the OS mic device. It opens exactly ONE
+    // `getUserMedia` stream, wraps it in a `MediaStreamSource`, and connects it to
+    // the worklet `AudioWorkletNode`'s input. The worklet copies that input block
+    // into the engine's `MicIn` node output buffer each render quantum (see
+    // ojcore-processor `feedMicInput`), so the mic flows through the engine graph.
+    //
+    // MUTE is provably silent at the engine seam: when `isMuted`, the source is
+    // DISCONNECTED from the worklet input, so `feedMicInput` sees no input and the
+    // engine's `MicIn` reads zeros — a muted mic is truly off on stage, not merely
+    // dimmed in the UI. The mic WAVEFORM in the UI is driven by the engine's
+    // per-node meter (subscribeSignalLevels), not a parallel AnalyserNode.
+    setMicrophoneInput(_nodeId: string, options: { isMuted: boolean; deviceId?: string }): void {
+        // The wasm engine sources whichever `MicIn` node the live graph contains
+        // (the worklet's `mic_in_ptr` finds it), so only the mute/device intent
+        // matters here — the visual nodeId is not needed for routing.
+        this.micMuted = options.isMuted;
+        const deviceId = options.deviceId;
+        // A device change re-acquires the one owned stream; otherwise reconcile the
+        // existing stream's connection against the desired mute state.
+        if (deviceId !== this.micDeviceId || !this.micStream) {
+            void this.acquireMicrophone(deviceId);
+        } else {
+            this.applyMicMute();
+        }
     }
 
-    /** Acquire the microphone and wire it into the worklet input. Idempotent
-     *  (a second call while a stream is live is a no-op); never throws. */
-    private async enableMicrophone(): Promise<void> {
-        if (this.micStream) return; // already capturing
+    /** Connect/disconnect the owned mic source to/from the worklet input to match
+     *  {@link micMuted}. Muting disconnects (engine `MicIn` reads silence); the
+     *  connect/disconnect is idempotent in practice (Web Audio tolerates a
+     *  redundant disconnect; we guard a redundant connect via the muted flag). */
+    private applyMicMute(): void {
+        if (!this.micSource || !this.node) return;
+        if (this.micMuted) {
+            try {
+                this.micSource.disconnect(this.node);
+            } catch {
+                // already disconnected — the feed is already silent
+            }
+        } else {
+            // Reconnect the live feed. A redundant connect would create a duplicate
+            // edge, so only connect when transitioning out of mute (the source is
+            // disconnected while muted), which `setMicrophoneInput` drives.
+            this.micSource.connect(this.node);
+        }
+    }
+
+    /** Acquire (or re-acquire) the ONE owned mic stream for `deviceId` and wire it
+     *  into the worklet input, honouring the current mute state. Tears the prior
+     *  stream down first (single owner). Idempotent under overlap; never throws. */
+    private async acquireMicrophone(deviceId?: string): Promise<void> {
+        if (this.micAcquiring) return;
         const ctx = getAudioContext();
         if (!ctx || !this.node) return;
         const media = globalThis.navigator?.mediaDevices;
@@ -774,27 +834,46 @@ export class OjcoreWasmExecutor implements Executor {
             console.warn('[OjcoreWasmExecutor] getUserMedia unavailable; mic not routed.');
             return;
         }
+        this.micAcquiring = true;
+        // Drop any prior stream so exactly ONE OS device is open at a time.
+        this.teardownMicStream();
         try {
-            const stream = await media.getUserMedia({ audio: true });
+            const constraints: MediaStreamConstraints = {
+                audio:
+                    deviceId && deviceId !== 'default'
+                        ? { deviceId: { exact: deviceId } }
+                        : true,
+            };
+            const stream = await media.getUserMedia(constraints);
             // The node may have been disposed while permission was pending.
             if (!this.node) {
                 for (const t of stream.getTracks()) t.stop();
                 return;
             }
             this.micStream = stream;
+            this.micDeviceId = deviceId;
             this.micSource = ctx.createMediaStreamSource(stream);
-            // Feed the mic into the worklet's input (input 0); the worklet routes
-            // it into the engine's MicIn node each block.
-            this.micSource.connect(this.node);
+            // Surface device loss as a non-modal recovery: when the OS track ends
+            // (unplugged), re-acquire the default device — a held note beats a glitch.
+            for (const track of stream.getTracks()) {
+                track.onended = () => {
+                    if (this.micStream === stream) void this.acquireMicrophone(undefined);
+                };
+            }
+            // Feed the mic into the worklet's input (input 0) UNLESS muted — when
+            // muted we leave it disconnected so the engine MicIn reads silence.
+            if (!this.micMuted) this.micSource.connect(this.node);
         } catch (err) {
             // Permission denied / no device / insecure context: stay unrouted.
             console.warn('[OjcoreWasmExecutor] microphone access denied or unavailable:', err);
-            this.disableMicrophone();
+            this.teardownMicStream();
+        } finally {
+            this.micAcquiring = false;
         }
     }
 
-    /** Tear down any active microphone capture. */
-    private disableMicrophone(): void {
+    /** Tear down the owned mic stream + source (stops the OS device). */
+    private teardownMicStream(): void {
         try {
             this.micSource?.disconnect();
         } catch {
@@ -802,9 +881,19 @@ export class OjcoreWasmExecutor implements Executor {
         }
         this.micSource = null;
         if (this.micStream) {
-            for (const track of this.micStream.getTracks()) track.stop();
+            for (const track of this.micStream.getTracks()) {
+                track.onended = null;
+                track.stop();
+            }
         }
         this.micStream = null;
+        this.micDeviceId = undefined;
+    }
+
+    /** Tear down any active microphone capture (dispose path). */
+    private disableMicrophone(): void {
+        this.teardownMicStream();
+        this.micMuted = false;
     }
 
     // --- Continuous sources ------------------------------------------------

@@ -9,9 +9,11 @@
  *     replies `sample-stored` the executor binds the returned `AssetId` onto the
  *     node's `AssetRef` and re-pushes the graph (so the worklet recompiles-with-
  *     assets and the live Sampler plays the sample) — mirroring the native flow.
- *  2. MIC INPUT: `setMicrophoneOutput` opens `getUserMedia` and wires the
- *     `MediaStreamSource` into the worklet input on success; on permission denial
- *     it does NOT throw and leaves the mic unrouted.
+ *  2. MIC INPUT: `setMicrophoneInput` makes the executor the SINGLE owner of the
+ *     OS mic device — it opens exactly ONE `getUserMedia` and wires the
+ *     `MediaStreamSource` into the worklet input. Muting DISCONNECTS that source
+ *     so the engine's `MicIn` reads silence (provably off at the seam). A device
+ *     change re-acquires one stream; permission denial does NOT throw.
  */
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
@@ -433,10 +435,9 @@ describe('OjcoreWasmExecutor looper return path (mocked worklet)', () => {
     });
 });
 
-describe('OjcoreWasmExecutor microphone input (mocked getUserMedia)', () => {
+describe('OjcoreWasmExecutor speaker volume (mocked worklet)', () => {
     beforeEach(() => {
         MockWorkletNode.last = null;
-        fakeMediaStreamSource.connect.mockClear();
         vi.stubGlobal('AudioWorkletNode', MockWorkletNode);
         vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) })));
         vi.stubGlobal('WebAssembly', { ...globalThis.WebAssembly, compile: vi.fn(() => Promise.resolve({})) });
@@ -445,8 +446,76 @@ describe('OjcoreWasmExecutor microphone input (mocked getUserMedia)', () => {
         vi.unstubAllGlobals();
     });
 
-    it('grants: wires the MediaStreamSource into the worklet input', async () => {
-        const tracks = [{ stop: vi.fn() }];
+    /** Decode every posted `command` message into its RtCommand JSON. */
+    function sentCommands(port: MockPort): unknown[] {
+        return port.posted
+            .filter((m) => m.type === 'command')
+            .map((m) => JSON.parse(new TextDecoder().decode(m.bytes as Uint8Array)));
+    }
+
+    it('routes volume + mute as SetParam(VOLUME=0)+SetParam(MUTE=1) to the engine — applied ONCE', async () => {
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const ex = new OjcoreWasmExecutor();
+        const { port } = await bringUp(ex, looperGraph());
+
+        port.posted.length = 0;
+        // speaker-1 interns to NodeIdx 1 (sorted ids: looper-1 < speaker-1).
+        ex.setSpeakerVolume('speaker-1', 0.5, false);
+
+        const cmds = sentCommands(port) as Array<{ SetParam?: { node: number; param: number; value: number } }>;
+        // Exactly two SetParams: master VOLUME then master MUTE.
+        const setParams = cmds.filter((c) => 'SetParam' in c).map((c) => c.SetParam!);
+        expect(setParams).toHaveLength(2);
+        const vol = setParams.find((p) => p.param === 0);
+        const mute = setParams.find((p) => p.param === 1);
+        expect(vol, 'master VOLUME (param 0) was sent').toBeTruthy();
+        expect(vol!.value).toBeCloseTo(0.5, 5);
+        expect(mute, 'master MUTE (param 1) was sent').toBeTruthy();
+        expect(mute!.value).toBe(0);
+        // Both SetParams address the SAME interned SpeakerOut NodeIdx.
+        expect(vol!.node).toBe(mute!.node);
+
+        // NO double gain: the old worklet `master-gain` postMessage must be GONE —
+        // volume is applied exactly once, by the engine's master_gain.
+        expect(port.posted.some((m) => m.type === 'master-gain')).toBe(false);
+        ex.dispose();
+    });
+
+    it('mute sends MUTE=1 (engine zeroes the master mix), not a worklet gain', async () => {
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const ex = new OjcoreWasmExecutor();
+        const { port } = await bringUp(ex, looperGraph());
+
+        port.posted.length = 0;
+        ex.setSpeakerVolume('speaker-1', 0.8, true);
+
+        const cmds = sentCommands(port) as Array<{ SetParam?: { param: number; value: number } }>;
+        const setParams = cmds.filter((c) => 'SetParam' in c).map((c) => c.SetParam!);
+        const mute = setParams.find((p) => p.param === 1);
+        expect(mute!.value, 'muted => MUTE param 1.0').toBe(1);
+        // Volume value is still sent verbatim (the engine forces gain to 0 on mute).
+        const vol = setParams.find((p) => p.param === 0);
+        expect(vol!.value).toBeCloseTo(0.8, 5);
+        expect(port.posted.some((m) => m.type === 'master-gain')).toBe(false);
+        ex.dispose();
+    });
+});
+
+describe('OjcoreWasmExecutor microphone input (mocked getUserMedia)', () => {
+    beforeEach(() => {
+        MockWorkletNode.last = null;
+        fakeMediaStreamSource.connect.mockClear();
+        fakeMediaStreamSource.disconnect.mockClear();
+        vi.stubGlobal('AudioWorkletNode', MockWorkletNode);
+        vi.stubGlobal('fetch', vi.fn(() => Promise.resolve({ ok: true, arrayBuffer: () => Promise.resolve(new ArrayBuffer(8)) })));
+        vi.stubGlobal('WebAssembly', { ...globalThis.WebAssembly, compile: vi.fn(() => Promise.resolve({})) });
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('grants: opens exactly ONE getUserMedia and wires the source into the worklet input', async () => {
+        const tracks = [{ stop: vi.fn(), onended: null as null | (() => void) }];
         const stream = { getTracks: () => tracks } as unknown as MediaStream;
         const getUserMedia = vi.fn(() => Promise.resolve(stream));
         vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
@@ -455,16 +524,95 @@ describe('OjcoreWasmExecutor microphone input (mocked getUserMedia)', () => {
         const ex = new OjcoreWasmExecutor();
         await bringUp(ex, micGraph());
 
-        ex.setMicrophoneOutput('mic-1', {} as AudioNode);
+        // Declare intent (unmuted). The EXECUTOR owns the device — the UI never
+        // opens its own stream, so this is the ONLY getUserMedia in the system.
+        ex.setMicrophoneInput('mic-1', { isMuted: false });
         await Promise.resolve();
         await Promise.resolve();
 
-        expect(getUserMedia).toHaveBeenCalledWith({ audio: true });
+        expect(getUserMedia).toHaveBeenCalledTimes(1);
         expect(fakeContext.createMediaStreamSource).toHaveBeenCalledWith(stream);
+        // Live (unmuted) => the source is connected to feed the engine MicIn.
         expect(fakeMediaStreamSource.connect).toHaveBeenCalledTimes(1);
+
+        // A redundant same-device, same-mute call does NOT open a second stream.
+        ex.setMicrophoneInput('mic-1', { isMuted: false });
+        await Promise.resolve();
+        expect(getUserMedia).toHaveBeenCalledTimes(1);
+
         ex.dispose();
         // dispose stops the captured tracks.
         expect(tracks[0].stop).toHaveBeenCalled();
+    });
+
+    it('muting disconnects the worklet input so the engine-fed mic block is silent', async () => {
+        const tracks = [{ stop: vi.fn(), onended: null as null | (() => void) }];
+        const stream = { getTracks: () => tracks } as unknown as MediaStream;
+        const getUserMedia = vi.fn(() => Promise.resolve(stream));
+        vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const ex = new OjcoreWasmExecutor();
+        await bringUp(ex, micGraph());
+
+        // Go live: source connected to the worklet input (engine hears the mic).
+        ex.setMicrophoneInput('mic-1', { isMuted: false });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(fakeMediaStreamSource.connect).toHaveBeenCalledTimes(1);
+        expect(fakeMediaStreamSource.disconnect).not.toHaveBeenCalled();
+
+        // Mute: the source is DISCONNECTED from the worklet input. The worklet's
+        // feedMicInput then sees no input and the engine's MicIn reads zeros — the
+        // mic is provably off at the engine, not merely dimmed in the UI. No new
+        // getUserMedia (single owner).
+        ex.setMicrophoneInput('mic-1', { isMuted: true });
+        await Promise.resolve();
+        expect(fakeMediaStreamSource.disconnect).toHaveBeenCalled();
+        expect(getUserMedia).toHaveBeenCalledTimes(1);
+
+        // Unmute reconnects the SAME owned stream (still one getUserMedia).
+        ex.setMicrophoneInput('mic-1', { isMuted: false });
+        await Promise.resolve();
+        expect(fakeMediaStreamSource.connect).toHaveBeenCalledTimes(2);
+        expect(getUserMedia).toHaveBeenCalledTimes(1);
+
+        ex.dispose();
+    });
+
+    it('a device change re-acquires exactly one stream (single owner)', async () => {
+        const mkStream = () => {
+            const tracks = [{ stop: vi.fn(), onended: null as null | (() => void) }];
+            return { stream: { getTracks: () => tracks } as unknown as MediaStream, tracks };
+        };
+        const a = mkStream();
+        const b = mkStream();
+        const getUserMedia = vi
+            .fn()
+            .mockResolvedValueOnce(a.stream)
+            .mockResolvedValueOnce(b.stream);
+        vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const ex = new OjcoreWasmExecutor();
+        await bringUp(ex, micGraph());
+
+        ex.setMicrophoneInput('mic-1', { isMuted: false, deviceId: 'default' });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(getUserMedia).toHaveBeenCalledTimes(1);
+
+        // Switch device: the prior owned stream is torn down and exactly one new
+        // stream is acquired for the new device.
+        ex.setMicrophoneInput('mic-1', { isMuted: false, deviceId: 'usb-mic' });
+        await Promise.resolve();
+        await Promise.resolve();
+        expect(getUserMedia).toHaveBeenCalledTimes(2);
+        expect(a.tracks[0].stop).toHaveBeenCalled();
+        const lastConstraints = getUserMedia.mock.calls[1][0] as MediaStreamConstraints;
+        expect(lastConstraints.audio).toMatchObject({ deviceId: { exact: 'usb-mic' } });
+
+        ex.dispose();
     });
 
     it('denied: does not throw and leaves the mic unrouted', async () => {
@@ -476,7 +624,7 @@ describe('OjcoreWasmExecutor microphone input (mocked getUserMedia)', () => {
         await bringUp(ex, micGraph());
 
         // Must not throw synchronously...
-        expect(() => ex.setMicrophoneOutput('mic-1', {} as AudioNode)).not.toThrow();
+        expect(() => ex.setMicrophoneInput('mic-1', { isMuted: false })).not.toThrow();
         // ...nor reject (the rejection is caught internally).
         await Promise.resolve();
         await Promise.resolve();
@@ -490,8 +638,30 @@ describe('OjcoreWasmExecutor microphone input (mocked getUserMedia)', () => {
         const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
         const ex = new OjcoreWasmExecutor();
         await bringUp(ex, micGraph());
-        expect(() => ex.setMicrophoneOutput('mic-1', {} as AudioNode)).not.toThrow();
+        expect(() => ex.setMicrophoneInput('mic-1', { isMuted: false })).not.toThrow();
         await Promise.resolve();
+        expect(fakeMediaStreamSource.connect).not.toHaveBeenCalled();
+        ex.dispose();
+    });
+
+    it('muting BEFORE the stream is acquired never connects the source (silent on load)', async () => {
+        // PERSIST-1: a project saved muted reloads muted. The first intent the node
+        // declares on load is `isMuted: true`; the executor must acquire the stream
+        // but leave it DISCONNECTED, so the engine MicIn reads silence from block 0.
+        const tracks = [{ stop: vi.fn(), onended: null as null | (() => void) }];
+        const stream = { getTracks: () => tracks } as unknown as MediaStream;
+        const getUserMedia = vi.fn(() => Promise.resolve(stream));
+        vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const ex = new OjcoreWasmExecutor();
+        await bringUp(ex, micGraph());
+
+        ex.setMicrophoneInput('mic-1', { isMuted: true });
+        await Promise.resolve();
+        await Promise.resolve();
+        // The stream was acquired (so unmute is instant) but never connected.
+        expect(getUserMedia).toHaveBeenCalledTimes(1);
         expect(fakeMediaStreamSource.connect).not.toHaveBeenCalled();
         ex.dispose();
     });

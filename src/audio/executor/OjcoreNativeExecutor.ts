@@ -699,14 +699,21 @@ export class OjcoreNativeExecutor implements Executor {
 
     // --- Microphone --------------------------------------------------------
     // Native mic capture is an engine duplex-input concern: the `set_mic` command
-    // tells the backend which graph node should receive the mic bus. The
-    // Web-Audio `outputNode` has no meaning natively (the engine owns routing),
-    // so only the node id crosses the seam.
-    setMicrophoneOutput(nodeId: string, _outputNode: AudioNode): void {
+    // tells the backend which graph node should receive the mic bus, and whether
+    // it is live. The engine owns the OS device (cpal duplex input), so only the
+    // node id + enabled flag cross the seam — no Web-Audio node.
+    //
+    // MUTE maps to `set_mic(node, false)`: the backend re-opens the host WITHOUT
+    // the duplex input, so the engine's `MicIn` reads silence — a muted mic is
+    // provably off at the engine, not merely dimmed in the UI. Unmute re-enables.
+    setMicrophoneInput(nodeId: string, options: { isMuted: boolean; deviceId?: string }): void {
         if (!this.invoke) return;
         const node = this.index.get(nodeId);
         if (node === undefined) return;
-        this.invoke('set_mic', { node, enabled: true }).catch((err: unknown) => {
+        // deviceId selection on native is a future cpal-input-routing concern; the
+        // engine currently sources the system default input. We honour mute here —
+        // the stage-critical guarantee — and ignore deviceId until input routing lands.
+        this.invoke('set_mic', { node, enabled: !options.isMuted }).catch((err: unknown) => {
             log.error('set_mic failed', { detail: String(err) });
         });
     }
