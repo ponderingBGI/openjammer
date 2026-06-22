@@ -539,3 +539,43 @@ describe('emitOjGraph — arity', () => {
         expect(spk.n_out).toBe(0);
     });
 });
+
+// ---------------------------------------------------------------------------
+// Looper inserted in the chain (the user's "it amplifies" scenario)
+// ---------------------------------------------------------------------------
+
+describe('emitOjGraph — looper inserted between instrument and speaker', () => {
+    it('emits a SINGLE clean instrument -> Looper -> SpeakerOut path (no doubled signal)', () => {
+        const inst = makeNode('piano', { id: 'inst' }); // -> Sampler
+        const looper = makeNode('looper', { id: 'lp' });
+        const speaker = makeNode('speaker', { id: 'spk' });
+        const a1 = makeConn(inst.id, 'audio-out', looper.id, 'audio-in', 'audio');
+        const a2 = makeConn(looper.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(inst, looper, speaker), connMap(a1, a2));
+
+        // The looper survives as a real Looper IrNode (not flattened, not Delay).
+        const looperIr = graph.nodes.find((n) => n.manifest_id === manifestIdFor('looper'));
+        expect(looperIr, 'looper survives as an IrNode').toBeDefined();
+        expect(looperIr!.kind).toBe('Looper');
+        expect(looperIr!.n_in).toBe(1);
+        expect(looperIr!.n_out).toBe(1);
+
+        // Kernel param contract: WET=1, DRY=1 (audible loop + transparent monitor).
+        expect(looperIr!.params.find((p) => p.id === 1)?.value).toBe(1); // WET
+        expect(looperIr!.params.find((p) => p.id === 2)?.value).toBe(1); // DRY
+
+        // EXACTLY ONE audio edge feeds the speaker, from the looper — NOT a
+        // surviving direct instrument->speaker path (which would double the signal).
+        const spk = graph.nodes.find((n) => n.kind === 'SpeakerOut')!;
+        const intoSpk = graph.edges.filter((e) => e.to_node === spk.id && e.kind === 'Audio');
+        expect(intoSpk, 'exactly one source feeds the speaker').toHaveLength(1);
+        expect(kindOfNodeId(graph, intoSpk[0].from_node)).toBe('Looper');
+        expect(hasEdge(graph, 'Sampler', 'SpeakerOut'), 'no direct doubled path').toBe(false);
+
+        // And the instrument feeds ONLY the looper (one outgoing audio edge).
+        const sampler = graph.nodes.find((n) => n.kind === 'Sampler')!;
+        const fromInst = graph.edges.filter((e) => e.from_node === sampler.id && e.kind === 'Audio');
+        expect(fromInst, 'instrument feeds only the looper').toHaveLength(1);
+        expect(kindOfNodeId(graph, fromInst[0].to_node)).toBe('Looper');
+    });
+});

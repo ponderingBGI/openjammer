@@ -16,34 +16,23 @@
 import type { NodeDefinition, NodeType } from './types';
 import { nodeDefinitions } from './registry';
 import { AI_MANIFEST_PARAMS_KEY } from './dynamicRegistry';
+// The ONE closed PrimitiveKind set, imported from the wire-contract SSOT so this
+// file never holds a fourth hand-written copy that can drift (see below).
+import type { PrimitiveKind } from '../../packages/oj-protocol-ts/src/index';
 
 // ============================================================================
 // Manifest types (mirror crates/ojcore/src/manifest.rs + oj-plugin-v1.json)
 // ============================================================================
 
 /**
- * CLOSED PrimitiveKind the RT loop lowers a manifest `id` to (serde unit-variant
- * names — must match `ojproto::PrimitiveKind` and the schema's `kind` enum).
+ * CLOSED PrimitiveKind the RT loop lowers a manifest `id` to. DERIVED from the
+ * single wire-contract SSOT (`@openjammer/oj-protocol` `PRIMITIVE_KINDS`, itself
+ * pinned to `ojproto::PrimitiveKind` and `schemas/primitive-kinds.json`) and
+ * re-exported here — NEVER a fourth hand-written copy. The previous hand copy
+ * silently omitted `Looper`/`Recorder`, which is exactly what lowered the looper
+ * node to a `Delay`; deriving the type makes that class of drift impossible.
  */
-export type PrimitiveKind =
-    | 'Osc'
-    | 'Sampler'
-    | 'Sf2'
-    | 'KarplusString'
-    | 'Gain'
-    | 'Biquad'
-    | 'Waveshaper'
-    | 'Delay'
-    | 'Convolution'
-    | 'FaustHost'
-    | 'WasmHost'
-    | 'PluginHost'
-    | 'Add'
-    | 'MicIn'
-    | 'SpeakerOut'
-    | 'GraphIn'
-    | 'GraphOut'
-    | 'Passthrough';
+export type { PrimitiveKind };
 
 /** How a node's audio is computed (selects the executor backend). Frozen v1. */
 export type DspKind = 'builtin' | 'faust' | 'wasm' | 'none';
@@ -125,7 +114,7 @@ const KIND_BY_TYPE: Partial<Record<NodeType, PrimitiveKind>> = {
     // processors
     amplifier: 'Gain',
     effect: 'Waveshaper',
-    looper: 'Delay',
+    looper: 'Looper',
     // routing / io
     add: 'Add',
     subtract: 'Add',
@@ -134,6 +123,31 @@ const KIND_BY_TYPE: Partial<Record<NodeType, PrimitiveKind>> = {
     recorder: 'SpeakerOut',
     'canvas-input': 'GraphIn',
     'canvas-output': 'GraphOut',
+};
+
+/**
+ * Explicit param-id tables for engine-backed nodes whose UI is bespoke
+ * (`ui:'react'`), so their manifest params MATCH the kernel's param ids EXACTLY
+ * instead of being auto-derived from `defaultData` field ORDER. Auto-derivation
+ * ({@link paramsFor}) is only safe for AutoParamPanel (`ui:'auto'`) nodes; for a
+ * bespoke engine node it silently collides — the looper's `duration`/`currentTime`
+ * fields landed on the kernel's `(LOOP_SECS=0, WET=1)` ids, forcing WET=0 so a
+ * captured loop played back SILENT (the real cause of "it doesn't loop after 10s").
+ * This table is the single source of param-id agreement for such nodes (SEAM-4).
+ *
+ * `name` is the `node.data` key the live value is read from (see
+ * {@link paramsFromData}); `id` MUST equal the kernel's param id.
+ */
+const PARAMS_BY_TYPE: Partial<Record<NodeType, ParamDecl[]>> = {
+    // builtin.looper — ojcore `looper_param` ids: LOOP_SECS=0, WET=1, DRY=2.
+    // LOOP_SECS reads `node.data.duration` (<= 0 => free-run; clamped to 60 s in
+    // the kernel). WET/DRY have no node.data key yet, so they hold their defaults
+    // (audible loop + live monitor) instead of being clobbered to 0.
+    looper: [
+        { id: 0, name: 'duration', min: 0, max: 60, default: 10 },
+        { id: 1, name: 'wet', min: 0, max: 1, default: 1 },
+        { id: 2, name: 'dry', min: 0, max: 1, default: 1 },
+    ],
 };
 
 /**
@@ -224,7 +238,7 @@ export function manifestFromDefinition(def: NodeDefinition): PluginManifest {
         name: def.name,
         dsp: dspFor(kind),
         ui: uiFor(def.type),
-        params: paramsFor(def),
+        params: PARAMS_BY_TYPE[def.type] ?? paramsFor(def),
         ports: portsFor(def),
     };
     if (kind !== undefined) manifest.kind = kind;
