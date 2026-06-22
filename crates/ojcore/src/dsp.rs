@@ -8,6 +8,71 @@
 //! [`DspInstance::activate`] (which runs off the RT thread); `process` then only
 //! reads from / writes into the caller-owned buffers handed in via [`ProcessCtx`].
 
+use crate::manifest::ContractVersion;
+
+/// This kernel build's [`DspInstance`] contract generation (`docs/STABILITY.md` §4).
+/// Bumped MINOR when a backward-compatible capability/extension is added; MAJOR
+/// only on a breaking change to the frozen hot path (which must never happen).
+pub const KERNEL_CONTRACT: ContractVersion = ContractVersion::new(1, 0);
+
+/// The CLOSED set of kernel-known capability EXTENSIONS a node may provide through
+/// [`DspInstance::extension`]. Each maps to a reserved `oj.*` capability id in the
+/// manifest's `abi` block (`docs/STABILITY.md` §4); new extensions are added here
+/// additively. The manifest declares them as OPEN strings, so an old kernel that
+/// lacks an id simply never offers it — the negotiation that keeps "distros share
+/// one kernel" true.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtId {
+    /// `oj.latency` — the node reports a processing latency in samples (for PDC).
+    Latency,
+    /// `oj.state` — opaque save/restore of the node's full state (sessions, respawn).
+    State,
+    /// `oj.note-expression` — per-note expression / MPE.
+    NoteExpression,
+    /// `oj.offline-render` — the node opts into HQ paths when `realtime == false`.
+    OfflineRender,
+    /// `oj.gui` — the node provides a custom editor surface.
+    Gui,
+}
+
+impl ExtId {
+    /// The reserved `oj.*` capability id this extension is declared as in a manifest.
+    pub const fn capability_id(self) -> &'static str {
+        match self {
+            ExtId::Latency => "oj.latency",
+            ExtId::State => "oj.state",
+            ExtId::NoteExpression => "oj.note-expression",
+            ExtId::OfflineRender => "oj.offline-render",
+            ExtId::Gui => "oj.gui",
+        }
+    }
+
+    /// Resolve a manifest capability id back to a kernel-known [`ExtId`], or `None`
+    /// for an unknown / `vendor.*` id.
+    pub fn from_capability_id(id: &str) -> Option<ExtId> {
+        match id {
+            "oj.latency" => Some(ExtId::Latency),
+            "oj.state" => Some(ExtId::State),
+            "oj.note-expression" => Some(ExtId::NoteExpression),
+            "oj.offline-render" => Some(ExtId::OfflineRender),
+            "oj.gui" => Some(ExtId::Gui),
+            _ => None,
+        }
+    }
+}
+
+/// Whether THIS kernel build provides the capability `id`. An `oj.*` id counts as
+/// supported only once its [`ExtId`] extension is actually wired into the engine;
+/// `vendor.*` and unknown ids are never kernel-provided. A plugin that REQUIRES an
+/// unsupported capability degrades to a labeled passthrough stub — never a crash
+/// (`docs/STABILITY.md` §5).
+pub fn kernel_supports_capability(_id: &str) -> bool {
+    // No capability extension is wired into the kernel yet: this scaffold lands the
+    // negotiation surface only. As each lands it is added here — `oj.latency` (P1),
+    // `oj.state` (P2), and so on. Until then every REQUIRED capability degrades.
+    false
+}
+
 /// Per-block audio buffers handed to [`DspInstance::process`].
 ///
 /// We use two independent lifetimes (`'b` for the channel pointer slices, `'s`
@@ -137,6 +202,57 @@ pub trait DspInstance: Send {
         1.0
     }
 
+    /// OFF-RT capability query (`docs/STABILITY.md` §4): borrow the extension object
+    /// for `id`, or `None` if this node does not provide it. This is the ONE seam
+    /// through which capabilities grow — the hot-path methods (`process` /
+    /// `set_param` / `note_on` / `note_off`) stay frozen forever, so a new
+    /// capability is one off-RT `match` arm here, never a new hot-trait method.
+    /// Default `None` (a node provides no extensions unless it opts in). NOT on the
+    /// audio thread; MAY allocate. Callers downcast the returned `Any` to the
+    /// extension's sub-trait/struct.
+    fn extension(&self, _id: ExtId) -> Option<&dyn core::any::Any> {
+        None
+    }
+
     /// Clear internal state (filter memory, delay lines, phase). Default no-op.
     fn reset(&mut self) {}
+}
+
+#[cfg(test)]
+mod ext_tests {
+    use super::*;
+
+    #[test]
+    fn ext_id_capability_id_roundtrips() {
+        for id in [
+            ExtId::Latency,
+            ExtId::State,
+            ExtId::NoteExpression,
+            ExtId::OfflineRender,
+            ExtId::Gui,
+        ] {
+            assert_eq!(ExtId::from_capability_id(id.capability_id()), Some(id));
+        }
+    }
+
+    #[test]
+    fn unknown_and_vendor_capability_ids_are_not_kernel_extensions() {
+        assert_eq!(ExtId::from_capability_id("vendor.x"), None);
+        assert_eq!(ExtId::from_capability_id("oj.unknown"), None);
+    }
+
+    #[test]
+    fn scaffold_kernel_supports_no_capabilities_yet() {
+        // The negotiation surface is landed, but no extension is wired into the
+        // engine yet, so every capability (incl. known oj.* ids) is unsupported.
+        assert!(!kernel_supports_capability(ExtId::Latency.capability_id()));
+        assert!(!kernel_supports_capability("vendor.x"));
+    }
+
+    #[test]
+    fn default_instance_provides_no_extension() {
+        // The reference GainNode opts into nothing, so extension() is None.
+        let node = crate::builtin::GainNode::new();
+        assert!(node.extension(ExtId::State).is_none());
+    }
 }

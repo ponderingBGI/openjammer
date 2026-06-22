@@ -138,6 +138,7 @@ impl StructuralLoader {
         };
         Self {
             manifest: PluginManifest {
+                abi: None,
                 id: String::from(id),
                 name: String::from(name),
                 kind,

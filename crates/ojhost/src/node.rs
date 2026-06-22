@@ -200,6 +200,7 @@ impl PluginHostLoader {
                 .collect()
         };
         let manifest = PluginManifest {
+            abi: None,
             id: hosted_plugin_id(&descriptor),
             name: descriptor.name.clone(),
             kind: PrimitiveKind::PluginHost,

@@ -25,6 +25,7 @@ pub const GAIN_PARAM: u16 = 0;
 /// Build the gain manifest (one param, one audio in/out).
 fn gain_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(GAIN_ID),
         name: String::from("Gain"),
         kind: PrimitiveKind::Gain,

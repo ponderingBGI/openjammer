@@ -168,6 +168,7 @@ impl PluginLoader for KarplusLoader {
 
 fn karplus_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(KARPLUS_ID),
         name: String::from("Karplus String"),
         kind: PrimitiveKind::KarplusString,

@@ -76,6 +76,7 @@ const IMPORT_WAT: &str = r#"(module
 
 fn mono_manifest(bytes: &[u8]) -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: wasm_id_for(bytes),
         name: "Code Node".into(),
         kind: PrimitiveKind::WasmHost,

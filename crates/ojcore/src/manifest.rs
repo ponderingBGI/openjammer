@@ -63,6 +63,117 @@ pub struct PortDecl {
     pub control_out: u8,
 }
 
+/// A contract/ABI version, `major.minor` (see [`Abi`] and `docs/STABILITY.md` §4).
+/// A MAJOR bump is breaking; a higher MINOR is backward-compatible (new optional
+/// capabilities). Compared with [`ContractVersion::satisfies`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContractVersion {
+    pub major: u16,
+    pub minor: u16,
+}
+
+impl ContractVersion {
+    pub const fn new(major: u16, minor: u16) -> Self {
+        Self { major, minor }
+    }
+
+    /// True if a kernel at `self` can load a plugin whose `min_contract` is `min`:
+    /// the same MAJOR (no breaking gap) AND at least as new a MINOR.
+    pub fn satisfies(self, min: ContractVersion) -> bool {
+        self.major == min.major && self.minor >= min.minor
+    }
+}
+
+/// One capability a plugin declares against the kernel contract. `id` is an OPEN
+/// namespaced string — the `oj.*` prefix is kernel-reserved (each maps to a closed
+/// [`crate::dsp::ExtId`]); the `vendor.*` prefix is for the community. `required`
+/// = the plugin cannot run without it (an unknown REQUIRED capability degrades the
+/// node to a labeled passthrough stub); otherwise it is optional (an unknown
+/// OPTIONAL capability is simply not offered). See `docs/STABILITY.md` §4–5.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Capability {
+    pub id: String,
+    #[serde(default)]
+    pub required: bool,
+}
+
+/// A coarse permission a plugin/distro declares it needs. DECLARED here; ENFORCED
+/// at the out-of-process worker's OS sandbox token, never by the manifest itself
+/// (see the native-plugin isolation model). Frozen v1 set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Permission {
+    /// Filesystem access beyond the node's own bundled assets.
+    Fs,
+    /// Network access.
+    Net,
+    /// Runs arbitrary native code (a hosted VST3/AU/CLAP or native code-node).
+    Native,
+}
+
+/// The additive ABI / capability-negotiation block (`docs/STABILITY.md` §4). It is
+/// OPTIONAL and strictly additive: a manifest without it is a pre-`abi` plugin that
+/// targets the base contract and declares no capabilities or permissions. This is
+/// the ONE surface that carries forward/backward compatibility (`min_contract`),
+/// capability negotiation, and the declared permission set — so stability, trust,
+/// and the distro min-kernel pin never fragment into competing manifest fields.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Abi {
+    /// The kernel contract generation the plugin was built against (informational).
+    pub contract: ContractVersion,
+    /// The OLDEST kernel contract that can load this plugin — the load gate.
+    pub min_contract: ContractVersion,
+    /// Capabilities the plugin uses, each flagged required-or-optional.
+    #[serde(default)]
+    pub capabilities: Vec<Capability>,
+    /// Coarse permissions the plugin declares it needs (enforced out-of-process).
+    #[serde(default)]
+    pub permissions: Vec<Permission>,
+}
+
+/// Why a plugin's [`Abi`] cannot be satisfied by the running kernel — the reason
+/// carried into the labeled passthrough stub's diagnostic. Borrows the offending
+/// capability id from the manifest, so it allocates nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AbiUnsupported<'a> {
+    /// The plugin's `min_contract` is newer than this kernel's contract.
+    ContractTooNew { min: ContractVersion },
+    /// The plugin REQUIRES a capability this kernel does not provide.
+    MissingCapability { id: &'a str },
+}
+
+impl Abi {
+    /// Iterate the ids of capabilities this plugin REQUIRES.
+    pub fn required_capabilities(&self) -> impl Iterator<Item = &str> {
+        self.capabilities
+            .iter()
+            .filter(|c| c.required)
+            .map(|c| c.id.as_str())
+    }
+
+    /// Decide whether a kernel at `kernel` contract — supporting the capability ids
+    /// for which `supported(id)` is true — can load this plugin. `Ok(())` = load
+    /// normally; `Err(reason)` = degrade to a labeled passthrough stub, NEVER a
+    /// crash and NEVER a refused project (`docs/STABILITY.md` §5).
+    pub fn load_compatibility(
+        &self,
+        kernel: ContractVersion,
+        supported: impl Fn(&str) -> bool,
+    ) -> Result<(), AbiUnsupported<'_>> {
+        if !kernel.satisfies(self.min_contract) {
+            return Err(AbiUnsupported::ContractTooNew {
+                min: self.min_contract,
+            });
+        }
+        for id in self.required_capabilities() {
+            if !supported(id) {
+                return Err(AbiUnsupported::MissingCapability { id });
+            }
+        }
+        Ok(())
+    }
+}
+
 /// The complete static description of a registrable node type. Serializes to /
 /// from the v1 JSON Schema (`schemas/oj-plugin-v1.json`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -77,4 +188,99 @@ pub struct PluginManifest {
     pub ui: UiKind,
     pub params: Vec<ParamDecl>,
     pub ports: PortDecl,
+    /// The additive ABI / capability-negotiation block (`docs/STABILITY.md` §4).
+    /// `None` = a pre-`abi` plugin (the common built-in case): base contract, no
+    /// declared capabilities or permissions. Strictly additive — absent in the v1
+    /// JSON, so every existing manifest deserializes unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abi: Option<Abi>,
+}
+
+#[cfg(test)]
+mod abi_tests {
+    use super::*;
+    use alloc::string::String;
+    use alloc::vec;
+
+    fn cap(id: &str, required: bool) -> Capability {
+        Capability {
+            id: String::from(id),
+            required,
+        }
+    }
+
+    #[test]
+    fn contract_version_satisfies_same_major_newer_minor() {
+        let kernel = ContractVersion::new(1, 2);
+        assert!(kernel.satisfies(ContractVersion::new(1, 0))); // older min: ok
+        assert!(kernel.satisfies(ContractVersion::new(1, 2))); // equal: ok
+        assert!(!kernel.satisfies(ContractVersion::new(1, 3))); // newer min: kernel too old
+        assert!(!kernel.satisfies(ContractVersion::new(0, 9))); // different major
+        assert!(!kernel.satisfies(ContractVersion::new(2, 0))); // different major
+    }
+
+    #[test]
+    fn unsupported_optional_capability_still_loads() {
+        let abi = Abi {
+            contract: ContractVersion::new(1, 0),
+            min_contract: ContractVersion::new(1, 0),
+            capabilities: vec![cap("oj.latency", false)], // OPTIONAL
+            permissions: vec![],
+        };
+        // The kernel supports nothing, but the capability is optional -> loads.
+        assert_eq!(
+            abi.load_compatibility(ContractVersion::new(1, 0), |_| false),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn contract_too_new_degrades() {
+        let abi = Abi {
+            contract: ContractVersion::new(1, 5),
+            min_contract: ContractVersion::new(1, 5),
+            capabilities: vec![],
+            permissions: vec![],
+        };
+        assert_eq!(
+            abi.load_compatibility(ContractVersion::new(1, 0), |_| true),
+            Err(AbiUnsupported::ContractTooNew {
+                min: ContractVersion::new(1, 5),
+            })
+        );
+    }
+
+    #[test]
+    fn missing_required_capability_degrades_then_loads_when_provided() {
+        let abi = Abi {
+            contract: ContractVersion::new(1, 0),
+            min_contract: ContractVersion::new(1, 0),
+            capabilities: vec![cap("vendor.secret", true)], // REQUIRED
+            permissions: vec![Permission::Native],
+        };
+        // Unsupported required capability -> degrade (a labeled stub, never a crash).
+        assert_eq!(
+            abi.load_compatibility(ContractVersion::new(1, 0), |_| false),
+            Err(AbiUnsupported::MissingCapability {
+                id: "vendor.secret"
+            })
+        );
+        // ...but loads cleanly once the kernel provides it.
+        assert_eq!(
+            abi.load_compatibility(ContractVersion::new(1, 0), |id| id == "vendor.secret"),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn required_capabilities_filters_optional() {
+        let abi = Abi {
+            contract: ContractVersion::new(1, 0),
+            min_contract: ContractVersion::new(1, 0),
+            capabilities: vec![cap("oj.state", true), cap("oj.gui", false)],
+            permissions: vec![],
+        };
+        let req: alloc::vec::Vec<&str> = abi.required_capabilities().collect();
+        assert_eq!(req, vec!["oj.state"]);
+    }
 }

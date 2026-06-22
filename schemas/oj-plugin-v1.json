@@ -79,6 +79,46 @@
         "control_in": { "type": "integer", "minimum": 0, "maximum": 255 },
         "control_out": { "type": "integer", "minimum": 0, "maximum": 255 }
       }
+    },
+    "abi": {
+      "type": "object",
+      "description": "Additive ABI / capability-negotiation block (docs/STABILITY.md §4). OPTIONAL and strictly additive: absent = a pre-abi plugin targeting the base contract, declaring no capabilities or permissions.",
+      "required": ["contract", "min_contract"],
+      "additionalProperties": false,
+      "properties": {
+        "contract": { "$ref": "#/$defs/contractVersion", "description": "Kernel contract generation the plugin was built against (informational)." },
+        "min_contract": { "$ref": "#/$defs/contractVersion", "description": "Oldest kernel contract that can load this plugin (the load gate)." },
+        "capabilities": {
+          "type": "array",
+          "description": "Capabilities the plugin uses; `oj.*` ids are kernel-reserved, `vendor.*` is community. An unknown REQUIRED capability degrades the node to a labeled passthrough stub; an unknown OPTIONAL one is simply not offered.",
+          "items": {
+            "type": "object",
+            "required": ["id"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "required": { "type": "boolean", "default": false }
+            }
+          }
+        },
+        "permissions": {
+          "type": "array",
+          "description": "Coarse permissions the plugin declares it needs. DECLARED here; ENFORCED out-of-process at the OS sandbox token.",
+          "items": { "enum": ["fs", "net", "native"] }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "contractVersion": {
+      "type": "object",
+      "description": "A contract version, major.minor (docs/STABILITY.md §4).",
+      "required": ["major", "minor"],
+      "additionalProperties": false,
+      "properties": {
+        "major": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "minor": { "type": "integer", "minimum": 0, "maximum": 65535 }
+      }
     }
   }
 }

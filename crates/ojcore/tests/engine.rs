@@ -529,6 +529,7 @@ impl NanLoader {
     fn new() -> Self {
         Self {
             manifest: PluginManifest {
+                abi: None,
                 id: NAN_ID.into(),
                 name: "NaN".into(),
                 kind: PrimitiveKind::Gain, // any processor kind works here
