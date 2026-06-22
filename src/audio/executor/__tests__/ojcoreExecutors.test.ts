@@ -79,6 +79,7 @@ function mockBridge(): { bridge: OjcoreBridge; sent: RtCommand[]; loaded: unknow
         sendCommand: (cmd) => {
             sent.push(cmd);
         },
+        nodeLevel: () => 0,
         loadSample: (nodeId, pcm, sampleRate, rootNote) => {
             loaded.push({ nodeId, len: pcm.length, sampleRate, rootNote });
             return Promise.resolve();
@@ -215,6 +216,7 @@ describe('recorder handle captures via the bridge and surfaces a blob', () => {
         const bridge: OjcoreBridge = {
             nodeIndex: () => 7,
             sendCommand: () => {},
+            nodeLevel: () => 0,
             loadSample: () => Promise.resolve(),
             startCapture: (id) => captured.push(`start:${id}`),
             stopCapture: (id) => {

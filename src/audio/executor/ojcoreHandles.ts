@@ -44,6 +44,12 @@ export interface OjcoreBridge {
     nodeIndex(nodeId: string): NodeIdx | undefined;
     /** Send one realtime command to the engine (note/param/looper/transport). */
     sendCommand(cmd: RtCommand): void;
+    /** Latest per-node output level (0..1 peak) cached from the engine meter
+     *  stream — for driving REAL node visuals (e.g. the looper's live waveform)
+     *  instead of synthetic motion. Returns `0` when the node has no recent
+     *  level (no signal, or metering not currently streaming): an honest empty
+     *  state, never a fabricated one. */
+    nodeLevel(nodeId: string): number;
     /**
      * Lower decoded mono PCM into the engine as the sample for `nodeId`'s
      * `builtin.sampler` (native: `load_sample` Tauri command -> AssetCatalog ->
@@ -267,13 +273,19 @@ export class OjcoreLooperHandle implements LooperHandle {
         this.onWaveformHistory = callback;
     }
 
-    /** Drive a cosmetic live-waveform/playhead while the engine records. */
+    /** Drive the live-waveform/playhead while the engine records. The amplitude
+     *  is the REAL per-node output level from the engine meter (VIS-1) — not a
+     *  synthetic sine — so the trace reflects what the performer is actually
+     *  playing. (The playhead is still derived from the local clock against the
+     *  set duration; a sample-accurate engine playhead awaits the LooperState
+     *  return frame.) */
     private startTick(): void {
         if (this.tickId !== null) return;
         const tick = () => {
             if (!this.recording) return;
             const elapsed = (performance.now() - this.cycleStart) / 1000;
-            const level = 0.2 + Math.abs(Math.sin(elapsed * 6)) * 0.6;
+            // Real input amplitude from the engine meter for THIS looper node.
+            const level = this.bridge.nodeLevel(this.nodeId);
             this.liveHistory.push(level);
             if (this.liveHistory.length > LOOP_WAVEFORM_POINTS * 4) {
                 this.liveHistory.shift();

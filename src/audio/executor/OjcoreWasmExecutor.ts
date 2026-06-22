@@ -159,6 +159,7 @@ export class OjcoreWasmExecutor implements Executor {
     private readonly bridge: OjcoreBridge = {
         nodeIndex: (nodeId) => this.index.get(nodeId),
         sendCommand: (cmd) => this.send(cmd),
+        nodeLevel: (nodeId) => this.levels.get(nodeId) ?? 0,
         loadSample: (nodeId, pcm, sampleRate, rootNote) =>
             this.loadSampleWasm(nodeId, pcm, sampleRate, rootNote),
         startCapture: (nodeId) => this.captureStartWasm(nodeId),

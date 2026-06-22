@@ -9,6 +9,7 @@ function mockBridge(): { bridge: OjcoreBridge; sent: RtCommand[] } {
     const bridge: OjcoreBridge = {
         nodeIndex: () => 3,
         sendCommand: (cmd) => sent.push(cmd),
+        nodeLevel: () => 0,
         loadSample: async () => {},
         startCapture: () => {},
         stopCapture: async () => null,
@@ -47,6 +48,7 @@ describe('OjcoreLooperHandle.setDuration -> engine LOOP_SECS', () => {
         const bridge: OjcoreBridge = {
             nodeIndex: () => undefined,
             sendCommand: (cmd) => sent.push(cmd),
+            nodeLevel: () => 0,
             loadSample: async () => {},
             startCapture: () => {},
             stopCapture: async () => null,
