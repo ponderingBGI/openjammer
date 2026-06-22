@@ -42,3 +42,26 @@
     flex-wrap: wrap;
     gap: var(--space-xs);
 }
+
+/* Empty state: the intro callout stacked over the real CLAP folder list. */
+.plugins-empty {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+/* One folder row: the path next to its scope tag (your account / all users). */
+.plugins-dir {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+/* An actual on-disk plugin folder path — monospace, wraps on long Windows paths. */
+.plugins-path {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: var(--text-xs);
+    color: var(--text-secondary, var(--text-muted));
+    word-break: break-all;
+}

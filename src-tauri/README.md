@@ -88,7 +88,7 @@ job):
 Pi is bundled with **native desktop releases only**. The browser/PWA build does
 not ship or run Pi; it continues to show the desktop-required state.
 
-1. **Use the desktop app.** `bun run dev:native` (lazily — only when stale) and
+1. **Use the desktop app.** `bun native` (lazily — only when stale) and
    `bun run tauri build` (always) run `bun run build:pi-runtime`, which compiles
    the pinned Pi sidecar into `src-tauri/binaries/` and bundles it as a Tauri
    resource. At runtime
@@ -126,49 +126,25 @@ bundled sidecar; no test here depends on a global Pi install.
 
 ## Local development
 
-From the **repo root** (not this directory):
+Run the desktop app from the **repo root** (not this directory):
 
 ```bash
-bun install                   # installs @tauri-apps/cli (+ web deps)
-bun run dev:native            # one command: Vite HMR + the native engine (alias: just dev / oj dev)
-bun run dev:native --engine   # windowless engine inner-loop via bacon (alias: just engine-watch)
+bun native   # Vite HMR + the native engine; opens the window, streams logs
 ```
 
-`bun run dev:native` (the `oj dev` wrapper) **delegates the whole Vite+cargo
-lifecycle and Ctrl+C teardown to the Tauri CLI** — the edge that already does
-recursive process-tree kill correctly on every OS — so shutdown is clean and
-identical on Windows/macOS/Linux (never add a sibling orchestrator here). It runs
-the config's `beforeDevCommand` (`bun run dev` → `http://localhost:5173`), then
-opens the native window with HMR of the web UI; saving Rust (`crates/**`,
-`src-tauri/**`) recompiles and **restarts** the window. The bundled Pi sidecar is
-built **lazily** — only on first run or after a Pi upgrade (it no longer
-recompiles on every start); set `OJ_DEV_SKIP_PI=1` to skip it, or
-`OPENJAMMER_PI_BIN` to point at an external Pi.
+Setup, per-OS prerequisites (`bun run oj setup`), and the dev controls are documented once in
+**[CONTRIBUTING.md § Native desktop](../CONTRIBUTING.md#native-desktop-tauri)** — don't duplicate
+them here. In short: `bun native` delegates the whole Vite+cargo lifecycle and Ctrl+C teardown to
+the Tauri CLI (the edge that already does recursive process-tree kill on every OS — never add a
+sibling orchestrator here); it runs the config's `beforeDevCommand` (`bun run dev` →
+`http://localhost:5173`), opens the window with web-UI HMR, and recompiles + restarts the window on
+Rust edits. The raw `bun run tauri dev` still works for debugging the shell directly.
 
-For fast Rust/DSP iteration without the window restart, use the windowless engine
-loop `bun run dev:native --engine` ([bacon](https://dystroy.org/bacon/) over the
-`render`/`nextest` harnesses, audible pass/fail; install once with
-`cargo install --locked bacon`). The raw `bun run tauri dev` still works for
-debugging the shell directly.
-
-### Prerequisites — `oj setup`
-
-The fastest path on any OS is **`bun run oj setup`**: it detects every native
-prerequisite and installs the missing ones after a confirm (winget on Windows for
-MSVC + WebView2 + Rust; `xcode-select` + rustup on macOS; apt/dnf/pacman on Linux).
-`--dry-run` previews, `--wasm` adds the browser-worklet nightly, and
-`bun run oj doctor --check native-readiness` reports without installing. The set is
-derived from CI (`.github/actions/setup-rust/action.yml`), so local matches CI.
-
-To install the Linux system libraries by hand instead:
-
-```bash
-sudo apt install \
-  libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
-  libjavascriptcoregtk-4.1-dev librsvg2-dev libasound2-dev pkg-config
-```
-
-macOS and Windows need only the Rust toolchain + Xcode CLT / MSVC build tools.
+**Tauri-specific knobs.** The bundled Pi (Ctrl+K AI) sidecar builds **lazily** — only on first run
+or after a Pi upgrade; set `OJ_DEV_SKIP_PI=1` to skip it, or `OPENJAMMER_PI_BIN` to point at an
+external Pi. For fast Rust/DSP iteration without the window restart, `bun native --engine` runs the
+windowless [bacon](https://dystroy.org/bacon/) loop over the `render`/`nextest` harnesses
+(`cargo install --locked bacon`).
 
 ## Building / verifying
 

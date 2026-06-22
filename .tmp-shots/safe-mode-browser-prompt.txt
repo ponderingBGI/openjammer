@@ -1,0 +1,23 @@
+You are a browser testing agent with Chrome DevTools MCP access. Be concise.
+
+TARGET: the redesigned OpenJammer Safe Mode screen at http://localhost:5175/
+
+STEPS:
+1. Navigate to http://localhost:5175/ and wait for load.
+2. Evaluate this JS in the page to seed localStorage so the next boot drops into Safe Mode with every option visible:
+   localStorage.setItem('openjammer-emergency-backup', JSON.stringify({v:1,timestamp:1,projectName:null,nodes:[],edges:[]}));
+   localStorage.setItem('openjammer-recovery-quarantine', JSON.stringify([{id:'emergency:1',bootSeq:1,reason:'snapshot-crashed-on-load'}]));
+   localStorage.setItem('openjammer-recovery-marker','x');
+   localStorage.setItem('openjammer-recovery-marker.bak','x');
+3. Reload the page. A full-screen dialog titled "Lets get you playing again" should appear (a div with role=dialog and aria-labelledby=oj-safemode-title).
+4. Take a screenshot and save it to .tmp-shots/safe-mode.png (and return it inline if possible).
+
+VERIFY AND REPORT (briefly):
+- TWO option cards: "Start fresh" (filled/primary) and "Back to my work" (outlined/secondary), each with one subtitle line.
+- Below a thin divider, a centered footer row of small text links: "Open a different project", "Send a report", "Reload last saved version", separated by middots.
+- document.activeElement on load is the "Start fresh" button (autofocus).
+- Pressing Tab cycles focus only within the dialog; Shift+Tab from the first focusable wraps to the last (focus never lands on page chrome behind the overlay).
+- Report the computed color and font-size of a .oj-welcome-link footer link (confirm it is dark/legible ink, not faint gray).
+- Click "Back to my work": the overlay should disappear.
+
+Report: any layout problems (overflow, cramped spacing, misalignment), whether the footer links are clearly legible, and the autofocus/Tab-trap results. Keep it short.

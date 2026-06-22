@@ -14,6 +14,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
+import { toast } from 'sonner';
 import { Modal, PanelHeader, Button, Callout, Chip, Spinner, List, ListRow } from '@openjammer/oj-ui';
 import { getInvoke, isTauri } from '../../ai/tauri';
 import './PluginsPanel.css';
@@ -31,10 +32,16 @@ interface PluginDescriptor {
     latency_samples: number;
 }
 
+/** A scanned CLAP folder + whether it's the per-user or system-wide location. */
+interface PluginDir {
+    path: string;
+    scope: 'user' | 'system' | string;
+}
+
 type ScanState =
     | { kind: 'idle' }
     | { kind: 'scanning' }
-    | { kind: 'ok'; plugins: PluginDescriptor[] }
+    | { kind: 'ok'; plugins: PluginDescriptor[]; dirs: PluginDir[] }
     | { kind: 'error'; message: string }
     | { kind: 'unsupported' };
 
@@ -68,11 +75,33 @@ export function PluginsPanel() {
         }
         setState({ kind: 'scanning' });
         try {
-            // Empty dirs -> the native side scans the OS-standard plugin folders.
-            const plugins = (await invoke('scan_plugins', { dirs: [] })) as PluginDescriptor[];
-            setState({ kind: 'ok', plugins: Array.isArray(plugins) ? plugins : [] });
+            // Empty dirs -> the native side scans the OS-standard plugin folders;
+            // `plugin_dirs` returns those same CLAP folders so the empty state can
+            // show the real paths (and offer to open one) instead of examples.
+            const [plugins, dirs] = await Promise.all([
+                invoke('scan_plugins', { dirs: [] }) as Promise<PluginDescriptor[]>,
+                invoke('plugin_dirs') as Promise<PluginDir[]>,
+            ]);
+            setState({
+                kind: 'ok',
+                plugins: Array.isArray(plugins) ? plugins : [],
+                dirs: Array.isArray(dirs) ? dirs : [],
+            });
         } catch (err) {
             setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
+        }
+    }, []);
+
+    /** Open one of the scanned CLAP folders in the OS file manager. */
+    const revealPath = useCallback(async (path: string) => {
+        const invoke = getInvoke();
+        if (!invoke) return;
+        try {
+            await invoke('reveal_path', { path });
+        } catch (err) {
+            toast.error('Could not open the folder', {
+                description: err instanceof Error ? err.message : String(err),
+            });
         }
     }, []);
 
@@ -112,11 +141,35 @@ export function PluginsPanel() {
                     </Callout>
                 )}
                 {state.kind === 'ok' && state.plugins.length === 0 && (
-                    <Callout variant="info">
-                        No plugins found. Drop a <code>.clap</code> into your CLAP folder
-                        (e.g. <code>~/.clap</code> on Linux, <code>~/Library/Audio/Plug-Ins/CLAP</code> on
-                        macOS) and re-scan.
-                    </Callout>
+                    <div className="plugins-empty">
+                        <Callout variant="info">
+                            No plugins found. OpenJammer hosts <code>.clap</code> plugins and scans
+                            both your account folder (no admin needed) and the system one — drop a{' '}
+                            <code>.clap</code> into either below, then <strong>Re-scan</strong>.
+                        </Callout>
+                        {state.dirs.length > 0 && (
+                            <List aria-label="CLAP plugin folders">
+                                {state.dirs.map((dir) => (
+                                    <ListRow
+                                        key={dir.path}
+                                        actions={
+                                            <Button
+                                                onClick={() => void revealPath(dir.path)}
+                                                title="Open this folder in your file manager"
+                                            >
+                                                Open folder
+                                            </Button>
+                                        }
+                                    >
+                                        <span className="plugins-dir">
+                                            <code className="plugins-path">{dir.path}</code>
+                                            <Chip>{dir.scope === 'user' ? 'your account' : 'all users'}</Chip>
+                                        </span>
+                                    </ListRow>
+                                ))}
+                            </List>
+                        )}
+                    </div>
                 )}
                 {state.kind === 'ok' && state.plugins.length > 0 && (
                     <List aria-label="Installed plugins">

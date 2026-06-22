@@ -29,7 +29,12 @@ bun run build      # tsc + production PWA build
 
 ## Engine + native app
 
+Run the native desktop app with **`bun native`** (the desktop counterpart to `bun dev`; first
+run: `bun run oj setup` for the toolchain). Setup, prerequisites, and controls live in the repo
+[CONTRIBUTING.md § Native desktop](https://github.com/PonderingBGI/openjammer/blob/main/CONTRIBUTING.md#native-desktop-tauri).
+
 ```sh
+bun native                                   # run the native desktop app (Vite HMR + engine)
 cargo test --workspace                       # engine tests + golden render
 cargo nextest run -p ojcore                  # the audio-thread no-alloc gate
 cargo build -p oj-tauri                      # the native desktop shell

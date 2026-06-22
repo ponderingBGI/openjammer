@@ -202,6 +202,27 @@ pub fn default_plugin_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+/// The subset of [`default_plugin_dirs`] that hold CLAP plugins — where dropping a
+/// `.clap` makes it hostable. The Plugins panel shows these as the real "drop a
+/// plugin here" folders for this machine (CLAP is the format the pure-Rust backend
+/// hosts), instead of generic cross-platform examples.
+pub fn clap_plugin_dirs() -> Vec<PathBuf> {
+    default_plugin_dirs()
+        .into_iter()
+        .filter(|p| is_clap_dir(p))
+        .collect()
+}
+
+/// Whether `dir` is a CLAP install folder, by its leaf name (`CLAP` / `.clap`,
+/// case-insensitive). The CLAP spec fixes these folder names, so matching the leaf
+/// is robust and keeps VST3 (`VST3` / `.vst3`) dirs out.
+fn is_clap_dir(dir: &Path) -> bool {
+    dir.file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.eq_ignore_ascii_case("clap") || n.eq_ignore_ascii_case(".clap"))
+        .unwrap_or(false)
+}
+
 /// Like [`scan`] but with an explicit [`Blacklist`] and optional [`ScanCache`]
 /// path. A candidate already in the cache is reused (not re-probed); a candidate
 /// in the blacklist is skipped; everything else is probed under the
@@ -429,5 +450,22 @@ mod tests {
         let back = ScanCache::load(&file);
         assert!(back.descriptors.is_empty());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clap_dirs_are_a_clap_named_subset_of_all_dirs() {
+        let all = default_plugin_dirs();
+        for d in clap_plugin_dirs() {
+            assert!(all.contains(&d), "a CLAP dir must be one of the scanned dirs");
+            let leaf = d.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+            assert!(
+                leaf.eq_ignore_ascii_case("clap") || leaf.eq_ignore_ascii_case(".clap"),
+                "{leaf} is not a CLAP folder name"
+            );
+            assert!(
+                !leaf.eq_ignore_ascii_case("vst3") && !leaf.eq_ignore_ascii_case(".vst3"),
+                "a VST3 dir leaked into clap_plugin_dirs"
+            );
+        }
     }
 }

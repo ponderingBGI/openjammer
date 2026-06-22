@@ -43,7 +43,7 @@ mod scan;
 pub use descriptor::{PluginDescriptor, PluginFormat, PortCounts};
 pub use error::HostError;
 pub use node::{HostedPlugin, PluginHostLoader, PluginHostNode, PLUGIN_HOST_ID};
-pub use scan::{default_plugin_dirs, scan, scan_with, Blacklist, ScanCache};
+pub use scan::{clap_plugin_dirs, default_plugin_dirs, scan, scan_with, Blacklist, ScanCache};
 
 use ojcore::PluginRegistry;
 
