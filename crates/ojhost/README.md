@@ -1,6 +1,6 @@
 # ojhost — third-party plugin host (UNIT U-JUCE)
 
-Hosts **VST3 / CLAP** (and **AU** on macOS) plugins so professional users can run
+Hosts **VST2 / VST3 / CLAP** (and **AU** on macOS) plugins so professional users can run
 their existing tools inside OpenJammer. A hosted plugin is "just a plugin": it
 implements [`ojcore::DspInstance`] and is minted by an [`ojcore::PluginLoader`]
 registered under the `host.plugin` manifest id, lowering to
@@ -16,7 +16,7 @@ confined to this crate** (the JUCE backend); the rest of the engine stays Rust.
 |-------|---------|-------------|-------|
 | **default (scaffold)** | none | none | `scan` returns empty; `load` is `Unavailable`. Always builds + tests with no toolchain and no network. |
 | `--features clap-host` | CLAP | none (pure Rust) | Real CLAP hosting via [`clack`] (MIT). **Recommended path** in a CMake-less environment. |
-| `--features juce` | VST3 + CLAP (+ AU on macOS) | CMake + C++ + (VST3 SDK) | Bundled C++ JUCE 8, built by `build.rs` via CMake FetchContent. |
+| `--features juce` | VST2 + VST3 + CLAP (+ AU on macOS) | CMake + C++ + VST3 SDK + owner-provisioned VST2 SDK headers | Bundled C++ JUCE 8, built by `build.rs` via CMake FetchContent. VST2 is never vendored; see licensing posture below. |
 
 The scaffold default is deliberate: the descriptor marshalling, scan cache,
 crash-blacklist, and the `DspInstance` bridge are all fully present and
@@ -57,6 +57,14 @@ OOP without changing the cache/blacklist file formats.
   **its own license** (dual GPLv3 / proprietary). Under GPLv3 it is compatible
   with AGPL distribution. The founder must accept Steinberg's terms and provide
   the SDK (JUCE can fetch it, or point `VST3_SDK_DIR` at a local checkout).
+* **VST2 SDK** (Steinberg, discontinued) — OpenJammer must **not vendor, mirror,
+  or auto-download** VST2 headers. VST2 support is compiled only when an owner or
+  local developer explicitly provides a legally obtained SDK/header checkout via
+  `VST2_SDK_DIR` and opts in with `OJHOST_ENABLE_VST2=1`. Public release builds
+  may advertise VST2 only when CI is provisioned with that private SDK input;
+  otherwise the release must build VST3/CLAP/AU and report VST2 as unavailable.
+  This keeps source distribution clean while still allowing full VST2 support in
+  owner-provisioned binaries.
 * **CLAP** — **MIT**. No restrictions. Both the `clack` (pure-Rust) and JUCE CLAP
   paths host CLAP plugins under MIT.
 
@@ -71,7 +79,7 @@ OOP without changing the cache/blacklist file formats.
    `~/.clap`, `/usr/lib/clap`, `/Library/Audio/Plug-Ins/CLAP` (macOS).
 3. No extra system deps. CLAP only (no VST3/AU).
 
-### Option B: full JUCE host (VST3 + CLAP + AU)
+### Option B: full JUCE host (VST2 + VST3 + CLAP + AU)
 
 1. Install CMake and a C++17 toolchain:
    `sudo apt-get install -y cmake build-essential` (Linux),
@@ -86,13 +94,21 @@ OOP without changing the cache/blacklist file formats.
 3. **VST3**: accept the Steinberg VST3 SDK license. JUCE 8 can fetch it; if your
    environment blocks that, point CMake at a local SDK and ensure
    `JUCE_PLUGINHOST_VST3=1` (set in `cpp/CMakeLists.txt`).
-4. **CLAP via JUCE**: the CMake build opts in to the community
+4. **VST2**: provide a legally obtained VST2 SDK/header checkout outside the repo
+   and set `OJHOST_ENABLE_VST2=1` plus `VST2_SDK_DIR=/path/to/sdk`. Do not commit
+   the SDK or generated header copies.
+5. **CLAP via JUCE**: the CMake build opts in to the community
    `clap-juce-extensions` (`-DOJHOST_WITH_CLAP=ON`, the build.rs default). If it
    cannot be fetched, prefer Option A's pure-Rust CLAP path.
-5. Plugin directories (defaults vary by OS):
+6. Plugin directories (defaults vary by OS):
    * VST3: `~/.vst3`, `/usr/lib/vst3` (Linux) · `~/Library/Audio/Plug-Ins/VST3`,
      `/Library/Audio/Plug-Ins/VST3` (macOS) · `C:\Program Files\Common
      Files\VST3` (Windows).
+   * VST2: `~/.vst`, `/usr/lib/vst`, `/usr/local/lib/vst` (Linux) ·
+     `~/Library/Audio/Plug-Ins/VST`, `/Library/Audio/Plug-Ins/VST` (macOS) ·
+     `C:\Program Files\VstPlugins`, `C:\Program Files\Steinberg\VstPlugins`,
+     `C:\Program Files\Common Files\VST2` (Windows; plus 32-bit folders only if
+     a same-architecture host is intentionally shipped).
    * AU (macOS): `~/Library/Audio/Plug-Ins/Components`,
      `/Library/Audio/Plug-Ins/Components`.
 
