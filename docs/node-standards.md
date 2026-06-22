@@ -331,7 +331,7 @@ interface EffectNodeData {
 }
 ```
 
-Examples: `effect`, `amplifier`
+Examples: `effect`
 
 ### Routing Nodes
 

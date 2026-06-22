@@ -113,7 +113,7 @@ const noopRegistrar: DspNodeRegistrar = { registerDspNode: () => () => {} };
 
 const PLAN_PORTS: Record<string, PortDefinition[]> = {
     microphone: [{ id: 'audio-out', name: 'Audio Out', type: 'audio', direction: 'output' }],
-    amplifier: [
+    multiplier: [
         { id: 'audio-in', name: 'Audio In', type: 'audio', direction: 'input' },
         { id: 'audio-out', name: 'Audio Out', type: 'audio', direction: 'output' },
     ],
@@ -165,18 +165,18 @@ describe('applyToolCall — graph mutations', () => {
 
     it('update_node_data merges and undo restores prior values', () => {
         const { api, nodes } = makeFakeStore();
-        const id = api.addNode('amplifier' as NodeType, { x: 0, y: 0 }, null, { gain: 1 });
+        const id = api.addNode('multiplier' as NodeType, { x: 0, y: 0 }, null, { factor: 1 });
 
         const res = applyToolCall(
-            { name: 'update_node_data', args: { nodeId: id, data: { gain: 3 } } },
+            { name: 'update_node_data', args: { nodeId: id, data: { factor: 3 } } },
             api,
             noopRegistrar,
         );
         expect(res.ok).toBe(true);
-        expect(nodes.get(id)!.data.gain).toBe(3);
+        expect(nodes.get(id)!.data.factor).toBe(3);
 
         res.undo();
-        expect(nodes.get(id)!.data.gain).toBe(1);
+        expect(nodes.get(id)!.data.factor).toBe(1);
     });
 
     it('update_node_data on a missing node fails with a no-op undo', () => {
@@ -345,7 +345,7 @@ describe('applyToolCall — batch_apply (M3)', () => {
                 name: 'batch_apply',
                 args: {
                     calls: [
-                        { name: 'add_node', args: { type: 'amplifier' as NodeType } },
+                        { name: 'add_node', args: { type: 'multiplier' as NodeType } },
                         {
                             name: 'add_connection',
                             args: {
@@ -589,7 +589,7 @@ describe('applyToolCall — emit_plan (M7) applies as ONE reversible frame', () 
     const plan: WorkflowPlan = {
         nodes: [
             { ref: 'mic', type: 'microphone' },
-            { ref: 'amp', type: 'amplifier', params: { gain: 2 } },
+            { ref: 'amp', type: 'multiplier', params: { factor: 2 } },
             { ref: 'out', type: 'speaker' },
         ],
         wires: [
@@ -605,9 +605,9 @@ describe('applyToolCall — emit_plan (M7) applies as ONE reversible frame', () 
         expect(res.ok).toBe(true);
         expect(nodes.size).toBe(3);
         expect(connections.size).toBe(2);
-        // The amp node carries its param via the lowered update_node_data.
-        const amp = [...nodes.values()].find((n) => n.type === 'amplifier');
-        expect(amp?.data.gain).toBe(2);
+        // The multiplier node carries its param via the lowered update_node_data.
+        const amp = [...nodes.values()].find((n) => n.type === 'multiplier');
+        expect(amp?.data.factor).toBe(2);
         // Wires resolved to the REAL node ids (via the structured nodeId field),
         // never the symbolic plan refs.
         const nodeIds = new Set(nodes.keys());
@@ -666,7 +666,7 @@ describe('applyToolCall — emit_plan (M7) applies as ONE reversible frame', () 
         const noSink: WorkflowPlan = {
             nodes: [
                 { ref: 'mic', type: 'microphone' },
-                { ref: 'amp', type: 'amplifier' },
+                { ref: 'amp', type: 'multiplier' },
             ],
             wires: [{ from: { ref: 'mic', port: 'Audio Out' }, to: { ref: 'amp', port: 'Audio In' } }],
         };

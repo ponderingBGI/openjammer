@@ -12,8 +12,8 @@ import { LoroPersistence } from '../loroPersistence';
 function makeNode(id: string, overrides: Partial<CrdtNode> = {}): CrdtNode {
     return {
         id,
-        type: 'amplifier',
-        category: 'effects',
+        type: 'multiplier',
+        category: 'utility',
         position: { x: 0, y: 0 },
         data: { gain: 1 },
         ports: [],

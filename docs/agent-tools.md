@@ -69,7 +69,7 @@ signal reaches a speaker) before a single node is created.
 
 ### v1 graph verbs (each a reversible store mutation)
 
-- **add_node** — Add a node of the given registry `type` to the canvas (e.g. "looper", "amplifier", "sampler", "speaker"). Mirrors the UI add-node action.
+- **add_node** — Add a node of the given registry `type` to the canvas (e.g. "looper", "multiplier", "sampler", "speaker"). Mirrors the UI add-node action.
 - **remove_node** — Remove the node with the given `nodeId` (and its dangling connections).
 - **update_node_data** — Shallow-merge `data` into an existing node's data (e.g. set a gain, duration, or effect param). Mirrors the UI parameter edits.
 - **add_connection** — Connect `sourceNodeId:sourcePortId` -> `targetNodeId:targetPortId`. Ports must exist and connection rules apply (see registry.canConnect).
@@ -123,7 +123,7 @@ the missing path to the speaker. Every step is visible in the chat and undoable.
 {
   "nodes": [
     { "ref": "lp",  "type": "looper" },
-    { "ref": "amp", "type": "amplifier", "params": { "gain": 2 } },
+    { "ref": "amp", "type": "multiplier", "params": { "factor": 2 } },
     { "ref": "out", "type": "speaker" }
   ],
   "wires": [

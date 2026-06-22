@@ -13,7 +13,7 @@ import { validatePlan, type PlanLookups } from '../planValidator';
 import type { PortDefinition } from '../../engine/types';
 
 // ---------------------------------------------------------------------------
-// Fake registry: a tiny world of looper / amplifier / speaker / mic.
+// Fake registry: a tiny world of looper / multiplier / speaker / mic.
 // ---------------------------------------------------------------------------
 
 const PORTS: Record<string, PortDefinition[]> = {
@@ -21,10 +21,9 @@ const PORTS: Record<string, PortDefinition[]> = {
         { id: 'audio-in', name: 'Audio In', type: 'audio', direction: 'input' },
         { id: 'audio-out', name: 'Audio Out', type: 'audio', direction: 'output' },
     ],
-    amplifier: [
+    multiplier: [
         { id: 'audio-in', name: 'Audio In', type: 'audio', direction: 'input' },
         { id: 'audio-out', name: 'Audio Out', type: 'audio', direction: 'output' },
-        { id: 'gain-in', name: 'Gain', type: 'control', direction: 'input' },
     ],
     speaker: [{ id: 'audio-in', name: 'Audio In', type: 'audio', direction: 'input' }],
     microphone: [{ id: 'audio-out', name: 'Audio Out', type: 'audio', direction: 'output' }],
@@ -51,7 +50,7 @@ describe('validatePlan', () => {
         const plan: WorkflowPlan = {
             nodes: [
                 { ref: 'mic', type: 'microphone' },
-                { ref: 'amp', type: 'amplifier' },
+                { ref: 'amp', type: 'multiplier' },
                 { ref: 'out', type: 'speaker' },
             ],
             wires: [
@@ -131,8 +130,8 @@ describe('validatePlan', () => {
         // amp -> amp2 -> amp (a feedback loop with no looper) is an illegal cycle.
         const plan: WorkflowPlan = {
             nodes: [
-                { ref: 'a', type: 'amplifier' },
-                { ref: 'b', type: 'amplifier' },
+                { ref: 'a', type: 'multiplier' },
+                { ref: 'b', type: 'multiplier' },
                 { ref: 'out', type: 'speaker' },
             ],
             wires: [
@@ -152,7 +151,7 @@ describe('validatePlan', () => {
         const plan: WorkflowPlan = {
             nodes: [
                 { ref: 'lp', type: 'looper' },
-                { ref: 'amp', type: 'amplifier' },
+                { ref: 'amp', type: 'multiplier' },
                 { ref: 'out', type: 'speaker' },
             ],
             wires: [
@@ -181,7 +180,7 @@ describe('validatePlan', () => {
         const plan: WorkflowPlan = {
             nodes: [
                 { ref: 'mic', type: 'microphone' },
-                { ref: 'amp', type: 'amplifier' },
+                { ref: 'amp', type: 'multiplier' },
             ],
             wires: [{ from: { ref: 'mic', port: 'Audio Out' }, to: { ref: 'amp', port: 'Audio In' } }],
         };
@@ -197,18 +196,18 @@ describe('validatePlan', () => {
 describe('planToToolCalls', () => {
     it('lowers params into add_node.initialData AND a follow-up update_node_data', () => {
         const plan: WorkflowPlan = {
-            nodes: [{ ref: 'amp', type: 'amplifier', params: { gain: 2 } }],
+            nodes: [{ ref: 'amp', type: 'multiplier', params: { factor: 2 } }],
             wires: [],
         };
         const calls = planToToolCalls(plan, { amp: 'node-1' }, fakeResolve);
         const add = calls.find((c) => c.name === 'add_node');
         expect(add?.name).toBe('add_node');
-        expect(add && add.name === 'add_node' && add.args.initialData).toEqual({ gain: 2 });
+        expect(add && add.name === 'add_node' && add.args.initialData).toEqual({ factor: 2 });
 
         const update = calls.find((c) => c.name === 'update_node_data');
         expect(update && update.name === 'update_node_data' && update.args).toEqual({
             nodeId: 'node-1',
-            data: { gain: 2 },
+            data: { factor: 2 },
         });
     });
 
@@ -234,7 +233,7 @@ describe('planToToolCalls', () => {
         const plan: WorkflowPlan = {
             nodes: [
                 { ref: 'a', type: 'microphone' },
-                { ref: 'b', type: 'amplifier' },
+                { ref: 'b', type: 'multiplier' },
                 { ref: 'c', type: 'speaker' },
             ],
             wires: [],
