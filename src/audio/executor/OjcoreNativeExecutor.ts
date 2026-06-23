@@ -66,6 +66,8 @@ import { setEngineHealth, useEngineHealthStore } from '../../store/engineHealthS
 import { ingestEngineEvents, remapFaultNodes, routeRuntimeFaults } from './faultPipe';
 import { setNodeVoiceLoadError } from './voiceLoadError';
 import { setNodePluginLoadError } from './pluginLoadError';
+import { HOSTED_PLUGIN_STATE_KEY } from '../../engine/dynamicRegistry';
+import { useGraphStore } from '../../store/graphStore';
 
 // Re-exported for back-compat: `coalesceEvents` moved to the shared `faultPipe`
 // seam (Wave 4) so both executor tiers share one fault path. Existing importers
@@ -468,6 +470,33 @@ export class OjcoreNativeExecutor implements Executor {
         this.pushGraph(true);
     }
 
+    /** Capture each hosted plugin's opaque state into its node.data (off-undo) so a
+     *  project export persists it (the oj.state save half). The engine reads the
+     *  live instances off-RT (pre-publish), returning `(ir_node_id, blob)`; we map
+     *  the IR id back to the visual node via the reverse index. Non-fatal on error
+     *  (the project still saves, just without plugin state). No-op device-less. */
+    async capturePluginStates(): Promise<void> {
+        if (!this.invoke) return;
+        try {
+            const states = (await this.invoke('save_plugin_states')) as
+                | { node: number; blob: number[] }[]
+                | undefined;
+            if (!Array.isArray(states)) return;
+            const store = useGraphStore.getState();
+            for (const { node, blob } of states) {
+                const visualId = this.reverseIndex.get(node);
+                if (visualId !== undefined && Array.isArray(blob) && blob.length > 0) {
+                    // Off-undo (outside any gesture): engine-derived state, not a user edit.
+                    store.updateNodeData(visualId, { [HOSTED_PLUGIN_STATE_KEY]: blob });
+                }
+            }
+        } catch (err) {
+            log.warn('save_plugin_states failed; project saved without plugin state', {
+                detail: String(err),
+            });
+        }
+    }
+
     private pushGraph(force = false): void {
         // Isolate the reconcile: lowering the visual graph to the engine IR must
         // NEVER throw out of a store-change subscriber — that would abort Zustand's
@@ -537,6 +566,32 @@ export class OjcoreNativeExecutor implements Executor {
         nextReverseIndex: Map<number, string>,
     ): Promise<void> {
         if (!this.invoke) return;
+        // oj.state RESTORE: stage any saved opaque blobs (from a loaded project's
+        // node.data) BEFORE the push, so the engine restores each hosted plugin on
+        // this adopt — applied as the base, before its params (so a later param edit
+        // wins). Re-staged each push so a graph edit never drops the restored
+        // non-param state. No blobs (the common path) -> no stage IPC.
+        if (this.getNodes) {
+            const getNodes = this.getNodes;
+            const restores: { node: number; blob: number[] }[] = [];
+            for (const [visualId, irIdx] of nextIndex) {
+                const blob = (getNodes().get(visualId)?.data as Record<string, unknown> | undefined)?.[
+                    HOSTED_PLUGIN_STATE_KEY
+                ];
+                if (Array.isArray(blob) && blob.length > 0) {
+                    restores.push({ node: irIdx as unknown as number, blob: blob as number[] });
+                }
+            }
+            if (restores.length > 0) {
+                try {
+                    await this.invoke('stage_plugin_restores', { restores });
+                } catch (err) {
+                    log.warn('stage_plugin_restores failed; plugins load at defaults', {
+                        detail: String(err),
+                    });
+                }
+            }
+        }
         let degradedIds: number[] = [];
         try {
             // push_graph returns the IR node ids that degraded to a passthrough stub

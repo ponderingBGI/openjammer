@@ -10,6 +10,7 @@ import { useAudioStore } from '../../store/audioStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useTransportStore } from '../../store/transportStore';
 import { exportWorkflow, downloadWorkflow, loadWorkflowFromFile, importWorkflow } from '../../engine/serialization';
+import { getExecutor } from '../../audio/executor';
 import { DropdownMenu, type MenuItemOrSeparator } from './DropdownMenu';
 import { useOnlineStatus } from '../../hooks/usePWA';
 import { Button } from '@openjammer/oj-ui';
@@ -61,8 +62,12 @@ export function Toolbar() {
     }, [toggleGlobalPause]);
 
     // Export workflow
-    const handleExport = useCallback(() => {
+    const handleExport = useCallback(async () => {
         try {
+            // Capture each hosted plugin's opaque state into node.data first (the
+            // oj.state save half) so the export persists it and a reopen restores the
+            // plugin. No-op on the browser tier; non-fatal if the engine declines.
+            await getExecutor().capturePluginStates();
             const workflow = exportWorkflow(nodes, connections, 'OpenJammer Workflow');
             downloadWorkflow(workflow);
             toast.success('Workflow exported');

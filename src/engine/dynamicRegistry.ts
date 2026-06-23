@@ -107,6 +107,16 @@ export interface HostedPluginDescriptor {
 
 export const HOSTED_PLUGIN_DESCRIPTOR_KEY = 'hostedPluginDescriptor';
 
+/**
+ * `node.data` key holding a hosted plugin's saved opaque STATE blob (the bytes from
+ * the engine's `save_plugin_states`, a plugin's `getStateInformation` / CLAP state),
+ * as a number[] of bytes. Persisted in the project so a reopened project restores
+ * each plugin; the native executor stages it back to the engine on graph push
+ * (lockfile-gated on the hosted plugin id, like the descriptor). Empty/absent for a
+ * plugin with no extra state or before the first save.
+ */
+export const HOSTED_PLUGIN_STATE_KEY = 'hostedPluginState';
+
 function hostedFormatSlug(format: string): string {
     const f = format.toLowerCase();
     if (f === 'vst2') return 'vst2';

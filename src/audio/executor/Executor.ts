@@ -69,6 +69,15 @@ export interface Executor {
     dispose(): void;
 
     /**
+     * Capture every hosted plugin's opaque state (the `oj.state` save half) and
+     * write it into the owning node's `data` (under `HOSTED_PLUGIN_STATE_KEY`), so a
+     * project export persists it and a reopen restores the plugin. Called before a
+     * project save. On the wasm tier (no native hosting) it is a no-op. Off the undo
+     * history — engine-derived runtime state, not a user edit.
+     */
+    capturePluginStates(): Promise<void>;
+
+    /**
      * Force a re-push of the current graph even when its bytes are unchanged. The
      * native host uses this after a plugin RESCAN to instantly rebind a degraded
      * node onto its now-available plugin (invariant #4a auto-rebind), rather than
