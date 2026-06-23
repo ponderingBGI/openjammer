@@ -231,6 +231,16 @@ pub trait DspInstance: Send {
         None
     }
 
+    /// OFF-RT state SAVE seam (the `oj.state` capability's `&self` save, as a direct
+    /// trait method so a host can pull it without downcasting through
+    /// [`extension`](DspInstance::extension)). Serialize the node's full opaque state
+    /// (a hosted plugin's `getStateInformation` / the CLAP state extension). Default
+    /// empty (a node with no extra state). Runs off the audio thread; MAY allocate.
+    /// The counterpart of [`restore_state`](DspInstance::restore_state).
+    fn save_state(&self) -> alloc::vec::Vec<u8> {
+        alloc::vec::Vec::new()
+    }
+
     /// OFF-RT state RESTORE seam (the `oj.state` capability's `&mut` half — see
     /// [`StateSave`] for the `&self` save half). Called at construction time (right
     /// after `activate` + baked-in `set_param`s + `load_asset`, on the control

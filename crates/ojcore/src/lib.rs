@@ -97,8 +97,9 @@ pub use ojproto::PrimitiveKind;
 
 pub use builtin::{GainLoader, GainNode, GAIN_ID, GAIN_PARAM};
 pub use compile::{
-    compile, compile_resilient, compile_with_assets, AssetPcm, AssetResolver, CompileError,
-    CompiledProgram, NoAssets, NodeRouting, Source,
+    compile, compile_resilient, compile_resilient_with_state, compile_with_assets, AssetPcm,
+    AssetResolver, CompileError, CompiledProgram, NoAssets, NoState, NodeRouting, Source,
+    StateResolver,
 };
 pub use dsp::{
     kernel_supports_capability, DspInstance, ExtId, ProcessCtx, StateSave, KERNEL_CONTRACT,

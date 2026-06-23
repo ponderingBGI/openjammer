@@ -35,8 +35,9 @@ use std::sync::{Arc, Mutex};
 
 use ojcore::meter::{event_frame, return_frame};
 use ojcore::{
-    compile, compile_resilient, master_param, CommandConsumer, CommandProducer, CommandQueue,
-    CompileError, Engine, EventRing, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
+    compile, compile_resilient_with_state, master_param, CommandConsumer, CommandProducer,
+    CommandQueue, CompileError, Engine, EventRing, MeterRing, PluginManifest, PluginRegistry,
+    ProgramSwap, StateResolver,
 };
 use ojcore_native::{
     device_fault_channel, install_device_listener, probe_default_output, AssetCatalog, AssetError,
@@ -122,6 +123,17 @@ pub struct StreamInfo {
 /// audio host (which owns the engine on the audio thread), the shared command
 /// producer (for `send_command`), and the program-swap mailbox.
 ///
+/// A [`StateResolver`] over the backend's staged restore blobs, handed to
+/// `compile_resilient_with_state` so each hosted node's `oj.state` blob is applied
+/// before its baked-in params.
+struct PendingStates<'a>(&'a std::collections::HashMap<u32, Vec<u8>>);
+
+impl StateResolver for PendingStates<'_> {
+    fn resolve_state(&self, node: NodeIdx) -> Option<&[u8]> {
+        self.0.get(&node.0).map(|v| v.as_slice())
+    }
+}
+
 /// Wrapped in a Tauri-managed `Mutex` (see [`crate::run`]); every method here is
 /// control-rate and runs on the IPC/control thread, never the audio thread.
 pub struct EngineBackend {
@@ -182,6 +194,21 @@ pub struct EngineBackend {
     /// returns these to the UI so the affected nodes show a non-modal "(missing
     /// plugin)" badge and the project still opens. Set by `adopt` on every push.
     last_degraded: Vec<u32>,
+    /// oj.state RESTORE blobs to apply at compile, keyed by IR node id, staged by a
+    /// project LOAD (`stage_plugin_restores`). `adopt` hands these to
+    /// `compile_resilient_with_state`, which calls `restore_state` BEFORE the baked-in
+    /// params (so current params win, the blob is the base) and re-applies them on
+    /// EVERY compile (a graph edit never drops the restored non-param state). Persist
+    /// for the session; replaced on the next project load.
+    pending_restores: std::collections::HashMap<u32, Vec<u8>>,
+    /// oj.state SAVE buffer: when `capture_states` is set for one `adopt`, each hosted
+    /// node's opaque blob (`DspInstance::save_state`) is captured here for the project
+    /// save (`save_plugin_states`). Empty otherwise.
+    saved_states: std::collections::HashMap<u32, Vec<u8>>,
+    /// One-shot flag: when set, the NEXT `adopt` captures hosted state into
+    /// `saved_states` (the only time `getStateInformation` runs). Set by
+    /// `save_plugin_states` around a forced re-adopt, cleared immediately after.
+    capture_states: bool,
     /// `true` while the engine is in the DEVICE-LOST state: the running output
     /// stream faulted (device yanked/disabled/reconfigured) and a rebuild has not
     /// yet succeeded. Set by [`tick`] on the first detected fault, cleared on a
@@ -325,6 +352,9 @@ impl EngineBackend {
             captures: std::collections::HashMap::new(),
             last_graph: None,
             last_degraded: Vec::new(),
+            pending_restores: std::collections::HashMap::new(),
+            saved_states: std::collections::HashMap::new(),
+            capture_states: false,
             device_lost: false,
             log_store: None,
             // Up to 8 reopen attempts per loss event before a calm give-up.
@@ -459,6 +489,37 @@ impl EngineBackend {
         Ok(self.last_degraded.clone())
     }
 
+    /// SAVE every hosted plugin's opaque state (the `oj.state` save half) for a
+    /// project save: `(ir_node_id, blob)` per hosted node. Forces a re-adopt of the
+    /// current graph with the capture flag set, so the just-compiled instances are
+    /// read on the control thread BEFORE publish (never on the audio thread). The
+    /// re-adopt re-instantiates the hosted plugins (a brief save-time cost, off the
+    /// steady path); a node with no extra state contributes nothing. Empty
+    /// device-less or with no hosted plugins.
+    pub fn save_plugin_states(&mut self) -> Vec<(u32, Vec<u8>)> {
+        let Some(g) = self.last_graph.clone() else {
+            return Vec::new();
+        };
+        self.capture_states = true;
+        let result = self.adopt(&g);
+        self.capture_states = false;
+        if let Err(e) = result {
+            // A failed re-adopt is non-fatal: keep the last good audio, save nothing.
+            eprintln!("ojcore: save_plugin_states re-adopt failed (non-fatal): {e}");
+            return Vec::new();
+        }
+        self.saved_states.drain().collect()
+    }
+
+    /// STAGE opaque restore blobs (keyed by IR node id) from a project LOAD. The next
+    /// (and every subsequent) `adopt` applies them via `compile_resilient_with_state`
+    /// — BEFORE the baked-in params, re-applied each compile — so a hosted plugin
+    /// comes up restored and a later param edit never reverts it. Replaces any prior
+    /// staged set; the caller stages BEFORE pushing the loaded graph.
+    pub fn stage_plugin_restores(&mut self, restores: Vec<(u32, Vec<u8>)>) {
+        self.pending_restores = restores.into_iter().collect();
+    }
+
     /// Carry forward the per-node sample binding (the slot-0 [`AssetRef`] and the
     /// sampler root-note param) from the previously adopted `prev` graph onto the
     /// freshly pushed `next` graph, for every node id present in both that still
@@ -544,8 +605,30 @@ impl EngineBackend {
         // pushed/loaded graph becomes a passthrough stub so the project ALWAYS opens,
         // rather than rejecting the whole push; genuine errors (cycle, no master) still
         // surface. The starter graph above stays strict (a known-good internal graph).
-        let program =
-            compile_resilient(&g, &self.registry, &self.catalog).map_err(BackendError::Compile)?;
+        // oj.state RESTORE rides the compile seam: `compile_resilient_with_state`
+        // applies each staged blob via `restore_state` BEFORE the baked-in params, so
+        // the blob is the base and current params win, re-applied on every compile.
+        let program = {
+            let states = PendingStates(&self.pending_restores);
+            compile_resilient_with_state(&g, &self.registry, &self.catalog, &states)
+                .map_err(BackendError::Compile)?
+        };
+
+        // oj.state SAVE (off-RT, only when a project save asked for it): the
+        // just-compiled hosted instances are reachable HERE on the control thread,
+        // BEFORE publish, so capturing their opaque blob (`save_state` ->
+        // getStateInformation / CLAP state) never touches the audio thread. Skipped on
+        // a normal edit (the common path), so `getStateInformation` is not on the
+        // per-edit cost.
+        if self.capture_states {
+            self.saved_states.clear();
+            for slot in 0..program.instances.len() {
+                let blob = program.instances[slot].save_state();
+                if !blob.is_empty() {
+                    self.saved_states.insert(program.ids[slot].0, blob);
+                }
+            }
+        }
 
         // Invariant #4a: surface any node that degraded to a passthrough stub (a
         // missing or incompatible plugin) so a loaded project's degraded nodes are
