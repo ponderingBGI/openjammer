@@ -21,6 +21,8 @@
   "type": "module",
   "scripts": {
     "preinstall": "node -e \"if(!process.env.npm_execpath?.includes('bun')){console.error('\\x1b[31mError: Use bun to install dependencies.\\nRun: bun install\\x1b[0m');process.exit(1)}\"",
+    "postinstall": "bun scripts/install-git-hooks.ts",
+    "setup:hooks": "bun scripts/install-git-hooks.ts",
     "dev": "vite",
     "native": "bun scripts/oj/index.ts dev",
     "dev:native": "bun scripts/oj/index.ts dev",

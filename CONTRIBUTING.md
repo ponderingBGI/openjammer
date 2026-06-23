@@ -22,7 +22,7 @@ Thank you for your interest in contributing to OpenJammer! This document provide
 git clone https://github.com/YOUR_USERNAME/openjammer.git
 cd openjammer
 
-# Install dependencies
+# Install dependencies and enable repo-local git hooks
 bun install
 
 # Start development server
@@ -135,6 +135,10 @@ openjammer/
    ```bash
    git commit -m "feat: add amazing feature"
    ```
+   `bun install` enables repo-local hooks that append the required DCO `Signed-off-by`
+   trailer automatically from your local Git identity. If hooks are disabled, use
+   `git commit -s -m "feat: add amazing feature"` or run `bun run setup:hooks`.
+
    Use conventional commit messages:
    - `feat:` for new features
    - `fix:` for bug fixes
@@ -234,17 +238,22 @@ The "future versions" clause lets a revised Exception ship without chasing every
 It grants the steward **no** right to take the project proprietary — it is relicensing latitude for the
 Exception only. (Why this matters: [LICENSING.md](LICENSING.md) §6.)
 
-**2. Sign your work (DCO).** Add a `Signed-off-by` line to every commit by committing with `-s`:
+**2. Sign your work (DCO).** Every commit needs a `Signed-off-by` trailer:
 
-```bash
-git commit -s -m "feat: add amazing feature"
+```text
+Signed-off-by: Your Name <your@email>
 ```
 
-This appends `Signed-off-by: Your Name <your@email>` (use a real name + email). It certifies you wrote
-the patch or otherwise have the right to submit it under the license above — including **AI-assisted**
-work, so long as you have the right to contribute it. A CI check
-([.github/workflows/dco.yml](.github/workflows/dco.yml)) fails any PR with an unsigned commit; fix it
-with `git commit --amend -s` (or `git rebase --signoff` for several commits).
+`bun install` enables repo-local Git hooks (`core.hooksPath=.githooks`) that add this trailer
+automatically from your local `git user.name` / `git user.email`; run `bun run setup:hooks` if you
+need to re-enable them. You can also add it explicitly with `git commit -s -m "feat: add amazing
+feature"`.
+
+This certifies you wrote the patch or otherwise have the right to submit it under the license above —
+including **AI-assisted** work, so long as you have the right to contribute it. A cheap local pre-push
+hook catches missing trailers before CI, and the CI check
+([.github/workflows/dco.yml](.github/workflows/dco.yml)) remains the final guard; fix failures with
+`git commit --amend -s` (or `git rebase --signoff` for several commits).
 
 ---
 
