@@ -22,6 +22,7 @@ use alloc::vec::Vec;
 use ojproto::{AssetId, ConnectionType, NodeIdx, OjGraph, PrimitiveKind};
 
 use crate::dsp::DspInstance;
+use crate::loader::PluginLoader;
 use crate::registry::PluginRegistry;
 
 /// Mono PCM handed back by an [`AssetResolver`] so [`compile_with_assets`] can
@@ -287,7 +288,30 @@ pub fn compile_with_assets(
         // `n_out × out_channels` audio output LANES (`1` = mono => a lane is a port).
         let oc = loader.manifest().ports.audio_out_channels.max(1);
         let ic = loader.manifest().ports.audio_in_channels.max(1);
-        let mut inst = loader.instantiate(sample_rate, block_size);
+        // Held-note-beats-a-glitch on LOAD (invariant #4a / docs/STABILITY.md §5): if
+        // the kernel cannot satisfy this plugin's declared `abi` (contract too new, or
+        // a required capability the kernel lacks), DEGRADE this node to a passthrough
+        // stub instead of failing the whole compile — the project always opens and
+        // stays audible. Topology (n_out × oc lanes) is preserved so downstream routing
+        // still resolves; the control plane surfaces the stub by diffing the compiled
+        // kind against the IR kind. A node with no `abi` block (every built-in) loads
+        // normally — this is a pure additive guard for declared third-party plugins.
+        let abi_ok = loader.manifest().abi.as_ref().is_none_or(|abi| {
+            abi.load_compatibility(
+                crate::dsp::KERNEL_CONTRACT,
+                crate::dsp::kernel_supports_capability,
+            )
+            .is_ok()
+        });
+        let (mut inst, kind) = if abi_ok {
+            (loader.instantiate(sample_rate, block_size), node.kind)
+        } else {
+            (
+                crate::structural::StructuralLoader::passthrough()
+                    .instantiate(sample_rate, block_size),
+                PrimitiveKind::Passthrough,
+            )
+        };
         inst.activate(sample_rate, block_size);
         // Apply any baked-in param defaults from the IR, then snap smoothers.
         for p in &node.params {
@@ -303,7 +327,7 @@ pub fn compile_with_assets(
             }
         }
         instances.push(inst);
-        kinds.push(node.kind);
+        kinds.push(kind);
         ids.push(node.id);
         // One pre-sized buffer per output LANE (`n_out` audio ports × channels).
         let lanes = node.n_out as usize * oc as usize;
@@ -500,7 +524,7 @@ mod channel_lane_tests {
     use super::*;
     use crate::dsp::{DspInstance, ProcessCtx};
     use crate::loader::PluginLoader;
-    use crate::manifest::{DspKind, PluginManifest, PortDecl, UiKind};
+    use crate::manifest::{Abi, ContractVersion, DspKind, PluginManifest, PortDecl, UiKind};
     use alloc::boxed::Box;
     use alloc::string::String;
     use alloc::vec;
@@ -591,5 +615,94 @@ mod channel_lane_tests {
         let spk = prog.slot_of_id(NodeIdx(2)).unwrap();
         assert_eq!(prog.out_channels[spk], 1);
         assert!(prog.out_bufs[spk].is_empty());
+    }
+
+    /// An incompatible-abi plugin (declares a kernel contract NEWER than this kernel)
+    /// DEGRADES to a passthrough stub instead of failing the compile — invariant #4a,
+    /// held-note-beats-a-glitch on LOAD. The project still compiles and stays audible.
+    #[test]
+    fn abi_incompatible_plugin_degrades_to_passthrough_stub() {
+        struct AbiNode;
+        impl DspInstance for AbiNode {
+            fn activate(&mut self, _sr: f32, _mb: usize) {}
+            fn process(&mut self, _ctx: &mut ProcessCtx<'_, '_>) {}
+            fn set_param(&mut self, _id: u16, _v: f32) {}
+        }
+        struct AbiLoader {
+            manifest: PluginManifest,
+        }
+        impl PluginLoader for AbiLoader {
+            fn manifest(&self) -> &PluginManifest {
+                &self.manifest
+            }
+            fn instantiate(&self, _sr: f32, _mb: usize) -> Box<dyn DspInstance> {
+                Box::new(AbiNode)
+            }
+        }
+
+        let mut reg = PluginRegistry::new();
+        // Requires kernel contract >= 2.0, but KERNEL_CONTRACT is 1.0 — unsatisfiable.
+        reg.register(Box::new(AbiLoader {
+            manifest: PluginManifest {
+                abi: Some(Abi {
+                    contract: ContractVersion::new(2, 0),
+                    min_contract: ContractVersion::new(2, 0),
+                    capabilities: vec![],
+                    permissions: vec![],
+                }),
+                id: String::from("test.future"),
+                name: String::from("FromTheFuture"),
+                kind: PrimitiveKind::Gain,
+                dsp: DspKind::Builtin,
+                ui: UiKind::Auto,
+                params: vec![],
+                ports: PortDecl {
+                    audio_in: 1,
+                    audio_out: 1,
+                    control_in: 0,
+                    control_out: 0,
+                    audio_in_channels: 1,
+                    audio_out_channels: 1,
+                },
+            },
+        }));
+        reg.register(Box::new(crate::structural::StructuralLoader::speaker_out()));
+
+        let mut g = OjGraph::empty(48_000, 64);
+        g.nodes.push(IrNode {
+            id: NodeIdx(1),
+            manifest_id: String::from("test.future"),
+            kind: PrimitiveKind::Gain,
+            params: vec![],
+            assets: vec![],
+            n_in: 1,
+            n_out: 1,
+        });
+        g.nodes.push(IrNode {
+            id: NodeIdx(2),
+            manifest_id: String::from(crate::SPEAKER_OUT_ID),
+            kind: PrimitiveKind::SpeakerOut,
+            params: vec![],
+            assets: vec![],
+            n_in: 1,
+            n_out: 0,
+        });
+        g.edges.push(IrEdge {
+            from_node: NodeIdx(1),
+            from_port: 0,
+            to_node: NodeIdx(2),
+            to_port: 0,
+            kind: ConnectionType::Audio,
+        });
+
+        // Compiles (no error — the project opens) and the incompatible node is now a
+        // passthrough stub, not its declared Gain kind.
+        let prog = compile(&g, &reg).expect("compiles with a degraded stub, never errors");
+        let stub = prog.slot_of_id(NodeIdx(1)).unwrap();
+        assert_eq!(
+            prog.kinds[stub],
+            PrimitiveKind::Passthrough,
+            "incompatible-abi node degraded to a passthrough stub"
+        );
     }
 }
