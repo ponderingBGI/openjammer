@@ -100,7 +100,9 @@ pub use compile::{
     compile, compile_resilient, compile_with_assets, AssetPcm, AssetResolver, CompileError,
     CompiledProgram, NoAssets, NodeRouting, Source,
 };
-pub use dsp::{kernel_supports_capability, DspInstance, ExtId, ProcessCtx, KERNEL_CONTRACT};
+pub use dsp::{
+    kernel_supports_capability, DspInstance, ExtId, ProcessCtx, StateSave, KERNEL_CONTRACT,
+};
 pub use exec::Engine;
 pub use loader::PluginLoader;
 pub use manifest::{

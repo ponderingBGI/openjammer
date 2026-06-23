@@ -105,6 +105,9 @@ extern "C" {
     fn ojhost_note_off(plugin: *mut OjPlugin, note: u8);
     fn ojhost_latency_samples(plugin: *const OjPlugin) -> u32;
     fn ojhost_param_count(plugin: *const OjPlugin) -> u32;
+    fn ojhost_get_state(plugin: *mut OjPlugin, out_len: *mut usize) -> *mut u8;
+    fn ojhost_free_state(data: *mut u8, len: usize);
+    fn ojhost_set_state(plugin: *mut OjPlugin, data: *const u8, len: usize);
     fn ojhost_unload(plugin: *mut OjPlugin);
     fn ojhost_editor_open(
         path: *const c_char,
@@ -429,6 +432,27 @@ impl HostedBackend for JuceBackend {
 
     fn latency_samples(&self) -> u32 {
         self.latency
+    }
+
+    fn save_state(&self) -> Vec<u8> {
+        // OFF-RT: pull the plugin's opaque state across the C ABI (malloc'd by C++),
+        // copy it into a Rust Vec, then free the C++ buffer (no cross-allocator free).
+        let mut len: usize = 0;
+        let ptr = unsafe { ojhost_get_state(self.plugin, &mut len as *mut usize) };
+        if ptr.is_null() || len == 0 {
+            return Vec::new();
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec();
+        unsafe { ojhost_free_state(ptr, len) };
+        bytes
+    }
+
+    fn restore_state(&mut self, blob: &[u8]) {
+        if blob.is_empty() {
+            return;
+        }
+        // OFF-RT: hand the blob to setStateInformation. The C++ side copies it.
+        unsafe { ojhost_set_state(self.plugin, blob.as_ptr(), blob.len()) };
     }
 
     fn deactivate(&mut self) {

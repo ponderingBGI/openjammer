@@ -66,11 +66,25 @@ impl ExtId {
 /// `vendor.*` and unknown ids are never kernel-provided. A plugin that REQUIRES an
 /// unsupported capability degrades to a labeled passthrough stub — never a crash
 /// (`docs/STABILITY.md` §5).
-pub fn kernel_supports_capability(_id: &str) -> bool {
-    // No capability extension is wired into the kernel yet: this scaffold lands the
-    // negotiation surface only. As each lands it is added here — `oj.latency` (P1),
-    // `oj.state` (P2), and so on. Until then every REQUIRED capability degrades.
-    false
+pub fn kernel_supports_capability(id: &str) -> bool {
+    // A capability counts as supported once its extension is actually wired into the
+    // engine. `oj.state` is now live: the off-RT `extension(ExtId::State)` save seam
+    // + `DspInstance::restore_state` restore seam are implemented (a hosted plugin
+    // persists + reloads its opaque state). Others (`oj.latency`, …) are added here
+    // as they land; until then a plugin that REQUIRES them degrades to a stub.
+    matches!(ExtId::from_capability_id(id), Some(ExtId::State))
+}
+
+/// Off-RT capability object behind [`ExtId::State`] (`docs/STABILITY.md` §4): a node
+/// that can serialize its full opaque state for sessions / crash-respawn. Returned
+/// (as `&dyn Any` → downcast to `&dyn StateSave`) from [`DspInstance::extension`].
+/// `save` is `&self` (a live read), so it is the SAVE half only; RESTORE needs
+/// `&mut self` and rides [`DspInstance::restore_state`] at construction instead.
+/// Both run OFF the audio thread and MAY allocate.
+pub trait StateSave {
+    /// Serialize the node's full state to an opaque byte blob (e.g. a hosted
+    /// plugin's `getStateInformation`). Empty when the node has no extra state.
+    fn save(&self) -> alloc::vec::Vec<u8>;
 }
 
 /// Per-block audio buffers handed to [`DspInstance::process`].
@@ -217,6 +231,16 @@ pub trait DspInstance: Send {
         None
     }
 
+    /// OFF-RT state RESTORE seam (the `oj.state` capability's `&mut` half — see
+    /// [`StateSave`] for the `&self` save half). Called at construction time (right
+    /// after `activate` + baked-in `set_param`s + `load_asset`, on the control
+    /// thread) with the opaque blob a prior session saved, so the node comes up
+    /// exactly as it was left. The default is a no-op so pure-DSP nodes ignore it;
+    /// a hosted plugin pushes the blob into `setStateInformation` / the CLAP state
+    /// extension. Like `load_asset`, this runs off the audio thread and MAY
+    /// allocate; an empty blob restores nothing.
+    fn restore_state(&mut self, _blob: &[u8]) {}
+
     /// Whether this node has LATCHED into a degraded dry-passthrough at runtime —
     /// a hosted plugin that faulted (a segfault caught at the foreign-code
     /// boundary) or a code-node kernel that trapped. Default `false`. The off-RT
@@ -256,11 +280,14 @@ mod ext_tests {
     }
 
     #[test]
-    fn scaffold_kernel_supports_no_capabilities_yet() {
-        // The negotiation surface is landed, but no extension is wired into the
-        // engine yet, so every capability (incl. known oj.* ids) is unsupported.
+    fn kernel_supports_only_the_wired_capabilities() {
+        // `oj.state` is wired (save + restore seams implemented), so it is
+        // supported; capabilities not yet wired (e.g. `oj.latency`) and
+        // vendor/unknown ids are not.
+        assert!(kernel_supports_capability(ExtId::State.capability_id()));
         assert!(!kernel_supports_capability(ExtId::Latency.capability_id()));
         assert!(!kernel_supports_capability("vendor.x"));
+        assert!(!kernel_supports_capability("oj.unknown"));
     }
 
     #[test]
@@ -268,5 +295,50 @@ mod ext_tests {
         // The reference GainNode opts into nothing, so extension() is None.
         let node = crate::builtin::GainNode::new();
         assert!(node.extension(ExtId::State).is_none());
+    }
+
+    /// A node that opts into `oj.state`: `extension(State)` hands back a `StateSave`
+    /// (the `&self` save half) and `restore_state` seeds it (the `&mut` half). This
+    /// is the exact seam a hosted plugin uses to round-trip its opaque blob.
+    #[test]
+    fn state_extension_saves_and_restores_a_blob() {
+        struct Stateful {
+            blob: alloc::vec::Vec<u8>,
+        }
+        impl StateSave for Stateful {
+            fn save(&self) -> alloc::vec::Vec<u8> {
+                self.blob.clone()
+            }
+        }
+        impl DspInstance for Stateful {
+            fn activate(&mut self, _sr: f32, _mb: usize) {}
+            fn process(&mut self, _ctx: &mut ProcessCtx<'_, '_>) {}
+            fn set_param(&mut self, _id: u16, _v: f32) {}
+            fn extension(&self, id: ExtId) -> Option<&dyn core::any::Any> {
+                match id {
+                    ExtId::State => Some(self),
+                    _ => None,
+                }
+            }
+            fn restore_state(&mut self, blob: &[u8]) {
+                self.blob = blob.to_vec();
+            }
+        }
+
+        let src = Stateful {
+            blob: alloc::vec![1, 2, 3, 4],
+        };
+        // SAVE via the extension (downcast to the StateSave sub-trait).
+        let any = src.extension(ExtId::State).expect("opts into oj.state");
+        let saver = any.downcast_ref::<Stateful>().expect("downcasts");
+        let blob = StateSave::save(saver);
+        assert_eq!(blob, alloc::vec![1, 2, 3, 4]);
+
+        // RESTORE into a fresh instance via the &mut seam.
+        let mut dst = Stateful {
+            blob: alloc::vec::Vec::new(),
+        };
+        dst.restore_state(&blob);
+        assert_eq!(dst.save(), alloc::vec![1, 2, 3, 4]);
     }
 }

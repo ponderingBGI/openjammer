@@ -491,6 +491,33 @@ uint32_t ojhost_param_count(const OjPlugin* plugin) {
     return static_cast<uint32_t>(plugin->instance->getParameters().size());
 }
 
+uint8_t* ojhost_get_state(OjPlugin* plugin, size_t* out_len) {
+    if (out_len != nullptr) *out_len = 0;
+    if (plugin == nullptr || plugin->instance == nullptr) return nullptr;
+    // OFF-RT: JUCE serializes the plugin's full state (params + internal/opaque
+    // state) into a MemoryBlock; copy it onto the C++ allocator so the Rust side
+    // frees it via ojhost_free_state (no cross-allocator free — same rule as
+    // dupString / ojhost_free_scan).
+    MemoryBlock block;
+    plugin->instance->getStateInformation(block);
+    const size_t n = static_cast<size_t>(block.getSize());
+    if (n == 0) return nullptr;
+    auto* out = static_cast<uint8_t*>(std::malloc(n));
+    if (out == nullptr) return nullptr;
+    std::memcpy(out, block.getData(), n);
+    if (out_len != nullptr) *out_len = n;
+    return out;
+}
+
+void ojhost_free_state(uint8_t* data, size_t /*len*/) {
+    std::free(data);
+}
+
+void ojhost_set_state(OjPlugin* plugin, const uint8_t* data, size_t len) {
+    if (plugin == nullptr || plugin->instance == nullptr || data == nullptr || len == 0) return;
+    plugin->instance->setStateInformation(data, static_cast<int>(len));
+}
+
 void ojhost_unload(OjPlugin* plugin) {
     delete plugin;
 }

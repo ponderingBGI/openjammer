@@ -79,6 +79,20 @@ pub trait HostedBackend: Send {
     /// Plugin-reported processing latency in samples (post-`activate`), for PDC.
     fn latency_samples(&self) -> u32;
 
+    /// OFF-RT: serialize the plugin's full opaque state — VST3
+    /// `getStateInformation` / the CLAP state extension — so a session can persist
+    /// it and a respawn can restore it (the `oj.state` capability's save half).
+    /// Default empty (a backend with no state surface). MAY allocate; never on the
+    /// audio thread.
+    fn save_state(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    /// OFF-RT: restore the plugin from a blob produced by [`save_state`]
+    /// (`setStateInformation` / CLAP state). Default no-op. Applied at construction
+    /// (before the instance goes live), so it runs off the audio thread; MAY allocate.
+    fn restore_state(&mut self, _blob: &[u8]) {}
+
     /// Off-RT: release activation-time resources. Default no-op.
     fn deactivate(&mut self) {}
 }
