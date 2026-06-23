@@ -35,6 +35,10 @@ pub mod looper_capture;
 #[cfg(feature = "persist")]
 pub mod logstore;
 pub mod offline;
+/// Offline-render audio analysis (the audition `AudioReport`). Demo-gated: only the
+/// `render` bin + tests need it, so it stays out of the lean serde-free host build.
+#[cfg(feature = "demo")]
+pub mod analysis;
 pub mod recorder;
 pub mod store;
 pub mod supervisor;
@@ -60,6 +64,8 @@ pub use looper_capture::{
 };
 pub use log::init_logging;
 pub use offline::OfflineDriver;
+#[cfg(feature = "demo")]
+pub use analysis::{analyze_stereo, AudioReport, ChannelReport};
 #[cfg(feature = "persist")]
 pub use logstore::{LogHit, LogRecord, LogStore};
 pub use recorder::{Recorder, RecorderSink, DEFAULT_RING_FRAMES};

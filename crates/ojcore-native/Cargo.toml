@@ -17,7 +17,9 @@ path = "src/bin/render.rs"
 required-features = ["demo"]
 
 [features]
-demo = ["dep:ojinstrument"]
+# The offline `render` audition tool: instrument loaders + JSON (graph in / report
+# out). All three are pulled ONLY here so the lean host build stays serde-free.
+demo = ["dep:ojinstrument", "dep:serde", "dep:serde_json"]
 # L3 — the SQLite/FTS5 persistent log store. Optional so the lean host build
 # stays free of the bundled-SQLite C compile; CI's logstore leg turns it on.
 persist = ["dep:rusqlite"]
@@ -28,6 +30,13 @@ ojcore = { path = "../ojcore" }
 ojproto = { path = "../ojproto" }
 # Built-in instruments — only for the `demo` render bin (optional, feature-gated).
 ojinstrument = { path = "../ojinstrument", optional = true }
+
+# The offline `render` audition tool deserializes an `OjGraph` (+ a note/param
+# schedule) and serializes an `AudioReport` so an agent/CI can "play this graph and
+# read what it sounds like". Optional + `demo`-gated — the host audio path never
+# touches serde. serde derive comes from the workspace dep.
+serde = { workspace = true, optional = true }
+serde_json = { version = "1.0.150", optional = true }
 
 # Wait-free SPSC ring for the off-RT Recorder capture path (U-STATEFUL): the
 # audio callback writes f32 frames in, the control thread drains them out. Same

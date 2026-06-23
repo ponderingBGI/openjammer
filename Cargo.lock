@@ -3364,6 +3364,8 @@ dependencies = [
  "ojproto",
  "rtrb",
  "rusqlite",
+ "serde",
+ "serde_json",
  "symphonia",
  "tracing",
  "tracing-appender",

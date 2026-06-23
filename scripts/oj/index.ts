@@ -20,6 +20,7 @@ import { scaffold } from './scaffold';
 import { dev } from './dev';
 import { design } from './design';
 import { setup } from './setup';
+import { render } from './render';
 
 interface ParsedFlags {
   json: boolean;
@@ -115,6 +116,8 @@ function usage(): void {
       '  oj scaffold  <node|dsp-kernel> ...   (not yet implemented)',
       '  oj dev       [--engine] [tauri-flags...]',
       '  oj setup     [--install] [--yes] [--dry-run] [--wasm] [--json]',
+      '  oj render    [--graph g.json] [--schedule s.json] [--secs n] [--out w.wav]',
+      '               [--report r.json] [--assert expr]...   (device-free audition)',
       '',
       'oj dev: one-command native loop (Vite HMR + ojcore-native engine, unified',
       '        logs, clean Ctrl+C). --engine runs the windowless bacon inner-loop.',
@@ -136,6 +139,10 @@ async function main(): Promise<number> {
     usage();
     return sub ? 0 : 2;
   }
+
+  // `render` passes ALL its args straight to the offline audition bin (so its
+  // `--graph/--schedule/--assert/--report` flags reach cargo unmangled by parseFlags).
+  if (sub === 'render') return render(rest);
 
   let flags: ReturnType<typeof parseFlags>;
   try {
