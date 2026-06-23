@@ -20,10 +20,36 @@
  *   spawn Pi. {@link AgentBackend.available} reports which we're in.
  */
 
-import type { NodeType, Position } from '../engine/types';
+import type { NodeType, PortDefinition, Position } from '../engine/types';
 import type { ParamDecl } from '../engine/manifest';
 import type { WorkflowPlan } from './plan';
 import type { Severity } from '@openjammer/oj-protocol';
+
+// ============================================================================
+// Port summaries — the lean port shape the read tools relay to the agent
+// ============================================================================
+
+/**
+ * A node's port as relayed to the agent by the read tools — the LEAN slice of
+ * {@link PortDefinition} the model needs to WIRE correctly: the human NAME (what
+ * `add_connection` and a plan wire reference), the direction, and the signal
+ * type. We never relay ids, positions, or layout, so the per-node payload stays
+ * small even for nodes with dozens of ports. This is the keystone that ends the
+ * guess→reject→retry loop: a read now tells the agent the legal port names.
+ */
+export interface PortSummary {
+    /** The human port NAME shown on the canvas (what a wire references). */
+    name: string;
+    /** Whether the signal flows IN or OUT. */
+    direction: 'input' | 'output';
+    /** The signal type: 'audio' (blue), 'control' (grey), or 'universal'. */
+    type: PortDefinition['type'];
+}
+
+/** Reduce a full {@link PortDefinition} to the lean {@link PortSummary}. */
+export function toPortSummary(p: PortDefinition): PortSummary {
+    return { name: p.name, direction: p.direction, type: p.type };
+}
 
 // ============================================================================
 // Tool calls — the ONLY thing an agent is allowed to emit
@@ -62,6 +88,7 @@ export const AGENT_TOOL_NAMES = [
     // settings, so "why is there no sound?" becomes an answerable, fixable question.
     'get_logs',
     'get_diagnostics',
+    'get_signal',
     'get_settings',
     'update_settings',
 ] as const;
@@ -238,12 +265,47 @@ export interface GetLogsArgs {
 }
 
 /**
- * Arguments for the READ tool `get_diagnostics`: none. Returns the environment +
- * live audio snapshot (version/channel/executor/isolation/platform, plus whether
- * the AudioContext is running, the measured round-trip latency, sample rate, and
- * the selected output device). SIDE-EFFECT-FREE.
+ * Arguments for the READ tool `get_diagnostics`. With NO `nodeId` it returns the
+ * environment + live audio snapshot (version/channel/executor/isolation/platform,
+ * plus whether the AudioContext is running, the measured round-trip latency,
+ * sample rate, and the selected output device). With a `nodeId` it returns a
+ * NODE-scoped debug snapshot — the node's identity (type / plugin id), its ports,
+ * its data keys (params AS LAST PUSHED, not a live engine read), a best-effort
+ * `degraded` flag, and the recent logs that mention the node — the "why is THIS
+ * node silent?" facet for debugging a custom plugin. SIDE-EFFECT-FREE.
  */
-export type GetDiagnosticsArgs = Record<string, never>;
+export interface GetDiagnosticsArgs {
+    /** A canvas node id to diagnose; omit for the environment-wide snapshot. */
+    nodeId?: string;
+}
+
+/**
+ * Arguments for the READ tool `get_signal`: the `nodeId` whose live output peak to
+ * probe. SIDE-EFFECT-FREE. The one live RT value that catches a node which compiles
+ * and wires correctly yet outputs pure silence (a stuck custom plugin) — reachability
+ * and the degraded flag can't see that; only a real meter read can.
+ */
+export interface GetSignalArgs {
+    /** The canvas node id to probe. */
+    nodeId: string;
+}
+
+/** A node's output level above which we call it "producing sound" (below = silent). */
+export const SIGNAL_SILENCE_FLOOR = 1e-3;
+
+/**
+ * Result of `get_signal`: an INSTANTANEOUS peak read (0–1), or `null` when no live
+ * meter reading is available (the node isn't metered, or audio isn't running). A
+ * single sample — if it reads ~0 once, probe again, since a note may simply be
+ * between transients.
+ */
+export interface SignalProbeResult {
+    nodeId: string;
+    /** Instantaneous output peak in 0–1, or null when no live reading is available. */
+    peak: number | null;
+    /** True when `peak` is present and above {@link SIGNAL_SILENCE_FLOOR}. */
+    hasSignal: boolean;
+}
 
 /**
  * Arguments for the READ tool `get_settings`: none. Returns the current
@@ -300,6 +362,7 @@ export type AgentToolCall =
     | { name: 'emit_plan'; args: EmitPlanArgs }
     | { name: 'get_logs'; args: GetLogsArgs }
     | { name: 'get_diagnostics'; args: GetDiagnosticsArgs }
+    | { name: 'get_signal'; args: GetSignalArgs }
     | { name: 'get_settings'; args: GetSettingsArgs }
     | { name: 'update_settings'; args: UpdateSettingsArgs };
 
@@ -332,6 +395,13 @@ export type AgentEvent =
     | { kind: 'status'; message: string }
     /** An allowlisted OpenJammer tool call to apply through the reversible graph path. */
     | { kind: 'tool-call'; call: AgentToolCall; id: string }
+    /**
+     * A SELF-EDIT: Philia editing its OWN memory/skills (writing pi-memory, learning
+     * a skill, remembering you) — NOT a canvas tool and NOT an "unsupported" line.
+     * It reads as "you editing you": a distinct quiet chip, reversible via Ctrl+K
+     * forget rather than a canvas Ctrl+Z. NOT a terminal event.
+     */
+    | { kind: 'self-edit'; summary: string; id: string }
     /** A terminal success: the agent finished proposing its plan. */
     | { kind: 'result'; summary: string }
     /** A terminal failure (transport error, no backend, model error, ...). */

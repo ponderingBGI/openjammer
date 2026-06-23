@@ -23,7 +23,7 @@ import type { MIDIEvent, MIDINoteEvent } from '../../types';
 // ---------------------------------------------------------------------------
 
 interface ExecCall {
-    method: 'noteOn' | 'noteOff' | 'controlDown' | 'controlUp';
+    method: 'noteOn' | 'noteOff';
     keyboardId: string;
     row?: number;
     keyIndex?: number;
@@ -41,12 +41,6 @@ class FakeExecutor implements VoiceExecutor {
     }
     noteOff(keyboardId: string, row: number, keyIndex: number): void {
         this.calls.push({ method: 'noteOff', keyboardId, row, keyIndex });
-    }
-    controlDown(keyboardId: string): void {
-        this.calls.push({ method: 'controlDown', keyboardId });
-    }
-    controlUp(keyboardId: string): void {
-        this.calls.push({ method: 'controlUp', keyboardId });
     }
     activateControlSignal(connectionId: string): void {
         this.activated.push(connectionId);
@@ -168,6 +162,17 @@ function noteOff(deviceId: string, note: number, channel = 0): MIDINoteEvent {
         note,
         velocity: 0,
         normalizedVelocity: 0,
+        channel,
+        timestamp: ts++,
+        deviceId
+    };
+}
+function cc(deviceId: string, value: number, channel = 0): MIDIEvent {
+    return {
+        type: 'cc',
+        controller: 64,
+        value,
+        normalizedValue: value / 127,
         channel,
         timestamp: ts++,
         deviceId
@@ -430,8 +435,14 @@ describe('MIDIVoiceRouter', () => {
         });
     });
 
-    describe('sustain pedal (CC 64)', () => {
-        it('maps CC64 >= 64 to controlDown and < 64 to controlUp', () => {
+    describe('per-note sustain (CC 64)', () => {
+        /** noteOff calls only, as [row, keyIndex] pairs in order. */
+        const offsOf = (e: FakeExecutor) =>
+            e.calls.filter((c) => c.method === 'noteOff').map((c) => [c.row, c.keyIndex]);
+
+        it('holds note-offs while the pedal is down, then flushes each once on pedal up', () => {
+            // Pedal down -> play + release 3 notes -> all 3 keep sounding ->
+            // pedal up -> all 3 release exactly once each.
             const node = midiInputNode('midi-1', 'dev-A');
             const router = new MIDIVoiceRouter({
                 graph: makeGraph([node]),
@@ -440,22 +451,163 @@ describe('MIDIVoiceRouter', () => {
             });
             router.start();
 
-            const cc = (value: number): MIDIEvent => ({
-                type: 'cc',
-                controller: 64,
-                value,
-                normalizedValue: value / 127,
-                channel: 0,
-                timestamp: ts++,
-                deviceId: 'dev-A'
+            midi.emit(cc('dev-A', 127)); // pedal DOWN
+
+            // C4 (60->1,0), D4 (62->1,2), E4 (64->1,4): press + release each.
+            for (const n of [60, 62, 64]) {
+                midi.emit(noteOn('dev-A', n, 100));
+                midi.emit(noteOff('dev-A', n));
+            }
+
+            // No note-off has reached the engine yet — all 3 voices are held.
+            expect(offsOf(exec)).toEqual([]);
+
+            midi.emit(cc('dev-A', 0)); // pedal UP -> flush
+
+            // Exactly one note-off per held voice.
+            expect(offsOf(exec)).toEqual([
+                [1, 0],
+                [1, 2],
+                [1, 4]
+            ]);
+        });
+
+        it('a note PRESSED while the pedal is down then released stays held until flush', () => {
+            const node = midiInputNode('midi-1', 'dev-A');
+            const router = new MIDIVoiceRouter({
+                graph: makeGraph([node]),
+                executor: exec,
+                midi
             });
+            router.start();
 
-            midi.emit(cc(127));
-            midi.emit(cc(0));
+            midi.emit(cc('dev-A', 127));
+            midi.emit(noteOn('dev-A', 60, 100));
+            midi.emit(noteOff('dev-A', 60));
+            expect(offsOf(exec)).toEqual([]); // held, not released
 
-            expect(exec.calls).toEqual([
-                { method: 'controlDown', keyboardId: 'midi-1' },
-                { method: 'controlUp', keyboardId: 'midi-1' }
+            midi.emit(cc('dev-A', 0));
+            expect(offsOf(exec)).toEqual([[1, 0]]); // released exactly once
+        });
+
+        it('re-pressing a held note does not leak a stuck voice (no double note-off)', () => {
+            const node = midiInputNode('midi-1', 'dev-A');
+            const router = new MIDIVoiceRouter({
+                graph: makeGraph([node]),
+                executor: exec,
+                midi
+            });
+            router.start();
+
+            midi.emit(cc('dev-A', 127)); // pedal down
+            midi.emit(noteOn('dev-A', 60, 100));
+            midi.emit(noteOff('dev-A', 60)); // held (1,0)
+            midi.emit(noteOn('dev-A', 60, 100)); // RE-PRESS the held note
+            // The held entry was dropped by the re-press; the fresh press is live
+            // and not yet released.
+            expect(offsOf(exec)).toEqual([]);
+
+            midi.emit(cc('dev-A', 0)); // pedal up
+            // Re-pressed note is still physically held (no note-off arrived for it
+            // after the re-press), so the flush has nothing to release -> no
+            // double-off, no stuck voice.
+            expect(offsOf(exec)).toEqual([]);
+        });
+
+        it('re-pressed then released note flushes exactly once', () => {
+            const node = midiInputNode('midi-1', 'dev-A');
+            const router = new MIDIVoiceRouter({
+                graph: makeGraph([node]),
+                executor: exec,
+                midi
+            });
+            router.start();
+
+            midi.emit(cc('dev-A', 127));
+            midi.emit(noteOn('dev-A', 60, 100));
+            midi.emit(noteOff('dev-A', 60)); // held
+            midi.emit(noteOn('dev-A', 60, 100)); // re-press (clears held)
+            midi.emit(noteOff('dev-A', 60)); // held again (fresh)
+            expect(offsOf(exec)).toEqual([]);
+
+            midi.emit(cc('dev-A', 0));
+            expect(offsOf(exec)).toEqual([[1, 0]]); // exactly one
+        });
+
+        it('releases immediately when the pedal is up (normal behavior)', () => {
+            const node = midiInputNode('midi-1', 'dev-A');
+            const router = new MIDIVoiceRouter({
+                graph: makeGraph([node]),
+                executor: exec,
+                midi
+            });
+            router.start();
+
+            midi.emit(noteOn('dev-A', 60, 100));
+            midi.emit(noteOff('dev-A', 60));
+            expect(offsOf(exec)).toEqual([[1, 0]]);
+        });
+
+        it('pedal up with no held notes is a no-op', () => {
+            const node = midiInputNode('midi-1', 'dev-A');
+            const router = new MIDIVoiceRouter({
+                graph: makeGraph([node]),
+                executor: exec,
+                midi
+            });
+            router.start();
+
+            midi.emit(cc('dev-A', 127));
+            midi.emit(cc('dev-A', 0)); // up, nothing held
+            expect(exec.calls).toEqual([]);
+        });
+
+        it('respects the channel filter for the pedal (CC on a rejected channel does not arm)', () => {
+            // activeChannel 1 accepts only event channel 0.
+            const node = midiInputNode('midi-1', 'dev-A', { activeChannel: 1 });
+            const router = new MIDIVoiceRouter({
+                graph: makeGraph([node]),
+                executor: exec,
+                midi
+            });
+            router.start();
+
+            // Pedal-down on channel 5 is rejected -> pedal NOT armed for this node.
+            midi.emit(cc('dev-A', 127, 5));
+            midi.emit(noteOn('dev-A', 60, 100, 0));
+            midi.emit(noteOff('dev-A', 60, 0));
+            // Pedal never engaged on the accepted channel -> immediate release.
+            expect(offsOf(exec)).toEqual([[1, 0]]);
+        });
+
+        it('two input nodes on the same device sustain independently', () => {
+            // Both bound to dev-A but on different channels; pedal arms only node B.
+            const a = midiInputNode('midi-A', 'dev-A', { activeChannel: 1 }); // ch 0
+            const b = midiInputNode('midi-B', 'dev-A', { activeChannel: 2 }); // ch 1
+            const router = new MIDIVoiceRouter({
+                graph: makeGraph([a, b]),
+                executor: exec,
+                midi
+            });
+            router.start();
+
+            midi.emit(cc('dev-A', 127, 1)); // pedal DOWN only for node B (ch 1)
+
+            // Note on ch 0 -> node A (pedal up) releases immediately.
+            midi.emit(noteOn('dev-A', 60, 100, 0));
+            midi.emit(noteOff('dev-A', 60, 0));
+            // Note on ch 1 -> node B (pedal down) is held.
+            midi.emit(noteOn('dev-A', 60, 100, 1));
+            midi.emit(noteOff('dev-A', 60, 1));
+
+            expect(exec.calls.filter((c) => c.method === 'noteOff')).toEqual([
+                { method: 'noteOff', keyboardId: 'midi-A', row: 1, keyIndex: 0 }
+            ]);
+
+            midi.emit(cc('dev-A', 0, 1)); // pedal UP for node B -> flush B only
+            expect(exec.calls.filter((c) => c.method === 'noteOff')).toEqual([
+                { method: 'noteOff', keyboardId: 'midi-A', row: 1, keyIndex: 0 },
+                { method: 'noteOff', keyboardId: 'midi-B', row: 1, keyIndex: 0 }
             ]);
         });
 
@@ -495,6 +647,19 @@ describe('MIDIVoiceRouter', () => {
             midi.emit(noteOn('dev-A', 60, 100));
             expect(exec.calls).toHaveLength(2);
             expect(exec.calls.map((c) => c.keyboardId).sort()).toEqual(['kb-1', 'midi-1']);
+        });
+    });
+
+    describe('malformed input', () => {
+        it('ignores an undefined event instead of reading .type', () => {
+            const router = new MIDIVoiceRouter({
+                graph: makeGraph([]),
+                executor: exec,
+                midi
+            });
+
+            expect(() => router.handleEvent(undefined)).not.toThrow();
+            expect(exec.calls).toHaveLength(0);
         });
     });
 

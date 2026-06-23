@@ -1153,6 +1153,29 @@ fn same_openjammer_package_family(existing: &str, package: &str) -> bool {
     false
 }
 
+/// Turn a self-authored package name into a SAFE directory slug — lowercase ASCII
+/// alphanumerics + single dashes, bounded. Rejects an empty result, so no `.`, `..`,
+/// or path separator can survive: a self-package can NEVER escape the packages dir.
+fn slugify_package_name(name: &str) -> Result<String, String> {
+    let mut slug = String::new();
+    let mut last_dash = false;
+    for ch in name.trim().to_lowercase().chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch);
+            last_dash = false;
+        } else if !last_dash && !slug.is_empty() {
+            slug.push('-');
+            last_dash = true;
+        }
+    }
+    let slug: String = slug.trim_matches('-').chars().take(48).collect();
+    let slug = slug.trim_matches('-').to_string();
+    if slug.is_empty() {
+        return Err("package name must contain a letter or digit".to_string());
+    }
+    Ok(slug)
+}
+
 /// Add (`present`) or remove a `package` entry from the agent home's
 /// `settings.json` `packages[]` — the one mechanism Pi loads packages through.
 /// Shared by the permission-gate (sandbox) and pi-persistent-intelligence (learning).
@@ -1203,6 +1226,23 @@ fn set_settings_package(agent_home: &Path, package: &str, present: bool) -> std:
     ojcore_native::atomic_write_path(&settings_path, serialized.as_bytes())
 }
 
+/// Whether `package` is currently present in the agent home's `settings.json`
+/// `packages[]` — the READ-side counterpart of {@link set_settings_package}. A
+/// missing / unreadable / malformed settings file reads as "not present" (false),
+/// never an error, so callers can treat it as a plain boolean.
+fn settings_has_package(agent_home: &Path, package: &str) -> bool {
+    let settings_path = agent_home.join(".pi").join("agent").join("settings.json");
+    std::fs::read_to_string(&settings_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|root| {
+            root.get("packages")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().any(|v| v.as_str() == Some(package)))
+        })
+        .unwrap_or(false)
+}
+
 /// Make the in-Pi permission-gate ACTIVE (jailed) or DROPPED (YOLO) by editing the
 /// agent home's `settings.json` `packages[]` BEFORE the child spawns and reads it.
 /// This is what turns the verified gate policy into live enforcement — and what
@@ -1235,6 +1275,74 @@ pub fn ai_set_learning(enabled: bool) -> Result<(), String> {
         .agent_home;
     set_settings_package(&agent_home, &persistent_intelligence_pkg(), enabled)
         .map_err(|e| e.to_string())
+}
+
+/// Read whether opt-in learning is currently ON — i.e. pi-persistent-intelligence is
+/// present in the agent home's `settings.json`. The read-side of `ai_set_learning`,
+/// so the UI can show a truthful "memory: on" indicator instead of guessing.
+#[tauri::command]
+pub fn ai_get_learning() -> Result<bool, String> {
+    let agent_home = AgentWorkspace::ensure()
+        .map_err(|e| e.to_string())?
+        .agent_home;
+    Ok(settings_has_package(
+        &agent_home,
+        &persistent_intelligence_pkg(),
+    ))
+}
+
+/// Sanity cap on a self-authored package's source — not a security boundary (the
+/// permission gate + OS jail are); just a guard against a runaway write. 256 KiB is
+/// ample for a Pi extension.
+const MAX_SELF_PACKAGE_SOURCE: usize = 256 * 1024;
+
+/// SHAPE-SELF: the agent authors itself a reusable Pi package (a real tool/skill) and
+/// the host writes it into the brain + registers it COLD-START-DEFERRED — it loads on
+/// the NEXT Pi spawn, never restarting the warm child (a mid-session restart would
+/// steal focus from a live set). HOST-MEDIATED on purpose: the in-Pi gate forbids the
+/// agent writing its own `packages/` + `settings.json` directly, so this is the ONE
+/// sanctioned path. It is safe even in jailed mode because `ai_run_blocking`
+/// re-asserts the permission gate via `configure_gate` on EVERY jailed spawn — so a
+/// self-authored package can never persistently drop its own gate. Returns the slug
+/// the package was saved under. The agent reverses it with Ctrl+K forget / by asking.
+#[tauri::command]
+pub fn ai_save_self_package(
+    name: String,
+    source: String,
+    description: Option<String>,
+) -> Result<String, String> {
+    if source.len() > MAX_SELF_PACKAGE_SOURCE {
+        return Err(format!(
+            "package source is too large ({} bytes; max {MAX_SELF_PACKAGE_SOURCE})",
+            source.len()
+        ));
+    }
+    let slug = slugify_package_name(&name)?;
+    let agent_home = AgentWorkspace::ensure()
+        .map_err(|e| e.to_string())?
+        .agent_home;
+    let pkg_dir = agent_home
+        .join(".pi")
+        .join("agent")
+        .join("packages")
+        .join(&slug);
+    std::fs::create_dir_all(&pkg_dir).map_err(|e| e.to_string())?;
+    let manifest = serde_json::json!({
+        "name": format!("openjammer-self-{slug}"),
+        "private": true,
+        "type": "module",
+        "keywords": ["pi-package", "openjammer", "self-authored"],
+        "description": description.unwrap_or_default(),
+        "pi": { "extensions": ["./index.mjs"] },
+    });
+    let manifest_str = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    std::fs::write(pkg_dir.join("package.json"), manifest_str).map_err(|e| e.to_string())?;
+    std::fs::write(pkg_dir.join("index.mjs"), source.as_bytes()).map_err(|e| e.to_string())?;
+    // Register the package dir. COLD-START-DEFERRED: the warm child is NOT restarted,
+    // so this applies on the next spawn — no focus-steal mid-set.
+    set_settings_package(&agent_home, &pkg_dir.to_string_lossy(), true)
+        .map_err(|e| e.to_string())?;
+    Ok(slug)
 }
 
 /// Forget the agent's learned memory (Phase 7) — wipes the pi-memory dir, leaving
@@ -2497,6 +2605,21 @@ impl AgentWorkspace {
         std::fs::create_dir_all(pi_agent.join("pi-memory"))?;
         std::fs::create_dir_all(pi_agent.join("sessions"))?;
         std::fs::create_dir_all(&project_root)?;
+        // Seed the agent's writable pi-memory with two starter files the persona
+        // points at: the SEE hand's debugging skill and the SHAPE-SELF hand's
+        // about-you.md. Idempotent — only written when absent, so the agent's own
+        // refinements (pi-memory is agent-writable) are never clobbered. Best-effort:
+        // a failed seed just leaves the persona's pointer fileless until next run.
+        let mem = pi_agent.join("pi-memory");
+        for (name, body) in [
+            ("debugging.md", include_str!("../assets/agent/debugging.md")),
+            ("about-you.md", include_str!("../assets/agent/about-you.md")),
+        ] {
+            let path = mem.join(name);
+            if !path.exists() {
+                let _ = std::fs::write(&path, body);
+            }
+        }
         Ok(Self {
             agent_home,
             project_root,
@@ -2982,6 +3105,32 @@ mod tests {
 
         std::env::remove_var("SECRET_SHOULD_NOT_LEAK");
         std::env::remove_var("OPENJAMMER_AI_KEY_VAR");
+    }
+
+    #[test]
+    fn slugify_package_name_is_safe_and_contained() {
+        // Normal names slugify predictably.
+        assert_eq!(
+            slugify_package_name("Tempo Helper").unwrap(),
+            "tempo-helper"
+        );
+        assert_eq!(
+            slugify_package_name("  my__cool.tool!! ").unwrap(),
+            "my-cool-tool"
+        );
+        // Path-traversal / separators can NEVER survive — no escape from packages/.
+        assert_eq!(
+            slugify_package_name("../../etc/passwd").unwrap(),
+            "etc-passwd"
+        );
+        assert_eq!(slugify_package_name("a/b\\c").unwrap(), "a-b-c");
+        // Empty-after-slug is rejected (no nameless dir).
+        assert!(slugify_package_name("   ").is_err());
+        assert!(slugify_package_name("////").is_err());
+        // No leading/trailing dashes survive.
+        let s = slugify_package_name("--edge--").unwrap();
+        assert!(!s.starts_with('-') && !s.ends_with('-'));
+        assert_eq!(s, "edge");
     }
 
     #[test]

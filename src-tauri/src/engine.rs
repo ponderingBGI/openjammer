@@ -35,8 +35,9 @@ use std::sync::{Arc, Mutex};
 
 use ojcore::meter::{event_frame, return_frame};
 use ojcore::{
-    compile, compile_with_assets, master_param, CommandConsumer, CommandProducer, CommandQueue,
-    CompileError, Engine, EventRing, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
+    compile, compile_resilient_with_state, master_param, CommandConsumer, CommandProducer,
+    CommandQueue, CompileError, Engine, EventRing, MeterRing, PluginManifest, PluginRegistry,
+    ProgramSwap, StateResolver,
 };
 use ojcore_native::{
     device_fault_channel, install_device_listener, probe_default_output, AssetCatalog, AssetError,
@@ -122,6 +123,17 @@ pub struct StreamInfo {
 /// audio host (which owns the engine on the audio thread), the shared command
 /// producer (for `send_command`), and the program-swap mailbox.
 ///
+/// A [`StateResolver`] over the backend's staged restore blobs, handed to
+/// `compile_resilient_with_state` so each hosted node's `oj.state` blob is applied
+/// before its baked-in params.
+struct PendingStates<'a>(&'a std::collections::HashMap<u32, Vec<u8>>);
+
+impl StateResolver for PendingStates<'_> {
+    fn resolve_state(&self, node: NodeIdx) -> Option<&[u8]> {
+        self.0.get(&node.0).map(|v| v.as_slice())
+    }
+}
+
 /// Wrapped in a Tauri-managed `Mutex` (see [`crate::run`]); every method here is
 /// control-rate and runs on the IPC/control thread, never the audio thread.
 pub struct EngineBackend {
@@ -177,6 +189,26 @@ pub struct EngineBackend {
     /// graph against the updated [`AssetCatalog`]. `None` until the first
     /// `push_graph` (the starter graph runs but is not stored).
     last_graph: Option<OjGraph>,
+    /// IR node ids that degraded to a passthrough stub on the most recent `adopt`
+    /// (a missing / `abi`-incompatible plugin — invariant #4a). `push_graph`
+    /// returns these to the UI so the affected nodes show a non-modal "(missing
+    /// plugin)" badge and the project still opens. Set by `adopt` on every push.
+    last_degraded: Vec<u32>,
+    /// oj.state RESTORE blobs to apply at compile, keyed by IR node id, staged by a
+    /// project LOAD (`stage_plugin_restores`). `adopt` hands these to
+    /// `compile_resilient_with_state`, which calls `restore_state` BEFORE the baked-in
+    /// params (so current params win, the blob is the base) and re-applies them on
+    /// EVERY compile (a graph edit never drops the restored non-param state). Persist
+    /// for the session; replaced on the next project load.
+    pending_restores: std::collections::HashMap<u32, Vec<u8>>,
+    /// oj.state SAVE buffer: when `capture_states` is set for one `adopt`, each hosted
+    /// node's opaque blob (`DspInstance::save_state`) is captured here for the project
+    /// save (`save_plugin_states`). Empty otherwise.
+    saved_states: std::collections::HashMap<u32, Vec<u8>>,
+    /// One-shot flag: when set, the NEXT `adopt` captures hosted state into
+    /// `saved_states` (the only time `getStateInformation` runs). Set by
+    /// `save_plugin_states` around a forced re-adopt, cleared immediately after.
+    capture_states: bool,
     /// `true` while the engine is in the DEVICE-LOST state: the running output
     /// stream faulted (device yanked/disabled/reconfigured) and a rebuild has not
     /// yet succeeded. Set by [`tick`] on the first detected fault, cleared on a
@@ -319,6 +351,10 @@ impl EngineBackend {
             store: AssetStore::new(),
             captures: std::collections::HashMap::new(),
             last_graph: None,
+            last_degraded: Vec::new(),
+            pending_restores: std::collections::HashMap::new(),
+            saved_states: std::collections::HashMap::new(),
+            capture_states: false,
             device_lost: false,
             log_store: None,
             // Up to 8 reopen attempts per loss event before a calm give-up.
@@ -413,13 +449,13 @@ impl EngineBackend {
     /// This is control-rate (off the audio thread). The displaced host is
     /// dropped here, which stops the old stream cleanly off-RT.
     ///
-    /// ASSET RESOLUTION. Compilation goes through [`compile_with_assets`] with the
+    /// ASSET RESOLUTION. Compilation goes through [`compile_resilient`] with the
     /// backend's [`AssetCatalog`] as the resolver, so any node carrying an
     /// [`AssetRef`] (a Sampler's sample, a Convolution's IR) has its decoded PCM
     /// installed (Sampler `set_sample` / Convolution `set_ir`) BEFORE the program
     /// goes live — the founder-verified seam that makes a serialized graph with a
     /// bound sample actually play.
-    pub fn push_graph(&mut self, graph: &OjGraph) -> Result<(), BackendError> {
+    pub fn push_graph(&mut self, graph: &OjGraph) -> Result<Vec<u32>, BackendError> {
         // The graph's own sample_rate / block_size are UI hints; `adopt` is the one
         // owner that compiles at the live device rate + host render chunk (see
         // `adopt`), so a 96k interface plays in tune and a recovery onto a
@@ -448,7 +484,40 @@ impl EngineBackend {
         // bind can re-resolve + recompile it against the catalog without a fresh
         // UI push, and so the NEXT push forward-merges from it in turn.
         self.last_graph = Some(g);
-        Ok(())
+        // The IR ids that degraded to a passthrough stub this push (invariant #4a),
+        // for the UI to badge. Empty on a clean graph.
+        Ok(self.last_degraded.clone())
+    }
+
+    /// SAVE every hosted plugin's opaque state (the `oj.state` save half) for a
+    /// project save: `(ir_node_id, blob)` per hosted node. Forces a re-adopt of the
+    /// current graph with the capture flag set, so the just-compiled instances are
+    /// read on the control thread BEFORE publish (never on the audio thread). The
+    /// re-adopt re-instantiates the hosted plugins (a brief save-time cost, off the
+    /// steady path); a node with no extra state contributes nothing. Empty
+    /// device-less or with no hosted plugins.
+    pub fn save_plugin_states(&mut self) -> Vec<(u32, Vec<u8>)> {
+        let Some(g) = self.last_graph.clone() else {
+            return Vec::new();
+        };
+        self.capture_states = true;
+        let result = self.adopt(&g);
+        self.capture_states = false;
+        if let Err(e) = result {
+            // A failed re-adopt is non-fatal: keep the last good audio, save nothing.
+            eprintln!("ojcore: save_plugin_states re-adopt failed (non-fatal): {e}");
+            return Vec::new();
+        }
+        self.saved_states.drain().collect()
+    }
+
+    /// STAGE opaque restore blobs (keyed by IR node id) from a project LOAD. The next
+    /// (and every subsequent) `adopt` applies them via `compile_resilient_with_state`
+    /// — BEFORE the baked-in params, re-applied each compile — so a hosted plugin
+    /// comes up restored and a later param edit never reverts it. Replaces any prior
+    /// staged set; the caller stages BEFORE pushing the loaded graph.
+    pub fn stage_plugin_restores(&mut self, restores: Vec<(u32, Vec<u8>)>) {
+        self.pending_restores = restores.into_iter().collect();
     }
 
     /// Carry forward the per-node sample binding (the slot-0 [`AssetRef`] and the
@@ -532,8 +601,55 @@ impl EngineBackend {
         let mut g = graph.clone();
         g.sample_rate = self.stream.sample_rate;
         g.block_size = self.stream.buffer_frames;
-        let program = compile_with_assets(&g, &self.registry, &self.catalog)
-            .map_err(BackendError::Compile)?;
+        // Load-time graceful degrade (invariant #4a): a missing plugin dependency in a
+        // pushed/loaded graph becomes a passthrough stub so the project ALWAYS opens,
+        // rather than rejecting the whole push; genuine errors (cycle, no master) still
+        // surface. The starter graph above stays strict (a known-good internal graph).
+        // oj.state RESTORE rides the compile seam: `compile_resilient_with_state`
+        // applies each staged blob via `restore_state` BEFORE the baked-in params, so
+        // the blob is the base and current params win, re-applied on every compile.
+        let program = {
+            let states = PendingStates(&self.pending_restores);
+            compile_resilient_with_state(&g, &self.registry, &self.catalog, &states)
+                .map_err(BackendError::Compile)?
+        };
+
+        // oj.state SAVE (off-RT, only when a project save asked for it): the
+        // just-compiled hosted instances are reachable HERE on the control thread,
+        // BEFORE publish, so capturing their opaque blob (`save_state` ->
+        // getStateInformation / CLAP state) never touches the audio thread. Skipped on
+        // a normal edit (the common path), so `getStateInformation` is not on the
+        // per-edit cost.
+        if self.capture_states {
+            self.saved_states.clear();
+            for slot in 0..program.instances.len() {
+                let blob = program.instances[slot].save_state();
+                if !blob.is_empty() {
+                    self.saved_states.insert(program.ids[slot].0, blob);
+                }
+            }
+        }
+
+        // Invariant #4a: surface any node that degraded to a passthrough stub (a
+        // missing or incompatible plugin) so a loaded project's degraded nodes are
+        // VISIBLE, not silent. Non-fatal — the project opened. Record the ids so
+        // `push_graph` returns them to the UI for a per-node badge (auto-rebind on a
+        // rescan rides this same path); keep the log line for headless diagnostics.
+        let degraded = program.degraded_stubs(&g);
+        for id in &degraded {
+            let manifest = g
+                .nodes
+                .iter()
+                .find(|n| n.id == *id)
+                .map(|n| n.manifest_id.as_str())
+                .unwrap_or("?");
+            eprintln!(
+                "ojcore: node {} (manifest '{manifest}') degraded to a passthrough stub \
+                 (missing or incompatible plugin); the project stays open",
+                id.0
+            );
+        }
+        self.last_degraded = degraded.iter().map(|id| id.0).collect();
 
         if self.host.is_some() {
             // Live: hand the program to the audio thread (lock-free) and reclaim
@@ -720,10 +836,12 @@ impl EngineBackend {
     // --- U-EXEC-PARITY capability seam (control-rate) ----------------------
 
     /// Drive a looper node's state machine: enqueue an [`RtCommand::Looper`] with
-    /// the given action code (one of the [`ojproto::looper_action`] consts). The
-    /// audio thread applies it via `DspInstance::looper_action`.
-    pub fn looper_cmd(&mut self, node: NodeIdx, action: u8) -> Result<(), BackendError> {
-        self.send_command(RtCommand::Looper { node, action })
+    /// the given action code (one of the [`ojproto::looper_action`] consts) and
+    /// `arg` (layer index / packed flags for the indexed actions, ignored by the
+    /// transport actions). The audio thread applies it via
+    /// `DspInstance::looper_action`.
+    pub fn looper_cmd(&mut self, node: NodeIdx, action: u8, arg: u32) -> Result<(), BackendError> {
+        self.send_command(RtCommand::Looper { node, action, arg })
     }
 
     /// Enable / disable the engine's level metering. While off, the render loop
@@ -743,14 +861,25 @@ impl EngineBackend {
     /// Drain the engine's meter return ring into a batch of [`EngineFrame`]s for
     /// the UI's `meters` event. Control-rate: called on a UI-driven poll, never
     /// the audio thread. Decodes the compact wire frames the audio thread pushed.
+    ///
+    /// SINGLE CONSUMER, ALL TAGS: the meter ring is one SPSC queue, so this is the
+    /// only place the wire frames are decoded. It surfaces both `Meter` frames
+    /// (the signal-level stream consumes their peaks) AND `Looper` frames (the
+    /// looper UI consumes their transport snapshot) — folding both into one drain
+    /// keeps a single ring consumer (a second drainer would race-steal frames).
+    /// `Beat` still rides the transport path and is filtered out here.
     pub fn drain_meters(&mut self) -> Vec<EngineFrame> {
         let mut out = Vec::new();
         let mut buf = [0u8; return_frame::MAX_LEN];
         while let Some(n) = self.meter_ring.pop(&mut buf) {
             if let Some(frame) = return_frame::decode(&buf[..n]) {
-                // Surface only Meter frames here (Beat goes via the transport
-                // path); the UI's signal-level stream consumes Meter peaks.
-                if matches!(frame, EngineFrame::Meter { .. }) {
+                // Surface Meter + Looper frames here (Beat goes via the transport
+                // path). One drain decodes every tag because there is exactly one
+                // consumer of the meter ring.
+                if matches!(
+                    frame,
+                    EngineFrame::Meter { .. } | EngineFrame::Looper { .. }
+                ) {
                     out.push(frame);
                 }
             }
@@ -768,6 +897,15 @@ impl EngineBackend {
             return false;
         };
         self.host = None; // tear down the dead stream before re-opening
+                          // Follow the (possibly new) default device's sample rate BEFORE adopting:
+                          // a format change (e.g. the interface switching 96 kHz → 48 kHz) or a
+                          // replacement device at a different rate must rebuild at that rate, or the
+                          // patch would resume detuned. `adopt` compiles the graph at
+                          // `self.stream.sample_rate`. (The cpal stream is gone here, so this just
+                          // queries the OS default — off-RT.)
+        if let Some(rate) = ojcore_native::default_output_sample_rate() {
+            self.stream.sample_rate = rate;
+        }
         let _ = self.adopt(&graph); // start failure is non-fatal (emits Lifecycle)
         self.host.is_some()
     }
@@ -877,7 +1015,7 @@ impl EngineBackend {
     /// off-RT asset pipeline a file load uses), bind the returned [`AssetId`] +
     /// the `root_note` onto `node` in the live graph, then recompile so the
     /// Sampler's `set_sample` (the U6 seam) fires through
-    /// [`compile_with_assets`]. Returns the stored [`AssetId`].
+    /// [`compile_resilient`]. Returns the stored [`AssetId`].
     ///
     /// If no graph has been pushed yet (no `last_graph`), the asset is still
     /// stored and returned — a subsequent `push_graph` that references it will
@@ -886,12 +1024,13 @@ impl EngineBackend {
         &mut self,
         node: NodeIdx,
         pcm: Vec<f32>,
+        channels: u16,
         sample_rate: u32,
         root_note: u8,
     ) -> Result<AssetId, BackendError> {
         let pcm = Pcm {
             samples: pcm,
-            channels: 1,
+            channels: channels.max(1),
             sample_rate: sample_rate.max(1),
         };
         let id = self.catalog.insert(pcm).map_err(BackendError::Asset)?;
@@ -999,6 +1138,34 @@ impl EngineBackend {
             cap.sample_rate = pcm.sample_rate;
         }
         Some((cap.pcm.clone(), cap.sample_rate))
+    }
+
+    /// STAGE-3 finalize-PCM: take looper `node`'s just-COMMITTED take as MONO PCM
+    /// and its sample rate, so the UI can build a real `AudioBuffer` for the layer's
+    /// row (true waveform + drag-to-library/export). Called by the control thread
+    /// when it drains a commit `LooperEdge` for `node` (the
+    /// Recording|Overdubbing→Playing edge): the host's off-RT per-looper capture
+    /// has the streamed take by then, and `loop_len` (from the looper snapshot the
+    /// UI already tracks) trims it to the committed cycle. Returns `None` when no
+    /// stream is live (device-less sandbox) or nothing was captured for the node.
+    ///
+    /// The PCM rides the Tauri command RETURN value (exactly like
+    /// [`recorder_stop`]), NOT an `EngineFrame` — keeping the wire/ojproto
+    /// unchanged: only `OjGraph` / `RtCommand` / the existing return frames cross
+    /// the boundary, and bulk PCM rides command returns.
+    pub fn take_looper_pcm(&self, node: NodeIdx, loop_len: usize) -> Option<(Vec<f32>, u32)> {
+        let host = self.host.as_ref()?;
+        let pcm = host.take_looper_pcm(node, loop_len)?;
+        Some((pcm, host.sample_rate()))
+    }
+
+    /// Discard looper `node`'s accumulated (uncommitted) capture — on CLEAR /
+    /// undo / delete with no commit — so a later take never inherits a stale tail.
+    /// No-op in the device-less sandbox. Off-RT.
+    pub fn discard_looper_pcm(&self, node: NodeIdx) {
+        if let Some(host) = self.host.as_ref() {
+            host.discard_looper_pcm(node);
+        }
     }
 
     /// Export a node's captured recording to a WAV file at `path` via the
@@ -1306,6 +1473,14 @@ fn render_event_kind(kind: &EventKind) -> (&'static str, String, Option<String>)
             text.clone(),
             Some(format!("{{\"code\":{code}}}")),
         ),
+        EventKind::LooperEdge { node, from, to } => (
+            "LooperEdge",
+            format!("looper {} edge: {from} -> {to}", node.0),
+            Some(format!(
+                "{{\"node\":{},\"from\":{from},\"to\":{to}}}",
+                node.0
+            )),
+        ),
     }
 }
 
@@ -1314,6 +1489,7 @@ fn lift_event(rt: RtEvent, seq: u32, ts_us: u64) -> Event {
         RtEvent::Xrun { dropped } => EventKind::Xrun { dropped },
         RtEvent::NodeFault { node, fault } => EventKind::NodeFault { node, fault },
         RtEvent::RingFull => EventKind::RingFull,
+        RtEvent::LooperEdge { node, from, to } => EventKind::LooperEdge { node, from, to },
     };
     let severity = match kind {
         EventKind::NodeFault { .. } => Severity::Error,
@@ -1474,9 +1650,9 @@ mod tests {
     #[test]
     fn looper_cmd_enqueues_looper_command() {
         let mut be = EngineBackend::new();
-        for action in 0u8..=5 {
+        for action in 0u8..=8 {
             assert!(
-                be.looper_cmd(NodeIdx(3), action).is_ok(),
+                be.looper_cmd(NodeIdx(3), action, 0).is_ok(),
                 "looper action {action} should enqueue"
             );
         }
@@ -1489,7 +1665,7 @@ mod tests {
         let mut be = EngineBackend::new();
         let pcm = vec![0.0f32, 0.25, -0.25, 0.5];
         let id = be
-            .load_sample(NodeIdx(2), pcm.clone(), 48_000, 60)
+            .load_sample(NodeIdx(2), pcm.clone(), 1, 48_000, 60)
             .expect("sample stores");
         let resolved = be.catalog.resolve(id).expect("resolves");
         assert_eq!(resolved.samples, pcm);
@@ -1534,29 +1710,70 @@ mod tests {
         assert!(be.metering);
     }
 
-    /// `drain_meters` returns only `Meter` frames decoded from the ring. With no
-    /// audio device the ring is empty, so the drain is an empty batch (no panic).
+    /// `drain_meters` surfaces `Meter` AND `Looper` frames (one ring, one consumer,
+    /// all tags), and filters out `Beat` (it rides the transport path). With no
+    /// audio device the ring is otherwise empty, so the drain never panics.
     #[test]
-    fn drain_meters_decodes_only_meter_frames() {
+    fn drain_meters_decodes_meter_and_looper_frames() {
         let mut be = EngineBackend::new();
-        // Push one encoded Meter frame and one Beat frame directly onto the ring
+        // Drain any frames a live audio device (present in this sandbox) already
+        // published, so the assertions only see the frames we push below — the test
+        // must be deterministic with OR without a device.
+        let _ = be.drain_meters();
+        // Push one Meter, one Looper, and one Beat frame directly onto the ring
         // (simulating the audio thread's publish), then drain.
         let mut buf = [0u8; return_frame::MAX_LEN];
         let n = return_frame::encode_meter(NodeIdx(5), 0.1, 0.8, &mut buf);
+        assert!(be.meter_ring.push(&buf[..n]));
+        let n = return_frame::encode_looper(NodeIdx(9), 3, 240, 480, 0.5, &mut buf);
         assert!(be.meter_ring.push(&buf[..n]));
         let n = return_frame::encode_beat(1, 2, 0.5, &mut buf);
         assert!(be.meter_ring.push(&buf[..n]));
 
         let frames = be.drain_meters();
-        // Only the Meter frame survives the filter.
-        assert_eq!(frames.len(), 1);
-        match &frames[0] {
-            EngineFrame::Meter { node, peak, .. } => {
-                assert_eq!(*node, NodeIdx(5));
-                assert!((peak - 0.8).abs() < 1e-6);
+        // The Meter and Looper frames survive the filter; the Beat is dropped. A
+        // live device may interleave its own Meter/Beat frames, so assert on the
+        // SPECIFIC frames we pushed rather than an exact count.
+        let meter = frames.iter().find_map(|f| match f {
+            EngineFrame::Meter { node, peak, .. } if *node == NodeIdx(5) => Some(*peak),
+            _ => None,
+        });
+        assert!(meter.is_some(), "the pushed Meter frame survived");
+        assert!((meter.unwrap() - 0.8).abs() < 1e-6);
+
+        let looper = frames
+            .iter()
+            .find(|f| matches!(f, EngineFrame::Looper { node, .. } if *node == NodeIdx(9)));
+        match looper {
+            Some(EngineFrame::Looper {
+                state,
+                pos,
+                loop_len,
+                peak,
+                ..
+            }) => {
+                assert_eq!(*state, 3);
+                assert_eq!(*pos, 240);
+                assert_eq!(*loop_len, 480);
+                assert!((peak - 0.5).abs() < 1e-6);
             }
-            other => panic!("expected Meter, got {other:?}"),
+            other => panic!("expected the pushed Looper frame, got {other:?}"),
         }
+
+        // No Beat frame from OUR push survives the filter (a device may still emit
+        // its own transport beats; we only assert ours is gone by checking the
+        // pushed Beat shape — bar=1, beat=2 — is absent).
+        assert!(
+            !frames.iter().any(|f| matches!(
+                f,
+                EngineFrame::Beat {
+                    bar: 1,
+                    beat: 2,
+                    ..
+                }
+            )),
+            "Beat frames are filtered out of the meter drain",
+        );
     }
 
     /// Speaker volume, device selection, and mic capture are all REAL round trips
@@ -1648,7 +1865,7 @@ mod tests {
 
         let pcm = vec![0.0f32, 0.5, -0.5, 0.25, 0.1, -0.1];
         let id = be
-            .load_sample(NodeIdx(1), pcm.clone(), 48_000, 60)
+            .load_sample(NodeIdx(1), pcm.clone(), 1, 48_000, 60)
             .expect("sample binds");
 
         // The asset resolves back to the same PCM.
@@ -1726,7 +1943,7 @@ mod tests {
         // Imperatively bind a sample to the sampler node (the engine-only mapping).
         let pcm = vec![0.0f32, 0.5, -0.5, 0.25];
         let id = be
-            .load_sample(NodeIdx(1), pcm.clone(), 48_000, 60)
+            .load_sample(NodeIdx(1), pcm.clone(), 1, 48_000, 60)
             .expect("sample binds");
 
         // A FRESH UI push of the same topology (no asset on the wire) must NOT drop
@@ -1755,7 +1972,7 @@ mod tests {
         let mut be = EngineBackend::new();
         be.push_graph(&sampler_graph()).expect("initial push");
         let first = be
-            .load_sample(NodeIdx(1), vec![0.1f32, 0.2], 48_000, 60)
+            .load_sample(NodeIdx(1), vec![0.1f32, 0.2], 1, 48_000, 60)
             .expect("first sample binds");
 
         // Push a graph that ALREADY carries its own slot-0 asset on node 1.

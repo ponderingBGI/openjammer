@@ -23,7 +23,7 @@ beforeEach(() => {
 });
 
 const goodGraph = {
-    nodes: [{ id: 'n1', type: 'amplifier' }],
+    nodes: [{ id: 'n1', type: 'multiplier' }],
     edges: [{ id: 'c1', sourceNodeId: 'n1', targetNodeId: 'n1' }],
 };
 

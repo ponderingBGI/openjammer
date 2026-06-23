@@ -14,8 +14,10 @@ use alloc::boxed::Box;
 use crate::builtin::GainLoader;
 use crate::effects::{BiquadLoader, ConvolutionLoader, DelayLoader, WaveshaperLoader};
 use crate::looper::LooperLoader;
+use crate::pan::PanLoader;
 use crate::registry::PluginRegistry;
 use crate::structural::StructuralLoader;
+use crate::width::WidthLoader;
 
 /// Knobs for [`register_builtins`] so the two targets can request the same set
 /// with small, explicit differences. All default to the full set.
@@ -53,9 +55,11 @@ impl BuiltinOpts {
 /// `ojinstrument::register_all`. Registers (when enabled by `opts`):
 ///
 /// * effects:    `builtin.gain`, `builtin.biquad`, `builtin.waveshaper`,
-///   `builtin.delay`, `builtin.convolution`, `builtin.looper`
+///   `builtin.delay`, `builtin.convolution`, `builtin.looper`, `builtin.pan`,
+///   `builtin.width`
 /// * structural: `host.graph_in`, `host.mic_in`, `host.graph_out`,
-///   `host.speaker_out`, `builtin.add`, `builtin.passthrough`
+///   `host.speaker_out`, `builtin.add`, `builtin.subtract`, `builtin.multiply`,
+///   `builtin.passthrough`
 pub fn register_builtins(reg: &mut PluginRegistry, opts: BuiltinOpts) {
     if opts.effects {
         reg.register(Box::new(GainLoader::new()));
@@ -66,6 +70,10 @@ pub fn register_builtins(reg: &mut PluginRegistry, opts: BuiltinOpts) {
         // U-STATEFUL: the looper rides the SAME shared path, so it appears in
         // both the native and wasm registries (no_std -> wasm-safe).
         reg.register(Box::new(LooperLoader::new()));
+        // The stereo panner — the first built-in with a 2-channel audio output.
+        reg.register(Box::new(PanLoader::new()));
+        // The stereo width node — the first built-in with a 2-channel audio input.
+        reg.register(Box::new(WidthLoader::new()));
     }
     if opts.structural {
         reg.register(Box::new(StructuralLoader::graph_in()));
@@ -73,6 +81,8 @@ pub fn register_builtins(reg: &mut PluginRegistry, opts: BuiltinOpts) {
         reg.register(Box::new(StructuralLoader::graph_out()));
         reg.register(Box::new(StructuralLoader::speaker_out()));
         reg.register(Box::new(StructuralLoader::add()));
+        reg.register(Box::new(StructuralLoader::subtract()));
+        reg.register(Box::new(StructuralLoader::multiply()));
         reg.register(Box::new(StructuralLoader::passthrough()));
     }
 }
@@ -83,9 +93,12 @@ mod tests {
     use crate::builtin::GAIN_ID;
     use crate::effects::{BIQUAD_ID, CONVOLUTION_ID, DELAY_ID, WAVESHAPER_ID};
     use crate::looper::LOOPER_ID;
+    use crate::pan::PAN_ID;
     use crate::structural::{
-        ADD_ID, GRAPH_IN_ID, GRAPH_OUT_ID, MIC_IN_ID, PASSTHROUGH_ID, SPEAKER_OUT_ID,
+        ADD_ID, GRAPH_IN_ID, GRAPH_OUT_ID, MIC_IN_ID, MULTIPLY_ID, PASSTHROUGH_ID, SPEAKER_OUT_ID,
+        SUBTRACT_ID,
     };
+    use crate::width::WIDTH_ID;
 
     /// The shared path registers exactly the expected built-in id set.
     #[test]
@@ -100,17 +113,21 @@ mod tests {
             DELAY_ID,
             CONVOLUTION_ID,
             LOOPER_ID,
+            PAN_ID,
+            WIDTH_ID,
             GRAPH_IN_ID,
             MIC_IN_ID,
             GRAPH_OUT_ID,
             SPEAKER_OUT_ID,
             ADD_ID,
+            SUBTRACT_ID,
+            MULTIPLY_ID,
             PASSTHROUGH_ID,
         ] {
             assert!(reg.contains(id), "missing built-in id: {id}");
         }
-        // 6 effects (incl. looper) + 6 structural == 12 loaders.
-        assert_eq!(reg.len(), 12);
+        // 8 effects (incl. looper + pan + width) + 8 structural == 16 loaders.
+        assert_eq!(reg.len(), 16);
     }
 
     /// Opting structural off registers effects only (and vice versa).
@@ -126,8 +143,10 @@ mod tests {
         );
         assert!(effects_only.contains(GAIN_ID));
         assert!(effects_only.contains(LOOPER_ID));
+        assert!(effects_only.contains(PAN_ID));
+        assert!(effects_only.contains(WIDTH_ID));
         assert!(!effects_only.contains(SPEAKER_OUT_ID));
-        assert_eq!(effects_only.len(), 6);
+        assert_eq!(effects_only.len(), 8);
 
         let mut structural_only = PluginRegistry::new();
         register_builtins(
@@ -138,8 +157,10 @@ mod tests {
             },
         );
         assert!(structural_only.contains(SPEAKER_OUT_ID));
+        assert!(structural_only.contains(SUBTRACT_ID));
+        assert!(structural_only.contains(MULTIPLY_ID));
         assert!(!structural_only.contains(GAIN_ID));
-        assert_eq!(structural_only.len(), 6);
+        assert_eq!(structural_only.len(), 8);
     }
 
     /// Every registered manifest lowers to its closed primitive kind.
@@ -154,6 +175,9 @@ mod tests {
         assert_eq!(reg.lower(DELAY_ID), Some(PrimitiveKind::Delay));
         assert_eq!(reg.lower(CONVOLUTION_ID), Some(PrimitiveKind::Convolution));
         assert_eq!(reg.lower(LOOPER_ID), Some(PrimitiveKind::Looper));
+        assert_eq!(reg.lower(PAN_ID), Some(PrimitiveKind::Pan));
+        assert_eq!(reg.lower(WIDTH_ID), Some(PrimitiveKind::Width));
+        assert_eq!(reg.lower(MULTIPLY_ID), Some(PrimitiveKind::Multiply));
         assert_eq!(reg.lower(SPEAKER_OUT_ID), Some(PrimitiveKind::SpeakerOut));
     }
 }

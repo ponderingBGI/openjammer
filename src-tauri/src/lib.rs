@@ -20,18 +20,22 @@ mod engine;
 mod sandbox;
 mod updater;
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use engine::BackendState;
-use ojhost::PluginDescriptor;
+use ojhost::{PluginDescriptor, PluginEditor};
 use ojproto::{EngineFrame, Event, NodeIdx, OjGraph, RtCommand};
 use tauri::Manager;
 
 /// Push a full graph from the UI: recompile it against the plugin registry and
 /// adopt it into the running engine (publish to the program-swap mailbox + run).
-/// `graph` is an [`OjGraph`] serialized as JSON across the IPC boundary.
+/// `graph` is an [`OjGraph`] serialized as JSON across the IPC boundary. Returns
+/// the IR node ids that degraded to a passthrough stub (a missing / incompatible
+/// plugin, invariant #4a) so the UI can badge them; empty on a clean graph.
 #[tauri::command]
-fn push_graph(graph: OjGraph, state: tauri::State<'_, BackendState>) -> Result<(), String> {
+fn push_graph(graph: OjGraph, state: tauri::State<'_, BackendState>) -> Result<Vec<u32>, String> {
     state
         .0
         .lock()
@@ -86,6 +90,177 @@ fn scan_plugins(
         .map_err(|e| e.to_string())
 }
 
+/// A plugin folder shown in the Plugins panel, tagged by scope + format so the UI
+/// can explain exactly where VST2/VST3/CLAP/AU plugins are discovered.
+#[derive(serde::Serialize)]
+struct PluginDir {
+    path: String,
+    /// `"user"` (under the profile dir — no admin to drop a plugin in) or
+    /// `"system"` (all users; usually needs admin).
+    scope: &'static str,
+    /// Human format tag: `"VST2"`, `"VST3"`, `"CLAP"`, or `"AU"`.
+    format: &'static str,
+}
+
+/// The OS-standard plugin folders for THIS machine, tagged by scope + format. The
+/// Plugins panel shows these in its empty state so the player sees the real paths
+/// (and can open one with [`reveal_path`]) instead of generic cross-platform
+/// examples. Per-user folders are listed first because they need no admin rights.
+#[tauri::command]
+fn plugin_dirs() -> Vec<PluginDir> {
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(PathBuf::from);
+    let mut dirs: Vec<PluginDir> = ojhost::default_plugin_dirs()
+        .into_iter()
+        .filter_map(|p| {
+            let format = plugin_dir_format(&p)?;
+            let user = home.as_ref().is_some_and(|h| p.starts_with(h));
+            Some(PluginDir {
+                path: p.to_string_lossy().into_owned(),
+                scope: if user { "user" } else { "system" },
+                format,
+            })
+        })
+        .collect();
+    // Lead with the per-user folder, then stable by format/path.
+    dirs.sort_by_key(|d| (d.scope != "user", d.format, d.path.clone()));
+    dirs
+}
+
+fn plugin_dir_format(path: &std::path::Path) -> Option<&'static str> {
+    let leaf = path.file_name()?.to_str()?.to_ascii_lowercase();
+    if leaf == "clap" || leaf == ".clap" {
+        Some("CLAP")
+    } else if leaf == "vst3" || leaf == ".vst3" {
+        Some("VST3")
+    } else if leaf == "components" {
+        Some("AU")
+    } else if leaf == "vst" || leaf == ".vst" || leaf == "vst2" || leaf == "vstplugins" {
+        Some("VST2")
+    } else {
+        None
+    }
+}
+
+/// Open one of the plugin folders in the OS file manager (Explorer / Finder /
+/// `xdg-open`). The path MUST be one of the known plugin dirs — we never open an
+/// arbitrary path handed in from the webview. The folder is created first
+/// (best-effort) so a not-yet-existing user plugin dir still opens, giving the
+/// player somewhere to drop a plugin.
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let target = PathBuf::from(&path);
+    if !ojhost::default_plugin_dirs().iter().any(|d| d == &target) {
+        return Err("refusing to open a path that is not a plugin folder".into());
+    }
+    let _ = std::fs::create_dir_all(&target);
+    open_in_file_manager(&target)
+}
+
+#[derive(Default)]
+struct PluginEditorState(Mutex<HashMap<String, PluginEditor>>);
+
+#[tauri::command]
+fn plugin_quarantine_reset() -> Result<(), String> {
+    let pedal = std::env::temp_dir().join("ojhost_dead_mans_pedal.txt");
+    match std::fs::remove_file(&pedal) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn plugin_editor_open(
+    node_id: String,
+    descriptor: PluginDescriptor,
+    state: tauri::State<'_, PluginEditorState>,
+) -> Result<(), String> {
+    let mut editors = state
+        .0
+        .lock()
+        .map_err(|_| "plugin editor mutex poisoned".to_string())?;
+    if let Some(editor) = editors.get_mut(&node_id) {
+        editor.focus();
+        return Ok(());
+    }
+    let mut editor = PluginEditor::open(&descriptor).map_err(|e| e.to_string())?;
+    editor.focus();
+    editors.insert(node_id, editor);
+    Ok(())
+}
+
+#[tauri::command]
+fn plugin_editor_focus(
+    node_id: String,
+    state: tauri::State<'_, PluginEditorState>,
+) -> Result<(), String> {
+    let mut editors = state
+        .0
+        .lock()
+        .map_err(|_| "plugin editor mutex poisoned".to_string())?;
+    let editor = editors
+        .get_mut(&node_id)
+        .ok_or_else(|| "plugin editor is not open".to_string())?;
+    editor.focus();
+    Ok(())
+}
+
+#[tauri::command]
+fn plugin_editor_close(
+    node_id: String,
+    state: tauri::State<'_, PluginEditorState>,
+) -> Result<(), String> {
+    let mut editors = state
+        .0
+        .lock()
+        .map_err(|_| "plugin editor mutex poisoned".to_string())?;
+    if let Some(mut editor) = editors.remove(&node_id) {
+        editor.close();
+    }
+    Ok(())
+}
+
+fn close_all_plugin_editors(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<PluginEditorState>() {
+        if let Ok(mut editors) = state.0.lock() {
+            for (_, mut editor) in editors.drain() {
+                editor.close();
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn open_in_file_manager(path: &std::path::Path) -> Result<(), String> {
+    // `explorer` returns a non-zero exit code even on success, so spawn-and-forget
+    // rather than inspect the status.
+    std::process::Command::new("explorer")
+        .arg(path)
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn open_in_file_manager(path: &std::path::Path) -> Result<(), String> {
+    std::process::Command::new("open")
+        .arg(path)
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_in_file_manager(path: &std::path::Path) -> Result<(), String> {
+    std::process::Command::new("xdg-open")
+        .arg(path)
+        .spawn()
+        .map(drop)
+        .map_err(|e| e.to_string())
+}
+
 /// Whether the native audio engine is currently running (false in a device-less
 /// environment, where the UI still runs and the engine starts when a device
 /// appears on the next `push_graph`).
@@ -121,15 +296,22 @@ fn ai_faust_compile(source: String) -> Result<Option<ai::FaustCompileResult>, St
 // --- U-EXEC-PARITY: looper / sampler / recorder / metering / speaker / mic ---
 
 /// Drive a looper node's state machine: enqueue an `RtCommand::Looper` carrying
-/// `action` (one of the `ojproto::looper_action` codes). The control-rate seam
-/// the looper UI's record/stop/overdub/clear buttons reach the engine through.
+/// `action` (one of the `ojproto::looper_action` codes) and `arg` (layer index /
+/// packed flags for the indexed actions, ignored by the transport actions). The
+/// control-rate seam the looper UI's record/stop/overdub/clear/mute/delete/undo
+/// controls reach the engine through.
 #[tauri::command]
-fn looper_cmd(node: u32, action: u8, state: tauri::State<'_, BackendState>) -> Result<(), String> {
+fn looper_cmd(
+    node: u32,
+    action: u8,
+    arg: u32,
+    state: tauri::State<'_, BackendState>,
+) -> Result<(), String> {
     state
         .0
         .lock()
         .map_err(|_| "engine backend mutex poisoned".to_string())?
-        .looper_cmd(NodeIdx(node), action)
+        .looper_cmd(NodeIdx(node), action, arg)
         .map_err(|e| e.to_string())
 }
 
@@ -177,6 +359,7 @@ fn poll_events(state: tauri::State<'_, BackendState>) -> Result<Vec<Event>, Stri
 fn load_sample(
     node: u32,
     pcm: Vec<f32>,
+    channels: u16,
     sample_rate: u32,
     root_note: u8,
     state: tauri::State<'_, BackendState>,
@@ -185,7 +368,7 @@ fn load_sample(
         .0
         .lock()
         .map_err(|_| "engine backend mutex poisoned".to_string())?
-        .load_sample(NodeIdx(node), pcm, sample_rate, root_note)
+        .load_sample(NodeIdx(node), pcm, channels, sample_rate, root_note)
         .map(|id| id.0)
         .map_err(|e| e.to_string())
 }
@@ -221,6 +404,89 @@ fn recorder_stop(
         .map_err(|_| "engine backend mutex poisoned".to_string())?
         .recorder_stop(NodeIdx(node))
         .map(|(pcm, sample_rate)| RecorderStopResult { pcm, sample_rate }))
+}
+
+/// One hosted plugin's saved opaque state. `node` is the IR node id; `blob` is the
+/// plugin's `getStateInformation` / CLAP-state bytes. The TS layer base64's the blob
+/// into `node.data` for the project file, lockfile-gated on the hosted plugin id.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PluginStateEntry {
+    node: u32,
+    blob: Vec<u8>,
+}
+
+/// SAVE every hosted plugin's opaque state (the `oj.state` save half) for a project
+/// save. One entry per hosted node with non-empty state; empty device-less or with
+/// no hosted plugins.
+#[tauri::command]
+fn save_plugin_states(
+    state: tauri::State<'_, BackendState>,
+) -> Result<Vec<PluginStateEntry>, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .save_plugin_states()
+        .into_iter()
+        .map(|(node, blob)| PluginStateEntry { node, blob })
+        .collect())
+}
+
+/// STAGE opaque restore blobs from a project LOAD; the next `push_graph` restores
+/// each hosted plugin to its saved state (applied before the baked-in params). Call
+/// BEFORE pushing the loaded graph.
+#[tauri::command]
+fn stage_plugin_restores(
+    restores: Vec<PluginStateEntry>,
+    state: tauri::State<'_, BackendState>,
+) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .stage_plugin_restores(restores.into_iter().map(|e| (e.node, e.blob)).collect());
+    Ok(())
+}
+
+/// Looper take PCM + rate returned by [`looper_take_pcm`] for the UI to build a
+/// real `AudioBuffer` (true waveform + drag-to-library/export) for a committed
+/// layer's row.
+#[derive(serde::Serialize)]
+struct LooperTakeResult {
+    pcm: Vec<f32>,
+    sample_rate: u32,
+}
+
+/// STAGE-3 finalize-PCM: take looper `node`'s just-COMMITTED take as MONO PCM +
+/// rate. The UI calls this when it processes a commit `LooperEdge` for `node`
+/// (Recording|Overdubbing→Playing), passing `loop_len` from the looper snapshot
+/// it already tracks, so the off-RT per-looper capture is trimmed to the
+/// committed cycle. Returns null when no stream is live / nothing was captured.
+/// The bulk PCM rides this command RETURN (like `recorder_stop`), not the wire.
+#[tauri::command]
+fn looper_take_pcm(
+    node: u32,
+    loop_len: u32,
+    state: tauri::State<'_, BackendState>,
+) -> Result<Option<LooperTakeResult>, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .take_looper_pcm(NodeIdx(node), loop_len as usize)
+        .map(|(pcm, sample_rate)| LooperTakeResult { pcm, sample_rate }))
+}
+
+/// Discard looper `node`'s accumulated (uncommitted) capture — on CLEAR / undo /
+/// delete with no commit — so a later take never inherits a stale tail.
+#[tauri::command]
+fn looper_discard_pcm(node: u32, state: tauri::State<'_, BackendState>) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .discard_looper_pcm(NodeIdx(node));
+    Ok(())
 }
 
 /// Export a node's captured recording to a WAV file at `path`.
@@ -300,6 +566,22 @@ fn list_output_devices() -> Vec<OutputDevice> {
         .into_iter()
         .map(|(id, name)| OutputDevice { id, name })
         .collect()
+}
+
+/// DEV/TEST ONLY: arm the hosted-plugin crash boundary so the NEXT guarded
+/// `processBlock` deliberately faults, letting the C++ SEH/signal latch be PROVEN on
+/// a live machine — arm, then play a note through a hosted plugin: that node faults,
+/// latches to a dry passthrough + crash badge, and the rest of the set plays on.
+///
+/// A no-op unless the app was built with `OJHOST_FAULT_INJECT=1` (env, read by
+/// ojhost's build.rs; needs the default `juce` C++): in every other build —
+/// including every shipped one — the fault code isn't compiled in, so this does
+/// nothing and cannot crash anything. Run `OJHOST_FAULT_INJECT=1 bun native`; with
+/// `withGlobalTauri`, arm it from the dev webview console:
+/// `await window.__TAURI__.core.invoke('debug_arm_plugin_fault')`.
+#[tauri::command]
+fn debug_arm_plugin_fault() {
+    ojhost::arm_fault();
 }
 
 /// Snapshot the current user data before an update installs — the frontend passes
@@ -392,6 +674,7 @@ pub fn run() {
         // quitting. macOS: no-op until the build is notarized.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { .. } = event {
+                close_all_plugin_editors(window.app_handle());
                 updater::install_on_quit(window.app_handle());
             }
         })
@@ -429,6 +712,7 @@ pub fn run() {
                 }
             }
             app.manage(backend);
+            app.manage(PluginEditorState::default());
             // The at-most-one warm Pi child for the session (Phase 1: instant feel).
             app.manage(ai::WarmChildState::default());
             // The loopback tool bridge (Phase 3: real graph reads round-trip to Pi).
@@ -457,11 +741,18 @@ pub fn run() {
             query_stream,
             engine_running,
             scan_plugins,
+            plugin_dirs,
+            reveal_path,
+            plugin_quarantine_reset,
+            plugin_editor_open,
+            plugin_editor_focus,
+            plugin_editor_close,
             ai::ai_run,
             ai::ai_command,
             ai::ai_prewarm,
             ai::ai_restart,
             ai::ai_set_learning,
+            ai::ai_get_learning,
             ai::ai_forget,
             ai::ai_sessions,
             ai::ai_session_messages,
@@ -469,6 +760,7 @@ pub fn run() {
             ai_faust_compile,
             ai::author_wasm_node,
             ai::author_faust_native,
+            ai::ai_save_self_package,
             auth::auth_status,
             auth::auth_store_key,
             auth::auth_get_key,
@@ -480,13 +772,18 @@ pub fn run() {
             poll_meters,
             poll_events,
             load_sample,
+            save_plugin_states,
+            stage_plugin_restores,
             recorder_start,
             recorder_stop,
+            looper_take_pcm,
+            looper_discard_pcm,
             recorder_export,
             set_speaker_volume,
             set_speaker_device,
             set_mic,
             list_output_devices,
+            debug_arm_plugin_fault,
             updater::update_stage,
             updater::update_is_pending,
             updater::update_try_install,

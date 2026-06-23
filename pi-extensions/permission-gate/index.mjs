@@ -61,6 +61,9 @@ export function vetoToolCall(toolName, input, cfg) {
     const name = String(toolName || '').toLowerCase();
 
     if (BASH_TOOLS.has(name)) {
+        // A write-capable command (cp/mv/sed -i/touch/mkdir) is now vetted so it
+        // can't target the agent's own config (the gate-drop hole); general
+        // containment stays the OS jail's job (it tracks cwd; this layer can't).
         const verdict = isCommandAllowed(commandOf(input));
         return verdict.allowed ? null : { block: true, reason: verdict.reason };
     }

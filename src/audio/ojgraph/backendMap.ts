@@ -7,11 +7,14 @@
  * `ojcore::compile` hard-errors (`UnknownManifest`) on any `manifest_id` its
  * registry doesn't contain:
  *
- *   • NATIVE (`src-tauri`):  builtin.gain, builtin.osc, builtin.sampler,
- *                            builtin.karplus  (no host structural loader; the
- *                            master `SpeakerOut` instance is loaded via the
- *                            GAIN loader — see `EngineBackend::starter_graph`).
- *   • WASM  (`ojcore-wasm`): builtin.gain, host.speaker_out.
+ *   • NATIVE (`src-tauri`):  the FULL set via `register_all(RegisterOpts::full())`
+ *                            (`EngineBackend::build_registry`) — every effect
+ *                            (gain/biquad/waveshaper/delay/convolution), the
+ *                            mix/routing nodes (add/subtract), every instrument,
+ *                            and SF2. IO/master kinds load via the GAIN placeholder
+ *                            (the `kind` flag marks them and the executor kind-gates
+ *                            them, so the placeholder is never processed).
+ *   • WASM  (`ojcore-wasm`): the same full set MINUS SF2 (`register_all(wasm())`).
  *
  * So before pushing, each executor remaps every IrNode's `manifest_id` to an id
  * its registry actually has, chosen by the node's closed {@link PrimitiveKind}.
@@ -37,7 +40,12 @@ export const ENGINE_IDS = {
     waveshaper: 'builtin.waveshaper',
     delay: 'builtin.delay',
     convolution: 'builtin.convolution',
+    pan: 'builtin.pan',
+    width: 'builtin.width',
+    looper: 'builtin.looper',
     add: 'builtin.add',
+    subtract: 'builtin.subtract',
+    multiply: 'builtin.multiply',
     passthrough: 'builtin.passthrough',
     hostGraphIn: 'host.graph_in',
     hostMicIn: 'host.mic_in',
@@ -63,9 +71,45 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
                 return ENGINE_IDS.sampler;
             case 'KarplusString':
                 return ENGINE_IDS.karplus;
-            // SpeakerOut/GraphOut: native loads the master instance via GAIN
-            // (the `kind` flag is what marks it master) — matches starter_graph.
-            // Gain / Add / Passthrough / processors / IO: GAIN passthrough.
+            // Effects + mix/routing: native registers the FULL set via
+            // register_all(RegisterOpts::full()), so these load their REAL kernels
+            // — NOT a gain passthrough (the prior collapse silently no-op'd every
+            // effect on the native/Tauri target and made Subtract == passthrough).
+            case 'Biquad':
+                return ENGINE_IDS.biquad;
+            case 'Waveshaper':
+                return ENGINE_IDS.waveshaper;
+            case 'Delay':
+                return ENGINE_IDS.delay;
+            case 'Convolution':
+                return ENGINE_IDS.convolution;
+            // The stereo panner (the first 2-channel-output built-in), registered on
+            // BOTH backends via register_builtins — it MUST load its real kernel so
+            // it produces L/R; the GAIN placeholder writes a single lane and would
+            // silently collapse the stereo to mono.
+            case 'Pan':
+                return ENGINE_IDS.pan;
+            // The stereo width node (the first 2-channel-INPUT built-in), registered on
+            // both backends — load its real kernel; the GAIN placeholder writes one lane
+            // and would collapse the mid/side processing.
+            case 'Width':
+                return ENGINE_IDS.width;
+            // The looper is a stateful built-in (register_builtins registers it on
+            // BOTH backends): it MUST load its real kernel, not the gain placeholder
+            // — a Gain instance no-ops looper_action/looper_snapshot, so record does
+            // nothing and the engine never emits a transport frame.
+            case 'Looper':
+                return ENGINE_IDS.looper;
+            case 'Add':
+                return ENGINE_IDS.add;
+            case 'Subtract':
+                return ENGINE_IDS.subtract;
+            case 'Multiply':
+                return ENGINE_IDS.multiply;
+            // SpeakerOut/GraphOut/GraphIn/MicIn/Passthrough/Gain: the master/IO
+            // instance loads via GAIN (the `kind` flag marks it; the executor
+            // kind-gates it so the placeholder is never processed) — matches
+            // starter_graph.
             default:
                 return ENGINE_IDS.gain;
         }
@@ -96,8 +140,23 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
             return ENGINE_IDS.delay;
         case 'Convolution':
             return ENGINE_IDS.convolution;
+        // The stereo panner — registered on both backends; load its real kernel so
+        // it produces L/R rather than the single-lane gain placeholder.
+        case 'Pan':
+            return ENGINE_IDS.pan;
+        // The stereo width node — registered on both backends; load its real kernel.
+        case 'Width':
+            return ENGINE_IDS.width;
+        // Stateful built-in, registered on the wasm registry too — load the real
+        // looper kernel, never the gain placeholder (see the native branch).
+        case 'Looper':
+            return ENGINE_IDS.looper;
         case 'Add':
             return ENGINE_IDS.add;
+        case 'Subtract':
+            return ENGINE_IDS.subtract;
+        case 'Multiply':
+            return ENGINE_IDS.multiply;
         case 'Passthrough':
             return ENGINE_IDS.passthrough;
         case 'GraphIn':
@@ -115,14 +174,38 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
 }
 
 /**
+ * The dynamic-hosting kinds — a Faust node, an AI-authored WASM code-node, or a
+ * hosted VST3/AU/CLAP. These are NOT closed builtins: each carries its OWN
+ * `manifest_id` (`ai.dsp.*` / `ai.wasm.*` / `host.plugin.*`), the exact key its
+ * per-node loader is registered under (registered dynamically, not in the static
+ * tables above). The native executor lowers nodes to these kinds + ids; the
+ * browser/wasm path keeps the closed effect fallback and never produces them (see
+ * emit's `codeNodesAsWasmHost` / `hostedPluginsAsPluginHost`). A node of one of
+ * these kinds therefore keeps its id VERBATIM through the remap — rewriting it by
+ * kind dropped it to the gain placeholder, so the real plugin/wasm DSP never
+ * loaded and first-class hosting silently did nothing.
+ */
+const DYNAMIC_HOST_KINDS: ReadonlySet<PrimitiveKind> = new Set<PrimitiveKind>([
+    'PluginHost',
+    'WasmHost',
+    'FaustHost',
+]);
+
+/**
  * Return a COPY of `graph` with every IrNode's `manifest_id` remapped to the
  * given backend's registry. Pure: does not mutate the input. `kind`, ports,
  * params, edges and schedule are preserved exactly.
+ *
+ * Dynamic-hosting kinds ({@link DYNAMIC_HOST_KINDS}) keep their `manifest_id`
+ * verbatim — it IS their (dynamically-registered) loader key. Every other kind is
+ * mapped to the backend's builtin loader by {@link manifestIdForKind}.
  */
 export function remapForBackend(graph: OjGraph, backend: EngineBackend): OjGraph {
     const nodes: IrNode[] = graph.nodes.map((n) => ({
         ...n,
-        manifest_id: manifestIdForKind(n.kind, backend),
+        manifest_id: DYNAMIC_HOST_KINDS.has(n.kind)
+            ? n.manifest_id
+            : manifestIdForKind(n.kind, backend),
     }));
     return { ...graph, nodes };
 }

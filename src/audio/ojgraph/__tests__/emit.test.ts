@@ -15,7 +15,13 @@ import { describe, expect, it } from 'vitest';
 import { emitOjGraph, SYNTHETIC_MASTER_ID } from '../emit';
 import { getNodeDefinition } from '../../../engine/registry';
 import { manifestIdFor } from '../../../engine/manifest';
-import { makeDspNodeDefinition, registerDynamicPlugin } from '../../../engine/dynamicRegistry';
+import {
+    hostedPluginIdFor,
+    makeDspNodeDefinition,
+    makeHostedPluginDefinition,
+    registerDynamicPlugin,
+    type HostedPluginDescriptor,
+} from '../../../engine/dynamicRegistry';
 import type { Connection, GraphNode, NodeType, PortDefinition } from '../../../engine/types';
 import type { IrEdge, IrNode, OjGraph } from '../../../../packages/oj-protocol-ts/src/index';
 
@@ -119,6 +125,37 @@ describe('emitOjGraph — basic shape', () => {
         const a = emitOjGraph(nodes, conns);
         const b = emitOjGraph(nodes, conns);
         expect(JSON.stringify(a)).toBe(JSON.stringify(b));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Resilience: lowering must NEVER throw on a transiently-inconsistent graph.
+// The reconcile runs inside a Zustand listener; a throw there aborts the store's
+// notification loop, starving later subscribers (the canvas re-render) AND the
+// persist middleware's post-loop write — the "delete a node and new nodes stop
+// appearing until a refresh, which also revives the delete" bug.
+// ---------------------------------------------------------------------------
+
+describe('emitOjGraph — resilience (never throws on an inconsistent graph)', () => {
+    it('tolerates a node present in the map but missing its ports / data', () => {
+        const speaker = makeNode('speaker', { id: 'spk' });
+        // The transient shape a reconcile can briefly see mid-edit: a node that
+        // exists but whose `ports`/`data` are absent. Lowering must not crash.
+        const broken = {
+            ...makeNode('instrument', { id: 'broken' }),
+            ports: undefined,
+            data: undefined,
+        } as unknown as GraphNode;
+        const conn = makeConn(broken.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        expect(() => emitOjGraph(nodeMap(broken, speaker), connMap(conn))).not.toThrow();
+    });
+
+    it('tolerates a connection whose endpoint node is gone (dangling edge)', () => {
+        const speaker = makeNode('speaker', { id: 'spk2' });
+        // Source id absent from the node map (a node just deleted) — the edge is
+        // dropped, never a crash.
+        const dangling = makeConn('ghost', 'audio-out', speaker.id, 'audio-in', 'audio');
+        expect(() => emitOjGraph(nodeMap(speaker), connMap(dangling))).not.toThrow();
     });
 });
 
@@ -233,28 +270,160 @@ describe('emitOjGraph — keyboard -> instrument -> effect -> speaker', () => {
 // ---------------------------------------------------------------------------
 
 describe('emitOjGraph — params', () => {
-    it('carries amplifier gain from node.data through the manifest decl', () => {
-        const amp = makeNode('amplifier', { id: 'amp', data: { gain: 2.5 } });
+    it('carries multiplier factor from node.data through the manifest decl', () => {
+        const mul = makeNode('multiplier', { id: 'mul', data: { factor: 2.5 } });
         const speaker = makeNode('speaker', { id: 'spk' });
-        const conn = makeConn(amp.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(amp, speaker), connMap(conn));
+        const conn = makeConn(mul.id, 'out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(mul, speaker), connMap(conn));
 
-        const gainNode = graph.nodes.find((n) => n.kind === 'Gain');
-        expect(gainNode).toBeDefined();
-        // amplifier defaultData has `gain` -> a single numeric ParamDecl id 0.
-        const gainParam = gainNode!.params.find((p) => p.id === 0);
-        expect(gainParam?.value).toBe(2.5);
+        const mulNode = graph.nodes.find((n) => n.kind === 'Multiply');
+        expect(mulNode).toBeDefined();
+        // multiplier `factor` -> the kernel FACTOR param id 0.
+        const factorParam = mulNode!.params.find((p) => p.id === 0);
+        expect(factorParam?.value).toBe(2.5);
     });
 
     it('uses the manifest default when data omits the param', () => {
-        const amp = makeNode('amplifier', { id: 'amp', data: {} });
-        // Force-remove the gain field so it falls back to the decl default (1).
-        amp.data = {};
+        const mul = makeNode('multiplier', { id: 'mul', data: {} });
+        // Force-remove the factor field so it falls back to the decl default (1).
+        mul.data = {};
         const speaker = makeNode('speaker', { id: 'spk' });
-        const conn = makeConn(amp.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(amp, speaker), connMap(conn));
-        const gainNode = graph.nodes.find((n) => n.kind === 'Gain')!;
-        expect(gainNode.params[0]?.value).toBe(1);
+        const conn = makeConn(mul.id, 'out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(mul, speaker), connMap(conn));
+        const mulNode = graph.nodes.find((n) => n.kind === 'Multiply')!;
+        expect(mulNode.params.find((p) => p.id === 0)?.value).toBe(1);
+    });
+
+    // The multiplier `factor` is CLAMPED to its declared range at the seam: floored
+    // at 0 (a negative multiplier is meaningless once ×0 mutes) with NO musical
+    // ceiling (1e6 ≈ unbounded, per the user's "0 to ∞"). The kernel accepts any
+    // float, so this seam is where the floor is honoured.
+    function mulFactor(factor: number): number {
+        const mul = makeNode('multiplier', { id: 'mul', data: { factor } });
+        const speaker = makeNode('speaker', { id: 'spk' });
+        const conn = makeConn(mul.id, 'out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(mul, speaker), connMap(conn));
+        const mulNode = graph.nodes.find((n) => n.kind === 'Multiply')!;
+        return mulNode.params.find((p) => p.id === 0)!.value;
+    }
+
+    it('clamps a negative factor up to 0 (no phase inversion)', () => {
+        expect(mulFactor(-1.5)).toBe(0);
+        expect(mulFactor(-0.001)).toBe(0);
+    });
+
+    it('passes a large factor through (no musical ceiling)', () => {
+        expect(mulFactor(9)).toBe(9);
+        expect(mulFactor(1000)).toBe(1000);
+    });
+
+    it('passes an in-range factor through unchanged', () => {
+        expect(mulFactor(0)).toBe(0);
+        expect(mulFactor(0.5)).toBe(0.5);
+        expect(mulFactor(2.5)).toBe(2.5);
+    });
+});
+
+describe('emitOjGraph — multiplier (×) factor_active', () => {
+    // The kernel can't see whether 'in-2' is connected (a disconnected input is
+    // zero-filled, not absent), so emit bakes FACTOR_ACTIVE (id 1) from the edges:
+    // 1 => multiply the two input signals (VCA), 0 => multiply by the on-node number.
+    it('sets factor_active = 0 when only the signal input is connected', () => {
+        const src = makeNode('piano', { id: 'src' });
+        const mul = makeNode('multiplier', { id: 'mul', data: { factor: 2 } });
+        const speaker = makeNode('speaker', { id: 'spk' });
+        const a1 = makeConn(src.id, 'audio-out', mul.id, 'in-1', 'audio');
+        const a2 = makeConn(mul.id, 'out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(src, mul, speaker), connMap(a1, a2));
+        const mulNode = graph.nodes.find((n) => n.kind === 'Multiply')!;
+        expect(mulNode.params.find((p) => p.id === 1)?.value).toBe(0);
+        expect(mulNode.params.find((p) => p.id === 0)?.value).toBe(2);
+    });
+
+    it('sets factor_active = 1 when the second input is connected (VCA)', () => {
+        const s1 = makeNode('piano', { id: 's1' });
+        const s2 = makeNode('piano', { id: 's2' });
+        const mul = makeNode('multiplier', { id: 'mul' });
+        const speaker = makeNode('speaker', { id: 'spk' });
+        const a1 = makeConn(s1.id, 'audio-out', mul.id, 'in-1', 'audio');
+        const a2 = makeConn(s2.id, 'audio-out', mul.id, 'in-2', 'audio');
+        const a3 = makeConn(mul.id, 'out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(s1, s2, mul, speaker), connMap(a1, a2, a3));
+        const mulNode = graph.nodes.find((n) => n.kind === 'Multiply')!;
+        expect(mulNode.params.find((p) => p.id === 1)?.value).toBe(1);
+        // Two distinct audio inputs routed to ports 0 and 1 (kept separate, not mixed).
+        expect(mulNode.n_in).toBe(2);
+        const toMul = graph.edges.filter((e) => e.to_node === mulNode.id && e.kind === 'Audio');
+        expect(new Set(toMul.map((e) => e.to_port))).toEqual(new Set([0, 1]));
+    });
+});
+
+// ---------------------------------------------------------------------------
+// EffectNode: DATA-DRIVEN kind + params reach the engine (SEAM-4)
+//
+// Previously `effect` ALWAYS lowered to Waveshaper and the sliders lived under
+// `data.params.*`, which the generic top-level paramsFromData never read — every
+// non-distortion menu option and every slider was DEAD. These pin the fix: the
+// chosen effectType selects the REAL ojcore primitive, and each slider lands on
+// the right kernel param id with its live value.
+// ---------------------------------------------------------------------------
+
+describe('emitOjGraph — effect lowering is data-driven', () => {
+    function effectIr(effectType: string, params: Record<string, number>): IrNode {
+        const fx = makeNode('effect', { id: 'fx', data: { effectType, params } });
+        const speaker = makeNode('speaker', { id: 'spk' });
+        const conn = makeConn(fx.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(fx, speaker), connMap(conn));
+        const ir = graph.nodes.find((n) => n.manifest_id === manifestIdFor('effect'));
+        expect(ir, `no effect IrNode for ${effectType}`).toBeDefined();
+        return ir!;
+    }
+
+    it('distortion -> Waveshaper, amount slider on AMOUNT (id 0)', () => {
+        const ir = effectIr('distortion', { amount: 0.8 });
+        expect(ir.kind).toBe('Waveshaper');
+        expect(ir.params.find((p) => p.id === 0)?.value).toBe(0.8);
+        // LEVEL(1) held at unity so the curve doesn't also re-gain.
+        expect(ir.params.find((p) => p.id === 1)?.value).toBe(1);
+    });
+
+    it('filter -> Biquad, frequency/q sliders on FREQ(1)/Q(2)', () => {
+        const ir = effectIr('filter', { frequency: 800, q: 2 });
+        expect(ir.kind).toBe('Biquad');
+        expect(ir.params.find((p) => p.id === 1)?.value).toBe(800);
+        expect(ir.params.find((p) => p.id === 2)?.value).toBe(2);
+    });
+
+    it('reverb -> Convolution, mix slider on MIX(0)', () => {
+        const ir = effectIr('reverb', { mix: 0.6 });
+        expect(ir.kind).toBe('Convolution');
+        expect(ir.params.find((p) => p.id === 0)?.value).toBe(0.6);
+    });
+
+    it('delay -> Delay, time/feedback/mix on TIME(0)/FEEDBACK(1)/MIX(2)', () => {
+        const ir = effectIr('delay', { time: 0.5, feedback: 0.7, mix: 0.4 });
+        expect(ir.kind).toBe('Delay');
+        expect(ir.params.find((p) => p.id === 0)?.value).toBe(0.5);
+        expect(ir.params.find((p) => p.id === 1)?.value).toBe(0.7);
+        expect(ir.params.find((p) => p.id === 2)?.value).toBe(0.4);
+    });
+
+    it('an omitted slider falls back to the kernel-correct default, not zero', () => {
+        // delay with NO params bag at all: TIME/FEEDBACK/MIX hold their defaults so
+        // the effect is audible (a 0-mix delay would be a silent, dead control).
+        const ir = effectIr('delay', {});
+        expect(ir.kind).toBe('Delay');
+        expect(ir.params.find((p) => p.id === 0)?.value).toBe(0.25);
+        expect(ir.params.find((p) => p.id === 1)?.value).toBe(0.4);
+        expect(ir.params.find((p) => p.id === 2)?.value).toBe(0.3);
+    });
+
+    it('the effect IrNode is a 1-in/1-out processor for every kind', () => {
+        for (const t of ['distortion', 'filter', 'reverb', 'delay']) {
+            const ir = effectIr(t, {});
+            expect(ir.n_in, `${t} n_in`).toBe(1);
+            expect(ir.n_out, `${t} n_out`).toBe(1);
+        }
     });
 });
 
@@ -358,6 +527,52 @@ describe('emitOjGraph — AI-authored code nodes (WasmHost)', () => {
 // Hierarchy / container flattening
 // ---------------------------------------------------------------------------
 
+describe('emitOjGraph — hosted plugin nodes (PluginHost)', () => {
+    it('lowers a hosted plugin dynamic node to PluginHost only for the native host path', () => {
+        const desc: HostedPluginDescriptor = {
+            uid: 'com.acme.echo',
+            name: 'Acme Echo',
+            vendor: 'Acme',
+            path: '/plugins/AcmeEcho.vst3',
+            format: 'vst3',
+            is_instrument: false,
+            ports: { audio_in: 2, audio_out: 2 },
+            param_count: 1,
+            params: [{ id: 0, name: 'mix', min: 0, max: 1, default: 0.5 }],
+            latency_samples: 0,
+        };
+        const pluginId = hostedPluginIdFor(desc);
+        const unregister = registerDynamicPlugin(pluginId, makeHostedPluginDefinition(desc));
+        try {
+            const fx = makeNode('effect', {
+                id: 'hosted',
+                data: makeHostedPluginDefinition(desc).defaultData,
+                ports: makeHostedPluginDefinition(desc).defaultPorts,
+            });
+            fx.pluginId = pluginId;
+            const speaker = makeNode('speaker', { id: 'spk' });
+            const conn = makeConn(fx.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+
+            const native = emitOjGraph(nodeMap(fx, speaker), connMap(conn), {
+                hostedPluginsAsPluginHost: true,
+            });
+            const hosted = native.nodes.find((n) => n.manifest_id === pluginId);
+            expect(hosted?.kind).toBe('PluginHost');
+            // A 2-in/2-out plugin is ONE stereo port per side (docs/CHANNELS.md
+            // model B): the IR carries the PORT count (1/1); the native compiler
+            // derives the 2 stereo lanes from the registered loader's channel count.
+            expect(hosted?.n_in).toBe(1);
+            expect(hosted?.n_out).toBe(1);
+
+            const fallback = emitOjGraph(nodeMap(fx, speaker), connMap(conn));
+            expect(fallback.nodes.some((n) => n.manifest_id === pluginId)).toBe(false);
+            expect(fallback.nodes.some((n) => n.kind === 'Waveshaper')).toBe(true);
+        } finally {
+            unregister();
+        }
+    });
+});
+
 describe('emitOjGraph — hierarchy / bundle flattening', () => {
     it('flattens audio THROUGH a container (passthrough) node', () => {
         // piano -> container(audio-in passthrough) -> speaker, where the
@@ -400,26 +615,26 @@ describe('emitOjGraph — hierarchy / bundle flattening', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Control edges between real IrNodes (e.g. amplifier gain modulation)
+// Control edges between real IrNodes
 // ---------------------------------------------------------------------------
 
 describe('emitOjGraph — control edges', () => {
     it('emits a control IrEdge when both endpoints are real IrNodes', () => {
-        // microphone (MicIn, audio source) -> amplifier gain-in (control).
+        // microphone (MicIn, audio source) -> multiplier in-1, forced control.
         const mic = makeNode('microphone', { id: 'mic' });
-        const amp = makeNode('amplifier', { id: 'amp' });
+        const mul = makeNode('multiplier', { id: 'mul' });
         const speaker = makeNode('speaker', { id: 's' });
 
-        const ctrl = makeConn(mic.id, 'audio-out', amp.id, 'gain-in', 'control');
-        const audio = makeConn(amp.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(mic, amp, speaker), connMap(ctrl, audio));
+        const ctrl = makeConn(mic.id, 'audio-out', mul.id, 'in-1', 'control');
+        const audio = makeConn(mul.id, 'out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(mic, mul, speaker), connMap(ctrl, audio));
 
         const controlEdges = graph.edges.filter((e) => e.kind === 'Control');
         expect(controlEdges).toHaveLength(1);
         const micIr = graph.nodes.find((n) => n.kind === 'MicIn')!;
-        const ampIr = graph.nodes.find((n) => n.kind === 'Gain')!;
+        const mulIr = graph.nodes.find((n) => n.kind === 'Multiply')!;
         expect(controlEdges[0].from_node).toBe(micIr.id);
-        expect(controlEdges[0].to_node).toBe(ampIr.id);
+        expect(controlEdges[0].to_node).toBe(mulIr.id);
     });
 });
 
@@ -448,10 +663,6 @@ describe('emitOjGraph — add node arity', () => {
         expect(addIr.n_in).toBeGreaterThanOrEqual(2);
     });
 });
-
-// ---------------------------------------------------------------------------
-// Arity / port counts
-// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Compile-readiness invariants (mirror crates/ojcore/src/compile.rs rules)
@@ -521,21 +732,91 @@ describe('emitOjGraph — compile-readiness invariants', () => {
 describe('emitOjGraph — arity', () => {
     it('sources have n_out>=1 and n_in 0; processors 1/1; master 1/0', () => {
         const piano = makeNode('piano', { id: 'p' });
-        const amp = makeNode('amplifier', { id: 'a' });
+        const fx = makeNode('effect', { id: 'a' });
         const speaker = makeNode('speaker', { id: 's' });
-        const a1 = makeConn(piano.id, 'audio-out', amp.id, 'audio-in', 'audio');
-        const a2 = makeConn(amp.id, 'audio-out', speaker.id, 'audio-in', 'audio');
-        const graph = emitOjGraph(nodeMap(piano, amp, speaker), connMap(a1, a2));
+        const a1 = makeConn(piano.id, 'audio-out', fx.id, 'audio-in', 'audio');
+        const a2 = makeConn(fx.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(piano, fx, speaker), connMap(a1, a2));
 
         const sampler = graph.nodes.find((n) => n.kind === 'Sampler')!;
-        const gain = graph.nodes.find((n) => n.kind === 'Gain')!;
+        const proc = graph.nodes.find((n) => n.kind === 'Waveshaper')!;
         const spk = graph.nodes.find((n) => n.kind === 'SpeakerOut')!;
 
         expect(sampler.n_in).toBe(0);
         expect(sampler.n_out).toBeGreaterThanOrEqual(1);
-        expect(gain.n_in).toBe(1);
-        expect(gain.n_out).toBe(1);
+        expect(proc.n_in).toBe(1);
+        expect(proc.n_out).toBe(1);
         expect(spk.n_in).toBe(1);
         expect(spk.n_out).toBe(0);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Looper inserted in the chain (the user's "it amplifies" scenario)
+// ---------------------------------------------------------------------------
+
+describe('emitOjGraph — looper inserted between instrument and speaker', () => {
+    it('emits a SINGLE clean instrument -> Looper -> SpeakerOut path (no doubled signal)', () => {
+        const inst = makeNode('piano', { id: 'inst' }); // -> Sampler
+        const looper = makeNode('looper', { id: 'lp' });
+        const speaker = makeNode('speaker', { id: 'spk' });
+        const a1 = makeConn(inst.id, 'audio-out', looper.id, 'audio-in', 'audio');
+        const a2 = makeConn(looper.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(inst, looper, speaker), connMap(a1, a2));
+
+        // The looper survives as a real Looper IrNode (not flattened, not Delay).
+        const looperIr = graph.nodes.find((n) => n.manifest_id === manifestIdFor('looper'));
+        expect(looperIr, 'looper survives as an IrNode').toBeDefined();
+        expect(looperIr!.kind).toBe('Looper');
+        expect(looperIr!.n_in).toBe(1);
+        expect(looperIr!.n_out).toBe(1);
+
+        // Kernel param contract: WET=1, DRY=1 (audible loop + transparent monitor).
+        expect(looperIr!.params.find((p) => p.id === 1)?.value).toBe(1); // WET
+        expect(looperIr!.params.find((p) => p.id === 2)?.value).toBe(1); // DRY
+
+        // EXACTLY ONE audio edge feeds the speaker, from the looper — NOT a
+        // surviving direct instrument->speaker path (which would double the signal).
+        const spk = graph.nodes.find((n) => n.kind === 'SpeakerOut')!;
+        const intoSpk = graph.edges.filter((e) => e.to_node === spk.id && e.kind === 'Audio');
+        expect(intoSpk, 'exactly one source feeds the speaker').toHaveLength(1);
+        expect(kindOfNodeId(graph, intoSpk[0].from_node)).toBe('Looper');
+        expect(hasEdge(graph, 'Sampler', 'SpeakerOut'), 'no direct doubled path').toBe(false);
+
+        // And the instrument feeds ONLY the looper (one outgoing audio edge).
+        const sampler = graph.nodes.find((n) => n.kind === 'Sampler')!;
+        const fromInst = graph.edges.filter((e) => e.from_node === sampler.id && e.kind === 'Audio');
+        expect(fromInst, 'instrument feeds only the looper').toHaveLength(1);
+        expect(kindOfNodeId(graph, fromInst[0].to_node)).toBe('Looper');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Speaker master params persist + re-apply on load (PERSIST-1, stage-critical)
+// ---------------------------------------------------------------------------
+
+describe('emitOjGraph — speaker master params (reload safety)', () => {
+    it('bakes volume AND mute into the SpeakerOut IR (master_param VOLUME=0, MUTE=1)', () => {
+        const piano = makeNode('piano', { id: 'p' });
+        const speaker = makeNode('speaker', { id: 's', data: { volume: 0.4, isMuted: true } });
+        const conn = makeConn(piano.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(piano, speaker), connMap(conn));
+
+        const spk = graph.nodes.find((n) => n.kind === 'SpeakerOut')!;
+        // VOLUME (id 0) carries node.data.volume; MUTE (id 1) carries the coerced
+        // boolean isMuted -> so a muted project re-applies mute to the engine on load
+        // instead of coming back at full volume.
+        expect(spk.params.find((p) => p.id === 0)?.value).toBe(0.4);
+        expect(spk.params.find((p) => p.id === 1)?.value).toBe(1);
+    });
+
+    it('an unmuted speaker bakes mute=0 (no regression)', () => {
+        const piano = makeNode('piano', { id: 'p' });
+        const speaker = makeNode('speaker', { id: 's' }); // defaults: volume 1, isMuted false
+        const conn = makeConn(piano.id, 'audio-out', speaker.id, 'audio-in', 'audio');
+        const graph = emitOjGraph(nodeMap(piano, speaker), connMap(conn));
+        const spk = graph.nodes.find((n) => n.kind === 'SpeakerOut')!;
+        expect(spk.params.find((p) => p.id === 0)?.value).toBe(1);
+        expect(spk.params.find((p) => p.id === 1)?.value).toBe(0);
     });
 });

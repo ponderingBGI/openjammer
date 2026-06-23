@@ -168,6 +168,12 @@ impl DspInstance for WasmHostNode {
         }
     }
 
+    fn runtime_degraded(&self) -> bool {
+        // A trapped kernel latched to passthrough — the same runtime-degrade the
+        // off-RT control side polls to badge a hosted-plugin crash.
+        self.bypassed
+    }
+
     fn reset(&mut self) {
         // Reset the stateful guards so no DC tail bleeds across a (re)load. A
         // latched bypass is NOT cleared here: a trapped kernel stays bypassed
@@ -371,6 +377,7 @@ mod tests {
 
     fn mono_manifest(bytes: &[u8]) -> PluginManifest {
         PluginManifest {
+            abi: None,
             id: crate::wasm_id_for(bytes),
             name: "Test Code Node".into(),
             kind: PrimitiveKind::WasmHost,
@@ -388,6 +395,8 @@ mod tests {
                 audio_out: 1,
                 control_in: 0,
                 control_out: 0,
+                audio_in_channels: 1,
+                audio_out_channels: 1,
             },
         }
     }

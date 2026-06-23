@@ -69,7 +69,7 @@ signal reaches a speaker) before a single node is created.
 
 ### v1 graph verbs (each a reversible store mutation)
 
-- **add_node** — Add a node of the given registry `type` to the canvas (e.g. "looper", "amplifier", "sampler", "speaker"). Mirrors the UI add-node action.
+- **add_node** — Add a node of the given registry `type` to the canvas (e.g. "looper", "multiplier", "sampler", "speaker"). Mirrors the UI add-node action.
 - **remove_node** — Remove the node with the given `nodeId` (and its dangling connections).
 - **update_node_data** — Shallow-merge `data` into an existing node's data (e.g. set a gain, duration, or effect param). Mirrors the UI parameter edits.
 - **add_connection** — Connect `sourceNodeId:sourcePortId` -> `targetNodeId:targetPortId`. Ports must exist and connection rules apply (see registry.canConnect).
@@ -77,10 +77,16 @@ signal reaches a speaker) before a single node is created.
 
 ### DSP-node authoring
 
-- **author_dsp_node** — Author a brand-new DSP effect from Faust source. Registers a command-palette entry; on the desktop build with libfaust present the source is compiled via the ojfaust crate. Reversible by deleting the node.
 - **author_code_node** — author a brand-new DSP node from Faust source — PREFER reusing/stitching existing nodes first. On desktop this compiles the source to a .wasm + a validated manifest and registers a first-class node with its real params; in the browser the source is stored. Reversible by deleting the node.
 
 ### Reads / introspection (side-effect-free)
+
+> Every read returns each node's **ports** — `{ name, direction, type }` (audio =
+> blue, control/technical = grey). Wire by the port NAME you see here, never a
+> guessed one — that ends the guess→reject→retry loop. `list_node_types` returns
+> each type's default ports plus a `dynamicPorts` flag: when it is true the type
+> generates its ports only once added, so add the node first and re-read to see
+> them. An `UNKNOWN_PORT` validation error also lists the node's real port names.
 
 - **get_graph** — Read the WHOLE current graph (every node + connection, all levels) as a compact summary. Side-effect-free. Prefer get_graph + find_nodes to REUSE existing nodes before adding new ones.
 - **list_node_types** — List the node types the user can ADD, with names + descriptions, from the registry. Side-effect-free. Call this first so you only ever reference real node types.
@@ -103,7 +109,8 @@ the previous values). It can never reach past what a user clicking the Settings
 panel can do.
 
 - **get_logs** — Read the on-device DevLog tail (newest first), optionally filtered by `levels`, `scope`, `search`, and `limit`. Side-effect-free. This is how you SEE engine xruns, node faults, MIDI, asset/plugin events, and every console line — diagnose "no sound" from evidence, not guesses.
-- **get_diagnostics** — Read the environment + live audio snapshot: app version/channel/executor, cross-origin isolation, platform, whether the AudioContext is running, the measured round-trip latency, sample rate, and the selected output device. Side-effect-free. Call it first when the user says something is broken.
+- **get_diagnostics** — Read the environment + live audio snapshot: app version/channel/executor, cross-origin isolation, platform, whether the AudioContext is running, the measured round-trip latency, sample rate, and the selected output device. Pass a `nodeId` to instead get a NODE-scoped debug snapshot (identity, ports, data keys, a degraded flag, and the logs that mention the node) — the "why is this node silent?" facet. Side-effect-free. Call it first when the user says something is broken.
+- **get_signal** — Probe a node's LIVE output level by `nodeId`: returns an instantaneous peak (0–1) or null when nothing is metered / audio is stopped. Side-effect-free. This is the one live read that catches a node which compiles and wires correctly yet outputs pure silence — if it reads ~0, probe again (a note may be between transients).
 - **get_settings** — Read the user-facing settings you may change: audio sample rate, latency hint, low-latency mode, input/output device, theme, and default velocity. Side-effect-free.
 - **update_settings** — Change settings via a `patch` over the safe allowlist (sampleRate, latencyHint, lowLatencyMode, outputDeviceId, inputDeviceId, themeId, defaultVelocity). Unknown keys are ignored; the change is REVERSIBLE (Ctrl+Z restores the previous values). Use it to FIX a setup — e.g. select the USB interface or switch to the interactive latency hint.
 
@@ -123,7 +130,7 @@ the missing path to the speaker. Every step is visible in the chat and undoable.
 {
   "nodes": [
     { "ref": "lp",  "type": "looper" },
-    { "ref": "amp", "type": "amplifier", "params": { "gain": 2 } },
+    { "ref": "amp", "type": "multiplier", "params": { "factor": 2 } },
     { "ref": "out", "type": "speaker" }
   ],
   "wires": [

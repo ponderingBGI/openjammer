@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+msg_file=${1:?commit message file missing}
+
+# DCO is a legal certification by the contributor. Automate adding the
+# contributor's own Git identity locally so a missing `-s` doesn't waste a CI run.
+# If the message already has any valid Signed-off-by trailer, leave it alone.
+if grep -qiE '^Signed-off-by: .+ <.+@.+>' "$msg_file"; then
+  exit 0
+fi
+
+ident=$(git var GIT_COMMITTER_IDENT)
+name=${ident%% <*}
+email=${ident#*<}
+email=${email%%>*}
+
+if [ -z "$name" ] || [ -z "$email" ] || [ "$email" = "$ident" ]; then
+  echo "OpenJammer: cannot add DCO sign-off; set git user.name and user.email." >&2
+  echo "  git config user.name 'Your Name'" >&2
+  echo "  git config user.email 'you@example.com'" >&2
+  exit 1
+fi
+
+git interpret-trailers --in-place \
+  --trailer "Signed-off-by: $name <$email>" \
+  "$msg_file"

@@ -41,6 +41,7 @@ import type {
     SignalLevelsCallback,
 } from './Executor';
 import { getAudioContext } from '../audioContext';
+import { classifyLatency, type LatencyReport } from './latency';
 import {
     DEFAULT_VOICE_INSTRUMENTS,
     getVoiceForInstrumentNode,
@@ -58,8 +59,15 @@ import {
     monoPcmToWavBlob,
     type OjcoreBridge,
 } from './ojcoreHandles';
-import { ingestEngineEvents } from './faultPipe';
+import { ingestEngineEvents, logNewlyDegradedStubs, routeRuntimeFaults } from './faultPipe';
 import { setEngineHealth } from '../../store/engineHealthStore';
+import { setNodeVoiceLoadError } from './voiceLoadError';
+import { describeNodeForLog, setNodePluginLoadError } from './pluginLoadError';
+import { logger } from '../../utils/log';
+import { BLUETOOTH_LATENCY_THRESHOLD_MS } from '../../utils/latencyDiagnostics';
+
+/** Scope-bound DevLog logger for the wasm executor. */
+const log = logger('wasm');
 
 // Vite resolves these to URLs/assets at build time.
 // The worklet processor module (bundled as an ES module worklet).
@@ -69,6 +77,10 @@ import ojcoreWasmUrl from '../wasm/pkg/ojcore_wasm_bg.wasm?url';
 
 /** Render quantum the AudioWorklet uses (the spec-fixed block size). */
 const WORKLET_BLOCK_SIZE = 128;
+
+/** Settle time for an agent `probeSignal` so at least one worklet meter frame lands
+ *  before we read the cached peak (the worklet meters continuously). */
+const PROBE_SETTLE_MS = 80;
 
 /**
  * One-time-per-session, non-focus-stealing "whisper" when the browser engine
@@ -104,6 +116,13 @@ function whisperBrowserEngineDegrade(
  *  this alongside the `AssetRef` lands the sample at unity at `rootNote`. */
 const SAMPLER_PCM_PARAM = 16;
 
+/** Master-output param ids on the SpeakerOut sink — mirror `ojcore::structural::
+ *  master_param` (VOLUME=0, MUTE=1). The engine's `exec.rs` scales the master mix
+ *  by the resolved `master_gain()`, so volume/mute are applied EXACTLY ONCE here
+ *  (not in the worklet). */
+const MASTER_PARAM_VOLUME = 0;
+const MASTER_PARAM_MUTE = 1;
+
 export class OjcoreWasmExecutor implements Executor {
     private getNodes: (() => Map<string, GraphNode>) | null = null;
     private getConnections: (() => Map<string, Connection>) | null = null;
@@ -116,6 +135,9 @@ export class OjcoreWasmExecutor implements Executor {
     private index: NodeIdxMap = new Map();
     /** Reverse map NodeIdx -> visual node id, for routing meter frames back. */
     private reverseIndex = new Map<number, string>();
+    /** Visual ids degraded to a passthrough stub on the LAST load — diffed each load
+     *  so a still-broken plugin is logged once, not on every re-push. */
+    private degradedVisualIds = new Set<string>();
     private signalCallbacks = new Set<SignalLevelsCallback>();
     /** Latest per-node levels, keyed by visual node id (for meter delivery). */
     private levels = new Map<string, number>();
@@ -123,12 +145,26 @@ export class OjcoreWasmExecutor implements Executor {
     /** Pending recorder-capture resolvers, keyed by NodeIdx, for the worklet's
      *  `recorder-data` reply. */
     private captureResolvers = new Map<number, (blob: Blob | null) => void>();
-    /** Live sampler asset bindings keyed by VISUAL node id: the worklet-assigned
-     *  `AssetId` + root note. Re-applied onto the emitted graph on every push so a
-     *  loaded sample survives subsequent node/connection edits (the wasm analogue
-     *  of native's persistent graph binding). */
+    /** Live USER-loaded sampler asset bindings keyed by VISUAL node id: the
+     *  worklet-assigned `AssetId` + root note. Re-applied onto the emitted graph on
+     *  every push so a loaded sample survives subsequent node/connection edits (the
+     *  wasm analogue of native's persistent graph binding). RESERVED for samples the
+     *  user loaded — the built-in default voice lives in `defaultVoiceBindings`, so
+     *  it never reads back as a user sample (the conflation that made the picker's
+     *  next change a no-op). */
     private sampleBindings = new Map<string, { assetId: number; rootNote: number }>();
-    /** Which built-in voice (family key) is currently bound per instrument node,
+    /** AssetIds for SYNTHESIZED built-in default voices, keyed by VISUAL node id —
+     *  the analogue of native binding the default voice into its kept graph. Applied
+     *  onto every emitted graph like `sampleBindings`, but a user sample on the same
+     *  node wins, and the entry is dropped when the node leaves the sampler path
+     *  (goes Karplus), so a return to a sampler instrument re-binds instead of
+     *  staying silent. */
+    private defaultVoiceBindings = new Map<string, { assetId: number; rootNote: number }>();
+    /** Visual node ids whose in-flight `load-sample` is a DEFAULT voice (not a user
+     *  sample), so the worklet's `sample-stored` reply is routed to
+     *  `defaultVoiceBindings` rather than `sampleBindings`. */
+    private pendingDefaultVoiceNodes = new Set<string>();
+    /** Which built-in voice (its bind key) is currently bound per instrument node,
      *  so a voice is re-synthesized + re-bound only when the picker selection
      *  changes (not on every graph push). */
     private boundVoiceKey = new Map<string, string>();
@@ -136,16 +172,27 @@ export class OjcoreWasmExecutor implements Executor {
      *  worklet replies `sample-stored` (or on a safety timeout). */
     private sampleLoadResolvers = new Map<string, () => void>();
     /** Active microphone capture: stream + worklet input source, so it can be
-     *  torn down on dispose / re-route. */
+     *  torn down on dispose / re-route. The executor is the SINGLE owner of the OS
+     *  mic device — the UI never opens its own `getUserMedia`. */
     private micStream: MediaStream | null = null;
     private micSource: MediaStreamAudioSourceNode | null = null;
+    /** Desired mute state for the mic feed. When muted, the source is DISCONNECTED
+     *  from the worklet input so the engine's `MicIn` reads silence — provably off
+     *  at the seam, not just visually dimmed. */
+    private micMuted = false;
+    /** The OS device id the owned stream was acquired for ('default'/undefined =>
+     *  system default), so a device change re-acquires exactly one stream. */
+    private micDeviceId: string | undefined = undefined;
+    /** Guards against overlapping `getUserMedia` calls (a re-acquire mid-flight). */
+    private micAcquiring = false;
 
     /** The engine-side seam the capability handles drive (wasm impl). */
     private readonly bridge: OjcoreBridge = {
         nodeIndex: (nodeId) => this.index.get(nodeId),
         sendCommand: (cmd) => this.send(cmd),
-        loadSample: (nodeId, pcm, sampleRate, rootNote) =>
-            this.loadSampleWasm(nodeId, pcm, sampleRate, rootNote),
+        nodeLevel: (nodeId) => this.levels.get(nodeId) ?? 0,
+        loadSample: (nodeId, pcm, sampleRate, rootNote, channels) =>
+            this.loadSampleWasm(nodeId, pcm, sampleRate, rootNote, channels),
         startCapture: (nodeId) => this.captureStartWasm(nodeId),
         stopCapture: (nodeId) => this.captureStopWasm(nodeId),
     };
@@ -225,12 +272,14 @@ export class OjcoreWasmExecutor implements Executor {
                 ok?: boolean;
                 message?: string;
                 levels?: Array<{ node: number; peak: number }>;
+                frames?: Float32Array;
                 node?: number;
                 pcm?: Float32Array;
                 sampleRate?: number;
                 assetId?: number;
                 rootNote?: number;
                 bytes?: Uint8Array;
+                degradedNodeIds?: number[];
             };
             switch (data.type) {
                 case 'ready':
@@ -246,8 +295,22 @@ export class OjcoreWasmExecutor implements Executor {
                     // their built-in default voice (was a no-op while not ready).
                     this.loadDefaultInstrumentVoices();
                     break;
+                case 'graph-ack':
+                    // Invariant #4a: badge the nodes that degraded to a passthrough
+                    // stub on this load, and clear the rest — the browser symmetry of
+                    // the native push_graph degraded-id surface. `reverseIndex` is
+                    // already committed by `sendGraph` (synchronous) before this async
+                    // ack arrives, so it maps the just-loaded graph.
+                    this.applyDegraded(data.degradedNodeIds ?? []);
+                    break;
                 case 'meters':
                     this.onMeterFrame(data.levels ?? []);
+                    break;
+                case 'looper':
+                    this.onLooperFrames(data.frames);
+                    break;
+                case 'looper-take':
+                    this.onLooperTake(data.node, data.pcm, data.sampleRate);
                     break;
                 case 'events':
                     this.onEngineEvents(data.bytes);
@@ -307,6 +370,33 @@ export class OjcoreWasmExecutor implements Executor {
         return BROWSER_CAPABILITIES;
     }
 
+    /**
+     * Latency of the browser backend: this executor renders its worklet into the
+     * shared {@link getAudioContext} destination, so that context's reported
+     * `baseLatency` + `outputLatency` ARE the output path. Round-trip doubles the
+     * one-way figure (input → engine → output), matching the honest browser-tier
+     * `~15-25 ms`. Resolves `null` before the context exists.
+     */
+    async getLatency(): Promise<LatencyReport | null> {
+        const ctx = getAudioContext();
+        if (!ctx) return null;
+        const baseLatency = (ctx.baseLatency ?? 0) * 1000;
+        const outputLatency = (ctx.outputLatency ?? 0) * 1000;
+        const roundTripMs = (baseLatency + outputLatency) * 2;
+        return {
+            source: 'browser',
+            running: ctx.state === 'running',
+            baseLatency,
+            outputLatency,
+            roundTripMs,
+            sampleRate: ctx.sampleRate,
+            bufferFrames: null,
+            classification: classifyLatency(roundTripMs),
+            // Bluetooth output typically adds 100-200 ms one-way.
+            isBluetoothSuspected: outputLatency > BLUETOOTH_LATENCY_THRESHOLD_MS,
+        };
+    }
+
     dispose(): void {
         this.unsub?.();
         this.unsub = null;
@@ -329,6 +419,9 @@ export class OjcoreWasmExecutor implements Executor {
         for (const resolve of this.sampleLoadResolvers.values()) resolve();
         this.sampleLoadResolvers.clear();
         this.sampleBindings.clear();
+        this.defaultVoiceBindings.clear();
+        this.pendingDefaultVoiceNodes.clear();
+        this.boundVoiceKey.clear();
         this.getNodes = null;
         this.getConnections = null;
         this.index = new Map();
@@ -337,7 +430,34 @@ export class OjcoreWasmExecutor implements Executor {
 
     // --- Graph push --------------------------------------------------------
 
+    /** Re-push the current graph (parity with the native executor's `resync`). The
+     *  wasm path has no native plugin hosting, so this is a plain re-emit; it exists
+     *  so the shared `Executor` surface is uniform. */
+    resync(): void {
+        this.pushGraph();
+    }
+
+    /** No-op on the wasm tier: there is no native plugin hosting, so there is no
+     *  opaque plugin state to capture (parity with the `Executor` surface). */
+    capturePluginStates(): Promise<void> {
+        return Promise.resolve();
+    }
+
     private pushGraph(): void {
+        // Isolate the reconcile: lowering the visual graph must NEVER throw out of
+        // a store-change subscriber — that would abort Zustand's listener loop and
+        // wedge the canvas (later subscribers + the persist setItem are skipped).
+        // Contain it: keep the last good audio, log, and let the next edit retry.
+        try {
+            this.pushGraphInner();
+        } catch (err) {
+            log.error('graph lowering failed; keeping last good audio', {
+                detail: err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err),
+            });
+        }
+    }
+
+    private pushGraphInner(): void {
         if (!this.getNodes || !this.getConnections) return;
         const { graph, index } = emitWithIndex(this.getNodes(), this.getConnections(), {
             blockSize: WORKLET_BLOCK_SIZE,
@@ -362,25 +482,33 @@ export class OjcoreWasmExecutor implements Executor {
     }
 
     /**
-     * Lower the built-in default voice into each instrument node that has no
-     * sample yet (see {@link DEFAULT_VOICE_INSTRUMENTS}). Once per node: the load
-     * round-trips through the worklet and records a `sampleBindings` entry, so this
-     * skips it next time and {@link applySampleBindings} keeps it bound. Needs the
-     * worklet ready + an AudioContext to build the buffer.
+     * Lower the built-in default voice into each instrument node that has no USER
+     * sample yet (see {@link DEFAULT_VOICE_INSTRUMENTS}). Re-binds when the picker
+     * selection changes ({@link boundVoiceKey}); the load round-trips through the
+     * worklet and records a `defaultVoiceBindings` entry (kept apart from USER
+     * `sampleBindings`), so {@link applySampleBindings} keeps it bound across later
+     * edits. Needs the worklet ready + an AudioContext to build the buffer.
      */
     private loadDefaultInstrumentVoices(): void {
         if (!this.ready || !this.getNodes) return;
         const ctx = getAudioContext();
         if (!ctx || typeof ctx.createBuffer !== 'function') return;
-        // Cache one AudioBuffer per voice family across nodes in this pass.
+        // Cache one AudioBuffer per voice key across nodes in this pass.
         const bufferByKey = new Map<string, AudioBuffer>();
         for (const node of this.getNodes().values()) {
             if (!DEFAULT_VOICE_INSTRUMENTS.has(node.type)) continue;
             if (this.index.get(node.id) === undefined) continue;
-            if (this.sampleBindings.has(node.id)) continue; // user-bound sample wins
             // Karplus-routed plucked strings are note-triggered; they need no PCM.
-            if (instrumentUsesKarplus(node.type, node.data as Record<string, unknown> | undefined))
+            // FORGET this node's default voice when it leaves the sampler path, so a
+            // later return to a sampler instrument re-binds instead of going silent
+            // (mirrors the native executor; without this, a switch through a Karplus
+            // instrument like Harpsichord/Clavinet could leave the node mute).
+            if (instrumentUsesKarplus(node.type, node.data as Record<string, unknown> | undefined)) {
+                this.boundVoiceKey.delete(node.id);
+                this.defaultVoiceBindings.delete(node.id);
                 continue;
+            }
+            if (this.sampleBindings.has(node.id)) continue; // USER-loaded sample wins
             try {
                 const { voice, key } = getVoiceForInstrumentNode(
                     node.type,
@@ -397,12 +525,29 @@ export class OjcoreWasmExecutor implements Executor {
                     buffer.getChannelData(0).set(voice.pcm);
                     bufferByKey.set(key, buffer);
                 }
+                // Flag this as a DEFAULT-voice load so `onSampleStored` records the
+                // returned AssetId in `defaultVoiceBindings`, NOT `sampleBindings`.
+                this.pendingDefaultVoiceNodes.add(node.id);
                 this.getSamplerAdapter(node.id).setBuffer(buffer);
                 this.boundVoiceKey.set(node.id, key);
+                // This node's voice loaded — clear any stale error badge (ERR-1).
+                setNodeVoiceLoadError(node.id, false);
             } catch (err) {
-                // A buffer-creation failure must never break the graph push.
-                console.error('[OjcoreWasmExecutor] default voice load failed:', err);
-                return;
+                // A single node's buffer-creation failure must NOT abort the pass and
+                // starve LATER nodes of their default voice (a held note beats a
+                // glitch): per-node try/catch, CONTINUE past it. The failing node is
+                // flagged for its own non-focus-stealing "!" badge (ERR-1) — never a
+                // modal — and the diagnostic goes to the DevLog.
+                log.error('default voice load failed for node; continuing', {
+                    detail: `${node.id}: ${err instanceof Error ? err.message : String(err)}`,
+                });
+                // Drop the in-flight default-voice flag so a later `sample-stored`
+                // (if any) is not misrouted, and forget the bound key so a retry
+                // re-attempts the load instead of being deduped away.
+                this.pendingDefaultVoiceNodes.delete(node.id);
+                this.boundVoiceKey.delete(node.id);
+                setNodeVoiceLoadError(node.id, true);
+                continue;
             }
         }
     }
@@ -412,14 +557,32 @@ export class OjcoreWasmExecutor implements Executor {
      * sampler's root-note param and an `AssetRef` in slot 0, so
      * `compile_with_assets` in the worklet resolves + installs the PCM into the
      * live Sampler. Pure data shaping over the emitted IR (off any render path).
+     *
+     * Built-in default voices are applied FIRST, then USER samples, so a
+     * user-loaded sample overrides the synthesized default on the same node.
      */
     private applySampleBindings(graph: OjGraph): void {
-        if (this.sampleBindings.size === 0) return;
-        for (const [nodeId, { assetId, rootNote }] of this.sampleBindings) {
+        if (this.sampleBindings.size === 0 && this.defaultVoiceBindings.size === 0) return;
+        this.bindAssetsOntoSamplers(graph, this.defaultVoiceBindings);
+        this.bindAssetsOntoSamplers(graph, this.sampleBindings);
+    }
+
+    /**
+     * Bind each `nodeId -> { assetId, rootNote }` onto its node in `graph`, but ONLY
+     * when that node still lowered to a `Sampler`. A node that switched to a
+     * plucked/bass instrument lowers to `KarplusString` (note-triggered, no PCM);
+     * forcing a stale sampler asset/param onto it is wrong — native guards the same
+     * way (`forward_merge_sample_bindings` carries a binding only Sampler->Sampler).
+     */
+    private bindAssetsOntoSamplers(
+        graph: OjGraph,
+        bindings: Map<string, { assetId: number; rootNote: number }>,
+    ): void {
+        for (const [nodeId, { assetId, rootNote }] of bindings) {
             const idx = this.index.get(nodeId);
             if (idx === undefined) continue;
             const ir = graph.nodes.find((n) => n.id === idx);
-            if (!ir) continue;
+            if (!ir || ir.kind !== 'Sampler') continue;
             // Root note -> the sampler's root-note param (compiler applies params
             // before assets), matching native `bind_sample_to_node`.
             const existing = ir.params.find((p) => p.id === SAMPLER_PCM_PARAM);
@@ -441,7 +604,16 @@ export class OjcoreWasmExecutor implements Executor {
         if (node === undefined || assetId === undefined) return;
         const nodeId = this.reverseIndex.get(node);
         if (nodeId === undefined) return;
-        this.sampleBindings.set(nodeId, { assetId, rootNote: rootNote ?? 60 });
+        const binding = { assetId, rootNote: rootNote ?? 60 };
+        // A DEFAULT-voice load (flagged when issued) records into `defaultVoiceBindings`;
+        // a USER sample load records into `sampleBindings` (which then wins over the
+        // default on the same node). Keeping the two apart is what lets the picker
+        // change the voice — a built-in default no longer reads back as a user sample.
+        if (this.pendingDefaultVoiceNodes.delete(nodeId)) {
+            this.defaultVoiceBindings.set(nodeId, binding);
+        } else {
+            this.sampleBindings.set(nodeId, binding);
+        }
         // Re-emit + push so the bound AssetRef reaches the worklet's recompile.
         this.pushGraph();
         const resolve = this.sampleLoadResolvers.get(nodeId);
@@ -451,7 +623,78 @@ export class OjcoreWasmExecutor implements Executor {
         }
     }
 
+    /**
+     * Route a worklet looper drain (a FLAT `[node, state, pos, loop_len, peak, ...]`
+     * `f32` array, one 5-tuple per looper node) to each looper handle's
+     * `onEngineFrame` — the REAL transport snapshot that drives the row/playhead.
+     * Ungated by metering (the worklet drains it regardless), so the looper UI
+     * updates even with level meters off.
+     */
+    private onLooperFrames(frames?: Float32Array): void {
+        if (!frames || frames.length < 5) return;
+        for (let i = 0; i + 4 < frames.length; i += 5) {
+            const node = frames[i];
+            const state = frames[i + 1];
+            const pos = frames[i + 2];
+            const loopLen = frames[i + 3];
+            const peak = frames[i + 4];
+            const nodeId = this.reverseIndex.get(node);
+            if (nodeId === undefined) continue;
+            this.caps.looper(nodeId).onEngineFrame(state, pos, loopLen, peak);
+        }
+    }
+
+    /**
+     * Route a committed take's TRUE captured PCM (Stage 3) from the worklet's
+     * `looper-take` postMessage to the looper handle's `onLayerPcm`, which builds
+     * a real AudioBuffer + true waveform and attaches it to the row the commit
+     * edge created (matched in commit order). The worklet read the just-committed
+     * layer off the read-only render buffer and TRANSFERRED the PCM here, so this
+     * is a move, not a copy — off any render path.
+     */
+    private onLooperTake(node?: number, pcm?: Float32Array, sampleRate?: number): void {
+        if (node === undefined || !pcm || pcm.length === 0) return;
+        const nodeId = this.reverseIndex.get(node);
+        if (nodeId === undefined) return;
+        const ctx = getAudioContext();
+        this.caps.looper(nodeId).onLayerPcm(pcm, sampleRate ?? ctx?.sampleRate ?? 48000);
+    }
+
+    /** Route any `LooperEdge` events in a drained batch to their looper handle's
+     *  `onEngineEdge` — the AUTHORITATIVE commit signal that creates the row.
+     *  Shared shape with the native tier (which taps the same edge off
+     *  `poll_events`); LooperEdge rides the `events` postMessage but is NOT a
+     *  fault, so it is routed here and still passed through to the fault pipe. */
+    private routeLooperEdges(events: EngineEvent[]): void {
+        for (const ev of events) {
+            const kind = ev?.kind;
+            if (typeof kind !== 'object' || !('LooperEdge' in kind)) continue;
+            const { node, from, to } = kind.LooperEdge;
+            const nodeId = this.reverseIndex.get(node);
+            if (nodeId === undefined) continue;
+            this.caps.looper(nodeId).onEngineEdge(from, to);
+        }
+    }
+
     /** Route worklet meter frames to signal-level subscribers, keyed by node id. */
+    /** Badge the nodes that degraded to a passthrough stub on the last load and
+     *  clear the rest (invariant #4a) — the browser symmetry of the native
+     *  push_graph degraded-id surface. Maps IR ids via the just-committed
+     *  `reverseIndex`; the setter only writes on change (cheap for steady graphs). */
+    private applyDegraded(degradedNodeIds: number[]): void {
+        const degradedSet = new Set(degradedNodeIds);
+        const nowDegraded = new Set<string>();
+        for (const [idx, visualId] of this.reverseIndex) {
+            const isDeg = degradedSet.has(idx);
+            setNodePluginLoadError(visualId, isDeg);
+            if (isDeg) nowDegraded.add(visualId);
+        }
+        // Surface NEW degradations into the DevLog (the agent's get_logs surface),
+        // diffed against the prior load so a steadily-broken plugin is logged once.
+        logNewlyDegradedStubs(nowDegraded, this.degradedVisualIds, describeNodeForLog);
+        this.degradedVisualIds = nowDegraded;
+    }
+
     private onMeterFrame(levels: Array<{ node: number; peak: number }>): void {
         let changed = false;
         for (const { node, peak } of levels) {
@@ -487,6 +730,15 @@ export class OjcoreWasmExecutor implements Executor {
         for (const ev of events) {
             if (ev.ts_us === 0) ev.ts_us = nowUs;
         }
+        // Tap LooperEdge transitions (a commit signal, not a fault) to the looper
+        // handle BEFORE the shared fault sink — the event ring is loss-proof, so a
+        // RECORDING|OVERDUBBING -> PLAYING edge reliably creates the row.
+        this.routeLooperEdges(events);
+        // Tap runtime CRASH faults (NodeFault{Crashed}) to the per-node badge — the
+        // SAME shared helper the native tier uses, so there is one runtime-fault
+        // owner. On the wasm tier this surfaces a TRAPPED code node (the wasm bypass
+        // latch); set-only, cleared by the next clean graph re-push.
+        routeRuntimeFaults(events, (n) => this.reverseIndex.get(n));
         ingestEngineEvents(events);
     }
 
@@ -552,9 +804,6 @@ export class OjcoreWasmExecutor implements Executor {
         }
     }
 
-    controlDown(_keyboardId: string): void {}
-    controlUp(_keyboardId: string): void {}
-
     activateControlSignal(connectionId: string): void {
         this.emitSignal(connectionId, 1);
     }
@@ -569,10 +818,18 @@ export class OjcoreWasmExecutor implements Executor {
     }
 
     // --- Speaker output ----------------------------------------------------
-    // The wasm engine renders into the AudioContext destination; master volume is
-    // a worklet `gain` message (the SpeakerOut node is unparameterized).
-    setSpeakerVolume(_nodeId: string, volume: number, isMuted: boolean): void {
-        this.node?.port.postMessage({ type: 'master-gain', gain: isMuted ? 0 : volume });
+    // Master volume / mute is applied ONCE, BY THE ENGINE: the SpeakerOut sink
+    // carries the real `volume`/`mute` master params (structural.rs
+    // `master_param::VOLUME=0` / `MUTE=1`), and the shared `exec.rs` scales the
+    // master mix by the resolved `master_gain()`. We route both as `SetParam`s
+    // through the SAME command ring native uses — NOT the old worklet `master-gain`
+    // postMessage, which scaled a SECOND time after the engine and risked
+    // double-applying gain. The worklet's `masterGain` is now pinned at unity.
+    setSpeakerVolume(nodeId: string, volume: number, isMuted: boolean): void {
+        const node = this.index.get(nodeId);
+        if (node === undefined) return;
+        this.send({ SetParam: { node, param: MASTER_PARAM_VOLUME, value: Math.max(0, volume) } });
+        this.send({ SetParam: { node, param: MASTER_PARAM_MUTE, value: isMuted ? 1 : 0 } });
     }
 
     // Per-device output routing. The browser has ONE AudioContext with ONE
@@ -602,23 +859,66 @@ export class OjcoreWasmExecutor implements Executor {
         };
     }
 
-    // --- Microphone --------------------------------------------------------
-    // Wasm mic capture: open the microphone via `getUserMedia`, wrap it in a
-    // `MediaStreamSource`, and connect it to the worklet `AudioWorkletNode`'s
-    // input. The worklet copies that input block into the engine's `MicIn` node
-    // output buffer each render quantum (see ojcore-processor `feedMicInput`), so
-    // the mic flows through the engine graph. The Web-Audio `outputNode` is
-    // unused: the engine owns routing via the `MicIn` graph node (mirrors native,
-    // where only the node id crosses the seam). Permission denial is handled
-    // gracefully — it logs and leaves the mic unrouted, never throws.
-    setMicrophoneOutput(_nodeId: string, _outputNode: AudioNode): void {
-        void this.enableMicrophone();
+    async probeSignal(nodeId: string): Promise<number | null> {
+        // The worklet streams meter frames continuously (enabled at 'ready'), so
+        // `levels` is kept fresh whether or not a subscriber is mounted; a brief
+        // settle lets at least one frame land, then we read the cached peak.
+        await new Promise<void>((resolve) => setTimeout(resolve, PROBE_SETTLE_MS));
+        return this.levels.get(nodeId) ?? null;
     }
 
-    /** Acquire the microphone and wire it into the worklet input. Idempotent
-     *  (a second call while a stream is live is a no-op); never throws. */
-    private async enableMicrophone(): Promise<void> {
-        if (this.micStream) return; // already capturing
+    // --- Microphone --------------------------------------------------------
+    // The executor is the SINGLE owner of the OS mic device. It opens exactly ONE
+    // `getUserMedia` stream, wraps it in a `MediaStreamSource`, and connects it to
+    // the worklet `AudioWorkletNode`'s input. The worklet copies that input block
+    // into the engine's `MicIn` node output buffer each render quantum (see
+    // ojcore-processor `feedMicInput`), so the mic flows through the engine graph.
+    //
+    // MUTE is provably silent at the engine seam: when `isMuted`, the source is
+    // DISCONNECTED from the worklet input, so `feedMicInput` sees no input and the
+    // engine's `MicIn` reads zeros — a muted mic is truly off on stage, not merely
+    // dimmed in the UI. The mic WAVEFORM in the UI is driven by the engine's
+    // per-node meter (subscribeSignalLevels), not a parallel AnalyserNode.
+    setMicrophoneInput(_nodeId: string, options: { isMuted: boolean; deviceId?: string }): void {
+        // The wasm engine sources whichever `MicIn` node the live graph contains
+        // (the worklet's `mic_in_ptr` finds it), so only the mute/device intent
+        // matters here — the visual nodeId is not needed for routing.
+        this.micMuted = options.isMuted;
+        const deviceId = options.deviceId;
+        // A device change re-acquires the one owned stream; otherwise reconcile the
+        // existing stream's connection against the desired mute state.
+        if (deviceId !== this.micDeviceId || !this.micStream) {
+            void this.acquireMicrophone(deviceId);
+        } else {
+            this.applyMicMute();
+        }
+    }
+
+    /** Connect/disconnect the owned mic source to/from the worklet input to match
+     *  {@link micMuted}. Muting disconnects (engine `MicIn` reads silence); the
+     *  connect/disconnect is idempotent in practice (Web Audio tolerates a
+     *  redundant disconnect; we guard a redundant connect via the muted flag). */
+    private applyMicMute(): void {
+        if (!this.micSource || !this.node) return;
+        if (this.micMuted) {
+            try {
+                this.micSource.disconnect(this.node);
+            } catch {
+                // already disconnected — the feed is already silent
+            }
+        } else {
+            // Reconnect the live feed. A redundant connect would create a duplicate
+            // edge, so only connect when transitioning out of mute (the source is
+            // disconnected while muted), which `setMicrophoneInput` drives.
+            this.micSource.connect(this.node);
+        }
+    }
+
+    /** Acquire (or re-acquire) the ONE owned mic stream for `deviceId` and wire it
+     *  into the worklet input, honouring the current mute state. Tears the prior
+     *  stream down first (single owner). Idempotent under overlap; never throws. */
+    private async acquireMicrophone(deviceId?: string): Promise<void> {
+        if (this.micAcquiring) return;
         const ctx = getAudioContext();
         if (!ctx || !this.node) return;
         const media = globalThis.navigator?.mediaDevices;
@@ -626,27 +926,46 @@ export class OjcoreWasmExecutor implements Executor {
             console.warn('[OjcoreWasmExecutor] getUserMedia unavailable; mic not routed.');
             return;
         }
+        this.micAcquiring = true;
+        // Drop any prior stream so exactly ONE OS device is open at a time.
+        this.teardownMicStream();
         try {
-            const stream = await media.getUserMedia({ audio: true });
+            const constraints: MediaStreamConstraints = {
+                audio:
+                    deviceId && deviceId !== 'default'
+                        ? { deviceId: { exact: deviceId } }
+                        : true,
+            };
+            const stream = await media.getUserMedia(constraints);
             // The node may have been disposed while permission was pending.
             if (!this.node) {
                 for (const t of stream.getTracks()) t.stop();
                 return;
             }
             this.micStream = stream;
+            this.micDeviceId = deviceId;
             this.micSource = ctx.createMediaStreamSource(stream);
-            // Feed the mic into the worklet's input (input 0); the worklet routes
-            // it into the engine's MicIn node each block.
-            this.micSource.connect(this.node);
+            // Surface device loss as a non-modal recovery: when the OS track ends
+            // (unplugged), re-acquire the default device — a held note beats a glitch.
+            for (const track of stream.getTracks()) {
+                track.onended = () => {
+                    if (this.micStream === stream) void this.acquireMicrophone(undefined);
+                };
+            }
+            // Feed the mic into the worklet's input (input 0) UNLESS muted — when
+            // muted we leave it disconnected so the engine MicIn reads silence.
+            if (!this.micMuted) this.micSource.connect(this.node);
         } catch (err) {
             // Permission denied / no device / insecure context: stay unrouted.
             console.warn('[OjcoreWasmExecutor] microphone access denied or unavailable:', err);
-            this.disableMicrophone();
+            this.teardownMicStream();
+        } finally {
+            this.micAcquiring = false;
         }
     }
 
-    /** Tear down any active microphone capture. */
-    private disableMicrophone(): void {
+    /** Tear down the owned mic stream + source (stops the OS device). */
+    private teardownMicStream(): void {
         try {
             this.micSource?.disconnect();
         } catch {
@@ -654,9 +973,19 @@ export class OjcoreWasmExecutor implements Executor {
         }
         this.micSource = null;
         if (this.micStream) {
-            for (const track of this.micStream.getTracks()) track.stop();
+            for (const track of this.micStream.getTracks()) {
+                track.onended = null;
+                track.stop();
+            }
         }
         this.micStream = null;
+        this.micDeviceId = undefined;
+    }
+
+    /** Tear down any active microphone capture (dispose path). */
+    private disableMicrophone(): void {
+        this.teardownMicStream();
+        this.micMuted = false;
     }
 
     // --- Continuous sources ------------------------------------------------
@@ -710,6 +1039,7 @@ export class OjcoreWasmExecutor implements Executor {
         pcm: Float32Array,
         sampleRate: number,
         rootNote: number,
+        channels: number,
     ): Promise<void> {
         const idx = this.index.get(nodeId);
         if (idx === undefined || !this.node || !this.ready) return Promise.resolve();
@@ -718,7 +1048,7 @@ export class OjcoreWasmExecutor implements Executor {
         return new Promise<void>((resolve) => {
             this.sampleLoadResolvers.set(nodeId, resolve);
             this.node?.port.postMessage(
-                { type: 'load-sample', node: idx, pcm: copy, sampleRate, rootNote },
+                { type: 'load-sample', node: idx, pcm: copy, channels, sampleRate, rootNote },
                 [copy.buffer],
             );
             // Safety timeout: never leave the load flow hanging if the worklet is

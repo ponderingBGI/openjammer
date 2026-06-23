@@ -71,4 +71,25 @@ describe('PluginsPanel', () => {
         open();
         await waitFor(() => expect(screen.getByText(/No plugins found/i)).toBeTruthy());
     });
+
+    it('lists the real CLAP folders and opens one on demand when empty', async () => {
+        tauriPresent = true;
+        const clapDir = 'C:\\Program Files\\Common Files\\CLAP';
+        invokeMock.mockImplementation((cmd: string) => {
+            if (cmd === 'plugin_dirs') return Promise.resolve([{ path: clapDir, scope: 'system' }]);
+            if (cmd === 'reveal_path') return Promise.resolve(null);
+            return Promise.resolve([]); // scan_plugins -> no plugins
+        });
+        render(<PluginsPanel />);
+        open();
+
+        // The actual on-disk path is shown (not a generic ~/.clap example).
+        await waitFor(() => expect(screen.getByText(/Common Files\\CLAP/)).toBeTruthy());
+
+        // "Open folder" reveals exactly that path via the native command.
+        act(() => screen.getByRole('button', { name: /open folder/i }).click());
+        await waitFor(() =>
+            expect(invokeMock).toHaveBeenCalledWith('reveal_path', { path: clapDir }),
+        );
+    });
 });

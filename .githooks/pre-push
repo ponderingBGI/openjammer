@@ -1,0 +1,70 @@
+#!/bin/sh
+set -eu
+
+remote_name=${1:-origin}
+zero=0000000000000000000000000000000000000000
+fail=0
+checked=0
+
+check_commit() {
+  sha=$1
+  subject=$(git show -s --format='%s' "$sha")
+  checked=$((checked + 1))
+  if ! git show -s --format='%B' "$sha" | grep -qiE '^Signed-off-by: .+ <.+@.+>'; then
+    echo "FAIL  $sha  $subject  — missing Signed-off-by" >&2
+    fail=1
+  fi
+}
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  # Deleted refs and tags do not introduce PR commits.
+  [ "$local_sha" = "$zero" ] && continue
+  case "$local_ref" in
+    refs/heads/*) ;;
+    *) continue ;;
+  esac
+
+  base=
+
+  # Direct pushes to protected integration branches should check only new commits.
+  if [ "$remote_ref" = "refs/heads/canari" ] || [ "$remote_ref" = "refs/heads/main" ]; then
+    if [ "$remote_sha" != "$zero" ]; then
+      base=$remote_sha
+    fi
+  fi
+
+  # Feature branches are reviewed against canari in this repo. Mirror the PR DCO gate.
+  if [ -z "$base" ] && git rev-parse --verify -q "$remote_name/canari" >/dev/null; then
+    base=$(git merge-base "$remote_name/canari" "$local_sha")
+  fi
+
+  # Fallback for non-origin remotes or unusual branch setups.
+  if [ -z "$base" ] && git rev-parse --verify -q "@{upstream}" >/dev/null; then
+    base=$(git merge-base "@{upstream}" "$local_sha")
+  fi
+  if [ -z "$base" ] && [ "$remote_sha" != "$zero" ]; then
+    base=$remote_sha
+  fi
+
+  if [ -z "$base" ]; then
+    echo "OpenJammer DCO pre-push: cannot determine a base for $local_ref; skipping local DCO check." >&2
+    continue
+  fi
+
+  for sha in $(git rev-list --no-merges "$base..$local_sha"); do
+    check_commit "$sha"
+  done
+done
+
+if [ "$fail" -ne 0 ]; then
+  echo "" >&2
+  echo "OpenJammer DCO pre-push failed: one or more commits lack Signed-off-by." >&2
+  echo "Fix one commit:   git commit --amend -s" >&2
+  echo "Fix many commits: git rebase --signoff origin/canari" >&2
+  echo "Then push again." >&2
+  exit 1
+fi
+
+if [ "$checked" -gt 0 ]; then
+  echo "OpenJammer DCO pre-push: checked $checked commit(s)." >&2
+fi

@@ -663,6 +663,7 @@ dependencies = [
  "bitflags 2.13.0",
  "clack-common",
  "clack-host",
+ "clack-plugin",
  "clap-sys",
 ]
 
@@ -673,9 +674,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a3e2891319937507e5d1c85e853de54abbf1939bdee0aa81079fab2cbc5eb15"
 dependencies = [
  "clack-common",
+ "clack-plugin",
  "clap-sys",
  "libloading 0.8.9",
  "objc2-foundation",
+]
+
+[[package]]
+name = "clack-plugin"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab76aa9fd46c79fbd5770e86a14d0a9d97adb239ff9173b51e3f5101aeb32c73"
+dependencies = [
+ "clack-common",
+ "clap-sys",
 ]
 
 [[package]]
@@ -3352,6 +3364,8 @@ dependencies = [
  "ojproto",
  "rtrb",
  "rusqlite",
+ "serde",
+ "serde_json",
  "symphonia",
  "tracing",
  "tracing-appender",
@@ -3385,7 +3399,9 @@ version = "0.0.0"
 dependencies = [
  "clack-extensions",
  "clack-host",
+ "clack-plugin",
  "cmake",
+ "codspeed-criterion-compat",
  "ojcore",
  "ojproto",
  "serde",

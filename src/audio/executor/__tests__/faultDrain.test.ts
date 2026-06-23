@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { Event as EngineEvent } from '../../../../packages/oj-protocol-ts/src/index';
 import { coalesceEvents } from '../OjcoreNativeExecutor';
-import { ingestEngineEvents } from '../faultPipe';
+import { ingestEngineEvents, logNewlyDegradedStubs, remapFaultNodes } from '../faultPipe';
 import { useEngineHealthStore, setEngineHealth } from '../../../store/engineHealthStore';
 import { useLogStore, _resetLogStoreForTests } from '../../../store/logStore';
 
@@ -60,6 +60,82 @@ describe('coalesceEvents', () => {
 
     it('returns an empty array unchanged', () => {
         expect(coalesceEvents([])).toEqual([]);
+    });
+});
+
+describe('remapFaultNodes', () => {
+    const index = new Map<number, string>([
+        [3, 'node-aaa'],
+        [4, 'node-bbb'],
+    ]);
+    const resolve = (n: number) => index.get(n);
+
+    it('rewrites a NodeFault engine index to its visual node id', () => {
+        const out = remapFaultNodes(
+            [ev(1, { NodeFault: { node: 3, fault: 'NonFinite' } }, 'Error')],
+            resolve,
+        );
+        expect(out[0].kind).toEqual({ NodeFault: { node: 'node-aaa', fault: 'NonFinite' } });
+    });
+
+    it('passes through a fault whose index has no mapping (a just-removed node)', () => {
+        const out = remapFaultNodes(
+            [ev(1, { NodeFault: { node: 99, fault: 'NonFinite' } }, 'Error')],
+            resolve,
+        );
+        expect(out[0].kind).toEqual({ NodeFault: { node: 99, fault: 'NonFinite' } });
+    });
+
+    it('leaves non-fault kinds untouched', () => {
+        const out = remapFaultNodes([ev(1, { Xrun: { dropped: 2 } }), ev(2, 'Lifecycle')], resolve);
+        expect(out.map((e) => e.kind)).toEqual([{ Xrun: { dropped: 2 } }, 'Lifecycle']);
+    });
+
+    it('the remapped fault still coalesces by node+fault (the storm still collapses)', () => {
+        const remapped = remapFaultNodes(
+            [
+                ev(1, { NodeFault: { node: 3, fault: 'NonFinite' } }, 'Error'),
+                ev(2, { NodeFault: { node: 3, fault: 'NonFinite' } }, 'Error'),
+            ],
+            resolve,
+        );
+        expect(coalesceEvents(remapped)).toHaveLength(1);
+        expect(coalesceEvents(remapped)[0].kind).toEqual({
+            NodeFault: { node: 'node-aaa', fault: 'NonFinite' },
+        });
+    });
+});
+
+describe('logNewlyDegradedStubs (the load-path twin: degraded stubs → get_logs)', () => {
+    beforeEach(() => {
+        _resetLogStoreForTests();
+    });
+    const describeNode = (id: string) => `${id} (reverb)`;
+
+    it('appends one Warn entry per newly-degraded node, with the degraded SSOT field', () => {
+        logNewlyDegradedStubs(new Set(['node-a', 'node-b']), new Set(), describeNode);
+        const entries = useLogStore.getState().entries;
+        expect(entries).toHaveLength(2);
+        expect(entries[0].level).toBe('Warn');
+        expect(entries[0].scope).toBe('engine');
+        expect(entries[0].message).toContain('node-a (reverb)');
+        expect(entries[0].message).toContain('degraded to passthrough');
+        // The structured field the node-diagnostics facet reads as its degraded SSOT.
+        expect(entries[0].fields).toEqual({ node: 'node-a', degraded: true });
+    });
+
+    it('does NOT re-log a node already degraded on the prior push (no per-push storm)', () => {
+        // node-a was already degraded last push; only node-b is new this push.
+        logNewlyDegradedStubs(new Set(['node-a', 'node-b']), new Set(['node-a']), describeNode);
+        const entries = useLogStore.getState().entries;
+        expect(entries).toHaveLength(1);
+        expect(entries[0].message).toContain('node-b');
+    });
+
+    it('logs nothing when the degraded set is empty or unchanged', () => {
+        logNewlyDegradedStubs(new Set(), new Set(), describeNode);
+        logNewlyDegradedStubs(new Set(['node-a']), new Set(['node-a']), describeNode);
+        expect(useLogStore.getState().entries).toHaveLength(0);
     });
 });
 

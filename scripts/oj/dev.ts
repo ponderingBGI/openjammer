@@ -72,11 +72,29 @@ async function nativeDev(passthrough: string[]): Promise<number> {
   //    self-documenting).
   if (!process.env.VITE_OJ_EXECUTOR) process.env.VITE_OJ_EXECUTOR = NATIVE_EXECUTOR;
 
-  // 4. Delegate the whole lifecycle to the Tauri CLI. Inherit stdio so logs are
-  //    unified and Ctrl+C reaches `tauri` directly. No signal handler here.
+  // 4. Print the controls once, then delegate the whole lifecycle to the Tauri
+  //    CLI. Inherit stdio so logs are unified and Ctrl+C reaches `tauri`
+  //    directly. NO keypress/signal handler — the window auto-opens, edits
+  //    hot-reload (src) or restart it (Rust), and Tauri owns clean teardown.
+  //    A keypress menu would mean taking that teardown back (Bun can't kill a
+  //    process tree on Windows) — so we print the controls instead of faking a
+  //    Vite-style menu that the non-TTY child can't deliver anyway.
+  if (!passthrough.length) printControls();
   return spawnInherited([BUN, 'run', 'tauri', 'dev', ...passthrough], {
     notFoundHint: 'is `@tauri-apps/cli` installed? run `bun install`.',
   });
+}
+
+/** The one-time "what's happening + how to drive it" banner for `bun native`. */
+function printControls(): void {
+  process.stdout.write(
+    '\n  OpenJammer · native dev\n' +
+      '  The desktop window opens on its own once the engine builds.\n' +
+      '    • edit src/**            → window hot-reloads instantly\n' +
+      '    • edit Rust (crates/**)  → window rebuilds + restarts\n' +
+      '    • Ctrl+C                 → stop everything\n' +
+      '  Live logs (Vite + Rust engine) stream below.\n\n',
+  );
 }
 
 /** The engine inner-loop: bacon owns its own TUI + child lifecycle. */
@@ -111,8 +129,7 @@ async function ensurePiSidecar(): Promise<number> {
     !!binaryName && (await Bun.file(join(ROOT, 'src-tauri', 'binaries', binaryName)).exists());
 
   if (stampVersion === installedVersion && binaryPresent) {
-    process.stdout.write(`[pi] up-to-date (${installedVersion}) — skip.\n`);
-    return 0;
+    return 0; // up-to-date — nothing to build, stay quiet
   }
 
   process.stdout.write(

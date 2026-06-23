@@ -21,7 +21,10 @@
   "type": "module",
   "scripts": {
     "preinstall": "node -e \"if(!process.env.npm_execpath?.includes('bun')){console.error('\\x1b[31mError: Use bun to install dependencies.\\nRun: bun install\\x1b[0m');process.exit(1)}\"",
+    "postinstall": "bun scripts/install-git-hooks.ts",
+    "setup:hooks": "bun scripts/install-git-hooks.ts",
     "dev": "vite",
+    "native": "bun scripts/oj/index.ts dev",
     "dev:native": "bun scripts/oj/index.ts dev",
     "oj": "bun scripts/oj/index.ts",
     "build": "tsc -b && vite build",
@@ -37,6 +40,9 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "bench": "cargo bench -p ojcore -p ojcore-dsp -p ojproto -p ojinstrument -p ojhost",
+    "bench:codspeed:build": "cargo codspeed build -m simulation -m memory -p ojcore -p ojcore-dsp -p ojproto -p ojinstrument -p ojhost",
+    "bench:codspeed:run": "cargo codspeed run -m simulation && cargo codspeed run -m memory",
     "tauri": "tauri"
   },
   "dependencies": {

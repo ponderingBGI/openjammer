@@ -22,7 +22,7 @@ Thank you for your interest in contributing to OpenJammer! This document provide
 git clone https://github.com/YOUR_USERNAME/openjammer.git
 cd openjammer
 
-# Install dependencies
+# Install dependencies and enable repo-local git hooks
 bun install
 
 # Start development server
@@ -33,25 +33,28 @@ The app will be available at `http://localhost:5173` (Vite's default).
 
 ### Native desktop (Tauri)
 
-The browser tier (`bun dev`) needs only Bun. The native low-latency tier additionally needs the
-Rust toolchain plus the per-OS Tauri prerequisites (Windows: MSVC "Desktop development with C++"
-+ WebView2; macOS: Xcode CLT; Linux: the `libwebkit2gtk-4.1`/`gtk-3`/`libsoup-3` set). **One command
-provisions all of it:**
+This is the canonical reference for running the native low-latency app. Two commands:
 
 ```bash
-bun run oj setup              # detect + install the native prerequisites (confirms first; --dry-run to preview)
-bun run dev:native            # one command: Vite HMR + the ojcore-native engine (alias: just dev)
-bun run dev:native --engine   # windowless engine inner-loop via bacon (cargo install --locked bacon)
+bun run oj setup   # one-time: install the native prerequisites (first run only)
+bun native         # run the desktop app — opens the window, streams logs live
 ```
 
-`oj setup` derives its prerequisite set from CI (`.github/actions/setup-rust/action.yml`), installs
-via winget / `xcode-select` + rustup / apt·dnf·pacman, and adds the browser-worklet wasm nightly with
-`--wasm`. `bun run oj doctor --check native-readiness` reports status without installing; `bun run
-tauri info` gives a full environment dump.
+`bun native` is the desktop counterpart to `bun dev`. The window opens on its own once the
+engine builds; **edit `src/**`** and it hot-reloads, **edit Rust (`crates/**`, `src-tauri/**`)**
+and it rebuilds + restarts the window, **Ctrl+C** stops everything. (There's no Vite-style
+keypress menu: the loop hands its whole lifecycle and clean Ctrl+C teardown to the Tauri CLI,
+so it behaves identically on Windows/macOS/Linux — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).)
 
-`oj dev` delegates lifecycle + Ctrl+C teardown to the Tauri CLI, so it behaves identically on
-Windows/macOS/Linux. Editing `src/**` hot-reloads in place; editing Rust (`crates/**`,
-`src-tauri/**`) restarts the native window — use `--engine` for fast DSP iteration.
+`oj setup` detects every native prerequisite (Rust; **Win:** MSVC "Desktop development with C++"
+\+ WebView2; **macOS:** Xcode CLT; **Linux:** the `libwebkit2gtk-4.1`/`gtk-3`/`libsoup-3` set) and
+installs the missing ones after a confirm. Its set is derived from CI, so local matches CI;
+`--dry-run` previews, `--wasm` adds the browser-worklet nightly, and `bun run oj doctor --check
+native-readiness` reports without installing.
+
+<sub>Power-user extras: `bun native --engine` is a windowless Rust/DSP inner-loop (bacon over the
+`render`/`nextest` harnesses — `cargo install --locked bacon`); `OJ_DEV_SKIP_PI=1` skips the
+Ctrl+K AI sidecar build. `bun native` is also reachable as `just dev` / `bun run dev:native`.</sub>
 
 ### Design system
 
@@ -106,10 +109,11 @@ openjammer/
 
 ### Pull Request Process
 
-> **Target `canari`, not `main`.** `canari` is the default/integration branch —
-> open every PR against it. `main` is the stable release branch, advanced only by
-> promoting `canari` → `main` (a maintainer merge commit). Each merge into
-> `canari` can build a numbered canari prerelease such as `v0.0.2-canari.1`.
+> **Target `canari`, not `main`.** `canari` is the integration branch — open every
+> PR against it. GitHub still defaults the base to `main`, so change it when you open
+> the PR. `main` is the stable release branch, advanced only by promoting
+> `canari` → `main` (a maintainer merge commit). Each merge into `canari` can build a
+> numbered canari prerelease such as `v0.0.2-canari.1`.
 
 1. **Fork the repository** and create a feature branch
    ```bash
@@ -131,6 +135,10 @@ openjammer/
    ```bash
    git commit -m "feat: add amazing feature"
    ```
+   `bun install` enables repo-local hooks that append the required DCO `Signed-off-by`
+   trailer automatically from your local Git identity. If hooks are disabled, use
+   `git commit -s -m "feat: add amazing feature"` or run `bun run setup:hooks`.
+
    Use conventional commit messages:
    - `feat:` for new features
    - `fix:` for bug fixes
@@ -230,17 +238,22 @@ The "future versions" clause lets a revised Exception ship without chasing every
 It grants the steward **no** right to take the project proprietary — it is relicensing latitude for the
 Exception only. (Why this matters: [LICENSING.md](LICENSING.md) §6.)
 
-**2. Sign your work (DCO).** Add a `Signed-off-by` line to every commit by committing with `-s`:
+**2. Sign your work (DCO).** Every commit needs a `Signed-off-by` trailer:
 
-```bash
-git commit -s -m "feat: add amazing feature"
+```text
+Signed-off-by: Your Name <your@email>
 ```
 
-This appends `Signed-off-by: Your Name <your@email>` (use a real name + email). It certifies you wrote
-the patch or otherwise have the right to submit it under the license above — including **AI-assisted**
-work, so long as you have the right to contribute it. A CI check
-([.github/workflows/dco.yml](.github/workflows/dco.yml)) fails any PR with an unsigned commit; fix it
-with `git commit --amend -s` (or `git rebase --signoff` for several commits).
+`bun install` enables repo-local Git hooks (`core.hooksPath=.githooks`) that add this trailer
+automatically from your local `git user.name` / `git user.email`; run `bun run setup:hooks` if you
+need to re-enable them. You can also add it explicitly with `git commit -s -m "feat: add amazing
+feature"`.
+
+This certifies you wrote the patch or otherwise have the right to submit it under the license above —
+including **AI-assisted** work, so long as you have the right to contribute it. A cheap local pre-push
+hook catches missing trailers before CI, and the CI check
+([.github/workflows/dco.yml](.github/workflows/dco.yml)) remains the final guard; fix failures with
+`git commit --amend -s` (or `git rebase --signoff` for several commits).
 
 ---
 

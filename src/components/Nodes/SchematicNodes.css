@@ -115,6 +115,42 @@
     opacity: 0.7;
 }
 
+/* Master volume slider + live output meter (VIS-1: the meter reads the engine's
+   per-node level). One row under the speaker symbol, above the device selector. */
+.speaker-volume-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    width: 100%;
+    margin-bottom: var(--space-xs);
+}
+
+.speaker-volume-slider {
+    width: 100%;
+    cursor: pointer;
+    accent-color: var(--accent-primary);
+}
+
+.speaker-volume-slider:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.speaker-output-meter {
+    width: 100%;
+    height: 6px;
+    border-radius: var(--radius-pill);
+    background: var(--bg-tertiary);
+    overflow: hidden;
+}
+
+.speaker-output-meter-fill {
+    height: 100%;
+    background: var(--accent-success);
+    border-radius: var(--radius-pill);
+    transition: width 60ms linear;
+}
+
 /* Device selector */
 .device-selector-container {
     position: relative;
@@ -946,6 +982,99 @@
     50% { opacity: 0.5; }
 }
 
+/* Live transport status pill in the header (engine-driven, non-focus-stealing) */
+.looper-status {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: var(--radius-sm);
+    line-height: 1.4;
+}
+
+.looper-status.recording {
+    background: color-mix(in srgb, var(--accent-danger) 18%, transparent);
+    color: var(--accent-danger);
+    animation: looper-record-pulse 1s ease-in-out infinite;
+}
+
+.looper-status.playing {
+    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+    color: var(--accent-primary);
+}
+
+/* Inline export-name editor (replaces the focus-stealing window.prompt) */
+.looper-rename-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--accent-primary);
+    border-radius: 4px;
+    padding: 0 6px;
+    outline: none;
+}
+
+/* Loop-level balance (wet) control row */
+.looper-balance-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 2px var(--space-md) var(--space-xs);
+}
+
+.looper-balance-label {
+    font-family: var(--font-sketch);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.looper-balance-slider {
+    flex: 1;
+    height: 4px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+    min-width: 0;
+}
+
+.looper-balance-value {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-primary);
+    width: 22px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+/* Undo-last-layer affordance (LIFO engine UNDO_LAST) */
+.looper-undo-btn {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    flex-shrink: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-node);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.looper-undo-btn:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+}
+
 /* ============================================
  * Microphone Node - Compact Layout
  * ============================================ */
@@ -1701,6 +1830,38 @@
 .library-node {
     min-width: 260px;
     max-width: 320px;
+}
+
+/* SEAM-1: the library's single live seam — the sample feed to connected samplers.
+   Right edge, vertically centered (matches the registry port position y:0.5). */
+.library-sample-out-port {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    right: -7px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: 50%;
+    background: var(--audio-output);
+    cursor: crosshair;
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+    z-index: 10;
+}
+
+.library-sample-out-port:hover,
+.library-sample-out-port:focus-visible {
+    transform: translateY(-50%) scale(1.2);
+}
+
+.library-sample-out-port:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 2px;
+}
+
+.library-sample-out-port.connected {
+    background: var(--audio-connected);
+    box-shadow: 0 0 6px var(--audio-connected);
 }
 
 .library-node .schematic-header {
@@ -2683,6 +2844,56 @@
 .sampler-sample-area.has-sample:hover {
     border-color: var(--audio-connected);
     box-shadow: 0 0 6px color-mix(in srgb, var(--audio-connected) 30%, transparent);
+}
+
+/* ERR-1: a persisted sample whose PCM could not be re-resolved this mount. The
+   slot looks loaded (name + cached waveform) but the engine is silent, so it is
+   marked distinctly — a dashed warning border, dimmed waveform — and never
+   confused with an empty or a working slot. Non-modal: it never steals focus. */
+.sampler-sample-area.load-error {
+    border-style: dashed;
+    border-color: var(--status-warning, #e0a458);
+    background: color-mix(in srgb, var(--status-warning, #e0a458) 8%, transparent);
+}
+
+.sampler-sample-area.load-error .sampler-waveform-path {
+    opacity: 0.4;
+}
+
+.sampler-load-error-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    margin-right: 4px;
+    border-radius: 50%;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--bg-primary, #1a1a1a);
+    background: var(--status-warning, #e0a458);
+}
+
+/* ERR-1: per-node "!" badge when an instrument's built-in default voice failed to
+   load (DEFECT 3). Same calm warning style as the sampler load-error badge. */
+.instrument-voice-error-badge,
+.node-plugin-error-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    margin-left: 6px;
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--bg-primary, #1a1a1a);
+    background: var(--status-warning, #e0a458);
+    cursor: help;
 }
 
 /* Drop text when empty */

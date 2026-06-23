@@ -23,6 +23,10 @@
 //! path returns a clear error (never a panic) so the harness can report "no
 //! audio device available" cleanly, and the device-requiring test is `#[ignore]`d.
 
+/// Offline-render audio analysis (the audition `AudioReport`). Demo-gated: only the
+/// `render` bin + tests need it, so it stays out of the lean serde-free host build.
+#[cfg(feature = "demo")]
+pub mod analysis;
 pub mod asset;
 pub mod backend;
 pub mod device;
@@ -33,11 +37,15 @@ pub mod latency;
 pub mod log;
 #[cfg(feature = "persist")]
 pub mod logstore;
+pub mod looper_capture;
+pub mod offline;
 pub mod recorder;
 pub mod store;
 pub mod supervisor;
 pub mod update_gate;
 
+#[cfg(feature = "demo")]
+pub use analysis::{analyze_stereo, AudioReport, ChannelReport};
 pub use asset::{AssetError, AssetStore, Pcm};
 pub use backend::{supervise_once, AudioBackend};
 pub use device::{
@@ -56,6 +64,10 @@ pub use latency::{
 pub use log::init_logging;
 #[cfg(feature = "persist")]
 pub use logstore::{LogHit, LogRecord, LogStore};
+pub use looper_capture::{
+    LooperCapture, LooperCaptureSink, DEFAULT_RING_FRAMES as LOOPER_CAPTURE_RING_FRAMES,
+};
+pub use offline::OfflineDriver;
 pub use recorder::{Recorder, RecorderSink, DEFAULT_RING_FRAMES};
 pub use store::{content_address, AssetCatalog};
 pub use supervisor::{DeviceSupervisor, RecoveryAction, SupervisorState};

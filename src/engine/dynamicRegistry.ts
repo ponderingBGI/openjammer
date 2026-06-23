@@ -18,7 +18,7 @@
  * at any time.
  */
 
-import type { NodeDefinition, PortDefinition } from './types';
+import type { NodeCategory, NodeDefinition, PortDefinition } from './types';
 import type { ParamDecl } from './manifest';
 
 // ============================================================================
@@ -58,6 +58,9 @@ export const AI_DSP_ID_PREFIX = 'ai.dsp.';
  */
 export const AI_WASM_ID_PREFIX = 'ai.wasm.';
 
+/** Namespace prefix for hosted native plugins: `host.plugin.<format>.<hash>`. */
+export const HOSTED_PLUGIN_ID_PREFIX = 'host.plugin.';
+
 /**
  * Derive the STABLE open id for an AI-authored DSP node from its kernel (the
  * stored Faust source). The same source always yields the same id, so identity
@@ -75,6 +78,96 @@ export function dspPluginIdFor(faustSource: string): string {
  */
 export function wasmPluginIdFor(wasmHash: string): string {
     return AI_WASM_ID_PREFIX + wasmHash;
+}
+
+// ============================================================================
+// Hosted native plugin definition (VST2/VST3/CLAP/AU)
+// ============================================================================
+
+export interface HostedParamDescriptor {
+    id: number;
+    name: string;
+    min: number;
+    max: number;
+    default: number;
+}
+
+export interface HostedPluginDescriptor {
+    uid: string;
+    name: string;
+    vendor: string;
+    path: string;
+    format: string;
+    is_instrument: boolean;
+    ports: { audio_in: number; audio_out: number };
+    param_count: number;
+    params?: HostedParamDescriptor[];
+    latency_samples: number;
+}
+
+export const HOSTED_PLUGIN_DESCRIPTOR_KEY = 'hostedPluginDescriptor';
+
+/**
+ * `node.data` key holding a hosted plugin's saved opaque STATE blob (the bytes from
+ * the engine's `save_plugin_states`, a plugin's `getStateInformation` / CLAP state),
+ * as a number[] of bytes. Persisted in the project so a reopened project restores
+ * each plugin; the native executor stages it back to the engine on graph push
+ * (lockfile-gated on the hosted plugin id, like the descriptor). Empty/absent for a
+ * plugin with no extra state or before the first save.
+ */
+export const HOSTED_PLUGIN_STATE_KEY = 'hostedPluginState';
+
+function hostedFormatSlug(format: string): string {
+    const f = format.toLowerCase();
+    if (f === 'vst2') return 'vst2';
+    if (f === 'vst3') return 'vst3';
+    if (f === 'au') return 'au';
+    return 'clap';
+}
+
+/** Match Rust `ojhost::hosted_plugin_id`: FNV-1a over `format\0uid\0path`. */
+export function hostedPluginIdFor(desc: HostedPluginDescriptor): string {
+    const slug = hostedFormatSlug(desc.format);
+    return `${HOSTED_PLUGIN_ID_PREFIX}${slug}.${shortHash(`${slug}\0${desc.uid}\0${desc.path}`)}`;
+}
+
+function hostedPorts(desc: HostedPluginDescriptor): PortDefinition[] {
+    const ports: PortDefinition[] = [];
+    if ((desc.ports?.audio_in ?? 0) > 0) {
+        ports.push({ id: 'audio-in', name: 'Audio In', type: 'audio', direction: 'input', position: { x: 0, y: 0.5 } });
+    }
+    if ((desc.ports?.audio_out ?? 0) > 0) {
+        ports.push({ id: 'audio-out', name: 'Audio Out', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } });
+    }
+    return ports;
+}
+
+export function makeHostedPluginDefinition(desc: HostedPluginDescriptor): NodeDefinition {
+    const params = desc.params && desc.params.length > 0
+        ? desc.params
+        : Array.from({ length: Math.min(desc.param_count ?? 0, 256) }, (_, id) => ({
+            id,
+            name: `param${id}`,
+            min: 0,
+            max: 1,
+            default: 0,
+        }));
+    const paramDefaults = Object.fromEntries(params.map((p) => [p.name, p.default]));
+    const category: NodeCategory = desc.is_instrument ? 'instruments' : 'effects';
+    return {
+        type: 'effect',
+        category,
+        name: desc.name || 'Hosted Plugin',
+        description: `${desc.format.toUpperCase()} plugin${desc.vendor ? ` by ${desc.vendor}` : ''}`,
+        ui: 'auto',
+        defaultPorts: hostedPorts(desc),
+        defaultData: {
+            ...paramDefaults,
+            [HOSTED_PLUGIN_DESCRIPTOR_KEY]: desc,
+        },
+        dimensions: { width: 190, height: 120 },
+        canEnter: false,
+    };
 }
 
 // ============================================================================
@@ -133,6 +226,10 @@ export function makeDspNodeDefinition(desc: DspNodeDescriptor): NodeDefinition {
         category: 'effects',
         name: desc.name,
         description: desc.description ?? 'AI-authored DSP effect',
+        // An AI code node renders its REAL compiled params via the FREE
+        // AutoParamPanel (manifestForDynamic also reports ui:'auto'), never a
+        // bespoke component — so the single-source `ui` field is 'auto' here.
+        ui: 'auto',
         defaultPorts: EFFECT_DYNAMIC_PORTS.map((port) => ({ ...port })),
         defaultData: {
             effectType: 'distortion',

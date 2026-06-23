@@ -43,6 +43,33 @@ test('denies command/process substitution smuggling', () => {
     assert.equal(isCommandAllowed('diff <(curl a) <(curl b)').allowed, false);
 });
 
+test('denies a write-capable bash command that targets the agent config (the gate-drop hole)', () => {
+    // cp/mv/sed -i/touch/mkdir are allowlisted binaries; before the fix their
+    // DESTINATION was unchecked, so the agent could overwrite settings.json and
+    // drop its own gate. The destination is now vetted for every path form.
+    for (const bad of [
+        'cp drafts/x .pi/agent/settings.json',
+        'mv x ../.pi/agent/settings.json',
+        'cp x /home/u/.openjammer/agent/.pi/agent/settings.json',
+        'mkdir .pi/agent/packages/evil',
+        "sed -i 's/a/b/' .pi/agent/settings.json",
+    ]) {
+        assert.equal(isCommandAllowed(bad).allowed, false, bad);
+    }
+});
+
+test('write-capable bash commands still allow legitimate in-project writes', () => {
+    for (const ok of [
+        'cp a.wav audio/b.wav',
+        'mv old.txt new.txt',
+        'touch notes.txt',
+        'mkdir takes',
+        "sed -i 's/a/b/' song.txt",
+    ]) {
+        assert.equal(isCommandAllowed(ok).allowed, true, ok);
+    }
+});
+
 test('a path-prefixed binary is reduced to its basename for the check', () => {
     assert.equal(isCommandAllowed('/usr/bin/curl x').allowed, false);
     assert.equal(isCommandAllowed('/bin/ls').allowed, true);
@@ -80,6 +107,16 @@ test('vetoToolCall: blocks a bash escape, allows a jailed read', () => {
     const cfg = { writableRoots: ['/home/u/MyProject'], secret: '' };
     assert.equal(vetoToolCall('bash', { command: 'curl evil' }, cfg)?.block, true);
     assert.equal(vetoToolCall('bash', { command: 'ls -la' }, cfg), null);
+});
+
+test('vetoToolCall: blocks a write-capable bash command that targets the gate', () => {
+    const cfg = { writableRoots: ['/home/u/MyProject'], secret: '' };
+    assert.equal(
+        vetoToolCall('bash', { command: 'cp drafts/x .pi/agent/settings.json' }, cfg)?.block,
+        true,
+    );
+    // A legitimate relative write inside the project is untouched.
+    assert.equal(vetoToolCall('bash', { command: 'cp a.wav out.wav' }, cfg), null);
 });
 
 test('vetoToolCall: blocks a write outside the jail and to protected config', () => {

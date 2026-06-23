@@ -16,6 +16,7 @@
 import type { Event as EngineEvent } from '../../../packages/oj-protocol-ts/src/index';
 import { useLogStore } from '../../store/logStore';
 import { setEngineHealth } from '../../store/engineHealthStore';
+import { setNodePluginLoadError } from './pluginLoadError';
 
 /**
  * Coalesce a batch of engine events so a per-block fault storm collapses to a
@@ -61,6 +62,100 @@ export function coalesceEvents(events: readonly EngineEvent[]): EngineEvent[] {
         out.push({ ...xrun, kind: { Xrun: { dropped: xrunDropped } } });
     }
     return out;
+}
+
+/**
+ * Rewrite each NodeFault's engine `node` index to its VISUAL node id (via the
+ * executor's reverse index), so a fault the agent reads in get_logs /
+ * get_diagnostics is addressable to a canvas node instead of an opaque engine
+ * number. Pure; the native executor calls it on a drained batch BEFORE
+ * {@link coalesceEvents} / {@link ingestEngineEvents}.
+ *
+ * A fault whose index has NO mapping (a just-removed node) passes through
+ * unchanged. The protocol types `node` as the numeric NodeIdx; at this LOG/agent
+ * boundary we repurpose it to the visual id, so the rewrite is a localized cast —
+ * and the coalesce dedup key (`node|fault`) stays stable per node (a stable
+ * string), so a per-block storm still collapses to one entry.
+ */
+export function remapFaultNodes(
+    events: readonly EngineEvent[],
+    resolve: (node: number) => string | undefined,
+): EngineEvent[] {
+    return events.map((ev) => {
+        const kind = ev.kind;
+        if (typeof kind === 'object' && 'NodeFault' in kind) {
+            const visual = resolve(kind.NodeFault.node);
+            if (visual !== undefined) {
+                return {
+                    ...ev,
+                    kind: { NodeFault: { ...kind.NodeFault, node: visual as unknown as number } },
+                };
+            }
+        }
+        return ev;
+    });
+}
+
+/**
+ * Tap a drained event batch for RUNTIME CRASH faults (`NodeFault` with
+ * `fault === 'Crashed'`) and badge the affected node — the runtime twin of the
+ * load-degraded "(missing plugin)" badge, sharing the one `setNodePluginLoadError`
+ * SSOT. A hosted plugin that crashed mid-set (the per-node fault latch) or a
+ * trapped code node thus shows the same non-modal node badge.
+ *
+ * SET-ONLY: clearing is owned solely by the next clean `push_graph` (its
+ * degraded-id loop sets `false` for every non-degraded node), so a fresh
+ * instantiate on a graph swap auto-clears both the load- and runtime-degraded
+ * badge — one clear-owner, no flicker. `resolve` maps the engine `NodeIdx` to its
+ * visual node id (each tier owns its reverse index). Shared by BOTH executors so
+ * there is one runtime-fault owner, not a fork (the same covenant as the rest of
+ * this pipe). Other fault kinds (NonFinite/OverBudget/AutoBypassed) are NOT badged
+ * here — those are transient/watchdog and stay in the DevLog via `ingestEngineEvents`.
+ */
+export function routeRuntimeFaults(
+    events: readonly EngineEvent[],
+    resolve: (engineNode: number) => string | undefined,
+): void {
+    for (const ev of events) {
+        const kind = ev.kind;
+        if (typeof kind !== 'object' || !('NodeFault' in kind)) continue;
+        if (kind.NodeFault.fault !== 'Crashed') continue;
+        const visual = resolve(kind.NodeFault.node);
+        if (visual === undefined) continue;
+        setNodePluginLoadError(visual, true);
+    }
+}
+
+/**
+ * Surface NEWLY-degraded passthrough stubs into the DevLog ring so the agent's
+ * `get_logs` / `get_diagnostics` can SEE a missing or incompatible hosted plugin —
+ * the LOAD-path twin of {@link routeRuntimeFaults} (the runtime-crash twin). The
+ * engine returns the degraded IR ids from `push_graph`; each executor maps them to
+ * VISUAL ids via its own reverse index and passes the resulting set here, together
+ * with the PRIOR push's degraded set. A node is logged ONCE, the push it first
+ * degrades — not on every steady re-push — because a still-broken plugin re-degrades
+ * every push and an unfiltered append would evict real history from the 5000-cap
+ * ring (the same storm-protection reasoning as {@link coalesceEvents}). One `Warn`
+ * entry per newcomer; `describe` (shared via {@link import('./pluginLoadError').describeNodeForLog})
+ * builds its label so both tiers read identically. The structured `fields.degraded`
+ * is the SSOT the node-diagnostics facet reads (no fragile message regex).
+ */
+export function logNewlyDegradedStubs(
+    nowDegraded: ReadonlySet<string>,
+    prevDegraded: ReadonlySet<string>,
+    describe: (visualId: string) => string,
+): void {
+    const append = useLogStore.getState().append;
+    for (const visual of nowDegraded) {
+        if (prevDegraded.has(visual)) continue;
+        append({
+            level: 'Warn',
+            source: 'Engine',
+            scope: 'engine',
+            message: `${describe(visual)}: degraded to passthrough — missing or incompatible plugin`,
+            fields: { node: visual, degraded: true },
+        });
+    }
 }
 
 /**

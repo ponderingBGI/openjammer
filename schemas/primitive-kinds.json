@@ -10,16 +10,19 @@
     "Waveshaper",
     "Delay",
     "Convolution",
+    "Pan",
+    "Width",
     "FaustHost",
     "WasmHost",
     "PluginHost",
     "Add",
+    "Subtract",
+    "Multiply",
     "MicIn",
     "SpeakerOut",
     "GraphIn",
     "GraphOut",
     "Passthrough",
-    "Looper",
-    "Recorder"
+    "Looper"
   ]
 }

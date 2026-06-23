@@ -24,8 +24,8 @@ import type { Connection, GraphNode } from '../../engine/types';
 function makeNode(id: string, overrides: Partial<CrdtNode> = {}): CrdtNode {
     return {
         id,
-        type: 'amplifier',
-        category: 'effects',
+        type: 'multiplier',
+        category: 'utility',
         position: { x: 0, y: 0 },
         data: { gain: 1 },
         ports: [],
@@ -229,7 +229,7 @@ describe('GraphStoreBridge origin tagging', () => {
         storeA.setState((s) => {
             const nodes = new Map(s.nodes);
             nodes.set('n1', {
-                id: 'n1', type: 'amplifier', category: 'effects',
+                id: 'n1', type: 'multiplier', category: 'utility',
                 position: { x: 5, y: 5 }, data: { gain: 2 }, ports: [],
                 parentId: null, childIds: [], specialNodes: [],
             });
@@ -306,7 +306,7 @@ describe('GraphStoreBridge origin tagging', () => {
 
 function mkNode(id: string): GraphNode {
     return {
-        id, type: 'amplifier', category: 'effects',
+        id, type: 'multiplier', category: 'utility',
         position: { x: 0, y: 0 }, data: {}, ports: [],
         parentId: null, childIds: [], specialNodes: [],
     };

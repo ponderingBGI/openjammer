@@ -30,6 +30,14 @@ clap-host = ["dep:clack-host", "dep:clack-extensions"]
 # default build needs none of that.
 juce = ["dep:cmake"]
 
+# NOTE on the dev/test crash-boundary harness: it is gated on the ENV VAR
+# `OJHOST_FAULT_INJECT=1` (read by build.rs), NOT a cargo feature. A feature would
+# be a new feature-combo → a SECOND full JUCE FetchContent clone + rebuild (~1 GB,
+# minutes) just to flip one `#ifdef`; the env var keeps the `{juce}` feature set so
+# the existing JUCE build is reused and only `ojhost_juce.cpp` recompiles. build.rs
+# emits `--cfg oj_fault_inject` when the var is set, so the Rust + C++ sides agree.
+# See `crates/ojhost/build.rs` and `cpp/ojhost_juce.cpp`.
+
 [dependencies]
 # Engine ABI: a hosted plugin is a `DspInstance` minted by a `PluginLoader`
 # registered under `PrimitiveKind::PluginHost`. `default-features = false`
@@ -44,10 +52,42 @@ serde_json = "1.0.150"
 # Pure-Rust CLAP host (MIT). Only linked with `--features clap-host`. Pinned
 # from a fresh `cargo add` resolve (governing principle #9).
 clack-host = { version = "0.1.0", optional = true }
-# CLAP params extension: query a plugin's parameter list (id/name/range) at scan
-# so the UI shows real knobs, and drive values via core param events. Same
+# CLAP params + state extensions: query a plugin's parameter list (id/name/range)
+# at scan so the UI shows real knobs and drive values via core param events; and
+# save/restore the plugin's opaque state (the `oj.state` capability — host-managed
+# binary streams) so a project reopens with its CLAP plugins restored. Same
 # pure-Rust clack family (MIT); only linked with `--features clap-host`.
-clack-extensions = { version = "0.1.0", optional = true, features = ["clack-host", "params"] }
+clack-extensions = { version = "0.1.0", optional = true, features = ["clack-host", "params", "state"] }
+
+[dev-dependencies]
+# CodSpeed-compatible criterion: plain criterion locally, instruction-count +
+# allocation instrumented in CI. Benchmarks the hosted-plugin control plane that
+# must stay off-RT but still instant for live use (scan cache, ids, registration).
+codspeed-criterion-compat = "4.7.0"
+# clack PLUGIN side (MIT) — test-only. Lets the CLAP-state round-trip test define an
+# IN-PROCESS clack plugin (no `.clap` dylib, no audio device) so CI verifies the
+# real `clap_plugin_state` save/load against `ClapBackend`. Only compiled for tests;
+# the state test itself is gated to the `clap-host` cfg (where `clap.rs` exists).
+clack-plugin = "0.1.0"
+
+# clack-extensions PLUGIN side (test-only): the `clack-plugin` feature exposes
+# `PluginStateImpl` so the in-process state stub can implement the CLAP state
+# extension. Unifies with the normal (`clack-host`) optional dep for the clap-host
+# test build; harmless (plugin-side only) when clap-host is off.
+[dev-dependencies.clack-extensions]
+version = "0.1.0"
+features = ["clack-plugin", "state"]
+
+# clack-host with its `clack-plugin` feature (test-only): exposes
+# `PluginEntry::load_from_clack`, which loads an IN-PROCESS clack plugin (no dylib).
+# Unifies with the normal optional clack-host dep for the clap-host test build.
+[dev-dependencies.clack-host]
+version = "0.1.0"
+features = ["clack-plugin"]
+
+[[bench]]
+name = "hosting"
+harness = false
 
 [build-dependencies]
 # Drives the CMake build of the bundled C++ JUCE host. Only used with

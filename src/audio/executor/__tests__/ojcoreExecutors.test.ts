@@ -79,8 +79,9 @@ function mockBridge(): { bridge: OjcoreBridge; sent: RtCommand[]; loaded: unknow
         sendCommand: (cmd) => {
             sent.push(cmd);
         },
-        loadSample: (nodeId, pcm, sampleRate, rootNote) => {
-            loaded.push({ nodeId, len: pcm.length, sampleRate, rootNote });
+        nodeLevel: () => 0,
+        loadSample: (nodeId, pcm, sampleRate, rootNote, channels) => {
+            loaded.push({ nodeId, len: pcm.length, sampleRate, rootNote, channels });
             return Promise.resolve();
         },
         startCapture: () => {},
@@ -125,42 +126,53 @@ describe('ojcore executors return real (never-null) capability handles', () => {
 // ---------------------------------------------------------------------------
 
 describe('looper handle maps actions to the right RtCommand::Looper', () => {
-    it('record sends ARM then RECORD; stop sends STOP', async () => {
+    it('record sends RECORD (not ARM); stop sends STOP', async () => {
         const { bridge, sent } = mockBridge();
         const looper = new OjcoreLooperHandle('looper-1', bridge);
 
         await looper.startRecording();
-        expect(sent).toEqual([
-            { Looper: { node: 7, action: LooperAction.ARM } },
-            { Looper: { node: 7, action: LooperAction.RECORD } },
-        ]);
+        // New engine-driven flow: RECORD only — ARM would clear existing layers.
+        expect(sent).toEqual([{ Looper: { node: 7, action: LooperAction.RECORD, arg: 0 } }]);
 
         sent.length = 0;
         looper.stopRecording();
-        expect(sent).toEqual([{ Looper: { node: 7, action: LooperAction.STOP } }]);
+        expect(sent).toEqual([{ Looper: { node: 7, action: LooperAction.STOP, arg: 0 } }]);
     });
 
-    it('deleting the last loop clears the engine buffer', async () => {
+    it('deleting a loop sends the indexed DELETE_LAYER command', async () => {
         const { bridge, sent } = mockBridge();
         const looper = new OjcoreLooperHandle('looper-1', bridge);
         await looper.startRecording();
         looper.stopRecording();
+        // The row is created by the engine commit edge, not stopRecording.
+        looper.onEngineEdge(2 /* RECORDING */, 3 /* PLAYING */);
         const loops = looper.getLoops();
         expect(loops).toHaveLength(1);
 
         sent.length = 0;
         looper.deleteLoop(loops[0].id);
-        expect(sent).toEqual([{ Looper: { node: 7, action: LooperAction.CLEAR } }]);
+        expect(sent).toEqual([
+            { Looper: { node: 7, action: LooperAction.DELETE_LAYER, arg: 0 } },
+        ]);
         expect(looper.getLoops()).toHaveLength(0);
     });
 
-    it('stopRecording mirrors a loop layer the UI can render', async () => {
+    it('the engine commit edge (RECORDING -> PLAYING) mirrors a loop layer the UI can render', async () => {
         const { bridge } = mockBridge();
         const looper = new OjcoreLooperHandle('looper-1', bridge);
         const added: string[] = [];
         looper.setOnLoopAdded((l) => added.push(l.id));
         await looper.startRecording();
+        // The engine streams live-trace frames during the pass (the real meter
+        // peak per block); these accumulate and build the committed row's waveform.
+        looper.onEngineFrame(2 /* RECORDING */, 10, 480, 0.4);
+        looper.onEngineFrame(2 /* RECORDING */, 20, 480, 0.6);
         looper.stopRecording();
+        // No row yet — stopRecording only sends STOP.
+        expect(added).toHaveLength(0);
+        // The authoritative commit creates the row, carrying the live trace (the
+        // TRUE captured PCM upgrades the shape later on its own seam).
+        looper.onEngineEdge(2 /* RECORDING */, 3 /* PLAYING */);
         expect(added).toHaveLength(1);
         const [loop] = looper.getLoops();
         expect(loop.waveformData.length).toBeGreaterThan(0);
@@ -187,7 +199,7 @@ describe('sampler handle maps config to SetParam and loads PCM', () => {
         ]);
     });
 
-    it('setBuffer downmixes to mono PCM and lowers it into the engine', () => {
+    it('setBuffer interleaves a stereo buffer and lowers it into the engine', () => {
         const { bridge, loaded } = mockBridge();
         const sampler = new OjcoreSamplerHandle('sampler-1', bridge);
         const fakeBuffer = {
@@ -199,7 +211,11 @@ describe('sampler handle maps config to SetParam and loads PCM', () => {
 
         sampler.setBuffer(fakeBuffer);
         expect(sampler.getBuffer()).toBe(fakeBuffer);
-        expect(loaded).toEqual([{ nodeId: 'sampler-1', len: 4, sampleRate: 44100, rootNote: 60 }]);
+        // Interleaved (no downmix): 4 frames x 2 channels = 8 samples, channels = 2,
+        // so a stereo sample plays in true stereo (parity with the native catalog).
+        expect(loaded).toEqual([
+            { nodeId: 'sampler-1', len: 8, sampleRate: 44100, rootNote: 60, channels: 2 },
+        ]);
 
         // Clearing the buffer does not attempt a load.
         loaded.length = 0;
@@ -215,6 +231,7 @@ describe('recorder handle captures via the bridge and surfaces a blob', () => {
         const bridge: OjcoreBridge = {
             nodeIndex: () => 7,
             sendCommand: () => {},
+            nodeLevel: () => 0,
             loadSample: () => Promise.resolve(),
             startCapture: (id) => captured.push(`start:${id}`),
             stopCapture: (id) => {
@@ -353,7 +370,8 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
                     typeof cmd === 'object' && cmd !== null && 'Looper' in cmd,
             );
         const actions = looperCmds.map((c) => c.Looper.action);
-        expect(actions).toContain(LooperAction.ARM);
+        // New engine-driven flow: RECORD (never ARM) then STOP.
+        expect(actions).not.toContain(LooperAction.ARM);
         expect(actions).toContain(LooperAction.RECORD);
         expect(actions).toContain(LooperAction.STOP);
         // Every looper command addresses the same interned NodeIdx.
@@ -388,11 +406,53 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
 
         ex.setSpeakerVolume('speaker-1', 0.7, false);
         ex.setSpeakerDevice('speaker-1', 'dev-2');
-        ex.setMicrophoneOutput('looper-1', {} as AudioNode);
+        ex.setMicrophoneInput('looper-1', { isMuted: false });
 
         expect(calls.some((c) => c.cmd === 'set_speaker_volume')).toBe(true);
         expect(calls.some((c) => c.cmd === 'set_speaker_device')).toBe(true);
         expect(calls.some((c) => c.cmd === 'set_mic')).toBe(true);
+        ex.dispose();
+    });
+
+    it('speaker volume forwards volume + muted to set_speaker_volume (engine bakes master VOLUME/MUTE)', async () => {
+        // The native engine's `set_speaker_volume` routes BOTH a SetParam(master
+        // VOLUME=0) and SetParam(master MUTE=1) to the live engine (engine.rs), so
+        // volume is applied ONCE by exec.rs `master_gain`. Here we pin the IPC seam:
+        // the executor forwards the UI's volume + mute intent verbatim.
+        const calls = installMockTauri();
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, looperGraph());
+        await flush();
+
+        ex.setSpeakerVolume('speaker-1', 0.3, false);
+        ex.setSpeakerVolume('speaker-1', 0.9, true);
+
+        const volCalls = calls.filter((c) => c.cmd === 'set_speaker_volume');
+        expect(volCalls).toHaveLength(2);
+        // Live: volume passed through, muted false.
+        expect(volCalls[0].args).toMatchObject({ volume: 0.3, muted: false });
+        // Muted: the executor sends volume 0 + muted true (engine forces gain to 0).
+        expect(volCalls[1].args).toMatchObject({ volume: 0, muted: true });
+        // Every call addresses the interned SpeakerOut NodeIdx (not undefined).
+        expect(typeof volCalls[0].args?.node).toBe('number');
+        ex.dispose();
+    });
+
+    it('mic mute maps to set_mic(enabled=false); unmute to enabled=true', async () => {
+        const calls = installMockTauri();
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, looperGraph());
+        await flush();
+
+        // Unmuted intent enables the engine mic; muted intent disables it — the
+        // engine MicIn then reads silence, so a "muted" mic is provably off.
+        ex.setMicrophoneInput('looper-1', { isMuted: false });
+        ex.setMicrophoneInput('looper-1', { isMuted: true });
+
+        const micCalls = calls.filter((c) => c.cmd === 'set_mic');
+        expect(micCalls.length).toBe(2);
+        expect(micCalls[0].args).toMatchObject({ enabled: true });
+        expect(micCalls[1].args).toMatchObject({ enabled: false });
         ex.dispose();
     });
 
@@ -532,6 +592,147 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         ex.dispose();
     });
 
+    it('routes a drained Looper frame to the looper handle onEngineFrame (ungated by meters)', async () => {
+        // The single meter ring now carries Meter AND Looper frames; the executor
+        // must route a Looper frame to the handle WITHOUT any signal-level
+        // subscriber mounted (the row/playhead surfaces even with meters off).
+        vi.useFakeTimers();
+        const graph = looperGraph();
+        // looper-1 interns to NodeIdx 0. poll_meters returns a Looper frame for it.
+        const looperFrame: EngineFrame = {
+            Looper: { node: 0, state: 3 /* PLAYING */, pos: 240, loop_len: 480, peak: 0.5 },
+        };
+        installMockTauri((cmd) => {
+            if (cmd === 'poll_meters') return [looperFrame];
+            return undefined;
+        });
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, graph);
+        await flush();
+
+        // NO subscribeSignalLevels here — proves the looper drain is ungated.
+        const looper = ex.getLooper('looper-1') as unknown as {
+            getEngineState(): number;
+        };
+        await vi.advanceTimersByTimeAsync(120);
+
+        // The frame's state drove the handle (3 == PLAYING).
+        expect(looper.getEngineState()).toBe(3);
+        ex.dispose();
+    });
+
+    it('routes a drained LooperEdge event to the looper handle onEngineEdge (creates a row)', async () => {
+        // A RECORDING->PLAYING edge on the loss-proof event ring is the authoritative
+        // commit: it must reach onEngineEdge and create exactly one UI row.
+        vi.useFakeTimers();
+        const graph = looperGraph();
+        // poll_events returns one LooperEdge for the looper node (NodeIdx 0).
+        const edgeEvent = {
+            v: 1,
+            seq: 1,
+            severity: 'Info',
+            kind: { LooperEdge: { node: 0, from: 2 /* RECORDING */, to: 3 /* PLAYING */ } },
+            source: 'Native',
+            ts_us: 0,
+            corr_id: 0,
+        };
+        installMockTauri((cmd) => {
+            if (cmd === 'poll_events') return [edgeEvent];
+            return undefined;
+        });
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, graph);
+        await flush();
+
+        const looper = ex.getLooper('looper-1');
+        const added: string[] = [];
+        (looper as unknown as { setOnLoopAdded(cb: (l: { id: string }) => void): void }).setOnLoopAdded(
+            (l) => added.push(l.id),
+        );
+        // Advance past the event-drain cadence (100 ms).
+        await vi.advanceTimersByTimeAsync(150);
+
+        expect(added).toHaveLength(1);
+        expect(looper.getLoops()).toHaveLength(1);
+        ex.dispose();
+    });
+
+    it('a commit edge pulls the take PCM via looper_take_pcm and upgrades the row (Stage 3)', async () => {
+        // On a RECORDING|OVERDUBBING -> PLAYING commit edge the native executor must
+        // ALSO call `looper_take_pcm` (the take PCM rides the command RETURN, not an
+        // EngineFrame) and feed the result into the handle's onLayerPcm — so the row
+        // gets the TRUE waveform (and, with a context, a real buffer for drag/export).
+        vi.useFakeTimers();
+        const graph = looperGraph();
+        // A Looper frame first establishes the cached loop_len; then the commit edge.
+        const looperFrame: EngineFrame = {
+            Looper: { node: 0, state: 2 /* RECORDING */, pos: 100, loop_len: 480, peak: 0.4 },
+        };
+        const edgeEvent = {
+            v: 1,
+            seq: 1,
+            severity: 'Info',
+            kind: { LooperEdge: { node: 0, from: 2 /* RECORDING */, to: 3 /* PLAYING */ } },
+            source: 'Native',
+            ts_us: 0,
+            corr_id: 0,
+        };
+        // The take PCM the engine returns for the committed cycle (a ramp).
+        const takePcm = [0, 0.3, 0.6, 0.9];
+        const takeCalls: Array<Record<string, unknown> | undefined> = [];
+        installMockTauri((cmd, args) => {
+            if (cmd === 'poll_meters') return [looperFrame];
+            if (cmd === 'poll_events') return [edgeEvent];
+            if (cmd === 'looper_take_pcm') {
+                takeCalls.push(args);
+                return { pcm: takePcm, sample_rate: 48000 };
+            }
+            return undefined;
+        });
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, graph);
+        await flush();
+
+        const looper = ex.getLooper('looper-1');
+        // Advance past BOTH the meter poll (50 ms, caches loop_len) and the event
+        // drain (100 ms, fires the commit edge + looper_take_pcm), then let the
+        // async take fetch + onLayerPcm settle.
+        await vi.advanceTimersByTimeAsync(160);
+        await flush();
+
+        // The commit edge created the row...
+        expect(looper.getLoops()).toHaveLength(1);
+        // ...and looper_take_pcm was invoked for node 0 with the cached loop length.
+        expect(takeCalls.length).toBeGreaterThan(0);
+        expect(takeCalls[0]).toMatchObject({ node: 0, loopLen: 480 });
+        // The returned PCM became the row's TRUE waveform (peak == PCM peak 0.9).
+        const layer = looper.getLoops()[0];
+        expect(Math.max(...layer.waveformData)).toBeCloseTo(0.9, 5);
+        ex.dispose();
+    });
+
+    it('a looper CLEAR discards the engine take buffer (looper_discard_pcm)', async () => {
+        // A CLEAR aborts an in-flight take, so the native executor must also tell the
+        // engine to discard the off-RT captured PCM — otherwise a later take inherits
+        // a stale tail.
+        const calls = installMockTauri();
+        const ex = new OjcoreNativeExecutor();
+        initWith(ex, looperGraph());
+        await flush();
+
+        // Drive a raw CLEAR through send_command (the handle has no public clear, so
+        // exercise the send seam directly via a looper action the bridge forwards).
+        // toggleLoopMute/delete address committed layers; CLEAR is the abort verb.
+        (ex as unknown as { send(cmd: RtCommand): void }).send({
+            Looper: { node: 0, action: LooperAction.CLEAR, arg: 0 },
+        });
+
+        expect(calls.some((c) => c.cmd === 'looper_discard_pcm')).toBe(true);
+        const discard = calls.find((c) => c.cmd === 'looper_discard_pcm');
+        expect(discard!.args).toMatchObject({ node: 0 });
+        ex.dispose();
+    });
+
     it('recovers engine health from DEGRADED to LIVE after a later accepted push', async () => {
         const graph = looperGraph();
         let pushes = 0;
@@ -566,6 +767,132 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         await flush();
         expect(useEngineHealthStore.getState().health).toBe('LIVE');
 
+        ex.dispose();
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Instrument-switch voice binding: the "switching instruments mutes / collapses
+// every voice to one" regression. A melodic node's default voice is bound
+// out-of-band via `load_sample` (its `instrumentId` is NOT graph data), so the
+// executor's bound-voice state machine must (a) re-bind on EVERY picker change,
+// even when the emitted graph is byte-identical (deduped), and (b) survive a
+// round trip through a Karplus instrument without leaving the node silent.
+// ---------------------------------------------------------------------------
+
+describe('OjcoreNativeExecutor instrument-switch voice binding (mocked Tauri invoke)', () => {
+    afterEach(() => {
+        delete (window as unknown as { __TAURI__?: unknown }).__TAURI__;
+        vi.useRealTimers();
+    });
+
+    /** A `keys` instrument -> speaker graph carrying a picker `instrumentId`. */
+    function instrumentGraph(instrumentId: string): {
+        nodes: Map<string, GraphNode>;
+        connections: Map<string, Connection>;
+    } {
+        const inst = makeNode('keys', 'keys-1');
+        inst.data = { ...inst.data, instrumentId };
+        const speaker = makeNode('speaker', 'speaker-1');
+        const out = inst.ports.find((p) => p.direction === 'output' && p.type === 'audio');
+        const spkIn = speaker.ports.find((p) => p.direction === 'input');
+        const conns = new Map<string, Connection>();
+        if (out && spkIn) {
+            const c = makeConn(inst.id, out.id, speaker.id, spkIn.id);
+            conns.set(c.id, c);
+        }
+        return {
+            nodes: new Map([
+                [inst.id, inst],
+                [speaker.id, speaker],
+            ]),
+            connections: conns,
+        };
+    }
+
+    async function flush(): Promise<void> {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+    }
+
+    function initCapturingNodeCb(
+        ex: OjcoreNativeExecutor,
+        graph: { nodes: Map<string, GraphNode>; connections: Map<string, Connection> },
+    ): () => void {
+        let nodeCb: (() => void) | null = null;
+        ex.initialize(
+            () => () => {},
+            (cb) => {
+                nodeCb = cb as unknown as () => void;
+                return () => {};
+            },
+            () => graph.nodes,
+            () => graph.connections,
+        );
+        return () => nodeCb?.();
+    }
+
+    const loadSampleCalls = (calls: InvokeCall[]): InvokeCall[] =>
+        calls.filter((c) => c.cmd === 'load_sample');
+
+    it('never goes silent across a Sampler→Karplus→Sampler switch (the mute repro)', async () => {
+        const calls = installMockTauri();
+        const graph = instrumentGraph('gm-acoustic-grand-piano'); // a Sampler-family piano
+        const ex = new OjcoreNativeExecutor();
+        const fire = initCapturingNodeCb(ex, graph);
+        await flush();
+        // Initial: the piano default voice was bound (a load_sample fired).
+        expect(loadSampleCalls(calls).length).toBeGreaterThan(0);
+
+        // Switch to Harpsichord — a 'piano'-category instrument that lowers to the
+        // Karplus primitive (note-triggered, NO PCM). The graph kind changes so the
+        // push is not deduped.
+        const node = graph.nodes.get('keys-1')!;
+        node.data = { ...node.data, instrumentId: 'gm-harpsichord' };
+        calls.length = 0;
+        fire();
+        await flush();
+        expect(loadSampleCalls(calls), 'Karplus needs no sample load').toHaveLength(0);
+
+        // Switch BACK to the piano. The engine forward-merges a sample binding only
+        // Sampler->Sampler, so the asset is dropped on the way back; the executor
+        // MUST re-bind the default voice or the node stays silent until reload.
+        node.data = { ...node.data, instrumentId: 'gm-acoustic-grand-piano' };
+        calls.length = 0;
+        fire();
+        await flush();
+        expect(
+            loadSampleCalls(calls).length,
+            'voice re-bound on return — not silent',
+        ).toBeGreaterThan(0);
+        ex.dispose();
+    });
+
+    it('re-binds when switching between two instruments in one family (deduped graph)', async () => {
+        const calls = installMockTauri();
+        const graph = instrumentGraph('gm-acoustic-grand-piano');
+        const ex = new OjcoreNativeExecutor();
+        const fire = initCapturingNodeCb(ex, graph);
+        await flush();
+
+        // Switch to another piano: same family, so the emitted OjGraph is byte-
+        // identical and `push_graph` is deduped — but the picker change must still
+        // re-bind the per-instrument voice (load_sample), or every piano sounds the
+        // same (the "they all sound the same" fix).
+        const node = graph.nodes.get('keys-1')!;
+        node.data = { ...node.data, instrumentId: 'gm-bright-acoustic-piano' };
+        calls.length = 0;
+        fire();
+        await flush();
+        expect(
+            calls.filter((c) => c.cmd === 'push_graph'),
+            'identical audio graph is deduped',
+        ).toHaveLength(0);
+        expect(
+            loadSampleCalls(calls).length,
+            'within-family switch still re-binds the voice',
+        ).toBeGreaterThan(0);
         ex.dispose();
     });
 });

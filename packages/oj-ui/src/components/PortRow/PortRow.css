@@ -54,3 +54,19 @@
 .oj-port-row.is-placeholder .oj-port-row__label {
     color: var(--text-muted);
 }
+
+/* A GATED row (declared but not engine-wired yet) reads as visibly inert: dimmed,
+   so the player sees the surface exists but won't wire a connection that would
+   silently do nothing. Wiring is already prevented by the gated path omitting the
+   Port's pointer handlers plus the canConnect guard, so the row stays hoverable —
+   `pointer-events: none` here would have killed the hover the `title` (the why)
+   needs, so the explanation could never show. cursor:not-allowed signals it. */
+.oj-port-row.is-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.oj-port-row.is-disabled .oj-port-row__label {
+    color: var(--text-muted);
+    font-style: italic;
+}

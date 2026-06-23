@@ -14,11 +14,16 @@
  */
 
 import { listen, getInvoke } from './tauri';
-import { applyToolCall, type DspNodeRegistrar } from './tools';
+import { applyToolCall, applyGetSignal, type DspNodeRegistrar } from './tools';
 import { createGraphStoreApi } from './graphAdapter';
 import { createPlanEnv } from './planAdapter';
 import { createEnvPort } from './envAdapter';
-import { isAgentToolName, type AgentToolCall, type AgentToolName } from './types';
+import {
+    isAgentToolName,
+    type AgentToolCall,
+    type AgentToolName,
+    type GetSignalArgs,
+} from './types';
 
 /** Tools that only READ — safe to run here to return real state to Pi. */
 const READ_TOOLS = new Set<AgentToolName>([
@@ -49,19 +54,31 @@ interface BridgeCall {
  * browser). Safe to call once at app root for the session.
  */
 export async function startBridgeListener(): Promise<(() => void) | null> {
-    return listen<BridgeCall>('oj-bridge-call', (payload) => {
+    return listen<BridgeCall>('oj-bridge-call', async (payload) => {
         const invoke = getInvoke();
         if (!invoke) return;
 
         let result: { ok: boolean; data?: unknown; error?: string };
         try {
-            if (!isAgentToolName(payload.name)) {
+            if (payload.name === 'save_self_package') {
+                // SHAPE-SELF: host-mediated self-modification, NOT a graph tool (so it
+                // is not in AGENT_TOOL_NAMES) — handled before the agent-tool guard.
+                // The Rust command writes the package + registers it cold-start-deferred.
+                const slug = await invoke('ai_save_self_package', payload.args ?? {});
+                result = { ok: true, data: { slug } };
+            } else if (!isAgentToolName(payload.name)) {
                 throw new Error(`Unsupported OpenJammer bridge tool: ${payload.name}`);
-            }
-            const name = payload.name;
-            if (READ_TOOLS.has(name)) {
+            } else if (payload.name === 'get_signal') {
+                // The one ASYNC read: a transient meter probe needs a poll tick to
+                // settle, so it is handled outside the synchronous applyToolCall.
+                const applied = await applyGetSignal(
+                    payload.args as unknown as GetSignalArgs,
+                    createEnvPort(),
+                );
+                result = { ok: applied.ok, data: applied.data };
+            } else if (READ_TOOLS.has(payload.name)) {
                 // The read tool's args ARE its fields; mirror the streamed shape.
-                const call = { name, args: payload.args } as AgentToolCall;
+                const call = { name: payload.name, args: payload.args } as AgentToolCall;
                 const applied = applyToolCall(
                     call,
                     createGraphStoreApi(),

@@ -46,12 +46,20 @@ pub enum PrimitiveKind {
     Waveshaper,
     Delay,
     Convolution,
+    /// Stereo panner: one mono audio input -> a 2-channel (stereo) audio output.
+    /// The first built-in node with `audio_out_channels = 2` (docs/CHANNELS.md).
+    Pan,
+    /// Stereo width (mid/side): a 2-channel audio input -> a 2-channel output. The
+    /// first built-in node with `audio_in_channels = 2` (docs/CHANNELS.md).
+    Width,
     // host-bridged / extension
     FaustHost,
     WasmHost,
     PluginHost,
     // routing / io
     Add,
+    Subtract,
+    Multiply,
     MicIn,
     SpeakerOut,
     GraphIn,
@@ -59,7 +67,6 @@ pub enum PrimitiveKind {
     Passthrough,
     // stateful (U-STATEFUL)
     Looper,
-    Recorder,
 }
 
 /// Looper transport actions carried by [`RtCommand::Looper`], encoded as a
@@ -83,6 +90,40 @@ pub mod looper_action {
     pub const CLEAR: u8 = 4;
     /// Overdub: sum the input into the existing loop while playing it back.
     pub const OVERDUB: u8 = 5;
+    /// Undo the most-recently committed layer (LIFO). `arg` is ignored.
+    pub const UNDO_LAST: u8 = 6;
+    /// Set a layer's mute flag. `arg` is the layer index in its low 31 bits;
+    /// the high bit ([`MUTE_FLAG`]) carries the desired muted state (set =
+    /// muted, clear = unmuted). One action covers both mute and unmute.
+    pub const SET_MUTE: u8 = 7;
+    /// Delete a layer by index. `arg` is the layer index.
+    pub const DELETE_LAYER: u8 = 8;
+
+    /// High bit of [`RtCommand::Looper`](crate::RtCommand::Looper)'s `arg` for
+    /// [`SET_MUTE`]: when set, the addressed layer is muted; when clear, it is
+    /// unmuted. The remaining bits are the layer index.
+    pub const MUTE_FLAG: u32 = 1 << 31;
+}
+
+/// Looper state-machine state codes carried by [`EngineFrame::Looper`] and the
+/// `from`/`to` fields of [`RtEvent::LooperEdge`] / [`EventKind::LooperEdge`].
+///
+/// These MIRROR the `ojcore::LooperState` discriminant order exactly (it has
+/// explicit discriminants and an `as_u8` plain-cast), so the engine emits these
+/// bytes verbatim and the TS mirror reads them as bare numbers. Kept as `u8`
+/// consts (not a serde enum) so the wire frames stay a flat number — the same
+/// pattern as [`looper_action`].
+pub mod looper_state {
+    /// No loop captured / not running.
+    pub const IDLE: u8 = 0;
+    /// Armed: the next record begins capture.
+    pub const ARMED: u8 = 1;
+    /// Recording a from-scratch first take (sets the loop length).
+    pub const RECORDING: u8 = 2;
+    /// Playing back the committed layers.
+    pub const PLAYING: u8 = 3;
+    /// Recording a new layer on top of existing playing layers.
+    pub const OVERDUBBING: u8 = 4;
 }
 
 /// Edge signal kind. The UI's `universal` ports are RESOLVED to `Audio` or
@@ -185,11 +226,16 @@ pub enum RtCommand {
         samples: u64,
     },
     /// Drive a looper node's state machine. `action` is one of the
-    /// [`looper_action`] consts (arm / record / play / stop / clear / overdub).
-    /// `NodeIdx(u32)` + `u8` is 5 payload bytes — well within the 16-byte cap.
+    /// [`looper_action`] consts (arm / record / play / stop / clear / overdub /
+    /// undo_last / set_mute / delete_layer). `arg` addresses a layer for the
+    /// indexed actions (set_mute / delete_layer) — see [`looper_action`] for the
+    /// per-action encoding (e.g. set_mute packs the muted flag in
+    /// [`looper_action::MUTE_FLAG`]) — and is ignored by the transport actions.
+    /// `NodeIdx(u32)` + `u8` + `u32` is 9 payload bytes — within the 16-byte cap.
     Looper {
         node: NodeIdx,
         action: u8,
+        arg: u32,
     },
 }
 
@@ -250,6 +296,18 @@ pub enum EngineFrame {
         beat: u32,
         phase: f32,
     },
+    /// Control-rate looper telemetry for one looper node, published every block
+    /// from the (ungated) looper-publish path. Carries NO audio buffer — only
+    /// the playhead/length/state needed to draw the loop row + playhead. `state`
+    /// is one of the [`looper_state`] codes; `pos`/`loop_len` are sample frames;
+    /// `peak` is the node's last-block output peak for the level meter.
+    Looper {
+        node: NodeIdx,
+        state: u8,
+        pos: u32,
+        loop_len: u32,
+        peak: f32,
+    },
     Error {
         code: u16,
         message: String,
@@ -297,6 +355,12 @@ pub enum FaultKind {
     OverBudget,
     /// The node was auto-bypassed after repeated faults.
     AutoBypassed,
+    /// The node's foreign code (a hosted VST3/CLAP plugin) CRASHED at runtime and
+    /// latched to a dry passthrough (the crash-isolation latch). Distinct from
+    /// `AutoBypassed` (the watchdog) — this is the per-node fault boundary catching
+    /// a real segfault. Surfaces the same "(missing/crashed plugin)" node badge as
+    /// the load-degraded path; cleared by a fresh instantiate on the next graph swap.
+    Crashed,
 }
 
 /// The CLOSED, versioned, control-rate event taxonomy. EXTERNALLY tagged by
@@ -314,6 +378,10 @@ pub enum EventKind {
     Xrun { dropped: u32 },
     /// A per-node DSP fault (NaN / over-budget / auto-bypass).
     NodeFault { node: NodeIdx, fault: FaultKind },
+    /// A looper node's state machine transitioned (e.g. recording -> playing on
+    /// commit). `from`/`to` are [`looper_state`] codes. Rides the loss-proof
+    /// EVENT ring (not the lossy meter ring) so a transition is never dropped.
+    LooperEdge { node: NodeIdx, from: u8, to: u8 },
     /// The event ring overflowed and dropped frames (drop-and-count).
     RingFull,
     /// Asset (sample / IR / SF2) load or decode event.
@@ -337,6 +405,10 @@ pub enum RtEvent {
     Xrun { dropped: u32 },
     /// A per-node DSP fault.
     NodeFault { node: NodeIdx, fault: FaultKind },
+    /// A looper node's state machine transitioned. `from`/`to` are
+    /// [`looper_state`] codes. `NodeIdx(u32)` + two `u8` = 6 payload bytes,
+    /// well within the 16-byte cap proven below.
+    LooperEdge { node: NodeIdx, from: u8, to: u8 },
     /// The event ring overflowed (drop-and-count).
     RingFull,
 }

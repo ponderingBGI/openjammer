@@ -545,6 +545,18 @@ export const InstrumentNode = memo(function InstrumentNode({
                 >
                     {displayName}
                 </span>
+                {/* ERR-1: non-focus-stealing badge when the built-in default voice
+                    failed to load for this node (DEFECT 3). Never a modal/toast — a
+                    held note beats a glitch; the player sees it and chooses when to act. */}
+                {data.voiceLoadError && (
+                    <span
+                        className="instrument-voice-error-badge"
+                        title="This instrument's built-in voice could not be loaded. Reselect it or reload to retry."
+                        aria-label="Voice failed to load"
+                    >
+                        !
+                    </span>
+                )}
             </div>
 
             {/* Main body - clean row layout matching mockup */}

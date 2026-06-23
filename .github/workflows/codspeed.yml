@@ -1,20 +1,33 @@
 name: CodSpeed
 
 # Continuous performance measurement for the OpenJammer hot paths, across all
-# four benched crates:
+# five benched crates:
 #   * ojcore       — engine compile (Kahn topo-sort + routing plan) + process_block
 #   * ojcore-dsp   — the DSP kernels + the master output guards (soft-limit/scrub)
 #   * ojinstrument — polyphonic voice render + a realistic end-to-end patch
 #   * ojproto      — the control-plane wire codec (OjGraph / ParamPatch / RtCommand)
+#   * ojhost       — hosted-plugin control plane (ids, registry insertion, scan cache)
 #
-# Two CodSpeed instruments run on every PR:
-#   * simulation — CPU instruction count (stable to <1% run-to-run); catches an
-#     O(n^2) schedule or a hotter inner loop.
+# Three CodSpeed instruments run on every PR:
+#   * simulation — CPU instruction + cache-model count; catches an O(n^2) schedule
+#     or a hotter inner loop. The regression GATE — but it is only <1% stable when
+#     BASE and HEAD run in the SAME environment. The simulation cost folds in the
+#     system `libm` (the synth kernels call sinf/expf/…) and the host cache model,
+#     so a runner-image or CPU change between the base and head runs shows up as a
+#     uniform double-digit "regression" across UNRELATED benches (e.g. a no-asset
+#     Sampler bench, ~30 ns wall-time, swinging 24%). Pin the image below so the
+#     base/head environment stays constant; for true hardware reproducibility move
+#     to a CodSpeed MACRO runner.
 #   * memory     — heap allocations; turns the zero-alloc covenant into a tracked
 #     per-PR number, complementing the binary `assert_no_alloc` test gate.
-# Both run on the free ubuntu runner (instrumentation-based, no macro runner).
-# This is a work-done / allocation proxy, NOT a wall-clock latency gate — real
-# <5ms latency is the founder-hardware loopback harness's job. CodSpeed
+#   * walltime   — absolute wall-clock CPU time for the end-to-end latency bench
+#     (`ojinstrument/benches/latency.rs`), so the per-block render cost is tracked
+#     in real µs against the block deadline. Wall-clock is hardware-sensitive: it
+#     is reliable on a CodSpeed MACRO runner (`runs-on: codspeed-macro`); on the
+#     free `ubuntu-latest` runner treat the absolute number as indicative and let
+#     `simulation` remain the gate.
+# This is a work-done / allocation / CPU-time proxy, NOT a device round-trip gate
+# — real <5ms latency is the founder-hardware loopback harness's job. CodSpeed
 # authenticates over OIDC (id-token below) — no token secret required.
 
 on:
@@ -36,7 +49,11 @@ concurrency:
 jobs:
   benchmarks:
     name: Run benchmarks
-    runs-on: ubuntu-latest
+    # Pinned (not ubuntu-latest): the simulation gate compares HEAD against the
+    # base branch's run, and a shared-runner image/libm/CPU change between them
+    # manifests as a phantom regression. A fixed image keeps the environment
+    # constant across runs so the comparison reflects code, not infrastructure.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -48,7 +65,7 @@ jobs:
           bins: cargo-codspeed
 
       - name: Build the benchmark target(s) for both instruments
-        run: cargo codspeed build -m simulation -m memory -p ojcore -p ojcore-dsp -p ojproto -p ojinstrument
+        run: cargo codspeed build -m simulation -m memory -p ojcore -p ojcore-dsp -p ojproto -p ojinstrument -p ojhost
 
       - name: Run the benchmarks (CPU simulation)
         uses: CodSpeedHQ/action@63f3e98b61959fe67f146a3ff022e4136fe9bb9c # v4
@@ -61,3 +78,32 @@ jobs:
         with:
           mode: memory
           run: cargo codspeed run -m memory
+
+  # Wall-clock CPU time for the end-to-end latency bench — an absolute-µs reading
+  # of the per-block render cost against the real-time deadline. Separate job so
+  # its noisier instrument never gates the deterministic simulation/memory run.
+  # NOTE: for stable absolute numbers, switch `runs-on` to a CodSpeed macro runner
+  # (`codspeed-macro`); on the shared runner the trend matters more than the value.
+  walltime:
+    name: Run latency benchmark (walltime)
+    # Pinned image (see the benchmarks job); for stable absolute µs, upgrade to a
+    # CodSpeed macro runner — on the shared runner the trend matters, not the value.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Rust toolchain, cache and cargo-codspeed
+        uses: moonrepo/setup-rust@cafffba5d5c8bc38a5120e6e60f3561d541a47cd # v0
+        with:
+          channel: stable
+          cache-target: release
+          bins: cargo-codspeed
+
+      - name: Build the latency benchmark for the walltime instrument
+        run: cargo codspeed build -m walltime -p ojinstrument
+
+      - name: Run the benchmarks (walltime)
+        uses: CodSpeedHQ/action@63f3e98b61959fe67f146a3ff022e4136fe9bb9c # v4
+        with:
+          mode: walltime
+          run: cargo codspeed run -m walltime

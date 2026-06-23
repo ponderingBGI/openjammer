@@ -498,6 +498,21 @@
     border-color: color-mix(in srgb, var(--accent-danger) 40%, transparent);
 }
 
+/* Self-edit — Philia editing its OWN memory/skills, not the canvas. A soft accent
+   wash + dashed edge marks it as "you editing you", distinct from a graph chip
+   without shouting (the music still comes first). */
+.command-bar-chip[data-self] {
+    color: var(--text-secondary);
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--accent, var(--sketch-black)) 45%, var(--border-subtle));
+    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 7%, var(--bg-tertiary));
+}
+
+.command-bar-chip[data-self] .command-bar-chip-glyph {
+    color: var(--accent, var(--sketch-black));
+    opacity: 1;
+}
+
 .command-bar-chip-glyph {
     font-family: var(--font-mono);
     opacity: 0.85;
@@ -1021,6 +1036,30 @@ button.command-bar-ai-thinking:focus-visible {
 .command-bar-ai-sandbox-yolo {
     color: var(--accent-danger);
     font-weight: 700;
+}
+
+/* "memory: on/off" — a quiet truth indicator, not a control. The on-state gets a
+   small accent dot; off stays muted so it never competes with the music. */
+.command-bar-ai-memory {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.command-bar-ai-memory[data-on='true'] {
+    color: var(--text-secondary);
+}
+
+.command-bar-ai-memory[data-on='true']::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 4px;
+    border-radius: 50%;
+    background: var(--accent, var(--sketch-black));
+    vertical-align: middle;
 }
 
 .command-bar-ai-yolo-toggle {

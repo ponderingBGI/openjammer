@@ -25,7 +25,10 @@ import {
     type LogView,
 } from '../store/logStore';
 import { useAudioStore } from '../store/audioStore';
+import { useGraphStore } from '../store/graphStore';
+import { resolveNodeDefinition } from '../engine/registry';
 import { gatherDiagnostics } from '../utils/diagnostics';
+import { getExecutor } from '../audio/executor';
 import { redactText, redactValue } from '../utils/redact';
 import { applyTheme, getSavedThemeId, getThemeById, saveThemeId } from '@openjammer/oj-tokens';
 import type {
@@ -33,10 +36,31 @@ import type {
     DiagnosticsReadResult,
     LogEntrySummary,
     LogsReadResult,
+    NodeDiagnosticsResult,
     SettingsReadResult,
     SettingsUpdateResult,
 } from './tools';
-import type { GetLogsArgs, SettingsPatch } from './types';
+import { SIGNAL_SILENCE_FLOOR, toPortSummary } from './types';
+import type { GetLogsArgs, GetSignalArgs, SettingsPatch, SignalProbeResult } from './types';
+
+/** Max node-scoped log lines the get_diagnostics node facet returns. */
+const NODE_LOG_LIMIT = 25;
+
+/**
+ * Whether a log entry references `nodeId` in its message or any field value — how
+ * the node facet finds the evidence (degraded messages, asset/plugin events, and —
+ * once the fault id-map lands — faults) for ONE node.
+ */
+function entryMentionsNode(e: LogEntry, nodeId: string): boolean {
+    if (e.message.includes(nodeId)) return true;
+    const f = e.fields;
+    if (f && typeof f === 'object') {
+        for (const v of Object.values(f)) {
+            if (v === nodeId || (typeof v === 'string' && v.includes(nodeId))) return true;
+        }
+    }
+    return false;
+}
 
 /** Default number of log entries returned by `get_logs` when no `limit` is given. */
 const DEFAULT_LOG_LIMIT = 50;
@@ -103,6 +127,52 @@ export function createEnvPort(): AgentEnvPort {
                 latencyClass: a.isAudioContextReady ? a.audioMetrics.classification : null,
                 outputDeviceLabel: a.deviceInfo.deviceLabel || null,
                 usbAudioInterface: a.deviceInfo.isUSBAudioInterface,
+            };
+        },
+
+        getNodeDiagnostics(nodeId: string): NodeDiagnosticsResult {
+            const node = useGraphStore.getState().getNode(nodeId);
+            const mentioned = useLogStore
+                .getState()
+                .entries.filter((e) => entryMentionsNode(e, nodeId));
+            const recentLogs = mentioned.slice(-NODE_LOG_LIMIT).reverse().map(toSummary);
+            // Degraded flag: the structured `fields.degraded` the executor stamps on a
+            // degraded-stub entry is the SSOT; the message regex stays only as a
+            // fallback for any other degraded-ish wording.
+            const degraded = mentioned.some(
+                (e) =>
+                    (e.fields as { degraded?: unknown } | undefined)?.degraded === true ||
+                    /degrad|passthrough/i.test(e.message),
+            );
+            if (!node) {
+                return { nodeId, found: false, degraded, recentLogs };
+            }
+            return {
+                nodeId,
+                found: true,
+                type: node.pluginId ?? node.type,
+                name: resolveNodeDefinition({ type: node.type, pluginId: node.pluginId }).name,
+                pluginId: node.pluginId,
+                dataKeys: Object.keys((node.data ?? {}) as Record<string, unknown>),
+                ports: (node.ports ?? []).map(toPortSummary),
+                degraded,
+                recentLogs,
+            };
+        },
+
+        async getSignal(args: GetSignalArgs): Promise<SignalProbeResult> {
+            // Probe the live engine peak off the audio thread (the executor owns the
+            // transient meter subscription). Imported statically: the executor is
+            // already eagerly loaded everywhere (the app's audio core), so a dynamic
+            // import bought no code-splitting — it only tripped Vite's "dynamically
+            // imported … also statically imported" warning. Clamp to 0–1 defensively;
+            // `null` means no live reading (unmetered node, or audio stopped).
+            const raw = await getExecutor().probeSignal(args.nodeId);
+            const peak = raw === null ? null : Math.max(0, Math.min(1, raw));
+            return {
+                nodeId: args.nodeId,
+                peak,
+                hasSignal: peak !== null && peak > SIGNAL_SILENCE_FLOOR,
             };
         },
 

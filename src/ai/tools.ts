@@ -34,7 +34,11 @@ import type {
     BatchApplyArgs,
     EmitPlanArgs,
     FindNodesArgs,
+    GetDiagnosticsArgs,
     GetLogsArgs,
+    GetSignalArgs,
+    PortSummary,
+    SignalProbeResult,
     RemoveConnectionArgs,
     RemoveNodeArgs,
     SettingsPatch,
@@ -42,6 +46,7 @@ import type {
     UpdateSettingsArgs,
     ValidatePlanArgs,
 } from './types';
+import { toPortSummary } from './types';
 import { planToToolCalls, type PlanPortResolver, type RefToId } from './plan';
 import { validatePlan, type PlanError, type PlanLookups } from './planValidator';
 
@@ -65,7 +70,7 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
         name: 'add_node',
         description:
             'Add a node of the given registry `type` to the canvas (e.g. "looper", ' +
-            '"amplifier", "sampler", "speaker"). Mirrors the UI add-node action.',
+            '"multiplier", "sampler", "speaker"). Mirrors the UI add-node action.',
     },
     {
         name: 'remove_node',
@@ -86,13 +91,6 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
     {
         name: 'remove_connection',
         description: 'Remove the connection with the given `connectionId`.',
-    },
-    {
-        name: 'author_dsp_node',
-        description:
-            'Author a brand-new DSP effect from Faust source. Registers a ' +
-            'command-palette entry; on the desktop build with libfaust present the ' +
-            'source is compiled via the ojfaust crate. Reversible by deleting the node.',
     },
     {
         name: 'author_code_node',
@@ -163,7 +161,19 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'Read the environment + live audio snapshot: app version/channel/executor, ' +
             'cross-origin isolation, platform, whether the AudioContext is running, the ' +
             'measured round-trip latency, sample rate, and the selected output device. ' +
-            'Side-effect-free. Call it first when the user says something is broken.',
+            'Pass a `nodeId` to instead get a NODE-scoped debug snapshot (identity, ports, ' +
+            'data keys, a degraded flag, and the logs that mention the node) — the ' +
+            '"why is this node silent?" facet. Side-effect-free. Call it first when the ' +
+            'user says something is broken.',
+    },
+    {
+        name: 'get_signal',
+        description:
+            "Probe a node's LIVE output level by `nodeId`: returns an instantaneous " +
+            'peak (0–1) or null when nothing is metered / audio is stopped. ' +
+            'Side-effect-free. This is the one live read that catches a node which ' +
+            'compiles and wires correctly yet outputs pure silence — if it reads ~0, ' +
+            'probe again (a note may be between transients).',
     },
     {
         name: 'get_settings',
@@ -233,12 +243,19 @@ export interface PerSubCall {
     summary: string;
 }
 
-/** Compact node summary used by the read tools (id/type/data keys). */
+/** Compact node summary used by the read tools (id/type/data keys/ports). */
 export interface NodeSummary {
     id: string;
     type: string;
     /** The KEYS of the node's `data` (not values — keeps the relay small). */
     dataKeys: string[];
+    /**
+     * The node's CURRENT (instance) ports, lean — so the agent wires by a real
+     * port NAME instead of guessing one the validator will reject. Instance ports
+     * (not the type's static defaults), so authored/container nodes show the ports
+     * they actually have.
+     */
+    ports: PortSummary[];
 }
 
 /** Compact connection summary (id + endpoints) used by the read tools. */
@@ -352,6 +369,40 @@ export interface DiagnosticsReadResult {
     usbAudioInterface: boolean;
 }
 
+/**
+ * The `get_diagnostics({ nodeId })` NODE facet: a node-shaped debug snapshot, so
+ * "why is THIS node silent?" is answered from evidence. Only the data KEYS are
+ * included (never values), and they reflect what was last PUSHED to the engine,
+ * not a live read — the running CompiledProgram lives on the audio thread, off-RT.
+ */
+export interface NodeDiagnosticsResult {
+    /** The node id that was asked about. */
+    nodeId: string;
+    /** Whether the node exists on the canvas. */
+    found: boolean;
+    /** The node's registry type, or its open plugin id for an authored node. */
+    type?: string;
+    /** The node's human name from the registry / dynamic def. */
+    name?: string;
+    /**
+     * The open plugin identity for an authored/custom node (e.g. "ai.wasm.<hash>");
+     * the hash content-addresses its source. Undefined for a built-in.
+     */
+    pluginId?: string;
+    /** The KEYS of the node's data (its params as LAST PUSHED — not a live read). */
+    dataKeys?: string[];
+    /** The node's current ports (lean), so a silent node's wiring is inspectable. */
+    ports?: PortSummary[];
+    /**
+     * True when the logs show this node degraded to a passthrough stub (best-effort:
+     * matched from the engine's degraded message; a numeric-only NodeFault won't
+     * correlate until the fault id-map lands).
+     */
+    degraded: boolean;
+    /** Recent log entries that MENTION this node (newest first) — the evidence. */
+    recentLogs: LogEntrySummary[];
+}
+
 /** The `get_settings` / `update_settings` relay: the safe-allowlist settings. */
 export interface SettingsReadResult {
     /** AudioContext sample rate in Hz. */
@@ -393,6 +444,12 @@ export interface AgentEnvPort {
     getLogs(args: GetLogsArgs): LogsReadResult;
     /** Read the environment + live audio diagnostics snapshot. */
     getDiagnostics(): DiagnosticsReadResult;
+    /** Read a NODE-scoped debug snapshot (identity, ports, data keys, a degraded
+     *  flag, and the recent logs that mention the node) for `get_diagnostics({nodeId})`. */
+    getNodeDiagnostics(nodeId: string): NodeDiagnosticsResult;
+    /** Probe a node's LIVE output peak (async: a transient meter read needs a poll
+     *  tick to settle). Returns `peak: null` when no live reading is available. */
+    getSignal(args: GetSignalArgs): Promise<SignalProbeResult>;
     /** Read the current safe-allowlist settings. */
     getSettings(): SettingsReadResult;
     /** Apply a settings patch (allowlisted, reversible). */
@@ -449,7 +506,17 @@ export function applyToolCall(
         case 'get_logs':
             return applyGetLogs(call.args, env);
         case 'get_diagnostics':
-            return applyGetDiagnostics(env);
+            return applyGetDiagnostics(call.args, env);
+        case 'get_signal':
+            // get_signal is ASYNC (a transient meter probe) and is answered live by
+            // the host bridge via {@link applyGetSignal}; the synchronous streamed
+            // path has no value to add, so it is a benign, SILENT no-op here.
+            return {
+                ok: true,
+                summary: 'get_signal is answered live via the host bridge.',
+                undo: NO_OP,
+                data: null,
+            };
         case 'get_settings':
             return applyGetSettings(env);
         case 'update_settings':
@@ -616,6 +683,7 @@ function summarizeNode(node: GraphNode): NodeSummary {
         id: node.id,
         type: node.type,
         dataKeys: Object.keys((node.data ?? {}) as Record<string, unknown>),
+        ports: (node.ports ?? []).map(toPortSummary),
     };
 }
 
@@ -925,10 +993,22 @@ function applyGetLogs(args: GetLogsArgs, env?: AgentEnvPort): AppliedToolResult 
     };
 }
 
-/** `get_diagnostics`: relay the environment + live audio snapshot. SIDE-EFFECT-FREE. */
-function applyGetDiagnostics(env?: AgentEnvPort): AppliedToolResult {
+/**
+ * `get_diagnostics`: relay the environment + live audio snapshot, OR — when a
+ * `nodeId` is given — a NODE-scoped debug snapshot (identity + ports + data keys +
+ * degraded flag + the logs that mention the node). SIDE-EFFECT-FREE.
+ */
+function applyGetDiagnostics(args: GetDiagnosticsArgs, env?: AgentEnvPort): AppliedToolResult {
     if (!env) {
         return { ok: true, summary: `get_diagnostics: ${ENV_MISSING}.`, undo: NO_OP, data: null };
+    }
+    // Node facet: "why is THIS node silent?" — identity, wiring, and the evidence.
+    if (args?.nodeId) {
+        const n = env.getNodeDiagnostics(args.nodeId);
+        const summary = n.found
+            ? `Diagnosed ${n.type ?? 'node'} (${n.nodeId})${n.degraded ? ' — DEGRADED to a passthrough stub' : ''}: ${n.recentLogs.length} recent log line(s) mention it.`
+            : `No node ${args.nodeId} is on the canvas.`;
+        return { ok: true, summary, undo: NO_OP, data: n };
     }
     const d = env.getDiagnostics();
     const audio = d.audioReady
@@ -940,6 +1020,31 @@ function applyGetDiagnostics(env?: AgentEnvPort): AppliedToolResult {
         undo: NO_OP,
         data: d,
     };
+}
+
+/**
+ * `get_signal`: probe a node's LIVE output peak. SIDE-EFFECT-FREE. The one ASYNC
+ * tool — a transient meter probe needs a poll tick to settle — so it is handled
+ * OUTSIDE the synchronous {@link applyToolCall} switch (the bridge awaits it), the
+ * established shape for an async tool (cf. `codeNodeAuthor`). Without an env port
+ * it returns a clearly-labelled null rather than throwing, mirroring the other
+ * diagnostics reads.
+ */
+export async function applyGetSignal(
+    args: GetSignalArgs,
+    env?: AgentEnvPort,
+): Promise<AppliedToolResult> {
+    if (!env) {
+        return { ok: true, summary: `get_signal: ${ENV_MISSING}.`, undo: NO_OP, data: null };
+    }
+    const r = await env.getSignal(args);
+    const summary =
+        r.peak === null
+            ? `No live signal at ${args.nodeId} — it isn't metered, or audio isn't running.`
+            : r.hasSignal
+              ? `${args.nodeId} peak ${r.peak.toFixed(3)} — it is producing sound.`
+              : `${args.nodeId} reads ~0 (silent) right now — probe again if a note may be between transients.`;
+    return { ok: true, summary, undo: NO_OP, data: r };
 }
 
 /** `get_settings`: relay the current safe-allowlist settings. SIDE-EFFECT-FREE. */

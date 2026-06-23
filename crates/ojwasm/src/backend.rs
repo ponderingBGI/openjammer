@@ -13,7 +13,6 @@
 
 use std::sync::OnceLock;
 use std::thread;
-use std::time::Duration;
 
 use wasmtime::{
     Config, Engine, Global, GlobalType, Instance, Linker, Memory, Module, Mutability, Store,
@@ -25,13 +24,10 @@ use crate::{Kernel, KernelTrap};
 /// wasm linear-memory page size (64 KiB).
 const PAGE: usize = 65536;
 
-/// Epoch ticks a single `oj_process` may run before it is pre-empted. The watchdog
-/// ticks every [`WATCHDOG_PERIOD`], so a runaway kernel is bounded to roughly
-/// `EPOCH_BUDGET * WATCHDOG_PERIOD` of wall-time before bypass. Deliberately
-/// generous for v1 so a normal sub-millisecond block never false-trips; tighten
-/// toward the `<5ms` RT budget when the latency benchmark lands.
-const EPOCH_BUDGET: u64 = 8;
-const WATCHDOG_PERIOD: Duration = Duration::from_millis(1);
+// The runaway-kernel epoch guard — `WATCHDOG_PERIOD`, `INIT_EPOCH_BUDGET`, and the
+// per-block `epoch_budget_ticks` — lives in `crate` (lib.rs) so it is unit-tested
+// without the wasmtime dep. The old FIXED 8-tick (~8 ms) budget is gone: the
+// per-block deadline now scales with the block period (`crate::epoch_budget_ticks`).
 
 /// The process-wide, epoch-interruptible wasmtime engine + its watchdog thread.
 ///
@@ -49,7 +45,7 @@ fn shared_engine() -> &'static Engine {
         let _ = thread::Builder::new()
             .name("ojwasm-epoch".into())
             .spawn(move || loop {
-                thread::sleep(WATCHDOG_PERIOD);
+                thread::sleep(crate::WATCHDOG_PERIOD);
                 watch.increment_epoch();
             });
         engine
@@ -84,6 +80,9 @@ struct WasmtimeKernel {
     /// Byte offset of the interleaved output scratch in linear memory.
     out_ptr: usize,
     max_block: usize,
+    /// Per-block epoch deadline (in watchdog ticks), set from the block period in
+    /// `init`; `INIT_EPOCH_BUDGET` until then. See `crate::epoch_budget_ticks`.
+    epoch_budget: u64,
     /// False until `init` grew memory + ran `oj_init` cleanly; a non-usable kernel
     /// makes `process` return [`KernelTrap`] so the host bypasses.
     usable: bool,
@@ -100,7 +99,7 @@ impl WasmtimeKernel {
         let mut store = Store::new(engine, ());
         // Bound a hostile `start` / ctor so instantiation can't hang the control
         // thread (the watchdog is already bumping the epoch).
-        store.set_epoch_deadline(EPOCH_BUDGET);
+        store.set_epoch_deadline(crate::INIT_EPOCH_BUDGET);
         let instance = Instance::new(&mut store, &module, &[]).map_err(|_| ())?;
         let memory = instance.get_memory(&mut store, "memory").ok_or(())?;
         let oj_init = instance
@@ -123,6 +122,7 @@ impl WasmtimeKernel {
             in_ptr: 0,
             out_ptr: 0,
             max_block: 0,
+            epoch_budget: crate::INIT_EPOCH_BUDGET,
             usable: false,
         })
     }
@@ -143,7 +143,8 @@ impl Kernel for WasmtimeKernel {
         let needed_end = self.out_ptr + out_bytes;
         let grow_pages = needed_end.saturating_sub(cur_bytes).div_ceil(PAGE);
         let grown = self.memory.grow(&mut self.store, grow_pages as u64).is_ok();
-        self.store.set_epoch_deadline(EPOCH_BUDGET);
+        self.epoch_budget = crate::epoch_budget_ticks(sample_rate, max_block);
+        self.store.set_epoch_deadline(self.epoch_budget);
         let inited = self
             .oj_init
             .call(&mut self.store, (sample_rate as i32, max_block as i32))
@@ -173,7 +174,7 @@ impl Kernel for WasmtimeKernel {
             }
         }
 
-        self.store.set_epoch_deadline(EPOCH_BUDGET);
+        self.store.set_epoch_deadline(self.epoch_budget);
         self.oj_process
             .call(
                 &mut self.store,
@@ -200,7 +201,7 @@ impl Kernel for WasmtimeKernel {
         if !self.usable {
             return;
         }
-        self.store.set_epoch_deadline(EPOCH_BUDGET);
+        self.store.set_epoch_deadline(self.epoch_budget);
         // A trapped param write poisons the store; the next `process` then returns
         // Err and the host bypasses — so the result is intentionally ignored here.
         let _ = self.oj_param.call(&mut self.store, (idx as i32, value));
@@ -250,6 +251,8 @@ struct FaustWasmKernel {
     in_buf0: usize,
     out_buf0: usize,
     max_block: usize,
+    /// Per-block epoch deadline (in watchdog ticks); see `crate::epoch_budget_ticks`.
+    epoch_budget: u64,
     usable: bool,
 }
 
@@ -264,7 +267,7 @@ impl FaustWasmKernel {
         // (or faust gains an exception-free output mode).
         let module = Module::new(engine, bytes).map_err(|_| ())?;
         let mut store = Store::new(engine, ());
-        store.set_epoch_deadline(EPOCH_BUDGET);
+        store.set_epoch_deadline(crate::INIT_EPOCH_BUDGET);
 
         // faust imports `env.memoryBase` + `env.tableBase` (base offsets for its
         // addresses); a standalone module wants 0 for both.
@@ -316,6 +319,7 @@ impl FaustWasmKernel {
             in_buf0: 0,
             out_buf0: 0,
             max_block: 0,
+            epoch_budget: crate::INIT_EPOCH_BUDGET,
             usable: false,
         })
     }
@@ -364,7 +368,8 @@ impl Kernel for FaustWasmKernel {
             }
         }
 
-        self.store.set_epoch_deadline(EPOCH_BUDGET);
+        self.epoch_budget = crate::epoch_budget_ticks(sample_rate, max_block);
+        self.store.set_epoch_deadline(self.epoch_budget);
         self.usable = self
             .init
             .call(&mut self.store, (self.dsp as i32, sample_rate as i32))
@@ -392,7 +397,7 @@ impl Kernel for FaustWasmKernel {
             }
         }
 
-        self.store.set_epoch_deadline(EPOCH_BUDGET);
+        self.store.set_epoch_deadline(self.epoch_budget);
         self.compute
             .call(
                 &mut self.store,
@@ -427,7 +432,7 @@ impl Kernel for FaustWasmKernel {
         if !self.usable {
             return;
         }
-        self.store.set_epoch_deadline(EPOCH_BUDGET);
+        self.store.set_epoch_deadline(self.epoch_budget);
         let _ = self
             .set_param
             .call(&mut self.store, (self.dsp as i32, idx as i32, value));
