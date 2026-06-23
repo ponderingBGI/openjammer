@@ -825,7 +825,36 @@ impl AudioHost {
         )
     }
 
+    /// Open the stream on a FRESH, dedicated thread, then hand the host back to the
+    /// caller. Why a thread: cpal's WASAPI build calls `CoInitializeEx` (MTA) on the
+    /// CALLING thread, but device-loss recovery + the device picker run from a
+    /// POOLED control thread (Tauri/tokio) whose COM apartment may already be STA —
+    /// set by the webview or the JUCE plugin host once it has run. cpal then fails
+    /// the build with `RPC_E_CHANGED_MODE` ("cannot change thread mode after it is
+    /// set"), so audio never reconnects after a device drop (the exact symptom: a
+    /// transient device-loss, then a rebuild that errors and leaves the app silent).
+    /// A fresh thread has no apartment, so cpal initializes MTA cleanly; the stream
+    /// then runs on cpal's own (also-MTA) audio thread, which keeps the MTA apartment
+    /// — and so the `IAudioClient` — alive after this open thread exits. Every open
+    /// (cold start, device pick, mic toggle, rebuild) shares this isolation, so it is
+    /// reproducible rather than depending on which pooled thread happened to call.
     fn start_inner(
+        req: StreamRequest,
+        engine: Engine,
+        rx: CommandConsumer,
+        opts: StartOptions,
+    ) -> Result<Self, HostError> {
+        std::thread::Builder::new()
+            .name("oj-audio-open".to_string())
+            .spawn(move || Self::build_host(req, engine, rx, opts))
+            .map_err(|e| HostError::Stream(format!("could not spawn audio-open thread: {e}")))?
+            .join()
+            .map_err(|_| HostError::Stream("audio-open thread panicked".to_string()))?
+    }
+
+    /// The actual stream build — runs on the dedicated `oj-audio-open` thread (see
+    /// [`AudioHost::start_inner`]) so the WASAPI/COM apartment is always clean.
+    fn build_host(
         req: StreamRequest,
         mut engine: Engine,
         mut rx: CommandConsumer,
