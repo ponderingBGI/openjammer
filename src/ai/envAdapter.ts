@@ -135,8 +135,14 @@ export function createEnvPort(): AgentEnvPort {
                 .getState()
                 .entries.filter((e) => entryMentionsNode(e, nodeId));
             const recentLogs = mentioned.slice(-NODE_LOG_LIMIT).reverse().map(toSummary);
-            // Best-effort degraded flag from the engine's degraded-stub message.
-            const degraded = mentioned.some((e) => /degrad|passthrough/i.test(e.message));
+            // Degraded flag: the structured `fields.degraded` the executor stamps on a
+            // degraded-stub entry is the SSOT; the message regex stays only as a
+            // fallback for any other degraded-ish wording.
+            const degraded = mentioned.some(
+                (e) =>
+                    (e.fields as { degraded?: unknown } | undefined)?.degraded === true ||
+                    /degrad|passthrough/i.test(e.message),
+            );
             if (!node) {
                 return { nodeId, found: false, degraded, recentLogs };
             }

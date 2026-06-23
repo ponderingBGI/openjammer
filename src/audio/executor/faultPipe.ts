@@ -127,6 +127,38 @@ export function routeRuntimeFaults(
 }
 
 /**
+ * Surface NEWLY-degraded passthrough stubs into the DevLog ring so the agent's
+ * `get_logs` / `get_diagnostics` can SEE a missing or incompatible hosted plugin —
+ * the LOAD-path twin of {@link routeRuntimeFaults} (the runtime-crash twin). The
+ * engine returns the degraded IR ids from `push_graph`; each executor maps them to
+ * VISUAL ids via its own reverse index and passes the resulting set here, together
+ * with the PRIOR push's degraded set. A node is logged ONCE, the push it first
+ * degrades — not on every steady re-push — because a still-broken plugin re-degrades
+ * every push and an unfiltered append would evict real history from the 5000-cap
+ * ring (the same storm-protection reasoning as {@link coalesceEvents}). One `Warn`
+ * entry per newcomer; `describe` (shared via {@link import('./pluginLoadError').describeNodeForLog})
+ * builds its label so both tiers read identically. The structured `fields.degraded`
+ * is the SSOT the node-diagnostics facet reads (no fragile message regex).
+ */
+export function logNewlyDegradedStubs(
+    nowDegraded: ReadonlySet<string>,
+    prevDegraded: ReadonlySet<string>,
+    describe: (visualId: string) => string,
+): void {
+    const append = useLogStore.getState().append;
+    for (const visual of nowDegraded) {
+        if (prevDegraded.has(visual)) continue;
+        append({
+            level: 'Warn',
+            source: 'Engine',
+            scope: 'engine',
+            message: `${describe(visual)}: degraded to passthrough — missing or incompatible plugin`,
+            fields: { node: visual, degraded: true },
+        });
+    }
+}
+
+/**
  * Coalesce + ingest a batch of engine fault events and update engine health.
  * The single shared sink for BOTH executor tiers (native poll + wasm worklet
  * post). Coalescing happens here, BEFORE ingest, because a faulting node emits a

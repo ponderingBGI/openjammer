@@ -59,10 +59,10 @@ import {
     monoPcmToWavBlob,
     type OjcoreBridge,
 } from './ojcoreHandles';
-import { ingestEngineEvents, routeRuntimeFaults } from './faultPipe';
+import { ingestEngineEvents, logNewlyDegradedStubs, routeRuntimeFaults } from './faultPipe';
 import { setEngineHealth } from '../../store/engineHealthStore';
 import { setNodeVoiceLoadError } from './voiceLoadError';
-import { setNodePluginLoadError } from './pluginLoadError';
+import { describeNodeForLog, setNodePluginLoadError } from './pluginLoadError';
 import { logger } from '../../utils/log';
 
 /** Scope-bound DevLog logger for the wasm executor. */
@@ -130,6 +130,9 @@ export class OjcoreWasmExecutor implements Executor {
     private index: NodeIdxMap = new Map();
     /** Reverse map NodeIdx -> visual node id, for routing meter frames back. */
     private reverseIndex = new Map<number, string>();
+    /** Visual ids degraded to a passthrough stub on the LAST load — diffed each load
+     *  so a still-broken plugin is logged once, not on every re-push. */
+    private degradedVisualIds = new Set<string>();
     private signalCallbacks = new Set<SignalLevelsCallback>();
     /** Latest per-node levels, keyed by visual node id (for meter delivery). */
     private levels = new Map<string, number>();
@@ -675,9 +678,16 @@ export class OjcoreWasmExecutor implements Executor {
      *  `reverseIndex`; the setter only writes on change (cheap for steady graphs). */
     private applyDegraded(degradedNodeIds: number[]): void {
         const degradedSet = new Set(degradedNodeIds);
+        const nowDegraded = new Set<string>();
         for (const [idx, visualId] of this.reverseIndex) {
-            setNodePluginLoadError(visualId, degradedSet.has(idx));
+            const isDeg = degradedSet.has(idx);
+            setNodePluginLoadError(visualId, isDeg);
+            if (isDeg) nowDegraded.add(visualId);
         }
+        // Surface NEW degradations into the DevLog (the agent's get_logs surface),
+        // diffed against the prior load so a steadily-broken plugin is logged once.
+        logNewlyDegradedStubs(nowDegraded, this.degradedVisualIds, describeNodeForLog);
+        this.degradedVisualIds = nowDegraded;
     }
 
     private onMeterFrame(levels: Array<{ node: number; peak: number }>): void {

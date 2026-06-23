@@ -21,6 +21,19 @@
 import { useGraphStore } from '../../store/graphStore';
 import type { NodeData } from '../../engine/types';
 
+/**
+ * A short human label for a node's degraded log line: `"<id> (<plugin-or-type>)"`.
+ * Used by {@link import('./faultPipe').logNewlyDegradedStubs} so both executor tiers
+ * surface a missing/incompatible plugin to the DevLog in one identical voice. Reads
+ * the live graph node (the same SSOT this module already owns) — never throws on a
+ * just-removed node (falls back to the bare id).
+ */
+export function describeNodeForLog(nodeId: string): string {
+    const node = useGraphStore.getState().nodes.get(nodeId);
+    const what = node?.pluginId ?? node?.type;
+    return what ? `${nodeId} (${what})` : nodeId;
+}
+
 /** Set/clear `pluginLoadError` on a node, off the undo history. */
 export function setNodePluginLoadError(nodeId: string, hasError: boolean): void {
     const store = useGraphStore.getState();
