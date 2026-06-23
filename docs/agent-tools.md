@@ -109,7 +109,7 @@ the previous values). It can never reach past what a user clicking the Settings
 panel can do.
 
 - **get_logs** — Read the on-device DevLog tail (newest first), optionally filtered by `levels`, `scope`, `search`, and `limit`. Side-effect-free. This is how you SEE engine xruns, node faults, MIDI, asset/plugin events, and every console line — diagnose "no sound" from evidence, not guesses.
-- **get_diagnostics** — Read the environment + live audio snapshot: app version/channel/executor, cross-origin isolation, platform, whether the AudioContext is running, the measured round-trip latency, sample rate, and the selected output device. Side-effect-free. Call it first when the user says something is broken.
+- **get_diagnostics** — Read the environment + live audio snapshot: app version/channel/executor, cross-origin isolation, platform, whether the AudioContext is running, the measured round-trip latency, sample rate, and the selected output device. Pass a `nodeId` to instead get a NODE-scoped debug snapshot (identity, ports, data keys, a degraded flag, and the logs that mention the node) — the "why is this node silent?" facet. Side-effect-free. Call it first when the user says something is broken.
 - **get_settings** — Read the user-facing settings you may change: audio sample rate, latency hint, low-latency mode, input/output device, theme, and default velocity. Side-effect-free.
 - **update_settings** — Change settings via a `patch` over the safe allowlist (sampleRate, latencyHint, lowLatencyMode, outputDeviceId, inputDeviceId, themeId, defaultVelocity). Unknown keys are ignored; the change is REVERSIBLE (Ctrl+Z restores the previous values). Use it to FIX a setup — e.g. select the USB interface or switch to the interactive latency hint.
 
