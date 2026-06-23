@@ -406,6 +406,48 @@ fn recorder_stop(
         .map(|(pcm, sample_rate)| RecorderStopResult { pcm, sample_rate }))
 }
 
+/// One hosted plugin's saved opaque state. `node` is the IR node id; `blob` is the
+/// plugin's `getStateInformation` / CLAP-state bytes. The TS layer base64's the blob
+/// into `node.data` for the project file, lockfile-gated on the hosted plugin id.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PluginStateEntry {
+    node: u32,
+    blob: Vec<u8>,
+}
+
+/// SAVE every hosted plugin's opaque state (the `oj.state` save half) for a project
+/// save. One entry per hosted node with non-empty state; empty device-less or with
+/// no hosted plugins.
+#[tauri::command]
+fn save_plugin_states(
+    state: tauri::State<'_, BackendState>,
+) -> Result<Vec<PluginStateEntry>, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .save_plugin_states()
+        .into_iter()
+        .map(|(node, blob)| PluginStateEntry { node, blob })
+        .collect())
+}
+
+/// STAGE opaque restore blobs from a project LOAD; the next `push_graph` restores
+/// each hosted plugin to its saved state (applied before the baked-in params). Call
+/// BEFORE pushing the loaded graph.
+#[tauri::command]
+fn stage_plugin_restores(
+    restores: Vec<PluginStateEntry>,
+    state: tauri::State<'_, BackendState>,
+) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .stage_plugin_restores(restores.into_iter().map(|e| (e.node, e.blob)).collect());
+    Ok(())
+}
+
 /// Looper take PCM + rate returned by [`looper_take_pcm`] for the UI to build a
 /// real `AudioBuffer` (true waveform + drag-to-library/export) for a committed
 /// layer's row.
@@ -712,6 +754,8 @@ pub fn run() {
             poll_meters,
             poll_events,
             load_sample,
+            save_plugin_states,
+            stage_plugin_restores,
             recorder_start,
             recorder_stop,
             looper_take_pcm,

@@ -113,6 +113,31 @@ impl AssetResolver for NoAssets {
     }
 }
 
+/// Resolves a node's saved opaque STATE blob (the `oj.state` RESTORE half) — the
+/// state analogue of [`AssetResolver`]. [`compile_inner`] applies it via
+/// [`DspInstance::restore_state`] right after `activate` and BEFORE the baked-in
+/// `set_param`s, so the blob is the BASE state and the IR's CURRENT param values
+/// always win (a post-load param edit is never overridden by a stale blob). It is
+/// re-applied on EVERY compile, so a graph edit never drops the restored non-param
+/// state. The default [`NoState`] restores nothing; the native host passes one
+/// wrapping the project's staged blobs (`EngineBackend::stage_plugin_restores`).
+pub trait StateResolver {
+    /// Borrow the saved state blob for `node`, if a prior session staged one.
+    fn resolve_state(&self, node: NodeIdx) -> Option<&[u8]>;
+}
+
+/// A resolver that restores no state — the default for [`compile`] /
+/// [`compile_with_assets`] / [`compile_resilient`]. The browser tier and tests use
+/// it (no hosted-plugin opaque state to restore).
+pub struct NoState;
+
+impl StateResolver for NoState {
+    #[inline]
+    fn resolve_state(&self, _node: NodeIdx) -> Option<&[u8]> {
+        None
+    }
+}
+
 /// One source buffer feeding a node input port: `(node slot, output port)`.
 /// `node` is the *compiled* slot index (0..n_nodes), NOT the IR [`NodeIdx`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -282,7 +307,7 @@ pub fn compile_with_assets(
     registry: &PluginRegistry,
     assets: &impl AssetResolver,
 ) -> Result<CompiledProgram, CompileError> {
-    compile_inner(graph, registry, assets, false)
+    compile_inner(graph, registry, assets, &NoState, false)
 }
 
 /// The LENIENT sibling of [`compile_with_assets`] for the project-LOAD path: an
@@ -298,16 +323,33 @@ pub fn compile_resilient(
     registry: &PluginRegistry,
     assets: &impl AssetResolver,
 ) -> Result<CompiledProgram, CompileError> {
-    compile_inner(graph, registry, assets, true)
+    compile_inner(graph, registry, assets, &NoState, true)
+}
+
+/// The LENIENT, STATE-aware compile for the native project-LOAD path: like
+/// [`compile_resilient`] but ALSO restores each hosted plugin's saved opaque blob
+/// (the `oj.state` restore half) via `states`, applied BEFORE the baked-in params
+/// so current params win and the blob is the base. The browser tier / tests use
+/// [`compile_resilient`] (no hosted state); only the native host has a real
+/// [`StateResolver`].
+pub fn compile_resilient_with_state(
+    graph: &OjGraph,
+    registry: &PluginRegistry,
+    assets: &impl AssetResolver,
+    states: &dyn StateResolver,
+) -> Result<CompiledProgram, CompileError> {
+    compile_inner(graph, registry, assets, states, true)
 }
 
 /// Shared implementation of [`compile_with_assets`] (strict) and
 /// [`compile_resilient`] (lenient). `lenient` only changes how an UNREGISTERED
-/// `manifest_id` is handled (stub vs error); everything else is identical.
+/// `manifest_id` is handled (stub vs error); everything else is identical. `states`
+/// restores any per-node saved opaque blob before the baked-in params.
 fn compile_inner(
     graph: &OjGraph,
     registry: &PluginRegistry,
     assets: &impl AssetResolver,
+    states: &dyn StateResolver,
     lenient: bool,
 ) -> Result<CompiledProgram, CompileError> {
     let n = graph.nodes.len();
@@ -380,6 +422,16 @@ fn compile_inner(
             ),
         };
         inst.activate(sample_rate, block_size);
+        // oj.state RESTORE (off-RT, BEFORE params): seed the node with a prior
+        // session's opaque blob so it is the BASE state. The baked-in `set_param`s
+        // below then override with the CURRENT param values, so a post-load param
+        // edit always wins and the blob never reverts it. Re-applied on EVERY
+        // compile, so a graph edit never drops the restored non-param state. Default
+        // `NoState` resolves nothing (browser tier / tests); a hosted plugin pushes
+        // the blob into setStateInformation / the CLAP state extension.
+        if let Some(blob) = states.resolve_state(node.id) {
+            inst.restore_state(blob);
+        }
         // Apply any baked-in param defaults from the IR, then snap smoothers.
         for p in &node.params {
             inst.set_param(p.id, p.value);
@@ -698,6 +750,131 @@ mod channel_lane_tests {
         let spk = prog.slot_of_id(NodeIdx(2)).unwrap();
         assert_eq!(prog.out_channels[spk], 1);
         assert!(prog.out_bufs[spk].is_empty());
+    }
+
+    /// `compile_resilient_with_state` restores a node's saved blob BEFORE the
+    /// baked-in params (so the blob is the BASE and the current param wins), and it
+    /// is re-applied every compile (a graph edit never drops the restored state). A
+    /// node whose `restore_state` sets its value and `set_param` overrides it ends at
+    /// the PARAM value when a param is present (proving restore ran first), and at the
+    /// BLOB value when no param overrides (proving the restore round-trips).
+    #[test]
+    fn compile_restores_state_before_params() {
+        struct StatefulNode {
+            value: u8,
+        }
+        impl DspInstance for StatefulNode {
+            fn activate(&mut self, _sr: f32, _mb: usize) {}
+            fn process(&mut self, _ctx: &mut ProcessCtx<'_, '_>) {}
+            fn set_param(&mut self, _id: u16, v: f32) {
+                self.value = v as u8;
+            }
+            fn restore_state(&mut self, blob: &[u8]) {
+                if let Some(&b) = blob.first() {
+                    self.value = b;
+                }
+            }
+            fn save_state(&self) -> alloc::vec::Vec<u8> {
+                vec![self.value]
+            }
+        }
+        struct StatefulLoader {
+            manifest: PluginManifest,
+        }
+        impl PluginLoader for StatefulLoader {
+            fn manifest(&self) -> &PluginManifest {
+                &self.manifest
+            }
+            fn instantiate(&self, _sr: f32, _mb: usize) -> Box<dyn DspInstance> {
+                Box::new(StatefulNode { value: 0 })
+            }
+        }
+        struct OneState {
+            blob: alloc::vec::Vec<u8>,
+        }
+        impl StateResolver for OneState {
+            fn resolve_state(&self, node: NodeIdx) -> Option<&[u8]> {
+                (node == NodeIdx(1)).then(|| self.blob.as_slice())
+            }
+        }
+
+        let manifest = |id: &str| PluginManifest {
+            abi: None,
+            id: String::from(id),
+            name: String::from("Stateful"),
+            kind: PrimitiveKind::Osc,
+            dsp: DspKind::Builtin,
+            ui: UiKind::Auto,
+            params: vec![],
+            ports: PortDecl {
+                audio_in: 0,
+                audio_out: 1,
+                control_in: 0,
+                control_out: 0,
+                audio_in_channels: 1,
+                audio_out_channels: 1,
+            },
+        };
+        let build_reg = || {
+            let mut reg = PluginRegistry::new();
+            reg.register(Box::new(StatefulLoader {
+                manifest: manifest("test.stateful"),
+            }));
+            reg.register(Box::new(crate::structural::StructuralLoader::speaker_out()));
+            reg
+        };
+        let build_graph = |param: Option<f32>| {
+            let mut g = OjGraph::empty(48_000, 64);
+            g.nodes.push(IrNode {
+                id: NodeIdx(1),
+                manifest_id: String::from("test.stateful"),
+                kind: PrimitiveKind::Osc,
+                params: param
+                    .map(|v| vec![ojproto::Param { id: 0, value: v }])
+                    .unwrap_or_default(),
+                assets: vec![],
+                n_in: 0,
+                n_out: 1,
+            });
+            g.nodes.push(IrNode {
+                id: NodeIdx(2),
+                manifest_id: String::from(crate::SPEAKER_OUT_ID),
+                kind: PrimitiveKind::SpeakerOut,
+                params: vec![],
+                assets: vec![],
+                n_in: 1,
+                n_out: 0,
+            });
+            g.edges.push(IrEdge {
+                from_node: NodeIdx(1),
+                from_port: 0,
+                to_node: NodeIdx(2),
+                to_port: 0,
+                kind: ConnectionType::Audio,
+            });
+            g
+        };
+        let states = OneState { blob: vec![99] };
+
+        // Param present: restore(99) THEN set_param(5) -> value 5 (param wins -> restore was first).
+        let prog = compile_resilient_with_state(&build_graph(Some(5.0)), &build_reg(), &NoAssets, &states)
+            .expect("compiles");
+        let slot = prog.slot_of_id(NodeIdx(1)).unwrap();
+        assert_eq!(
+            prog.instances[slot].save_state(),
+            vec![5u8],
+            "restore is the BASE; the current param overrides it (so restore ran first)"
+        );
+
+        // No param: the restored blob value survives (restore round-trips end to end).
+        let prog2 = compile_resilient_with_state(&build_graph(None), &build_reg(), &NoAssets, &states)
+            .expect("compiles");
+        let slot2 = prog2.slot_of_id(NodeIdx(1)).unwrap();
+        assert_eq!(
+            prog2.instances[slot2].save_state(),
+            vec![99u8],
+            "the staged blob restores when no param overrides it"
+        );
     }
 
     /// An incompatible-abi plugin (declares a kernel contract NEWER than this kernel)
