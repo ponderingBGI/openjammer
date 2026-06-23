@@ -192,6 +192,13 @@ struct Host {
     /// Monotonic sequence stamped on each drained fault [`Event`] (wire parity
     /// with the native backend's `event_seq`). Bumped per surfaced fault.
     event_seq: u32,
+    /// Per-slot edge latch for the RUNTIME-degrade fault (a trapped code node /
+    /// crashed host): `runtime_degraded()` is PERMANENT (unlike the per-block budget
+    /// flags), so we emit its `NodeFault{Crashed}` ONCE per degrade and mark the
+    /// slot here — otherwise `has_pending_events` would stay true forever and
+    /// `drain_events` would allocate every block. Reset (all false) on each
+    /// `load_graph`, sized to the new program's instance count.
+    crashed_seen: Vec<bool>,
     /// Count of nodes that DEGRADED to a passthrough stub in the LAST `load_graph`
     /// (a missing/incompatible plugin dependency, invariant #4a). The worklet reads
     /// it via [`last_load_degraded`] to warn — the browser analogue of the native
@@ -295,6 +302,7 @@ pub fn init(sample_rate: u32, block_size: u32) {
         event_seq: 0,
         last_load_degraded: 0,
         last_degraded_ids: Vec::new(),
+        crashed_seen: Vec::new(),
     };
 
     // SAFETY: single-threaded worklet init; no other reference is live.
@@ -343,9 +351,14 @@ pub fn load_graph(bytes: &[u8]) -> bool {
     let degraded = program.degraded_stubs(&graph);
     host.last_load_degraded = degraded.len() as u32;
     host.last_degraded_ids = degraded.iter().map(|id| id.0).collect();
+    // Reset the runtime-degrade edge latch: the fresh program has fresh instances,
+    // none crashed yet, so a re-instantiate clears any prior runtime-fault badge
+    // (the same auto-clear the native push_graph degraded loop gives).
+    let n_instances = program.instances.len();
     // `install` hands back the old program; dropping it here keeps the RT path
     // allocation/free-free.
     let _old = host.engine.install(program);
+    host.crashed_seen = vec![false; n_instances];
     true
 }
 
@@ -810,7 +823,21 @@ fn node_fault_event(node: NodeIdx, fault: FaultKind, seq: u32) -> Event {
 /// must surface even when no meter UI is subscribed.
 #[wasm_bindgen]
 pub fn has_pending_events() -> bool {
-    host_ref().is_some_and(|h| h.engine.budget().any_flagged())
+    host_ref().is_some_and(|h| {
+        // Budget flags (NaN/over-budget) OR an UNSEEN runtime-degrade edge (a
+        // trapped code node latched to passthrough). The runtime scan is an O(nodes)
+        // bool/vtable read, alloc-free, gated to UNSEEN slots so a persistently
+        // degraded node does not keep `drain_events` allocating every block.
+        h.engine.budget().any_flagged()
+            || h.engine
+                .program()
+                .instances
+                .iter()
+                .enumerate()
+                .any(|(slot, inst)| {
+                    inst.runtime_degraded() && !h.crashed_seen.get(slot).copied().unwrap_or(false)
+                })
+    })
 }
 
 /// Drain the engine's per-node resilience flags into a JSON `Vec<Event>` — the
@@ -834,9 +861,13 @@ pub fn drain_events() -> Vec<u8> {
     if !host.engine.budget().any_flagged() {
         return Vec::new();
     }
-    // Disjoint field borrows: `engine` (the program + flags) and `event_seq`.
+    // Disjoint field borrows: `engine` (the program + flags), `event_seq`, and the
+    // runtime-degrade edge latch.
     let Host {
-        engine, event_seq, ..
+        engine,
+        event_seq,
+        crashed_seen,
+        ..
     } = host;
     // Snapshot node ids before borrowing the budget (disjoint from the flag read).
     let ids = engine.program().ids.clone();
@@ -862,6 +893,22 @@ pub fn drain_events() -> Vec<u8> {
         }
     }
     engine.budget_mut().clear();
+    // Runtime-degrade edge: a node that LATCHED to passthrough at runtime (a trapped
+    // code node) emits NodeFault{Crashed} ONCE — `runtime_degraded()` is permanent,
+    // so the per-slot `crashed_seen` latch stops it re-firing every block (and is
+    // reset on `load_graph`, so a fresh instantiate auto-clears the badge).
+    let n = engine.program().instances.len();
+    for slot in 0..n {
+        let already = crashed_seen.get(slot).copied().unwrap_or(false);
+        if !already && engine.program().instances[slot].runtime_degraded() {
+            *event_seq = event_seq.wrapping_add(1);
+            let node = ids.get(slot).copied().unwrap_or(NodeIdx(0));
+            events.push(node_fault_event(node, FaultKind::Crashed, *event_seq));
+            if slot < crashed_seen.len() {
+                crashed_seen[slot] = true;
+            }
+        }
+    }
     if events.is_empty() {
         return Vec::new();
     }
