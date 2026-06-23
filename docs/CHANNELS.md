@@ -127,14 +127,17 @@ and it means a stereo effect dropped after a mono source "just works."
    sibling for stereo hosts.
 2. **The master sink.** `SpeakerOut`/`GraphOut` input port 0 may be stereo; `process_block` emits its N
    channels. The master `soft_limit` + meter + sanitize run **per channel**.
-3. **The asset path.** **DONE (native).** `AssetPcm` now carries `channels` and BORROWS the
+3. **The asset path.** **DONE (both tiers).** `AssetPcm` now carries `channels` and BORROWS the
    interleaved buffer zero-copy instead of downmixing at compile; the per-channel split moved to the
    consuming node. `DspInstance::load_asset` gained a `channels` arg, so the **Sampler**
    (`audio_out_channels = 2`) deinterleaves into planar L/R and plays a stereo sample in true stereo
    (a mono sample plays identically in both lanes, so a mono master reads a byte-identical channel 0 —
    the `golden_render` Sampler gate stays green), while the **Convolution** IR downmixes itself via
-   `compile::downmix_to_mono`. *Deferred:* the **wasm** asset store still uploads mono only
-   (`ojcore-wasm` + the JS interleave path) — a follow-up; the native value lands without it.
+   `compile::downmix_to_mono`. The **wasm** asset store preserves stereo too (carries `channels` +
+   hashes it in the content address — mono ids unchanged), and the live sample-drop chain
+   (`setBuffer` → `loadSample` → both bridges → the native `load_sample` command + the wasm
+   `store_asset`) INTERLEAVES instead of downmixing — so a stereo sample plays in true stereo on
+   **both tiers** and content-addresses identically across them.
 
 ---
 
