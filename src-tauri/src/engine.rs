@@ -1138,7 +1138,7 @@ impl EngineBackend {
     }
 
     /// STAGE-3 finalize-PCM: take looper `node`'s just-COMMITTED take as MONO PCM
-    /// + its sample rate, so the UI can build a real `AudioBuffer` for the layer's
+    /// and its sample rate, so the UI can build a real `AudioBuffer` for the layer's
     /// row (true waveform + drag-to-library/export). Called by the control thread
     /// when it drains a commit `LooperEdge` for `node` (the
     /// Recording|Overdubbing→Playing edge): the host's off-RT per-looper capture
