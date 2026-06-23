@@ -180,16 +180,19 @@ pub trait DspInstance: Send {
     ///
     /// Called by [`crate::compile`] (or any host that resolves an
     /// [`ojproto::AssetRef`]) AFTER `activate` + the baked-in `set_param`s, with
-    /// the already-decoded mono PCM behind the node's asset slot. `slot` is the
-    /// [`ojproto::AssetRef::slot`]; `pcm` is mono `f32` in `[-1, 1]`;
-    /// `sample_rate` is the PCM's own capture rate (for resampling correction).
+    /// the already-decoded PCM behind the node's asset slot. `slot` is the
+    /// [`ojproto::AssetRef::slot`]; `pcm` is INTERLEAVED `f32` in `[-1, 1]` with
+    /// `channels` channels (`1` = mono); `sample_rate` is the PCM's own capture
+    /// rate (for resampling correction). The channel count rides along so a node
+    /// keeps the layout it wants — a stereo Sampler plays both channels, while a
+    /// mono-only consumer downmixes via [`crate::compile::downmix_to_mono`].
     ///
     /// This runs off the audio thread (at compile / asset-bind time), so unlike
     /// `process` it MAY allocate (e.g. the Sampler copies the PCM into a shared
     /// `Arc`). The default is a no-op so pure-DSP nodes ignore any bound asset;
     /// the Sampler installs it as its playback buffer and the Convolution node as
     /// its impulse response. RT-safe is NOT required here.
-    fn load_asset(&mut self, _slot: u16, _pcm: &[f32], _sample_rate: f32) {}
+    fn load_asset(&mut self, _slot: u16, _pcm: &[f32], _channels: u8, _sample_rate: f32) {}
 
     /// Master-output gain this node contributes when it is the graph's master
     /// sink (SpeakerOut / GraphOut). The executor multiplies the resolved master

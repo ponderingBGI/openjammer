@@ -452,14 +452,20 @@ fn delay_reproduces_impulse_after_n_samples() {
 /// from a test without `ojcore-native`. Returns the same PCM for ANY id.
 struct OneAsset {
     id: AssetId,
+    /// Interleaved PCM (`channels`-major frames); mono when `channels == 1`.
     pcm: Vec<f32>,
+    channels: u8,
     sample_rate: f32,
 }
 
 impl AssetResolver for OneAsset {
     fn resolve(&self, id: AssetId) -> Option<AssetPcm<'_>> {
         if id == self.id {
-            Some(AssetPcm::mono(&self.pcm, self.sample_rate))
+            Some(AssetPcm::from_interleaved(
+                &self.pcm,
+                self.channels as u16,
+                self.sample_rate,
+            ))
         } else {
             None
         }
@@ -510,6 +516,7 @@ fn convolution_dry_without_ir_and_identity_with_unit_ir() {
     let ir = OneAsset {
         id: AssetId(7),
         pcm: vec![1.0], // identity kernel
+        channels: 1,
         sample_rate: SRF,
     };
     let mut engine =
@@ -626,6 +633,7 @@ fn sampler_plays_resolved_asset_at_root_pitch() {
     let asset = OneAsset {
         id: AssetId(42),
         pcm: pcm.clone(),
+        channels: 1,
         sample_rate: SRF,
     };
 
@@ -691,6 +699,89 @@ fn sampler_plays_resolved_asset_at_root_pitch() {
     assert!(
         tail_peak < 1e-2,
         "sampler rang past sample end (tail {tail_peak})"
+    );
+}
+
+#[test]
+fn sampler_stereo_asset_renders_distinct_left_and_right() {
+    // An interleaved STEREO asset whose right channel is the phase-inverse of the
+    // left. Played at the root note (unity ratio), the stereo Sampler must route
+    // L -> device L and R -> device R (the last mono boundary, CHANNELS.md §5.3) —
+    // NOT duplicate one channel — so the two device channels are genuine mirror
+    // images. This locks the stereo asset path end-to-end through the real registry.
+    let frames = 64usize;
+    let mut interleaved = Vec::with_capacity(frames * 2);
+    for i in 0..frames {
+        let s = core_f32_sin(2.0 * std::f32::consts::PI * i as f32 / 16.0) * 0.6;
+        interleaved.push(s); // L
+        interleaved.push(-s); // R (phase-inverted)
+    }
+    let asset = OneAsset {
+        id: AssetId(43),
+        pcm: interleaved,
+        channels: 2,
+        sample_rate: SRF,
+    };
+
+    let mut g = OjGraph::empty(SR, BLOCK);
+    let mut sampler = with_params(
+        node(1, SAMPLER_ID, PrimitiveKind::Sampler, 0, 1),
+        &[
+            (instr_param::GAIN, 1.0),
+            (instr_param::ATTACK, 0.0),
+            (instr_param::DECAY, 0.0),
+            (instr_param::SUSTAIN, 1.0),
+            (SAMPLER_PCM_PARAM, 60.0), // root note = 60 -> unity ratio
+        ],
+    );
+    sampler.assets.push(AssetRef {
+        slot: 0,
+        asset: AssetId(43),
+    });
+    g.nodes.push(sampler);
+    g.nodes
+        .push(node(2, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 2));
+
+    let mut engine = Engine::new(
+        compile_with_assets(&g, &registry(), &asset).expect("compile w/ stereo sample"),
+    );
+    engine.apply(RtCommand::NoteOn {
+        node: NodeIdx(1),
+        note: 60,
+        vel: 127,
+    });
+    let (l, r) = render_stereo(&mut engine, 1);
+    assert_all_finite(&l);
+    assert_all_finite(&r);
+
+    // Both device channels carry the sample — neither is silent or dropped.
+    assert!(
+        peak(&l[..frames]) > 0.2,
+        "left carries the sample (peak {})",
+        peak(&l[..frames])
+    );
+    assert!(
+        peak(&r[..frames]) > 0.2,
+        "right carries the sample (peak {})",
+        peak(&r[..frames])
+    );
+    // ...and they are DISTINCT: R is the inverse of L, so L + R ≈ 0 everywhere
+    // (the master brickwall is an odd function, so it preserves the symmetry)
+    // while |L - R| is large — proving the channels are independently routed.
+    let mut max_abs_diff = 0.0f32;
+    for i in 0..frames {
+        assert!(
+            (l[i] + r[i]).abs() < 0.05,
+            "R is the phase-inverse of L (frame {i}: L {} R {})",
+            l[i],
+            r[i]
+        );
+        max_abs_diff = max_abs_diff.max((l[i] - r[i]).abs());
+    }
+    assert!(
+        max_abs_diff > 0.3,
+        "L and R are genuinely distinct, not a duplicated mono lane (max |L-R| {max_abs_diff})"
     );
 }
 

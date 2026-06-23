@@ -43,26 +43,78 @@ pub const SAMPLER_DEFAULT_ROOT: u8 = 60;
 /// shared envelope param ids so the two never collide.
 pub const SAMPLER_PCM_PARAM: u16 = 16;
 
-/// An already-decoded, mono PCM sample plus the rate it was captured at and the
-/// MIDI note it represents. Shared (`Arc`) across all of an instrument's voices.
+/// An already-decoded PCM sample (mono or stereo) plus the rate it was captured at
+/// and the MIDI note it represents. Shared (`Arc`) across all of an instrument's
+/// voices. Stored PLANAR (one buffer per channel) so the hot loop reads a channel
+/// with no stride; a mono sample leaves `pcm_r` empty and plays `pcm_l` in both
+/// output lanes (so a mono master reads a byte-identical channel 0).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SamplerSample {
-    /// Mono PCM samples in `[-1, 1]`.
-    pub pcm: Vec<f32>,
+    /// Left / mono PCM samples in `[-1, 1]`.
+    pub pcm_l: Vec<f32>,
+    /// Right PCM samples; `None` for a mono sample (R reads `pcm_l`), so a mono
+    /// sample neither copies nor doubles its memory.
+    pub pcm_r: Option<Vec<f32>>,
     /// The sample's own capture sample rate (Hz). Used to correct playback rate
     /// when it differs from the engine's sample rate.
     pub sample_rate: f32,
-    /// MIDI note at which `pcm` plays at unity ratio (its recorded pitch).
+    /// MIDI note at which the sample plays at unity ratio (its recorded pitch).
     pub root_note: u8,
 }
 
 impl SamplerSample {
+    /// A mono sample: `pcm` plays in every output lane.
     pub fn new(pcm: Vec<f32>, sample_rate: f32, root_note: u8) -> Self {
         Self {
-            pcm,
+            pcm_l: pcm,
+            pcm_r: None,
             sample_rate: sample_rate.max(1.0),
             root_note,
         }
+    }
+
+    /// Deinterleave an interleaved buffer of `channels` channels into planar L/R.
+    /// `channels <= 1` yields a mono sample (R reads L); `channels >= 2` takes
+    /// channel 0 as L and channel 1 as R (any further channels are dropped — v1 is
+    /// up to stereo). A trailing partial frame is ignored.
+    pub fn from_interleaved(
+        interleaved: &[f32],
+        channels: u8,
+        sample_rate: f32,
+        root_note: u8,
+    ) -> Self {
+        let ch = channels.max(1) as usize;
+        if ch == 1 {
+            return Self::new(interleaved.to_vec(), sample_rate, root_note);
+        }
+        let frames = interleaved.len() / ch;
+        let mut l = Vec::with_capacity(frames);
+        let mut r = Vec::with_capacity(frames);
+        for f in 0..frames {
+            let base = f * ch;
+            l.push(interleaved[base]);
+            r.push(interleaved[base + 1]);
+        }
+        Self {
+            pcm_l: l,
+            pcm_r: Some(r),
+            sample_rate: sample_rate.max(1.0),
+            root_note,
+        }
+    }
+}
+
+/// Linearly interpolate the buffer at the fractional read position `(i, frac)`,
+/// returning silence past the end. Shared by the L and R hot-loop reads so both
+/// channels resample identically.
+#[inline]
+fn sample_at(pcm: &[f32], i: usize, frac: f32, n: usize) -> f32 {
+    if i + 1 < n {
+        pcm[i] * (1.0 - frac) + pcm[i + 1] * frac
+    } else if i < n {
+        pcm[i]
+    } else {
+        0.0
     }
 }
 
@@ -76,9 +128,13 @@ struct SamplerVoice {
     inc: f32,
     env: Adsr,
     amp: f32,
-    /// One-pole low-pass state (the filtered sample carried between frames).
-    lp: f32,
+    /// Per-channel one-pole low-pass state (the filtered sample carried between
+    /// frames), one per output lane so L and R filter independently for a true
+    /// stereo sample. For a mono sample both track the same input.
+    lp_l: f32,
+    lp_r: f32,
     /// One-pole coefficient in `(0, 1]`: 1 = fully open (bright), lower = darker.
+    /// Shared by both channels (it is set by velocity, not by channel).
     lp_coef: f32,
 }
 
@@ -122,7 +178,8 @@ impl SamplerInstrument {
                 inc: 0.0,
                 env: Adsr::new(sr, adsr),
                 amp: 0.0,
-                lp: 0.0,
+                lp_l: 0.0,
+                lp_r: 0.0,
                 lp_coef: 1.0,
             }; MAX_VOICES],
             alloc: VoiceAlloc::new(),
@@ -162,15 +219,29 @@ impl DspInstance for SamplerInstrument {
         if ctx.outputs.is_empty() {
             return;
         }
-        let out = &mut ctx.outputs[0];
-        for s in out.iter_mut().take(ctx.nframes) {
+        let nframes = ctx.nframes;
+        // Lane 0 (L) is always written; lane 1 (R) only when the output port is
+        // stereo. A mono master reads lane 0, so a mono sample's L is byte-identical
+        // to the pre-stereo single-lane Sampler (same interp, same one-pole, same
+        // pos advance) — the `golden_render` Sampler gate stays green.
+        let (head, tail) = ctx.outputs.split_at_mut(1);
+        let out_l: &mut [f32] = &mut head[0][..];
+        let mut out_r: Option<&mut [f32]> = tail.first_mut().map(|r| &mut r[..]);
+        for s in out_l.iter_mut().take(nframes) {
             *s = 0.0;
+        }
+        if let Some(r) = out_r.as_deref_mut() {
+            for s in r.iter_mut().take(nframes) {
+                *s = 0.0;
+            }
         }
         let Some(sample) = self.sample.as_ref() else {
             return; // No PCM loaded -> silence (but still well-defined output).
         };
-        let pcm = &sample.pcm;
-        let n = pcm.len();
+        let pcm_l = &sample.pcm_l;
+        // A mono sample plays its single buffer in both lanes (R reads L).
+        let pcm_r = sample.pcm_r.as_deref().unwrap_or(pcm_l);
+        let n = pcm_l.len();
         if n == 0 {
             return;
         }
@@ -179,21 +250,20 @@ impl DspInstance for SamplerInstrument {
                 continue;
             }
             let v = &mut self.voices[slot];
-            for s in out.iter_mut().take(ctx.nframes) {
+            for f in 0..nframes {
                 let g = v.env.tick();
-                // Linear interpolation over the buffer at the fractional pos.
                 let i = v.pos as usize;
-                let sampled = if i + 1 < n {
-                    let frac = v.pos - i as f32;
-                    pcm[i] * (1.0 - frac) + pcm[i + 1] * frac
-                } else if i < n {
-                    pcm[i]
-                } else {
-                    0.0
-                };
-                // Velocity brightness: one-pole low-pass (coef 1 = fully open).
-                v.lp += v.lp_coef * (sampled - v.lp);
-                *s += v.lp * g * v.amp * self.gain;
+                let frac = v.pos - i as f32;
+                // Velocity brightness: a one-pole low-pass per channel (coef 1 =
+                // fully open). L runs the identical recurrence the mono Sampler did.
+                let l = sample_at(pcm_l, i, frac, n);
+                v.lp_l += v.lp_coef * (l - v.lp_l);
+                out_l[f] += v.lp_l * g * v.amp * self.gain;
+                if let Some(r_out) = out_r.as_deref_mut() {
+                    let r = sample_at(pcm_r, i, frac, n);
+                    v.lp_r += v.lp_coef * (r - v.lp_r);
+                    r_out[f] += v.lp_r * g * v.amp * self.gain;
+                }
                 v.pos += v.inc;
                 // Past the end while not yet released -> let the tail release.
                 if v.pos >= n as f32 {
@@ -224,7 +294,8 @@ impl DspInstance for SamplerInstrument {
         v.inc = inc;
         v.amp = velocity_to_amp(vel).max(0.0);
         // Velocity → brightness: soft notes get a lower low-pass cutoff.
-        v.lp = 0.0;
+        v.lp_l = 0.0;
+        v.lp_r = 0.0;
         v.lp_coef = velocity_to_lp_coef(vel, self.sample_rate);
         v.env.set_params(self.adsr);
         v.env.reset();
@@ -263,9 +334,9 @@ impl DspInstance for SamplerInstrument {
     /// assets at compile time), else [`SAMPLER_DEFAULT_ROOT`] (middle C). Slot is
     /// ignored: the sampler has a single PCM buffer. May allocate (copies the
     /// borrowed PCM into a shared `Arc`); never called on the audio thread.
-    fn load_asset(&mut self, _slot: u16, pcm: &[f32], sample_rate: f32) {
+    fn load_asset(&mut self, _slot: u16, pcm: &[f32], channels: u8, sample_rate: f32) {
         let root = self.root_override.unwrap_or(SAMPLER_DEFAULT_ROOT);
-        let sample = SamplerSample::new(pcm.to_vec(), sample_rate, root);
+        let sample = SamplerSample::from_interleaved(pcm, channels, sample_rate, root);
         self.set_sample(Arc::new(sample));
     }
 
@@ -363,11 +434,14 @@ fn sampler_manifest() -> PluginManifest {
         ],
         ports: PortDecl {
             audio_in: 0,
+            // One stereo output port (docs/CHANNELS.md model B): the compiler
+            // derives 1 × 2 = 2 lanes. A mono sample plays identically in both, so
+            // a mono master (which reads lane 0) is byte-identical to before.
             audio_out: 1,
             control_in: 0,
             control_out: 0,
             audio_in_channels: 1,
-            audio_out_channels: 1,
+            audio_out_channels: 2,
         },
     }
 }

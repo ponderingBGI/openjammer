@@ -674,11 +674,18 @@ impl DspInstance for ConvolutionNode {
     }
 
     /// OFF-RT asset bind: install the resolved PCM as this node's impulse
-    /// response (the U6 seam reached from [`crate::compile_with_assets`]). The
+    /// response (the U6 seam reached from [`crate::compile_with_assets`]). The IR
+    /// is a single mono kernel, so a multi-channel IR is downmixed here (the
+    /// channel count now rides the asset instead of being collapsed at compile);
     /// `sample_rate` is unused — the IR is taken as-is at the engine rate; slot is
     /// ignored (a single IR). May allocate; never called on the audio thread.
-    fn load_asset(&mut self, _slot: u16, pcm: &[f32], _sample_rate: f32) {
-        self.set_ir(pcm);
+    fn load_asset(&mut self, _slot: u16, pcm: &[f32], channels: u8, _sample_rate: f32) {
+        if channels > 1 {
+            let mono = crate::compile::downmix_to_mono(pcm, channels);
+            self.set_ir(&mono);
+        } else {
+            self.set_ir(pcm);
+        }
     }
 
     fn reset(&mut self) {
