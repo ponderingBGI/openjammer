@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { Event as EngineEvent } from '../../../../packages/oj-protocol-ts/src/index';
 import { coalesceEvents } from '../OjcoreNativeExecutor';
-import { ingestEngineEvents } from '../faultPipe';
+import { ingestEngineEvents, remapFaultNodes } from '../faultPipe';
 import { useEngineHealthStore, setEngineHealth } from '../../../store/engineHealthStore';
 import { useLogStore, _resetLogStoreForTests } from '../../../store/logStore';
 
@@ -60,6 +60,49 @@ describe('coalesceEvents', () => {
 
     it('returns an empty array unchanged', () => {
         expect(coalesceEvents([])).toEqual([]);
+    });
+});
+
+describe('remapFaultNodes', () => {
+    const index = new Map<number, string>([
+        [3, 'node-aaa'],
+        [4, 'node-bbb'],
+    ]);
+    const resolve = (n: number) => index.get(n);
+
+    it('rewrites a NodeFault engine index to its visual node id', () => {
+        const out = remapFaultNodes(
+            [ev(1, { NodeFault: { node: 3, fault: 'NonFinite' } }, 'Error')],
+            resolve,
+        );
+        expect(out[0].kind).toEqual({ NodeFault: { node: 'node-aaa', fault: 'NonFinite' } });
+    });
+
+    it('passes through a fault whose index has no mapping (a just-removed node)', () => {
+        const out = remapFaultNodes(
+            [ev(1, { NodeFault: { node: 99, fault: 'NonFinite' } }, 'Error')],
+            resolve,
+        );
+        expect(out[0].kind).toEqual({ NodeFault: { node: 99, fault: 'NonFinite' } });
+    });
+
+    it('leaves non-fault kinds untouched', () => {
+        const out = remapFaultNodes([ev(1, { Xrun: { dropped: 2 } }), ev(2, 'Lifecycle')], resolve);
+        expect(out.map((e) => e.kind)).toEqual([{ Xrun: { dropped: 2 } }, 'Lifecycle']);
+    });
+
+    it('the remapped fault still coalesces by node+fault (the storm still collapses)', () => {
+        const remapped = remapFaultNodes(
+            [
+                ev(1, { NodeFault: { node: 3, fault: 'NonFinite' } }, 'Error'),
+                ev(2, { NodeFault: { node: 3, fault: 'NonFinite' } }, 'Error'),
+            ],
+            resolve,
+        );
+        expect(coalesceEvents(remapped)).toHaveLength(1);
+        expect(coalesceEvents(remapped)[0].kind).toEqual({
+            NodeFault: { node: 'node-aaa', fault: 'NonFinite' },
+        });
     });
 });
 
