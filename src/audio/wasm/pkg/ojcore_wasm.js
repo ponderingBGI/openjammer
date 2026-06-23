@@ -169,6 +169,31 @@ export function init(sample_rate, block_size) {
 }
 
 /**
+ * The IR node ids (`NodeIdx.0`) that degraded to a passthrough stub in the last
+ * [`load_graph`] — returned to JS as a `Uint32Array` so the worklet can badge the
+ * exact nodes (the browser analogue of the native `push_graph` degraded-id
+ * return). Empty on a clean load.
+ * @returns {Uint32Array}
+ */
+export function last_degraded_node_ids() {
+    const ret = wasm.last_degraded_node_ids();
+    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
+ * Number of nodes that degraded to a passthrough stub in the last [`load_graph`]
+ * (a missing or incompatible plugin dependency). The worklet reads this after a
+ * load to warn — the browser analogue of the native host's degraded-stub log (#4a).
+ * @returns {number}
+ */
+export function last_load_degraded() {
+    const ret = wasm.last_load_degraded();
+    return ret >>> 0;
+}
+
+/**
  * Compile and install a serialized [`OjGraph`] (serde JSON `bytes`).
  *
  * Runs OFF the render path: compilation allocates (instances, routing, scratch
@@ -270,8 +295,19 @@ export function node_count() {
 }
 
 /**
- * Pointer (byte offset into wasm linear memory) of the mono output buffer.
- * JS reads `nframes` little-endian f32s starting here after each [`process`].
+ * Number of PLANAR output channels [`process`] writes (stereo). Each channel row
+ * is `block_size` f32s; channel `c` starts at `output_ptr() + c*block_size`.
+ * @returns {number}
+ */
+export function output_channels() {
+    const ret = wasm.output_channels();
+    return ret >>> 0;
+}
+
+/**
+ * Pointer (byte offset into wasm linear memory) of the PLANAR output buffer.
+ * JS reads each channel's `block_size`-strided row starting here after each
+ * [`process`] (channel `c` at `output_ptr() + c*block_size`).
  * @returns {number}
  */
 export function output_ptr() {
@@ -284,10 +320,12 @@ export function output_ptr() {
  *
  * Steps, all allocation-free:
  *   1. drain the command ring, applying each [`RtCommand`] to the engine;
- *   2. render `nframes` into the pre-sized output buffer.
+ *   2. render `nframes` PLANAR into the output buffer via `process_block_into`.
  *
  * `nframes` is clamped to the configured block size. Read the result from
- * [`output_ptr`] (`nframes` f32s of mono master output).
+ * [`output_ptr`] + [`output_channels`]: channel `c` is the `block_size`-strided
+ * row at `c*block_size` (a mono graph fills every row identically — true stereo
+ * only when a Pan/stereo node feeds the master).
  * @param {number} nframes
  */
 export function process(nframes) {
@@ -361,13 +399,14 @@ export function set_metering(on) {
  * content address only for a degenerate input, so the JS side treats it as "not
  * stored" only when the host is absent (it checks `ready` first).
  * @param {Float32Array} pcm
+ * @param {number} channels
  * @param {number} sample_rate
  * @returns {number}
  */
-export function store_asset(pcm, sample_rate) {
+export function store_asset(pcm, channels, sample_rate) {
     const ptr0 = passArrayF32ToWasm0(pcm, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.store_asset(ptr0, len0, sample_rate);
+    const ret = wasm.store_asset(ptr0, len0, channels, sample_rate);
     return ret >>> 0;
 }
 function __wbg_get_imports() {
@@ -394,6 +433,11 @@ function getArrayF32FromWasm0(ptr, len) {
     return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
 }
 
+function getArrayU32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
@@ -405,6 +449,14 @@ function getFloat32ArrayMemory0() {
         cachedFloat32ArrayMemory0 = new Float32Array(wasm.memory.buffer);
     }
     return cachedFloat32ArrayMemory0;
+}
+
+let cachedUint32ArrayMemory0 = null;
+function getUint32ArrayMemory0() {
+    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
+        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
+    }
+    return cachedUint32ArrayMemory0;
 }
 
 let cachedUint8ArrayMemory0 = null;
@@ -437,6 +489,7 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedFloat32ArrayMemory0 = null;
+    cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;
