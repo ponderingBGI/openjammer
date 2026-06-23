@@ -20,6 +20,12 @@ fn main() {
     println!("cargo:rerun-if-env-changed=OJHOST_ENABLE_VST2");
     println!("cargo:rerun-if-env-changed=VST2_SDK_DIR");
     println!("cargo:rerun-if-env-changed=VST3_SDK_DIR");
+    // DEV/TEST crash-boundary harness: env-gated (NOT a cargo feature) so flipping
+    // it reuses the existing `{juce}` build dir instead of forcing a second full
+    // JUCE clone+rebuild. Declare the cfg name unconditionally so Rust 1.80+
+    // cfg-checking doesn't warn even in non-juce builds (the cfg appears in lib.rs).
+    println!("cargo:rerun-if-env-changed=OJHOST_FAULT_INJECT");
+    println!("cargo:rustc-check-cfg=cfg(oj_fault_inject)");
 
     #[cfg(feature = "juce")]
     build_juce();
@@ -50,11 +56,14 @@ fn build_juce() {
     let mut cfg = cmake::Config::new("cpp");
     cfg.define("OJHOST_WITH_CLAP", if with_clap { "ON" } else { "OFF" })
         .define("OJHOST_WITH_VST2", if with_vst2 { "ON" } else { "OFF" });
-    // Dev/test: when the `fault-inject` feature is on alongside `juce`, compile the
-    // in-guard fault injector so the crash boundary can be verified on a live
-    // machine (see `cpp/ojhost_juce.cpp`). OFF for every normal/shipped build.
-    #[cfg(feature = "fault-inject")]
-    cfg.define("OJHOST_FAULT_INJECT", "ON");
+    // Dev/test: when `OJHOST_FAULT_INJECT` is set, compile the in-guard fault
+    // injector so the crash boundary can be PROVEN on a live machine (see
+    // `cpp/ojhost_juce.cpp`), and emit `--cfg oj_fault_inject` so the Rust FFI +
+    // `arm_fault` chain matches the compiled C++ symbol. OFF (absent) otherwise.
+    if env_flag("OJHOST_FAULT_INJECT").unwrap_or(false) {
+        cfg.define("OJHOST_FAULT_INJECT", "ON");
+        println!("cargo:rustc-cfg=oj_fault_inject");
+    }
     if let Some(path) = vst2_sdk.as_deref() {
         cfg.define("OJHOST_VST2_SDK_DIR", path);
     }

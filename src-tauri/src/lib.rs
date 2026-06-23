@@ -573,11 +573,12 @@ fn list_output_devices() -> Vec<OutputDevice> {
 /// a live machine — arm, then play a note through a hosted plugin: that node faults,
 /// latches to a dry passthrough + crash badge, and the rest of the set plays on.
 ///
-/// A no-op unless the app was built `--features fault-inject` (→ `ojhost/fault-inject`,
-/// which needs the default `juce` C++): in every other build — including every
-/// shipped one — the fault code isn't compiled in, so this does nothing and cannot
-/// crash anything. With `withGlobalTauri`, a tester arms it from the dev webview
-/// console: `await window.__TAURI__.core.invoke('debug_arm_plugin_fault')`.
+/// A no-op unless the app was built with `OJHOST_FAULT_INJECT=1` (env, read by
+/// ojhost's build.rs; needs the default `juce` C++): in every other build —
+/// including every shipped one — the fault code isn't compiled in, so this does
+/// nothing and cannot crash anything. Run `OJHOST_FAULT_INJECT=1 bun native`; with
+/// `withGlobalTauri`, arm it from the dev webview console:
+/// `await window.__TAURI__.core.invoke('debug_arm_plugin_fault')`.
 #[tauri::command]
 fn debug_arm_plugin_fault() {
     ojhost::arm_fault();
