@@ -63,9 +63,14 @@ import {
 import { classifyLatency, type LatencyReport } from './latency';
 import { logger } from '../../utils/log';
 import { setEngineHealth, useEngineHealthStore } from '../../store/engineHealthStore';
-import { ingestEngineEvents, remapFaultNodes, routeRuntimeFaults } from './faultPipe';
+import {
+    ingestEngineEvents,
+    logNewlyDegradedStubs,
+    remapFaultNodes,
+    routeRuntimeFaults,
+} from './faultPipe';
 import { setNodeVoiceLoadError } from './voiceLoadError';
-import { setNodePluginLoadError } from './pluginLoadError';
+import { describeNodeForLog, setNodePluginLoadError } from './pluginLoadError';
 import { HOSTED_PLUGIN_STATE_KEY } from '../../engine/dynamicRegistry';
 import { useGraphStore } from '../../store/graphStore';
 
@@ -132,6 +137,9 @@ export class OjcoreNativeExecutor implements Executor {
     private index: NodeIdxMap = new Map();
     /** Reverse map NodeIdx -> visual node id, for routing meter frames back. */
     private reverseIndex = new Map<number, string>();
+    /** Visual ids degraded to a passthrough stub on the LAST accepted push — diffed
+     *  each push so a still-broken plugin is logged once, not on every re-push. */
+    private degradedVisualIds = new Set<string>();
     /** Which built-in voice (family key) is currently bound per instrument node,
      *  so the picker selection re-binds but a plain re-push does not. */
     private boundVoiceKey = new Map<string, string>();
@@ -630,9 +638,18 @@ export class OjcoreNativeExecutor implements Executor {
         // clean re-push with an empty degraded set) makes the badge disappear. The
         // setter only writes on change, so this is a cheap no-op for steady graphs.
         const degradedSet = new Set(degradedIds);
+        const nowDegraded = new Set<string>();
         for (const [idx, visualId] of nextReverseIndex) {
-            setNodePluginLoadError(visualId, degradedSet.has(idx));
+            const isDeg = degradedSet.has(idx);
+            setNodePluginLoadError(visualId, isDeg);
+            if (isDeg) nowDegraded.add(visualId);
         }
+        // Surface NEW degradations into the DevLog so the agent's get_logs /
+        // get_diagnostics can see a missing/incompatible plugin (the badge above is
+        // the player's surface; this is the agent's). Logged once per node, diffed
+        // against the prior push so a steadily-broken plugin does not spam the ring.
+        logNewlyDegradedStubs(nowDegraded, this.degradedVisualIds, describeNodeForLog);
+        this.degradedVisualIds = nowDegraded;
         // A graph is live and the engine accepted it, so the executor has observed
         // real recovery. Lift IDLE or DEGRADED to LIVE (the positive state
         // crash-recovery waits for); keep DEAD sticky unless a caller performs a

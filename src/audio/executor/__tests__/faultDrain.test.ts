@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import type { Event as EngineEvent } from '../../../../packages/oj-protocol-ts/src/index';
 import { coalesceEvents } from '../OjcoreNativeExecutor';
-import { ingestEngineEvents, remapFaultNodes } from '../faultPipe';
+import { ingestEngineEvents, logNewlyDegradedStubs, remapFaultNodes } from '../faultPipe';
 import { useEngineHealthStore, setEngineHealth } from '../../../store/engineHealthStore';
 import { useLogStore, _resetLogStoreForTests } from '../../../store/logStore';
 
@@ -103,6 +103,39 @@ describe('remapFaultNodes', () => {
         expect(coalesceEvents(remapped)[0].kind).toEqual({
             NodeFault: { node: 'node-aaa', fault: 'NonFinite' },
         });
+    });
+});
+
+describe('logNewlyDegradedStubs (the load-path twin: degraded stubs → get_logs)', () => {
+    beforeEach(() => {
+        _resetLogStoreForTests();
+    });
+    const describeNode = (id: string) => `${id} (reverb)`;
+
+    it('appends one Warn entry per newly-degraded node, with the degraded SSOT field', () => {
+        logNewlyDegradedStubs(new Set(['node-a', 'node-b']), new Set(), describeNode);
+        const entries = useLogStore.getState().entries;
+        expect(entries).toHaveLength(2);
+        expect(entries[0].level).toBe('Warn');
+        expect(entries[0].scope).toBe('engine');
+        expect(entries[0].message).toContain('node-a (reverb)');
+        expect(entries[0].message).toContain('degraded to passthrough');
+        // The structured field the node-diagnostics facet reads as its degraded SSOT.
+        expect(entries[0].fields).toEqual({ node: 'node-a', degraded: true });
+    });
+
+    it('does NOT re-log a node already degraded on the prior push (no per-push storm)', () => {
+        // node-a was already degraded last push; only node-b is new this push.
+        logNewlyDegradedStubs(new Set(['node-a', 'node-b']), new Set(['node-a']), describeNode);
+        const entries = useLogStore.getState().entries;
+        expect(entries).toHaveLength(1);
+        expect(entries[0].message).toContain('node-b');
+    });
+
+    it('logs nothing when the degraded set is empty or unchanged', () => {
+        logNewlyDegradedStubs(new Set(), new Set(), describeNode);
+        logNewlyDegradedStubs(new Set(['node-a']), new Set(['node-a']), describeNode);
+        expect(useLogStore.getState().entries).toHaveLength(0);
     });
 });
 

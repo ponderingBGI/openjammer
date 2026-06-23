@@ -291,6 +291,25 @@ describe('createEnvPort — live against the real stores', () => {
         }
     });
 
+    it('getNodeDiagnostics: reads the structured degraded SSOT, not just the message', () => {
+        // The executor stamps `fields.degraded:true` on a degraded-stub entry; the
+        // facet must trust that even when the MESSAGE wouldn't match the old regex.
+        const id = useGraphStore.getState().addNode('looper', { x: 0, y: 0 }, null, {});
+        try {
+            useLogStore.getState().append({
+                level: 'Warn',
+                source: 'Engine',
+                scope: 'engine',
+                message: `${id} (some.plugin): stubbed`, // no "degrad"/"passthrough" wording
+                fields: { node: id, degraded: true },
+            });
+            const d = createEnvPort().getNodeDiagnostics(id);
+            expect(d.degraded).toBe(true);
+        } finally {
+            useGraphStore.getState().removeNode(id);
+        }
+    });
+
     it('getNodeDiagnostics: a missing node reports found:false', () => {
         const d = createEnvPort().getNodeDiagnostics('does-not-exist');
         expect(d.found).toBe(false);
