@@ -105,12 +105,27 @@ impl HostedPlugin {
 /// all scratch at load/activate, so `process` is allocation-free.
 pub struct PluginHostNode {
     plugin: HostedPlugin,
+    /// Latched `true` once the plugin faults (a segfault caught at the foreign-code
+    /// boundary). From then on `process` runs a dry passthrough and never re-enters
+    /// the plugin — the crash latch (mirrors `ojwasm`'s `bypassed`). Cleared only by
+    /// a fresh `instantiate` on the next off-RT graph swap.
+    faulted: bool,
 }
 
 impl PluginHostNode {
     /// Wrap an already-loaded [`HostedPlugin`] as a DSP node.
     pub fn new(plugin: HostedPlugin) -> Self {
-        Self { plugin }
+        Self {
+            plugin,
+            faulted: false,
+        }
+    }
+
+    /// Whether this instance has latched into the crash-fault passthrough. Off-RT
+    /// diagnostic; the RT path reads the field directly (mirror of
+    /// `WasmHostNode::is_bypassed`).
+    pub fn is_faulted(&self) -> bool {
+        self.faulted
     }
 
     /// Plugin-reported latency in samples (for PDC budget enforcement).
@@ -125,11 +140,25 @@ impl DspInstance for PluginHostNode {
     }
 
     fn process(&mut self, ctx: &mut ProcessCtx<'_, '_>) {
-        // Forward the engine's channel-major buffers straight through; the
-        // backend copies into its pre-allocated scratch internally (RT-safe).
-        self.plugin
-            .backend
-            .process(ctx.inputs, ctx.outputs, ctx.nframes);
+        // Already crashed once -> never touch the foreign plugin again; hold a
+        // guarded dry passthrough so the rest of the graph keeps playing.
+        if self.faulted {
+            dry_passthrough(ctx);
+            return;
+        }
+        // Forward through the per-node fault boundary. The backend copies into its
+        // pre-allocated scratch internally (RT-safe). A `true` return means the
+        // plugin FAULTED this block: latch the crash, and hold a clean passthrough
+        // for this block too (its output can't be trusted) — a held note beats a
+        // glitch. We never re-enter the plugin this session (latch-and-quarantine).
+        let faulted =
+            self.plugin
+                .backend
+                .process_guarded(ctx.inputs, ctx.outputs, ctx.nframes);
+        if faulted {
+            self.faulted = true;
+            dry_passthrough(ctx);
+        }
     }
 
     fn set_param(&mut self, id: u16, value: f32) {
@@ -142,6 +171,10 @@ impl DspInstance for PluginHostNode {
 
     fn note_off(&mut self, note: u8) {
         self.plugin.backend.note_off(note);
+    }
+
+    fn runtime_degraded(&self) -> bool {
+        self.faulted
     }
 
     fn deactivate(&mut self) {
@@ -268,6 +301,28 @@ fn alloc_param_name(i: u16) -> String {
     format!("param{i}")
 }
 
+/// Copy each input channel to the matching output channel, silencing outputs with
+/// no matching input. RT-safe (no alloc/lock): the dry passthrough used both when a
+/// hosted plugin can't LOAD (the [`PassthroughNode`] fallback) and when one FAULTS
+/// at runtime (the [`PluginHostNode`] crash latch).
+fn dry_passthrough(ctx: &mut ProcessCtx<'_, '_>) {
+    for (out_idx, out) in ctx.outputs.iter_mut().enumerate() {
+        if let Some(input) = ctx.inputs.get(out_idx) {
+            let out_len = out.len();
+            let n = ctx.nframes.min(input.len()).min(out_len);
+            out[..n].copy_from_slice(&input[..n]);
+            let tail = ctx.nframes.min(out_len);
+            for s in out[n..tail].iter_mut() {
+                *s = 0.0;
+            }
+        } else {
+            for s in out.iter_mut().take(ctx.nframes) {
+                *s = 0.0;
+            }
+        }
+    }
+}
+
 /// A do-nothing node: copies input to output (or silences when channel counts
 /// mismatch). Used as the fallback when a hosted plugin can't be loaded, so the
 /// engine still runs.
@@ -277,21 +332,7 @@ impl DspInstance for PassthroughNode {
     fn activate(&mut self, _sample_rate: f32, _max_block: usize) {}
 
     fn process(&mut self, ctx: &mut ProcessCtx<'_, '_>) {
-        for (out_idx, out) in ctx.outputs.iter_mut().enumerate() {
-            if let Some(input) = ctx.inputs.get(out_idx) {
-                let out_len = out.len();
-                let n = ctx.nframes.min(input.len()).min(out_len);
-                out[..n].copy_from_slice(&input[..n]);
-                let tail = ctx.nframes.min(out_len);
-                for s in out[n..tail].iter_mut() {
-                    *s = 0.0;
-                }
-            } else {
-                for s in out.iter_mut().take(ctx.nframes) {
-                    *s = 0.0;
-                }
-            }
-        }
+        dry_passthrough(ctx);
     }
 
     fn set_param(&mut self, _id: u16, _value: f32) {}
@@ -396,5 +437,109 @@ mod tests {
             let res = HostedPlugin::load(&sample_desc(0), 48_000.0, 64);
             assert!(matches!(res, Err(HostError::Unavailable)));
         }
+    }
+
+    /// A backend that reports a guarded-process FAULT starting at its `fault_at`-th
+    /// `process_guarded` call, standing in for a real crashing plugin so the crash
+    /// latch is provable in the device-free sandbox. (The real-segfault path — the
+    /// SEH/signal boundary actually catching a `processBlock` crash — is a
+    /// `--features juce,fault-inject` founder check, since it can't run here.)
+    struct FaultingBackend {
+        calls: usize,
+        fault_at: usize,
+    }
+
+    impl HostedBackend for FaultingBackend {
+        fn activate(&mut self, _sample_rate: f32, _max_block: usize) {}
+
+        fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], nframes: usize) {
+            // A healthy block writes a recognizable constant the test can detect.
+            for out in outputs.iter_mut() {
+                for s in out.iter_mut().take(nframes) {
+                    *s = 0.5;
+                }
+            }
+        }
+
+        fn process_guarded(
+            &mut self,
+            inputs: &[&[f32]],
+            outputs: &mut [&mut [f32]],
+            nframes: usize,
+        ) -> bool {
+            self.calls += 1;
+            if self.calls >= self.fault_at {
+                // Simulate the foreign-code boundary catching a crash: the output is
+                // garbage the latch MUST discard, and the fault is reported.
+                for out in outputs.iter_mut() {
+                    for s in out.iter_mut().take(nframes) {
+                        *s = f32::NAN;
+                    }
+                }
+                true
+            } else {
+                self.process(inputs, outputs, nframes);
+                false
+            }
+        }
+
+        fn set_param(&mut self, _id: u16, _value: f32) {}
+
+        fn latency_samples(&self) -> u32 {
+            0
+        }
+    }
+
+    #[test]
+    fn a_faulting_plugin_latches_to_passthrough_without_crashing_the_graph() {
+        // The node hosts a backend that faults on its 2nd block. The fault must
+        // latch the node to a dry passthrough — the app and the rest of the graph
+        // keep running, and no garbage escapes ("a held note beats a glitch").
+        let plugin = HostedPlugin {
+            backend: Box::new(FaultingBackend {
+                calls: 0,
+                fault_at: 2,
+            }),
+            descriptor: sample_desc(0),
+        };
+        let mut node = PluginHostNode::new(plugin);
+        node.activate(48_000.0, 64);
+
+        let input: Vec<f32> = (0..64).map(|i| i as f32 * 0.01 - 0.3).collect();
+        let run = |node: &mut PluginHostNode, input: &[f32]| -> Vec<f32> {
+            let mut out = vec![0.0f32; 64];
+            {
+                let ins: [&[f32]; 1] = [input];
+                let mut outs: [&mut [f32]; 1] = [&mut out];
+                let mut ctx = ProcessCtx {
+                    inputs: &ins,
+                    outputs: &mut outs,
+                    nframes: 64,
+                };
+                node.process(&mut ctx);
+            }
+            out
+        };
+
+        // Block 1: healthy -> the plugin's signal passes through, not latched.
+        let b1 = run(&mut node, &input);
+        assert!(!node.is_faulted(), "a healthy block must not latch");
+        assert!(
+            b1.iter().all(|&s| (s - 0.5).abs() < 1e-6),
+            "the plugin's output passed through cleanly"
+        );
+
+        // Block 2: the plugin faults -> latch, and the block holds a CLEAN dry
+        // passthrough of the input (the faulting NaN output is discarded).
+        let b2 = run(&mut node, &input);
+        assert!(node.is_faulted(), "a fault must latch the node");
+        assert!(node.runtime_degraded(), "the off-RT poll reports the degrade");
+        assert!(b2.iter().all(|s| s.is_finite()), "no NaN escapes the latch");
+        assert_eq!(b2, input, "the fault block holds a dry passthrough");
+
+        // Block 3: stays latched, never re-enters the plugin, stays a passthrough.
+        let b3 = run(&mut node, &input);
+        assert!(node.is_faulted());
+        assert_eq!(b3, input, "still a dry passthrough after latching");
     }
 }

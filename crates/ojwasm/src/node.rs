@@ -168,6 +168,12 @@ impl DspInstance for WasmHostNode {
         }
     }
 
+    fn runtime_degraded(&self) -> bool {
+        // A trapped kernel latched to passthrough — the same runtime-degrade the
+        // off-RT control side polls to badge a hosted-plugin crash.
+        self.bypassed
+    }
+
     fn reset(&mut self) {
         // Reset the stateful guards so no DC tail bleeds across a (re)load. A
         // latched bypass is NOT cleared here: a trapped kernel stays bypassed
