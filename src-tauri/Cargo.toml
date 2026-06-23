@@ -85,6 +85,12 @@ plugin-host-juce = ["ojhost/juce"]
 plugin-host-clap = ["ojhost/clap-host"]
 plugin-host-scaffold = []
 
+# DEV/TEST ONLY: forward ojhost's fault injector so a tester can PROVE the C++
+# crash boundary live — `bun native --features fault-inject` (juce stays on via the
+# default). Arms via the dev-gated `debug_arm_plugin_fault` command. A no-op in any
+# build without it (the fault code isn't compiled in); NEVER ship with it.
+fault-inject = ["ojhost/fault-inject"]
+
 # This feature must be enabled when building the app in production, so the
 # webview loads the bundled frontend instead of the dev server. Tauri's CLI sets
 # it via `tauri build`; harmless in `cargo build`.

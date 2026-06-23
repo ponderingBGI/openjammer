@@ -97,5 +97,15 @@ if(OJHOST_WITH_CLAP)
     target_link_libraries(ojhost_juce PRIVATE clap_juce_extensions)
 endif()
 
+# --- dev/test fault injection ----------------------------------------------
+# When ON (Rust `--features juce,fault-inject`), compile a deliberate one-shot
+# fault into the guarded processBlock + the `ojhost_arm_fault` entry, so the crash
+# boundary (SEH/signal) can be PROVEN on a live machine. OFF for every normal /
+# shipped build — the fault code is then absent entirely.
+option(OJHOST_FAULT_INJECT "Dev/test: compile the in-guard fault injector" OFF)
+if(OJHOST_FAULT_INJECT)
+    target_compile_definitions(ojhost_juce PRIVATE OJHOST_FAULT_INJECT=1)
+endif()
+
 # Install so the `cmake` Rust crate can find the archive in the build output dir.
 install(TARGETS ojhost_juce ARCHIVE DESTINATION lib)

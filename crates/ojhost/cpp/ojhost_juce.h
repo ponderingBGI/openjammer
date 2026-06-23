@@ -167,6 +167,17 @@ void ojhost_set_state(OjPlugin* plugin, const uint8_t* data, size_t len);
 /* Destroy a loaded plugin instance. */
 void ojhost_unload(OjPlugin* plugin);
 
+#if defined(OJHOST_FAULT_INJECT)
+/* DEV/TEST ONLY (compiled only with `--features juce,fault-inject`; absent from
+ * every shipped build): arm a deliberate one-shot fault INSIDE the next guarded
+ * processBlock, so the crash boundary (SEH on Windows / chained signals on POSIX)
+ * can be PROVEN to catch a real access violation on a live machine — one hosted
+ * node faults, the Rust latch quarantines it, and the rest of the set plays on.
+ * Sets a process-global counter the audio thread reads inside the guard; the next
+ * guarded block faults exactly once. Safe to call from the control thread. */
+void ojhost_arm_fault(void);
+#endif
+
 /* ----------------------------------------------------------------------------
  * Native editor windows (OFF the audio thread).
  * ------------------------------------------------------------------------- */

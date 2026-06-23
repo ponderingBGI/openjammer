@@ -117,6 +117,23 @@ extern "C" {
     ) -> *mut OjPluginEditor;
     fn ojhost_editor_focus(editor: *mut OjPluginEditor);
     fn ojhost_editor_close(editor: *mut OjPluginEditor);
+
+    // DEV/TEST ONLY: present only when the C++ is compiled with `OJHOST_FAULT_INJECT`
+    // (Rust `--features juce,fault-inject`). Arms a one-shot in-guard fault.
+    #[cfg(feature = "fault-inject")]
+    fn ojhost_arm_fault();
+}
+
+/// DEV/TEST ONLY: arm a deliberate one-shot fault inside the next guarded
+/// `processBlock`, so the C++ SEH/signal crash boundary can be PROVEN to catch a
+/// real access violation on a live machine (the sandbox has no JUCE build to run
+/// it). Sets a process-global atomic the audio thread reads inside the guard.
+#[cfg(feature = "fault-inject")]
+pub(super) fn arm_fault() {
+    // SAFETY: `ojhost_arm_fault` only does a relaxed atomic fetch_add on a
+    // process-global counter in the linked C++ host — no arguments, no shared Rust
+    // state, lock-free, safe to call from the control thread.
+    unsafe { ojhost_arm_fault() };
 }
 
 fn fmt_to_c(f: PluginFormat) -> c_int {

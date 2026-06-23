@@ -464,8 +464,11 @@ mod tests {
     /// A backend that reports a guarded-process FAULT starting at its `fault_at`-th
     /// `process_guarded` call, standing in for a real crashing plugin so the crash
     /// latch is provable in the device-free sandbox. (The real-segfault path — the
-    /// SEH/signal boundary actually catching a `processBlock` crash — is a
-    /// `--features juce,fault-inject` founder check, since it can't run here.)
+    /// SEH/signal boundary actually catching a `processBlock` crash — is exercised
+    /// by the `--features juce,fault-inject` harness: it compiles a one-shot
+    /// null-deref into the guard, armed via `ojhost::arm_fault`, so the boundary can
+    /// be PROVEN on a provisioned machine. That build still can't run here, hence
+    /// this device-free stand-in.)
     struct FaultingBackend {
         calls: usize,
         fault_at: usize,
