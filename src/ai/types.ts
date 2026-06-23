@@ -20,10 +20,36 @@
  *   spawn Pi. {@link AgentBackend.available} reports which we're in.
  */
 
-import type { NodeType, Position } from '../engine/types';
+import type { NodeType, PortDefinition, Position } from '../engine/types';
 import type { ParamDecl } from '../engine/manifest';
 import type { WorkflowPlan } from './plan';
 import type { Severity } from '@openjammer/oj-protocol';
+
+// ============================================================================
+// Port summaries — the lean port shape the read tools relay to the agent
+// ============================================================================
+
+/**
+ * A node's port as relayed to the agent by the read tools — the LEAN slice of
+ * {@link PortDefinition} the model needs to WIRE correctly: the human NAME (what
+ * `add_connection` and a plan wire reference), the direction, and the signal
+ * type. We never relay ids, positions, or layout, so the per-node payload stays
+ * small even for nodes with dozens of ports. This is the keystone that ends the
+ * guess→reject→retry loop: a read now tells the agent the legal port names.
+ */
+export interface PortSummary {
+    /** The human port NAME shown on the canvas (what a wire references). */
+    name: string;
+    /** Whether the signal flows IN or OUT. */
+    direction: 'input' | 'output';
+    /** The signal type: 'audio' (blue), 'control' (grey), or 'universal'. */
+    type: PortDefinition['type'];
+}
+
+/** Reduce a full {@link PortDefinition} to the lean {@link PortSummary}. */
+export function toPortSummary(p: PortDefinition): PortSummary {
+    return { name: p.name, direction: p.direction, type: p.type };
+}
 
 // ============================================================================
 // Tool calls — the ONLY thing an agent is allowed to emit

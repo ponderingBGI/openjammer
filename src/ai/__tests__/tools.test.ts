@@ -97,8 +97,25 @@ function makeFakeStore() {
         listConnections: () => Array.from(connections.values()),
         findNodesByType: (type) => Array.from(nodes.values()).filter((n) => n.type === type),
         listNodeTypes: () => [
-            { type: 'looper' as NodeType, name: 'Looper', description: 'loop', category: 'Routing' },
-            { type: 'speaker' as NodeType, name: 'Speaker', description: 'out', category: 'Output' },
+            {
+                type: 'looper' as NodeType,
+                name: 'Looper',
+                description: 'loop',
+                category: 'Routing',
+                ports: [
+                    { name: 'Audio In', direction: 'input', type: 'audio' },
+                    { name: 'Audio Out', direction: 'output', type: 'audio' },
+                ],
+                dynamicPorts: false,
+            },
+            {
+                type: 'speaker' as NodeType,
+                name: 'Speaker',
+                description: 'out',
+                category: 'Output',
+                ports: [{ name: 'Audio In', direction: 'input', type: 'audio' }],
+                dynamicPorts: false,
+            },
         ],
     };
 

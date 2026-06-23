@@ -35,6 +35,7 @@ import type {
     EmitPlanArgs,
     FindNodesArgs,
     GetLogsArgs,
+    PortSummary,
     RemoveConnectionArgs,
     RemoveNodeArgs,
     SettingsPatch,
@@ -42,6 +43,7 @@ import type {
     UpdateSettingsArgs,
     ValidatePlanArgs,
 } from './types';
+import { toPortSummary } from './types';
 import { planToToolCalls, type PlanPortResolver, type RefToId } from './plan';
 import { validatePlan, type PlanError, type PlanLookups } from './planValidator';
 
@@ -86,13 +88,6 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
     {
         name: 'remove_connection',
         description: 'Remove the connection with the given `connectionId`.',
-    },
-    {
-        name: 'author_dsp_node',
-        description:
-            'Author a brand-new DSP effect from Faust source. Registers a ' +
-            'command-palette entry; on the desktop build with libfaust present the ' +
-            'source is compiled via the ojfaust crate. Reversible by deleting the node.',
     },
     {
         name: 'author_code_node',
@@ -233,12 +228,19 @@ export interface PerSubCall {
     summary: string;
 }
 
-/** Compact node summary used by the read tools (id/type/data keys). */
+/** Compact node summary used by the read tools (id/type/data keys/ports). */
 export interface NodeSummary {
     id: string;
     type: string;
     /** The KEYS of the node's `data` (not values — keeps the relay small). */
     dataKeys: string[];
+    /**
+     * The node's CURRENT (instance) ports, lean — so the agent wires by a real
+     * port NAME instead of guessing one the validator will reject. Instance ports
+     * (not the type's static defaults), so authored/container nodes show the ports
+     * they actually have.
+     */
+    ports: PortSummary[];
 }
 
 /** Compact connection summary (id + endpoints) used by the read tools. */
@@ -616,6 +618,7 @@ function summarizeNode(node: GraphNode): NodeSummary {
         id: node.id,
         type: node.type,
         dataKeys: Object.keys((node.data ?? {}) as Record<string, unknown>),
+        ports: (node.ports ?? []).map(toPortSummary),
     };
 }
 
