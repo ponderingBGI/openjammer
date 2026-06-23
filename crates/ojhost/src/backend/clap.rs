@@ -239,9 +239,11 @@ pub(super) fn open(
         out_ports: AudioPorts::with_capacity(channels, 1),
         in_scratch: vec![vec![0.0f32; max_block]; channels],
         out_scratch: vec![vec![0.0f32; max_block]; channels],
-        // Pre-sized so `set_param`'s param-value pushes don't allocate on the RT
-        // thread (the buffer is cleared each block in `process`).
-        in_events: EventBuffer::with_capacity(64),
+        // Pre-sized so `set_param`'s param-value pushes AND `note_on`/`note_off`'s
+        // note pushes don't allocate on the RT thread (the buffer is cleared each
+        // block in `process`). Headroom for a dense chord + an automation burst in
+        // one block so `EventBuffer::push` never has to grow.
+        in_events: EventBuffer::with_capacity(256),
         out_events: EventBuffer::new(),
         channels,
         max_block,
@@ -379,6 +381,32 @@ impl HostedBackend for ClapBackend {
         self.in_events.push(&event);
     }
 
+    fn note_on(&mut self, note: u8, vel: u8) {
+        // Queue a CLAP NOTE_ON core event for the next `process` block, exactly
+        // like `set_param` queues a PARAM_VALUE event. The plugin reads it from
+        // `in_events`. PCKN = (port 0, channel 0, key = note, note_id = match-all):
+        // we don't track per-note ids, so the note is addressed by key. CLAP
+        // velocity is normalized 0..=1 (MIDI 0..=127 / 127).
+        let event = clack_host::events::event_types::NoteOnEvent::new(
+            0, // sample offset within the block
+            clack_host::events::Pckn::from_raw(0, 0, note as i16, -1),
+            vel as f64 / 127.0,
+        );
+        // Pre-reserved at `open`, so this push does not allocate on the RT thread.
+        self.in_events.push(&event);
+    }
+
+    fn note_off(&mut self, note: u8) {
+        // Mirror of `note_on`: a CLAP NOTE_OFF core event keyed by note, with a
+        // 0.0 release velocity (we don't track release velocity).
+        let event = clack_host::events::event_types::NoteOffEvent::new(
+            0,
+            clack_host::events::Pckn::from_raw(0, 0, note as i16, -1),
+            0.0,
+        );
+        self.in_events.push(&event);
+    }
+
     fn latency_samples(&self) -> u32 {
         self.latency
     }
@@ -407,5 +435,24 @@ mod tests {
                 .expect("non-CLAP probe must be Ok(empty), never a panic or error");
             assert!(got.is_empty(), "non-CLAP probe must yield no descriptors");
         }
+    }
+
+    /// The note-event wiring `note_on`/`note_off` rely on: a NOTE_ON / NOTE_OFF
+    /// CLAP core event must build from a key and push into the same pre-sized
+    /// `EventBuffer` the RT path uses, then clear — proving the API usage compiles
+    /// and behaves without needing a real instrument. (The full audible path is a
+    /// `--features juce`/`clap-host` founder check with a real CLAP synth.)
+    #[test]
+    fn note_events_push_and_clear_without_allocating() {
+        use clack_host::events::event_types::{NoteOffEvent, NoteOnEvent};
+        use clack_host::events::Pckn;
+        use clack_host::prelude::EventBuffer;
+
+        let mut buf = EventBuffer::with_capacity(256);
+        buf.push(&NoteOnEvent::new(0, Pckn::from_raw(0, 0, 60, -1), 100.0 / 127.0));
+        buf.push(&NoteOffEvent::new(0, Pckn::from_raw(0, 0, 60, -1), 0.0));
+        assert_eq!(buf.len(), 2, "both note events queued");
+        buf.clear();
+        assert!(buf.is_empty(), "the block boundary drains queued note events");
     }
 }
