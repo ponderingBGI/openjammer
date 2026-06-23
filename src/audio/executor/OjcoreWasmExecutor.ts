@@ -64,6 +64,7 @@ import { setEngineHealth } from '../../store/engineHealthStore';
 import { setNodeVoiceLoadError } from './voiceLoadError';
 import { describeNodeForLog, setNodePluginLoadError } from './pluginLoadError';
 import { logger } from '../../utils/log';
+import { BLUETOOTH_LATENCY_THRESHOLD_MS } from '../../utils/latencyDiagnostics';
 
 /** Scope-bound DevLog logger for the wasm executor. */
 const log = logger('wasm');
@@ -392,7 +393,7 @@ export class OjcoreWasmExecutor implements Executor {
             bufferFrames: null,
             classification: classifyLatency(roundTripMs),
             // Bluetooth output typically adds 100-200 ms one-way.
-            isBluetoothSuspected: outputLatency > 100,
+            isBluetoothSuspected: outputLatency > BLUETOOTH_LATENCY_THRESHOLD_MS,
         };
     }
 
