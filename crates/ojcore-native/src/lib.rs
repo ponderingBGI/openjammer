@@ -34,6 +34,7 @@ pub mod log;
 pub mod looper_capture;
 #[cfg(feature = "persist")]
 pub mod logstore;
+pub mod offline;
 pub mod recorder;
 pub mod store;
 pub mod supervisor;
@@ -58,6 +59,7 @@ pub use looper_capture::{
     LooperCapture, LooperCaptureSink, DEFAULT_RING_FRAMES as LOOPER_CAPTURE_RING_FRAMES,
 };
 pub use log::init_logging;
+pub use offline::OfflineDriver;
 #[cfg(feature = "persist")]
 pub use logstore::{LogHit, LogRecord, LogStore};
 pub use recorder::{Recorder, RecorderSink, DEFAULT_RING_FRAMES};
