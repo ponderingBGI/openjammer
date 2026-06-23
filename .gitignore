@@ -60,6 +60,13 @@ playwright-report/
 # Ladle component-catalog build output
 .ladle/build/
 
+# Scratch screenshots / browser-test prompts (ad-hoc dev artifacts, never ship)
+.tmp-shots/
+
+# Generated stereo test fixtures — regenerate on demand with
+# `bun test-assets/gen-test-wavs.ts` (the generator is tracked; the WAVs are not)
+test-assets/*.wav
+
 # Update-signing key material — NEVER commit (RCE-grade). Private keys live only
 # on the maintainer's offline backups + in GitHub Actions secrets. Public `.pub`
 # keys are embedded directly in tauri.conf.json / updater.rs instead.
