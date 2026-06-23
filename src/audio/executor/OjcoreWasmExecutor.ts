@@ -429,6 +429,12 @@ export class OjcoreWasmExecutor implements Executor {
         this.pushGraph();
     }
 
+    /** No-op on the wasm tier: there is no native plugin hosting, so there is no
+     *  opaque plugin state to capture (parity with the `Executor` surface). */
+    capturePluginStates(): Promise<void> {
+        return Promise.resolve();
+    }
+
     private pushGraph(): void {
         // Isolate the reconcile: lowering the visual graph must NEVER throw out of
         // a store-change subscriber — that would abort Zustand's listener loop and
