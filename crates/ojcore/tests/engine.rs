@@ -837,7 +837,7 @@ fn looper_process_is_allocation_free() {
             (looper_action::OVERDUB, 0),
             (looper_action::PLAY, 0),
             // Indexed actions are allocation-free too: undo / mute / delete.
-            (looper_action::SET_MUTE, 0 | looper_action::MUTE_FLAG),
+            (looper_action::SET_MUTE, looper_action::MUTE_FLAG), // layer 0, muted
             (looper_action::DELETE_LAYER, 0),
             (looper_action::UNDO_LAST, 0),
             (looper_action::STOP, 0),

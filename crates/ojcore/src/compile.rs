@@ -800,7 +800,7 @@ mod channel_lane_tests {
         }
         impl StateResolver for OneState {
             fn resolve_state(&self, node: NodeIdx) -> Option<&[u8]> {
-                (node == NodeIdx(1)).then(|| self.blob.as_slice())
+                (node == NodeIdx(1)).then_some(self.blob.as_slice())
             }
         }
 

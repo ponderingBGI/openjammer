@@ -12,8 +12,8 @@
 //! latency gate: keep the per-block work well under the block period and a small,
 //! low-latency buffer stays sustainable; regress it and latency climbs.
 //!
-//! The full live signal chain is exercised — instrument voices + an effects chain
-//! + the master mix — with a real note-driven chord, so the number reflects "what
+//! The full live signal chain is exercised — instrument voices, an effects chain,
+//! and the master mix — with a real note-driven chord, so the number reflects "what
 //! a performer runs", not a synthetic kernel. The headline `e2e/midi_to_audio_64`
 //! is the production buffer the native engine requests (`DEFAULT_STREAM`,
 //! `src-tauri/src/engine.rs`); the sweep shows how the per-block budget scales
