@@ -33,9 +33,16 @@ fn main() {
 
 #[cfg(feature = "juce")]
 fn build_juce() {
+    // CMake commonly ships INSIDE Visual Studio / Build Tools but is NOT on PATH —
+    // so before demanding it, try to discover that copy and point `$CMAKE` at it.
+    // (Without this, `bun native` panics for anyone who has the VS "C++ CMake tools"
+    // but no standalone CMake on PATH.)
+    ensure_cmake();
     if !cmake_available() {
         panic!(
-            "ojhost/juce requires CMake on PATH. Install CMake (and a C++ toolchain) or build with `--no-default-features` / `plugin-host-scaffold`."
+            "ojhost/juce requires CMake, but none was found on PATH, in $CMAKE, or in a \
+             Visual Studio / Build Tools install. Install CMake (or the VS \"C++ CMake \
+             tools\" component), or build with `--no-default-features` / `plugin-host-scaffold`."
         );
     }
 
@@ -90,6 +97,63 @@ fn cmake_available() -> bool {
         .stderr(std::process::Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
+}
+
+/// If CMake is not already invokable (on PATH or via `$CMAKE`), try to locate the
+/// copy that ships inside Visual Studio / Build Tools — Windows devs commonly have
+/// it there but not on PATH — and point `$CMAKE` at it so both [`cmake_available`]
+/// and the `cmake` crate pick it up. No-op when CMake already works or off-Windows.
+#[cfg(feature = "juce")]
+fn ensure_cmake() {
+    if cmake_available() {
+        return;
+    }
+    #[cfg(target_os = "windows")]
+    if let Some(path) = discover_windows_cmake() {
+        println!("cargo:warning=ojhost: CMake not on PATH; using {}", path.display());
+        std::env::set_var("CMAKE", path);
+    }
+}
+
+/// Find a usable `cmake.exe` bundled in a VS / Build Tools install (enumerated via
+/// `vswhere`), or at a standard standalone install path. Returns the first found.
+#[cfg(all(feature = "juce", target_os = "windows"))]
+fn discover_windows_cmake() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    const VS_CMAKE_SUBPATH: &str =
+        r"Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe";
+
+    // 1. Every VS / Build Tools install vswhere knows about (covers non-default
+    //    install roots like `C:\BuildTools`).
+    let pf86 =
+        std::env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".into());
+    let vswhere = PathBuf::from(&pf86).join(r"Microsoft Visual Studio\Installer\vswhere.exe");
+    if vswhere.is_file() {
+        if let Ok(out) = std::process::Command::new(&vswhere)
+            .args(["-all", "-products", "*", "-property", "installationPath"])
+            .output()
+        {
+            for line in String::from_utf8_lossy(&out.stdout).lines() {
+                let cand = PathBuf::from(line.trim()).join(VS_CMAKE_SUBPATH);
+                if cand.is_file() {
+                    return Some(cand);
+                }
+            }
+        }
+    }
+
+    // 2. Common standalone / known-non-default install dirs.
+    for p in [
+        r"C:\BuildTools\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe",
+        r"C:\Program Files\CMake\bin\cmake.exe",
+        r"C:\Program Files (x86)\CMake\bin\cmake.exe",
+    ] {
+        let cand = PathBuf::from(p);
+        if cand.is_file() {
+            return Some(cand);
+        }
+    }
+    None
 }
 
 #[cfg(feature = "juce")]
