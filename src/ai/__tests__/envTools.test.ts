@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { applyToolCall, type AgentEnvPort, type DspNodeRegistrar } from '../tools';
+import { applyToolCall, applyGetSignal, type AgentEnvPort, type DspNodeRegistrar } from '../tools';
 import type { GraphStoreApi } from '../graphAdapter';
 import { createEnvPort } from '../envAdapter';
 import { useAudioStore } from '../../store/audioStore';
@@ -74,6 +74,11 @@ function makeFakeEnv() {
                     message: `${nodeId}: degraded to passthrough`,
                 },
             ],
+        })),
+        getSignal: vi.fn(async (args: { nodeId: string }) => ({
+            nodeId: args.nodeId,
+            peak: 0.42,
+            hasSignal: true,
         })),
         getSettings: vi.fn(() => ({
             sampleRate: 48000,
@@ -160,6 +165,48 @@ describe('diagnostics/settings tools — pure dispatch (fake env)', () => {
         expect(res.ok).toBe(true);
         expect(res.summary).toContain('48000 Hz');
         expect(res.summary).toContain('cream');
+    });
+
+    it('applyGetSignal relays the live peak and reports producing sound', async () => {
+        const { env } = makeFakeEnv();
+        const res = await applyGetSignal({ nodeId: 'node-7' }, env);
+        expect(res.ok).toBe(true);
+        expect(env.getSignal).toHaveBeenCalledWith({ nodeId: 'node-7' });
+        expect(res.summary).toContain('peak 0.420');
+        expect(res.summary).toContain('producing sound');
+        expect(res.data).toMatchObject({ nodeId: 'node-7', peak: 0.42, hasSignal: true });
+    });
+
+    it('applyGetSignal calls a silent node ~0 and a null read "not metered"', async () => {
+        const silentEnv: AgentEnvPort = {
+            ...makeFakeEnv().env,
+            getSignal: vi.fn(async (a: { nodeId: string }) => ({
+                nodeId: a.nodeId,
+                peak: 0,
+                hasSignal: false,
+            })),
+        };
+        const silent = await applyGetSignal({ nodeId: 'dead' }, silentEnv);
+        expect(silent.summary).toContain('~0 (silent)');
+        expect(silent.data).toMatchObject({ peak: 0, hasSignal: false });
+
+        const nullEnv: AgentEnvPort = {
+            ...makeFakeEnv().env,
+            getSignal: vi.fn(async (a: { nodeId: string }) => ({
+                nodeId: a.nodeId,
+                peak: null,
+                hasSignal: false,
+            })),
+        };
+        const unmetered = await applyGetSignal({ nodeId: 'ghost' }, nullEnv);
+        expect(unmetered.summary).toContain("isn't metered");
+    });
+
+    it('applyGetSignal degrades clearly when no env port is wired', async () => {
+        const res = await applyGetSignal({ nodeId: 'node-7' }, undefined);
+        expect(res.ok).toBe(true);
+        expect(res.data).toBeNull();
+        expect(res.summary).toMatch(/no environment port/i);
     });
 
     it('update_settings applies + exposes a reversible undo', () => {

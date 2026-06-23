@@ -36,7 +36,9 @@ import type {
     FindNodesArgs,
     GetDiagnosticsArgs,
     GetLogsArgs,
+    GetSignalArgs,
     PortSummary,
+    SignalProbeResult,
     RemoveConnectionArgs,
     RemoveNodeArgs,
     SettingsPatch,
@@ -163,6 +165,15 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'data keys, a degraded flag, and the logs that mention the node) — the ' +
             '"why is this node silent?" facet. Side-effect-free. Call it first when the ' +
             'user says something is broken.',
+    },
+    {
+        name: 'get_signal',
+        description:
+            "Probe a node's LIVE output level by `nodeId`: returns an instantaneous " +
+            'peak (0–1) or null when nothing is metered / audio is stopped. ' +
+            'Side-effect-free. This is the one live read that catches a node which ' +
+            'compiles and wires correctly yet outputs pure silence — if it reads ~0, ' +
+            'probe again (a note may be between transients).',
     },
     {
         name: 'get_settings',
@@ -436,6 +447,9 @@ export interface AgentEnvPort {
     /** Read a NODE-scoped debug snapshot (identity, ports, data keys, a degraded
      *  flag, and the recent logs that mention the node) for `get_diagnostics({nodeId})`. */
     getNodeDiagnostics(nodeId: string): NodeDiagnosticsResult;
+    /** Probe a node's LIVE output peak (async: a transient meter read needs a poll
+     *  tick to settle). Returns `peak: null` when no live reading is available. */
+    getSignal(args: GetSignalArgs): Promise<SignalProbeResult>;
     /** Read the current safe-allowlist settings. */
     getSettings(): SettingsReadResult;
     /** Apply a settings patch (allowlisted, reversible). */
@@ -493,6 +507,16 @@ export function applyToolCall(
             return applyGetLogs(call.args, env);
         case 'get_diagnostics':
             return applyGetDiagnostics(call.args, env);
+        case 'get_signal':
+            // get_signal is ASYNC (a transient meter probe) and is answered live by
+            // the host bridge via {@link applyGetSignal}; the synchronous streamed
+            // path has no value to add, so it is a benign, SILENT no-op here.
+            return {
+                ok: true,
+                summary: 'get_signal is answered live via the host bridge.',
+                undo: NO_OP,
+                data: null,
+            };
         case 'get_settings':
             return applyGetSettings(env);
         case 'update_settings':
@@ -996,6 +1020,31 @@ function applyGetDiagnostics(args: GetDiagnosticsArgs, env?: AgentEnvPort): Appl
         undo: NO_OP,
         data: d,
     };
+}
+
+/**
+ * `get_signal`: probe a node's LIVE output peak. SIDE-EFFECT-FREE. The one ASYNC
+ * tool — a transient meter probe needs a poll tick to settle — so it is handled
+ * OUTSIDE the synchronous {@link applyToolCall} switch (the bridge awaits it), the
+ * established shape for an async tool (cf. `codeNodeAuthor`). Without an env port
+ * it returns a clearly-labelled null rather than throwing, mirroring the other
+ * diagnostics reads.
+ */
+export async function applyGetSignal(
+    args: GetSignalArgs,
+    env?: AgentEnvPort,
+): Promise<AppliedToolResult> {
+    if (!env) {
+        return { ok: true, summary: `get_signal: ${ENV_MISSING}.`, undo: NO_OP, data: null };
+    }
+    const r = await env.getSignal(args);
+    const summary =
+        r.peak === null
+            ? `No live signal at ${args.nodeId} — it isn't metered, or audio isn't running.`
+            : r.hasSignal
+              ? `${args.nodeId} peak ${r.peak.toFixed(3)} — it is producing sound.`
+              : `${args.nodeId} reads ~0 (silent) right now — probe again if a note may be between transients.`;
+    return { ok: true, summary, undo: NO_OP, data: r };
 }
 
 /** `get_settings`: relay the current safe-allowlist settings. SIDE-EFFECT-FREE. */

@@ -88,6 +88,7 @@ export const AGENT_TOOL_NAMES = [
     // settings, so "why is there no sound?" becomes an answerable, fixable question.
     'get_logs',
     'get_diagnostics',
+    'get_signal',
     'get_settings',
     'update_settings',
 ] as const;
@@ -279,6 +280,34 @@ export interface GetDiagnosticsArgs {
 }
 
 /**
+ * Arguments for the READ tool `get_signal`: the `nodeId` whose live output peak to
+ * probe. SIDE-EFFECT-FREE. The one live RT value that catches a node which compiles
+ * and wires correctly yet outputs pure silence (a stuck custom plugin) — reachability
+ * and the degraded flag can't see that; only a real meter read can.
+ */
+export interface GetSignalArgs {
+    /** The canvas node id to probe. */
+    nodeId: string;
+}
+
+/** A node's output level above which we call it "producing sound" (below = silent). */
+export const SIGNAL_SILENCE_FLOOR = 1e-3;
+
+/**
+ * Result of `get_signal`: an INSTANTANEOUS peak read (0–1), or `null` when no live
+ * meter reading is available (the node isn't metered, or audio isn't running). A
+ * single sample — if it reads ~0 once, probe again, since a note may simply be
+ * between transients.
+ */
+export interface SignalProbeResult {
+    nodeId: string;
+    /** Instantaneous output peak in 0–1, or null when no live reading is available. */
+    peak: number | null;
+    /** True when `peak` is present and above {@link SIGNAL_SILENCE_FLOOR}. */
+    hasSignal: boolean;
+}
+
+/**
  * Arguments for the READ tool `get_settings`: none. Returns the current
  * user-facing settings the agent is allowed to inspect/change (audio sample
  * rate, latency hint, low-latency mode, input/output device, theme, default
@@ -333,6 +362,7 @@ export type AgentToolCall =
     | { name: 'emit_plan'; args: EmitPlanArgs }
     | { name: 'get_logs'; args: GetLogsArgs }
     | { name: 'get_diagnostics'; args: GetDiagnosticsArgs }
+    | { name: 'get_signal'; args: GetSignalArgs }
     | { name: 'get_settings'; args: GetSettingsArgs }
     | { name: 'update_settings'; args: UpdateSettingsArgs };
 

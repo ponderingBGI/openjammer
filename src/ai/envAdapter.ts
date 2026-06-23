@@ -39,8 +39,8 @@ import type {
     SettingsReadResult,
     SettingsUpdateResult,
 } from './tools';
-import { toPortSummary } from './types';
-import type { GetLogsArgs, SettingsPatch } from './types';
+import { SIGNAL_SILENCE_FLOOR, toPortSummary } from './types';
+import type { GetLogsArgs, GetSignalArgs, SettingsPatch, SignalProbeResult } from './types';
 
 /** Max node-scoped log lines the get_diagnostics node facet returns. */
 const NODE_LOG_LIMIT = 25;
@@ -156,6 +156,22 @@ export function createEnvPort(): AgentEnvPort {
                 ports: (node.ports ?? []).map(toPortSummary),
                 degraded,
                 recentLogs,
+            };
+        },
+
+        async getSignal(args: GetSignalArgs): Promise<SignalProbeResult> {
+            // Probe the live engine peak off the audio thread (the executor owns the
+            // transient meter subscription). Lazy import so the heavy audio/executor
+            // module graph only loads on a real probe, not at AI-module load (keeps
+            // the AI layer light + tests fast). Clamp to 0–1 defensively; `null` means
+            // no live reading is available (unmetered node, or audio stopped).
+            const { getExecutor } = await import('../audio/executor');
+            const raw = await getExecutor().probeSignal(args.nodeId);
+            const peak = raw === null ? null : Math.max(0, Math.min(1, raw));
+            return {
+                nodeId: args.nodeId,
+                peak,
+                hasSignal: peak !== null && peak > SIGNAL_SILENCE_FLOOR,
             };
         },
 

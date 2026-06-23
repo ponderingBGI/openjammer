@@ -98,6 +98,17 @@ function getInvoke(): ((cmd: string, args?: Record<string, unknown>) => Promise<
 /** How often (ms) to poll the engine for fresh per-node meter levels. */
 const METER_POLL_MS = 50;
 
+/** Settle time for an agent `probeSignal`: a couple of {@link METER_POLL_MS} ticks
+ *  so at least one fresh meter frame lands before we read the cached peak. */
+const PROBE_SETTLE_MS = METER_POLL_MS * 2 + 30;
+
+/** A no-op signal subscriber used to keep the meter stream alive during a probe. */
+const NOOP_SIGNAL_CB: SignalLevelsCallback = () => {};
+
+/** Resolve after `ms`, off the audio thread (probe settle). */
+const delay = (ms: number): Promise<void> =>
+    new Promise((resolve) => window.setTimeout(resolve, ms));
+
 /**
  * How often (ms) to drain the engine's fault-event ring. SEPARATE from the meter
  * poll on purpose: meters early-return when no signal-level UI is mounted, but a
@@ -829,6 +840,20 @@ export class OjcoreNativeExecutor implements Executor {
         return () => {
             this.signalCallbacks.delete(callback);
         };
+    }
+
+    async probeSignal(nodeId: string): Promise<number | null> {
+        // A transient subscriber makes `haveSignalSubs` true so `pollMeters` fills
+        // `levels`; wait a couple of poll ticks for a fresh frame, read the node's
+        // peak, then unsubscribe. (The meter poll interval is left running — the same
+        // lifecycle the UI meters use — but stops populating once no subs remain.)
+        const unsub = this.subscribeSignalLevels(NOOP_SIGNAL_CB);
+        try {
+            await delay(PROBE_SETTLE_MS);
+            return this.levels.get(nodeId) ?? null;
+        } finally {
+            unsub();
+        }
     }
 
     // --- Microphone --------------------------------------------------------
