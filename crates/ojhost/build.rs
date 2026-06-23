@@ -61,6 +61,14 @@ fn build_juce() {
     // prefix. CMakeLists.txt pulls JUCE via FetchContent and emits the static
     // lib `ojhost_juce`.
     let mut cfg = cmake::Config::new("cpp");
+    // MSVC CRT match: rustc links the NON-debug CRT (`/MD`, msvcrt) even in a debug
+    // build, so JUCE must use the same. Left at the cargo profile, a debug build
+    // compiles JUCE in Debug config (`_DEBUG` + `/MDd`) and fails to link into the
+    // Rust binary with `__imp__calloc_dbg` / `_CrtDbgReport` unresolved. Pin the C++
+    // to Release so its runtime + `_DEBUG`-gating match rustc's. (We don't step
+    // through JUCE internals; this also builds it faster.) No effect off-Windows.
+    #[cfg(target_os = "windows")]
+    cfg.profile("Release");
     cfg.define("OJHOST_WITH_CLAP", if with_clap { "ON" } else { "OFF" })
         .define("OJHOST_WITH_VST2", if with_vst2 { "ON" } else { "OFF" });
     // Dev/test: when `OJHOST_FAULT_INJECT` is set, compile the in-guard fault
@@ -77,6 +85,24 @@ fn build_juce() {
     if let Some(path) = vst3_sdk.as_deref() {
         cfg.define("OJHOST_VST3_SDK_DIR", path);
     }
+    // Bound the parallel C++ compile. cmake-rs derives its `--parallel` from cargo's
+    // `NUM_JOBS` (= core count, often 16); a `/O2` Release build of JUCE's large TUs
+    // at that width can exhaust the compiler's heap (`C1060 out of heap space`) on a
+    // RAM-constrained machine. Cap it (override `OJHOST_JUCE_JOBS` to tune) just for
+    // this build so it fits in memory; the build is a little slower but doesn't OOM.
+    let juce_jobs = std::env::var("OJHOST_JUCE_JOBS")
+        .ok()
+        .and_then(|j| j.parse::<usize>().ok())
+        .or_else(|| {
+            std::env::var("NUM_JOBS")
+                .ok()
+                .and_then(|j| j.parse::<usize>().ok())
+                .map(|j| j.min(4))
+        })
+        .unwrap_or(4)
+        .max(1);
+    println!("cargo:rerun-if-env-changed=OJHOST_JUCE_JOBS");
+    std::env::set_var("NUM_JOBS", juce_jobs.to_string());
     let dst = cfg.build();
 
     // Link the produced static library + JUCE's transitive system deps. JUCE's
