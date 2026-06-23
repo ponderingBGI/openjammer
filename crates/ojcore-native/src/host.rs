@@ -1263,7 +1263,9 @@ mod tests {
         // Planar render scratch: `channels` rows of one engine block (`frames`).
         let mut mono = vec![0.0f32; frames * channels];
 
-        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None, None);
+        render_block(
+            &mut proc, &mut rx, &mut data, channels, &mut mono, None, None,
+        );
 
         // Commands were drained, in order, before any render.
         assert_eq!(proc.drained.len(), 2);
@@ -1343,7 +1345,9 @@ mod tests {
         // Planar render scratch: `channels` rows of one engine block (`frames`).
         let mut mono = vec![0.0f32; frames * channels];
 
-        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None, None);
+        render_block(
+            &mut proc, &mut rx, &mut data, channels, &mut mono, None, None,
+        );
 
         assert!(data.iter().all(|&s| (s - 0.25).abs() < 1e-9));
     }
@@ -1363,7 +1367,9 @@ mod tests {
         // Planar scratch: a 4-frame engine block × `channels`.
         let mut mono = vec![0.0f32; 4 * channels];
 
-        render_block(&mut proc, &mut rx, &mut data, channels, &mut mono, None, None);
+        render_block(
+            &mut proc, &mut rx, &mut data, channels, &mut mono, None, None,
+        );
 
         // 10 frames in 4-frame chunks → 4 + 4 + 2 = three render calls, last = 2.
         assert_eq!(proc.renders, 3);
@@ -1568,7 +1574,7 @@ mod tests {
     fn render_block_streams_looper_take_into_capture() {
         use crate::looper_capture::LooperCapture;
         use ojcore::looper::looper_param;
-        use ojcore::{compile, LooperLoader, GainLoader, PluginRegistry, GAIN_ID, LOOPER_ID};
+        use ojcore::{compile, GainLoader, LooperLoader, PluginRegistry, GAIN_ID, LOOPER_ID};
         use ojproto::{
             looper_action, ConnectionType, IrEdge, IrNode, OjGraph, Param, PrimitiveKind, RtCommand,
         };
@@ -1591,8 +1597,14 @@ mod tests {
             n_in: 1,
             n_out: 1,
         };
-        looper.params.push(Param { id: looper_param::WET, value: 1.0 });
-        looper.params.push(Param { id: looper_param::DRY, value: 0.0 });
+        looper.params.push(Param {
+            id: looper_param::WET,
+            value: 1.0,
+        });
+        looper.params.push(Param {
+            id: looper_param::DRY,
+            value: 0.0,
+        });
         let graph = OjGraph {
             ir_version: ojproto::SCHEMA_VERSION,
             sample_rate: SR,

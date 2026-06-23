@@ -876,7 +876,10 @@ impl EngineBackend {
                 // Surface Meter + Looper frames here (Beat goes via the transport
                 // path). One drain decodes every tag because there is exactly one
                 // consumer of the meter ring.
-                if matches!(frame, EngineFrame::Meter { .. } | EngineFrame::Looper { .. }) {
+                if matches!(
+                    frame,
+                    EngineFrame::Meter { .. } | EngineFrame::Looper { .. }
+                ) {
                     out.push(frame);
                 }
             }
@@ -894,12 +897,12 @@ impl EngineBackend {
             return false;
         };
         self.host = None; // tear down the dead stream before re-opening
-        // Follow the (possibly new) default device's sample rate BEFORE adopting:
-        // a format change (e.g. the interface switching 96 kHz → 48 kHz) or a
-        // replacement device at a different rate must rebuild at that rate, or the
-        // patch would resume detuned. `adopt` compiles the graph at
-        // `self.stream.sample_rate`. (The cpal stream is gone here, so this just
-        // queries the OS default — off-RT.)
+                          // Follow the (possibly new) default device's sample rate BEFORE adopting:
+                          // a format change (e.g. the interface switching 96 kHz → 48 kHz) or a
+                          // replacement device at a different rate must rebuild at that rate, or the
+                          // patch would resume detuned. `adopt` compiles the graph at
+                          // `self.stream.sample_rate`. (The cpal stream is gone here, so this just
+                          // queries the OS default — off-RT.)
         if let Some(rate) = ojcore_native::default_output_sample_rate() {
             self.stream.sample_rate = rate;
         }
@@ -1738,11 +1741,17 @@ mod tests {
         assert!(meter.is_some(), "the pushed Meter frame survived");
         assert!((meter.unwrap() - 0.8).abs() < 1e-6);
 
-        let looper = frames.iter().find(|f| {
-            matches!(f, EngineFrame::Looper { node, .. } if *node == NodeIdx(9))
-        });
+        let looper = frames
+            .iter()
+            .find(|f| matches!(f, EngineFrame::Looper { node, .. } if *node == NodeIdx(9)));
         match looper {
-            Some(EngineFrame::Looper { state, pos, loop_len, peak, .. }) => {
+            Some(EngineFrame::Looper {
+                state,
+                pos,
+                loop_len,
+                peak,
+                ..
+            }) => {
                 assert_eq!(*state, 3);
                 assert_eq!(*pos, 240);
                 assert_eq!(*loop_len, 480);
@@ -1755,9 +1764,14 @@ mod tests {
         // its own transport beats; we only assert ours is gone by checking the
         // pushed Beat shape — bar=1, beat=2 — is absent).
         assert!(
-            !frames
-                .iter()
-                .any(|f| matches!(f, EngineFrame::Beat { bar: 1, beat: 2, .. })),
+            !frames.iter().any(|f| matches!(
+                f,
+                EngineFrame::Beat {
+                    bar: 1,
+                    beat: 2,
+                    ..
+                }
+            )),
             "Beat frames are filtered out of the meter drain",
         );
     }

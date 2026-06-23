@@ -1285,7 +1285,10 @@ pub fn ai_get_learning() -> Result<bool, String> {
     let agent_home = AgentWorkspace::ensure()
         .map_err(|e| e.to_string())?
         .agent_home;
-    Ok(settings_has_package(&agent_home, &persistent_intelligence_pkg()))
+    Ok(settings_has_package(
+        &agent_home,
+        &persistent_intelligence_pkg(),
+    ))
 }
 
 /// Sanity cap on a self-authored package's source — not a security boundary (the
@@ -3107,10 +3110,19 @@ mod tests {
     #[test]
     fn slugify_package_name_is_safe_and_contained() {
         // Normal names slugify predictably.
-        assert_eq!(slugify_package_name("Tempo Helper").unwrap(), "tempo-helper");
-        assert_eq!(slugify_package_name("  my__cool.tool!! ").unwrap(), "my-cool-tool");
+        assert_eq!(
+            slugify_package_name("Tempo Helper").unwrap(),
+            "tempo-helper"
+        );
+        assert_eq!(
+            slugify_package_name("  my__cool.tool!! ").unwrap(),
+            "my-cool-tool"
+        );
         // Path-traversal / separators can NEVER survive — no escape from packages/.
-        assert_eq!(slugify_package_name("../../etc/passwd").unwrap(), "etc-passwd");
+        assert_eq!(
+            slugify_package_name("../../etc/passwd").unwrap(),
+            "etc-passwd"
+        );
         assert_eq!(slugify_package_name("a/b\\c").unwrap(), "a-b-c");
         // Empty-after-slug is rejected (no nameless dir).
         assert!(slugify_package_name("   ").is_err());

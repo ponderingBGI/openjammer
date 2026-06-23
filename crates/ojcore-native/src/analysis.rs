@@ -62,8 +62,10 @@ fn rms(buf: &[f32]) -> f32 {
 }
 
 fn peak(buf: &[f32]) -> f32 {
-    buf.iter()
-        .fold(0.0f32, |m, &x| if x.is_finite() { m.max(x.abs()) } else { m })
+    buf.iter().fold(
+        0.0f32,
+        |m, &x| if x.is_finite() { m.max(x.abs()) } else { m },
+    )
 }
 
 /// Count upward zero-crossings (negative-or-zero → positive). One per cycle of a
@@ -183,8 +185,12 @@ mod tests {
     fn distinct_channels_read_stereo() {
         // Two sawtooths at different periods (no trig — libm-free, deterministic):
         // genuinely uncorrelated, each with one upward zero-crossing per period.
-        let l: Vec<f32> = (0..960).map(|i| ((i % 100) as f32 / 100.0) * 2.0 - 1.0).collect();
-        let r: Vec<f32> = (0..960).map(|i| ((i % 37) as f32 / 37.0) * 2.0 - 1.0).collect();
+        let l: Vec<f32> = (0..960)
+            .map(|i| ((i % 100) as f32 / 100.0) * 2.0 - 1.0)
+            .collect();
+        let r: Vec<f32> = (0..960)
+            .map(|i| ((i % 37) as f32 / 37.0) * 2.0 - 1.0)
+            .collect();
         let rep = analyze_stereo(&l, &r, 48_000);
         assert!(rep.finite);
         assert!(rep.is_stereo, "uncorrelated channels must read stereo");

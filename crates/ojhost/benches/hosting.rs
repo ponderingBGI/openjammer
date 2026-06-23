@@ -7,8 +7,11 @@
 //! DSP cost is plugin/vendor-specific and belongs in manual founder hardware tests.
 
 use codspeed_criterion_compat::{black_box, criterion_group, criterion_main, Criterion};
-use ojhost::{hosted_plugin_id, register_scanned, scan, HostedParam, PluginDescriptor, PluginFormat, PortCounts, ScanCache};
 use ojcore::PluginRegistry;
+use ojhost::{
+    hosted_plugin_id, register_scanned, scan, HostedParam, PluginDescriptor, PluginFormat,
+    PortCounts, ScanCache,
+};
 use std::path::PathBuf;
 
 fn desc(index: usize) -> PluginDescriptor {
@@ -80,5 +83,11 @@ fn bench_safe_empty_scan(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, bench_identity, bench_register, bench_scan_cache, bench_safe_empty_scan);
+criterion_group!(
+    benches,
+    bench_identity,
+    bench_register,
+    bench_scan_cache,
+    bench_safe_empty_scan
+);
 criterion_main!(benches);

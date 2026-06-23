@@ -269,6 +269,10 @@ mod tests {
         sink.capture(9, &big);
         assert!(sink.dropped() >= 34, "oversized frame dropped + counted");
         cap.drain();
-        assert_eq!(cap.accumulated(9), 0, "no partial frame reached the demuxer");
+        assert_eq!(
+            cap.accumulated(9),
+            0,
+            "no partial frame reached the demuxer"
+        );
     }
 }

@@ -376,7 +376,9 @@ fn probe_via_helper(path: &Path) -> Result<Vec<PluginDescriptor>, ProbeHelperErr
                     Ok(response.descriptors)
                 } else {
                     Err(ProbeHelperError::Failed(
-                        response.error.unwrap_or_else(|| "scan helper failed".into()),
+                        response
+                            .error
+                            .unwrap_or_else(|| "scan helper failed".into()),
                     ))
                 };
             }
@@ -589,7 +591,10 @@ mod tests {
     fn clap_dirs_are_a_clap_named_subset_of_all_dirs() {
         let all = default_plugin_dirs();
         for d in clap_plugin_dirs() {
-            assert!(all.contains(&d), "a CLAP dir must be one of the scanned dirs");
+            assert!(
+                all.contains(&d),
+                "a CLAP dir must be one of the scanned dirs"
+            );
             let leaf = d.file_name().and_then(|n| n.to_str()).unwrap_or_default();
             assert!(
                 leaf.eq_ignore_ascii_case("clap") || leaf.eq_ignore_ascii_case(".clap"),

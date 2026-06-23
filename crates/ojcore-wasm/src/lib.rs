@@ -130,7 +130,11 @@ impl AssetResolver for WasmAssetStore {
         // Hand back the INTERLEAVED PCM + its channel count (zero-copy); the
         // consuming node keeps the layout it needs (a stereo Sampler plays both
         // channels, a Convolution downmixes) — symmetric with the native catalog.
-        Some(AssetPcm::from_interleaved(&a.pcm, a.channels, a.sample_rate))
+        Some(AssetPcm::from_interleaved(
+            &a.pcm,
+            a.channels,
+            a.sample_rate,
+        ))
     }
 }
 
@@ -392,7 +396,11 @@ pub fn last_degraded_node_ids() -> Vec<u32> {
 pub fn store_asset(pcm: &[f32], channels: u32, sample_rate: f32) -> u32 {
     let Some(host) = host_mut() else { return 0 };
     host.assets
-        .insert(pcm.to_vec(), channels.clamp(1, u16::MAX as u32) as u16, sample_rate)
+        .insert(
+            pcm.to_vec(),
+            channels.clamp(1, u16::MAX as u32) as u16,
+            sample_rate,
+        )
         .0
 }
 
@@ -1534,7 +1542,10 @@ mod tests {
         let pcm = engine.program().instances[slot].last_committed_layer_pcm();
         assert_eq!(pcm.len(), BLOCK, "committed loop is one block long");
         for (i, (&x, &y)) in signal.iter().zip(pcm.iter()).enumerate() {
-            assert!((x - y).abs() < 1e-6, "wasm commit pcm frame {i}: {x} != {y}");
+            assert!(
+                (x - y).abs() < 1e-6,
+                "wasm commit pcm frame {i}: {x} != {y}"
+            );
         }
     }
 

@@ -309,7 +309,11 @@ mod tests {
 
         let asset = AssetResolver::resolve(&cat, id).expect("stereo resolves, not None");
         assert_eq!(asset.channels, 2, "the channel count rides along");
-        assert_eq!(asset.pcm.as_ref(), expected.as_slice(), "interleaved, no downmix");
+        assert_eq!(
+            asset.pcm.as_ref(),
+            expected.as_slice(),
+            "interleaved, no downmix"
+        );
         assert_eq!(asset.sample_rate, 48_000.0);
     }
 

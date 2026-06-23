@@ -272,7 +272,11 @@ pub(super) fn open_editor(desc: &PluginDescriptor) -> Result<Box<dyn EditorBacke
     if handle.is_null() {
         let message = unsafe { cstr_owned(err) };
         return Err(HostError::Load {
-            message: if message.is_empty() { "plugin editor failed to open".into() } else { message },
+            message: if message.is_empty() {
+                "plugin editor failed to open".into()
+            } else {
+                message
+            },
         });
     }
     Ok(Box::new(JuceEditor { handle }))

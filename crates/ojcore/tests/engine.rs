@@ -827,7 +827,8 @@ fn idle_looper_in_path_matches_direct_path() {
     // A: GraphIn(1) -> SpeakerOut(3) — the "no looper" baseline.
     let mut a = OjGraph::empty(SR, BLOCK);
     a.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
-    a.nodes.push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    a.nodes
+        .push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
     a.edges.push(audio_edge(1, 0, 3, 0));
     let mut ea = Engine::new(compile(&a, &reg).expect("compile A"));
 
@@ -835,11 +836,21 @@ fn idle_looper_in_path_matches_direct_path() {
     let mut b = OjGraph::empty(SR, BLOCK);
     b.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
     let mut lp = node(2, ojcore::LOOPER_ID, PrimitiveKind::Looper, 1, 1);
-    lp.params.push(Param { id: looper_param::LOOP_SECS, value: 10.0 });
-    lp.params.push(Param { id: looper_param::WET, value: 1.0 });
-    lp.params.push(Param { id: looper_param::DRY, value: 1.0 });
+    lp.params.push(Param {
+        id: looper_param::LOOP_SECS,
+        value: 10.0,
+    });
+    lp.params.push(Param {
+        id: looper_param::WET,
+        value: 1.0,
+    });
+    lp.params.push(Param {
+        id: looper_param::DRY,
+        value: 1.0,
+    });
     b.nodes.push(lp);
-    b.nodes.push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    b.nodes
+        .push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
     b.edges.push(audio_edge(1, 0, 2, 0));
     b.edges.push(audio_edge(2, 0, 3, 0));
     let mut eb = Engine::new(compile(&b, &reg).expect("compile B"));

@@ -136,7 +136,10 @@ fn ensure_cmake() {
     }
     #[cfg(target_os = "windows")]
     if let Some(path) = discover_windows_cmake() {
-        println!("cargo:warning=ojhost: CMake not on PATH; using {}", path.display());
+        println!(
+            "cargo:warning=ojhost: CMake not on PATH; using {}",
+            path.display()
+        );
         std::env::set_var("CMAKE", path);
     }
 }
@@ -245,23 +248,8 @@ fn link_platform_libs() {
     // MSVC's C/C++ runtime is selected by the toolchain flags and does not need a
     // manual cargo link line.
     for lib in [
-        "advapi32",
-        "comctl32",
-        "comdlg32",
-        "gdi32",
-        "imm32",
-        "kernel32",
-        "ole32",
-        "oleaut32",
-        "rpcrt4",
-        "shell32",
-        "shlwapi",
-        "user32",
-        "uuid",
-        "version",
-        "wininet",
-        "winmm",
-        "ws2_32",
+        "advapi32", "comctl32", "comdlg32", "gdi32", "imm32", "kernel32", "ole32", "oleaut32",
+        "rpcrt4", "shell32", "shlwapi", "user32", "uuid", "version", "wininet", "winmm", "ws2_32",
     ] {
         println!("cargo:rustc-link-lib=dylib={lib}");
     }

@@ -324,9 +324,7 @@ struct ClapBackend {
 // `unsafe impl Send` over its `*mut OjPlugin`.
 unsafe impl Send for ClapBackend {}
 
-pub(super) fn open_editor(
-    _desc: &PluginDescriptor,
-) -> Result<Box<dyn EditorBackend>, HostError> {
+pub(super) fn open_editor(_desc: &PluginDescriptor) -> Result<Box<dyn EditorBackend>, HostError> {
     Err(HostError::Unavailable)
 }
 
@@ -543,11 +541,18 @@ mod tests {
         use clack_host::prelude::EventBuffer;
 
         let mut buf = EventBuffer::with_capacity(256);
-        buf.push(&NoteOnEvent::new(0, Pckn::from_raw(0, 0, 60, -1), 100.0 / 127.0));
+        buf.push(&NoteOnEvent::new(
+            0,
+            Pckn::from_raw(0, 0, 60, -1),
+            100.0 / 127.0,
+        ));
         buf.push(&NoteOffEvent::new(0, Pckn::from_raw(0, 0, 60, -1), 0.0));
         assert_eq!(buf.len(), 2, "both note events queued");
         buf.clear();
-        assert!(buf.is_empty(), "the block boundary drains queued note events");
+        assert!(
+            buf.is_empty(),
+            "the block boundary drains queued note events"
+        );
     }
 }
 

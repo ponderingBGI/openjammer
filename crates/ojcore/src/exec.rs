@@ -941,9 +941,13 @@ mod apply_rt_tests {
             "the degraded node emits NodeFault{{Crashed}}; got {faults:?}"
         );
         assert!(
-            !faults
-                .iter()
-                .any(|ev| matches!(ev, RtEvent::NodeFault { node: NodeIdx(0), .. })),
+            !faults.iter().any(|ev| matches!(
+                ev,
+                RtEvent::NodeFault {
+                    node: NodeIdx(0),
+                    ..
+                }
+            )),
             "a healthy node emits no fault"
         );
     }

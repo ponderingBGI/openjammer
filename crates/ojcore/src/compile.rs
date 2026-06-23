@@ -637,7 +637,10 @@ mod asset_pcm_tests {
     fn from_interleaved_clamps_channels_to_u8() {
         let src = [0.0_f32; 4];
         assert_eq!(AssetPcm::from_interleaved(&src, 0, 48_000.0).channels, 1);
-        assert_eq!(AssetPcm::from_interleaved(&src, 999, 48_000.0).channels, 255);
+        assert_eq!(
+            AssetPcm::from_interleaved(&src, 999, 48_000.0).channels,
+            255
+        );
     }
 
     #[test]
@@ -648,7 +651,10 @@ mod asset_pcm_tests {
             vec![2.0_f32, 0.0, 0.5]
         );
         // 3-channel frame (3,6,9)->6; the trailing partial (1,2) is ignored.
-        assert_eq!(downmix_to_mono(&[3.0_f32, 6.0, 9.0, 1.0, 2.0], 3), vec![6.0_f32]);
+        assert_eq!(
+            downmix_to_mono(&[3.0_f32, 6.0, 9.0, 1.0, 2.0], 3),
+            vec![6.0_f32]
+        );
         // Mono copies through unchanged.
         assert_eq!(downmix_to_mono(&[0.1_f32, -0.2], 1), vec![0.1_f32, -0.2]);
     }
@@ -857,8 +863,9 @@ mod channel_lane_tests {
         let states = OneState { blob: vec![99] };
 
         // Param present: restore(99) THEN set_param(5) -> value 5 (param wins -> restore was first).
-        let prog = compile_resilient_with_state(&build_graph(Some(5.0)), &build_reg(), &NoAssets, &states)
-            .expect("compiles");
+        let prog =
+            compile_resilient_with_state(&build_graph(Some(5.0)), &build_reg(), &NoAssets, &states)
+                .expect("compiles");
         let slot = prog.slot_of_id(NodeIdx(1)).unwrap();
         assert_eq!(
             prog.instances[slot].save_state(),
@@ -867,8 +874,9 @@ mod channel_lane_tests {
         );
 
         // No param: the restored blob value survives (restore round-trips end to end).
-        let prog2 = compile_resilient_with_state(&build_graph(None), &build_reg(), &NoAssets, &states)
-            .expect("compiles");
+        let prog2 =
+            compile_resilient_with_state(&build_graph(None), &build_reg(), &NoAssets, &states)
+                .expect("compiles");
         let slot2 = prog2.slot_of_id(NodeIdx(1)).unwrap();
         assert_eq!(
             prog2.instances[slot2].save_state(),

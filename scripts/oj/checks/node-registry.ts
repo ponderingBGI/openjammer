@@ -109,9 +109,6 @@ export function parseNodeTypes(typesText: string): string[] {
   return [...out];
 }
 
-/** A quoted-or-bare object key, e.g. `keyboard:` or `'keyboard-key':`. */
-const KEY_RE = /^\s*'?([A-Za-z][A-Za-z0-9-]*)'?\s*:/;
-
 /**
  * NodeType -> line, derived from the `type: 'X'` field each `nodeDefinitions`
  * entry carries (the entry's own self-declared type — robust against key/value

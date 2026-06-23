@@ -107,8 +107,14 @@ fn demo_graph() -> OjGraph {
             (delay_param::MIX, 0.3),
         ],
     ));
-    g.nodes
-        .push(node(4, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0, &[]));
+    g.nodes.push(node(
+        4,
+        SPEAKER_OUT_ID,
+        PrimitiveKind::SpeakerOut,
+        1,
+        0,
+        &[],
+    ));
     g.nodes.push(node(5, PAN_ID, PrimitiveKind::Pan, 1, 1, &[]));
     g.edges.push(edge(1, 2));
     g.edges.push(edge(2, 3));
@@ -198,7 +204,8 @@ fn load_schedule(path: Option<&str>, sample_rate: u32) -> Vec<(usize, RtCommand)
     let Some(p) = path else {
         return Vec::new();
     };
-    let json = std::fs::read_to_string(p).unwrap_or_else(|e| fail(&format!("read schedule {p}: {e}")));
+    let json =
+        std::fs::read_to_string(p).unwrap_or_else(|e| fail(&format!("read schedule {p}: {e}")));
     let events: Vec<SchedEvent> =
         serde_json::from_str(&json).unwrap_or_else(|e| fail(&format!("parse schedule {p}: {e}")));
     let mut out: Vec<(usize, RtCommand)> = events
@@ -251,7 +258,8 @@ fn render_graph(
     seconds: f32,
     assets: &[(u32, String)],
 ) -> (Vec<f32>, Vec<f32>, u32) {
-    let json = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("read graph {path}: {e}")));
+    let json =
+        std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("read graph {path}: {e}")));
     let mut g: OjGraph =
         serde_json::from_str(&json).unwrap_or_else(|e| fail(&format!("parse graph {path}: {e}")));
 
@@ -345,7 +353,9 @@ fn parse_args() -> Opts {
                     match v.split_once('=') {
                         Some((n, p)) => match n.trim().parse::<u32>() {
                             Ok(id) => o.assets.push((id, p.to_string())),
-                            Err(_) => fail(&format!("--asset: bad node id in {v:?} (want NODE=path.wav)")),
+                            Err(_) => fail(&format!(
+                                "--asset: bad node id in {v:?} (want NODE=path.wav)"
+                            )),
                         },
                         None => fail(&format!("--asset: want NODE=path.wav, got {v:?}")),
                     }
@@ -440,10 +450,7 @@ fn check_assert(rep: &AudioReport, expr: &str) -> bool {
 }
 
 fn finish(left: &[f32], right: &[f32], sample_rate: u32, opts: &Opts, default_out: &str) -> ! {
-    let out = opts
-        .out
-        .clone()
-        .unwrap_or_else(|| default_out.to_string());
+    let out = opts.out.clone().unwrap_or_else(|| default_out.to_string());
 
     // Interleave L/R for the WAV.
     let total = left.len().min(right.len());

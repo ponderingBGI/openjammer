@@ -22,9 +22,7 @@
 //! `tests/e2e_latency.rs`.
 
 use codspeed_criterion_compat::{black_box, criterion_group, criterion_main, Criterion};
-use ojcore::{
-    compile, BuiltinOpts, Engine, PluginRegistry, BIQUAD_ID, DELAY_ID, SPEAKER_OUT_ID,
-};
+use ojcore::{compile, BuiltinOpts, Engine, PluginRegistry, BIQUAD_ID, DELAY_ID, SPEAKER_OUT_ID};
 use ojinstrument::{register_all, RegisterOpts, OSC_ID};
 use ojproto::{ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, PrimitiveKind, RtCommand};
 
@@ -62,7 +60,8 @@ fn audio_edge(from: u32, to: u32) -> IrEdge {
 fn realistic_graph(block: u32) -> OjGraph {
     let mut g = OjGraph::empty(SR, block);
     g.nodes.push(node(1, OSC_ID, PrimitiveKind::Osc, 0, 1));
-    g.nodes.push(node(2, BIQUAD_ID, PrimitiveKind::Biquad, 1, 1));
+    g.nodes
+        .push(node(2, BIQUAD_ID, PrimitiveKind::Biquad, 1, 1));
     g.nodes.push(node(3, DELAY_ID, PrimitiveKind::Delay, 1, 1));
     g.nodes
         .push(node(4, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));

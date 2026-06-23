@@ -721,6 +721,9 @@ mod tests {
             }
             (e / n as f32).sqrt()
         };
-        assert!(rms > 0.05, "string collapsed to a click: rms after 2 periods = {rms}");
+        assert!(
+            rms > 0.05,
+            "string collapsed to a click: rms after 2 periods = {rms}"
+        );
     }
 }

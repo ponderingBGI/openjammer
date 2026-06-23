@@ -357,7 +357,10 @@ impl LooperNode {
     /// trims to `loop_len`.
     #[inline]
     pub fn last_captured_block(&self) -> Option<&[f32]> {
-        if !matches!(self.state, LooperState::Recording | LooperState::Overdubbing) {
+        if !matches!(
+            self.state,
+            LooperState::Recording | LooperState::Overdubbing
+        ) {
             return None;
         }
         let start = self.block_capture_start;
@@ -517,7 +520,10 @@ impl LooperNode {
                 // (loop_len still 0, free-run) the length is the current write
                 // head; then commit. If quantized, the wrap in `process` already
                 // committed; here we just hold Playing.
-                if matches!(self.state, LooperState::Recording | LooperState::Overdubbing) {
+                if matches!(
+                    self.state,
+                    LooperState::Recording | LooperState::Overdubbing
+                ) {
                     if self.loop_len == 0 {
                         self.loop_len = self.pos.max(1);
                     }

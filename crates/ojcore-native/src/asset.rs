@@ -389,7 +389,10 @@ mod tests {
             decoded.frames()
         );
         // The bug kept only the LAST packet, so the head + middle would be lost.
-        assert!((decoded.samples[0] - original.samples[0]).abs() < 1e-6, "head lost");
+        assert!(
+            (decoded.samples[0] - original.samples[0]).abs() < 1e-6,
+            "head lost"
+        );
         let mid = frames / 2;
         assert!(
             (decoded.samples[mid] - original.samples[mid]).abs() < 1e-6,

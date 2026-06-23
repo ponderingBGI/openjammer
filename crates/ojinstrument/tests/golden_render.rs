@@ -603,7 +603,10 @@ fn karplus_instrument_note_is_audible_then_rings_down() {
     // bug. A proper noise burst keeps ringing, so the string is still audible here.
     let sustain = render(&mut engine, 8);
     assert_all_finite(&sustain);
-    assert!(peak(&sustain) > 0.02, "karplus collapsed to a click — no sustained ring");
+    assert!(
+        peak(&sustain) > 0.02,
+        "karplus collapsed to a click — no sustained ring"
+    );
 
     engine.apply(RtCommand::NoteOff {
         node: NodeIdx(1),

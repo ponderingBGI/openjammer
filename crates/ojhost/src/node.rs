@@ -29,7 +29,11 @@ pub const PLUGIN_HOST_ID: &str = "host.plugin";
 /// Build the stable manifest id for one scanned hosted plugin.
 pub fn hosted_plugin_id(desc: &PluginDescriptor) -> String {
     let key = format!("{}\0{}\0{}", desc.format.slug(), desc.uid, desc.path);
-    format!("{PLUGIN_HOST_ID}.{}.{}", desc.format.slug(), fnv1a32_hex(key.as_bytes()))
+    format!(
+        "{PLUGIN_HOST_ID}.{}.{}",
+        desc.format.slug(),
+        fnv1a32_hex(key.as_bytes())
+    )
 }
 
 fn fnv1a32_hex(bytes: &[u8]) -> String {
@@ -151,10 +155,10 @@ impl DspInstance for PluginHostNode {
         // plugin FAULTED this block: latch the crash, and hold a clean passthrough
         // for this block too (its output can't be trusted) — a held note beats a
         // glitch. We never re-enter the plugin this session (latch-and-quarantine).
-        let faulted =
-            self.plugin
-                .backend
-                .process_guarded(ctx.inputs, ctx.outputs, ctx.nframes);
+        let faulted = self
+            .plugin
+            .backend
+            .process_guarded(ctx.inputs, ctx.outputs, ctx.nframes);
         if faulted {
             self.faulted = true;
             dry_passthrough(ctx);
@@ -395,7 +399,10 @@ mod tests {
         // A 2-out instrument is ONE stereo output port carrying 2 channels (model
         // B), not two mono ports — so the compiler derives 1 × 2 = 2 output lanes.
         assert_eq!(m.ports.audio_out, 1, "one audio-out port per side");
-        assert_eq!(m.ports.audio_out_channels, 2, "carrying the plugin's 2 channels");
+        assert_eq!(
+            m.ports.audio_out_channels, 2,
+            "carrying the plugin's 2 channels"
+        );
         assert_eq!(m.ports.audio_in, 0, "an instrument has no audio input");
         assert_eq!(m.params.len(), 3);
     }
@@ -558,7 +565,10 @@ mod tests {
         // passthrough of the input (the faulting NaN output is discarded).
         let b2 = run(&mut node, &input);
         assert!(node.is_faulted(), "a fault must latch the node");
-        assert!(node.runtime_degraded(), "the off-RT poll reports the degrade");
+        assert!(
+            node.runtime_degraded(),
+            "the off-RT poll reports the degrade"
+        );
         assert!(b2.iter().all(|s| s.is_finite()), "no NaN escapes the latch");
         assert_eq!(b2, input, "the fault block holds a dry passthrough");
 
@@ -599,7 +609,9 @@ mod tests {
     fn hosted_plugin_provides_the_oj_state_save_restore_seam() {
         // SAVE via the engine's path: extension(State) -> downcast -> StateSave::save.
         let node = PluginHostNode::new(HostedPlugin {
-            backend: Box::new(StatefulBackend { blob: vec![9, 8, 7] }),
+            backend: Box::new(StatefulBackend {
+                blob: vec![9, 8, 7],
+            }),
             descriptor: sample_desc(0),
         });
         let any = node
