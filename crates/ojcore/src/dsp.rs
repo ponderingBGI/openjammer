@@ -217,6 +217,17 @@ pub trait DspInstance: Send {
         None
     }
 
+    /// Whether this node has LATCHED into a degraded dry-passthrough at runtime —
+    /// a hosted plugin that faulted (a segfault caught at the foreign-code
+    /// boundary) or a code-node kernel that trapped. Default `false`. The off-RT
+    /// control side polls this each tick to surface a non-modal "this node is
+    /// passing through" badge — the runtime twin of the load-time
+    /// [`crate::CompiledProgram::degraded_stubs`]. A single field read, off the hot
+    /// path; recovery is a fresh `instantiate` on the next graph swap.
+    fn runtime_degraded(&self) -> bool {
+        false
+    }
+
     /// Clear internal state (filter memory, delay lines, phase). Default no-op.
     fn reset(&mut self) {}
 }

@@ -48,6 +48,25 @@ pub trait HostedBackend: Send {
     /// allocate, lock, or block.
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], nframes: usize);
 
+    /// RT-thread hot path WITH a per-node fault boundary. Render like [`process`],
+    /// returning `true` if the foreign plugin FAULTED this block (a segfault /
+    /// illegal op caught at the language boundary) — in which case `outputs` may be
+    /// garbage and the caller must not trust it. The default has NO boundary: it
+    /// calls [`process`] and reports no fault. The JUCE backend overrides it with
+    /// the per-OS SEH / signal guard around `processBlock`. On a reported fault the
+    /// [`crate::node::PluginHostNode`] latches to a dry passthrough and never
+    /// re-enters the plugin this session ("a held note beats a glitch"; latch-and-
+    /// quarantine, never resume out of foreign C++ that may hold the heap lock).
+    fn process_guarded(
+        &mut self,
+        inputs: &[&[f32]],
+        outputs: &mut [&mut [f32]],
+        nframes: usize,
+    ) -> bool {
+        self.process(inputs, outputs, nframes);
+        false
+    }
+
     /// RT-thread: set parameter `id` to `value`. MUST NOT allocate.
     fn set_param(&mut self, id: u16, value: f32);
 
