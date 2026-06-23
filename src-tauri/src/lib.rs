@@ -31,9 +31,11 @@ use tauri::Manager;
 
 /// Push a full graph from the UI: recompile it against the plugin registry and
 /// adopt it into the running engine (publish to the program-swap mailbox + run).
-/// `graph` is an [`OjGraph`] serialized as JSON across the IPC boundary.
+/// `graph` is an [`OjGraph`] serialized as JSON across the IPC boundary. Returns
+/// the IR node ids that degraded to a passthrough stub (a missing / incompatible
+/// plugin, invariant #4a) so the UI can badge them; empty on a clean graph.
 #[tauri::command]
-fn push_graph(graph: OjGraph, state: tauri::State<'_, BackendState>) -> Result<(), String> {
+fn push_graph(graph: OjGraph, state: tauri::State<'_, BackendState>) -> Result<Vec<u32>, String> {
     state
         .0
         .lock()

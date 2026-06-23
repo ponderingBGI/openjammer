@@ -62,6 +62,7 @@ import {
 import { ingestEngineEvents } from './faultPipe';
 import { setEngineHealth } from '../../store/engineHealthStore';
 import { setNodeVoiceLoadError } from './voiceLoadError';
+import { setNodePluginLoadError } from './pluginLoadError';
 import { logger } from '../../utils/log';
 
 /** Scope-bound DevLog logger for the wasm executor. */
@@ -270,6 +271,7 @@ export class OjcoreWasmExecutor implements Executor {
                 assetId?: number;
                 rootNote?: number;
                 bytes?: Uint8Array;
+                degradedNodeIds?: number[];
             };
             switch (data.type) {
                 case 'ready':
@@ -284,6 +286,14 @@ export class OjcoreWasmExecutor implements Executor {
                     // Now that the worklet can receive PCM, give instrument nodes
                     // their built-in default voice (was a no-op while not ready).
                     this.loadDefaultInstrumentVoices();
+                    break;
+                case 'graph-ack':
+                    // Invariant #4a: badge the nodes that degraded to a passthrough
+                    // stub on this load, and clear the rest — the browser symmetry of
+                    // the native push_graph degraded-id surface. `reverseIndex` is
+                    // already committed by `sendGraph` (synchronous) before this async
+                    // ack arrives, so it maps the just-loaded graph.
+                    this.applyDegraded(data.degradedNodeIds ?? []);
                     break;
                 case 'meters':
                     this.onMeterFrame(data.levels ?? []);
@@ -646,6 +656,17 @@ export class OjcoreWasmExecutor implements Executor {
     }
 
     /** Route worklet meter frames to signal-level subscribers, keyed by node id. */
+    /** Badge the nodes that degraded to a passthrough stub on the last load and
+     *  clear the rest (invariant #4a) — the browser symmetry of the native
+     *  push_graph degraded-id surface. Maps IR ids via the just-committed
+     *  `reverseIndex`; the setter only writes on change (cheap for steady graphs). */
+    private applyDegraded(degradedNodeIds: number[]): void {
+        const degradedSet = new Set(degradedNodeIds);
+        for (const [idx, visualId] of this.reverseIndex) {
+            setNodePluginLoadError(visualId, degradedSet.has(idx));
+        }
+    }
+
     private onMeterFrame(levels: Array<{ node: number; peak: number }>): void {
         let changed = false;
         for (const { node, peak } of levels) {

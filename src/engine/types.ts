@@ -265,6 +265,15 @@ export interface Position {
 export interface NodeData {
     // Common fields
     [key: string]: unknown;
+
+    /**
+     * Engine-derived runtime flag (NOT a user edit, never in undo history): the
+     * node degraded to a labeled passthrough stub — a hosted plugin that is
+     * missing / `abi`-incompatible on load (invariant #4a) or that FAULTED at
+     * runtime (the crash latch). The UI shows a non-modal "(missing plugin)" badge;
+     * it clears automatically when the plugin resolves again (a rescan/auto-rebind).
+     */
+    pluginLoadError?: boolean;
 }
 
 /**

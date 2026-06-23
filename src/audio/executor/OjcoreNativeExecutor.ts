@@ -65,6 +65,7 @@ import { logger } from '../../utils/log';
 import { setEngineHealth, useEngineHealthStore } from '../../store/engineHealthStore';
 import { ingestEngineEvents } from './faultPipe';
 import { setNodeVoiceLoadError } from './voiceLoadError';
+import { setNodePluginLoadError } from './pluginLoadError';
 
 // Re-exported for back-compat: `coalesceEvents` moved to the shared `faultPipe`
 // seam (Wave 4) so both executor tiers share one fault path. Existing importers
@@ -515,8 +516,12 @@ export class OjcoreNativeExecutor implements Executor {
         nextReverseIndex: Map<number, string>,
     ): Promise<void> {
         if (!this.invoke) return;
+        let degradedIds: number[] = [];
         try {
-            await this.invoke('push_graph', { graph });
+            // push_graph returns the IR node ids that degraded to a passthrough stub
+            // (a missing / incompatible hosted plugin — invariant #4a).
+            const result = await this.invoke('push_graph', { graph });
+            degradedIds = Array.isArray(result) ? (result as number[]) : [];
         } catch (err) {
             // HELD NOTE BEATS A GLITCH: a rejected push (Compile / RingFull) does
             // NOT tear down the prior graph — the engine keeps the last good
@@ -544,6 +549,14 @@ export class OjcoreNativeExecutor implements Executor {
         // stay pointed at the last good graph (held-note rule).
         this.index = nextIndex;
         this.reverseIndex = nextReverseIndex;
+        // Badge any node that degraded to a passthrough stub (missing / incompatible
+        // plugin) and CLEAR the rest — so a rescan that re-resolves the plugin (a
+        // clean re-push with an empty degraded set) makes the badge disappear. The
+        // setter only writes on change, so this is a cheap no-op for steady graphs.
+        const degradedSet = new Set(degradedIds);
+        for (const [idx, visualId] of nextReverseIndex) {
+            setNodePluginLoadError(visualId, degradedSet.has(idx));
+        }
         // A graph is live and the engine accepted it, so the executor has observed
         // real recovery. Lift IDLE or DEGRADED to LIVE (the positive state
         // crash-recovery waits for); keep DEAD sticky unless a caller performs a

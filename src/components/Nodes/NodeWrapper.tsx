@@ -2,7 +2,7 @@
  * Node Wrapper - Handles node positioning, selection, and dragging
  */
 
-import { useCallback, useRef, useState, useMemo, useEffect, memo } from 'react';
+import { useCallback, useRef, useState, useMemo, useEffect, memo, type ReactNode } from 'react';
 import type { GraphNode, Position } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -449,6 +449,28 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
             ? displayDefinition.name
             : node.type.charAt(0).toUpperCase() + node.type.slice(1);
 
+    // Invariant #4a: a non-modal "(missing plugin)" badge when this node degraded
+    // to a passthrough stub — a hosted plugin missing/incompatible on load, or one
+    // that faulted at runtime. Engine-derived (`node.data.pluginLoadError`, off the
+    // undo history); clears automatically when the plugin resolves again. Renders
+    // for ANY node type via the shared NodeShell header (a held note beats a glitch:
+    // the project stays open and the player sees what's missing).
+    const pluginDegraded = (node.data as { pluginLoadError?: boolean }).pluginLoadError === true;
+    const headerTitleNode: ReactNode = pluginDegraded ? (
+        <>
+            {headerTitle}
+            <span
+                className="node-plugin-error-badge"
+                title="This plugin is missing or crashed — audio is passing through. It will reconnect when the plugin returns (rescan your plugins)."
+                aria-label="Plugin missing or crashed"
+            >
+                !
+            </span>
+        </>
+    ) : (
+        headerTitle
+    );
+
     const renderNodeContent = () => {
         // M6: an AI-authored code node carries an OPEN `pluginId` resolving to a
         // dynamic plugin with `ui:'auto'` + the node's REAL compiled params. Render
@@ -546,7 +568,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
             onMouseLeave={handleNodeMouseLeave}
         >
             <NodeShell
-                title={headerTitle}
+                title={headerTitleNode}
                 nodeType={node.category}
                 selected={isSelected}
                 dragging={isDragging}

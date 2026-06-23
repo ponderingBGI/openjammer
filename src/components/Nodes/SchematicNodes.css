@@ -2878,7 +2878,8 @@
 
 /* ERR-1: per-node "!" badge when an instrument's built-in default voice failed to
    load (DEFECT 3). Same calm warning style as the sampler load-error badge. */
-.instrument-voice-error-badge {
+.instrument-voice-error-badge,
+.node-plugin-error-badge {
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
@@ -2892,6 +2893,7 @@
     line-height: 1;
     color: var(--bg-primary, #1a1a1a);
     background: var(--status-warning, #e0a458);
+    cursor: help;
 }
 
 /* Drop text when empty */
