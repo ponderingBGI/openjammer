@@ -45,9 +45,17 @@ A saved project round-trips on any kernel, even one that has never heard of a no
 - the **port topology** (`n_in` / `n_out`, and post-stereo `n_channels`).
 
 The rule: **an unknown node never deletes the user's work.** It loads as a *labeled passthrough
-stub* (`crates/ojhost/src/node.rs` `PassthroughNode`) that preserves topology + params + the ref,
-and auto-rebinds if the real node/asset reappears. This is *a held note beats a glitch* applied to
-the load path — the project ALWAYS opens.
+stub* that preserves topology + params + the ref, and (future) auto-rebinds if the real node/asset
+reappears. This is *a held note beats a glitch* applied to the load path — the project ALWAYS opens.
+
+> **Implemented (load path):** `ojcore::compile_resilient` (the lenient sibling of `compile`, used by
+> both `ojcore-wasm::load_graph` and the native `push_graph`) degrades an unregistered `manifest_id`
+> *or* an `abi`-incompatible plugin to `ojcore`'s passthrough, preserving the IR topology;
+> `CompiledProgram::degraded_stubs(&graph)` enumerates them for a label. Strict `compile` stays the
+> default so dev/tests still catch a typo'd id. **Still future:** carrying the label to the UI +
+> auto-rebind (both ride the `.oj` lockfile), and the *crash-path* stub — a hosted plugin that FAULTS
+> at runtime latching to a dry passthrough — which is `crates/ojhost/src/node.rs` `PassthroughNode`
+> behind a per-node native fault boundary, a separate mechanism from this load-path stub.
 
 ### FROZEN-2 — The real-time wire shapes
 `RtCommand`, `RtEvent`, `EngineFrame`, `OjGraph`, and the `Event` envelope in
