@@ -123,21 +123,30 @@ export function validatePlan(plan: WorkflowPlan, lookups: PlanLookups): PlanErro
         // (UNKNOWN_TYPE already reported it).
         if (!lookups.isKnownType(fromNode.type) || !lookups.isKnownType(toNode.type)) continue;
 
-        // (3) port-NAME resolution against each node's declared ports.
-        const sourcePort = findPortByName(lookups.portsFor(fromNode.type), wire.from.port);
-        const targetPort = findPortByName(lookups.portsFor(toNode.type), wire.to.port);
+        // (3) port-NAME resolution against each node's declared ports. An
+        // UNKNOWN_PORT error TEACHES — it lists the node's real port names for the
+        // direction the wire needs, so the agent corrects the wire instead of
+        // guessing again.
+        const fromPorts = lookups.portsFor(fromNode.type);
+        const toPorts = lookups.portsFor(toNode.type);
+        const sourcePort = findPortByName(fromPorts, wire.from.port);
+        const targetPort = findPortByName(toPorts, wire.to.port);
         if (!sourcePort) {
             errors.push({
                 code: 'UNKNOWN_PORT',
                 ref: wire.from.ref,
-                message: `node "${wire.from.ref}" (${fromNode.type}) has no port named "${wire.from.port}"`,
+                message:
+                    `node "${wire.from.ref}" (${fromNode.type}) has no port named ` +
+                    `"${wire.from.port}"${portHint(fromPorts, 'output')}`,
             });
         }
         if (!targetPort) {
             errors.push({
                 code: 'UNKNOWN_PORT',
                 ref: wire.to.ref,
-                message: `node "${wire.to.ref}" (${toNode.type}) has no port named "${wire.to.port}"`,
+                message:
+                    `node "${wire.to.ref}" (${toNode.type}) has no port named ` +
+                    `"${wire.to.port}"${portHint(toPorts, 'input')}`,
             });
         }
         if (!sourcePort || !targetPort) continue;
@@ -204,6 +213,20 @@ function findPortByName(
     name: string,
 ): PortDefinition | undefined {
     return ports.find((p) => p.name === name);
+}
+
+/**
+ * A teaching hint for an UNKNOWN_PORT error: list the node's real port NAMES for
+ * the direction the wire needs (bounded), so the message says what to USE, not
+ * just what failed. A type with no ports of that direction reports it plainly.
+ */
+function portHint(ports: readonly PortDefinition[], want: 'input' | 'output'): string {
+    const names = ports.filter((p) => p.direction === want).map((p) => p.name);
+    if (names.length === 0) return ` — this node has no ${want} ports`;
+    const MAX = 6;
+    const shown = names.slice(0, MAX).map((n) => `"${n}"`).join(', ');
+    const more = names.length > MAX ? `, …(+${names.length - MAX} more)` : '';
+    return ` — available ${want} ports: ${shown}${more}`;
 }
 
 /**

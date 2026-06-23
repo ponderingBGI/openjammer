@@ -77,10 +77,16 @@ signal reaches a speaker) before a single node is created.
 
 ### DSP-node authoring
 
-- **author_dsp_node** — Author a brand-new DSP effect from Faust source. Registers a command-palette entry; on the desktop build with libfaust present the source is compiled via the ojfaust crate. Reversible by deleting the node.
 - **author_code_node** — author a brand-new DSP node from Faust source — PREFER reusing/stitching existing nodes first. On desktop this compiles the source to a .wasm + a validated manifest and registers a first-class node with its real params; in the browser the source is stored. Reversible by deleting the node.
 
 ### Reads / introspection (side-effect-free)
+
+> Every read returns each node's **ports** — `{ name, direction, type }` (audio =
+> blue, control/technical = grey). Wire by the port NAME you see here, never a
+> guessed one — that ends the guess→reject→retry loop. `list_node_types` returns
+> each type's default ports plus a `dynamicPorts` flag: when it is true the type
+> generates its ports only once added, so add the node first and re-read to see
+> them. An `UNKNOWN_PORT` validation error also lists the node's real port names.
 
 - **get_graph** — Read the WHOLE current graph (every node + connection, all levels) as a compact summary. Side-effect-free. Prefer get_graph + find_nodes to REUSE existing nodes before adding new ones.
 - **list_node_types** — List the node types the user can ADD, with names + descriptions, from the registry. Side-effect-free. Call this first so you only ever reference real node types.
