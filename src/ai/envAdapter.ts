@@ -28,6 +28,7 @@ import { useAudioStore } from '../store/audioStore';
 import { useGraphStore } from '../store/graphStore';
 import { resolveNodeDefinition } from '../engine/registry';
 import { gatherDiagnostics } from '../utils/diagnostics';
+import { getExecutor } from '../audio/executor';
 import { redactText, redactValue } from '../utils/redact';
 import { applyTheme, getSavedThemeId, getThemeById, saveThemeId } from '@openjammer/oj-tokens';
 import type {
@@ -161,11 +162,11 @@ export function createEnvPort(): AgentEnvPort {
 
         async getSignal(args: GetSignalArgs): Promise<SignalProbeResult> {
             // Probe the live engine peak off the audio thread (the executor owns the
-            // transient meter subscription). Lazy import so the heavy audio/executor
-            // module graph only loads on a real probe, not at AI-module load (keeps
-            // the AI layer light + tests fast). Clamp to 0–1 defensively; `null` means
-            // no live reading is available (unmetered node, or audio stopped).
-            const { getExecutor } = await import('../audio/executor');
+            // transient meter subscription). Imported statically: the executor is
+            // already eagerly loaded everywhere (the app's audio core), so a dynamic
+            // import bought no code-splitting — it only tripped Vite's "dynamically
+            // imported … also statically imported" warning. Clamp to 0–1 defensively;
+            // `null` means no live reading (unmetered node, or audio stopped).
             const raw = await getExecutor().probeSignal(args.nodeId);
             const peak = raw === null ? null : Math.max(0, Math.min(1, raw));
             return {
