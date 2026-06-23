@@ -153,9 +153,15 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy (-D warnings)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        # Exclude oj-tauri: its DEFAULT feature is the full JUCE host
+        # (plugin-host-juce -> ojhost/juce), which needs CMake + the VST3 SDK and is
+        # founder-rig-only. A `--workspace` build pulls that default in via feature
+        # unification and dies at the JUCE CMake configure here. The desktop shell is
+        # linted with the pure-Rust CLAP backend in the "Plugin host" step below, and
+        # built for real (JUCE) by the native Windows/macOS jobs.
+        run: cargo clippy --workspace --exclude oj-tauri --all-targets -- -D warnings
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude oj-tauri
       # RT no-alloc gate (mirrors `just test-rt`). nextest's process-per-test
       # isolation is STRICTLY safer than `cargo test`'s shared process for the
       # global-allocator swap `assert_no_alloc` installs. A REQUIRED per-PR check
@@ -187,6 +193,11 @@ jobs:
         run: |
           cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings
           cargo test -p ojhost --features clap-host
+          # The desktop shell (oj-tauri) is excluded from the workspace gate above
+          # (its default is the founder-rig JUCE host). Lint + test it here with the
+          # pure-Rust CLAP backend so the IPC surface + commands stay green — no CMake.
+          cargo clippy -p oj-tauri --no-default-features --features plugin-host-clap --all-targets -- -D warnings
+          cargo test -p oj-tauri --no-default-features --features plugin-host-clap
 
   web:
     name: Web (control plane)
