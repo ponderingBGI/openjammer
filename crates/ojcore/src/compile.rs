@@ -25,17 +25,21 @@ use crate::dsp::DspInstance;
 use crate::loader::PluginLoader;
 use crate::registry::PluginRegistry;
 
-/// Mono PCM handed back by an [`AssetResolver`] so [`compile_with_assets`] can
-/// install it into a node through [`DspInstance::load_asset`]. The engine's audio
-/// bus is mono, so this is always single-channel: an already-mono asset is
-/// BORROWED from the host's store (zero-copy, the common live path), while a
-/// multi-channel asset (a stereo sample or IR) is summed to mono here (owned) via
-/// [`AssetPcm::from_interleaved`]. The `Cow` keeps the mono case allocation-free
-/// while still letting a stereo sample resolve and play instead of being dropped.
+/// Decoded PCM handed back by an [`AssetResolver`] so [`compile_with_assets`] can
+/// install it into a node through [`DspInstance::load_asset`]. The buffer is kept
+/// in its source INTERLEAVED layout (channel-major frames) and BORROWED zero-copy;
+/// the per-channel split / downmix decision moves to the consuming node — a stereo
+/// Sampler keeps both channels (`SamplerSample::from_interleaved`), while a node
+/// that needs mono (the Convolution IR) downmixes via [`downmix_to_mono`]. This is
+/// how the channel model widens to a real stereo Sampler without forcing a mono
+/// boundary at compile time (`docs/CHANNELS.md` §5.3).
 #[derive(Debug, Clone)]
 pub struct AssetPcm<'a> {
-    /// Mono PCM samples in `[-1, 1]` (borrowed when the source was already mono).
+    /// Interleaved PCM in `[-1, 1]` (`channels`-major frames). For `channels == 1`
+    /// this is plain mono. Borrowed from the host's store (zero-copy).
     pub pcm: Cow<'a, [f32]>,
+    /// Number of interleaved channels in `pcm` (`1` = mono).
+    pub channels: u8,
     /// The PCM's own capture sample rate (Hz), for resampling correction.
     pub sample_rate: f32,
 }
@@ -46,36 +50,46 @@ impl<'a> AssetPcm<'a> {
     pub fn mono(pcm: &'a [f32], sample_rate: f32) -> Self {
         Self {
             pcm: Cow::Borrowed(pcm),
+            channels: 1,
             sample_rate,
         }
     }
 
-    /// Build mono PCM from an interleaved buffer of `channels` channels, averaging
-    /// the channels per frame. `channels <= 1` borrows unchanged (no alloc); a
-    /// stereo (or N-channel) sample/IR is downmixed to mono here — ONCE, off the
-    /// RT thread, since the engine bus is mono. A trailing partial frame (samples
-    /// that don't fill a whole frame) is ignored.
+    /// Borrow an interleaved buffer of `channels` channels UNCHANGED (zero-copy).
+    /// Unlike before, this no longer downmixes: the channel count rides along so a
+    /// stereo Sampler can play both channels and a mono-only consumer downmixes
+    /// itself via [`downmix_to_mono`]. `channels` is clamped to `1..=255`.
     pub fn from_interleaved(samples: &'a [f32], channels: u16, sample_rate: f32) -> Self {
-        let ch = channels as usize;
-        if ch <= 1 {
-            return Self::mono(samples, sample_rate);
-        }
-        let frames = samples.len() / ch;
-        let mut mono = Vec::with_capacity(frames);
-        let inv = 1.0 / ch as f32;
-        for f in 0..frames {
-            let base = f * ch;
-            let mut sum = 0.0;
-            for c in 0..ch {
-                sum += samples[base + c];
-            }
-            mono.push(sum * inv);
-        }
         Self {
-            pcm: Cow::Owned(mono),
+            pcm: Cow::Borrowed(samples),
+            channels: channels.clamp(1, u8::MAX as u16) as u8,
             sample_rate,
         }
     }
+}
+
+/// Downmix an interleaved buffer of `channels` channels to mono by averaging each
+/// frame's channels. `channels <= 1` copies through unchanged. A trailing partial
+/// frame (samples that don't fill a whole frame) is ignored. Off the RT thread:
+/// the consuming node calls this when it needs a single channel (e.g. the
+/// Convolution impulse response stays mono).
+pub fn downmix_to_mono(interleaved: &[f32], channels: u8) -> Vec<f32> {
+    let ch = channels.max(1) as usize;
+    if ch == 1 {
+        return interleaved.to_vec();
+    }
+    let frames = interleaved.len() / ch;
+    let inv = 1.0 / ch as f32;
+    let mut mono = Vec::with_capacity(frames);
+    for f in 0..frames {
+        let base = f * ch;
+        let mut sum = 0.0;
+        for c in 0..ch {
+            sum += interleaved[base + c];
+        }
+        mono.push(sum * inv);
+    }
+    mono
 }
 
 /// Resolve an [`AssetId`] (baked into the IR via an [`ojproto::AssetRef`]) to its
@@ -376,7 +390,7 @@ fn compile_inner(
         // Unresolvable assets are skipped — the node simply starts empty.
         for asset in &node.assets {
             if let Some(pcm) = assets.resolve(asset.asset) {
-                inst.load_asset(asset.slot, &pcm.pcm, pcm.sample_rate);
+                inst.load_asset(asset.slot, &pcm.pcm, pcm.channels, pcm.sample_rate);
             }
         }
         instances.push(inst);
@@ -527,7 +541,7 @@ fn topo_sort(
 
 #[cfg(test)]
 mod asset_pcm_tests {
-    use super::AssetPcm;
+    use super::{downmix_to_mono, AssetPcm};
     use alloc::borrow::Cow;
 
     #[test]
@@ -536,6 +550,7 @@ mod asset_pcm_tests {
         let a = AssetPcm::mono(&src, 48_000.0);
         assert!(matches!(a.pcm, Cow::Borrowed(_)), "mono must not allocate");
         assert_eq!(a.pcm.as_ref(), &src);
+        assert_eq!(a.channels, 1);
         assert_eq!(a.sample_rate, 48_000.0);
     }
 
@@ -547,28 +562,43 @@ mod asset_pcm_tests {
             matches!(a.pcm, Cow::Borrowed(_)),
             "1-channel must be borrowed"
         );
+        assert_eq!(a.channels, 1);
         assert_eq!(a.pcm.as_ref(), &src);
     }
 
     #[test]
-    fn from_interleaved_averages_stereo_frames() {
-        // Interleaved L/R frames: (1,3)->2, (-1,1)->0, (0.5,0.5)->0.5.
+    fn from_interleaved_preserves_stereo_interleaved_zero_copy() {
+        // The interleaved buffer + channel count now ride along UNCHANGED (the
+        // per-channel split moved to the consuming node); no downmix, no alloc.
         let src = [1.0_f32, 3.0, -1.0, 1.0, 0.5, 0.5];
         let a = AssetPcm::from_interleaved(&src, 2, 44_100.0);
         assert!(
-            matches!(a.pcm, Cow::Owned(_)),
-            "a true downmix owns its buffer"
+            matches!(a.pcm, Cow::Borrowed(_)),
+            "stereo is borrowed, not downmixed"
         );
-        assert_eq!(a.pcm.as_ref(), &[2.0_f32, 0.0, 0.5]);
+        assert_eq!(a.channels, 2);
+        assert_eq!(a.pcm.as_ref(), &src);
         assert_eq!(a.sample_rate, 44_100.0);
     }
 
     #[test]
-    fn from_interleaved_handles_n_channels_and_drops_partial_frame() {
+    fn from_interleaved_clamps_channels_to_u8() {
+        let src = [0.0_f32; 4];
+        assert_eq!(AssetPcm::from_interleaved(&src, 0, 48_000.0).channels, 1);
+        assert_eq!(AssetPcm::from_interleaved(&src, 999, 48_000.0).channels, 255);
+    }
+
+    #[test]
+    fn downmix_to_mono_averages_frames_and_drops_partial() {
+        // Stereo L/R frames: (1,3)->2, (-1,1)->0, (0.5,0.5)->0.5.
+        assert_eq!(
+            downmix_to_mono(&[1.0_f32, 3.0, -1.0, 1.0, 0.5, 0.5], 2),
+            vec![2.0_f32, 0.0, 0.5]
+        );
         // 3-channel frame (3,6,9)->6; the trailing partial (1,2) is ignored.
-        let src = [3.0_f32, 6.0, 9.0, 1.0, 2.0];
-        let a = AssetPcm::from_interleaved(&src, 3, 48_000.0);
-        assert_eq!(a.pcm.as_ref(), &[6.0_f32]);
+        assert_eq!(downmix_to_mono(&[3.0_f32, 6.0, 9.0, 1.0, 2.0], 3), vec![6.0_f32]);
+        // Mono copies through unchanged.
+        assert_eq!(downmix_to_mono(&[0.1_f32, -0.2], 1), vec![0.1_f32, -0.2]);
     }
 }
 
