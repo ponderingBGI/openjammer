@@ -187,6 +187,23 @@ impl CompiledProgram {
             .ok()
             .map(|i| self.id_index[i].1)
     }
+
+    /// The nodes that DEGRADED to a passthrough stub at compile — their IR `kind` is
+    /// not `Passthrough` but they compiled to one (a missing dependency or an
+    /// unsatisfiable `abi`; see [`compile_resilient`]). The control plane surfaces
+    /// these as labeled stubs (invariant #4a); empty when every node loaded its real
+    /// kernel. Pure: a kind-diff against the source `graph`, no extra state.
+    pub fn degraded_stubs(&self, graph: &OjGraph) -> Vec<NodeIdx> {
+        graph
+            .nodes
+            .iter()
+            .filter(|n| n.kind != PrimitiveKind::Passthrough)
+            .filter_map(|n| {
+                let slot = self.slot_of_id(n.id)?;
+                (self.kinds[slot] == PrimitiveKind::Passthrough).then_some(n.id)
+            })
+            .collect()
+    }
 }
 
 /// Why compilation failed. No allocation-time error is silently swallowed:
@@ -795,5 +812,7 @@ mod channel_lane_tests {
             "missing dependency degraded to a passthrough stub"
         );
         assert_eq!(prog.out_bufs[stub].len(), 1, "topology preserved at mono");
+        // The control plane can enumerate the degraded node(s) for a UI label.
+        assert_eq!(prog.degraded_stubs(&g), vec![NodeIdx(1)]);
     }
 }
