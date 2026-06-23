@@ -15,8 +15,8 @@
 
 use assert_no_alloc::*;
 use ojcore::{
-    compile, CommandQueue, CompileError, Engine, GainLoader, PanLoader, PluginRegistry, ProgramSwap,
-    WidthLoader, GAIN_ID, GAIN_PARAM, PAN_ID, WIDTH_ID,
+    compile, CommandQueue, CompileError, Engine, GainLoader, PanLoader, PluginRegistry,
+    ProgramSwap, WidthLoader, GAIN_ID, GAIN_PARAM, PAN_ID, WIDTH_ID,
 };
 use ojproto::{ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, Param, PrimitiveKind, RtCommand};
 
@@ -99,7 +99,8 @@ fn graphin_pan_width_speaker() -> OjGraph {
     g.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
     g.nodes.push(node(2, PAN_ID, PrimitiveKind::Pan, 1, 1));
     g.nodes.push(node(3, WIDTH_ID, PrimitiveKind::Width, 1, 1));
-    g.nodes.push(node(4, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.nodes
+        .push(node(4, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
     g.edges.push(audio_edge(1, 0, 2, 0)); // input -> pan
     g.edges.push(audio_edge(2, 0, 3, 0)); // pan   -> width
     g.edges.push(audio_edge(3, 0, 4, 0)); // width -> speaker

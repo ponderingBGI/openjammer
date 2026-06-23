@@ -442,7 +442,10 @@ impl LooperNode {
                 self.layers.push(Layer { buf, muted: false });
                 self.recording = replacement;
             } else {
-                debug_assert!(false, "looper pool exhausted in commit_take (activate not called?)");
+                debug_assert!(
+                    false,
+                    "looper pool exhausted in commit_take (activate not called?)"
+                );
             }
         }
         // else: at the layer cap — drop the take (state still goes to Playing).
