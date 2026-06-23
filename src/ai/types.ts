@@ -395,6 +395,13 @@ export type AgentEvent =
     | { kind: 'status'; message: string }
     /** An allowlisted OpenJammer tool call to apply through the reversible graph path. */
     | { kind: 'tool-call'; call: AgentToolCall; id: string }
+    /**
+     * A SELF-EDIT: Philia editing its OWN memory/skills (writing pi-memory, learning
+     * a skill, remembering you) — NOT a canvas tool and NOT an "unsupported" line.
+     * It reads as "you editing you": a distinct quiet chip, reversible via Ctrl+K
+     * forget rather than a canvas Ctrl+Z. NOT a terminal event.
+     */
+    | { kind: 'self-edit'; summary: string; id: string }
     /** A terminal success: the agent finished proposing its plan. */
     | { kind: 'result'; summary: string }
     /** A terminal failure (transport error, no backend, model error, ...). */

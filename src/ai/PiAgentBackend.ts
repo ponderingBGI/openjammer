@@ -61,6 +61,38 @@ function newRunChannel(): string {
     return `ai-run://${Date.now()}-${runCounter}-${rand}`;
 }
 
+/** The base name of a path (last segment), for a readable self-edit summary. */
+function baseName(p: string): string {
+    const parts = p.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] ?? p;
+}
+
+/**
+ * Recognize a SELF-EDIT — Philia editing its own memory/skills — among the NON-oj
+ * Pi tools, so it reads as "you editing you" (a distinct chip) instead of an
+ * "unsupported tool" line. Two reliable signals: a file write/edit/bash whose path
+ * (or command) targets `pi-memory`, and the memory-package verbs by name. Returns a
+ * human summary for the chip, or null when it's some other (genuinely unsupported)
+ * Pi tool.
+ */
+export function classifySelfEdit(name: string, args: unknown): string | null {
+    const a = (args ?? {}) as Record<string, unknown>;
+    const pathLike = String(a.path ?? a.file ?? a.filename ?? a.target ?? '');
+    const cmd = String(a.command ?? a.cmd ?? '');
+    const touchesMemory = pathLike.includes('pi-memory') || cmd.includes('pi-memory');
+    const isWrite = /^(write|edit|create|append|str_replace|fs_write|bash|sh|tee|cp|mv)\b/i.test(name);
+    if (isWrite && touchesMemory) {
+        if (/about-you\.md/i.test(pathLike)) return 'updated what it knows about you';
+        if (/\.md$/i.test(pathLike)) return `learned a skill (${baseName(pathLike)})`;
+        return 'updated its memory';
+    }
+    // pi-persistent-intelligence verbs (name-based): remember / recall / learn / memory.
+    if (/(^|[._-])(remember|recall|memor|learn)/i.test(name)) {
+        return 'remembered something for next time';
+    }
+    return null;
+}
+
 /** Normalize a raw Pi line into a typed {@link AgentEvent}. */
 function toAgentEvent(line: PiStreamLine): AgentEvent {
     switch (line.kind) {
@@ -70,6 +102,12 @@ function toAgentEvent(line: PiStreamLine): AgentEvent {
                 return { kind: 'tool-call', call: call as AgentToolCall, id: line.id ?? '' };
             }
             const name = typeof call?.name === 'string' ? call.name : 'unknown';
+            // A self-edit is the SHAPE-SELF hand at work — legitimate, just not a
+            // canvas tool. Surface it as its own kind, never an "unsupported" line.
+            const selfSummary = classifySelfEdit(name, (call as { args?: unknown })?.args);
+            if (selfSummary) {
+                return { kind: 'self-edit', summary: selfSummary, id: line.id ?? '' };
+            }
             return {
                 kind: 'thought',
                 text: `Ignored unsupported Pi tool "${name}". OpenJammer only applies canvas graph tools.\n`,

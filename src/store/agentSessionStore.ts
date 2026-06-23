@@ -85,6 +85,9 @@ export interface ActionChip {
     summary: string;
     /** Whether the mutation succeeded. */
     ok: boolean;
+    /** A SELF-EDIT (Philia editing its own memory/skills) rather than a canvas edit:
+     *  rendered distinctly and reversed via Ctrl+K forget, not a canvas Ctrl+Z. */
+    self?: boolean;
 }
 
 /** A user's prompt turn. */
@@ -432,6 +435,18 @@ export const useAgentSessionStore = create<AgentSessionStore>()(
                                 if (!SILENT_TOOLS.has(event.call.name)) {
                                     patch((a) => ({ ...a, actions: [...a.actions, chip] }));
                                 }
+                                break;
+                            }
+                            case 'self-edit': {
+                                // Philia editing its own memory/skills — a distinct
+                                // quiet chip (reversed via Ctrl+K forget, not Ctrl+Z).
+                                const chip: ActionChip = {
+                                    name: 'self_edit',
+                                    summary: event.summary,
+                                    ok: true,
+                                    self: true,
+                                };
+                                patch((a) => ({ ...a, actions: [...a.actions, chip] }));
                                 break;
                             }
                             case 'session':
