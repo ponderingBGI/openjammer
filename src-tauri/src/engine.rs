@@ -536,8 +536,26 @@ impl EngineBackend {
         // pushed/loaded graph becomes a passthrough stub so the project ALWAYS opens,
         // rather than rejecting the whole push; genuine errors (cycle, no master) still
         // surface. The starter graph above stays strict (a known-good internal graph).
-        let program = compile_resilient(&g, &self.registry, &self.catalog)
-            .map_err(BackendError::Compile)?;
+        let program =
+            compile_resilient(&g, &self.registry, &self.catalog).map_err(BackendError::Compile)?;
+
+        // Invariant #4a: surface any node that degraded to a passthrough stub (a
+        // missing or incompatible plugin) so a loaded project's degraded nodes are
+        // VISIBLE, not silent. Non-fatal — the project opened; this is the label the
+        // .oj lockfile (P2) will eventually carry to the UI.
+        for id in program.degraded_stubs(&g) {
+            let manifest = g
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .map(|n| n.manifest_id.as_str())
+                .unwrap_or("?");
+            eprintln!(
+                "ojcore: node {} (manifest '{manifest}') degraded to a passthrough stub \
+                 (missing or incompatible plugin); the project stays open",
+                id.0
+            );
+        }
 
         if self.host.is_some() {
             // Live: hand the program to the audio thread (lock-free) and reclaim
