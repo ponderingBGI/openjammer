@@ -106,7 +106,12 @@ describe('workflow serialization', () => {
         expect(imported.connections.map(connection => connection.id)).toEqual(['sample-conn']);
     });
 
-    it('drops nodes with an unknown (missing-definition) type', () => {
+    it('KEEPS an unknown node type as a labeled stub — a saved project always opens (FROZEN-1)', () => {
+        // STABILITY.md §2: an unknown node (e.g. saved by a newer build, or a
+        // missing plugin) must NEVER delete the user's work — it loads as a labeled
+        // passthrough stub that preserves topology + data + the ref. The previous
+        // behavior DROPPED it, silently losing work; the engine's compile_resilient
+        // already degrades it, so the TS load path must keep it too.
         const workflow: SerializedWorkflow = {
             version: '1.0.0',
             name: 'Workflow with future node',
@@ -118,7 +123,12 @@ describe('workflow serialization', () => {
                     type: 'future-node' as never,
                     category: 'utility',
                     position: { x: 0, y: 0 },
-                    data: {}
+                    data: { keep: 'this' },
+                    // Persisted per-instance ports keep the node's topology so its
+                    // connections survive (the future-rebind contract).
+                    ports: [
+                        { id: 'audio-out', name: 'Audio Out', type: 'audio', direction: 'output' }
+                    ]
                 },
                 {
                     id: 'speaker-1',
@@ -128,12 +138,31 @@ describe('workflow serialization', () => {
                     data: { isMuted: false, volume: 1 }
                 }
             ],
-            connections: []
+            connections: [
+                {
+                    id: 'into-speaker',
+                    sourceNodeId: 'mystery-1',
+                    sourcePortId: 'audio-out',
+                    targetNodeId: 'speaker-1',
+                    targetPortId: 'audio-in',
+                    type: 'audio'
+                }
+            ]
         };
 
         const imported = importWorkflow(workflow);
 
-        expect(imported.nodes.map(node => node.id)).toEqual(['speaker-1']);
+        // The unknown node is KEPT (never dropped) …
+        expect(imported.nodes.map(node => node.id).sort()).toEqual(['mystery-1', 'speaker-1']);
+        const mystery = imported.nodes.find(node => node.id === 'mystery-1');
+        // … round-trips losslessly (type, data, persisted ports preserved) …
+        expect(mystery?.type).toBe('future-node');
+        expect(mystery?.data).toEqual({ keep: 'this' });
+        expect(mystery?.ports.map(port => port.id)).toEqual(['audio-out']);
+        // … resolves to the inert MISSING_DEFINITION so the app stays operable …
+        expect(resolveNodeDefinition(mystery!).name).toBe('Unknown');
+        // … and the connection to it SURVIVES (topology preserved for a rebind).
+        expect(imported.connections.map(connection => connection.id)).toEqual(['into-speaker']);
     });
 });
 
@@ -258,7 +287,7 @@ describe('open node identity (M5)', () => {
         expect(imported.nodes.map((n) => n.id)).toEqual(['dyn-1']);
     });
 
-    it('an unknown/unregistered exotic type still falls back to MISSING (drop preserved)', () => {
+    it('keeps an unregistered exotic-type node and round-trips it losslessly (FROZEN-1)', () => {
         const workflow: SerializedWorkflow = {
             version: '1.1.0',
             name: 'Exotic-type workflow',
@@ -269,8 +298,8 @@ describe('open node identity (M5)', () => {
                     // Neither a known plugin id NOR a registered dynamic id, and no pluginId.
                     type: 'totally-unknown' as never,
                     category: 'utility',
-                    position: { x: 0, y: 0 },
-                    data: {},
+                    position: { x: 5, y: 7 },
+                    data: { secret: 42 },
                 },
                 {
                     id: 'speaker-1',
@@ -284,7 +313,21 @@ describe('open node identity (M5)', () => {
         };
 
         const imported = importWorkflow(workflow);
-        // The unknown exotic node is dropped; the known node survives (safety unchanged).
-        expect(imported.nodes.map((n) => n.id)).toEqual(['speaker-1']);
+        // Both nodes survive — the unknown one is never dropped (FROZEN-1).
+        expect(imported.nodes.map((n) => n.id).sort()).toEqual(['mystery-1', 'speaker-1']);
+        const mystery = imported.nodes.find((n) => n.id === 'mystery-1')!;
+        // It resolves to the inert MISSING_DEFINITION (Unknown) rather than crashing.
+        expect(resolveNodeDefinition(mystery).name).toBe('Unknown');
+
+        // Re-export preserves the exotic node VERBATIM (lossless persisted surface),
+        // so a project saved on a build that lacks the node is never corrupted by a
+        // round-trip through it.
+        const nodes = new Map(imported.nodes.map((n) => [n.id, n]));
+        const connections = new Map(imported.connections.map((c) => [c.id, c]));
+        const reexported = exportWorkflow(nodes, connections, 'roundtrip');
+        const m = reexported.nodes.find((n) => n.id === 'mystery-1')!;
+        expect(m.type).toBe('totally-unknown');
+        expect(m.data).toEqual({ secret: 42 });
+        expect(m.position).toEqual({ x: 5, y: 7 });
     });
 });
