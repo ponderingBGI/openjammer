@@ -22,7 +22,7 @@
 use ojcore::effects::{biquad_param, convolution_param, delay_param, waveshaper_param};
 use ojcore::{
     compile, compile_with_assets, master_param, AssetPcm, AssetResolver, Engine, PluginRegistry,
-    BIQUAD_ID, CONVOLUTION_ID, DELAY_ID, GAIN_ID, GAIN_PARAM, GRAPH_IN_ID, LOOPER_ID,
+    BIQUAD_ID, CONVOLUTION_ID, DELAY_ID, GAIN_ID, GAIN_PARAM, GRAPH_IN_ID, LOOPER_ID, PAN_ID,
     SPEAKER_OUT_ID, WAVESHAPER_ID,
 };
 use ojinstrument::{
@@ -88,6 +88,19 @@ fn render(engine: &mut Engine, blocks: usize) -> Vec<f32> {
         engine.process_block(&mut out[b * NB..(b + 1) * NB], NB);
     }
     out
+}
+
+/// Render `blocks` blocks into TWO channel buffers via `process_block_into` — the
+/// stereo counterpart of [`render`], exercising the N-channel device-output path.
+fn render_stereo(engine: &mut Engine, blocks: usize) -> (Vec<f32>, Vec<f32>) {
+    let mut l = vec![0.0f32; blocks * NB];
+    let mut r = vec![0.0f32; blocks * NB];
+    for b in 0..blocks {
+        let (lb, rb) = (&mut l[b * NB..(b + 1) * NB], &mut r[b * NB..(b + 1) * NB]);
+        let mut outs: [&mut [f32]; 2] = [lb, rb];
+        engine.process_block_into(&mut outs, NB);
+    }
+    (l, r)
 }
 
 /// Root-mean-square of a buffer.
@@ -1006,6 +1019,93 @@ fn osc_440_matches_committed_golden() {
         assert!(
             (got - want).abs() <= tol,
             "golden sample #{i} drifted: got {got:?}, want {want:?} (tol {tol:?})"
+        );
+    }
+}
+
+// ===========================================================================
+// Stereo: the channel path through the SHARED registry + process_block_into.
+// A mono GraphIn injected into a real Pan node images to two device channels per
+// the equal-power law (docs/CHANNELS.md) — the end-to-end stereo proof in the gate.
+// ===========================================================================
+
+#[test]
+fn pan_centre_images_injected_input_equal_power() {
+    // GraphIn(1) -> Pan(2, centre) -> SpeakerOut(3). A centred pan sends a mono DC
+    // input to BOTH device channels at the equal-power gain 1/√2 ≈ 0.7071 (not the
+    // 1.0 of a mono fan-out, nor the 0.5 of a linear law) — proving the real Pan
+    // loader ran and process_block_into delivered true two-channel output.
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes
+        .push(node(1, GRAPH_IN_ID, PrimitiveKind::GraphIn, 0, 1));
+    g.nodes.push(node(2, PAN_ID, PrimitiveKind::Pan, 1, 1)); // pan defaults to 0 = centre
+    g.nodes
+        .push(node(3, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 2));
+    g.edges.push(audio_edge(2, 3));
+
+    let mut engine = Engine::new(compile(&g, &registry()).expect("compile pan-centre graph"));
+
+    const DC: f32 = 0.5;
+    if let Some(buf) = engine.input_mut(NodeIdx(1), 0) {
+        buf.copy_from_slice(&vec![DC; NB]);
+    }
+    let (l, r) = render_stereo(&mut engine, 1);
+    assert_all_finite(&l);
+    assert_all_finite(&r);
+
+    let centre = DC * core::f32::consts::FRAC_1_SQRT_2;
+    for i in 1..NB {
+        assert!(
+            (l[i] - centre).abs() < 1e-3,
+            "L[{i}] = {} != {centre}",
+            l[i]
+        );
+        assert!(
+            (r[i] - centre).abs() < 1e-3,
+            "R[{i}] = {} != {centre}",
+            r[i]
+        );
+    }
+}
+
+#[test]
+fn pan_hard_left_routes_input_to_left_channel_only() {
+    // GraphIn(1) -> Pan(2, pan=-1 hard left) -> SpeakerOut(3). The mono input lands
+    // ENTIRELY in the left device channel; the right is silent — true stereo
+    // separation (L != R) end to end through the real path.
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes
+        .push(node(1, GRAPH_IN_ID, PrimitiveKind::GraphIn, 0, 1));
+    g.nodes.push(with_params(
+        node(2, PAN_ID, PrimitiveKind::Pan, 1, 1),
+        &[(0, -1.0)], // pan_param::PAN = 0; -1 = hard left
+    ));
+    g.nodes
+        .push(node(3, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 2));
+    g.edges.push(audio_edge(2, 3));
+
+    let mut engine = Engine::new(compile(&g, &registry()).expect("compile pan-left graph"));
+
+    const DC: f32 = 0.5;
+    if let Some(buf) = engine.input_mut(NodeIdx(1), 0) {
+        buf.copy_from_slice(&vec![DC; NB]);
+    }
+    let (l, r) = render_stereo(&mut engine, 1);
+    assert_all_finite(&l);
+    assert_all_finite(&r);
+
+    for i in 1..NB {
+        assert!(
+            (l[i] - DC).abs() < 1e-3,
+            "L[{i}] = {} != {DC} (hard left)",
+            l[i]
+        );
+        assert!(
+            r[i].abs() < 1e-3,
+            "R[{i}] = {} != 0 (hard left silent)",
+            r[i]
         );
     }
 }
