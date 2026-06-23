@@ -1,22 +1,29 @@
 //! Pure-Rust CLAP backend (feature = "clap-host"), built on the `clack` host
 //! crate (MIT, no C++). Supports CLAP only — VST3 / AU need the JUCE backend.
 //!
-//! # Threading model (why we store only the audio processor)
+//! # Threading model (the `Send` processor + the retained main-thread handle)
 //!
 //! `clack`'s [`PluginInstance`] is the MAIN-THREAD handle and is `!Send`. Its
 //! [`StartedPluginAudioProcessor`], by contrast, IS `Send` (it owns an `Arc`
 //! clone of the instance and is meant to be moved to the audio thread). So we:
 //!
 //! 1. on the loading thread, create the instance, `activate`, and
-//!    `start_processing` to obtain the `Send` audio processor;
-//! 2. drop the `!Send` [`PluginInstance`] handle — `clack` leaks its handle when
-//!    the audio processor still holds the `Arc`, so the instance stays alive and
-//!    is fully torn down (deactivated + destroyed) when the processor drops;
-//! 3. store ONLY the `Send` processor (+ pre-allocated scratch) in the backend.
+//!    `start_processing` to obtain the `Send` audio processor (its own `Arc`);
+//! 2. RETAIN the `!Send` [`PluginInstance`] handle in the backend (it owns a
+//!    second `Arc` to the same inner) so the `oj.state` capability can call the
+//!    CLAP `clap_plugin_state` save/load — which are `[main-thread]` and need this
+//!    handle, not the audio processor;
+//! 3. store the `Send` processor + the retained handle + pre-allocated scratch.
 //!
-//! This is exactly the lifecycle `clack` documents for sending a plugin to the
-//! audio thread, and it makes [`ClapBackend`] genuinely `Send` (so the engine
-//! can move a freshly-loaded plugin onto the RT thread) without `unsafe`.
+//! The retained handle makes the struct `!Send`, so [`ClapBackend`] carries an
+//! `unsafe impl Send` (see the impl for its safety contract). It is sound because
+//! the handle is only ever METHOD-CALLED on the control thread — at off-RT
+//! save/restore (always BEFORE the program is published into the audio callback)
+//! and at teardown (drop happens on the control thread via the program-swap
+//! reclaim). During audio-thread `process` only the `Send` processor is touched;
+//! the `[main-thread]` handle is never used there, so a state call can never race
+//! the audio thread. This is the same discipline the JUCE backend uses for its
+//! `*mut OjPlugin`.
 //!
 //! # Real-time safety
 //!
@@ -218,11 +225,10 @@ pub(super) fn open(
         message: e.to_string(),
     })?;
 
-    // Drop the !Send main-thread handles. `clack` leaks the instance handle
-    // because the audio processor still owns an `Arc` to it, so the plugin stays
-    // alive and is torn down when `started` drops. `entry` is also kept alive by
-    // the instance's internal clone.
-    drop(instance);
+    // RETAIN the `!Send` main-thread `instance` handle (moved into the backend
+    // below) so the `oj.state` save/restore can reach the CLAP state extension —
+    // it owns a second `Arc` to the inner alongside `started`. `entry` is dropped
+    // here; the instance keeps its own internal clone alive.
     drop(entry);
 
     let channels = desc.ports.audio_out.max(desc.ports.audio_in).max(1) as usize;
@@ -235,6 +241,11 @@ pub(super) fn open(
         .collect();
     Ok(Box::new(ClapBackend {
         processor: Some(started),
+        // Retained main-thread handle for oj.state save/restore (see module doc +
+        // the `unsafe impl Send` contract). `RefCell` because `save_state(&self)`
+        // needs `&mut` for `plugin_handle()`; `Option` so `deactivate` can release
+        // it. Touched only on the control thread.
+        instance: std::cell::RefCell::new(Some(instance)),
         in_ports: AudioPorts::with_capacity(channels, 1),
         out_ports: AudioPorts::with_capacity(channels, 1),
         in_scratch: vec![vec![0.0f32; max_block]; channels],
@@ -252,11 +263,19 @@ pub(super) fn open(
     }))
 }
 
-/// One live CLAP plugin's audio-thread half + pre-allocated RT scratch.
+/// One live CLAP plugin's audio-thread half + pre-allocated RT scratch + the
+/// retained main-thread handle for `oj.state`.
 struct ClapBackend {
-    /// The `Send` audio processor; sole `Arc` owner of the instance once the
-    /// main-thread handle is dropped. `Option` so `deactivate` can take it.
+    /// The `Send` audio processor; one of two `Arc` owners of the inner (the other
+    /// is `instance`). `Option` so `deactivate` can take it.
     processor: Option<StartedPluginAudioProcessor<OjClapHost>>,
+    /// The retained `!Send` main-thread handle (a second `Arc` to the inner), kept
+    /// solely so `save_state`/`restore_state` can call the CLAP state extension's
+    /// `[main-thread]` save/load. Touched ONLY on the control thread (off-RT
+    /// save/restore pre-publish, and drop via the swap reclaim) — never during the
+    /// audio-thread `process`. This is what makes the struct `!Send`; see the
+    /// `unsafe impl Send` below.
+    instance: std::cell::RefCell<Option<PluginInstance<OjClapHost>>>,
     /// Pre-sized input/output port wrappers (reused every block).
     in_ports: AudioPorts,
     out_ports: AudioPorts,
@@ -273,6 +292,23 @@ struct ClapBackend {
     /// addresses params by 0-based index; this resolves it to the plugin's id.
     param_ids: Vec<clack_host::utils::ClapId>,
 }
+
+// SAFETY: `ClapBackend` is `!Send` only because of the retained `!Send`
+// `PluginInstance` main-thread `handle` (`instance`). We assert it is sound to send
+// because that handle is METHOD-CALLED exclusively on the control thread:
+//   * `open` creates it on the control thread (compile/adopt);
+//   * `save_state`/`restore_state` use it on the control thread, and ONLY while the
+//     program is not yet published — i.e. before the backend is moved into the audio
+//     callback (the engine captures/restores on freshly compiled, pre-publish
+//     instances; a published backend is unreachable for state);
+//   * `process` (audio thread) touches ONLY the `Send` `processor`, never `instance`;
+//   * the backend is dropped on the control thread (the program-swap reclaim), so
+//     the instance's `[main-thread]` teardown also runs off the audio thread.
+// The backend may CROSS threads (control -> audio -> control) carrying the dormant
+// handle, but the handle is never used on the audio thread, so no CLAP
+// `[main-thread]` call can race `process`. This mirrors the JUCE backend's
+// `unsafe impl Send` over its `*mut OjPlugin`.
+unsafe impl Send for ClapBackend {}
 
 pub(super) fn open_editor(
     _desc: &PluginDescriptor,
@@ -411,10 +447,54 @@ impl HostedBackend for ClapBackend {
         self.latency
     }
 
+    fn save_state(&self) -> Vec<u8> {
+        // oj.state SAVE: serialize the plugin's opaque state via the CLAP
+        // `clap_plugin_state` extension's `[main-thread]` save. Off-RT, control
+        // thread, pre-publish (see the `unsafe impl Send` contract). A plugin with
+        // no state extension, or a save that fails, yields an empty blob (the node
+        // simply has nothing to persist) — never an error. `RefCell` gives the
+        // `&mut` `plugin_handle()` needs from this `&self` method.
+        use clack_extensions::state::PluginState;
+        let mut guard = self.instance.borrow_mut();
+        let Some(inst) = guard.as_mut() else {
+            return Vec::new();
+        };
+        let Some(state) = inst.plugin_shared_handle().get_extension::<PluginState>() else {
+            return Vec::new();
+        };
+        let mut buf = Vec::new();
+        match state.save(&mut inst.plugin_handle(), &mut buf) {
+            Ok(()) => buf,
+            Err(_) => Vec::new(),
+        }
+    }
+
+    fn restore_state(&mut self, blob: &[u8]) {
+        // oj.state RESTORE: load a prior session's opaque blob via the CLAP state
+        // extension's `[main-thread]` load. Off-RT, at compile time on the fresh
+        // (pre-publish) instance. An empty blob or a plugin without the extension is
+        // a no-op; a load failure is swallowed (the plugin keeps its default state).
+        use clack_extensions::state::PluginState;
+        if blob.is_empty() {
+            return;
+        }
+        let mut guard = self.instance.borrow_mut();
+        let Some(inst) = guard.as_mut() else {
+            return;
+        };
+        let Some(state) = inst.plugin_shared_handle().get_extension::<PluginState>() else {
+            return;
+        };
+        let mut reader = std::io::Cursor::new(blob);
+        let _ = state.load(&mut inst.plugin_handle(), &mut reader);
+    }
+
     fn deactivate(&mut self) {
-        // Dropping the processor (sole Arc owner) stops processing, deactivates,
-        // and destroys the instance via clack's PluginInstanceInner::drop.
+        // Release both `Arc`s to the inner. Dropping the LAST one triggers clack's
+        // `PluginInstanceInner::drop`, which stops processing, deactivates, and
+        // destroys the plugin (the same teardown the sole-owner path relied on).
         self.processor = None;
+        *self.instance.borrow_mut() = None;
     }
 }
 
