@@ -129,7 +129,7 @@ landlock = "0.4"
 # already pulls transitively (no new toolchain). CONTROL-PLANE only, never on the
 # audio RT path. `CREATE_NO_WINDOW` itself needs no crate (it's in `std`).
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = [
+windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
     "Win32_System_JobObjects",
