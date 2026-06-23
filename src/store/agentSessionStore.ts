@@ -165,6 +165,7 @@ const SILENT_TOOLS = new Set([
     'validate_plan',
     'get_logs',
     'get_diagnostics',
+    'get_signal',
     'get_settings',
 ]);
 

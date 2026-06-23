@@ -133,6 +133,15 @@ export interface Executor {
     /** Subscribe to per-connection signal levels (0-1). Returns an unsubscribe. */
     subscribeSignalLevels(callback: SignalLevelsCallback): Unsubscribe;
 
+    /**
+     * Probe ONE node's instantaneous output peak (0-1) for the agent's `get_signal`,
+     * or null when no live reading is available (the node isn't metered, or audio
+     * isn't running). Async because the per-node meter only streams while a
+     * subscriber is mounted: this registers a transient one, lets a poll tick settle,
+     * reads the cached peak, and unsubscribes — off the audio thread, never blocking.
+     */
+    probeSignal(nodeId: string): Promise<number | null>;
+
     // --- Microphone --------------------------------------------------------
 
     /**

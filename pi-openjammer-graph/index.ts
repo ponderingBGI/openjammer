@@ -330,6 +330,17 @@ export default function register(pi: ExtensionAPI): void {
     });
 
     registerGraphTool(pi, {
+        name: 'get_signal',
+        label: 'Probe OpenJammer Node Signal',
+        description:
+            "Probe a node's LIVE output peak (0–1) by nodeId, or null when nothing is " +
+            'metered / audio is stopped. Side-effect-free. The one live read that catches ' +
+            'a node which wires correctly yet outputs silence — if it reads ~0, probe again.',
+        promptSnippet: "Probe a node's live output level to tell a wired-but-silent node from a working one",
+        parameters: Type.Object({ nodeId: Type.String() }),
+    });
+
+    registerGraphTool(pi, {
         name: 'get_settings',
         label: 'Read OpenJammer Settings',
         description: 'Read user-facing OpenJammer settings the agent may inspect/change. Side-effect-free.',

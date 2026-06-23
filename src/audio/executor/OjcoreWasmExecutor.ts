@@ -77,6 +77,10 @@ import ojcoreWasmUrl from '../wasm/pkg/ojcore_wasm_bg.wasm?url';
 /** Render quantum the AudioWorklet uses (the spec-fixed block size). */
 const WORKLET_BLOCK_SIZE = 128;
 
+/** Settle time for an agent `probeSignal` so at least one worklet meter frame lands
+ *  before we read the cached peak (the worklet meters continuously). */
+const PROBE_SETTLE_MS = 80;
+
 /**
  * One-time-per-session, non-focus-stealing "whisper" when the browser engine
  * can't start at all. NEVER a modal and NEVER a toast storm: a single calm sonner
@@ -852,6 +856,14 @@ export class OjcoreWasmExecutor implements Executor {
         return () => {
             this.signalCallbacks.delete(callback);
         };
+    }
+
+    async probeSignal(nodeId: string): Promise<number | null> {
+        // The worklet streams meter frames continuously (enabled at 'ready'), so
+        // `levels` is kept fresh whether or not a subscriber is mounted; a brief
+        // settle lets at least one frame land, then we read the cached peak.
+        await new Promise<void>((resolve) => setTimeout(resolve, PROBE_SETTLE_MS));
+        return this.levels.get(nodeId) ?? null;
     }
 
     // --- Microphone --------------------------------------------------------
