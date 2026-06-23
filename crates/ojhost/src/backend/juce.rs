@@ -92,6 +92,14 @@ extern "C" {
         out_channels: c_int,
         nframes: c_int,
     );
+    fn ojhost_process_guarded(
+        plugin: *mut OjPlugin,
+        inputs: *const *const c_float,
+        in_channels: c_int,
+        outputs: *const *mut c_float,
+        out_channels: c_int,
+        nframes: c_int,
+    ) -> c_int;
     fn ojhost_set_param(plugin: *mut OjPlugin, index: u32, value: c_float);
     fn ojhost_note_on(plugin: *mut OjPlugin, note: u8, velocity: u8);
     fn ojhost_note_off(plugin: *mut OjPlugin, note: u8);
@@ -338,6 +346,21 @@ impl JuceBackend {
             param_count: desc.param_count,
         })
     }
+
+    /// Point the pre-sized channel-pointer arrays at the caller's buffers and
+    /// return the clamped (in, out) channel counts. Shared by `process` and
+    /// `process_guarded` (RT-safe: no allocation — `activate` sized the arrays).
+    fn fill_ptrs(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]]) -> (usize, usize) {
+        let in_n = inputs.len().min(self.in_ptrs.len());
+        for (i, slot) in self.in_ptrs.iter_mut().enumerate().take(in_n) {
+            *slot = inputs[i].as_ptr();
+        }
+        let out_n = outputs.len().min(self.out_ptrs.len());
+        for (i, slot) in self.out_ptrs.iter_mut().enumerate().take(out_n) {
+            *slot = outputs[i].as_mut_ptr();
+        }
+        (in_n, out_n)
+    }
 }
 
 impl HostedBackend for JuceBackend {
@@ -353,14 +376,7 @@ impl HostedBackend for JuceBackend {
     }
 
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], nframes: usize) {
-        let in_n = inputs.len().min(self.in_ptrs.len());
-        for (i, slot) in self.in_ptrs.iter_mut().enumerate().take(in_n) {
-            *slot = inputs[i].as_ptr();
-        }
-        let out_n = outputs.len().min(self.out_ptrs.len());
-        for (i, slot) in self.out_ptrs.iter_mut().enumerate().take(out_n) {
-            *slot = outputs[i].as_mut_ptr();
-        }
+        let (in_n, out_n) = self.fill_ptrs(inputs, outputs);
         unsafe {
             ojhost_process(
                 self.plugin,
@@ -371,6 +387,29 @@ impl HostedBackend for JuceBackend {
                 nframes as c_int,
             );
         }
+    }
+
+    fn process_guarded(
+        &mut self,
+        inputs: &[&[f32]],
+        outputs: &mut [&mut [f32]],
+        nframes: usize,
+    ) -> bool {
+        // Identical to `process`, but through the C++ SEH/signal fault boundary.
+        // A non-zero return is `OJ_PROCESS_FAULT`: the plugin crashed this block
+        // (the C++ side already silenced the outputs); the node latches.
+        let (in_n, out_n) = self.fill_ptrs(inputs, outputs);
+        let status = unsafe {
+            ojhost_process_guarded(
+                self.plugin,
+                self.in_ptrs.as_ptr(),
+                in_n as c_int,
+                self.out_ptrs.as_ptr(),
+                out_n as c_int,
+                nframes as c_int,
+            )
+        };
+        status != 0
     }
 
     fn set_param(&mut self, id: u16, value: f32) {

@@ -119,6 +119,25 @@ void ojhost_process(OjPlugin* plugin,
                     float* const* outputs, int32_t out_channels,
                     int32_t nframes);
 
+/* Status of a guarded process call. */
+typedef enum OjProcessStatus {
+    OJ_PROCESS_OK = 0,
+    OJ_PROCESS_FAULT = 1, /* the plugin crashed; outputs were silenced */
+} OjProcessStatus;
+
+/* RT-thread: render `nframes` like `ojhost_process`, but with a per-node fault
+ * boundary (Windows SEH / POSIX signal guard) wrapped ONLY around the foreign
+ * `processBlock` call. Returns `OJ_PROCESS_OK` normally, or `OJ_PROCESS_FAULT` if
+ * the plugin faulted (segfault / illegal op) this block — in which case every
+ * output is silenced for the transition block and the caller (the Rust
+ * `PluginHostNode`) latches the node to a dry passthrough and NEVER calls the
+ * plugin again this session (latch-and-quarantine — we do not resume out of
+ * foreign C++ that may hold the heap lock). Still RT-safe: no allocation. */
+int32_t ojhost_process_guarded(OjPlugin* plugin,
+                               const float* const* inputs, int32_t in_channels,
+                               float* const* outputs, int32_t out_channels,
+                               int32_t nframes);
+
 /* RT-thread: set parameter `index` to a normalized [0,1] `value`. */
 void ojhost_set_param(OjPlugin* plugin, uint32_t index, float value);
 
