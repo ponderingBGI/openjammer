@@ -2497,13 +2497,20 @@ impl AgentWorkspace {
         std::fs::create_dir_all(pi_agent.join("pi-memory"))?;
         std::fs::create_dir_all(pi_agent.join("sessions"))?;
         std::fs::create_dir_all(&project_root)?;
-        // Seed the SEE hand's on-demand debugging skill the persona points at.
-        // Idempotent: only written when absent, so the agent's own refinements to
-        // its skill (pi-memory is agent-writable) are never clobbered. Best-effort —
-        // a failed seed just means the persona's compact pointer has no file yet.
-        let debugging = pi_agent.join("pi-memory").join("debugging.md");
-        if !debugging.exists() {
-            let _ = std::fs::write(&debugging, include_str!("../assets/agent/debugging.md"));
+        // Seed the agent's writable pi-memory with two starter files the persona
+        // points at: the SEE hand's debugging skill and the SHAPE-SELF hand's
+        // about-you.md. Idempotent — only written when absent, so the agent's own
+        // refinements (pi-memory is agent-writable) are never clobbered. Best-effort:
+        // a failed seed just leaves the persona's pointer fileless until next run.
+        let mem = pi_agent.join("pi-memory");
+        for (name, body) in [
+            ("debugging.md", include_str!("../assets/agent/debugging.md")),
+            ("about-you.md", include_str!("../assets/agent/about-you.md")),
+        ] {
+            let path = mem.join(name);
+            if !path.exists() {
+                let _ = std::fs::write(&path, body);
+            }
         }
         Ok(Self {
             agent_home,
