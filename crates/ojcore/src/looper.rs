@@ -430,16 +430,20 @@ impl LooperNode {
             return;
         }
         if self.layers.len() < MAX_LAYERS {
-            let buf = core::mem::take(&mut self.recording);
-            self.layers.push(Layer { buf, muted: false });
-            // O(1) swap in a fresh take buffer from the pool. The pool was sized
-            // to MAX_LAYERS spares in activate, so this never allocates while
-            // layers < MAX_LAYERS; the fallback only fires in a misuse/no-activate
-            // path and is the single tolerated edge allocation.
-            self.recording = self.pool.pop().unwrap_or_else(|| {
-                let cap = self.layers.first().map(|l| l.buf.len()).unwrap_or(1);
-                vec![0.0; cap.max(1)]
-            });
+            // O(1) swap a fresh take buffer in from the pool, which `activate`
+            // pre-sized to MAX_LAYERS spares — so while layers < MAX_LAYERS the
+            // pool always holds at least one and this NEVER allocates on the RT
+            // path. If it is ever empty here, `activate` was not called (a misuse
+            // path): keep the last good `recording` buffer and drop the take
+            // rather than allocate while audio flows. The debug_assert makes CI
+            // catch any path that reaches it.
+            if let Some(replacement) = self.pool.pop() {
+                let buf = core::mem::take(&mut self.recording);
+                self.layers.push(Layer { buf, muted: false });
+                self.recording = replacement;
+            } else {
+                debug_assert!(false, "looper pool exhausted in commit_take (activate not called?)");
+            }
         }
         // else: at the layer cap — drop the take (state still goes to Playing).
         self.transition(LooperState::Playing);
