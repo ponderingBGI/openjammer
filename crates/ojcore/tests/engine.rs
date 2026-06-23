@@ -15,8 +15,8 @@
 
 use assert_no_alloc::*;
 use ojcore::{
-    compile, CommandQueue, CompileError, Engine, GainLoader, PluginRegistry, ProgramSwap, GAIN_ID,
-    GAIN_PARAM,
+    compile, CommandQueue, CompileError, Engine, GainLoader, PanLoader, PluginRegistry, ProgramSwap,
+    WidthLoader, GAIN_ID, GAIN_PARAM, PAN_ID, WIDTH_ID,
 };
 use ojproto::{ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, Param, PrimitiveKind, RtCommand};
 
@@ -78,6 +78,31 @@ fn graphin_gain_speaker(gain: f32) -> OjGraph {
     g.nodes.push(speaker);
     g.edges.push(audio_edge(1, 0, 2, 0)); // input -> gain
     g.edges.push(audio_edge(2, 0, 3, 0)); // gain  -> speaker
+    g
+}
+
+/// A registry with gain + the stereo Pan and Width built-ins.
+fn stereo_registry() -> PluginRegistry {
+    let mut reg = PluginRegistry::new();
+    reg.register(Box::new(GainLoader::new()));
+    reg.register(Box::new(PanLoader::new()));
+    reg.register(Box::new(WidthLoader::new()));
+    reg
+}
+
+/// GraphIn(1) -> Pan(2) -> Width(3) -> SpeakerOut(4): the new stereo lane path.
+/// Pan widens the mono source into a stereo lane pair and Width processes both
+/// lanes; the mono master then folds them down. One audio PORT per side carries
+/// the lanes (docs/CHANNELS.md model), so n_in/n_out mirror the mono nodes.
+fn graphin_pan_width_speaker() -> OjGraph {
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
+    g.nodes.push(node(2, PAN_ID, PrimitiveKind::Pan, 1, 1));
+    g.nodes.push(node(3, WIDTH_ID, PrimitiveKind::Width, 1, 1));
+    g.nodes.push(node(4, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 0, 2, 0)); // input -> pan
+    g.edges.push(audio_edge(2, 0, 3, 0)); // pan   -> width
+    g.edges.push(audio_edge(3, 0, 4, 0)); // width -> speaker
     g
 }
 
@@ -240,6 +265,29 @@ fn process_block_is_allocation_free() {
     engine.process_block(&mut out, NB);
 
     // The REQUIRED gate: zero heap allocation on the hot path.
+    assert_no_alloc(|| {
+        for _ in 0..32 {
+            engine.process_block(&mut out, NB);
+        }
+    });
+}
+
+#[test]
+fn stereo_pan_width_process_is_allocation_free() {
+    // Gate the NEW stereo lane-mix hot path the same way as the mono path: Pan
+    // widens the mono source into a stereo lane pair and Width processes both
+    // lanes every block. A per-sample allocation slipping into that path would be
+    // a dropout on a live stereo patch, so prove zero heap traffic here too.
+    let reg = stereo_registry();
+    let prog = compile(&graphin_pan_width_speaker(), &reg).expect("compile");
+    let mut engine = Engine::new(prog);
+    let input = ramp();
+    let mut out = vec![0.0f32; NB];
+
+    // Warm up once outside the gate.
+    inject(&mut engine, &input);
+    engine.process_block(&mut out, NB);
+
     assert_no_alloc(|| {
         for _ in 0..32 {
             engine.process_block(&mut out, NB);
