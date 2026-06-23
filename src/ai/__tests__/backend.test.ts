@@ -100,6 +100,13 @@ describe('classifySelfEdit — Philia editing its own memory/skills', () => {
         );
     });
 
+    it('recognizes save_self_package as authoring a tool, with its name', () => {
+        expect(classifySelfEdit('save_self_package', { name: 'tempo helper', source: '…' })).toBe(
+            'saved itself a tool (tempo helper)',
+        );
+        expect(classifySelfEdit('save_self_package', {})).toBe('saved itself a tool');
+    });
+
     it('returns null for a genuinely unrelated Pi tool', () => {
         expect(classifySelfEdit('write', { path: '/tmp/scratch.txt' })).toBeNull();
         expect(classifySelfEdit('web_search', { query: 'x' })).toBeNull();

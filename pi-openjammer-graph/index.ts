@@ -349,6 +349,24 @@ export default function register(pi: ExtensionAPI): void {
     });
 
     registerGraphTool(pi, {
+        name: 'save_self_package',
+        label: 'Save a Self-Authored Tool',
+        description:
+            'SHAPE-SELF (this is you editing YOU, not the canvas): author yourself a ' +
+            'reusable Pi package from `name` + `source` (an index.mjs Pi extension). The ' +
+            'host writes it into your brain and registers it; it loads on your NEXT start, ' +
+            'never mid-session. Use it when a procedure deserves to be a permanent tool, ' +
+            'not just a one-off — a preference is memory, a procedure is a skill, a ' +
+            'reusable tool is a package.',
+        promptSnippet: 'Author yourself a reusable Pi tool/package (loads on your next start)',
+        parameters: Type.Object({
+            name: Type.String({ description: 'A short name for the tool; slugified to a package id.' }),
+            source: Type.String({ description: 'The package index.mjs source (a Pi extension).' }),
+            description: Type.Optional(Type.String()),
+        }),
+    });
+
+    registerGraphTool(pi, {
         name: 'update_settings',
         label: 'Update OpenJammer Settings',
         description: 'Apply an allowlisted, reversible OpenJammer settings patch.',
