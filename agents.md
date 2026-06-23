@@ -163,7 +163,7 @@ matters. Use headphones to avoid feedback loops when testing microphone input.
 
 Before you open a pull request:
 
-- [ ] Opened the PR against `canari` (the default/integration branch), not `main`
+- [ ] Opened the PR against `canari` (the integration branch; GitHub still defaults to `main`, so change the base), not `main`
 - [ ] Used `bun` for all package operations
 - [ ] Followed the existing structure and naming
 - [ ] **Tested with audio actually playing** — no clicks, no dropouts, no added latency

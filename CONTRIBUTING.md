@@ -109,10 +109,11 @@ openjammer/
 
 ### Pull Request Process
 
-> **Target `canari`, not `main`.** `canari` is the default/integration branch —
-> open every PR against it. `main` is the stable release branch, advanced only by
-> promoting `canari` → `main` (a maintainer merge commit). Each merge into
-> `canari` can build a numbered canari prerelease such as `v0.0.2-canari.1`.
+> **Target `canari`, not `main`.** `canari` is the integration branch — open every
+> PR against it. GitHub still defaults the base to `main`, so change it when you open
+> the PR. `main` is the stable release branch, advanced only by promoting
+> `canari` → `main` (a maintainer merge commit). Each merge into `canari` can build a
+> numbered canari prerelease such as `v0.0.2-canari.1`.
 
 1. **Fork the repository** and create a feature branch
    ```bash
