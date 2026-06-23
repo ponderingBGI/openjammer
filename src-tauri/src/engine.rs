@@ -177,6 +177,11 @@ pub struct EngineBackend {
     /// graph against the updated [`AssetCatalog`]. `None` until the first
     /// `push_graph` (the starter graph runs but is not stored).
     last_graph: Option<OjGraph>,
+    /// IR node ids that degraded to a passthrough stub on the most recent `adopt`
+    /// (a missing / `abi`-incompatible plugin — invariant #4a). `push_graph`
+    /// returns these to the UI so the affected nodes show a non-modal "(missing
+    /// plugin)" badge and the project still opens. Set by `adopt` on every push.
+    last_degraded: Vec<u32>,
     /// `true` while the engine is in the DEVICE-LOST state: the running output
     /// stream faulted (device yanked/disabled/reconfigured) and a rebuild has not
     /// yet succeeded. Set by [`tick`] on the first detected fault, cleared on a
@@ -319,6 +324,7 @@ impl EngineBackend {
             store: AssetStore::new(),
             captures: std::collections::HashMap::new(),
             last_graph: None,
+            last_degraded: Vec::new(),
             device_lost: false,
             log_store: None,
             // Up to 8 reopen attempts per loss event before a calm give-up.
@@ -419,7 +425,7 @@ impl EngineBackend {
     /// installed (Sampler `set_sample` / Convolution `set_ir`) BEFORE the program
     /// goes live — the founder-verified seam that makes a serialized graph with a
     /// bound sample actually play.
-    pub fn push_graph(&mut self, graph: &OjGraph) -> Result<(), BackendError> {
+    pub fn push_graph(&mut self, graph: &OjGraph) -> Result<Vec<u32>, BackendError> {
         // The graph's own sample_rate / block_size are UI hints; `adopt` is the one
         // owner that compiles at the live device rate + host render chunk (see
         // `adopt`), so a 96k interface plays in tune and a recovery onto a
@@ -448,7 +454,9 @@ impl EngineBackend {
         // bind can re-resolve + recompile it against the catalog without a fresh
         // UI push, and so the NEXT push forward-merges from it in turn.
         self.last_graph = Some(g);
-        Ok(())
+        // The IR ids that degraded to a passthrough stub this push (invariant #4a),
+        // for the UI to badge. Empty on a clean graph.
+        Ok(self.last_degraded.clone())
     }
 
     /// Carry forward the per-node sample binding (the slot-0 [`AssetRef`] and the
@@ -541,13 +549,15 @@ impl EngineBackend {
 
         // Invariant #4a: surface any node that degraded to a passthrough stub (a
         // missing or incompatible plugin) so a loaded project's degraded nodes are
-        // VISIBLE, not silent. Non-fatal — the project opened; this is the label the
-        // .oj lockfile (P2) will eventually carry to the UI.
-        for id in program.degraded_stubs(&g) {
+        // VISIBLE, not silent. Non-fatal — the project opened. Record the ids so
+        // `push_graph` returns them to the UI for a per-node badge (auto-rebind on a
+        // rescan rides this same path); keep the log line for headless diagnostics.
+        let degraded = program.degraded_stubs(&g);
+        for id in &degraded {
             let manifest = g
                 .nodes
                 .iter()
-                .find(|n| n.id == id)
+                .find(|n| n.id == *id)
                 .map(|n| n.manifest_id.as_str())
                 .unwrap_or("?");
             eprintln!(
@@ -556,6 +566,7 @@ impl EngineBackend {
                 id.0
             );
         }
+        self.last_degraded = degraded.iter().map(|id| id.0).collect();
 
         if self.host.is_some() {
             // Live: hand the program to the audio thread (lock-free) and reclaim

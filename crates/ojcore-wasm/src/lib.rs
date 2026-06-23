@@ -191,6 +191,10 @@ struct Host {
     /// it via [`last_load_degraded`] to warn — the browser analogue of the native
     /// host's degraded-stub log.
     last_load_degraded: u32,
+    /// The IR node ids (`NodeIdx.0`) that degraded in the LAST `load_graph`, read
+    /// via [`last_degraded_node_ids`] so the worklet can badge the exact nodes
+    /// (symmetry with the native `push_graph` degraded-id return).
+    last_degraded_ids: Vec<u32>,
 }
 
 /// The single host instance. SOUND because an AudioWorklet processor runs on
@@ -284,6 +288,7 @@ pub fn init(sample_rate: u32, block_size: u32) {
         sample_rate,
         event_seq: 0,
         last_load_degraded: 0,
+        last_degraded_ids: Vec::new(),
     };
 
     // SAFETY: single-threaded worklet init; no other reference is live.
@@ -326,9 +331,12 @@ pub fn load_graph(bytes: &[u8]) -> bool {
         Ok(p) => p,
         Err(_) => return false,
     };
-    // Record how many nodes degraded to a stub so the worklet can warn (invariant
-    // #4a, the browser analogue of the native host's degraded-stub log).
-    host.last_load_degraded = program.degraded_stubs(&graph).len() as u32;
+    // Record which nodes degraded to a stub so the worklet can warn AND badge the
+    // exact nodes (invariant #4a, the browser analogue of the native host's
+    // degraded-stub log + the native push_graph degraded-id return).
+    let degraded = program.degraded_stubs(&graph);
+    host.last_load_degraded = degraded.len() as u32;
+    host.last_degraded_ids = degraded.iter().map(|id| id.0).collect();
     // `install` hands back the old program; dropping it here keeps the RT path
     // allocation/free-free.
     let _old = host.engine.install(program);
@@ -341,6 +349,15 @@ pub fn load_graph(bytes: &[u8]) -> bool {
 #[wasm_bindgen]
 pub fn last_load_degraded() -> u32 {
     host_ref().map_or(0, |h| h.last_load_degraded)
+}
+
+/// The IR node ids (`NodeIdx.0`) that degraded to a passthrough stub in the last
+/// [`load_graph`] — returned to JS as a `Uint32Array` so the worklet can badge the
+/// exact nodes (the browser analogue of the native `push_graph` degraded-id
+/// return). Empty on a clean load.
+#[wasm_bindgen]
+pub fn last_degraded_node_ids() -> Vec<u32> {
+    host_ref().map_or_else(Vec::new, |h| h.last_degraded_ids.clone())
 }
 
 /// Store decoded mono `pcm` (captured at `sample_rate` Hz) in the host's PCM
