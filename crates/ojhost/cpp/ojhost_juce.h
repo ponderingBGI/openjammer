@@ -151,6 +151,19 @@ uint32_t ojhost_latency_samples(const OjPlugin* plugin);
 /* Number of parameters the instance exposes. */
 uint32_t ojhost_param_count(const OjPlugin* plugin);
 
+/* OFF-RT: serialize the plugin's full opaque state (VST3 getStateInformation).
+ * Returns a malloc'd buffer of `*out_len` bytes the caller frees via
+ * `ojhost_free_state`, or NULL (with `*out_len == 0`) if the plugin has no state.
+ * The `oj.state` capability's save half — never on the audio thread. */
+uint8_t* ojhost_get_state(OjPlugin* plugin, size_t* out_len);
+
+/* Free a buffer returned by `ojhost_get_state` (kept on the C++ allocator). */
+void ojhost_free_state(uint8_t* data, size_t len);
+
+/* OFF-RT: restore the plugin from a `len`-byte blob produced by `ojhost_get_state`
+ * (VST3 setStateInformation). The `oj.state` restore half — applied at load. */
+void ojhost_set_state(OjPlugin* plugin, const uint8_t* data, size_t len);
+
 /* Destroy a loaded plugin instance. */
 void ojhost_unload(OjPlugin* plugin);
 

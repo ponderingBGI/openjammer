@@ -14,7 +14,7 @@
 use std::sync::Mutex;
 
 use ojcore::{DspInstance, ParamDecl, PluginLoader, PluginManifest, PortDecl, ProcessCtx};
-use ojcore::{DspKind, UiKind};
+use ojcore::{DspKind, ExtId, StateSave, UiKind};
 use ojproto::PrimitiveKind;
 
 use crate::backend::{self, HostedBackend};
@@ -177,8 +177,30 @@ impl DspInstance for PluginHostNode {
         self.faulted
     }
 
+    /// Provide the `oj.state` capability (save half): a caller downcasts the
+    /// returned `Any` to `&PluginHostNode` and calls [`StateSave::save`]. A faulted
+    /// node keeps providing it (its last good state is still the backend's).
+    fn extension(&self, id: ExtId) -> Option<&dyn core::any::Any> {
+        match id {
+            ExtId::State => Some(self),
+            _ => None,
+        }
+    }
+
+    /// Restore half of `oj.state`: push a prior session's blob into the plugin at
+    /// construction (off-RT), so a reloaded project comes up exactly as left.
+    fn restore_state(&mut self, blob: &[u8]) {
+        self.plugin.backend.restore_state(blob);
+    }
+
     fn deactivate(&mut self) {
         self.plugin.backend.deactivate();
+    }
+}
+
+impl StateSave for PluginHostNode {
+    fn save(&self) -> Vec<u8> {
+        self.plugin.backend.save_state()
     }
 }
 
@@ -541,5 +563,65 @@ mod tests {
         let b3 = run(&mut node, &input);
         assert!(node.is_faulted());
         assert_eq!(b3, input, "still a dry passthrough after latching");
+    }
+
+    /// A backend that round-trips an opaque state blob, standing in for a real
+    /// plugin's getStateInformation/setStateInformation (or the CLAP state ext).
+    struct StatefulBackend {
+        blob: Vec<u8>,
+    }
+
+    impl HostedBackend for StatefulBackend {
+        fn activate(&mut self, _sample_rate: f32, _max_block: usize) {}
+        fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], nframes: usize) {
+            for out in outputs.iter_mut() {
+                for s in out.iter_mut().take(nframes) {
+                    *s = 0.0;
+                }
+            }
+        }
+        fn set_param(&mut self, _id: u16, _value: f32) {}
+        fn latency_samples(&self) -> u32 {
+            0
+        }
+        fn save_state(&self) -> Vec<u8> {
+            self.blob.clone()
+        }
+        fn restore_state(&mut self, blob: &[u8]) {
+            self.blob = blob.to_vec();
+        }
+    }
+
+    #[test]
+    fn hosted_plugin_provides_the_oj_state_save_restore_seam() {
+        // SAVE via the engine's path: extension(State) -> downcast -> StateSave::save.
+        let node = PluginHostNode::new(HostedPlugin {
+            backend: Box::new(StatefulBackend { blob: vec![9, 8, 7] }),
+            descriptor: sample_desc(0),
+        });
+        let any = node
+            .extension(ExtId::State)
+            .expect("a hosted plugin provides oj.state");
+        let saver = any
+            .downcast_ref::<PluginHostNode>()
+            .expect("downcasts to the node");
+        assert_eq!(StateSave::save(saver), vec![9, 8, 7]);
+        assert!(
+            node.extension(ExtId::Latency).is_none(),
+            "only oj.state is provided (not yet-unwired capabilities)"
+        );
+
+        // RESTORE into a fresh node via the &mut seam (what compile applies at load).
+        let mut fresh = PluginHostNode::new(HostedPlugin {
+            backend: Box::new(StatefulBackend { blob: Vec::new() }),
+            descriptor: sample_desc(0),
+        });
+        fresh.restore_state(&[1, 2, 3]);
+        let restored = fresh.extension(ExtId::State).unwrap();
+        assert_eq!(
+            StateSave::save(restored.downcast_ref::<PluginHostNode>().unwrap()),
+            vec![1, 2, 3],
+            "the blob restored into the fresh instance"
+        );
     }
 }
