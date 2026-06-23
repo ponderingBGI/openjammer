@@ -422,6 +422,13 @@ export class OjcoreWasmExecutor implements Executor {
 
     // --- Graph push --------------------------------------------------------
 
+    /** Re-push the current graph (parity with the native executor's `resync`). The
+     *  wasm path has no native plugin hosting, so this is a plain re-emit; it exists
+     *  so the shared `Executor` surface is uniform. */
+    resync(): void {
+        this.pushGraph();
+    }
+
     private pushGraph(): void {
         // Isolate the reconcile: lowering the visual graph must NEVER throw out of
         // a store-change subscriber — that would abort Zustand's listener loop and
