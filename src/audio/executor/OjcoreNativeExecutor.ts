@@ -450,14 +450,25 @@ export class OjcoreNativeExecutor implements Executor {
     }
 
     /** Emit + remap + push the current graph to the native engine. */
-    private pushGraph(): void {
+    /** Force a re-push of the current graph even when its bytes are unchanged —
+     *  the seam a plugin rescan uses to INSTANTLY rebind a degraded node onto its
+     *  now-available real plugin (the engine re-registered it on scan), instead of
+     *  waiting for the next canvas edit. A clean graph just recompiles to itself. */
+    resync(): void {
+        this.pushGraph(true);
+    }
+
+    private pushGraph(force = false): void {
         // Isolate the reconcile: lowering the visual graph to the engine IR must
         // NEVER throw out of a store-change subscriber — that would abort Zustand's
         // listener loop and wedge the canvas (later subscribers, and the persist
         // middleware's post-loop setItem, are skipped). Contain it: keep the last
         // good audio, log for the DevLog, and let the next edit retry.
+        // `force` bypasses the byte-identical dedupe — used by `resync()` after a
+        // plugin rescan, where the OjGraph is unchanged but the registry now has the
+        // plugin, so a re-push recompiles a degraded node onto its real loader.
         try {
-            this.pushGraphInner();
+            this.pushGraphInner(force);
         } catch (err) {
             log.error('graph lowering failed; keeping last good audio', {
                 detail: err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err),
@@ -465,7 +476,7 @@ export class OjcoreNativeExecutor implements Executor {
         }
     }
 
-    private pushGraphInner(): void {
+    private pushGraphInner(force = false): void {
         if (!this.getNodes || !this.getConnections) return;
         // The native engine registers a WasmHost loader per AI-authored faust node
         // (author_faust_native), so lower compiled code nodes to their real WasmHost
@@ -489,7 +500,7 @@ export class OjcoreNativeExecutor implements Executor {
         // means "nothing to push" — skip the IPC entirely. This keeps a noisy
         // subscriber (or a render loop) from hammering the native engine.
         const serialized = JSON.stringify(native);
-        if (serialized === this.lastPushedGraph) {
+        if (!force && serialized === this.lastPushedGraph) {
             // The audio IR is unchanged, but an instrument PICKER change does not
             // alter the emitted graph (the default voice is bound out-of-band via
             // load_sample, not as graph data), so a deduped push would otherwise

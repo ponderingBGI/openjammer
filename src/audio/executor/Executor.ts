@@ -68,6 +68,15 @@ export interface Executor {
     /** Tear down subscriptions and release audio resources. */
     dispose(): void;
 
+    /**
+     * Force a re-push of the current graph even when its bytes are unchanged. The
+     * native host uses this after a plugin RESCAN to instantly rebind a degraded
+     * node onto its now-available plugin (invariant #4a auto-rebind), rather than
+     * waiting for the next canvas edit. A clean graph harmlessly recompiles to
+     * itself; on the wasm tier (no native hosting) it is a plain re-emit.
+     */
+    resync(): void;
+
     // --- Platform capabilities --------------------------------------------
 
     /**

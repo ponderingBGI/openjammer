@@ -17,6 +17,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Modal, PanelHeader, Button, Callout, Chip, Spinner, List, ListRow } from '@openjammer/oj-ui';
 import { getInvoke, isTauri } from '../../ai/tauri';
+import { getExecutor } from '../../audio/executor';
 import { hostedPluginIdFor, makeHostedPluginDefinition, registerDynamicPlugin } from '../../engine/dynamicRegistry';
 import { register as registerCommand } from '../../store/commandRegistry';
 import { useGraphStore } from '../../store/graphStore';
@@ -122,6 +123,15 @@ export function PluginsPanel() {
                 plugins: safePlugins,
                 dirs: Array.isArray(dirs) ? dirs : [],
             });
+            // Auto-rebind (invariant #4a): the engine just re-registered every
+            // scanned plugin, so force a re-push. A node that was degraded because
+            // its plugin was missing now recompiles onto the real loader and its
+            // "(missing plugin)" badge clears — no canvas edit needed.
+            try {
+                getExecutor().resync();
+            } catch {
+                /* no executor yet (pre-audio): the next push rebinds anyway */
+            }
         } catch (err) {
             setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
         }
