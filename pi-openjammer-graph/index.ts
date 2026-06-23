@@ -141,26 +141,24 @@ function registerGraphTool(
     });
 }
 
-const REUSE_FIRST = [
-    'Use get_graph or find_nodes before mutating an existing OpenJammer canvas; reuse existing keyboard/speaker nodes instead of duplicating them.',
-    'Use emit_plan or batch_apply for multi-step OpenJammer builds so the whole patch lands as one coherent edit.',
-    'OpenJammer graph tools are the only tools that change the canvas; do not use file-editing tools to build a musical patch.',
-    'Never ask the user something a read (get_graph, find_nodes, list_node_types) could answer — investigate first; ask only as a genuine last resort.',
-];
-
 /**
- * The OpenJammer copilot identity. Appended (chained, never replacing) to Pi's
- * system prompt on every turn via {@link before_agent_start}, so the agent is THE
- * OpenJammer professional from byte one — not a generic coding CLI that asks
- * "an echo node for what?". The reversible-verb + sandbox boundary is named as
- * the LICENSE to be bold; the hard rule (investigate first, ask only as a last
- * resort) is the antidote to needless clarifying questions.
+ * Philia — OpenJammer's in-instrument bandmate. Appended (chained, never replacing)
+ * to Pi's system prompt on every turn via {@link before_agent_start}, so the agent
+ * is Philia from byte one — not a generic coding CLI that asks "an echo node for
+ * what?". Three hands, named by what they touch: BUILD the canvas (reversible
+ * verbs), SEE everything (logs + node diagnosis), SHAPE-SELF (memory + skills).
+ * The reversible-verb + sandbox boundary is the LICENSE to be bold; the hard rule
+ * (investigate first, ask only as a last resort) is the antidote to needless
+ * clarifying questions. The reuse-first guidance lives here now (one statement),
+ * not duplicated across every tool's promptGuidelines.
  */
 const PERSONA = [
-    "You are OpenJammer's in-instrument copilot — the expert on this node-graph MUSIC instrument that people play live (keyboards, instruments, samplers, loopers, effects and speakers wired into sound). You are NOT a generic coding CLI: \"make an echo node\" means add an echo effect to the canvas, never write a program.",
-    'You change the canvas ONLY through OpenJammer\'s reversible graph verbs (add_node, add_connection, update_node_data, author_code_node, …). Every edit is one plain Ctrl+Z step for the player and runs inside an OS/Pi sandbox — so be BOLD: design the patch and build it, do not ask permission to act.',
-    "Investigate before you ask. Call get_graph / find_nodes / list_node_types and infer the musician's intent from what is already on the canvas. Figure out everything you can on your own; ask the user ONLY when you genuinely cannot resolve it after investigating, and make every question feel necessary. Never ask what a read could answer.",
-    'Prefer musical defaults and a held, believable result over a clarifying question. Reuse existing nodes instead of duplicating them. Ports: audio = blue (sound), technical = grey (numbers/triggers). When no built-in node can do the job, author_code_node is the last resort.',
+    "You're Philia — the bandmate inside OpenJammer, a node-graph MUSIC instrument people play LIVE, no second take. Someone may be playing right now. You know this rig cold: keyboards, samplers, loopers, effects and speakers wired into sound. You are NOT a coding CLI — \"make an echo node\" means drop an echo onto the canvas, never write a program about it.",
+    "Play like a friend in the room: warm, low-ego, rooting for the take. But the music comes first — say little, build much, never a wall of text while someone's playing. One line when their hands are on the keys; a few short lines when it's quiet. No emoji, no exclamation spam — warmth is in the words.",
+    "You work with three hands, named by what they touch. You BUILD the instrument only through OpenJammer's reversible graph verbs (add_node, add_connection, update_node_data, and emit_plan to land a whole patch in one undoable frame) — every edit is one plain Ctrl+Z for the player, so be bold: design the patch and build it, don't ask permission; act, then say what you did in a line. You SEE everything — read the logs and diagnose any node, even a silent custom plugin, from evidence, never a guess. And you SHAPE YOURSELF — remember the player, teach yourself a skill or a tool, keep what you learn; that's you editing you, not a Ctrl+Z canvas edit, so say so plainly.",
+    "Look before you reach: get_graph / find_nodes / list_node_types, and infer intent from what is already wired. Reuse the speaker and the nodes that exist — never add a second of anything. Ask a real question only when a read genuinely can't answer it.",
+    'Ports: audio = blue (sound), technical = grey (numbers, triggers). When no built-in node can do the job, authoring a code node is the last resort.',
+    'A held note beats a glitch.',
 ].join('\n\n');
 
 /** Race a host bridge read against a short cap so the first turn never stalls on
@@ -206,9 +204,7 @@ export default function register(pi: ExtensionAPI): void {
         name: 'add_node',
         label: 'Add OpenJammer Node',
         description: 'Add a node of the given registry type to the OpenJammer canvas.',
-        promptSnippet: 'Add an OpenJammer canvas node by registry type',
-        promptGuidelines: REUSE_FIRST,
-        parameters: Type.Object({
+        promptSnippet: 'Add an OpenJammer canvas node by registry type',        parameters: Type.Object({
             type: Type.String({ description: 'OpenJammer registry node type, e.g. keyboard, instrument, effect, speaker.' }),
             position: Type.Optional(Position),
             parentId: Type.Optional(Type.Union([Type.String(), Type.Null()])),
@@ -236,9 +232,7 @@ export default function register(pi: ExtensionAPI): void {
         name: 'add_connection',
         label: 'Connect OpenJammer Ports',
         description: 'Connect a source port to a target port on the OpenJammer canvas.',
-        promptSnippet: 'Connect two OpenJammer canvas ports',
-        promptGuidelines: REUSE_FIRST,
-        parameters: Type.Object({
+        promptSnippet: 'Connect two OpenJammer canvas ports',        parameters: Type.Object({
             sourceNodeId: Type.String(),
             sourcePortId: Type.String(),
             targetNodeId: Type.String(),
@@ -258,9 +252,7 @@ export default function register(pi: ExtensionAPI): void {
         name: 'get_graph',
         label: 'Read OpenJammer Graph',
         description: 'Read the whole OpenJammer graph. Side-effect-free.',
-        promptSnippet: 'Read the live OpenJammer graph before planning edits',
-        promptGuidelines: REUSE_FIRST,
-        parameters: EmptyArgs,
+        promptSnippet: 'Read the live OpenJammer graph before planning edits',        parameters: EmptyArgs,
     });
 
     registerGraphTool(pi, {
@@ -275,18 +267,14 @@ export default function register(pi: ExtensionAPI): void {
         name: 'find_nodes',
         label: 'Find OpenJammer Nodes',
         description: 'Find OpenJammer nodes by type, or all nodes when type is omitted. Side-effect-free.',
-        promptSnippet: 'Find existing OpenJammer nodes by type',
-        promptGuidelines: REUSE_FIRST,
-        parameters: Type.Object({ type: Type.Optional(Type.String()) }),
+        promptSnippet: 'Find existing OpenJammer nodes by type',        parameters: Type.Object({ type: Type.Optional(Type.String()) }),
     });
 
     registerGraphTool(pi, {
         name: 'batch_apply',
         label: 'Batch OpenJammer Edits',
         description: 'Apply ordered OpenJammer mutation calls as one atomic frame.',
-        promptSnippet: 'Apply several OpenJammer canvas edits as one frame',
-        promptGuidelines: REUSE_FIRST,
-        parameters: Type.Object({ calls: Type.Array(Type.Object({}, { additionalProperties: true })) }),
+        promptSnippet: 'Apply several OpenJammer canvas edits as one frame',        parameters: Type.Object({ calls: Type.Array(Type.Object({}, { additionalProperties: true })) }),
     });
 
     registerGraphTool(pi, {
@@ -301,26 +289,7 @@ export default function register(pi: ExtensionAPI): void {
         name: 'emit_plan',
         label: 'Emit OpenJammer Plan',
         description: 'Build a whole OpenJammer WorkflowPlan in one reversible frame.',
-        promptSnippet: 'Build an OpenJammer WorkflowPlan on the live canvas',
-        promptGuidelines: REUSE_FIRST,
-        parameters: PlanObject,
-    });
-
-    registerGraphTool(pi, {
-        name: 'author_dsp_node',
-        label: 'Author OpenJammer DSP Node',
-        description: 'Author a new Faust DSP node for OpenJammer. Use only when built-in nodes cannot do the job.',
-        promptSnippet: 'Author a Faust DSP node for OpenJammer when no built-in node fits',
-        parameters: Type.Object({
-            name: Type.String(),
-            faustSource: Type.String(),
-            description: Type.Optional(Type.String()),
-            compiled: Type.Optional(Type.Boolean()),
-            nIn: Type.Optional(Type.Number()),
-            nOut: Type.Optional(Type.Number()),
-            params: Type.Optional(Type.Array(Type.Object({}, { additionalProperties: true }))),
-            wasmHash: Type.Optional(Type.String()),
-        }),
+        promptSnippet: 'Build an OpenJammer WorkflowPlan on the live canvas',        parameters: PlanObject,
     });
 
     registerGraphTool(pi, {

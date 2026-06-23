@@ -23,39 +23,39 @@
  * this file.
  */
 
-import { useEffect } from 'react';
-import { nodeDefinitions, menuCategories } from '../../engine/registry';
-import type { NodeCategory, NodeType, Position } from '../../engine/types';
-import { useGraphStore } from '../../store/graphStore';
-import { useCanvasStore } from '../../store/canvasStore';
-import { useCanvasNavigationStore } from '../../store/canvasNavigationStore';
-import { registerAll } from '../../store/commandRegistry';
-import type { Action, ActionCtx, Command } from '../../store/commandRegistry';
-import { seedPaletteLearning } from '../../store/paletteLearningSeed';
-import { getInvoke } from '../../ai/tauri';
+import { useEffect } from "react";
+import { nodeDefinitions, menuCategories } from "../../engine/registry";
+import type { NodeCategory, NodeType, Position } from "../../engine/types";
+import { useGraphStore } from "../../store/graphStore";
+import { useCanvasStore } from "../../store/canvasStore";
+import { useCanvasNavigationStore } from "../../store/canvasNavigationStore";
+import { registerAll } from "../../store/commandRegistry";
+import type { Action, ActionCtx, Command } from "../../store/commandRegistry";
+import { seedPaletteLearning } from "../../store/paletteLearningSeed";
+import { getInvoke } from "../../ai/tauri";
 
 // Human-readable group label per category (matches the menu's casing).
 const CATEGORY_LABEL: Record<NodeCategory, string> = {
-    instruments: 'Instruments',
-    input: 'Input',
-    effects: 'Effects',
-    routing: 'Routing',
-    output: 'Output',
-    utility: 'Utility',
+  instruments: "Instruments",
+  input: "Input",
+  effects: "Effects",
+  routing: "Routing",
+  output: "Output",
+  utility: "Utility",
 };
 
 /** The canvas-space centre of the current viewport (the palette's spawn point). */
 function viewportCenter(): Position {
-    const screenCenter: Position = {
-        x: window.innerWidth / 2,
-        y: window.innerHeight / 2,
-    };
-    return useCanvasStore.getState().screenToCanvas(screenCenter);
+  const screenCenter: Position = {
+    x: window.innerWidth / 2,
+    y: window.innerHeight / 2,
+  };
+  return useCanvasStore.getState().screenToCanvas(screenCenter);
 }
 
 /** The canvas level the user is currently viewing (the default add parent). */
 function currentParentId(): string | null {
-    return useCanvasNavigationStore.getState().currentViewNodeId;
+  return useCanvasNavigationStore.getState().currentViewNodeId;
 }
 
 /**
@@ -71,9 +71,9 @@ function currentParentId(): string | null {
  * RE-READs the stores at call time (mutation discipline) — never the snapshot.
  */
 function addNodeFromCtx(type: NodeType, ctx?: ActionCtx): void {
-    const canvasPos = ctx?.point ?? viewportCenter();
-    const parentId = ctx?.node?.id ?? currentParentId();
-    useGraphStore.getState().addNode(type, canvasPos, parentId);
+  const canvasPos = ctx?.point ?? viewportCenter();
+  const parentId = ctx?.node?.id ?? currentParentId();
+  useGraphStore.getState().addNode(type, canvasPos, parentId);
 }
 
 /**
@@ -88,27 +88,34 @@ function addNodeFromCtx(type: NodeType, ctx?: ActionCtx): void {
  * unchanged across M2's learning).
  */
 function buildNodeActions(): Action[] {
-    const userFacingTypes = new Set<NodeType>(
-        menuCategories.flatMap((category) => category.items),
-    );
+  const userFacingTypes = new Set<NodeType>(
+    menuCategories.flatMap((category) => category.items)
+  );
 
-    const result: Action[] = [];
-    for (const type of userFacingTypes) {
-        const def = nodeDefinitions[type];
-        if (!def) continue;
-        const label = CATEGORY_LABEL[def.category] ?? def.category;
-        result.push({
-            id: `node.add.${type}`,
-            title: `Add ${def.name}`,
-            group: label,
-            path: [label],
-            keywords: [def.type, def.category, def.description, 'add', 'node', 'create'],
-            targets: ['global', 'canvasPoint', 'selection'],
-            surfaces: ['palette', 'menu'],
-            run: (ctx) => addNodeFromCtx(type, ctx),
-        });
-    }
-    return result;
+  const result: Action[] = [];
+  for (const type of userFacingTypes) {
+    const def = nodeDefinitions[type];
+    if (!def) continue;
+    const label = CATEGORY_LABEL[def.category] ?? def.category;
+    result.push({
+      id: `node.add.${type}`,
+      title: `Add ${def.name}`,
+      group: label,
+      path: [label],
+      keywords: [
+        def.type,
+        def.category,
+        def.description,
+        "add",
+        "node",
+        "create",
+      ],
+      targets: ["global", "canvasPoint", "selection"],
+      surfaces: ["palette", "menu"],
+      run: (ctx) => addNodeFromCtx(type, ctx),
+    });
+  }
+  return result;
 }
 
 /**
@@ -120,77 +127,131 @@ function buildNodeActions(): Action[] {
  * SUPERSET) and never clutter the curated right-click menu.
  */
 function buildAppCommands(): Command[] {
-    return [
-        {
-            id: 'app.settings.toggle',
-            title: 'Open Settings',
-            group: 'App',
-            keywords: ['settings', 'preferences', 'theme', 'audio', 'keybindings'],
-            run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-settings')),
-        },
-        {
-            id: 'app.help.toggle',
-            title: 'Toggle Help',
-            group: 'App',
-            keywords: ['help', 'shortcuts', 'keys', 'guide'],
-            run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-help')),
-        },
-        {
-            // The on-device structured-log surface (L4). Available in every build so
-            // a performer can pull up xruns / node faults / MIDI on stage. The AI
-            // agent reads the same store via its `get_logs` tool.
-            id: 'app.devlog.toggle',
-            title: 'Toggle DevLog',
-            group: 'App',
-            keywords: ['devlog', 'log', 'logs', 'debug', 'console', 'diagnostics', 'events', 'xrun'],
-            run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-devlog')),
-        },
-        {
-            // The one-screen audio-health readout (§4) — same diagnostics the AI reads.
-            id: 'app.audio-health.toggle',
-            title: 'Audio health',
-            group: 'App',
-            keywords: ['audio', 'health', 'latency', 'sound', 'diagnostics', 'device', 'status', 'no sound'],
-            run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-audio-health')),
-        },
-        {
-            // Report a problem (L5/Phase 2) — opens the local diagnostic bundle
-            // (DevLog tail + reveal log file + copy diagnostics). Nothing is
-            // uploaded; the performer chooses what to share. Wires the previously
-            // orphaned `openjammer:report-issue` seam the IssueReporter listens for.
-            id: 'app.report-issue',
-            title: 'Report a problem',
-            group: 'App',
-            keywords: ['report', 'issue', 'bug', 'problem', 'diagnostics', 'log', 'support', 'crash'],
-            run: () => window.dispatchEvent(new CustomEvent('openjammer:report-issue')),
-        },
-        {
-            // Bring-your-own plugin discovery (§3) — scan installed CLAP/VST3.
-            id: 'app.plugins.toggle',
-            title: 'Plugins',
-            group: 'App',
-            keywords: ['plugin', 'plugins', 'clap', 'vst', 'vst3', 'host', 'bring your own', 'effect', 'instrument'],
-            run: () => window.dispatchEvent(new CustomEvent('openjammer:toggle-plugins')),
-        },
-        {
-            id: 'app.project.new',
-            title: 'New Project',
-            group: 'App',
-            keywords: ['new', 'project', 'create', 'file'],
-            run: () => window.dispatchEvent(new CustomEvent('openjammer:new-project')),
-        },
-        {
-            // D6 (M7): the Ctrl+K-superset entry into the AuthChooser. Palette-only
-            // (a legacy Command → surfaces:['palette']) — the curated right-click
-            // menu need not surface AI provider chrome. It opens the AI path's
-            // configure flow via a window event the CommandBar listens for.
-            id: 'app.ai.configure',
-            title: 'Configure AI provider',
-            group: 'AI',
-            keywords: ['ai', 'auth', 'provider', 'key', 'login', 'opencode', 'codex', 'anthropic'],
-            run: () => window.dispatchEvent(new CustomEvent('openjammer:configure-ai')),
-        },
-    ];
+  return [
+    {
+      id: "app.settings.toggle",
+      title: "Open Settings",
+      group: "App",
+      keywords: ["settings", "preferences", "theme", "audio", "keybindings"],
+      run: () =>
+        window.dispatchEvent(new CustomEvent("openjammer:toggle-settings")),
+    },
+    {
+      id: "app.help.toggle",
+      title: "Toggle Help",
+      group: "App",
+      keywords: ["help", "shortcuts", "keys", "guide"],
+      run: () =>
+        window.dispatchEvent(new CustomEvent("openjammer:toggle-help")),
+    },
+    {
+      // The on-device structured-log surface (L4). Available in every build so
+      // a performer can pull up xruns / node faults / MIDI on stage. The AI
+      // agent reads the same store via its `get_logs` tool.
+      id: "app.devlog.toggle",
+      title: "Toggle DevLog",
+      group: "App",
+      keywords: [
+        "devlog",
+        "log",
+        "logs",
+        "debug",
+        "console",
+        "diagnostics",
+        "events",
+        "xrun",
+      ],
+      run: () =>
+        window.dispatchEvent(new CustomEvent("openjammer:toggle-devlog")),
+    },
+    {
+      // The one-screen audio-health readout (§4) — same diagnostics the AI reads.
+      id: "app.audio-health.toggle",
+      title: "Audio health",
+      group: "App",
+      keywords: [
+        "audio",
+        "health",
+        "latency",
+        "sound",
+        "diagnostics",
+        "device",
+        "status",
+        "no sound",
+      ],
+      run: () =>
+        window.dispatchEvent(new CustomEvent("openjammer:toggle-audio-health")),
+    },
+    {
+      // Report a problem (L5/Phase 2) — opens the local diagnostic bundle
+      // (DevLog tail + reveal log file + copy diagnostics). Nothing is
+      // uploaded; the performer chooses what to share. Wires the previously
+      // orphaned `openjammer:report-issue` seam the IssueReporter listens for.
+      id: "app.report-issue",
+      title: "Report a problem",
+      group: "App",
+      keywords: [
+        "report",
+        "issue",
+        "bug",
+        "problem",
+        "diagnostics",
+        "log",
+        "support",
+        "crash",
+      ],
+      run: () =>
+        window.dispatchEvent(new CustomEvent("openjammer:report-issue")),
+    },
+    {
+      // Bring-your-own plugin discovery (§3) — scan installed CLAP/VST3.
+      id: "app.plugins.toggle",
+      title: "Plugins",
+      group: "App",
+      keywords: [
+        "plugin",
+        "plugins",
+        "clap",
+        "vst",
+        "vst3",
+        "host",
+        "bring your own",
+        "effect",
+        "instrument",
+      ],
+      run: () =>
+        window.dispatchEvent(new CustomEvent("openjammer:toggle-plugins")),
+    },
+    {
+      id: "app.project.new",
+      title: "New Project",
+      group: "App",
+      keywords: ["new", "project", "create", "file"],
+      run: () =>
+        window.dispatchEvent(new CustomEvent("openjammer:new-project")),
+    },
+    {
+      // D6 (M7): the Ctrl+K-superset entry into the AuthChooser. Palette-only
+      // (a legacy Command → surfaces:['palette']) — the curated right-click
+      // menu need not surface AI provider chrome. It opens the AI path's
+      // configure flow via a window event the CommandBar listens for.
+      id: "app.ai.configure",
+      title: "Configure AI provider",
+      group: "AI",
+      keywords: [
+        "ai",
+        "auth",
+        "provider",
+        "key",
+        "login",
+        "opencode",
+        "codex",
+        "anthropic",
+      ],
+      run: () =>
+        window.dispatchEvent(new CustomEvent("openjammer:configure-ai")),
+    },
+  ];
 }
 
 /**
@@ -200,44 +261,52 @@ function buildAppCommands(): Command[] {
  * persistent global brain means these manage the agent's memory across projects.
  */
 function buildAiActions(): Action[] {
-    const invokeAi = (cmd: string, args?: Record<string, unknown>): void => {
-        const invoke = getInvoke();
-        if (!invoke) return;
-        void invoke(cmd, args ?? {});
-    };
-    const agentOnly = (ctx: ActionCtx): boolean => ctx.caps.agent !== 'none';
-    return [
-        {
-            id: 'ai.learning.enable',
-            title: 'AI: Remember my taste (learning on)',
-            group: 'AI',
-            keywords: ['ai', 'learn', 'memory', 'remember', 'persistent', 'intelligence'],
-            targets: ['global'],
-            surfaces: ['palette'],
-            enabled: agentOnly,
-            run: () => invokeAi('ai_set_learning', { enabled: true }),
-        },
-        {
-            id: 'ai.learning.disable',
-            title: 'AI: Stop learning my taste',
-            group: 'AI',
-            keywords: ['ai', 'learn', 'memory', 'stop', 'off', 'privacy'],
-            targets: ['global'],
-            surfaces: ['palette'],
-            enabled: agentOnly,
-            run: () => invokeAi('ai_set_learning', { enabled: false }),
-        },
-        {
-            id: 'ai.learning.forget',
-            title: 'AI: Forget learned taste',
-            group: 'AI',
-            keywords: ['ai', 'forget', 'memory', 'wipe', 'reset', 'clear'],
-            targets: ['global'],
-            surfaces: ['palette'],
-            enabled: agentOnly,
-            run: () => invokeAi('ai_forget'),
-        },
-    ];
+  const invokeAi = (cmd: string, args?: Record<string, unknown>): void => {
+    const invoke = getInvoke();
+    if (!invoke) return;
+    void invoke(cmd, args ?? {});
+  };
+  const agentOnly = (ctx: ActionCtx): boolean => ctx.caps.agent !== "none";
+  return [
+    {
+      id: "ai.learning.enable",
+      title: "AI: Let Philia remember you (memory on)",
+      group: "AI",
+      keywords: [
+        "ai",
+        "Philia",
+        "learn",
+        "memory",
+        "remember",
+        "persistent",
+        "intelligence",
+      ],
+      targets: ["global"],
+      surfaces: ["palette"],
+      enabled: agentOnly,
+      run: () => invokeAi("ai_set_learning", { enabled: true }),
+    },
+    {
+      id: "ai.learning.disable",
+      title: "AI: Stop Philia remembering you (memory off)",
+      group: "AI",
+      keywords: ["ai", "Philia", "learn", "memory", "stop", "off", "privacy"],
+      targets: ["global"],
+      surfaces: ["palette"],
+      enabled: agentOnly,
+      run: () => invokeAi("ai_set_learning", { enabled: false }),
+    },
+    {
+      id: "ai.learning.forget",
+      title: "AI: Make Philia forget what it learned",
+      group: "AI",
+      keywords: ["ai", "Philia", "forget", "memory", "wipe", "reset", "clear"],
+      targets: ["global"],
+      surfaces: ["palette"],
+      enabled: agentOnly,
+      run: () => invokeAi("ai_forget"),
+    },
+  ];
 }
 
 /**
@@ -245,15 +314,15 @@ function buildAiActions(): Action[] {
  * mounted. The registry is keyed by id, so this is safe across re-mounts.
  */
 export function useCommandSources(): void {
-    useEffect(() => {
-        // D-LEARN (M7): seed the local frecency floor from Pi memory when the
-        // platform's learning ceiling is 'pi-memory'. Additive + no-op on the
-        // founder-gated empty stub, so this is always safe (never lowers a score).
-        void seedPaletteLearning();
-        return registerAll([
-            ...buildNodeActions(),
-            ...buildAppCommands(),
-            ...buildAiActions(),
-        ]);
-    }, []);
+  useEffect(() => {
+    // D-LEARN (M7): seed the local frecency floor from Pi memory when the
+    // platform's learning ceiling is 'pi-memory'. Additive + no-op on the
+    // founder-gated empty stub, so this is always safe (never lowers a score).
+    void seedPaletteLearning();
+    return registerAll([
+      ...buildNodeActions(),
+      ...buildAppCommands(),
+      ...buildAiActions(),
+    ]);
+  }, []);
 }
