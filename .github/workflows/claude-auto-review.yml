@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Checkout code
         # Pinned to v4.3.1 for supply chain security
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -33,7 +33,7 @@ jobs:
 
       - name: Claude Iterative Review & Fix
         # Pinned to v1.0.26 for supply chain security
-        uses: anthropics/claude-code-action@0d1933529914177075d5bc3558ae3d047f188146
+        uses: anthropics/claude-code-action@80b31826338489861333dc17217865dfe8085cdc
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
