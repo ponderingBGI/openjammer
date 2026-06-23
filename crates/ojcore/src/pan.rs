@@ -27,14 +27,15 @@ pub mod pan_param {
     pub const PAN: u16 = 0;
 }
 
-/// The constant-sum (linear-law) L/R gains for a pan position `p`. `p` is clamped
-/// to `[-1, 1]`; centre is `(0.5, 0.5)`, hard left `(1.0, 0.0)`, hard right
-/// `(0.0, 1.0)`. (A −3 dB centre dip is inherent to the linear law; an equal-power
-/// law is a future refinement and need not change the contract.)
+/// The equal-power (constant-power) L/R gains for a pan position `p`. `p` is clamped
+/// to `[-1, 1]`; the gains trace a quarter cosine/sine so perceived loudness stays
+/// constant across the sweep — no centre dip. Centre is `(0.707, 0.707)`, hard left
+/// `(1.0, 0.0)`, hard right `(0.0, 1.0)`. θ runs `[0, π/2]` as `p` runs `[-1, 1]`.
 #[inline]
 fn pan_gains(p: f32) -> (f32, f32) {
     let p = p.clamp(-1.0, 1.0);
-    ((1.0 - p) * 0.5, (1.0 + p) * 0.5)
+    let theta = (p + 1.0) * core::f32::consts::FRAC_PI_4;
+    (libm::cosf(theta), libm::sinf(theta))
 }
 
 /// Build the pan manifest: one mono audio in, a 2-channel audio out, one param.
@@ -187,16 +188,18 @@ mod tests {
     }
 
     #[test]
-    fn centre_splits_evenly() {
+    fn centre_is_equal_power() {
         let mut node = PanNode::new();
         node.activate(SR, BLOCK);
         node.set_param(pan_param::PAN, 0.0);
         node.reset(); // snap so there is no ramp to wait out
         let input = vec![1.0f32; BLOCK];
         let (l, r) = render(&mut node, &input);
+        // Equal-power centre: both channels at cos(π/4) = 1/√2 ≈ 0.7071 (no −3 dB dip).
+        let centre = core::f32::consts::FRAC_1_SQRT_2;
         for i in 0..BLOCK {
-            assert!((l[i] - 0.5).abs() < 1e-4, "L@{i}");
-            assert!((r[i] - 0.5).abs() < 1e-4, "R@{i}");
+            assert!((l[i] - centre).abs() < 1e-4, "L@{i}");
+            assert!((r[i] - centre).abs() < 1e-4, "R@{i}");
         }
     }
 
