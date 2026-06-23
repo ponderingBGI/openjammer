@@ -23,7 +23,7 @@ use ojcore::effects::{biquad_param, convolution_param, delay_param, waveshaper_p
 use ojcore::{
     compile, compile_with_assets, master_param, AssetPcm, AssetResolver, Engine, PluginRegistry,
     BIQUAD_ID, CONVOLUTION_ID, DELAY_ID, GAIN_ID, GAIN_PARAM, GRAPH_IN_ID, LOOPER_ID, PAN_ID,
-    SPEAKER_OUT_ID, WAVESHAPER_ID,
+    SPEAKER_OUT_ID, WAVESHAPER_ID, WIDTH_ID,
 };
 use ojinstrument::{
     param as instr_param, register_all, RegisterOpts, KARPLUS_ID, OSC_ID, SAMPLER_ID,
@@ -1105,6 +1105,97 @@ fn pan_hard_left_routes_input_to_left_channel_only() {
         assert!(
             r[i].abs() < 1e-3,
             "R[{i}] = {} != 0 (hard left silent)",
+            r[i]
+        );
+    }
+}
+
+// A mid-graph stereo EFFECT (Width) re-imaging a real stereo SOURCE (Pan) — the
+// end-to-end lock for the general lane-aware mix (`mix_input_lane`): Pan's two output
+// lanes must route into Width's two INPUT lanes through the real compile + registry.
+
+#[test]
+fn pan_into_width_unity_routes_the_stereo_chain() {
+    // GraphIn -> Pan(centre) -> Width(unity) -> SpeakerOut. A unity Width is
+    // transparent, so the output is the centred equal-power image, unchanged — proving
+    // the chain ROUTES (Pan's L/R lanes reach Width's two input lanes).
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes
+        .push(node(1, GRAPH_IN_ID, PrimitiveKind::GraphIn, 0, 1));
+    g.nodes.push(node(2, PAN_ID, PrimitiveKind::Pan, 1, 1));
+    g.nodes.push(node(3, WIDTH_ID, PrimitiveKind::Width, 1, 1));
+    g.nodes
+        .push(node(4, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 2));
+    g.edges.push(audio_edge(2, 3));
+    g.edges.push(audio_edge(3, 4));
+
+    let mut engine = Engine::new(compile(&g, &registry()).expect("compile pan->width chain"));
+    const DC: f32 = 0.5;
+    if let Some(buf) = engine.input_mut(NodeIdx(1), 0) {
+        buf.copy_from_slice(&vec![DC; NB]);
+    }
+    let (l, r) = render_stereo(&mut engine, 1);
+    assert_all_finite(&l);
+    assert_all_finite(&r);
+
+    let centre = DC * core::f32::consts::FRAC_1_SQRT_2;
+    for i in 1..NB {
+        assert!(
+            (l[i] - centre).abs() < 1e-3,
+            "L[{i}] = {} != {centre}",
+            l[i]
+        );
+        assert!(
+            (r[i] - centre).abs() < 1e-3,
+            "R[{i}] = {} != {centre}",
+            r[i]
+        );
+    }
+}
+
+#[test]
+fn width_collapses_a_panned_signal_to_mono() {
+    // GraphIn -> Pan(hard left) -> Width(0) -> SpeakerOut. Pan sends the input to L
+    // only (L=DC, R=0); Width receives that stereo pair via the general mix and at
+    // width 0 mid/side-collapses it to the centre (L'=R'=mid=DC/2). The proof that a
+    // stereo EFFECT mid-graph genuinely re-images a real stereo source — commit F.
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes
+        .push(node(1, GRAPH_IN_ID, PrimitiveKind::GraphIn, 0, 1));
+    g.nodes.push(with_params(
+        node(2, PAN_ID, PrimitiveKind::Pan, 1, 1),
+        &[(0, -1.0)], // hard left
+    ));
+    g.nodes.push(with_params(
+        node(3, WIDTH_ID, PrimitiveKind::Width, 1, 1),
+        &[(0, 0.0)], // width 0 = mono collapse
+    ));
+    g.nodes
+        .push(node(4, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 2));
+    g.edges.push(audio_edge(2, 3));
+    g.edges.push(audio_edge(3, 4));
+
+    let mut engine = Engine::new(compile(&g, &registry()).expect("compile pan->width collapse"));
+    const DC: f32 = 0.5;
+    if let Some(buf) = engine.input_mut(NodeIdx(1), 0) {
+        buf.copy_from_slice(&vec![DC; NB]);
+    }
+    let (l, r) = render_stereo(&mut engine, 1);
+    assert_all_finite(&l);
+    assert_all_finite(&r);
+
+    let centre = DC / 2.0; // mid of (DC, 0)
+    for i in 1..NB {
+        assert!(
+            (l[i] - centre).abs() < 1e-3,
+            "L[{i}] = {} != {centre}",
+            l[i]
+        );
+        assert!(
+            (r[i] - centre).abs() < 1e-3,
+            "R[{i}] = {} != {centre}",
             r[i]
         );
     }
