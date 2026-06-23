@@ -174,14 +174,38 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
 }
 
 /**
+ * The dynamic-hosting kinds — a Faust node, an AI-authored WASM code-node, or a
+ * hosted VST3/AU/CLAP. These are NOT closed builtins: each carries its OWN
+ * `manifest_id` (`ai.dsp.*` / `ai.wasm.*` / `host.plugin.*`), the exact key its
+ * per-node loader is registered under (registered dynamically, not in the static
+ * tables above). The native executor lowers nodes to these kinds + ids; the
+ * browser/wasm path keeps the closed effect fallback and never produces them (see
+ * emit's `codeNodesAsWasmHost` / `hostedPluginsAsPluginHost`). A node of one of
+ * these kinds therefore keeps its id VERBATIM through the remap — rewriting it by
+ * kind dropped it to the gain placeholder, so the real plugin/wasm DSP never
+ * loaded and first-class hosting silently did nothing.
+ */
+const DYNAMIC_HOST_KINDS: ReadonlySet<PrimitiveKind> = new Set<PrimitiveKind>([
+    'PluginHost',
+    'WasmHost',
+    'FaustHost',
+]);
+
+/**
  * Return a COPY of `graph` with every IrNode's `manifest_id` remapped to the
  * given backend's registry. Pure: does not mutate the input. `kind`, ports,
  * params, edges and schedule are preserved exactly.
+ *
+ * Dynamic-hosting kinds ({@link DYNAMIC_HOST_KINDS}) keep their `manifest_id`
+ * verbatim — it IS their (dynamically-registered) loader key. Every other kind is
+ * mapped to the backend's builtin loader by {@link manifestIdForKind}.
  */
 export function remapForBackend(graph: OjGraph, backend: EngineBackend): OjGraph {
     const nodes: IrNode[] = graph.nodes.map((n) => ({
         ...n,
-        manifest_id: manifestIdForKind(n.kind, backend),
+        manifest_id: DYNAMIC_HOST_KINDS.has(n.kind)
+            ? n.manifest_id
+            : manifestIdForKind(n.kind, backend),
     }));
     return { ...graph, nodes };
 }

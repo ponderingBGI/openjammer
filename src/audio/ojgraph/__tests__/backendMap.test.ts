@@ -205,6 +205,39 @@ describe('remapForBackend', () => {
             expect(looper.manifest_id, `${backend} Looper not gain`).not.toBe(ENGINE_IDS.gain);
         }
     });
+
+    it('preserves a hosted plugin / wasm code-node dynamic id (first-class hosting loads its real kernel)', () => {
+        // REGRESSION: the native executor lowers a hosted VST3/CLAP node to kind
+        // PluginHost with its real per-node loader id (host.plugin.<format>.<hash>),
+        // and an AI-authored compiled code node to kind WasmHost with ai.wasm.<hash>.
+        // remapForBackend rewrote EVERY node by kind, and manifestIdForKind has no case
+        // for these kinds, so they collapsed to builtin.gain — a unity passthrough. The
+        // engine resolves loaders by exact manifest_id, so the real plugin/wasm DSP
+        // never instantiated and first-class hosting silently no-op'd, with every test
+        // green. The dynamic id IS the loader key; it must survive the remap verbatim.
+        const hostedId = 'host.plugin.vst3.deadbeef';
+        const wasmId = 'ai.wasm.cafef00d';
+        const graph: OjGraph = {
+            ir_version: 1,
+            sample_rate: 48_000,
+            block_size: 128,
+            nodes: [
+                { id: 1, manifest_id: hostedId, kind: 'PluginHost', params: [], assets: [], n_in: 1, n_out: 1 },
+                { id: 2, manifest_id: wasmId, kind: 'WasmHost', params: [], assets: [], n_in: 1, n_out: 1 },
+                { id: 3, manifest_id: 'builtin.speaker', kind: 'SpeakerOut', params: [], assets: [], n_in: 1, n_out: 0 },
+            ],
+            edges: [],
+            schedule: [],
+        };
+        for (const backend of ['native', 'wasm'] as const) {
+            const g = remapForBackend(graph, backend);
+            const idOf = (k: string) => g.nodes.find((n) => n.kind === k)!.manifest_id;
+            expect(idOf('PluginHost'), `${backend} PluginHost id preserved`).toBe(hostedId);
+            expect(idOf('WasmHost'), `${backend} WasmHost id preserved`).toBe(wasmId);
+            expect(idOf('PluginHost'), `${backend} PluginHost not gain`).not.toBe(ENGINE_IDS.gain);
+            expect(idOf('WasmHost'), `${backend} WasmHost not gain`).not.toBe(ENGINE_IDS.gain);
+        }
+    });
 });
 
 // ---------------------------------------------------------------------------
@@ -218,20 +251,23 @@ describe('remapForBackend', () => {
 
 // Kinds that LEGITIMATELY load via the gain placeholder, per backend:
 //  • Gain itself (it IS the gain kernel);
-//  • the host-bridged extension kinds (FaustHost/WasmHost/PluginHost are registered
-//    dynamically per-node, not by this static remap, and fall back to gain so an
-//    unrunnable host node stays audible rather than failing the whole push);
 //  • Recorder (a host-side master tap; the recorder NODE lowers to SpeakerOut, so
 //    this kind is never actually emitted);
 //  • on NATIVE only, the IO/master/routing kinds — the executor KIND-GATES them, so
 //    the gain placeholder instance is never processed (wasm loads real host.* loaders
 //    for these, so they must NOT be gain there).
+// NOTE: the host-bridged extension kinds (FaustHost/WasmHost/PluginHost) are
+// deliberately NOT here. remapForBackend preserves their dynamic manifest_id
+// verbatim (it is their per-node loader key), so they never collapse to gain — the
+// "preserves a hosted plugin / wasm code-node dynamic id" test below proves it.
+// Allowlisting them here previously disarmed this very guard for the exact kinds the
+// first-class-hosting feature added, masking that hosted nodes loaded as gain no-ops.
 const GAIN_FALLBACK_OK: Record<EngineBackend, ReadonlySet<PrimitiveKind>> = {
     native: new Set<PrimitiveKind>([
-        'Gain', 'FaustHost', 'WasmHost', 'PluginHost', 'Recorder',
+        'Gain', 'Recorder',
         'MicIn', 'SpeakerOut', 'GraphIn', 'GraphOut', 'Passthrough',
     ]),
-    wasm: new Set<PrimitiveKind>(['Gain', 'FaustHost', 'WasmHost', 'PluginHost', 'Recorder']),
+    wasm: new Set<PrimitiveKind>(['Gain', 'Recorder']),
 };
 
 describe('backendMap — no audio kind silently no-ops via the gain fallback', () => {
