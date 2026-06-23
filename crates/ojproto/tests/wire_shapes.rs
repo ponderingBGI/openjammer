@@ -59,7 +59,6 @@ fn primitive_kind_is_bare_variant_string() {
         (PrimitiveKind::GraphOut, "\"GraphOut\""),
         (PrimitiveKind::Passthrough, "\"Passthrough\""),
         (PrimitiveKind::Looper, "\"Looper\""),
-        (PrimitiveKind::Recorder, "\"Recorder\""),
     ];
     for (kind, expected) in all {
         assert_json(&kind, expected);

@@ -67,7 +67,6 @@ pub enum PrimitiveKind {
     Passthrough,
     // stateful (U-STATEFUL)
     Looper,
-    Recorder,
 }
 
 /// Looper transport actions carried by [`RtCommand::Looper`], encoded as a

@@ -42,8 +42,7 @@
         "GraphIn",
         "GraphOut",
         "Passthrough",
-        "Looper",
-        "Recorder"
+        "Looper"
       ]
     },
     "dsp": {

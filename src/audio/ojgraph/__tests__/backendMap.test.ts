@@ -251,8 +251,6 @@ describe('remapForBackend', () => {
 
 // Kinds that LEGITIMATELY load via the gain placeholder, per backend:
 //  • Gain itself (it IS the gain kernel);
-//  • Recorder (a host-side master tap; the recorder NODE lowers to SpeakerOut, so
-//    this kind is never actually emitted);
 //  • on NATIVE only, the IO/master/routing kinds — the executor KIND-GATES them, so
 //    the gain placeholder instance is never processed (wasm loads real host.* loaders
 //    for these, so they must NOT be gain there).
@@ -264,10 +262,10 @@ describe('remapForBackend', () => {
 // first-class-hosting feature added, masking that hosted nodes loaded as gain no-ops.
 const GAIN_FALLBACK_OK: Record<EngineBackend, ReadonlySet<PrimitiveKind>> = {
     native: new Set<PrimitiveKind>([
-        'Gain', 'Recorder',
+        'Gain',
         'MicIn', 'SpeakerOut', 'GraphIn', 'GraphOut', 'Passthrough',
     ]),
-    wasm: new Set<PrimitiveKind>(['Gain', 'Recorder']),
+    wasm: new Set<PrimitiveKind>(['Gain']),
 };
 
 describe('backendMap — no audio kind silently no-ops via the gain fallback', () => {

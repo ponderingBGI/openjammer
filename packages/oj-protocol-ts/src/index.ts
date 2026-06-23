@@ -91,7 +91,6 @@ export const PRIMITIVE_KINDS = [
   "Passthrough",
   // stateful (U-STATEFUL)
   "Looper",
-  "Recorder",
 ] as const;
 
 /** The closed primitive-kind union, derived from {@link PRIMITIVE_KINDS}. */
