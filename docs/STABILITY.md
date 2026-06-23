@@ -52,10 +52,18 @@ reappears. This is *a held note beats a glitch* applied to the load path — the
 > both `ojcore-wasm::load_graph` and the native `push_graph`) degrades an unregistered `manifest_id`
 > *or* an `abi`-incompatible plugin to `ojcore`'s passthrough, preserving the IR topology;
 > `CompiledProgram::degraded_stubs(&graph)` enumerates them for a label. Strict `compile` stays the
-> default so dev/tests still catch a typo'd id. **Still future:** carrying the label to the UI +
-> auto-rebind (both ride the `.oj` lockfile), and the *crash-path* stub — a hosted plugin that FAULTS
-> at runtime latching to a dry passthrough — which is `crates/ojhost/src/node.rs` `PassthroughNode`
-> behind a per-node native fault boundary, a separate mechanism from this load-path stub.
+> default so dev/tests still catch a typo'd id.
+>
+> **Implemented (crash path, Phase A):** a hosted plugin that FAULTS at runtime latches to a dry
+> passthrough instead of taking down the app. `crates/ojhost/src/node.rs` `PluginHostNode` runs the
+> foreign `processBlock` through `HostedBackend::process_guarded`, whose JUCE backend wraps the call in
+> a per-OS fault boundary (Windows SEH / POSIX `sigsetjmp` + chained signal handlers,
+> `cpp/ojhost_juce.cpp`). On a fault the node sets `faulted` and runs the same dry passthrough as the
+> load-path stub for the rest of its life (latch-and-quarantine — never resume out of foreign C++ that
+> may hold the heap lock); `DspInstance::runtime_degraded()` lets the off-RT side poll + badge it (the
+> runtime twin of `degraded_stubs`, shared with `ojwasm`'s `bypassed` latch). **Still future:** the
+> out-of-process worker (full malice / stack-overflow / macOS-Mach-exception containment — isolation
+> Phase C); the load-path label→UI surface + auto-rebind both ride the `.oj` lockfile.
 
 ### FROZEN-2 — The real-time wire shapes
 `RtCommand`, `RtEvent`, `EngineFrame`, `OjGraph`, and the `Event` envelope in

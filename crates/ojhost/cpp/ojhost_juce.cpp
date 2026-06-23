@@ -25,6 +25,17 @@
 #include <string>
 #include <vector>
 
+// Per-OS crash-fault boundary for the foreign `processBlock` call (see
+// `ojhost_process_guarded`). Windows uses SEH (`__try`/`__except`, in <excpt.h>
+// via <windows.h>); POSIX uses a `sigsetjmp` target + chained signal handlers.
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <csetjmp>
+#include <csignal>
+#include <mutex>
+#endif
+
 using namespace juce;
 
 namespace {
@@ -280,6 +291,176 @@ void ojhost_process(OjPlugin* plugin,
     }
     // Restore full block capacity for next call.
     plugin->buffer.setSize(chans, plugin->maxBlock, true, false, true);
+}
+
+// ---------------------------------------------------------------------------
+// Crash-fault boundary (Phase A: in-process guard + latch).
+//
+// The single foreign call — `instance->processBlock(...)` — is wrapped so a
+// plugin segfault becomes a RETURN VALUE, not a process crash. We LATCH-and-
+// QUARANTINE: on a fault the output is silenced and the Rust `PluginHostNode`
+// flips to a dry passthrough and never calls us again this session. We do NOT
+// resume the plugin — a fault mid-`malloc` may leave the CRT/arena heap lock
+// held, so re-entering (or allocating from a faulted thread) could deadlock; the
+// audio thread allocates nothing after the latch, and a clean instance comes back
+// only via a fresh off-RT `instantiate`. Full malice/stack-overflow containment
+// is the future out-of-process worker; Phase-A POSIX limits (macOS Mach
+// exceptions; a held global lock) are documented here, not silently ignored.
+// ---------------------------------------------------------------------------
+namespace {
+
+#if defined(_WIN32)
+
+// MSVC SEH must live in a LEAF function with no C++ objects requiring unwinding.
+// This one only derefs a pointer and calls a method (the AudioBuffer / MidiBuffer
+// are POD members built in ojhost_prepare), so it qualifies — no `/EHa` needed.
+static int ojGuardedProcessBlock(OjPlugin* plugin) {
+    __try {
+        plugin->instance->processBlock(plugin->buffer, plugin->midi);
+        return 0;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 1;
+    }
+}
+
+#else
+
+// POSIX: a thread-local longjmp target + process-global SIGSEGV/SIGILL/SIGFPE/
+// SIGBUS handlers that jump back ONLY when a fault happens inside our guard;
+// otherwise they chain to the previously-installed handler so a real crash
+// elsewhere is never swallowed.
+static thread_local sigjmp_buf ojFaultJmp;
+static thread_local volatile sig_atomic_t ojInGuard = 0;
+static struct sigaction ojPrev[4]; // [SEGV, ILL, FPE, BUS]
+
+static int ojSigIndex(int sig) {
+    switch (sig) {
+        case SIGSEGV: return 0;
+        case SIGILL:  return 1;
+        case SIGFPE:  return 2;
+        case SIGBUS:  return 3;
+        default:      return -1;
+    }
+}
+
+static void ojFaultHandler(int sig, siginfo_t* info, void* uc) {
+    if (ojInGuard) {
+        ojInGuard = 0;
+        siglongjmp(ojFaultJmp, 1); // back into ojGuardedProcessBlock
+    }
+    // Not in our guard -> a genuine fault elsewhere: chain to the prior handler.
+    const int idx = ojSigIndex(sig);
+    if (idx < 0) { signal(sig, SIG_DFL); raise(sig); return; }
+    const struct sigaction& prev = ojPrev[idx];
+    if ((prev.sa_flags & SA_SIGINFO) != 0) {
+        if (prev.sa_sigaction != nullptr) prev.sa_sigaction(sig, info, uc);
+    } else if (prev.sa_handler == SIG_IGN) {
+        // ignored upstream — leave it
+    } else if (prev.sa_handler == SIG_DFL) {
+        signal(sig, SIG_DFL);
+        raise(sig);
+    } else {
+        prev.sa_handler(sig);
+    }
+}
+
+static void ojInstallHandlersOnce() {
+    static std::once_flag once;
+    std::call_once(once, []() {
+        struct sigaction sa;
+        std::memset(&sa, 0, sizeof(sa));
+        sa.sa_sigaction = ojFaultHandler;
+        // SA_ONSTACK: run on the alt stack (survive a stack-overflow SIGSEGV).
+        // SA_NODEFER: allow re-entry so the handler can siglongjmp cleanly.
+        sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
+        sigemptyset(&sa.sa_mask);
+        sigaction(SIGSEGV, &sa, &ojPrev[0]);
+        sigaction(SIGILL,  &sa, &ojPrev[1]);
+        sigaction(SIGFPE,  &sa, &ojPrev[2]);
+        sigaction(SIGBUS,  &sa, &ojPrev[3]);
+    });
+}
+
+// A per-thread alternate signal stack so a stack-overflow fault on the audio
+// thread (which cpal, not us, created) can still be caught. Installed lazily on
+// the first guarded call on that thread.
+static void ojInstallAltStackOnce() {
+    static thread_local bool installed = false;
+    static thread_local char altStack[64 * 1024];
+    if (installed) return;
+    stack_t ss;
+    std::memset(&ss, 0, sizeof(ss));
+    ss.ss_sp = altStack;
+    ss.ss_size = sizeof(altStack);
+    ss.ss_flags = 0;
+    sigaltstack(&ss, nullptr);
+    installed = true;
+}
+
+static int ojGuardedProcessBlock(OjPlugin* plugin) {
+    ojInstallHandlersOnce();
+    ojInstallAltStackOnce();
+    if (sigsetjmp(ojFaultJmp, 1) == 0) {
+        ojInGuard = 1;
+        plugin->instance->processBlock(plugin->buffer, plugin->midi);
+        ojInGuard = 0;
+        return 0;
+    }
+    ojInGuard = 0;
+    return 1; // returned via siglongjmp: a fault was caught
+}
+
+#endif
+
+} // namespace
+
+int32_t ojhost_process_guarded(OjPlugin* plugin,
+                               const float* const* inputs, int32_t in_channels,
+                               float* const* outputs, int32_t out_channels,
+                               int32_t nframes) {
+    if (plugin == nullptr || plugin->instance == nullptr) return OJ_PROCESS_OK;
+    const int n = jmin(nframes, plugin->maxBlock);
+    const int chans = plugin->preparedChannels;
+
+    // Copy inputs into the pre-sized buffer (no allocation) — same as
+    // ojhost_process. This is OUTSIDE the guarded leaf (it can't fault).
+    for (int ch = 0; ch < chans; ++ch) {
+        float* dst = plugin->buffer.getWritePointer(ch);
+        if (ch < in_channels && inputs[ch] != nullptr) {
+            std::memcpy(dst, inputs[ch], sizeof(float) * static_cast<size_t>(n));
+        } else {
+            std::memset(dst, 0, sizeof(float) * static_cast<size_t>(n));
+        }
+    }
+    plugin->buffer.setSize(chans, n, true, false, true);
+
+    // The ONLY line that can crash a third-party plugin, behind the fault boundary.
+    const int faulted = ojGuardedProcessBlock(plugin);
+
+    if (faulted != 0) {
+        // Quarantine transition: silence every output for this block; the Rust
+        // latch holds a dry passthrough from here and never calls us again.
+        for (int ch = 0; ch < out_channels; ++ch) {
+            if (outputs[ch] != nullptr) {
+                std::memset(outputs[ch], 0, sizeof(float) * static_cast<size_t>(n));
+            }
+        }
+        plugin->buffer.setSize(chans, plugin->maxBlock, true, false, true);
+        return OJ_PROCESS_FAULT;
+    }
+
+    plugin->midi.clear();
+    for (int ch = 0; ch < out_channels; ++ch) {
+        if (outputs[ch] == nullptr) continue;
+        if (ch < chans) {
+            std::memcpy(outputs[ch], plugin->buffer.getReadPointer(ch),
+                        sizeof(float) * static_cast<size_t>(n));
+        } else {
+            std::memset(outputs[ch], 0, sizeof(float) * static_cast<size_t>(n));
+        }
+    }
+    plugin->buffer.setSize(chans, plugin->maxBlock, true, false, true);
+    return OJ_PROCESS_OK;
 }
 
 void ojhost_set_param(OjPlugin* plugin, uint32_t index, float value) {
