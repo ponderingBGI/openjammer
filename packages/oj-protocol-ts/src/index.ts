@@ -333,7 +333,7 @@ export type Severity = "Trace" | "Debug" | "Info" | "Warn" | "Error";
 export type Source = "Engine" | "Wasm" | "Ui" | "Native";
 
 /** RT fault taxonomy. Rust: `enum FaultKind` — bare string. */
-export type FaultKind = "NonFinite" | "OverBudget" | "AutoBypassed";
+export type FaultKind = "NonFinite" | "OverBudget" | "AutoBypassed" | "Crashed";
 
 /**
  * The closed, versioned event taxonomy (control-rate). Rust: `enum EventKind`,

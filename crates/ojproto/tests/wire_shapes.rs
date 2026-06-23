@@ -285,6 +285,7 @@ fn event_taxonomy_shapes_match_ts_mirror() {
     assert_json(&Severity::Warn, "\"Warn\"");
     assert_json(&Source::Engine, "\"Engine\"");
     assert_json(&FaultKind::OverBudget, "\"OverBudget\"");
+    assert_json(&FaultKind::Crashed, "\"Crashed\"");
 
     assert_json(&EventKind::Xrun { dropped: 2 }, r#"{"Xrun":{"dropped":2}}"#);
     assert_json(

@@ -63,7 +63,7 @@ import {
 import { classifyLatency, type LatencyReport } from './latency';
 import { logger } from '../../utils/log';
 import { setEngineHealth, useEngineHealthStore } from '../../store/engineHealthStore';
-import { ingestEngineEvents, remapFaultNodes } from './faultPipe';
+import { ingestEngineEvents, remapFaultNodes, routeRuntimeFaults } from './faultPipe';
 import { setNodeVoiceLoadError } from './voiceLoadError';
 import { setNodePluginLoadError } from './pluginLoadError';
 
@@ -381,6 +381,11 @@ export class OjcoreNativeExecutor implements Executor {
         // looper handle to create its row. Routing here (not in the fault pipe)
         // keeps the fault path tag-agnostic — LooperEdge is not a fault.
         this.routeLooperEdges(events);
+        // Tap runtime CRASH faults (NodeFault{Crashed}) to the per-node badge — the
+        // runtime twin of the load-degraded surface (invariant #4a). Done on the
+        // raw engine-indexed batch (this tier owns the reverse map), set-only; the
+        // push_graph degraded loop owns clearing. Shared helper -> wasm tier reuses it.
+        routeRuntimeFaults(events, (n) => this.reverseIndex.get(n));
         // Make every fault NODE-ADDRESSABLE before the shared sink: rewrite each
         // NodeFault's engine index to its visual node id (this tier owns the reverse
         // index) so the agent's get_logs / get_diagnostics map a fault to a canvas

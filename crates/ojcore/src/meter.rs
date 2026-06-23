@@ -263,6 +263,7 @@ pub mod event_frame {
     const FAULT_NON_FINITE: u8 = 0;
     const FAULT_OVER_BUDGET: u8 = 1;
     const FAULT_AUTO_BYPASSED: u8 = 2;
+    const FAULT_CRASHED: u8 = 3;
 
     /// Largest event frame: the looper edge frame is
     /// tag + sub + node(u32) + from(u8) + to(u8) = 8 bytes (the node-fault frame
@@ -286,6 +287,7 @@ pub mod event_frame {
                     FaultKind::NonFinite => FAULT_NON_FINITE,
                     FaultKind::OverBudget => FAULT_OVER_BUDGET,
                     FaultKind::AutoBypassed => FAULT_AUTO_BYPASSED,
+                    FaultKind::Crashed => FAULT_CRASHED,
                 };
                 7
             }
@@ -316,6 +318,7 @@ pub mod event_frame {
                     FAULT_NON_FINITE => FaultKind::NonFinite,
                     FAULT_OVER_BUDGET => FaultKind::OverBudget,
                     FAULT_AUTO_BYPASSED => FaultKind::AutoBypassed,
+                    FAULT_CRASHED => FaultKind::Crashed,
                     _ => return None,
                 };
                 Some(RtEvent::NodeFault { node, fault })
@@ -509,6 +512,10 @@ mod tests {
         assert_event_roundtrips(RtEvent::NodeFault {
             node: NodeIdx(u32::MAX),
             fault: FaultKind::AutoBypassed,
+        });
+        assert_event_roundtrips(RtEvent::NodeFault {
+            node: NodeIdx(5),
+            fault: FaultKind::Crashed,
         });
         assert_event_roundtrips(RtEvent::LooperEdge {
             node: NodeIdx(7),

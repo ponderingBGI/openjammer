@@ -356,6 +356,12 @@ pub enum FaultKind {
     OverBudget,
     /// The node was auto-bypassed after repeated faults.
     AutoBypassed,
+    /// The node's foreign code (a hosted VST3/CLAP plugin) CRASHED at runtime and
+    /// latched to a dry passthrough (the crash-isolation latch). Distinct from
+    /// `AutoBypassed` (the watchdog) — this is the per-node fault boundary catching
+    /// a real segfault. Surfaces the same "(missing/crashed plugin)" node badge as
+    /// the load-degraded path; cleared by a fresh instantiate on the next graph swap.
+    Crashed,
 }
 
 /// The CLOSED, versioned, control-rate event taxonomy. EXTERNALLY tagged by

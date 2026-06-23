@@ -579,6 +579,30 @@ impl Engine {
         // edges onto the loss-proof event ring. Alloc-free; skips non-loopers.
         #[cfg(feature = "std")]
         self.publish_looper();
+        // Runtime-degrade telemetry: a node that latched to a dry passthrough at
+        // runtime (a crashed hosted plugin / trapped code node) surfaces a
+        // NodeFault{Crashed} so the UI badges it. Alloc-free; skips healthy nodes.
+        #[cfg(feature = "std")]
+        self.publish_faults();
+    }
+
+    /// Emit a [`ojproto::FaultKind::Crashed`] node fault for every node that has
+    /// LATCHED to a dry passthrough at runtime ([`DspInstance::runtime_degraded`] —
+    /// a crashed hosted plugin or a trapped code node). Re-emitted every block it
+    /// stays degraded, so a frame dropped on a full ring re-sends next block
+    /// (naturally loss-proof) and is coalesced off-RT exactly like a persistently
+    /// non-finite node. Alloc-free: a `bool` read per node + the stack-buffer
+    /// `emit_node_fault`. Skips healthy nodes (default `runtime_degraded() == false`).
+    #[cfg(feature = "std")]
+    fn publish_faults(&self) {
+        if self.event_ring.is_none() {
+            return;
+        }
+        for slot in 0..self.program.instances.len() {
+            if self.program.instances[slot].runtime_degraded() {
+                self.emit_node_fault(slot, ojproto::FaultKind::Crashed);
+            }
+        }
     }
 
     /// Mix `node`'s inputs into `in_scratch`, then render it into its own
@@ -852,6 +876,76 @@ mod apply_rt_tests {
             note: 64,
         });
         assert_eq!(probe.last_note_off.get(), Some(64));
+    }
+
+    #[test]
+    fn publish_faults_emits_node_fault_crashed_for_a_runtime_degraded_node() {
+        use crate::meter::{event_frame, EventRing};
+        use alloc::sync::Arc;
+        use ojproto::{FaultKind, RtEvent};
+
+        /// A stub that reports it LATCHED to passthrough at runtime (a crashed
+        /// hosted plugin / trapped code node) — what `runtime_degraded()` returns.
+        struct DegradedNode {
+            degraded: bool,
+        }
+        unsafe impl Send for DegradedNode {}
+        impl DspInstance for DegradedNode {
+            fn activate(&mut self, _sr: f32, _mb: usize) {}
+            fn process(&mut self, _ctx: &mut ProcessCtx<'_, '_>) {}
+            fn set_param(&mut self, _id: u16, _v: f32) {}
+            fn runtime_degraded(&self) -> bool {
+                self.degraded
+            }
+        }
+
+        // Slot 0 = a runtime-degraded node (id 7); slot 1 = a healthy master (id 0).
+        let instances: Vec<Box<dyn DspInstance>> = vec![
+            Box::new(DegradedNode { degraded: true }),
+            Box::new(DegradedNode { degraded: false }),
+        ];
+        let program = CompiledProgram {
+            instances,
+            routing: vec![NodeRouting::default(), NodeRouting::default()],
+            out_bufs: vec![vec![vec![0.0; 4]], vec![]],
+            out_channels: vec![1, 1],
+            in_channels: vec![1, 1],
+            bypassed: vec![false, false],
+            kinds: vec![PrimitiveKind::Osc, PrimitiveKind::SpeakerOut],
+            ids: vec![NodeIdx(7), NodeIdx(0)],
+            id_index: vec![(NodeIdx(0), 1), (NodeIdx(7), 0)],
+            master_out: 1,
+            block_size: 4,
+            in_scratch: vec![vec![0.0; 4]],
+            max_in: 1,
+            max_out: 1,
+            schedule: vec![0, 1],
+        };
+        let mut engine = Engine::new(program);
+        let ring = Arc::new(EventRing::new());
+        engine.attach_event_ring(Some(ring.clone()));
+
+        let mut out = vec![0.0f32; 4];
+        engine.process_block(&mut out, 4);
+
+        let mut faults = Vec::new();
+        event_frame::drain_events(&ring, |ev| faults.push(ev));
+        assert!(
+            faults.iter().any(|ev| matches!(
+                ev,
+                RtEvent::NodeFault {
+                    node: NodeIdx(7),
+                    fault: FaultKind::Crashed,
+                }
+            )),
+            "the degraded node emits NodeFault{{Crashed}}; got {faults:?}"
+        );
+        assert!(
+            !faults
+                .iter()
+                .any(|ev| matches!(ev, RtEvent::NodeFault { node: NodeIdx(0), .. })),
+            "a healthy node emits no fault"
+        );
     }
 
     #[test]

@@ -59,7 +59,7 @@ import {
     monoPcmToWavBlob,
     type OjcoreBridge,
 } from './ojcoreHandles';
-import { ingestEngineEvents } from './faultPipe';
+import { ingestEngineEvents, routeRuntimeFaults } from './faultPipe';
 import { setEngineHealth } from '../../store/engineHealthStore';
 import { setNodeVoiceLoadError } from './voiceLoadError';
 import { setNodePluginLoadError } from './pluginLoadError';
@@ -713,6 +713,11 @@ export class OjcoreWasmExecutor implements Executor {
         // handle BEFORE the shared fault sink — the event ring is loss-proof, so a
         // RECORDING|OVERDUBBING -> PLAYING edge reliably creates the row.
         this.routeLooperEdges(events);
+        // Tap runtime CRASH faults (NodeFault{Crashed}) to the per-node badge — the
+        // SAME shared helper the native tier uses, so there is one runtime-fault
+        // owner. On the wasm tier this surfaces a TRAPPED code node (the wasm bypass
+        // latch); set-only, cleared by the next clean graph re-push.
+        routeRuntimeFaults(events, (n) => this.reverseIndex.get(n));
         ingestEngineEvents(events);
     }
 
