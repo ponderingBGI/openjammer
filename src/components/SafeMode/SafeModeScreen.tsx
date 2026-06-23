@@ -88,7 +88,7 @@ export function SafeModeScreen({ api }: { api: SafeModeApi }) {
                         </span>
                     </span>
                     <span className="oj-welcome-option-glyph" aria-hidden="true">
-                        &larrhk;
+                        &larr;
                     </span>
                 </button>
 

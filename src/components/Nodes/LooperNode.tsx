@@ -805,6 +805,14 @@ export const LooperNode = memo(function LooperNode({
                     className={`looper-record-btn ${isRecording ? 'recording' : ''}`}
                     onClick={isRecording ? handleStopRecord : handleRecord}
                     disabled={!isAudioContextReady}
+                    aria-label={
+                        isRecording
+                            ? 'Stop and commit this loop pass'
+                            : hasLayers
+                              ? 'Overdub a new layer'
+                              : 'Record a loop'
+                    }
+                    aria-pressed={isRecording}
                     title={isRecording ? 'Stop / commit pass' : hasLayers ? 'Overdub a layer' : 'Record'}
                 />
             </div>
