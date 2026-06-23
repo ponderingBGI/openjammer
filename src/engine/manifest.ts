@@ -146,6 +146,7 @@ const KIND_BY_TYPE: Partial<Record<NodeType, PrimitiveKind>> = {
     // processors
     effect: 'Waveshaper',
     pan: 'Pan',
+    width: 'Width',
     looper: 'Looper',
     // routing / io
     add: 'Add',
@@ -205,6 +206,10 @@ const PARAMS_BY_TYPE: Partial<Record<NodeType, ParamDecl[]>> = {
     // derivation (`rangeFor(0)` => [0,1]) cannot express; AutoParamPanel renders it.
     // `paramsFromData` reads node.data.pan and clamps to [-1, 1].
     pan: [{ id: 0, name: 'pan', min: -1, max: 1, default: 0 }],
+    // builtin.width — ojcore width_param WIDTH id 0, range [0, 2] (0 = mono, 1 = unity,
+    // 2 = wide). Explicit because the conservative auto-derivation (rangeFor(1) => [0,1])
+    // cannot express the >1 widen range. `paramsFromData` reads node.data.width.
+    width: [{ id: 0, name: 'width', min: 0, max: 2, default: 1 }],
 };
 
 /**

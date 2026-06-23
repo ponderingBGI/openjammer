@@ -46,6 +46,7 @@ fn primitive_kind_is_bare_variant_string() {
         (PrimitiveKind::Delay, "\"Delay\""),
         (PrimitiveKind::Convolution, "\"Convolution\""),
         (PrimitiveKind::Pan, "\"Pan\""),
+        (PrimitiveKind::Width, "\"Width\""),
         (PrimitiveKind::FaustHost, "\"FaustHost\""),
         (PrimitiveKind::WasmHost, "\"WasmHost\""),
         (PrimitiveKind::PluginHost, "\"PluginHost\""),

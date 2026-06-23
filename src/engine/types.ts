@@ -174,6 +174,7 @@ export type NodeType =
     | 'looper'
     | 'effect'
     | 'pan'             // Stereo panner (mono -> L/R; the first stereo built-in)
+    | 'width'           // Stereo width / mid-side (the first stereo-IN built-in)
     | 'multiplier'
     | 'speaker'
     | 'recorder'
@@ -231,6 +232,7 @@ export const KNOWN_PLUGIN_IDS = [
     'looper',
     'effect',
     'pan',
+    'width',
     'multiplier',
     'speaker',
     'recorder',

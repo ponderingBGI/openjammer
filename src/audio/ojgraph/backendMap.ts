@@ -41,6 +41,7 @@ export const ENGINE_IDS = {
     delay: 'builtin.delay',
     convolution: 'builtin.convolution',
     pan: 'builtin.pan',
+    width: 'builtin.width',
     looper: 'builtin.looper',
     add: 'builtin.add',
     subtract: 'builtin.subtract',
@@ -88,6 +89,11 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
             // silently collapse the stereo to mono.
             case 'Pan':
                 return ENGINE_IDS.pan;
+            // The stereo width node (the first 2-channel-INPUT built-in), registered on
+            // both backends — load its real kernel; the GAIN placeholder writes one lane
+            // and would collapse the mid/side processing.
+            case 'Width':
+                return ENGINE_IDS.width;
             // The looper is a stateful built-in (register_builtins registers it on
             // BOTH backends): it MUST load its real kernel, not the gain placeholder
             // — a Gain instance no-ops looper_action/looper_snapshot, so record does
@@ -138,6 +144,9 @@ function manifestIdForKind(kind: PrimitiveKind, backend: EngineBackend): string 
         // it produces L/R rather than the single-lane gain placeholder.
         case 'Pan':
             return ENGINE_IDS.pan;
+        // The stereo width node — registered on both backends; load its real kernel.
+        case 'Width':
+            return ENGINE_IDS.width;
         // Stateful built-in, registered on the wasm registry too — load the real
         // looper kernel, never the gain placeholder (see the native branch).
         case 'Looper':
