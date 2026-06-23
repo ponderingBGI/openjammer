@@ -498,6 +498,21 @@
     border-color: color-mix(in srgb, var(--accent-danger) 40%, transparent);
 }
 
+/* Self-edit — Philia editing its OWN memory/skills, not the canvas. A soft accent
+   wash + dashed edge marks it as "you editing you", distinct from a graph chip
+   without shouting (the music still comes first). */
+.command-bar-chip[data-self] {
+    color: var(--text-secondary);
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--accent, var(--sketch-black)) 45%, var(--border-subtle));
+    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 7%, var(--bg-tertiary));
+}
+
+.command-bar-chip[data-self] .command-bar-chip-glyph {
+    color: var(--accent, var(--sketch-black));
+    opacity: 1;
+}
+
 .command-bar-chip-glyph {
     font-family: var(--font-mono);
     opacity: 0.85;
