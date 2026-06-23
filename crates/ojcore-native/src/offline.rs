@@ -94,8 +94,11 @@ impl OfflineDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ojcore::{compile, register_builtins, BuiltinOpts, Engine, PluginRegistry, SPEAKER_OUT_ID};
-    use ojproto::{IrNode, NodeIdx, OjGraph, PrimitiveKind};
+    use ojcore::{
+        compile, pan_param, register_builtins, BuiltinOpts, Engine, PluginRegistry, GRAPH_IN_ID,
+        PAN_ID, SPEAKER_OUT_ID,
+    };
+    use ojproto::{ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, PrimitiveKind, RtCommand};
 
     /// A lone-`SpeakerOut` engine (renders silence) — enough to exercise the driver's
     /// loop without a generator (the bootstrap graph the wasm worklet starts on).
@@ -151,6 +154,91 @@ mod tests {
         assert!(
             l.iter().chain(r.iter()).all(|x| x.is_finite()),
             "no NaN/inf"
+        );
+    }
+
+    /// GraphIn -> Pan -> SpeakerOut: a host-injected DC source panned by a SCHEDULED
+    /// param change mid-render. Proves the driver applies per-block commands across
+    /// the virtual transport (the seam a P3 stems bounce relies on) — not just at the
+    /// start: the first half pans hard LEFT, the second hard RIGHT.
+    fn pan_chain_engine() -> Engine {
+        let mut g = OjGraph::empty(48_000, 64);
+        g.nodes.push(IrNode {
+            id: NodeIdx(1),
+            manifest_id: GRAPH_IN_ID.into(),
+            kind: PrimitiveKind::GraphIn,
+            params: vec![],
+            assets: vec![],
+            n_in: 0,
+            n_out: 1,
+        });
+        g.nodes.push(IrNode {
+            id: NodeIdx(2),
+            manifest_id: PAN_ID.into(),
+            kind: PrimitiveKind::Pan,
+            params: vec![],
+            assets: vec![],
+            n_in: 1,
+            n_out: 1,
+        });
+        g.nodes.push(IrNode {
+            id: NodeIdx(3),
+            manifest_id: SPEAKER_OUT_ID.into(),
+            kind: PrimitiveKind::SpeakerOut,
+            params: vec![],
+            assets: vec![],
+            n_in: 1,
+            n_out: 0,
+        });
+        g.edges.push(IrEdge {
+            from_node: NodeIdx(1),
+            from_port: 0,
+            to_node: NodeIdx(2),
+            to_port: 0,
+            kind: ConnectionType::Audio,
+        });
+        g.edges.push(IrEdge {
+            from_node: NodeIdx(2),
+            from_port: 0,
+            to_node: NodeIdx(3),
+            to_port: 0,
+            kind: ConnectionType::Audio,
+        });
+        let mut reg = PluginRegistry::new();
+        register_builtins(&mut reg, BuiltinOpts::full());
+        Engine::new(compile(&g, &reg).expect("pan chain compiles"))
+    }
+
+    #[test]
+    fn render_stereo_applies_scheduled_pan_over_time() {
+        let mut driver = OfflineDriver::new(pan_chain_engine(), 64);
+        let frames = 32 * 64; // 32 blocks: each half >> the 5 ms pan smoother settle
+        let (l, r) = driver.render_stereo(frames, |engine, frame| {
+            // Inject a DC into the GraphIn source each block (what a host feeds).
+            if let Some(buf) = engine.input_mut(NodeIdx(1), 0) {
+                buf.fill(0.5);
+            }
+            // Stepped pan: hard LEFT for the first half, hard RIGHT for the second.
+            let pan = if frame < frames / 2 { -1.0 } else { 1.0 };
+            engine.apply(RtCommand::SetParam {
+                node: NodeIdx(2),
+                param: pan_param::PAN,
+                value: pan,
+            });
+        });
+        // First half settled hard-left: L carries the signal, R ~0.
+        assert!(
+            l[frames / 2 - 1] > r[frames / 2 - 1] + 0.2,
+            "first half panned left (L {} > R {})",
+            l[frames / 2 - 1],
+            r[frames / 2 - 1]
+        );
+        // Second half settled hard-right: R carries the signal, L ~0.
+        assert!(
+            r[frames - 1] > l[frames - 1] + 0.2,
+            "second half panned right (R {} > L {})",
+            r[frames - 1],
+            l[frames - 1]
         );
     }
 }
