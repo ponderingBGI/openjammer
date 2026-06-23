@@ -24,11 +24,15 @@
 
 use ojcore::effects::{biquad_param, delay_param};
 use ojcore::{
-    compile, pan_param, Engine, PluginRegistry, BIQUAD_ID, DELAY_ID, PAN_ID, SPEAKER_OUT_ID,
+    compile, compile_with_assets, pan_param, AssetPcm, AssetResolver, Engine, PluginRegistry,
+    BIQUAD_ID, DELAY_ID, PAN_ID, SPEAKER_OUT_ID,
 };
 use ojcore_native::{analyze_stereo, AssetStore, AudioReport, OfflineDriver, Pcm};
 use ojinstrument::{param as ip, register_all, RegisterOpts, OSC_ID};
-use ojproto::{ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, Param, PrimitiveKind, RtCommand};
+use ojproto::{
+    AssetId, AssetRef, ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, Param, PrimitiveKind,
+    RtCommand,
+};
 use serde::Deserialize;
 
 const SR: u32 = 48_000;
@@ -224,15 +228,60 @@ fn load_schedule(path: Option<&str>, sample_rate: u32) -> Vec<(usize, RtCommand)
     out
 }
 
-fn render_graph(path: &str, schedule: Option<&str>, seconds: f32) -> (Vec<f32>, Vec<f32>, u32) {
+/// Resolver for `--asset` CLI samples: the AssetId is the index into `pcms` (the
+/// load order), so the i-th `--asset` flag binds AssetId(i). Borrows the decoded
+/// interleaved PCM zero-copy — a stereo WAV keeps both channels (the Sampler splits
+/// them; a mono-only consumer downmixes itself), so this drives the real stereo
+/// Sampler path device-free.
+struct CliAssets {
+    pcms: Vec<Pcm>,
+}
+
+impl AssetResolver for CliAssets {
+    fn resolve(&self, id: AssetId) -> Option<AssetPcm<'_>> {
+        self.pcms
+            .get(id.0 as usize)
+            .map(|p| AssetPcm::from_interleaved(&p.samples, p.channels, p.sample_rate as f32))
+    }
+}
+
+fn render_graph(
+    path: &str,
+    schedule: Option<&str>,
+    seconds: f32,
+    assets: &[(u32, String)],
+) -> (Vec<f32>, Vec<f32>, u32) {
     let json = std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("read graph {path}: {e}")));
-    let g: OjGraph =
+    let mut g: OjGraph =
         serde_json::from_str(&json).unwrap_or_else(|e| fail(&format!("parse graph {path}: {e}")));
+
+    // Decode each `--asset NODE=path.wav` and bind it to that node via an AssetRef,
+    // so `compile_with_assets` installs the PCM through `DspInstance::load_asset`.
+    let mut pcms: Vec<Pcm> = Vec::new();
+    for (node_id, wav) in assets {
+        let pcm = AssetStore
+            .decode_wav_file(wav)
+            .unwrap_or_else(|e| fail(&format!("decode asset {wav}: {e}")));
+        let asset = AssetId(pcms.len() as u32);
+        let target = g
+            .nodes
+            .iter_mut()
+            .find(|n| n.id == NodeIdx(*node_id))
+            .unwrap_or_else(|| fail(&format!("--asset: no node with id {node_id} in {path}")));
+        target.assets.push(AssetRef { slot: 0, asset });
+        pcms.push(pcm);
+    }
+
     let sample_rate = g.sample_rate.max(1);
     let block = (g.block_size as usize).max(1);
-    let engine = Engine::new(
-        compile(&g, &registry()).unwrap_or_else(|e| fail(&format!("compile graph: {e:?}"))),
-    );
+    let resolver = CliAssets { pcms };
+    let program = if resolver.pcms.is_empty() {
+        compile(&g, &registry())
+    } else {
+        compile_with_assets(&g, &registry(), &resolver)
+    }
+    .unwrap_or_else(|e| fail(&format!("compile graph: {e:?}")));
+    let engine = Engine::new(program);
     let mut driver = OfflineDriver::new(engine, block);
 
     let events = load_schedule(schedule, sample_rate);
@@ -260,6 +309,7 @@ struct Opts {
     report: Option<String>,
     dump_graph: Option<String>,
     asserts: Vec<String>,
+    assets: Vec<(u32, String)>,
     quiet: bool,
 }
 
@@ -272,6 +322,7 @@ fn parse_args() -> Opts {
         report: None,
         dump_graph: None,
         asserts: Vec::new(),
+        assets: Vec::new(),
         quiet: false,
     };
     let mut positional: Vec<String> = Vec::new();
@@ -287,6 +338,17 @@ fn parse_args() -> Opts {
             "--assert" => {
                 if let Some(e) = it.next() {
                     o.asserts.push(e);
+                }
+            }
+            "--asset" => {
+                if let Some(v) = it.next() {
+                    match v.split_once('=') {
+                        Some((n, p)) => match n.trim().parse::<u32>() {
+                            Ok(id) => o.assets.push((id, p.to_string())),
+                            Err(_) => fail(&format!("--asset: bad node id in {v:?} (want NODE=path.wav)")),
+                        },
+                        None => fail(&format!("--asset: want NODE=path.wav, got {v:?}")),
+                    }
                 }
             }
             "--quiet" => o.quiet = true,
@@ -450,7 +512,12 @@ fn main() {
     }
 
     let (left, right, sample_rate, default_out) = if let Some(gp) = opts.graph.clone() {
-        let (l, r, sr) = render_graph(&gp, opts.schedule.as_deref(), opts.secs.unwrap_or(2.0));
+        let (l, r, sr) = render_graph(
+            &gp,
+            opts.schedule.as_deref(),
+            opts.secs.unwrap_or(2.0),
+            &opts.assets,
+        );
         (l, r, sr, "openjammer-render.wav")
     } else {
         let (l, r, sr) = render_demo(opts.secs.unwrap_or(4.0));
