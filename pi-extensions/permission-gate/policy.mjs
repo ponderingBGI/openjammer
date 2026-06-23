@@ -65,9 +65,54 @@ export function leadingBinary(segment) {
 }
 
 /**
+ * Allowlisted binaries that WRITE a file the agent names as an argument. Their
+ * destination paths must be vetted the same way the write/edit TOOLS are — never a
+ * protected config path, and (when roots are known) inside the jail — or the agent
+ * could overwrite its own gate via bash (`cp drafts/x .pi/agent/settings.json`),
+ * which the binary-only allowlist would otherwise wave through.
+ */
+const WRITE_CAPABLE = new Set(['cp', 'mv', 'touch', 'mkdir', 'tee', 'sed']);
+
+/**
+ * The path argument(s) a write-capable segment would WRITE to. Conservative:
+ * cp/mv write the LAST path arg (the destination); touch/mkdir/tee write every
+ * path arg; sed writes a file only with in-place editing (`-i` / `-i.bak`), else
+ * it writes stdout (and a redirect would already be denied). Flags (`-x`) are
+ * skipped; an over-included non-path token simply never matches a config path.
+ */
+export function writeTargets(segment) {
+    const tokens = segment.trim().split(/\s+/);
+    let i = 0;
+    while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+    const bin = (tokens[i] ?? '').split('/').pop();
+    const rest = tokens.slice(i + 1);
+    const paths = rest.filter((t) => !t.startsWith('-'));
+    switch (bin) {
+        case 'cp':
+        case 'mv':
+            return paths.length >= 2 ? [paths[paths.length - 1]] : [];
+        case 'touch':
+        case 'mkdir':
+        case 'tee':
+            return paths;
+        case 'sed':
+            return rest.some((t) => t === '-i' || t.startsWith('-i')) ? paths : [];
+        default:
+            return [];
+    }
+}
+
+/**
  * Decide whether a bash command line is allowed in jailed mode. Default-deny:
- * EVERY segment's leading binary must be in `allow` and never in HARD_DENY, and
- * the line must contain no command/process substitution.
+ * EVERY segment's leading binary must be in `allow` and never in HARD_DENY, the
+ * line must contain no command/process substitution, AND a write-capable command
+ * (cp/mv/sed -i/touch/mkdir/tee) may not target the agent's own config
+ * (settings.json / packages / extensions) — the gate-drop hole a binary-only
+ * allowlist leaves open. General out-of-jail containment is left to the OS jail
+ * (the hard guarantee): a cooperative path check can't track `cd` / relative cwd,
+ * but the config-path guard is a robust substring match for every path form
+ * (relative, `../`, or absolute), so the irreducible "edit my own gate" escape is
+ * closed here regardless.
  */
 export function isCommandAllowed(line, allow = DEFAULT_ALLOWLIST) {
     const text = String(line);
@@ -88,6 +133,16 @@ export function isCommandAllowed(line, allow = DEFAULT_ALLOWLIST) {
                 allowed: false,
                 reason: `'${bin}' is not in the jailed allowlist (toggle YOLO for full shell)`,
             };
+        }
+        if (WRITE_CAPABLE.has(bin)) {
+            for (const target of writeTargets(seg)) {
+                if (isProtectedConfigPath(target)) {
+                    return {
+                        allowed: false,
+                        reason: `'${bin}' may not write the agent's own config (${target})`,
+                    };
+                }
+            }
         }
     }
     return { allowed: true };
