@@ -34,6 +34,7 @@ import type {
     BatchApplyArgs,
     EmitPlanArgs,
     FindNodesArgs,
+    GetDiagnosticsArgs,
     GetLogsArgs,
     PortSummary,
     RemoveConnectionArgs,
@@ -158,7 +159,10 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'Read the environment + live audio snapshot: app version/channel/executor, ' +
             'cross-origin isolation, platform, whether the AudioContext is running, the ' +
             'measured round-trip latency, sample rate, and the selected output device. ' +
-            'Side-effect-free. Call it first when the user says something is broken.',
+            'Pass a `nodeId` to instead get a NODE-scoped debug snapshot (identity, ports, ' +
+            'data keys, a degraded flag, and the logs that mention the node) — the ' +
+            '"why is this node silent?" facet. Side-effect-free. Call it first when the ' +
+            'user says something is broken.',
     },
     {
         name: 'get_settings',
@@ -354,6 +358,40 @@ export interface DiagnosticsReadResult {
     usbAudioInterface: boolean;
 }
 
+/**
+ * The `get_diagnostics({ nodeId })` NODE facet: a node-shaped debug snapshot, so
+ * "why is THIS node silent?" is answered from evidence. Only the data KEYS are
+ * included (never values), and they reflect what was last PUSHED to the engine,
+ * not a live read — the running CompiledProgram lives on the audio thread, off-RT.
+ */
+export interface NodeDiagnosticsResult {
+    /** The node id that was asked about. */
+    nodeId: string;
+    /** Whether the node exists on the canvas. */
+    found: boolean;
+    /** The node's registry type, or its open plugin id for an authored node. */
+    type?: string;
+    /** The node's human name from the registry / dynamic def. */
+    name?: string;
+    /**
+     * The open plugin identity for an authored/custom node (e.g. "ai.wasm.<hash>");
+     * the hash content-addresses its source. Undefined for a built-in.
+     */
+    pluginId?: string;
+    /** The KEYS of the node's data (its params as LAST PUSHED — not a live read). */
+    dataKeys?: string[];
+    /** The node's current ports (lean), so a silent node's wiring is inspectable. */
+    ports?: PortSummary[];
+    /**
+     * True when the logs show this node degraded to a passthrough stub (best-effort:
+     * matched from the engine's degraded message; a numeric-only NodeFault won't
+     * correlate until the fault id-map lands).
+     */
+    degraded: boolean;
+    /** Recent log entries that MENTION this node (newest first) — the evidence. */
+    recentLogs: LogEntrySummary[];
+}
+
 /** The `get_settings` / `update_settings` relay: the safe-allowlist settings. */
 export interface SettingsReadResult {
     /** AudioContext sample rate in Hz. */
@@ -395,6 +433,9 @@ export interface AgentEnvPort {
     getLogs(args: GetLogsArgs): LogsReadResult;
     /** Read the environment + live audio diagnostics snapshot. */
     getDiagnostics(): DiagnosticsReadResult;
+    /** Read a NODE-scoped debug snapshot (identity, ports, data keys, a degraded
+     *  flag, and the recent logs that mention the node) for `get_diagnostics({nodeId})`. */
+    getNodeDiagnostics(nodeId: string): NodeDiagnosticsResult;
     /** Read the current safe-allowlist settings. */
     getSettings(): SettingsReadResult;
     /** Apply a settings patch (allowlisted, reversible). */
@@ -451,7 +492,7 @@ export function applyToolCall(
         case 'get_logs':
             return applyGetLogs(call.args, env);
         case 'get_diagnostics':
-            return applyGetDiagnostics(env);
+            return applyGetDiagnostics(call.args, env);
         case 'get_settings':
             return applyGetSettings(env);
         case 'update_settings':
@@ -928,10 +969,22 @@ function applyGetLogs(args: GetLogsArgs, env?: AgentEnvPort): AppliedToolResult 
     };
 }
 
-/** `get_diagnostics`: relay the environment + live audio snapshot. SIDE-EFFECT-FREE. */
-function applyGetDiagnostics(env?: AgentEnvPort): AppliedToolResult {
+/**
+ * `get_diagnostics`: relay the environment + live audio snapshot, OR — when a
+ * `nodeId` is given — a NODE-scoped debug snapshot (identity + ports + data keys +
+ * degraded flag + the logs that mention the node). SIDE-EFFECT-FREE.
+ */
+function applyGetDiagnostics(args: GetDiagnosticsArgs, env?: AgentEnvPort): AppliedToolResult {
     if (!env) {
         return { ok: true, summary: `get_diagnostics: ${ENV_MISSING}.`, undo: NO_OP, data: null };
+    }
+    // Node facet: "why is THIS node silent?" — identity, wiring, and the evidence.
+    if (args?.nodeId) {
+        const n = env.getNodeDiagnostics(args.nodeId);
+        const summary = n.found
+            ? `Diagnosed ${n.type ?? 'node'} (${n.nodeId})${n.degraded ? ' — DEGRADED to a passthrough stub' : ''}: ${n.recentLogs.length} recent log line(s) mention it.`
+            : `No node ${args.nodeId} is on the canvas.`;
+        return { ok: true, summary, undo: NO_OP, data: n };
     }
     const d = env.getDiagnostics();
     const audio = d.audioReady

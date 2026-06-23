@@ -25,6 +25,8 @@ import {
     type LogView,
 } from '../store/logStore';
 import { useAudioStore } from '../store/audioStore';
+import { useGraphStore } from '../store/graphStore';
+import { resolveNodeDefinition } from '../engine/registry';
 import { gatherDiagnostics } from '../utils/diagnostics';
 import { redactText, redactValue } from '../utils/redact';
 import { applyTheme, getSavedThemeId, getThemeById, saveThemeId } from '@openjammer/oj-tokens';
@@ -33,10 +35,31 @@ import type {
     DiagnosticsReadResult,
     LogEntrySummary,
     LogsReadResult,
+    NodeDiagnosticsResult,
     SettingsReadResult,
     SettingsUpdateResult,
 } from './tools';
+import { toPortSummary } from './types';
 import type { GetLogsArgs, SettingsPatch } from './types';
+
+/** Max node-scoped log lines the get_diagnostics node facet returns. */
+const NODE_LOG_LIMIT = 25;
+
+/**
+ * Whether a log entry references `nodeId` in its message or any field value — how
+ * the node facet finds the evidence (degraded messages, asset/plugin events, and —
+ * once the fault id-map lands — faults) for ONE node.
+ */
+function entryMentionsNode(e: LogEntry, nodeId: string): boolean {
+    if (e.message.includes(nodeId)) return true;
+    const f = e.fields;
+    if (f && typeof f === 'object') {
+        for (const v of Object.values(f)) {
+            if (v === nodeId || (typeof v === 'string' && v.includes(nodeId))) return true;
+        }
+    }
+    return false;
+}
 
 /** Default number of log entries returned by `get_logs` when no `limit` is given. */
 const DEFAULT_LOG_LIMIT = 50;
@@ -103,6 +126,30 @@ export function createEnvPort(): AgentEnvPort {
                 latencyClass: a.isAudioContextReady ? a.audioMetrics.classification : null,
                 outputDeviceLabel: a.deviceInfo.deviceLabel || null,
                 usbAudioInterface: a.deviceInfo.isUSBAudioInterface,
+            };
+        },
+
+        getNodeDiagnostics(nodeId: string): NodeDiagnosticsResult {
+            const node = useGraphStore.getState().getNode(nodeId);
+            const mentioned = useLogStore
+                .getState()
+                .entries.filter((e) => entryMentionsNode(e, nodeId));
+            const recentLogs = mentioned.slice(-NODE_LOG_LIMIT).reverse().map(toSummary);
+            // Best-effort degraded flag from the engine's degraded-stub message.
+            const degraded = mentioned.some((e) => /degrad|passthrough/i.test(e.message));
+            if (!node) {
+                return { nodeId, found: false, degraded, recentLogs };
+            }
+            return {
+                nodeId,
+                found: true,
+                type: node.pluginId ?? node.type,
+                name: resolveNodeDefinition({ type: node.type, pluginId: node.pluginId }).name,
+                pluginId: node.pluginId,
+                dataKeys: Object.keys((node.data ?? {}) as Record<string, unknown>),
+                ports: (node.ports ?? []).map(toPortSummary),
+                degraded,
+                recentLogs,
             };
         },
 

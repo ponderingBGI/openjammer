@@ -16,6 +16,7 @@ import { applyToolCall, type AgentEnvPort, type DspNodeRegistrar } from '../tool
 import type { GraphStoreApi } from '../graphAdapter';
 import { createEnvPort } from '../envAdapter';
 import { useAudioStore } from '../../store/audioStore';
+import { useGraphStore } from '../../store/graphStore';
 import { useLogStore, _resetLogStoreForTests } from '../../store/logStore';
 import { getSavedThemeId } from '@openjammer/oj-tokens';
 
@@ -55,6 +56,24 @@ function makeFakeEnv() {
             latencyClass: 'excellent',
             outputDeviceLabel: 'MOTU M4',
             usbAudioInterface: true,
+        })),
+        getNodeDiagnostics: vi.fn((nodeId: string) => ({
+            nodeId,
+            found: true,
+            type: 'reverb',
+            name: 'Reverb',
+            dataKeys: ['mix', 'decay'],
+            ports: [{ name: 'Audio In', direction: 'input' as const, type: 'audio' as const }],
+            degraded: true,
+            recentLogs: [
+                {
+                    ts: 5,
+                    level: 'Warn' as const,
+                    source: 'Engine' as const,
+                    scope: 'engine',
+                    message: `${nodeId}: degraded to passthrough`,
+                },
+            ],
         })),
         getSettings: vi.fn(() => ({
             sampleRate: 48000,
@@ -112,6 +131,21 @@ describe('diagnostics/settings tools — pure dispatch (fake env)', () => {
         expect(res.summary).toContain('1.2.3');
         expect(res.summary).toContain('48000 Hz');
         expect(res.summary).toContain('round-trip');
+    });
+
+    it('get_diagnostics({nodeId}) routes to the node facet and flags degraded', () => {
+        const { env } = makeFakeEnv();
+        const res = applyToolCall(
+            { name: 'get_diagnostics', args: { nodeId: 'node-7' } },
+            STUB_STORE,
+            STUB_REGISTRAR,
+            undefined,
+            env,
+        );
+        expect(res.ok).toBe(true);
+        expect(env.getNodeDiagnostics).toHaveBeenCalledWith('node-7');
+        expect(res.summary).toContain('DEGRADED');
+        expect(res.data).toMatchObject({ nodeId: 'node-7', found: true, degraded: true });
     });
 
     it('get_settings summarizes the current knobs', () => {
@@ -231,6 +265,36 @@ describe('createEnvPort — live against the real stores', () => {
     it('updateSettings with an unchanged value applies nothing', () => {
         const { applied } = createEnvPort().updateSettings({ sampleRate: 48000 });
         expect(applied).toEqual([]);
+    });
+
+    it('getNodeDiagnostics: identity + ports + degraded + node-scoped logs', () => {
+        const id = useGraphStore.getState().addNode('looper', { x: 0, y: 0 }, null, {});
+        try {
+            useLogStore.getState().append({
+                level: 'Warn',
+                source: 'Engine',
+                scope: 'engine',
+                message: `${id}: degraded to passthrough, missing dependency`,
+            });
+            useLogStore
+                .getState()
+                .append({ level: 'Info', source: 'Ui', scope: 'a', message: 'unrelated line' });
+            const d = createEnvPort().getNodeDiagnostics(id);
+            expect(d.found).toBe(true);
+            expect(d.type).toBe('looper');
+            expect(Array.isArray(d.ports)).toBe(true);
+            expect(d.degraded).toBe(true);
+            expect(d.recentLogs).toHaveLength(1);
+            expect(d.recentLogs[0].message).toContain('degraded');
+        } finally {
+            useGraphStore.getState().removeNode(id);
+        }
+    });
+
+    it('getNodeDiagnostics: a missing node reports found:false', () => {
+        const d = createEnvPort().getNodeDiagnostics('does-not-exist');
+        expect(d.found).toBe(false);
+        expect(d.recentLogs).toEqual([]);
     });
 
     it('getLogs filters by level, returns newest-first, and respects limit', () => {

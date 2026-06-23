@@ -321,9 +321,12 @@ export default function register(pi: ExtensionAPI): void {
     registerGraphTool(pi, {
         name: 'get_diagnostics',
         label: 'Read OpenJammer Diagnostics',
-        description: 'Read OpenJammer environment and live audio diagnostics. Side-effect-free.',
-        promptSnippet: 'Read OpenJammer diagnostics before fixing audio or MIDI setup',
-        parameters: EmptyArgs,
+        description:
+            'Read OpenJammer environment + live audio diagnostics, or — with a nodeId — ' +
+            'a node-scoped debug snapshot (identity, ports, data keys, a degraded flag, ' +
+            'and the logs that mention the node) to find why ONE node is silent. Side-effect-free.',
+        promptSnippet: 'Read OpenJammer diagnostics; pass a nodeId to debug one node',
+        parameters: Type.Object({ nodeId: Type.Optional(Type.String()) }),
     });
 
     registerGraphTool(pi, {

@@ -264,12 +264,19 @@ export interface GetLogsArgs {
 }
 
 /**
- * Arguments for the READ tool `get_diagnostics`: none. Returns the environment +
- * live audio snapshot (version/channel/executor/isolation/platform, plus whether
- * the AudioContext is running, the measured round-trip latency, sample rate, and
- * the selected output device). SIDE-EFFECT-FREE.
+ * Arguments for the READ tool `get_diagnostics`. With NO `nodeId` it returns the
+ * environment + live audio snapshot (version/channel/executor/isolation/platform,
+ * plus whether the AudioContext is running, the measured round-trip latency,
+ * sample rate, and the selected output device). With a `nodeId` it returns a
+ * NODE-scoped debug snapshot — the node's identity (type / plugin id), its ports,
+ * its data keys (params AS LAST PUSHED, not a live engine read), a best-effort
+ * `degraded` flag, and the recent logs that mention the node — the "why is THIS
+ * node silent?" facet for debugging a custom plugin. SIDE-EFFECT-FREE.
  */
-export type GetDiagnosticsArgs = Record<string, never>;
+export interface GetDiagnosticsArgs {
+    /** A canvas node id to diagnose; omit for the environment-wide snapshot. */
+    nodeId?: string;
+}
 
 /**
  * Arguments for the READ tool `get_settings`: none. Returns the current
