@@ -30,6 +30,7 @@
         "Delay",
         "Convolution",
         "Pan",
+        "Width",
         "FaustHost",
         "WasmHost",
         "PluginHost",

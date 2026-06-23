@@ -49,6 +49,9 @@ pub enum PrimitiveKind {
     /// Stereo panner: one mono audio input -> a 2-channel (stereo) audio output.
     /// The first built-in node with `audio_out_channels = 2` (docs/CHANNELS.md).
     Pan,
+    /// Stereo width (mid/side): a 2-channel audio input -> a 2-channel output. The
+    /// first built-in node with `audio_in_channels = 2` (docs/CHANNELS.md).
+    Width,
     // host-bridged / extension
     FaustHost,
     WasmHost,

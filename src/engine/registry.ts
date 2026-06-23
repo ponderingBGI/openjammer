@@ -536,6 +536,22 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         dimensions: { width: 150, height: 90 }
     },
 
+    width: {
+        type: 'width',
+        category: 'effects',
+        name: 'Width',
+        description: 'Stereo width via mid/side (0 = mono … 1 = unchanged … 2 = wide)',
+        ui: 'auto', // AutoParamPanel (one width knob) — no bespoke NodeWrapper branch
+        defaultPorts: [
+            { ...audioInput, position: { x: 0, y: 0.5 } },
+            { ...audioOutput, position: { x: 1, y: 0.5 } }
+        ],
+        defaultData: {
+            width: 1
+        },
+        dimensions: { width: 150, height: 90 }
+    },
+
     multiplier: {
         type: 'multiplier',
         category: 'utility',
