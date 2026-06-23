@@ -131,16 +131,19 @@ fn cmake_available() -> bool {
 /// and the `cmake` crate pick it up. No-op when CMake already works or off-Windows.
 #[cfg(feature = "juce")]
 fn ensure_cmake() {
-    if cmake_available() {
-        return;
-    }
+    // Windows devs often have CMake only inside VS / Build Tools, not on PATH; if so,
+    // point $CMAKE at it. Off-Windows, CMake is expected on PATH, so this is a no-op
+    // (the whole block is compiled out — keeping it out of the early-return shape that
+    // tripped clippy's needless_return once the Windows arm is stripped).
     #[cfg(target_os = "windows")]
-    if let Some(path) = discover_windows_cmake() {
-        println!(
-            "cargo:warning=ojhost: CMake not on PATH; using {}",
-            path.display()
-        );
-        std::env::set_var("CMAKE", path);
+    if !cmake_available() {
+        if let Some(path) = discover_windows_cmake() {
+            println!(
+                "cargo:warning=ojhost: CMake not on PATH; using {}",
+                path.display()
+            );
+            std::env::set_var("CMAKE", path);
+        }
     }
 }
 
