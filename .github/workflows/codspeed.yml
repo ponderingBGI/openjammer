@@ -9,8 +9,15 @@ name: CodSpeed
 #   * ojhost       — hosted-plugin control plane (ids, registry insertion, scan cache)
 #
 # Three CodSpeed instruments run on every PR:
-#   * simulation — CPU instruction count (stable to <1% run-to-run); catches an
-#     O(n^2) schedule or a hotter inner loop. The stable regression GATE.
+#   * simulation — CPU instruction + cache-model count; catches an O(n^2) schedule
+#     or a hotter inner loop. The regression GATE — but it is only <1% stable when
+#     BASE and HEAD run in the SAME environment. The simulation cost folds in the
+#     system `libm` (the synth kernels call sinf/expf/…) and the host cache model,
+#     so a runner-image or CPU change between the base and head runs shows up as a
+#     uniform double-digit "regression" across UNRELATED benches (e.g. a no-asset
+#     Sampler bench, ~30 ns wall-time, swinging 24%). Pin the image below so the
+#     base/head environment stays constant; for true hardware reproducibility move
+#     to a CodSpeed MACRO runner.
 #   * memory     — heap allocations; turns the zero-alloc covenant into a tracked
 #     per-PR number, complementing the binary `assert_no_alloc` test gate.
 #   * walltime   — absolute wall-clock CPU time for the end-to-end latency bench
@@ -42,7 +49,11 @@ concurrency:
 jobs:
   benchmarks:
     name: Run benchmarks
-    runs-on: ubuntu-latest
+    # Pinned (not ubuntu-latest): the simulation gate compares HEAD against the
+    # base branch's run, and a shared-runner image/libm/CPU change between them
+    # manifests as a phantom regression. A fixed image keeps the environment
+    # constant across runs so the comparison reflects code, not infrastructure.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -75,7 +86,9 @@ jobs:
   # (`codspeed-macro`); on the shared runner the trend matters more than the value.
   walltime:
     name: Run latency benchmark (walltime)
-    runs-on: ubuntu-latest
+    # Pinned image (see the benchmarks job); for stable absolute µs, upgrade to a
+    # CodSpeed macro runner — on the shared runner the trend matters, not the value.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
