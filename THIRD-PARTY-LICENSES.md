@@ -14,12 +14,15 @@ Generate the Part-A notice with **`just licenses`** (runs `cargo about generate`
 just licenses               # writes THIRD-PARTY-RUST.html via cargo-about + about.toml
 ```
 
-**Audit verdict (paper audit, pending a live `cargo deny check licenses` run):** the tree is **clean for
-AGPL-3.0 distribution** — every dependency is permissive or AGPL-compatible (MIT, Apache-2.0,
-Apache-2.0-WITH-LLVM-exception, BSD, ISC, Zlib, Unicode, MPL-2.0, CC0, BSL-1.0). No SSPL / BUSL /
-Commons-Clause / CC-BY-NC present. **Action:** run `cargo deny check licenses` on a real toolchain,
-promote `deny.toml`'s license gate to a **required** PR check, trim the allowlist to what is actually
-present, and add explicit denials for SSPL-1.0, BUSL-1.1, Commons-Clause, and CC-BY-NC-*.
+**Audit verdict:** the tree is **clean for AGPL-3.0 distribution** — `cargo deny --all-features check
+bans licenses sources` passes on a real toolchain (`bans ok, licenses ok, sources ok`); every dependency
+is permissive or AGPL-compatible (MIT, Apache-2.0, Apache-2.0-WITH-LLVM-exception, BSD, ISC, Zlib,
+Unicode, MPL-2.0, CC0, BSL-1.0). No SSPL / BUSL / Commons-Clause / CC-BY-NC present. **Status — done:**
+the `deny.toml` license gate is **now a required PR check** (`continue-on-error` removed from the
+cargo-deny job in `supply-chain.yml`). cargo-deny v2 has **no `deny` list** — the allow-list is
+exhaustive, so SSPL / BUSL / Commons-Clause / CC-BY-NC fail **by omission**; no explicit denials are
+needed or possible. *Optional hygiene:* trim the three currently-unused allow entries (`AGPL-3.0`,
+`BSL-1.0`, `Unicode-DFS-2016`), which cargo-deny reports as unmatched.
 
 ## B. Components cargo tooling cannot see (HAND-MAINTAINED)
 
