@@ -558,8 +558,11 @@ describe('emitOjGraph — hosted plugin nodes (PluginHost)', () => {
             });
             const hosted = native.nodes.find((n) => n.manifest_id === pluginId);
             expect(hosted?.kind).toBe('PluginHost');
-            expect(hosted?.n_in).toBe(2);
-            expect(hosted?.n_out).toBe(2);
+            // A 2-in/2-out plugin is ONE stereo port per side (docs/CHANNELS.md
+            // model B): the IR carries the PORT count (1/1); the native compiler
+            // derives the 2 stereo lanes from the registered loader's channel count.
+            expect(hosted?.n_in).toBe(1);
+            expect(hosted?.n_out).toBe(1);
 
             const fallback = emitOjGraph(nodeMap(fx, speaker), connMap(conn));
             expect(fallback.nodes.some((n) => n.manifest_id === pluginId)).toBe(false);

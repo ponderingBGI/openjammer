@@ -457,10 +457,19 @@ export function manifestForDynamic(id: string, def: NodeDefinition): PluginManif
             ui: 'auto',
             params,
             ports: {
-                audio_in: hosted.ports?.audio_in ?? 0,
-                audio_out: hosted.ports?.audio_out ?? 0,
+                // ONE audio port per side that CARRIES the plugin's channels
+                // (docs/CHANNELS.md model B), mirroring the Rust `PluginHostLoader`
+                // manifest. emit's `portCounts` reads only `audio_in`/`audio_out`
+                // (the PORT count, => n_in/n_out = 1), and the native compiler
+                // derives the stereo lanes from the registered loader's
+                // `audio_*_channels`. Modeling N channels as N mono ports here would
+                // emit n_out = 2 and desync from the 1-port Rust manifest.
+                audio_in: (hosted.ports?.audio_in ?? 0) > 0 ? 1 : 0,
+                audio_out: (hosted.ports?.audio_out ?? 0) > 0 ? 1 : 0,
                 control_in: 0,
                 control_out: 0,
+                audio_in_channels: hosted.ports?.audio_in ?? 0,
+                audio_out_channels: hosted.ports?.audio_out ?? 0,
             },
         };
     }
