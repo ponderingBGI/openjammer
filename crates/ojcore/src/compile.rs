@@ -251,6 +251,34 @@ pub fn compile_with_assets(
     registry: &PluginRegistry,
     assets: &impl AssetResolver,
 ) -> Result<CompiledProgram, CompileError> {
+    compile_inner(graph, registry, assets, false)
+}
+
+/// The LENIENT sibling of [`compile_with_assets`] for the project-LOAD path: an
+/// UNREGISTERED `manifest_id` (a missing plugin / instrument dependency) degrades to
+/// a passthrough stub — topology preserved, the project ALWAYS opens (invariant #4a,
+/// held-note-beats-a-glitch on load) — instead of failing with
+/// [`CompileError::UnknownManifest`]. The strict [`compile`] / [`compile_with_assets`]
+/// stay the default so dev + tests still catch a typo'd or corrupt id loudly. (An
+/// unsatisfiable `abi` already degrades to a stub in BOTH modes.) The control plane
+/// surfaces a stubbed node by diffing the compiled kind against the IR kind.
+pub fn compile_resilient(
+    graph: &OjGraph,
+    registry: &PluginRegistry,
+    assets: &impl AssetResolver,
+) -> Result<CompiledProgram, CompileError> {
+    compile_inner(graph, registry, assets, true)
+}
+
+/// Shared implementation of [`compile_with_assets`] (strict) and
+/// [`compile_resilient`] (lenient). `lenient` only changes how an UNREGISTERED
+/// `manifest_id` is handled (stub vs error); everything else is identical.
+fn compile_inner(
+    graph: &OjGraph,
+    registry: &PluginRegistry,
+    assets: &impl AssetResolver,
+    lenient: bool,
+) -> Result<CompiledProgram, CompileError> {
     let n = graph.nodes.len();
     let sample_rate = graph.sample_rate as f32;
     let block_size = graph.block_size as usize;
@@ -280,37 +308,45 @@ pub fn compile_with_assets(
     let mut out_channels: Vec<u8> = Vec::with_capacity(n);
     let mut in_channels: Vec<u8> = Vec::with_capacity(n);
     for node in &graph.nodes {
-        let loader = registry
-            .get(&node.manifest_id)
-            .ok_or_else(|| CompileError::UnknownManifest(node.manifest_id.clone()))?;
-        // Channels are a node-TYPE property (docs/CHANNELS.md): derive them from the
-        // loader's manifest. The IR's `n_out` is the AUDIO port count, so the node has
-        // `n_out × out_channels` audio output LANES (`1` = mono => a lane is a port).
-        let oc = loader.manifest().ports.audio_out_channels.max(1);
-        let ic = loader.manifest().ports.audio_in_channels.max(1);
-        // Held-note-beats-a-glitch on LOAD (invariant #4a / docs/STABILITY.md §5): if
-        // the kernel cannot satisfy this plugin's declared `abi` (contract too new, or
-        // a required capability the kernel lacks), DEGRADE this node to a passthrough
-        // stub instead of failing the whole compile — the project always opens and
-        // stays audible. Topology (n_out × oc lanes) is preserved so downstream routing
-        // still resolves; the control plane surfaces the stub by diffing the compiled
-        // kind against the IR kind. A node with no `abi` block (every built-in) loads
-        // normally — this is a pure additive guard for declared third-party plugins.
-        let abi_ok = loader.manifest().abi.as_ref().is_none_or(|abi| {
-            abi.load_compatibility(
-                crate::dsp::KERNEL_CONTRACT,
-                crate::dsp::kernel_supports_capability,
-            )
-            .is_ok()
-        });
-        let (mut inst, kind) = if abi_ok {
-            (loader.instantiate(sample_rate, block_size), node.kind)
-        } else {
-            (
+        // Resolve the loader. STRICT (the default): an unregistered `manifest_id` is a
+        // hard error — it catches a typo'd or corrupt id in dev + tests. LENIENT (the
+        // `compile_resilient` project-LOAD path): a missing dependency degrades to a
+        // passthrough stub so the project ALWAYS opens (invariant #4a), exactly like an
+        // unsatisfiable `abi` below.
+        let loader = match registry.get(&node.manifest_id) {
+            Some(l) => Some(l),
+            None if lenient => None,
+            None => return Err(CompileError::UnknownManifest(node.manifest_id.clone())),
+        };
+        // Channels are a node-TYPE property (docs/CHANNELS.md), derived from the
+        // loader's manifest (`n_out × out_channels` audio output LANES; `1` = mono =>
+        // a lane is a port). `loadable` is false for a missing dependency OR an
+        // unsatisfiable `abi` (contract too new / a capability the kernel lacks) — BOTH
+        // degrade to a passthrough stub (held-note-beats-a-glitch on load,
+        // STABILITY.md §5), never a failed compile. A missing-dep stub keeps the IR
+        // topology at mono lanes; the control plane diffs compiled-kind vs IR-kind.
+        let (oc, ic, loadable) = match loader {
+            Some(l) => {
+                let oc = l.manifest().ports.audio_out_channels.max(1);
+                let ic = l.manifest().ports.audio_in_channels.max(1);
+                let abi_ok = l.manifest().abi.as_ref().is_none_or(|abi| {
+                    abi.load_compatibility(
+                        crate::dsp::KERNEL_CONTRACT,
+                        crate::dsp::kernel_supports_capability,
+                    )
+                    .is_ok()
+                });
+                (oc, ic, abi_ok)
+            }
+            None => (1, 1, false),
+        };
+        let (mut inst, kind) = match (loader, loadable) {
+            (Some(l), true) => (l.instantiate(sample_rate, block_size), node.kind),
+            _ => (
                 crate::structural::StructuralLoader::passthrough()
                     .instantiate(sample_rate, block_size),
                 PrimitiveKind::Passthrough,
-            )
+            ),
         };
         inst.activate(sample_rate, block_size);
         // Apply any baked-in param defaults from the IR, then snap smoothers.
@@ -704,5 +740,60 @@ mod channel_lane_tests {
             PrimitiveKind::Passthrough,
             "incompatible-abi node degraded to a passthrough stub"
         );
+    }
+
+    /// A graph referencing an UNREGISTERED `manifest_id`: strict `compile` errors
+    /// (`UnknownManifest`, so dev + tests catch a typo), but `compile_resilient`
+    /// degrades the missing dependency to a passthrough stub so the project still
+    /// opens (invariant #4a, held-note-beats-a-glitch on load).
+    #[test]
+    fn missing_dependency_is_strict_error_but_lenient_passthrough_stub() {
+        let mut reg = PluginRegistry::new();
+        reg.register(Box::new(crate::structural::StructuralLoader::speaker_out()));
+
+        let mut g = OjGraph::empty(48_000, 64);
+        g.nodes.push(IrNode {
+            id: NodeIdx(1),
+            manifest_id: String::from("missing.plugin.v9"), // never registered
+            kind: PrimitiveKind::Gain,
+            params: vec![],
+            assets: vec![],
+            n_in: 1,
+            n_out: 1,
+        });
+        g.nodes.push(IrNode {
+            id: NodeIdx(2),
+            manifest_id: String::from(crate::SPEAKER_OUT_ID),
+            kind: PrimitiveKind::SpeakerOut,
+            params: vec![],
+            assets: vec![],
+            n_in: 1,
+            n_out: 0,
+        });
+        g.edges.push(IrEdge {
+            from_node: NodeIdx(1),
+            from_port: 0,
+            to_node: NodeIdx(2),
+            to_port: 0,
+            kind: ConnectionType::Audio,
+        });
+
+        // Strict: a hard error — the default, so a typo/corruption is caught loudly.
+        assert!(matches!(
+            compile(&g, &reg),
+            Err(CompileError::UnknownManifest(_))
+        ));
+
+        // Lenient: the project opens; the missing node is a passthrough stub with its
+        // IR topology preserved (one mono output lane).
+        let prog =
+            compile_resilient(&g, &reg, &NoAssets).expect("resilient compile opens the project");
+        let stub = prog.slot_of_id(NodeIdx(1)).unwrap();
+        assert_eq!(
+            prog.kinds[stub],
+            PrimitiveKind::Passthrough,
+            "missing dependency degraded to a passthrough stub"
+        );
+        assert_eq!(prog.out_bufs[stub].len(), 1, "topology preserved at mono");
     }
 }
