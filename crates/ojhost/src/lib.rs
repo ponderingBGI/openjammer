@@ -120,12 +120,13 @@ pub fn register_scanned(reg: &mut PluginRegistry, descriptors: &[PluginDescripto
 /// faults, the Rust latch quarantines it to a dry passthrough + crash badge, and
 /// every sibling keeps playing.
 ///
-/// A **no-op unless** the build has BOTH `juce` and `fault-inject`. In any other
-/// build — including every shipped one — the fault code is not compiled in, so this
-/// does nothing and can never crash the app. Not for product code; the only caller
-/// is the dev-gated Tauri command.
+/// A **no-op unless** the build has `juce` AND was built with `OJHOST_FAULT_INJECT=1`
+/// (build.rs then emits `--cfg oj_fault_inject`). In any other build — including
+/// every shipped one — the fault code is not compiled in, so this does nothing and
+/// can never crash the app. Not for product code; the only caller is the dev-gated
+/// Tauri command.
 pub fn arm_fault() {
-    #[cfg(all(feature = "juce", feature = "fault-inject"))]
+    #[cfg(all(feature = "juce", oj_fault_inject))]
     backend::arm_fault();
 }
 

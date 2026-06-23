@@ -117,7 +117,7 @@ pub(crate) fn open_editor(desc: &PluginDescriptor) -> Result<Box<dyn EditorBacke
 
 /// DEV/TEST ONLY: forward to the JUCE backend's in-guard fault arm (see
 /// [`crate::arm_fault`]). Present only with `juce` + `fault-inject`.
-#[cfg(all(feature = "juce", feature = "fault-inject"))]
+#[cfg(all(feature = "juce", oj_fault_inject))]
 pub(crate) fn arm_fault() {
     juce::arm_fault();
 }

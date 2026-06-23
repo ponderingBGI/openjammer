@@ -30,13 +30,13 @@ clap-host = ["dep:clack-host", "dep:clack-extensions"]
 # default build needs none of that.
 juce = ["dep:cmake"]
 
-# DEV/TEST ONLY: compile a deliberate one-shot fault into the guarded
-# `processBlock` + an `ojhost_arm_fault` entry, so the C++ crash boundary (SEH on
-# Windows, chained signals on POSIX) can be PROVEN on a live machine — the sandbox
-# has no JUCE build to run it. Meaningful ONLY together with `juce` (the C++ that
-# carries both the fault and the boundary catching it); harmless without it. NEVER
-# enable in a shipped build: the fault code simply isn't compiled in otherwise.
-fault-inject = []
+# NOTE on the dev/test crash-boundary harness: it is gated on the ENV VAR
+# `OJHOST_FAULT_INJECT=1` (read by build.rs), NOT a cargo feature. A feature would
+# be a new feature-combo → a SECOND full JUCE FetchContent clone + rebuild (~1 GB,
+# minutes) just to flip one `#ifdef`; the env var keeps the `{juce}` feature set so
+# the existing JUCE build is reused and only `ojhost_juce.cpp` recompiles. build.rs
+# emits `--cfg oj_fault_inject` when the var is set, so the Rust + C++ sides agree.
+# See `crates/ojhost/build.rs` and `cpp/ojhost_juce.cpp`.
 
 [dependencies]
 # Engine ABI: a hosted plugin is a `DspInstance` minted by a `PluginLoader`

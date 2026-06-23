@@ -85,11 +85,11 @@ plugin-host-juce = ["ojhost/juce"]
 plugin-host-clap = ["ojhost/clap-host"]
 plugin-host-scaffold = []
 
-# DEV/TEST ONLY: forward ojhost's fault injector so a tester can PROVE the C++
-# crash boundary live — `bun native --features fault-inject` (juce stays on via the
-# default). Arms via the dev-gated `debug_arm_plugin_fault` command. A no-op in any
-# build without it (the fault code isn't compiled in); NEVER ship with it.
-fault-inject = ["ojhost/fault-inject"]
+# NOTE: the dev/test crash-boundary harness is gated on the ENV VAR
+# `OJHOST_FAULT_INJECT=1` (read by ojhost's build.rs), NOT a cargo feature — so it
+# reuses the existing JUCE build instead of forcing a second full clone+rebuild.
+# Run `OJHOST_FAULT_INJECT=1 bun native`; arm via `debug_arm_plugin_fault`. A no-op
+# in any build without the var set (the fault code isn't compiled in).
 
 # This feature must be enabled when building the app in production, so the
 # webview loads the bundled frontend instead of the dev server. Tauri's CLI sets
