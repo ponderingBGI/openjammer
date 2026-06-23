@@ -208,14 +208,20 @@ impl PluginHostLoader {
             ui: UiKind::Auto,
             params,
             ports: PortDecl {
-                audio_in: descriptor.ports.audio_in.min(u8::MAX as u16) as u8,
-                audio_out: descriptor.ports.audio_out.min(u8::MAX as u16) as u8,
+                // ONE audio port per side that carries the plugin's channel count
+                // (docs/CHANNELS.md model B: a stereo cable is one connection of N
+                // channels, not N mono ports). A stereo reverb is one stereo-in +
+                // one stereo-out port. The compiler multiplies `audio_*_channels`
+                // into render lanes (`compile.rs`: lanes = n_out × out_channels),
+                // and the JUCE/CLAP backends already copy exactly that many planar
+                // channels from the descriptor's layout — so the reshape is the only
+                // change needed to host a real stereo plugin in stereo.
+                audio_in: (descriptor.ports.audio_in > 0) as u8,
+                audio_out: (descriptor.ports.audio_out > 0) as u8,
                 control_in: 0,
                 control_out: 0,
-                // Hosted plugins are treated as mono-per-port for now; stereo
-                // hosting wires the descriptor's channel layout in a later step.
-                audio_in_channels: 1,
-                audio_out_channels: 1,
+                audio_in_channels: descriptor.ports.audio_in.min(u8::MAX as u16) as u8,
+                audio_out_channels: descriptor.ports.audio_out.min(u8::MAX as u16) as u8,
             },
         };
         Self {
@@ -323,7 +329,11 @@ mod tests {
         assert_eq!(m.id, expected_id);
         assert_eq!(m.kind, PrimitiveKind::PluginHost);
         assert_eq!(m.name, "Acme Synth");
-        assert_eq!(m.ports.audio_out, 2);
+        // A 2-out instrument is ONE stereo output port carrying 2 channels (model
+        // B), not two mono ports — so the compiler derives 1 × 2 = 2 output lanes.
+        assert_eq!(m.ports.audio_out, 1, "one audio-out port per side");
+        assert_eq!(m.ports.audio_out_channels, 2, "carrying the plugin's 2 channels");
+        assert_eq!(m.ports.audio_in, 0, "an instrument has no audio input");
         assert_eq!(m.params.len(), 3);
     }
 
