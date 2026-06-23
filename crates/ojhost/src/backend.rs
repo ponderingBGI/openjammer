@@ -115,6 +115,13 @@ pub(crate) fn open_editor(desc: &PluginDescriptor) -> Result<Box<dyn EditorBacke
     active::open_editor(desc)
 }
 
+/// DEV/TEST ONLY: forward to the JUCE backend's in-guard fault arm (see
+/// [`crate::arm_fault`]). Present only with `juce` + `fault-inject`.
+#[cfg(all(feature = "juce", feature = "fault-inject"))]
+pub(crate) fn arm_fault() {
+    juce::arm_fault();
+}
+
 // Select the single active backend. `juce` is the superset, so it wins when both
 // features are requested.
 #[cfg(all(feature = "clap-host", not(feature = "juce")))]

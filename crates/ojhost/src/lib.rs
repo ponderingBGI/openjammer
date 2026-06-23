@@ -114,6 +114,21 @@ pub fn register_scanned(reg: &mut PluginRegistry, descriptors: &[PluginDescripto
     n
 }
 
+/// DEV/TEST ONLY: arm the hosted-plugin crash boundary so the NEXT guarded
+/// `processBlock` deliberately faults — used to PROVE the C++ SEH/signal latch on a
+/// live machine, since the scaffold sandbox has no JUCE build to run it. A node
+/// faults, the Rust latch quarantines it to a dry passthrough + crash badge, and
+/// every sibling keeps playing.
+///
+/// A **no-op unless** the build has BOTH `juce` and `fault-inject`. In any other
+/// build — including every shipped one — the fault code is not compiled in, so this
+/// does nothing and can never crash the app. Not for product code; the only caller
+/// is the dev-gated Tauri command.
+pub fn arm_fault() {
+    #[cfg(all(feature = "juce", feature = "fault-inject"))]
+    backend::arm_fault();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

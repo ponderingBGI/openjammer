@@ -568,6 +568,21 @@ fn list_output_devices() -> Vec<OutputDevice> {
         .collect()
 }
 
+/// DEV/TEST ONLY: arm the hosted-plugin crash boundary so the NEXT guarded
+/// `processBlock` deliberately faults, letting the C++ SEH/signal latch be PROVEN on
+/// a live machine — arm, then play a note through a hosted plugin: that node faults,
+/// latches to a dry passthrough + crash badge, and the rest of the set plays on.
+///
+/// A no-op unless the app was built `--features fault-inject` (→ `ojhost/fault-inject`,
+/// which needs the default `juce` C++): in every other build — including every
+/// shipped one — the fault code isn't compiled in, so this does nothing and cannot
+/// crash anything. With `withGlobalTauri`, a tester arms it from the dev webview
+/// console: `await window.__TAURI__.core.invoke('debug_arm_plugin_fault')`.
+#[tauri::command]
+fn debug_arm_plugin_fault() {
+    ojhost::arm_fault();
+}
+
 /// Snapshot the current user data before an update installs — the frontend passes
 /// its exported `localStorage`; the Pi agent dir is copied natively. Best-effort:
 /// a failed backup never fails the caller. Records the OUTGOING version + channel
@@ -736,8 +751,6 @@ pub fn run() {
             ai::ai_prewarm,
             ai::ai_restart,
             ai::ai_set_learning,
-            ai::ai_get_learning,
-            ai::ai_save_self_package,
             ai::ai_forget,
             ai::ai_sessions,
             ai::ai_session_messages,
@@ -767,6 +780,7 @@ pub fn run() {
             set_speaker_device,
             set_mic,
             list_output_devices,
+            debug_arm_plugin_fault,
             updater::update_stage,
             updater::update_is_pending,
             updater::update_try_install,

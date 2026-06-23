@@ -30,6 +30,14 @@ clap-host = ["dep:clack-host", "dep:clack-extensions"]
 # default build needs none of that.
 juce = ["dep:cmake"]
 
+# DEV/TEST ONLY: compile a deliberate one-shot fault into the guarded
+# `processBlock` + an `ojhost_arm_fault` entry, so the C++ crash boundary (SEH on
+# Windows, chained signals on POSIX) can be PROVEN on a live machine — the sandbox
+# has no JUCE build to run it. Meaningful ONLY together with `juce` (the C++ that
+# carries both the fault and the boundary catching it); harmless without it. NEVER
+# enable in a shipped build: the fault code simply isn't compiled in otherwise.
+fault-inject = []
+
 [dependencies]
 # Engine ABI: a hosted plugin is a `DspInstance` minted by a `PluginLoader`
 # registered under `PrimitiveKind::PluginHost`. `default-features = false`

@@ -50,6 +50,11 @@ fn build_juce() {
     let mut cfg = cmake::Config::new("cpp");
     cfg.define("OJHOST_WITH_CLAP", if with_clap { "ON" } else { "OFF" })
         .define("OJHOST_WITH_VST2", if with_vst2 { "ON" } else { "OFF" });
+    // Dev/test: when the `fault-inject` feature is on alongside `juce`, compile the
+    // in-guard fault injector so the crash boundary can be verified on a live
+    // machine (see `cpp/ojhost_juce.cpp`). OFF for every normal/shipped build.
+    #[cfg(feature = "fault-inject")]
+    cfg.define("OJHOST_FAULT_INJECT", "ON");
     if let Some(path) = vst2_sdk.as_deref() {
         cfg.define("OJHOST_VST2_SDK_DIR", path);
     }

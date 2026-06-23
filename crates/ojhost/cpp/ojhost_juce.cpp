@@ -36,6 +36,11 @@
 #include <mutex>
 #endif
 
+// DEV/TEST ONLY: the in-guard fault injector needs a lock-free cross-thread flag.
+#if defined(OJHOST_FAULT_INJECT)
+#include <atomic>
+#endif
+
 using namespace juce;
 
 namespace {
@@ -309,6 +314,32 @@ void ojhost_process(OjPlugin* plugin,
 // ---------------------------------------------------------------------------
 namespace {
 
+#if defined(OJHOST_FAULT_INJECT)
+// DEV/TEST ONLY: a process-global one-shot arm shared by every hosted instance in
+// this process. When > 0, the NEXT guarded processBlock (whichever hosted node is
+// scheduled first) performs a deliberate null write so the SEH/signal boundary
+// below can be PROVEN to catch a real access violation on a live machine — that
+// node faults, the Rust latch flips it to a dry passthrough + crash badge, and
+// every sibling node keeps playing. Decremented atomically so exactly one block
+// faults per arm. Compiled ONLY with `--features juce,fault-inject`; absent from
+// any shipped build. Read inside the guard so the fault is caught, not fatal.
+std::atomic<int> ojFaultArm{0};
+void ojMaybeInjectFault() {
+    int armed = ojFaultArm.load(std::memory_order_relaxed);
+    while (armed > 0) {
+        if (ojFaultArm.compare_exchange_weak(armed, armed - 1,
+                                             std::memory_order_relaxed)) {
+            // A VOLATILE pointer (not pointer-to-volatile): each read re-loads, so
+            // the optimizer can't prove it's null and -Wnull-dereference (under
+            // JUCE's -Werror) won't reject this deliberate access violation.
+            int* volatile boom = nullptr;
+            *boom = 0xC0FFEE; // deliberate fault, INSIDE the guard
+            return;
+        }
+    }
+}
+#endif
+
 #if defined(_WIN32)
 
 // MSVC SEH must live in a LEAF function with no C++ objects requiring unwinding.
@@ -316,6 +347,9 @@ namespace {
 // are POD members built in ojhost_prepare), so it qualifies — no `/EHa` needed.
 static int ojGuardedProcessBlock(OjPlugin* plugin) {
     __try {
+#if defined(OJHOST_FAULT_INJECT)
+        ojMaybeInjectFault(); // dev/test: prove __except catches a real fault
+#endif
         plugin->instance->processBlock(plugin->buffer, plugin->midi);
         return 0;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -402,6 +436,9 @@ static int ojGuardedProcessBlock(OjPlugin* plugin) {
     ojInstallAltStackOnce();
     if (sigsetjmp(ojFaultJmp, 1) == 0) {
         ojInGuard = 1;
+#if defined(OJHOST_FAULT_INJECT)
+        ojMaybeInjectFault(); // dev/test: prove the signal guard catches a real fault
+#endif
         plugin->instance->processBlock(plugin->buffer, plugin->midi);
         ojInGuard = 0;
         return 0;
@@ -462,6 +499,17 @@ int32_t ojhost_process_guarded(OjPlugin* plugin,
     plugin->buffer.setSize(chans, plugin->maxBlock, true, false, true);
     return OJ_PROCESS_OK;
 }
+
+#if defined(OJHOST_FAULT_INJECT)
+// DEV/TEST ONLY: arm a one-shot fault in the next guarded processBlock. Control
+// thread sets the process-global counter; the audio thread reads + consumes it
+// inside the guard (see `ojMaybeInjectFault`). Lock-free; never present in a
+// shipped build. Reachable from the dev webview console via the Tauri command
+// `debug_arm_plugin_fault`.
+void ojhost_arm_fault(void) {
+    ojFaultArm.fetch_add(1, std::memory_order_relaxed);
+}
+#endif
 
 void ojhost_set_param(OjPlugin* plugin, uint32_t index, float value) {
     if (plugin == nullptr || plugin->instance == nullptr) return;
