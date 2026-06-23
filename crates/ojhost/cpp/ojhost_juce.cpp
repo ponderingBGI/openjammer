@@ -121,6 +121,17 @@ struct OjPluginEditor {
     std::unique_ptr<AudioProcessorEditor> editor;
 };
 
+// The POSIX crash-guard's process-global fault handlers are defined in the
+// crash-guard section far below. Forward-declare the installer here (the SAME
+// unnamed namespace) so the off-RT ojhost_prepare can arm the handlers, instead
+// of paying the std::call_once lock + four sigaction syscalls on the first
+// guarded audio block. (Windows uses SEH and has no install cost.)
+#if !defined(_WIN32)
+namespace {
+static void ojInstallHandlersOnce();
+}  // namespace
+#endif
+
 extern "C" {
 
 OjHost* ojhost_create(void) {
@@ -260,6 +271,14 @@ void ojhost_prepare(OjPlugin* plugin, double sample_rate, int32_t max_block) {
     plugin->midi.ensureSize(4096);
     plugin->instance->setRateAndBufferSizeDetails(sample_rate, max_block);
     plugin->instance->prepareToPlay(sample_rate, max_block);
+#if !defined(_WIN32)
+    // Arm the process-global crash-guard handlers HERE, off the RT path.
+    // ojhost_prepare runs on the compile/control thread (never the cpal audio
+    // thread); the handlers + their std::call_once lock + four sigaction syscalls
+    // are process-global and idempotent, so installing once at prepare keeps the
+    // first guarded audio block free of the lock and syscalls it used to pay.
+    ojInstallHandlersOnce();
+#endif
 }
 
 void ojhost_process(OjPlugin* plugin,
@@ -416,8 +435,11 @@ static void ojInstallHandlersOnce() {
 }
 
 // A per-thread alternate signal stack so a stack-overflow fault on the audio
-// thread (which cpal, not us, created) can still be caught. Installed lazily on
-// the first guarded call on that thread.
+// thread (which cpal, not us, created) can still be caught. The stack is
+// thread_local and cpal owns the audio thread, so this can ONLY be armed from
+// that thread — a single sigaltstack syscall on its first guarded block, the one
+// accepted one-time RT cost (it matters only if a hosted plugin faults via stack
+// overflow). The process-global handlers move off-RT to ojhost_prepare.
 static void ojInstallAltStackOnce() {
     static thread_local bool installed = false;
     static thread_local char altStack[64 * 1024];
@@ -432,7 +454,8 @@ static void ojInstallAltStackOnce() {
 }
 
 static int ojGuardedProcessBlock(OjPlugin* plugin) {
-    ojInstallHandlersOnce();
+    // Process-global handlers are installed off-RT in ojhost_prepare; only the
+    // thread_local alt stack must be armed from this (cpal-owned) audio thread.
     ojInstallAltStackOnce();
     if (sigsetjmp(ojFaultJmp, 1) == 0) {
         ojInGuard = 1;
