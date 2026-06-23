@@ -80,8 +80,8 @@ function mockBridge(): { bridge: OjcoreBridge; sent: RtCommand[]; loaded: unknow
             sent.push(cmd);
         },
         nodeLevel: () => 0,
-        loadSample: (nodeId, pcm, sampleRate, rootNote) => {
-            loaded.push({ nodeId, len: pcm.length, sampleRate, rootNote });
+        loadSample: (nodeId, pcm, sampleRate, rootNote, channels) => {
+            loaded.push({ nodeId, len: pcm.length, sampleRate, rootNote, channels });
             return Promise.resolve();
         },
         startCapture: () => {},
@@ -199,7 +199,7 @@ describe('sampler handle maps config to SetParam and loads PCM', () => {
         ]);
     });
 
-    it('setBuffer downmixes to mono PCM and lowers it into the engine', () => {
+    it('setBuffer interleaves a stereo buffer and lowers it into the engine', () => {
         const { bridge, loaded } = mockBridge();
         const sampler = new OjcoreSamplerHandle('sampler-1', bridge);
         const fakeBuffer = {
@@ -211,7 +211,11 @@ describe('sampler handle maps config to SetParam and loads PCM', () => {
 
         sampler.setBuffer(fakeBuffer);
         expect(sampler.getBuffer()).toBe(fakeBuffer);
-        expect(loaded).toEqual([{ nodeId: 'sampler-1', len: 4, sampleRate: 44100, rootNote: 60 }]);
+        // Interleaved (no downmix): 4 frames x 2 channels = 8 samples, channels = 2,
+        // so a stereo sample plays in true stereo (parity with the native catalog).
+        expect(loaded).toEqual([
+            { nodeId: 'sampler-1', len: 8, sampleRate: 44100, rootNote: 60, channels: 2 },
+        ]);
 
         // Clearing the buffer does not attempt a load.
         loaded.length = 0;

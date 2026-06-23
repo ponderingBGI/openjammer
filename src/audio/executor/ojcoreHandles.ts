@@ -64,7 +64,9 @@ export interface OjcoreBridge {
         nodeId: string,
         pcm: Float32Array,
         sampleRate: number,
-        rootNote: number
+        rootNote: number,
+        /** Interleave count of `pcm` (1 = mono, 2 = stereo interleaved L/R). */
+        channels: number
     ): Promise<void>;
     /** Begin capturing `nodeId`'s output bus on the engine side. */
     startCapture(nodeId: string): void;
@@ -674,15 +676,23 @@ export class OjcoreSamplerHandle implements SamplerHandle {
     setBuffer(buffer: AudioBuffer | null): void {
         this.buffer = buffer;
         if (!buffer) return;
-        // Downmix to mono PCM and lower it into the engine sampler.
+        // Interleave channel-major frames so a STEREO sample plays in true stereo
+        // (the content store + Sampler keep the layout, like the native catalog);
+        // a mono buffer stays mono (channels === 1, byte-identical to before).
         const channels = buffer.numberOfChannels;
         const len = buffer.length;
-        const mono = new Float32Array(len);
+        const interleaved = new Float32Array(len * channels);
         for (let ch = 0; ch < channels; ch++) {
             const data = buffer.getChannelData(ch);
-            for (let i = 0; i < len; i++) mono[i] += data[i] / channels;
+            for (let i = 0; i < len; i++) interleaved[i * channels + ch] = data[i];
         }
-        void this.bridge.loadSample(this.nodeId, mono, buffer.sampleRate, this.config.rootNote);
+        void this.bridge.loadSample(
+            this.nodeId,
+            interleaved,
+            buffer.sampleRate,
+            this.config.rootNote,
+            channels,
+        );
     }
 
     setRootNote(midiNote: number): void {

@@ -183,7 +183,7 @@ function looperGraph(): { nodes: Map<string, GraphNode>; connections: Map<string
     };
 }
 
-/** A stereo-ish fake AudioBuffer the sampler handle downmixes to mono PCM. */
+/** A mono fake AudioBuffer the sampler handle interleaves (1 channel = unchanged). */
 function fakeBuffer(): AudioBuffer {
     return {
         numberOfChannels: 1,
@@ -256,6 +256,7 @@ describe('OjcoreWasmExecutor sampler live-load (mocked worklet)', () => {
         expect(load, 'a load-sample message was posted').toBeTruthy();
         expect(load!.node).toBeTypeOf('number');
         expect((load!.pcm as Float32Array).length).toBe(8);
+        expect(load!.channels).toBe(1); // mono interleave = unchanged
         expect(load!.sampleRate).toBe(44100);
         expect(load!.rootNote).toBe(60);
         ex.dispose();

@@ -154,8 +154,8 @@ export class OjcoreNativeExecutor implements Executor {
         nodeIndex: (nodeId) => this.index.get(nodeId),
         sendCommand: (cmd) => this.send(cmd),
         nodeLevel: (nodeId) => this.levels.get(nodeId) ?? 0,
-        loadSample: (nodeId, pcm, sampleRate, rootNote) =>
-            this.loadSampleNative(nodeId, pcm, sampleRate, rootNote),
+        loadSample: (nodeId, pcm, sampleRate, rootNote, channels) =>
+            this.loadSampleNative(nodeId, pcm, sampleRate, rootNote, channels),
         startCapture: (nodeId) => this.recorderStartNative(nodeId),
         stopCapture: (nodeId) => this.recorderStopNative(nodeId),
     };
@@ -611,7 +611,8 @@ export class OjcoreNativeExecutor implements Executor {
                 // picker re-binds but a plain re-push does not.
                 if (this.boundVoiceKey.get(node.id) === key) continue;
                 this.boundVoiceKey.set(node.id, key);
-                void this.loadSampleNative(node.id, voice.pcm, voice.sampleRate, voice.rootNote);
+                // Built-in default voices are mono.
+                void this.loadSampleNative(node.id, voice.pcm, voice.sampleRate, voice.rootNote, 1);
                 setNodeVoiceLoadError(node.id, false);
             } catch (err) {
                 log.error('default voice load failed for node; continuing', {
@@ -800,12 +801,14 @@ export class OjcoreNativeExecutor implements Executor {
 
     // --- Native command backings for the capability bridge -----------------
 
-    /** Lower mono PCM into the engine sampler for `nodeId` via `load_sample`. */
+    /** Lower interleaved PCM (`channels`-major) into the engine sampler for
+     *  `nodeId` via `load_sample`. `channels === 1` is plain mono. */
     private async loadSampleNative(
         nodeId: string,
         pcm: Float32Array,
         sampleRate: number,
         rootNote: number,
+        channels: number,
     ): Promise<void> {
         if (!this.invoke) return;
         const idx = this.index.get(nodeId);
@@ -813,10 +816,12 @@ export class OjcoreNativeExecutor implements Executor {
         try {
             // Transfer PCM as a plain number array (control-rate asset load, NOT
             // the audio thread — the engine resolves it into the AssetCatalog and
-            // calls the sampler's set_sample off-RT).
+            // calls the sampler's set_sample off-RT). Interleaved + channels so a
+            // stereo sample plays in true stereo.
             await this.invoke('load_sample', {
                 node: idx,
                 pcm: Array.from(pcm),
+                channels,
                 sampleRate,
                 rootNote,
             });

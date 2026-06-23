@@ -938,12 +938,13 @@ impl EngineBackend {
         &mut self,
         node: NodeIdx,
         pcm: Vec<f32>,
+        channels: u16,
         sample_rate: u32,
         root_note: u8,
     ) -> Result<AssetId, BackendError> {
         let pcm = Pcm {
             samples: pcm,
-            channels: 1,
+            channels: channels.max(1),
             sample_rate: sample_rate.max(1),
         };
         let id = self.catalog.insert(pcm).map_err(BackendError::Asset)?;
@@ -1578,7 +1579,7 @@ mod tests {
         let mut be = EngineBackend::new();
         let pcm = vec![0.0f32, 0.25, -0.25, 0.5];
         let id = be
-            .load_sample(NodeIdx(2), pcm.clone(), 48_000, 60)
+            .load_sample(NodeIdx(2), pcm.clone(), 1, 48_000, 60)
             .expect("sample stores");
         let resolved = be.catalog.resolve(id).expect("resolves");
         assert_eq!(resolved.samples, pcm);
@@ -1767,7 +1768,7 @@ mod tests {
 
         let pcm = vec![0.0f32, 0.5, -0.5, 0.25, 0.1, -0.1];
         let id = be
-            .load_sample(NodeIdx(1), pcm.clone(), 48_000, 60)
+            .load_sample(NodeIdx(1), pcm.clone(), 1, 48_000, 60)
             .expect("sample binds");
 
         // The asset resolves back to the same PCM.
@@ -1845,7 +1846,7 @@ mod tests {
         // Imperatively bind a sample to the sampler node (the engine-only mapping).
         let pcm = vec![0.0f32, 0.5, -0.5, 0.25];
         let id = be
-            .load_sample(NodeIdx(1), pcm.clone(), 48_000, 60)
+            .load_sample(NodeIdx(1), pcm.clone(), 1, 48_000, 60)
             .expect("sample binds");
 
         // A FRESH UI push of the same topology (no asset on the wire) must NOT drop
@@ -1874,7 +1875,7 @@ mod tests {
         let mut be = EngineBackend::new();
         be.push_graph(&sampler_graph()).expect("initial push");
         let first = be
-            .load_sample(NodeIdx(1), vec![0.1f32, 0.2], 48_000, 60)
+            .load_sample(NodeIdx(1), vec![0.1f32, 0.2], 1, 48_000, 60)
             .expect("first sample binds");
 
         // Push a graph that ALREADY carries its own slot-0 asset on node 1.

@@ -73,13 +73,16 @@ const CMD_FRAME_MAX: usize = 128;
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-/// One decoded, host-owned mono sample. The wasm host owns the PCM here (the
-/// `no_std` `ojcore` core never owns asset bytes); the [`WasmAssetStore`]
-/// resolver hands back a borrow of `pcm` at compile time so a Sampler node's
-/// [`ojproto::AssetRef`] installs through [`ojcore::DspInstance::load_asset`].
+/// One decoded, host-owned sample (INTERLEAVED `channels`-major frames; `1` =
+/// mono). The wasm host owns the PCM here (the `no_std` `ojcore` core never owns
+/// asset bytes); the [`WasmAssetStore`] resolver hands back a borrow of `pcm` at
+/// compile time so a Sampler node's [`ojproto::AssetRef`] installs through
+/// [`ojcore::DspInstance::load_asset`] — preserving stereo so a browser Sampler
+/// plays a stereo sample in true stereo, like the native catalog.
 struct StoredAsset {
     id: AssetId,
     pcm: Vec<f32>,
+    channels: u16,
     sample_rate: f32,
 }
 
@@ -97,12 +100,13 @@ impl WasmAssetStore {
     /// Content-address `pcm`/`sample_rate` (FNV-1a over the spec + sample bytes,
     /// folded to `u32` — identical to the native catalog) and store it, returning
     /// its [`AssetId`]. Deduplicates: re-storing identical PCM keeps one copy.
-    fn insert(&mut self, pcm: Vec<f32>, sample_rate: f32) -> AssetId {
-        let id = content_address(&pcm, sample_rate);
+    fn insert(&mut self, pcm: Vec<f32>, channels: u16, sample_rate: f32) -> AssetId {
+        let id = content_address(&pcm, channels, sample_rate);
         if !self.assets.iter().any(|a| a.id == id) {
             self.assets.push(StoredAsset {
                 id,
                 pcm,
+                channels,
                 sample_rate,
             });
         }
@@ -123,23 +127,25 @@ impl WasmAssetStore {
 impl AssetResolver for WasmAssetStore {
     fn resolve(&self, id: AssetId) -> Option<AssetPcm<'_>> {
         let a = self.get(id)?;
-        // The wasm store is mono-only (the JS side downmixes before `store_asset`).
-        Some(AssetPcm::mono(&a.pcm, a.sample_rate))
+        // Hand back the INTERLEAVED PCM + its channel count (zero-copy); the
+        // consuming node keeps the layout it needs (a stereo Sampler plays both
+        // channels, a Convolution downmixes) — symmetric with the native catalog.
+        Some(AssetPcm::from_interleaved(&a.pcm, a.channels, a.sample_rate))
     }
 }
 
-/// Compute the deterministic content address of mono PCM at `sample_rate`. Mirrors
-/// `ojcore-native::store::content_address` for the mono case: hash the spec
-/// (channels = 1, the rate) then every sample's IEEE-754 LE bytes, fold the 64-bit
-/// FNV-1a to the `u32` [`AssetId`] domain by XORing its halves.
-fn content_address(pcm: &[f32], sample_rate: f32) -> AssetId {
+/// Compute the deterministic content address of INTERLEAVED PCM at `sample_rate`.
+/// Mirrors `ojcore-native::store::content_address`: hash the spec (`channels`, the
+/// rate) then every sample's IEEE-754 LE bytes, fold the 64-bit FNV-1a to the
+/// `u32` [`AssetId`] domain by XORing its halves. Byte-identical to the old mono
+/// hash when `channels == 1`, so existing mono asset ids are unchanged.
+fn content_address(pcm: &[f32], channels: u16, sample_rate: f32) -> AssetId {
     #[inline]
     fn mix(h: u64, byte: u8) -> u64 {
         (h ^ byte as u64).wrapping_mul(FNV_PRIME)
     }
     let mut h = FNV_OFFSET;
-    // channels = 1 (the wasm store is mono-only, like the native live path).
-    for b in 1u16.to_le_bytes() {
+    for b in channels.max(1).to_le_bytes() {
         h = mix(h, b);
     }
     // The native catalog hashes an integer sample rate; round to match.
@@ -370,9 +376,11 @@ pub fn last_degraded_node_ids() -> Vec<u32> {
 /// content address only for a degenerate input, so the JS side treats it as "not
 /// stored" only when the host is absent (it checks `ready` first).
 #[wasm_bindgen]
-pub fn store_asset(pcm: &[f32], sample_rate: f32) -> u32 {
+pub fn store_asset(pcm: &[f32], channels: u32, sample_rate: f32) -> u32 {
     let Some(host) = host_mut() else { return 0 };
-    host.assets.insert(pcm.to_vec(), sample_rate).0
+    host.assets
+        .insert(pcm.to_vec(), channels.clamp(1, u16::MAX as u32) as u16, sample_rate)
+        .0
 }
 
 /// Pointer (byte offset into wasm linear memory) of the FIRST `MicIn` node's
@@ -1209,14 +1217,19 @@ mod tests {
     fn asset_store_dedups_identical_pcm() {
         let mut store = WasmAssetStore::default();
         let pcm: Vec<f32> = (0..256).map(|i| (i as f32 / 256.0) - 0.5).collect();
-        let a = store.insert(pcm.clone(), 48_000.0);
-        let b = store.insert(pcm.clone(), 48_000.0);
+        let a = store.insert(pcm.clone(), 1, 48_000.0);
+        let b = store.insert(pcm.clone(), 1, 48_000.0);
         assert_eq!(a, b, "identical PCM must content-address the same");
         assert_eq!(store.assets.len(), 1, "identical PCM must not duplicate");
         // A different rate is a distinct asset (spec is part of the address).
-        let c = store.insert(pcm, 44_100.0);
+        let c = store.insert(pcm.clone(), 1, 44_100.0);
         assert_ne!(a, c);
         assert_eq!(store.assets.len(), 2);
+        // The channel count is part of the spec too: the SAME bytes as 2-channel
+        // address differently (so a stereo sample never collides with a mono one).
+        let d = store.insert(pcm, 2, 48_000.0);
+        assert_ne!(a, d, "channel count distinguishes the content address");
+        assert_eq!(store.assets.len(), 3);
     }
 
     /// The store resolves a stored id back to a borrow of its PCM (the
@@ -1225,11 +1238,20 @@ mod tests {
     fn asset_store_resolves_stored_pcm() {
         let mut store = WasmAssetStore::default();
         let pcm = vec![0.25f32; 64];
-        let id = store.insert(pcm.clone(), 48_000.0);
+        let id = store.insert(pcm.clone(), 1, 48_000.0);
         let resolved = store.resolve(id).expect("stored asset resolves");
         assert_eq!(resolved.pcm, &pcm[..]);
+        assert_eq!(resolved.channels, 1);
         assert_eq!(resolved.sample_rate, 48_000.0);
         assert!(store.resolve(AssetId(id.0 ^ 0xffff_ffff)).is_none());
+
+        // A stereo asset resolves with its interleaved buffer + channel count
+        // preserved (no downmix) — what a browser stereo Sampler plays.
+        let interleaved = vec![0.5f32, -0.5, 0.5, -0.5];
+        let sid = store.insert(interleaved.clone(), 2, 48_000.0);
+        let sres = store.resolve(sid).expect("stereo asset resolves");
+        assert_eq!(sres.channels, 2);
+        assert_eq!(sres.pcm, &interleaved[..], "interleaved, not downmixed");
     }
 
     /// A Sampler node carrying an `AssetRef` actually receives its PCM when the
@@ -1245,7 +1267,7 @@ mod tests {
         // A loud, finite mono buffer so a played voice meters non-zero.
         let pcm = vec![0.8f32; 512];
         let mut store = WasmAssetStore::default();
-        let id = store.insert(pcm, 48_000.0);
+        let id = store.insert(pcm, 1, 48_000.0);
 
         let graph = OjGraph {
             ir_version: SCHEMA_VERSION,

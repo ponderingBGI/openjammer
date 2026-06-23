@@ -359,6 +359,7 @@ fn poll_events(state: tauri::State<'_, BackendState>) -> Result<Vec<Event>, Stri
 fn load_sample(
     node: u32,
     pcm: Vec<f32>,
+    channels: u16,
     sample_rate: u32,
     root_note: u8,
     state: tauri::State<'_, BackendState>,
@@ -367,7 +368,7 @@ fn load_sample(
         .0
         .lock()
         .map_err(|_| "engine backend mutex poisoned".to_string())?
-        .load_sample(NodeIdx(node), pcm, sample_rate, root_note)
+        .load_sample(NodeIdx(node), pcm, channels, sample_rate, root_note)
         .map(|id| id.0)
         .map_err(|e| e.to_string())
 }
