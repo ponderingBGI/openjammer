@@ -35,7 +35,7 @@ use std::sync::{Arc, Mutex};
 
 use ojcore::meter::{event_frame, return_frame};
 use ojcore::{
-    compile, compile_with_assets, master_param, CommandConsumer, CommandProducer, CommandQueue,
+    compile, compile_resilient, master_param, CommandConsumer, CommandProducer, CommandQueue,
     CompileError, Engine, EventRing, MeterRing, PluginManifest, PluginRegistry, ProgramSwap,
 };
 use ojcore_native::{
@@ -413,7 +413,7 @@ impl EngineBackend {
     /// This is control-rate (off the audio thread). The displaced host is
     /// dropped here, which stops the old stream cleanly off-RT.
     ///
-    /// ASSET RESOLUTION. Compilation goes through [`compile_with_assets`] with the
+    /// ASSET RESOLUTION. Compilation goes through [`compile_resilient`] with the
     /// backend's [`AssetCatalog`] as the resolver, so any node carrying an
     /// [`AssetRef`] (a Sampler's sample, a Convolution's IR) has its decoded PCM
     /// installed (Sampler `set_sample` / Convolution `set_ir`) BEFORE the program
@@ -532,7 +532,11 @@ impl EngineBackend {
         let mut g = graph.clone();
         g.sample_rate = self.stream.sample_rate;
         g.block_size = self.stream.buffer_frames;
-        let program = compile_with_assets(&g, &self.registry, &self.catalog)
+        // Load-time graceful degrade (invariant #4a): a missing plugin dependency in a
+        // pushed/loaded graph becomes a passthrough stub so the project ALWAYS opens,
+        // rather than rejecting the whole push; genuine errors (cycle, no master) still
+        // surface. The starter graph above stays strict (a known-good internal graph).
+        let program = compile_resilient(&g, &self.registry, &self.catalog)
             .map_err(BackendError::Compile)?;
 
         if self.host.is_some() {
@@ -896,7 +900,7 @@ impl EngineBackend {
     /// off-RT asset pipeline a file load uses), bind the returned [`AssetId`] +
     /// the `root_note` onto `node` in the live graph, then recompile so the
     /// Sampler's `set_sample` (the U6 seam) fires through
-    /// [`compile_with_assets`]. Returns the stored [`AssetId`].
+    /// [`compile_resilient`]. Returns the stored [`AssetId`].
     ///
     /// If no graph has been pushed yet (no `last_graph`), the asset is still
     /// stored and returned — a subsequent `push_graph` that references it will

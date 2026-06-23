@@ -48,7 +48,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use ojcore::{
-    compile_with_assets, AssetPcm, AssetResolver, Engine, PluginRegistry, SPEAKER_OUT_ID,
+    compile_resilient, compile_with_assets, AssetPcm, AssetResolver, Engine, PluginRegistry,
+    SPEAKER_OUT_ID,
 };
 use ojcore_midiring::{header_offsets, CmdRing, MidiRing};
 use ojinstrument::{register_all, RegisterOpts};
@@ -311,7 +312,11 @@ pub fn load_graph(bytes: &[u8]) -> bool {
     // wasm end of the sample-load seam): a Sampler carrying a bound `AssetId`
     // gets its sample installed via `DspInstance::load_asset` here, off the RT
     // thread, before the program goes live — mirroring native `compile_with_assets`.
-    let program = match compile_with_assets(&graph, &host.registry, &host.assets) {
+    // Load-time graceful degrade (invariant #4a): a missing plugin/instrument
+    // dependency becomes a labeled passthrough stub so a loaded project ALWAYS opens
+    // and stays audible, instead of the whole `load_graph` failing. (The bootstrap +
+    // tests stay strict — known-good internal graphs.)
+    let program = match compile_resilient(&graph, &host.registry, &host.assets) {
         Ok(p) => p,
         Err(_) => return false,
     };
