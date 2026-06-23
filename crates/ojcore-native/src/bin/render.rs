@@ -8,7 +8,7 @@
 
 use ojcore::effects::{biquad_param, delay_param};
 use ojcore::{compile, Engine, PluginRegistry, BIQUAD_ID, DELAY_ID, SPEAKER_OUT_ID};
-use ojcore_native::{AssetStore, Pcm};
+use ojcore_native::{AssetStore, OfflineDriver, Pcm};
 use ojinstrument::{param as ip, register_all, RegisterOpts, OSC_ID};
 use ojproto::{ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, Param, PrimitiveKind, RtCommand};
 
@@ -105,19 +105,19 @@ fn main() {
 
     let mut reg = PluginRegistry::new();
     register_all(&mut reg, RegisterOpts::full());
-    let mut engine = Engine::new(compile(&g, &reg).expect("compile demo graph"));
+    let engine = Engine::new(compile(&g, &reg).expect("compile demo graph"));
+    let mut driver = OfflineDriver::new(engine, BLOCK);
 
     // C-major arpeggio, ~0.25s per note, then a tail so the delay/release ring out.
     let notes: [u8; 6] = [60, 64, 67, 72, 67, 64];
     let note_frames = SR as usize / 4;
     let play_frames = (seconds * SR as f32) as usize;
     let tail_frames = SR as usize / 2;
-    let total = (play_frames + tail_frames).div_ceil(BLOCK) * BLOCK;
-    let mut buf = vec![0.0f32; total];
 
+    // The "second clock": the OfflineDriver owns the block loop + virtual transport;
+    // this hook is the SCHEDULE, applying note edges at each block boundary frame.
     let mut playing: Option<u8> = None;
-    let mut frame = 0usize;
-    while frame < total {
+    let buf = driver.render_mono(play_frames + tail_frames, |engine, frame| {
         // Schedule notes only within the play region; the tail just rings out.
         let want = if frame < play_frames {
             Some(notes[(frame / note_frames) % notes.len()])
@@ -140,9 +140,8 @@ fn main() {
             }
             playing = want;
         }
-        engine.process_block(&mut buf[frame..frame + BLOCK], BLOCK);
-        frame += BLOCK;
-    }
+    });
+    let total = buf.len();
 
     let n = buf.len() as f64;
     let rms = (buf.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>() / n).sqrt();
