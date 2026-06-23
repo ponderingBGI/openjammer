@@ -63,7 +63,7 @@ import {
 import { classifyLatency, type LatencyReport } from './latency';
 import { logger } from '../../utils/log';
 import { setEngineHealth, useEngineHealthStore } from '../../store/engineHealthStore';
-import { ingestEngineEvents } from './faultPipe';
+import { ingestEngineEvents, remapFaultNodes } from './faultPipe';
 import { setNodeVoiceLoadError } from './voiceLoadError';
 import { setNodePluginLoadError } from './pluginLoadError';
 
@@ -381,9 +381,14 @@ export class OjcoreNativeExecutor implements Executor {
         // looper handle to create its row. Routing here (not in the fault pipe)
         // keeps the fault path tag-agnostic — LooperEdge is not a fault.
         this.routeLooperEdges(events);
+        // Make every fault NODE-ADDRESSABLE before the shared sink: rewrite each
+        // NodeFault's engine index to its visual node id (this tier owns the reverse
+        // index) so the agent's get_logs / get_diagnostics map a fault to a canvas
+        // node, not an opaque engine number.
+        const addressable = remapFaultNodes(events, (n) => this.reverseIndex.get(n));
         // The ONE shared fault sink (coalesce -> ingest -> health), identical for
         // the wasm tier — see `faultPipe.ts`. No second owner of the fault path.
-        ingestEngineEvents(events);
+        ingestEngineEvents(addressable);
     }
 
     /** ojcore `LooperState` codes mirrored for the commit-edge filter (kept in

@@ -64,6 +64,38 @@ export function coalesceEvents(events: readonly EngineEvent[]): EngineEvent[] {
 }
 
 /**
+ * Rewrite each NodeFault's engine `node` index to its VISUAL node id (via the
+ * executor's reverse index), so a fault the agent reads in get_logs /
+ * get_diagnostics is addressable to a canvas node instead of an opaque engine
+ * number. Pure; the native executor calls it on a drained batch BEFORE
+ * {@link coalesceEvents} / {@link ingestEngineEvents}.
+ *
+ * A fault whose index has NO mapping (a just-removed node) passes through
+ * unchanged. The protocol types `node` as the numeric NodeIdx; at this LOG/agent
+ * boundary we repurpose it to the visual id, so the rewrite is a localized cast —
+ * and the coalesce dedup key (`node|fault`) stays stable per node (a stable
+ * string), so a per-block storm still collapses to one entry.
+ */
+export function remapFaultNodes(
+    events: readonly EngineEvent[],
+    resolve: (node: number) => string | undefined,
+): EngineEvent[] {
+    return events.map((ev) => {
+        const kind = ev.kind;
+        if (typeof kind === 'object' && 'NodeFault' in kind) {
+            const visual = resolve(kind.NodeFault.node);
+            if (visual !== undefined) {
+                return {
+                    ...ev,
+                    kind: { NodeFault: { ...kind.NodeFault, node: visual as unknown as number } },
+                };
+            }
+        }
+        return ev;
+    });
+}
+
+/**
  * Coalesce + ingest a batch of engine fault events and update engine health.
  * The single shared sink for BOTH executor tiers (native poll + wasm worklet
  * post). Coalescing happens here, BEFORE ingest, because a faulting node emits a
