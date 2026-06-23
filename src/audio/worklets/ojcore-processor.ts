@@ -270,6 +270,18 @@ class OjcoreProcessor extends AudioWorkletProcessor {
     private handleGraph(bytes: Uint8Array): void {
         if (!this.ready) return;
         const ok = wasm.load_graph(bytes) as boolean;
+        // Invariant #4a: warn if any node degraded to a passthrough stub on load (a
+        // missing/incompatible plugin), so the browser tier is as visible as the
+        // native host's log. `console` is available in the AudioWorkletGlobalScope.
+        if (ok) {
+            const degraded = wasm.last_load_degraded() as number;
+            if (degraded > 0) {
+                console.warn(
+                    `ojcore: ${degraded} node(s) degraded to a passthrough stub on load ` +
+                        `(missing or incompatible plugin); the project stays open`,
+                );
+            }
+        }
         this.port.postMessage({ type: 'graph-ack', ok });
     }
 

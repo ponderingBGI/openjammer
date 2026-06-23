@@ -186,6 +186,11 @@ struct Host {
     /// Monotonic sequence stamped on each drained fault [`Event`] (wire parity
     /// with the native backend's `event_seq`). Bumped per surfaced fault.
     event_seq: u32,
+    /// Count of nodes that DEGRADED to a passthrough stub in the LAST `load_graph`
+    /// (a missing/incompatible plugin dependency, invariant #4a). The worklet reads
+    /// it via [`last_load_degraded`] to warn — the browser analogue of the native
+    /// host's degraded-stub log.
+    last_load_degraded: u32,
 }
 
 /// The single host instance. SOUND because an AudioWorklet processor runs on
@@ -278,6 +283,7 @@ pub fn init(sample_rate: u32, block_size: u32) {
         block_size,
         sample_rate,
         event_seq: 0,
+        last_load_degraded: 0,
     };
 
     // SAFETY: single-threaded worklet init; no other reference is live.
@@ -320,10 +326,21 @@ pub fn load_graph(bytes: &[u8]) -> bool {
         Ok(p) => p,
         Err(_) => return false,
     };
+    // Record how many nodes degraded to a stub so the worklet can warn (invariant
+    // #4a, the browser analogue of the native host's degraded-stub log).
+    host.last_load_degraded = program.degraded_stubs(&graph).len() as u32;
     // `install` hands back the old program; dropping it here keeps the RT path
     // allocation/free-free.
     let _old = host.engine.install(program);
     true
+}
+
+/// Number of nodes that degraded to a passthrough stub in the last [`load_graph`]
+/// (a missing or incompatible plugin dependency). The worklet reads this after a
+/// load to warn — the browser analogue of the native host's degraded-stub log (#4a).
+#[wasm_bindgen]
+pub fn last_load_degraded() -> u32 {
+    host_ref().map_or(0, |h| h.last_load_degraded)
 }
 
 /// Store decoded mono `pcm` (captured at `sample_rate` Hz) in the host's PCM
