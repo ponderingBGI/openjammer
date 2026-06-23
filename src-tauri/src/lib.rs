@@ -736,6 +736,7 @@ pub fn run() {
             ai::ai_prewarm,
             ai::ai_restart,
             ai::ai_set_learning,
+            ai::ai_get_learning,
             ai::ai_forget,
             ai::ai_sessions,
             ai::ai_session_messages,

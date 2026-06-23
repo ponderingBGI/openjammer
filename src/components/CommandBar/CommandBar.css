@@ -1023,6 +1023,30 @@ button.command-bar-ai-thinking:focus-visible {
     font-weight: 700;
 }
 
+/* "memory: on/off" — a quiet truth indicator, not a control. The on-state gets a
+   small accent dot; off stays muted so it never competes with the music. */
+.command-bar-ai-memory {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.command-bar-ai-memory[data-on='true'] {
+    color: var(--text-secondary);
+}
+
+.command-bar-ai-memory[data-on='true']::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 4px;
+    border-radius: 50%;
+    background: var(--accent, var(--sketch-black));
+    vertical-align: middle;
+}
+
 .command-bar-ai-yolo-toggle {
     font-family: var(--font-mono);
     font-size: var(--text-xs);

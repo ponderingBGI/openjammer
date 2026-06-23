@@ -32,6 +32,7 @@ import { useCanvasNavigationStore } from "../../store/canvasNavigationStore";
 import { registerAll } from "../../store/commandRegistry";
 import type { Action, ActionCtx, Command } from "../../store/commandRegistry";
 import { seedPaletteLearning } from "../../store/paletteLearningSeed";
+import { useAiLearningStore } from "../../store/aiLearningStore";
 import { getInvoke } from "../../ai/tauri";
 
 // Human-readable group label per category (matches the menu's casing).
@@ -284,7 +285,11 @@ function buildAiActions(): Action[] {
       targets: ["global"],
       surfaces: ["palette"],
       enabled: agentOnly,
-      run: () => invokeAi("ai_set_learning", { enabled: true }),
+      run: () => {
+        invokeAi("ai_set_learning", { enabled: true });
+        // Reflect in the "memory: on" footer at once (the host read confirms it).
+        useAiLearningStore.getState().setEnabled(true);
+      },
     },
     {
       id: "ai.learning.disable",
@@ -294,7 +299,10 @@ function buildAiActions(): Action[] {
       targets: ["global"],
       surfaces: ["palette"],
       enabled: agentOnly,
-      run: () => invokeAi("ai_set_learning", { enabled: false }),
+      run: () => {
+        invokeAi("ai_set_learning", { enabled: false });
+        useAiLearningStore.getState().setEnabled(false);
+      },
     },
     {
       id: "ai.learning.forget",
