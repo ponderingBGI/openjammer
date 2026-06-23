@@ -1203,6 +1203,23 @@ fn set_settings_package(agent_home: &Path, package: &str, present: bool) -> std:
     ojcore_native::atomic_write_path(&settings_path, serialized.as_bytes())
 }
 
+/// Whether `package` is currently present in the agent home's `settings.json`
+/// `packages[]` — the READ-side counterpart of {@link set_settings_package}. A
+/// missing / unreadable / malformed settings file reads as "not present" (false),
+/// never an error, so callers can treat it as a plain boolean.
+fn settings_has_package(agent_home: &Path, package: &str) -> bool {
+    let settings_path = agent_home.join(".pi").join("agent").join("settings.json");
+    std::fs::read_to_string(&settings_path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|root| {
+            root.get("packages")
+                .and_then(|v| v.as_array())
+                .map(|a| a.iter().any(|v| v.as_str() == Some(package)))
+        })
+        .unwrap_or(false)
+}
+
 /// Make the in-Pi permission-gate ACTIVE (jailed) or DROPPED (YOLO) by editing the
 /// agent home's `settings.json` `packages[]` BEFORE the child spawns and reads it.
 /// This is what turns the verified gate policy into live enforcement — and what
@@ -1235,6 +1252,17 @@ pub fn ai_set_learning(enabled: bool) -> Result<(), String> {
         .agent_home;
     set_settings_package(&agent_home, &persistent_intelligence_pkg(), enabled)
         .map_err(|e| e.to_string())
+}
+
+/// Read whether opt-in learning is currently ON — i.e. pi-persistent-intelligence is
+/// present in the agent home's `settings.json`. The read-side of `ai_set_learning`,
+/// so the UI can show a truthful "memory: on" indicator instead of guessing.
+#[tauri::command]
+pub fn ai_get_learning() -> Result<bool, String> {
+    let agent_home = AgentWorkspace::ensure()
+        .map_err(|e| e.to_string())?
+        .agent_home;
+    Ok(settings_has_package(&agent_home, &persistent_intelligence_pkg()))
 }
 
 /// Forget the agent's learned memory (Phase 7) — wipes the pi-memory dir, leaving

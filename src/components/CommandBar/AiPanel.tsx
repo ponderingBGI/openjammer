@@ -41,6 +41,7 @@ import { catalogFingerprint, useModelCatalogStore } from '../../store/modelCatal
 import { useGraphStore } from '../../store/graphStore';
 import { useAuthStore } from '../../auth/authStore';
 import { useSandboxStore } from '../../store/sandboxStore';
+import { useAiLearningStore } from '../../store/aiLearningStore';
 import { AuthChooser } from './AuthChooser';
 import { ChatMessage } from './ChatMessage';
 import { SessionPicker } from './SessionPicker';
@@ -237,6 +238,14 @@ export function AiPanel({
     const projectLabel = useSandboxStore((s) => s.projectLabel);
     const canYolo = useSandboxStore((s) => s.canYolo());
     const [yoloConfirm, setYoloConfirm] = useState(false);
+
+    // Whether Philia remembers this player across sessions — read truthfully from the
+    // host on mount (the toggle commands also set it optimistically). null in the
+    // browser (no host), where the indicator simply doesn't render.
+    const memoryOn = useAiLearningStore((s) => s.enabled);
+    useEffect(() => {
+        void useAiLearningStore.getState().refresh();
+    }, []);
 
     // The composer draft + the resume sub-view.
     const [draft, setDraft] = useState(autoSendInitial ? '' : initialPrompt);
@@ -853,6 +862,19 @@ export function AiPanel({
                     <span className="command-bar-ai-sandbox">
                         Sandboxed&nbsp;↬&nbsp;
                         <code>{projectLabel ? `${projectLabel}/` : 'project/'}</code>
+                    </span>
+                )}
+                {memoryOn !== null && (
+                    <span
+                        className="command-bar-ai-memory"
+                        data-on={memoryOn}
+                        title={
+                            memoryOn
+                                ? 'Philia remembers you across sessions (toggle in ⌘K)'
+                                : 'Philia forgets between sessions (toggle in ⌘K)'
+                        }
+                    >
+                        memory: {memoryOn ? 'on' : 'off'}
                     </span>
                 )}
                 <button
