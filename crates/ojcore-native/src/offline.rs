@@ -54,6 +54,32 @@ impl OfflineDriver {
         buf
     }
 
+    /// Render `frames` of STEREO audio into two planar channel buffers (each rounded
+    /// UP to a whole block) via `process_block_into` — the stereo counterpart of
+    /// [`OfflineDriver::render_mono`], for an offline bounce of a graph that contains a
+    /// `Pan` / `Width` / stereo node. `before_block` runs at each block boundary,
+    /// exactly as in `render_mono`. A mono graph fills both channels identically.
+    pub fn render_stereo<F>(&mut self, frames: usize, mut before_block: F) -> (Vec<f32>, Vec<f32>)
+    where
+        F: FnMut(&mut Engine, usize),
+    {
+        let total = frames.div_ceil(self.block) * self.block;
+        let mut l = vec![0.0f32; total];
+        let mut r = vec![0.0f32; total];
+        let mut frame = 0;
+        while frame < total {
+            before_block(&mut self.engine, frame);
+            let (lb, rb) = (
+                &mut l[frame..frame + self.block],
+                &mut r[frame..frame + self.block],
+            );
+            let mut outs: [&mut [f32]; 2] = [lb, rb];
+            self.engine.process_block_into(&mut outs, self.block);
+            frame += self.block;
+        }
+        (l, r)
+    }
+
     /// Borrow the engine (e.g. to apply setup commands before the first block).
     pub fn engine_mut(&mut self) -> &mut Engine {
         &mut self.engine
@@ -114,5 +140,17 @@ mod tests {
         let buf = driver.render_mono(0, |_e, _f| calls += 1);
         assert!(buf.is_empty());
         assert_eq!(calls, 0, "no blocks, no hook calls");
+    }
+
+    #[test]
+    fn render_stereo_returns_two_finite_channels() {
+        let mut driver = OfflineDriver::new(lone_speaker_engine(), 64);
+        let (l, r) = driver.render_stereo(200, |_e, _f| {});
+        assert_eq!(l.len(), 256, "L rounds up to a whole block");
+        assert_eq!(r.len(), 256, "R rounds up to a whole block");
+        assert!(
+            l.iter().chain(r.iter()).all(|x| x.is_finite()),
+            "no NaN/inf"
+        );
     }
 }
