@@ -77,6 +77,11 @@ function baseName(p: string): string {
  */
 export function classifySelfEdit(name: string, args: unknown): string | null {
     const a = (args ?? {}) as Record<string, unknown>;
+    // The host-mediated self-package tool is unambiguous — Philia authoring a tool.
+    if (name === 'save_self_package') {
+        const pkg = String(a.name ?? '').trim();
+        return pkg ? `saved itself a tool (${pkg})` : 'saved itself a tool';
+    }
     const pathLike = String(a.path ?? a.file ?? a.filename ?? a.target ?? '');
     const cmd = String(a.command ?? a.cmd ?? '');
     const touchesMemory = pathLike.includes('pi-memory') || cmd.includes('pi-memory');

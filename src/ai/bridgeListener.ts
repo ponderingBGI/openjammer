@@ -60,11 +60,15 @@ export async function startBridgeListener(): Promise<(() => void) | null> {
 
         let result: { ok: boolean; data?: unknown; error?: string };
         try {
-            if (!isAgentToolName(payload.name)) {
+            if (payload.name === 'save_self_package') {
+                // SHAPE-SELF: host-mediated self-modification, NOT a graph tool (so it
+                // is not in AGENT_TOOL_NAMES) — handled before the agent-tool guard.
+                // The Rust command writes the package + registers it cold-start-deferred.
+                const slug = await invoke('ai_save_self_package', payload.args ?? {});
+                result = { ok: true, data: { slug } };
+            } else if (!isAgentToolName(payload.name)) {
                 throw new Error(`Unsupported OpenJammer bridge tool: ${payload.name}`);
-            }
-            const name = payload.name;
-            if (name === 'get_signal') {
+            } else if (payload.name === 'get_signal') {
                 // The one ASYNC read: a transient meter probe needs a poll tick to
                 // settle, so it is handled outside the synchronous applyToolCall.
                 const applied = await applyGetSignal(
@@ -72,9 +76,9 @@ export async function startBridgeListener(): Promise<(() => void) | null> {
                     createEnvPort(),
                 );
                 result = { ok: applied.ok, data: applied.data };
-            } else if (READ_TOOLS.has(name)) {
+            } else if (READ_TOOLS.has(payload.name)) {
                 // The read tool's args ARE its fields; mirror the streamed shape.
-                const call = { name, args: payload.args } as AgentToolCall;
+                const call = { name: payload.name, args: payload.args } as AgentToolCall;
                 const applied = applyToolCall(
                     call,
                     createGraphStoreApi(),
