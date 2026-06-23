@@ -7,7 +7,9 @@
 //!   cargo run -p ojcore-native --bin render -- [out.wav] [seconds]
 
 use ojcore::effects::{biquad_param, delay_param};
-use ojcore::{compile, Engine, PluginRegistry, BIQUAD_ID, DELAY_ID, SPEAKER_OUT_ID};
+use ojcore::{
+    compile, pan_param, Engine, PluginRegistry, BIQUAD_ID, DELAY_ID, PAN_ID, SPEAKER_OUT_ID,
+};
 use ojcore_native::{AssetStore, OfflineDriver, Pcm};
 use ojinstrument::{param as ip, register_all, RegisterOpts, OSC_ID};
 use ojproto::{ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, Param, PrimitiveKind, RtCommand};
@@ -99,9 +101,13 @@ fn main() {
         0,
         &[],
     ));
+    // A stereo Pan between the delay and the master, swept left->right below so the
+    // offline bounce is genuinely STEREO (not a mono fan-out).
+    g.nodes.push(node(5, PAN_ID, PrimitiveKind::Pan, 1, 1, &[]));
     g.edges.push(edge(1, 2));
     g.edges.push(edge(2, 3));
-    g.edges.push(edge(3, 4));
+    g.edges.push(edge(3, 5));
+    g.edges.push(edge(5, 4));
 
     let mut reg = PluginRegistry::new();
     register_all(&mut reg, RegisterOpts::full());
@@ -117,7 +123,7 @@ fn main() {
     // The "second clock": the OfflineDriver owns the block loop + virtual transport;
     // this hook is the SCHEDULE, applying note edges at each block boundary frame.
     let mut playing: Option<u8> = None;
-    let buf = driver.render_mono(play_frames + tail_frames, |engine, frame| {
+    let (left, right) = driver.render_stereo(play_frames + tail_frames, |engine, frame| {
         // Schedule notes only within the play region; the tail just rings out.
         let want = if frame < play_frames {
             Some(notes[(frame / note_frames) % notes.len()])
@@ -140,8 +146,22 @@ fn main() {
             }
             playing = want;
         }
+        // Sweep the pan left -> right across the play region (equal-power), so the
+        // arpeggio moves across the stereo field — a genuine offline STEREO bounce.
+        let pos = (frame as f32 / play_frames.max(1) as f32) * 2.0 - 1.0;
+        engine.apply(RtCommand::SetParam {
+            node: NodeIdx(5),
+            param: pan_param::PAN,
+            value: pos.clamp(-1.0, 1.0),
+        });
     });
-    let total = buf.len();
+    // Interleave L/R into the stereo buffer the WAV + analysis use.
+    let total = left.len();
+    let mut buf = vec![0.0f32; total * 2];
+    for (i, (&lv, &rv)) in left.iter().zip(right.iter()).enumerate() {
+        buf[i * 2] = lv;
+        buf[i * 2 + 1] = rv;
+    }
 
     let n = buf.len() as f64;
     let rms = (buf.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>() / n).sqrt();
@@ -151,14 +171,14 @@ fn main() {
 
     let pcm = Pcm {
         samples: buf,
-        channels: 1,
+        channels: 2,
         sample_rate: SR,
     };
     AssetStore.write_wav_file(&out, &pcm).expect("write wav");
 
     println!("ojcore offline render -> {out}");
     println!(
-        "  {:.2}s @ {} Hz mono, {} frames",
+        "  {:.2}s @ {} Hz stereo, {} frames",
         total as f32 / SR as f32,
         SR,
         total
