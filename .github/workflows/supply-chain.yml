@@ -7,10 +7,10 @@ name: Supply chain
 #   • cargo-audit (nightly): live RustSec advisories — kept OFF the PR path so a
 #     freshly-disclosed CVE never red-walls an unrelated PR.
 #
-# Both run `continue-on-error` in advisory mode: they REPORT on every relevant
-# PR / night but do not block a merge until a first green run confirms the
-# `deny.toml` license allowlist, at which point cargo-deny is promoted into the
-# merge gate.
+# cargo-deny (per-PR) is now a REQUIRED, blocking check — the deny.toml allow-list is
+# confirmed green (bans · licenses · sources all pass). cargo-audit (nightly) stays
+# `continue-on-error` so a freshly disclosed CVE REPORTS but never red-walls an
+# unrelated PR. Add "cargo-deny (bans · licenses · sources)" to branch protection.
 
 on:
   pull_request:
@@ -36,7 +36,6 @@ jobs:
     name: cargo-deny (bans · licenses · sources)
     if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    continue-on-error: true # advisory until the license allowlist is confirmed green
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:

@@ -74,3 +74,6 @@ ds-bundle/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+
+# Generated third-party Rust notice bundle (`just licenses`; bundled into installers at release)
+THIRD-PARTY-RUST.html

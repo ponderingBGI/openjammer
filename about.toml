@@ -1,0 +1,25 @@
+# cargo-about configuration — generates the Part-A third-party Rust notice bundle.
+# Run via `just licenses` (writes THIRD-PARTY-RUST.html). See THIRD-PARTY-LICENSES.md.
+#
+# `accepted` mirrors deny.toml's license allow-list: these are the licenses we expect to
+# find in the dependency tree. A dependency carrying anything else is flagged here, the
+# same way it fails the cargo-deny gate — one source of truth, two tools.
+
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "MPL-2.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "0BSD",
+    "CDLA-Permissive-2.0",
+    "AGPL-3.0",
+    "AGPL-3.0-only",
+]

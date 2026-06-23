@@ -1,29 +1,33 @@
-# OpenJammer Plugin Exception — v0.1 **(DRAFT — NOT YET IN EFFECT)**
+# OpenJammer Plugin Exception — v1.0
 
-> **STATUS: DRAFT. This is a proposal, not an active grant.** It takes effect only after
-> **(a)** review by a FOSS-competent attorney and **(b)** adoption by the project steward
-> (and the contributor-licensing change in [CONTRIBUTING.md](CONTRIBUTING.md), see
-> [LICENSING.md](LICENSING.md)). **Until both occur, OpenJammer is licensed under the
-> GNU AGPL-3.0 alone** ([LICENSE](LICENSE)); this draft grants no additional permission, is
-> not attached to the LICENSE, and is not referenced as an active AGPL §7 additional
-> permission anywhere in the tree. **This is not legal advice.**
+> **STATUS: IN EFFECT.** This is an active additional permission granted by the OpenJammer
+> copyright holders under section 7 of the GNU Affero General Public License, version 3.
+> OpenJammer is licensed under **AGPL-3.0-only WITH the OpenJammer Plugin Exception**
+> ([LICENSE](LICENSE) + this file). In any conflict, [LICENSE](LICENSE) and this file control
+> over the plain-language explainer in [LICENSING.md](LICENSING.md). **This is not legal advice;**
+> an attorney review is a welcome, non-blocking safety net, not a precondition.
 >
 > *Why this exists:* OpenJammer's belief is "a minimal core made infinite by everyone." The
-> AGPL keeps the **instrument** strongly copyleft (no closed superset can undercut the commons —
-> the lesson of VCV Rack's permissive era and the "Floats"/miRack forks), while this Exception
-> makes **plugins — including paid, proprietary ones — legal**, so a real creator economy can
-> exist. It is patterned on the **GNU Classpath Exception** and the **GCC Runtime Library
-> Exception** (unconditional "under terms of your choice"), deliberately **dropping VCV's
-> "free of charge" condition** so commercial plugins are permitted. Money lives on the
-> marketplace Terms of Service, never on the license (the "no wall" belief).
+> AGPL keeps the **instrument** strongly copyleft (no closed superset can undercut the commons).
+> That is the lesson VCV Rack learned in its permissive (BSD) era: a paid, IP-infringing clone
+> *plugin* ("Floats") triggered its move to GPL at v1, and a closed commercial *app fork*
+> ("miRack") shipped legally from the BSD code — showing how a permissive core lets a closed
+> competitor undercut a 100+ developer commons. This Exception makes **plugins — including paid,
+> proprietary ones — legal**, so a real creator economy can exist. It is patterned on the **GNU
+> Classpath Exception** and the **GCC Runtime Library Exception** (unconditional "under terms of
+> your choice"), deliberately **dropping VCV's "free of charge" condition** so commercial plugins
+> are permitted. Money lives on the marketplace Terms of Service, never on the license (the "no
+> wall" belief).
 
 ---
 
 This Exception is an additional permission under section 7 of the GNU Affero General Public
 License, version 3 ("AGPLv3"), the license under which OpenJammer (the "Covered Work") is
-distributed. It applies to any file of the Covered Work that carries a notice referring to this
-Exception. As permitted by AGPLv3 section 7, any recipient may remove this Exception from any
-copy they convey.
+distributed. The copyright holders grant this Exception for the OpenJammer Covered Work as
+distributed in the project's official repository as a whole, and it applies additionally to any
+file of the Covered Work that carries a notice referring to this Exception. As permitted by
+AGPLv3 section 7, any recipient may remove this Exception from any copy they convey (doing so
+only makes that copy more strongly copyleft; it cannot affect copies obtained from upstream).
 
 ## 0. Definitions
 
@@ -108,10 +112,14 @@ to remote users. Your section 13 obligation continues to cover the Covered Work 
 modifications to it in full, and is in no way diminished by this clause; this clause clarifies only
 that the obligation does not reach independent Plugins.
 
-> **⚠ Highest counsel-scrutiny item.** AGPL is silent on §13 here and VCV (GPLv3) offers no
-> precedent. This is a **novel clause**, drafted as a scope *clarification*, not a waiver of any
-> third party's rights (which §7/§13 could not permit anyway). Counsel must confirm it is valid and
-> effective before this Exception is adopted.
+> **Scope clarification, not a waiver.** This clause disposes only of the copyright holders' own
+> §13 claim — it declines to treat an independent Plugin as part of *their* Corresponding Source.
+> It does not, and could not, waive any third party's §13 rights. The mechanism is well
+> established: the FSF's own §7 templates scope Corresponding Source, SPDX lists a
+> `GPL-3.0-interface-exception`, and translate5 ships an AGPLv3 §7 exception that carves out
+> independent plugins. It is on its strongest footing here because the copyright holders own the
+> entire Covered Work. The clause is untested in court; an optional attorney review remains a
+> welcome safety net (see [LICENSING.md](LICENSING.md)).
 
 ## 5. Generated and compiled DSP
 
@@ -137,7 +145,7 @@ version.
 
 ---
 
-*Drafting provenance: VCV Rack v2 LICENSE.md (AGPL/GPLv3 §7 plugin exception, structure), the GNU
+*Drafting provenance: VCV Rack v2 LICENSE.md (GPLv3 §7 plugin exception, structure), the GNU
 Classpath Exception (unconditional "under terms of your choice"), and the GCC Runtime Library
 Exception (combining/output, no-weakening). See [LICENSING.md](LICENSING.md) for the plain-language
-explainer and the counsel sign-off list.*
+explainer and the optional attorney-review checklist.*

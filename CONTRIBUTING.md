@@ -213,9 +213,34 @@ We use:
 - Help others in GitHub Issues when possible
 - Share your workflows and creative uses
 
-## License
+## License & sign-off (the contributor agreement)
 
-By contributing, you agree that your contributions will be licensed under the AGPL-3.0 license.
+OpenJammer is **AGPL-3.0-only WITH the OpenJammer Plugin Exception** ([LICENSE](LICENSE) +
+[LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md)). Two lightweight things are asked of every contribution.
+
+**1. The grant.** By contributing, you agree:
+
+> By contributing you certify the Developer Certificate of Origin (DCO 1.1, see [.github/DCO](.github/DCO))
+> and agree your contributions are licensed under **AGPL-3.0-only WITH the OpenJammer Plugin Exception**
+> ([LICENSE](LICENSE) + [LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md)), and you grant the project steward
+> permission to license your contribution under that Exception and under **future versions of that
+> Exception** adopted by the steward.
+
+The "future versions" clause lets a revised Exception ship without chasing every contributor for consent.
+It grants the steward **no** right to take the project proprietary — it is relicensing latitude for the
+Exception only. (Why this matters: [LICENSING.md](LICENSING.md) §6.)
+
+**2. Sign your work (DCO).** Add a `Signed-off-by` line to every commit by committing with `-s`:
+
+```bash
+git commit -s -m "feat: add amazing feature"
+```
+
+This appends `Signed-off-by: Your Name <your@email>` (use a real name + email). It certifies you wrote
+the patch or otherwise have the right to submit it under the license above — including **AI-assisted**
+work, so long as you have the right to contribute it. A CI check
+([.github/workflows/dco.yml](.github/workflows/dco.yml)) fails any PR with an unsigned commit; fix it
+with `git commit --amend -s` (or `git rebase --signoff` for several commits).
 
 ---
 

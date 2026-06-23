@@ -1,9 +1,10 @@
-# Trademark Policy **(DRAFT — pending steward adoption + trademark counsel)**
+# Trademark Policy
 
-> **Status: DRAFT proposal.** Not yet a registered mark or an adopted policy. Because the
-> [Plugin Exception](LICENSE-EXCEPTION.md) deliberately permits commercial, non-copyleft plugins, the
-> **trademark — not the license — is OpenJammer's durable anti-fork moat.** Register the mark **before
-> marketplace launch.** This is not legal advice.
+> **Status: adopted policy.** The mark itself is **not yet registered** — registration is an owner
+> action (see below). Because the [Plugin Exception](LICENSE-EXCEPTION.md) deliberately permits
+> commercial, non-copyleft plugins, the trademark is a **supporting** moat: it protects the *name*, not
+> the project. The durable moat is the marketplace network effect + maintainer trust. **Register the
+> mark before marketplace launch.** This is not legal advice.
 
 ## The marks
 
@@ -37,15 +38,32 @@ redistribute the *code*; it does **not** grant any right to use the *Marks*.
 - **First-party / verified** marketplace status (and any use of the Marks it confers) is granted only
   through the marketplace Terms of Service, never implied.
 
-## Why this matters
+## Why this matters (and its limits)
 
-The Plugin Exception is what makes a paid ecosystem legal; it intentionally does **not** copyleft
-commercial plugins. So the thing that stops a closed competitor from shipping "OpenJammer Pro" and
-trading on the community's reputation is the **brand**. Registering and consistently enforcing the Marks
-— while keeping nominative use generously open — is how the commons stays trustworthy without walling
-anything off.
+The Plugin Exception makes a paid ecosystem legal; it intentionally does **not** copyleft commercial
+plugins. The trademark stops a closed competitor from shipping "OpenJammer Pro" and *trading on the
+name* — but be clear-eyed about its limit: rename-forks (OpenTofu, Valkey, OpenSearch) show a competitor
+can rebrand and still gain ground, so the mark protects the **name, not the project**. The **durable**
+moat is the two-sided plugin-marketplace network effect plus maintainer and community trust. The
+trademark's real leverage is a licensed **"Certified for OpenJammer" badge** (the Apple "Made for
+iPhone" model), granted only through the marketplace and distinct from free nominative use. A
+*published* policy like this one is itself required to avoid losing the mark to "naked licensing" — so
+registering and consistently (but generously) enforcing the Marks is how the commons stays trustworthy
+without walling anything off.
+
+## Registration (owner action — before marketplace launch)
+
+Registering is cheap relative to its value and should be done before the marketplace launches:
+
+- **US (USPTO):** file an **intent-to-use (§1(b))** application for the "OpenJammer" wordmark and the
+  logo — ~**$350/class** (single fee tier as of Jan 2025). §1(b) locks a priority date before public
+  use; prove use later with a Statement of Use.
+- **EU (EUTM):** the EU is **first-to-file** (squatter risk), so file an EUTM in parallel — ~€850 for
+  one class.
+- Use trademark counsel for the filings; the goods/services class for software + an online marketplace
+  matters. Police the mark (app stores, domains, new filings) — unenforced marks weaken.
 
 ---
 
 *See [LICENSING.md](LICENSING.md) for the full picture and [LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md)
-for the (draft) plugin exception.*
+for the plugin exception.*

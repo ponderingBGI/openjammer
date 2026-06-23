@@ -121,11 +121,16 @@ the two beliefs, the code values, and the playbook — is in **[agents.md](agent
 
 ## License
 
-OpenJammer is licensed under the **[AGPL-3.0 License](LICENSE)**:
+OpenJammer is licensed under **AGPL-3.0-only WITH the OpenJammer Plugin Exception**
+([LICENSE](LICENSE) + [LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md)):
 
 - ✅ Free to use, modify, and distribute.
 - ✅ Open source, community-driven.
-- ⚠️ If you run a modified version as a web service, you must share your source code.
+- ✅ **Plugins may carry any license — including paid, proprietary ones** — via the Plugin Exception.
+- ⚠️ If you run a modified version as a web service, you must share your source code (not your plugins).
+
+See [LICENSING.md](LICENSING.md) for the plain-language explainer and [TRADEMARK.md](TRADEMARK.md) for
+the brand policy.
 
 ---
 

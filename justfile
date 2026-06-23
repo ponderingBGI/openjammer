@@ -23,6 +23,18 @@ fmt:
 clippy:
     cargo clippy --workspace --all-targets -- -D warnings
 
+# ── Supply chain / licensing ───────────────────────────────────────────────────
+# License/bans/sources gate — the SAME command the required supply-chain.yml runs.
+# Needs cargo-deny: `cargo install --locked cargo-deny`.
+deny:
+    cargo deny --all-features check bans licenses sources
+
+# Generate the Part-A third-party Rust notice bundle (THIRD-PARTY-RUST.html) for the
+# installer payload, via cargo-about + about.toml/about.hbs. See THIRD-PARTY-LICENSES.md.
+# Needs cargo-about: `cargo install --locked cargo-about`.
+licenses:
+    cargo about generate about.hbs > THIRD-PARTY-RUST.html
+
 # ── Tests ────────────────────────────────────────────────────────────────────
 # nextest gives process-per-test isolation — STRICTLY safer than `cargo test`'s
 # shared process for the global-allocator swap `assert_no_alloc` installs.

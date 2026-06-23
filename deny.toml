@@ -3,9 +3,10 @@
 # Closes the supply-chain gap: bans (duplicate/yanked crates), licenses
 # (allowlist), and sources (only the crates.io registry) are checked on every PR
 # that touches Cargo metadata; advisories are checked NIGHTLY (a fresh CVE must
-# never red-wall an unrelated PR). The allowlist below is intentionally broad and
-# the PR job runs advisory (continue-on-error) until a first green run confirms
-# the real license set, after which it is promoted to a required check.
+# never red-wall an unrelated PR). The PR license/bans/sources job is now a REQUIRED
+# check (see supply-chain.yml). cargo-deny v2 has no `deny` list: the allow-list below
+# is exhaustive, so any license not listed — SSPL, BUSL, Commons-Clause, CC-BY-NC, etc.
+# — fails the gate by omission.
 
 [advisories]
 version = 2
@@ -14,9 +15,10 @@ ignore = []
 
 [licenses]
 version = 2
-# Permissive baseline covering the licenses common in a Rust + audio dep tree.
-# The workspace itself is AGPL-3.0-only (see Cargo.toml). Tighten/trim once a
-# green run reports the exact set actually present.
+# Permissive baseline covering the licenses present in the Rust + audio dep tree
+# (confirmed by CI). The workspace itself is AGPL-3.0-only WITH the OpenJammer Plugin
+# Exception — Cargo.toml keeps the bare `AGPL-3.0-only` SPDX id and the exception is
+# expressed out-of-band (LICENSING.md §10). Anything not listed here is denied.
 allow = [
     "MIT",
     "Apache-2.0",

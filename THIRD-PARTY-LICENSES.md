@@ -1,4 +1,4 @@
-# Third-Party Licenses & Notices **(SCAFFOLD — to be completed before public release)**
+# Third-Party Licenses & Notices
 
 > AGPL §4/§5 require that conveyed binaries carry the appropriate notices. This file has two parts:
 > **(A)** the Rust dependency tree (auto-generated), and **(B)** components the cargo tooling **cannot
@@ -7,13 +7,11 @@
 
 ## A. Rust dependency tree (auto-generated)
 
-Generate with a tool such as `cargo about` or `cargo bundle-licenses` and commit the output here (or as
-a sibling file bundled into installers):
+Generate the Part-A notice with **`just licenses`** (runs `cargo about generate` against the committed
+[`about.toml`](about.toml)) and bundle the output into the installer payload at release:
 
 ```
-# example:
-cargo install cargo-about
-cargo about generate about.hbs > THIRD-PARTY-RUST.html   # bundle into the installer payload
+just licenses               # writes THIRD-PARTY-RUST.html via cargo-about + about.toml
 ```
 
 **Audit verdict (paper audit, pending a live `cargo deny check licenses` run):** the tree is **clean for
@@ -34,6 +32,6 @@ present, and add explicit denials for SSPL-1.0, BUSL-1.1, Commons-Clause, and CC
 | **Bundled `.sf2` soundfont(s)** | Sample data played by `rustysynth` (which is MIT) | Per-asset — **audit the specific file** | Many GM soundfonts are permissive/CC0; some are not. The soundfont **data** has its own license independent of `rustysynth`. Confirm before bundling. |
 
 > **The default public installer** (`build-installers.yml` → `bun run tauri build`, default features) ships
-> the AGPL-JUCE host. Ensure the AGPL text + [LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md) (once adopted) +
-> this notice are bundled into the installer payload. See [LICENSING.md](LICENSING.md) §9 for the JUCE /
+> the AGPL-JUCE host. Ensure the AGPL text + [LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md) + this notice
+> are bundled into the installer payload. See [LICENSING.md](LICENSING.md) §9 for the JUCE /
 > CLAP-default decision.
