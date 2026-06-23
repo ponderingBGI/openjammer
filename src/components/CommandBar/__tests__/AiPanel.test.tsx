@@ -116,7 +116,7 @@ describe('AiPanel chat', () => {
     it('shows the composer and the welcome on an empty conversation', () => {
         renderPanel();
         expect(screen.getByPlaceholderText(/Ask anything/i)).toBeInTheDocument();
-        expect(screen.getByText(/describe what to build/i)).toBeInTheDocument();
+        expect(screen.getByText(/i'm Philia/i)).toBeInTheDocument();
     });
 
     it('prewarms the Pi child once on entering AI mode when configured', () => {

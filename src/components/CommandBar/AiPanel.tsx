@@ -124,8 +124,38 @@ function starterChips(nodeCount: number, hasOutput: boolean): StarterChip[] {
     return [
         { label: 'Add reverb', prompt: 'Add a reverb after my current sound.' },
         { label: 'Make it lo-fi', prompt: 'Make my current patch sound lo-fi.' },
-        { label: 'Suggest an effect', prompt: 'Suggest and add one effect that would improve this patch.' },
+        { label: 'Debug a quiet node', prompt: 'One of my nodes seems silent — look at the logs and tell me why.' },
     ];
+}
+
+interface WelcomeCopy {
+    greeting: string;
+    body: string;
+}
+
+/**
+ * Philia's state-aware first-run hello — the welcome re-voiced in the agent's
+ * persona (warm, lowercase, the music comes first). It surfaces what Philia can do —
+ * build, fix, debug — through the greeting itself, never a feature list, and only
+ * shows in the empty/new-chat state. The Ctrl+Z safety line is appended in the JSX.
+ */
+function welcomeCopy(nodeCount: number, hasOutput: boolean): WelcomeCopy {
+    if (nodeCount === 0) {
+        return {
+            greeting: "hi — i'm Philia, your bandmate in here.",
+            body: "blank page, which is the fun part. tell me the sound you want and i'll build it straight onto the canvas — i can fix the wiring or debug a node from the logs too.",
+        };
+    }
+    if (!hasOutput) {
+        return {
+            greeting: 'hey — Philia here.',
+            body: "i can see what you've got, but nothing's reaching the speakers yet. i can finish the wiring, add a sound, or chase down why it's quiet.",
+        };
+    }
+    return {
+        greeting: 'hey — Philia here.',
+        body: 'nice patch. i can add to it, swap a sound, rewire it, or debug it from the logs — say the word.',
+    };
 }
 
 /** The catalog-cache key for the current provider config (see modelCatalogStore). */
@@ -177,6 +207,10 @@ export function AiPanel({
 
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const transcriptRef = useRef<HTMLDivElement>(null);
+    // Whether the transcript is scrolled to (near) its bottom. We only auto-stick
+    // to new turns while pinned there, so we never yank the view out from under a
+    // player who scrolled up to read — report without stealing focus.
+    const pinnedRef = useRef(true);
     const autoSentRef = useRef(false);
     const thinkingLevelRef = useRef<PiThinkingLevel>('medium');
     // The single reasoning control (footer pill). We pulse it in place on change
@@ -249,6 +283,10 @@ export function AiPanel({
         const [count, out] = canvasShape.split(':');
         return starterChips(Number(count), out === '1');
     }, [canvasShape]);
+    const welcome = useMemo(() => {
+        const [count, out] = canvasShape.split(':');
+        return welcomeCopy(Number(count), out === '1');
+    }, [canvasShape]);
 
     // Re-derive auth status from native on mount (the key lives in the keychain).
     useEffect(() => {
@@ -266,11 +304,18 @@ export function AiPanel({
         }
     }, [available, showAuth, view]);
 
-    // Auto-stick to the bottom as turns stream in.
+    // Auto-stick to the bottom as turns stream in — but ONLY when already pinned
+    // there. If the player has scrolled up to read an earlier turn, leave their
+    // view exactly where they put it.
     useEffect(() => {
         const el = transcriptRef.current;
-        if (el) el.scrollTop = el.scrollHeight;
+        if (el && pinnedRef.current) el.scrollTop = el.scrollHeight;
     }, [messages]);
+
+    const onTranscriptScroll = useCallback(() => {
+        const el = transcriptRef.current;
+        if (el) pinnedRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32;
+    }, []);
 
     const updateDraft = useCallback((value: string) => {
         setDraft(value);
@@ -657,7 +702,7 @@ export function AiPanel({
                 </div>
             </div>
 
-            <div className="command-bar-ai-transcript" ref={transcriptRef}>
+            <div className="command-bar-ai-transcript" ref={transcriptRef} onScroll={onTranscriptScroll}>
                 {runtimeStatus && (
                     <div className="command-bar-ai-runtime" role="status">
                         {runtimeStatus}
@@ -670,12 +715,10 @@ export function AiPanel({
                 )}
                 {messages.length === 0 && (
                     <div className="command-bar-ai-welcome">
-                        <p className="command-bar-ai-welcome-title">Ask, or describe what to build.</p>
+                        <p className="command-bar-ai-welcome-title">{welcome.greeting}</p>
                         <p className="command-bar-ai-welcome-body">
-                            Questions get answered; build requests land on the canvas live —
-                            undo anything with <kbd className="command-bar-kbd">{MOD}+Z</kbd>.
-                            Type <code>/new</code> to start over, <code>/resume</code> to revisit a session,
-                            or press <kbd className="command-bar-kbd">{MOD}+↑</kbd> to edit an earlier prompt.
+                            {welcome.body} everything i touch is one{' '}
+                            <kbd className="command-bar-kbd">{MOD}+Z</kbd> away.
                         </p>
                         <div className="command-bar-ai-welcome-chips">
                             {starters.map((chip) => (
