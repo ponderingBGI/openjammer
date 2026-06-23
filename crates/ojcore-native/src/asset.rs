@@ -170,6 +170,12 @@ impl AssetStore {
         let mut samples: Vec<f32> = Vec::new();
         let mut channels: u16 = 0;
         let mut sample_rate: u32 = 0;
+        // `copy_to_vec_interleaved` REPLACES its target with just this packet's
+        // samples (it is "copy to", not "append to"). Decode each packet into a
+        // scratch buffer and EXTEND the accumulator, or every sample longer than one
+        // packet (~16 ms) is truncated to its final packet. (Surfaced by the offline
+        // audition tool: a 2 s WAV decoded to 0.01 s.)
+        let mut packet_samples: Vec<f32> = Vec::new();
 
         loop {
             let packet = match format.next_packet() {
@@ -186,7 +192,8 @@ impl AssetStore {
                     let spec = decoded.spec();
                     sample_rate = spec.rate();
                     channels = spec.channels().count() as u16;
-                    decoded.copy_to_vec_interleaved(&mut samples);
+                    decoded.copy_to_vec_interleaved(&mut packet_samples);
+                    samples.extend_from_slice(&packet_samples);
                 }
                 // Skip recoverable per-packet errors; halt on the rest.
                 Err(SymphoniaError::DecodeError(_)) | Err(SymphoniaError::IoError(_)) => continue,
@@ -350,6 +357,44 @@ mod tests {
             assert!((decoded.samples[f * 2] - 0.25).abs() < 1e-6, "L@{f}");
             assert!((decoded.samples[f * 2 + 1] + 0.25).abs() < 1e-6, "R@{f}");
         }
+    }
+
+    #[test]
+    fn wav_roundtrip_multi_packet_full_length() {
+        // The decoder reads the stream packet-by-packet; a sample longer than one
+        // packet MUST accumulate EVERY packet, not keep only the last. Regression:
+        // `copy_to_vec_interleaved` REPLACES its target, so the loop used to
+        // truncate any sample > ~16 ms to its final packet (the other round-trip
+        // tests use <1-packet samples, so they never caught it — the offline
+        // audition tool did). Use a multi-packet length and assert the full span.
+        let store = AssetStore::new();
+        let frames = 20_000; // ~0.42 s @ 48 kHz — spans many decode packets
+        let samples: Vec<f32> = (0..frames)
+            .map(|i| ((i % 100) as f32 / 100.0) * 2.0 - 1.0) // sawtooth (libm-free)
+            .collect();
+        let original = Pcm {
+            samples,
+            channels: 1,
+            sample_rate: 48_000,
+        };
+        let bytes = store.encode_wav_bytes(&original).expect("encode");
+        let decoded = store.decode_wav_bytes(bytes).expect("decode");
+
+        assert_eq!(decoded.channels, 1);
+        assert_eq!(decoded.sample_rate, 48_000);
+        assert_eq!(
+            decoded.frames(),
+            frames,
+            "multi-packet WAV truncated: got {} of {frames} frames",
+            decoded.frames()
+        );
+        // The bug kept only the LAST packet, so the head + middle would be lost.
+        assert!((decoded.samples[0] - original.samples[0]).abs() < 1e-6, "head lost");
+        let mid = frames / 2;
+        assert!(
+            (decoded.samples[mid] - original.samples[mid]).abs() < 1e-6,
+            "middle lost"
+        );
     }
 
     #[test]
