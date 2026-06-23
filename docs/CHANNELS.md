@@ -164,6 +164,38 @@ After step 1 the kernel is stereo-*capable* with zero behavior change; steps 2�
 and are independently valuable. Automation, PDC, and MPE are then built **once** against this real
 channel model — which is exactly why stereo lands before them.
 
+**Status: COMPLETE (both tiers).** Step 1 (the `n_channels` substrate) → per-lane `compile`/`exec` →
+`process_block_into` N-channel output → the §4 adaptation → the native *and* wasm planar hosts → the
+general mid-graph lane-aware `mix_input_lane` → two real stereo nodes (`Pan`, `Width`). Every step stayed
+golden-render-clean; the `pan_centre`/`pan_hard_left` stereo goldens now lock the path bit-exactly in CI.
+A musician can pan and widen sound in true stereo at `<5ms` (native) or `~15–25ms` (browser).
+
+## 8. Authoring a stereo node (the recipe + the traps)
+
+A stereo node is an ordinary plugin whose manifest declares `audio_in_channels` / `audio_out_channels`
+greater than 1; the engine derives the lanes and hands `process` the extra `ProcessCtx` slices.
+`Pan` (`crates/ojcore/src/pan.rs`, mono→stereo, equal-power) and `Width`
+(`crates/ojcore/src/width.rs`, stereo→stereo mid/side) are the worked examples. A new **built-in** stereo
+node touches a fixed set of coupled sources — keep them in lockstep or a checker/test fails:
+
+1. **`ojproto::PrimitiveKind`** — add the variant, mirrored in all FIVE SSOT declarations: the Rust enum,
+   `wire_shapes.rs`'s list, `schemas/primitive-kinds.json`, the TS `PRIMITIVE_KINDS` tuple, and
+   `schemas/oj-plugin-v1.json`'s `kind` enum (the `ssot-set-equality` + `primitive-kinds-parity` tests enforce this).
+2. **The node + loader** (`crates/ojcore/src/<node>.rs`) with the channel counts on its `PortDecl`,
+   registered in `register.rs` (update its count tests). Smoothers must `reset` to the **stored target**,
+   never a hardcoded default.
+3. **The backend map** (`src/audio/ojgraph/backendMap.ts`) — map the kind to its real `builtin.*` id on
+   BOTH backends. **Trap:** an unmapped kind silently falls back to `builtin.gain`, which writes a single
+   lane and collapses the stereo.
+4. **The editor node-def** — the `NodeType` union **and** `KNOWN_PLUGIN_IDS` (`src/engine/types.ts`), the
+   `nodeDefinitions` entry, `KIND_BY_TYPE`, and (for a signed/wide range) `PARAMS_BY_TYPE`
+   (`src/engine/manifest.ts`). **Trap:** miss `KNOWN_PLUGIN_IDS` and `isPluginId` fails, so `get()` returns
+   `MISSING_DEFINITION` and the manifest silently becomes `builtin.container`.
+5. **A `golden_render` stereo case** so the bounce is locked end to end through the real registry.
+
+Authoring against a Faust/wasm bridge instead needs none of the `PrimitiveKind` churn — the channel counts
+ride the dynamic manifest, so only the DSP + ports change.
+
 ---
 
 *Related: [BOUNDARY.md](./BOUNDARY.md) §9 (one core, two clocks) · [STABILITY.md](./STABILITY.md)
