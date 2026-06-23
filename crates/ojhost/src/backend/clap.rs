@@ -200,13 +200,29 @@ pub(super) fn open(
     let entry = unsafe { PluginEntry::load(&desc.path) }.map_err(|e| HostError::Load {
         message: e.to_string(),
     })?;
+    // `open_from_entry` builds an instance that keeps its own internal clone of the
+    // entry, so the local `entry` may drop when `open` returns.
+    open_from_entry(&entry, desc, sample_rate, max_block)
+}
+
+/// Shared body of [`open`] over an already-loaded [`PluginEntry`]. Factored out so a
+/// device-free unit test can drive the real backend with an IN-PROCESS `clack`
+/// plugin (`PluginEntry::load_from_clack`) — no `.clap` dylib, no audio device — and
+/// exercise the `oj.state` save/restore round-trip against a real CLAP state vtable.
+/// Performs activate -> start_processing here (off the RT thread).
+fn open_from_entry(
+    entry: &PluginEntry,
+    desc: &PluginDescriptor,
+    sample_rate: f32,
+    max_block: usize,
+) -> Result<Box<dyn HostedBackend>, HostError> {
     let info = host_info();
     let id = std::ffi::CString::new(desc.uid.as_str()).map_err(|_| HostError::Load {
         message: "plugin uid contains an interior NUL".into(),
     })?;
 
     let mut instance =
-        PluginInstance::<OjClapHost>::new(|_| OjShared, |_| OjMainThread, &entry, &id, &info)
+        PluginInstance::<OjClapHost>::new(|_| OjShared, |_| OjMainThread, entry, &id, &info)
             .map_err(|e| HostError::Load {
                 message: e.to_string(),
             })?;
@@ -226,11 +242,9 @@ pub(super) fn open(
     })?;
 
     // RETAIN the `!Send` main-thread `instance` handle (moved into the backend
-    // below) so the `oj.state` save/restore can reach the CLAP state extension —
-    // it owns a second `Arc` to the inner alongside `started`. `entry` is dropped
-    // here; the instance keeps its own internal clone alive.
-    drop(entry);
-
+    // below) so the `oj.state` save/restore can reach the CLAP state extension — it
+    // owns a second `Arc` to the inner alongside `started`. The caller's `entry`
+    // stays borrowed for this call; the instance keeps its own internal clone.
     let channels = desc.ports.audio_out.max(desc.ports.audio_in).max(1) as usize;
     // Map each surfaced param (by index) to its CLAP id, so `set_param(index, _)`
     // can build a param-value event targeting the plugin's stable id.
@@ -534,5 +548,144 @@ mod tests {
         assert_eq!(buf.len(), 2, "both note events queued");
         buf.clear();
         assert!(buf.is_empty(), "the block boundary drains queued note events");
+    }
+}
+
+/// Device-free verification of the `oj.state` save/restore round-trip through the
+/// REAL [`ClapBackend`] — using an IN-PROCESS `clack` plugin
+/// (`PluginEntry::load_from_clack`), so no `.clap` dylib and no audio device are
+/// needed. This is what makes the CLAP state path a true CI test rather than only a
+/// founder check: a stub plugin implements the actual CLAP `clap_plugin_state`
+/// extension (save writes its current bytes, load replaces them), and we drive
+/// [`open_from_entry`] -> [`HostedBackend::save_state`] / `restore_state` and assert
+/// the blob round-trips through the live plugin's `[main-thread]` state calls.
+#[cfg(test)]
+mod state_roundtrip {
+    use crate::descriptor::{PluginDescriptor, PluginFormat, PortCounts};
+    use clack_extensions::state::{PluginState, PluginStateImpl};
+    use clack_host::prelude::PluginEntry;
+    use clack_plugin::prelude::*;
+    use clack_plugin::stream::{InputStream, OutputStream};
+    use std::io::{Read, Write};
+
+    struct StubShared;
+    impl<'a> PluginShared<'a> for StubShared {}
+
+    /// Holds the plugin's opaque state — save writes it out, load replaces it.
+    struct StubMainThread {
+        value: Vec<u8>,
+    }
+    impl<'a> PluginMainThread<'a, StubShared> for StubMainThread {}
+    impl PluginStateImpl for StubMainThread {
+        fn save(&mut self, output: &mut OutputStream) -> Result<(), PluginError> {
+            output.write_all(&self.value)?;
+            Ok(())
+        }
+        fn load(&mut self, input: &mut InputStream) -> Result<(), PluginError> {
+            let mut buf = Vec::new();
+            input.read_to_end(&mut buf)?;
+            self.value = buf;
+            Ok(())
+        }
+    }
+
+    struct StubAudio;
+    impl<'a> PluginAudioProcessor<'a, StubShared, StubMainThread> for StubAudio {
+        fn activate(
+            _host: HostAudioProcessorHandle<'a>,
+            _main_thread: &mut StubMainThread,
+            _shared: &'a StubShared,
+            _config: PluginAudioConfiguration,
+        ) -> Result<Self, PluginError> {
+            Ok(StubAudio)
+        }
+        fn process(
+            &mut self,
+            _process: Process,
+            _audio: Audio,
+            _events: Events,
+        ) -> Result<ProcessStatus, PluginError> {
+            Ok(ProcessStatus::Sleep)
+        }
+    }
+
+    struct StubPlugin;
+    impl Plugin for StubPlugin {
+        type AudioProcessor<'a> = StubAudio;
+        type Shared<'a> = StubShared;
+        type MainThread<'a> = StubMainThread;
+        fn declare_extensions(
+            builder: &mut PluginExtensions<Self>,
+            _shared: Option<&Self::Shared<'_>>,
+        ) {
+            builder.register::<PluginState>();
+        }
+    }
+    impl DefaultPluginFactory for StubPlugin {
+        fn get_descriptor() -> clack_plugin::plugin::PluginDescriptor {
+            use clack_plugin::plugin::features::*;
+            clack_plugin::plugin::PluginDescriptor::new("oj.test.stateful", "OJ Test Stateful")
+                .with_features([SYNTHESIZER])
+        }
+        fn new_shared(_host: HostSharedHandle<'_>) -> Result<Self::Shared<'_>, PluginError> {
+            Ok(StubShared)
+        }
+        fn new_main_thread<'a>(
+            _host: HostMainThreadHandle<'a>,
+            _shared: &'a Self::Shared<'a>,
+        ) -> Result<Self::MainThread<'a>, PluginError> {
+            // The state the plugin reports until something loads into it.
+            Ok(StubMainThread {
+                value: b"initial-state".to_vec(),
+            })
+        }
+    }
+
+    #[test]
+    fn clap_state_round_trips_through_the_backend() {
+        // In-process clack entry: no `.clap` dylib, no audio device.
+        let entry = PluginEntry::load_from_clack::<SinglePluginEntry<StubPlugin>>(c"")
+            .expect("in-process clack entry loads");
+        let desc = PluginDescriptor {
+            uid: "oj.test.stateful".to_string(),
+            name: "OJ Test Stateful".to_string(),
+            vendor: "OpenJammer".to_string(),
+            path: String::new(),
+            format: PluginFormat::Clap,
+            is_instrument: true,
+            ports: PortCounts {
+                audio_in: 0,
+                audio_out: 2,
+            },
+            param_count: 0,
+            params: Vec::new(),
+            latency_samples: 0,
+        };
+        let mut backend =
+            super::open_from_entry(&entry, &desc, 48_000.0, 128).expect("backend opens");
+
+        // SAVE reads the live plugin's current state via the CLAP state extension.
+        assert_eq!(
+            backend.save_state(),
+            b"initial-state",
+            "save_state reads the plugin's current opaque state"
+        );
+
+        // RESTORE a new blob, then SAVE again — the plugin's [main-thread] load/save
+        // round-trips the opaque bytes through the real ClapBackend handle path.
+        backend.restore_state(b"restored-blob");
+        assert_eq!(
+            backend.save_state(),
+            b"restored-blob",
+            "restore_state then save_state round-trips the opaque blob end to end"
+        );
+
+        // An empty restore is a no-op (does not clobber the current state).
+        backend.restore_state(b"");
+        assert_eq!(
+            backend.save_state(),
+            b"restored-blob",
+            "an empty restore blob is ignored"
+        );
     }
 }

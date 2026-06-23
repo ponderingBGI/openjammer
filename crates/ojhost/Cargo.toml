@@ -56,6 +56,26 @@ clack-extensions = { version = "0.1.0", optional = true, features = ["clack-host
 # allocation instrumented in CI. Benchmarks the hosted-plugin control plane that
 # must stay off-RT but still instant for live use (scan cache, ids, registration).
 codspeed-criterion-compat = "4.7.0"
+# clack PLUGIN side (MIT) — test-only. Lets the CLAP-state round-trip test define an
+# IN-PROCESS clack plugin (no `.clap` dylib, no audio device) so CI verifies the
+# real `clap_plugin_state` save/load against `ClapBackend`. Only compiled for tests;
+# the state test itself is gated to the `clap-host` cfg (where `clap.rs` exists).
+clack-plugin = "0.1.0"
+
+# clack-extensions PLUGIN side (test-only): the `clack-plugin` feature exposes
+# `PluginStateImpl` so the in-process state stub can implement the CLAP state
+# extension. Unifies with the normal (`clack-host`) optional dep for the clap-host
+# test build; harmless (plugin-side only) when clap-host is off.
+[dev-dependencies.clack-extensions]
+version = "0.1.0"
+features = ["clack-plugin", "state"]
+
+# clack-host with its `clack-plugin` feature (test-only): exposes
+# `PluginEntry::load_from_clack`, which loads an IN-PROCESS clack plugin (no dylib).
+# Unifies with the normal optional clack-host dep for the clap-host test build.
+[dev-dependencies.clack-host]
+version = "0.1.0"
+features = ["clack-plugin"]
 
 [[bench]]
 name = "hosting"
