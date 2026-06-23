@@ -97,6 +97,8 @@ interface LoadSampleMsg {
     type: 'load-sample';
     node: number;
     pcm: Float32Array;
+    /** Interleave count of `pcm` (1 = mono, 2 = stereo interleaved L/R). */
+    channels: number;
     sampleRate: number;
     rootNote: number;
 }
@@ -199,7 +201,8 @@ class OjcoreProcessor extends AudioWorkletProcessor {
     }
 
     /**
-     * Install mono PCM as a node's sampler buffer (wasm sample live-load).
+     * Install interleaved PCM (`channels`-major) as a node's sampler buffer (wasm
+     * sample live-load); `channels === 1` is mono.
      *
      * Stores the transferred PCM in the wasm host's content-addressed asset store
      * (`store_asset` -> `AssetId`) and replies with that id. The UI binds the id
@@ -209,7 +212,7 @@ class OjcoreProcessor extends AudioWorkletProcessor {
      */
     private handleLoadSample(msg: LoadSampleMsg): void {
         if (!this.ready) return;
-        const assetId = wasm.store_asset(msg.pcm, msg.sampleRate) as number;
+        const assetId = wasm.store_asset(msg.pcm, msg.channels ?? 1, msg.sampleRate) as number;
         this.port.postMessage({
             type: 'sample-stored',
             node: msg.node,

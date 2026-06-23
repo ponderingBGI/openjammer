@@ -183,8 +183,8 @@ export class OjcoreWasmExecutor implements Executor {
         nodeIndex: (nodeId) => this.index.get(nodeId),
         sendCommand: (cmd) => this.send(cmd),
         nodeLevel: (nodeId) => this.levels.get(nodeId) ?? 0,
-        loadSample: (nodeId, pcm, sampleRate, rootNote) =>
-            this.loadSampleWasm(nodeId, pcm, sampleRate, rootNote),
+        loadSample: (nodeId, pcm, sampleRate, rootNote, channels) =>
+            this.loadSampleWasm(nodeId, pcm, sampleRate, rootNote, channels),
         startCapture: (nodeId) => this.captureStartWasm(nodeId),
         stopCapture: (nodeId) => this.captureStopWasm(nodeId),
     };
@@ -998,6 +998,7 @@ export class OjcoreWasmExecutor implements Executor {
         pcm: Float32Array,
         sampleRate: number,
         rootNote: number,
+        channels: number,
     ): Promise<void> {
         const idx = this.index.get(nodeId);
         if (idx === undefined || !this.node || !this.ready) return Promise.resolve();
@@ -1006,7 +1007,7 @@ export class OjcoreWasmExecutor implements Executor {
         return new Promise<void>((resolve) => {
             this.sampleLoadResolvers.set(nodeId, resolve);
             this.node?.port.postMessage(
-                { type: 'load-sample', node: idx, pcm: copy, sampleRate, rootNote },
+                { type: 'load-sample', node: idx, pcm: copy, channels, sampleRate, rootNote },
                 [copy.buffer],
             );
             // Safety timeout: never leave the load flow hanging if the worklet is
