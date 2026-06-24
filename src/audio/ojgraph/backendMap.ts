@@ -192,9 +192,11 @@ const DYNAMIC_HOST_KINDS: ReadonlySet<PrimitiveKind> = new Set<PrimitiveKind>([
 ]);
 
 /**
- * Return a COPY of `graph` with every IrNode's `manifest_id` remapped to the
- * given backend's registry. Pure: does not mutate the input. `kind`, ports,
- * params, edges and schedule are preserved exactly.
+ * Return a FULLY-OWNED copy of `graph` with every IrNode's `manifest_id` remapped
+ * to the given backend's registry. Pure: does not mutate the input, and the result
+ * shares NO array with it — `nodes` AND `edges` are cloned — so a caller may mutate
+ * the returned graph (e.g. conduct's code-node splice) without aliasing the emit
+ * output's arrays. `kind`, ports, params, edge endpoints and schedule are value-equal.
  *
  * Dynamic-hosting kinds ({@link DYNAMIC_HOST_KINDS}) keep their `manifest_id`
  * verbatim — it IS their (dynamically-registered) loader key. Every other kind is
@@ -207,5 +209,8 @@ export function remapForBackend(graph: OjGraph, backend: EngineBackend): OjGraph
             ? n.manifest_id
             : manifestIdForKind(n.kind, backend),
     }));
-    return { ...graph, nodes };
+    // Own the edges too (not just nodes): a half-owned return that shares the edge
+    // array is the aliasing trap conduct used to compensate for with a local clone.
+    const edges = graph.edges.map((e) => ({ ...e }));
+    return { ...graph, nodes, edges };
 }

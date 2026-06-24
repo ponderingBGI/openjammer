@@ -11,7 +11,7 @@ import { remapForBackend } from '../audio/ojgraph';
 import { clampMidi } from '../music/note';
 import { specToGraph } from './spec';
 import type { Arrangement, CodeNode, ScheduleEvent } from './types';
-import type { IrEdge, IrNode, OjGraph } from '../../packages/oj-protocol-ts/src/index';
+import type { IrNode, OjGraph } from '../../packages/oj-protocol-ts/src/index';
 
 export interface ConductResult {
     /** The flat IR, backend-remapped for native — exactly what `oj render` loads. */
@@ -124,8 +124,8 @@ export function conduct(arr: Arrangement): ConductResult {
     // cannot know it) — so the 1-in/1-out here is the mono-effect topology hint.
     const codeNodes = arr.codeNodes ?? [];
     if (codeNodes.length > 0) {
-        // Own the edges (remapForBackend shares the emit array) before we rewire.
-        remapped.edges = remapped.edges.map((e) => ({ ...e })) as IrEdge[];
+        // remapForBackend now returns a FULLY-OWNED graph, so we rewire its edges in
+        // place without aliasing the emit output (no defensive clone needed).
         let nextId = remapped.nodes.reduce((m, n) => Math.max(m, n.id), -1) + 1;
 
         // Group by target track, preserving declared order, so several nodes on one
