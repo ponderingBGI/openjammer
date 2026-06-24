@@ -214,6 +214,14 @@ jobs:
         run: bun run lint
       - name: Test
         run: bun run test:run
+      # The `oj` CLI's own tests use `bun:test` + `Bun.file` (they test a Bun program),
+      # so they run under `bun test`, not vitest — and were SILENTLY UNCOLLECTED until
+      # now (hiding a real prereqs drift). The `test-collection` doctor gate keeps every
+      # test file mapped to a runner so none is ever born dead again.
+      - name: CLI tests (bun)
+        run: bun run test:cli
+      - name: Permission-gate security tests (node --test)
+        run: bun run test:pi-ext
       # Build-warning gate: the production build must emit ZERO warnings. A clean
       # build is part of the covenant — a chunk-size, browserslist, or deprecation
       # notice is cosmetic noise that erodes trust and, left unchecked, creeps back.
@@ -325,6 +333,8 @@ jobs:
         run: bun scripts/oj/index.ts doctor --check ssot-set-equality --json
       - name: COOP/COEP cross-origin isolation headers
         run: bun scripts/oj/index.ts doctor --check coi-headers --json
+      - name: No born-dead tests (every test file has a CI runner)
+        run: bun scripts/oj/index.ts doctor --check test-collection --json
 
   gate:
     name: Merge gate

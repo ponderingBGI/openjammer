@@ -78,10 +78,20 @@ test('wasm-nightly install pins the documented nightly date', () => {
   expect(nightly?.argv).toContain('rust-src');
 });
 
-test('DEBIAN_TAURI_LIBS is the six Tauri/cpal -dev libraries', () => {
-  expect(DEBIAN_TAURI_LIBS).toHaveLength(6);
+test('DEBIAN_TAURI_LIBS is the complete native-build apt set (build tools + Tauri/cpal/X11 libs)', () => {
+  // Build tools the JUCE/ojhost C++ + the link step need (cmake was the drift that
+  // a dead test hid — a dev without it builds fine until ojhost's CMake step).
+  for (const tool of ['build-essential', 'cmake', 'pkg-config']) {
+    expect(DEBIAN_TAURI_LIBS).toContain(tool);
+  }
+  // The core Tauri/cpal libs.
   expect(DEBIAN_TAURI_LIBS).toContain('libasound2-dev');
   expect(DEBIAN_TAURI_LIBS).toContain('libwebkit2gtk-4.1-dev');
+  // The freetype/fontconfig/X11/GL libs a Linux build links.
+  for (const lib of ['libfontconfig1-dev', 'libx11-dev', 'libgl1-mesa-dev']) {
+    expect(DEBIAN_TAURI_LIBS).toContain(lib);
+  }
+  // Exact set-equality with the CI apt list is enforced by prereqs-ssot.test.ts.
 });
 
 test('glyph renders present/absent/unknown', () => {

@@ -27,11 +27,25 @@ export const WASM_NIGHTLY = '2026-06-01';
 const WEBVIEW2_GUID = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
 
 /**
- * The Debian/apt Tauri+cpal system libraries — MUST equal the apt list in
- * .github/actions/setup-rust/action.yml (enforced by prereqs-ssot.test.ts).
+ * The COMPLETE Debian/apt set the native build needs — build tools (build-essential,
+ * cmake for the JUCE/ojhost C++ build, pkg-config), the Tauri/cpal libs, and the
+ * freetype/fontconfig/X11/GL libs a Linux build links. MUST equal the apt list in
+ * .github/actions/setup-rust/action.yml (enforced by prereqs-ssot.test.ts) so a dev's
+ * `oj setup` installs EXACTLY what CI does — no "works in CI, fails on my box" drift.
  */
 export const DEBIAN_TAURI_LIBS = [
+  'build-essential',
+  'cmake',
+  'pkg-config',
   'libasound2-dev',
+  'libfreetype6-dev',
+  'libfontconfig1-dev',
+  'libx11-dev',
+  'libxext-dev',
+  'libxinerama-dev',
+  'libxrandr-dev',
+  'libxcursor-dev',
+  'libgl1-mesa-dev',
   'libwebkit2gtk-4.1-dev',
   'libgtk-3-dev',
   'libsoup-3.0-dev',
@@ -281,9 +295,12 @@ function rustPrereq(os: OS): Prereq {
 
 function linuxLibsInstall(pm: LinuxPm | null): InstallCmd | null {
   if (pm === 'apt') {
+    // DEBIAN_TAURI_LIBS already carries build-essential + pkg-config (== the CI set);
+    // add `curl` for rustup on a fresh box (CI's runner ships it preinstalled, so it
+    // is install-only and not part of the SSOT-checked list).
     return {
-      display: `sudo apt-get install -y ${[...DEBIAN_TAURI_LIBS, 'pkg-config', 'build-essential', 'curl'].join(' ')}`,
-      argv: ['sudo', 'apt-get', 'install', '-y', ...DEBIAN_TAURI_LIBS, 'pkg-config', 'build-essential', 'curl'],
+      display: `sudo apt-get install -y ${[...DEBIAN_TAURI_LIBS, 'curl'].join(' ')}`,
+      argv: ['sudo', 'apt-get', 'install', '-y', ...DEBIAN_TAURI_LIBS, 'curl'],
       elevated: true,
     };
   }
