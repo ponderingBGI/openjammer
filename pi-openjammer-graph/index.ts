@@ -374,6 +374,41 @@ export default function register(pi: ExtensionAPI): void {
         parameters: Type.Object({ patch: JsonRecord }),
     });
 
+    registerGraphTool(pi, {
+        name: 'describe_arrangement',
+        label: 'Read OpenJammer Song Timeline',
+        description:
+            'Read the OpenJammer SONG TIMELINE (the on-canvas DAW arrangement) as a ' +
+            'readable summary — tracks (by stable id), clips, notes (count + pitch range), ' +
+            'sections, tempo, and automation, all at bar.beat. Side-effect-free. ALWAYS ' +
+            'read this before editing the timeline so you target real ids + know the ppq.',
+        promptSnippet: 'Read the OpenJammer song timeline before authoring it',
+        parameters: EmptyArgs,
+    });
+
+    registerGraphTool(pi, {
+        name: 'edit_timeline',
+        label: 'Author OpenJammer Song Timeline',
+        description:
+            'Author the OpenJammer SONG TIMELINE with an ordered list of reversible ' +
+            '`verbs`, applied live and undoable with Ctrl+Z. Each verb is `{kind, ...}`. ' +
+            'Times are PPQN ticks (read ppq + bar positions from describe_arrangement ' +
+            'FIRST). Common verbs: {kind:"setTempo", tempoBpm}; {kind:"setTrackMute", ' +
+            'trackId, mute}; {kind:"addClip", trackId, index, clip:{startTick, notes:' +
+            '[{tick,durTick,pitch,vel?}]}}; {kind:"moveClip", clipId, startTick}; ' +
+            '{kind:"addNote", clipId, index, note:{tick,durTick,pitch,vel?}}; ' +
+            '{kind:"editNote", noteId, patch:{tick?,durTick?,pitch?,vel?}}; ' +
+            '{kind:"removeClip"|"removeNote"|"removeTrack", ...Id}; {kind:"addSection", ' +
+            'index, section:{name, startBar}}; {kind:"addAutomationLane", trackId, index, ' +
+            'lane:{ref, param, points:[{tick,value}]}}; {kind:"setAutomationPoint", ' +
+            'laneId, point:{tick,value}}. Ids for ADDED entities are minted for you — omit them.',
+        promptSnippet:
+            'Author the OpenJammer song timeline with reversible verbs (read describe_arrangement first)',
+        parameters: Type.Object({
+            verbs: Type.Array(Type.Object({ kind: Type.String() }, { additionalProperties: true })),
+        }),
+    });
+
     // Re-ground on the first turn of every session. session_start fires for
     // startup / new / resume / fork — a resumed or forked session may show a
     // different canvas, so each is treated as a fresh "first turn".

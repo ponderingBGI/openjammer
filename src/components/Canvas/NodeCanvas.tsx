@@ -39,6 +39,7 @@ const WaveformEditorModal = lazy(() =>
 );
 import { PresenceOverlay } from '../Collab/PresenceOverlay';
 import { SongInterior } from '../Song/SongInterior';
+import { useArrangementStore } from '../../store/arrangementStore';
 import { useCollabStore } from '../../store/collabStore';
 import './NodeCanvas.css';
 
@@ -639,6 +640,45 @@ export function NodeCanvas() {
                 e.preventDefault();
                 setCurrentMode(keyNum);
                 return;
+            }
+
+            // TIMELINE KEYMAP: inside a Song interior, the DAW muscle-memory keys must
+            // drive the ARRANGEMENT, not the node graph (the covenant's plain-Ctrl+Z
+            // promise). Read fresh state so there is no stale closure. We intercept only
+            // play/undo/redo/delete; everything else (Q to exit, mode keys) falls through.
+            {
+                const viewId = useCanvasNavigationStore.getState().currentViewNodeId;
+                const viewNode = viewId ? useGraphStore.getState().nodes.get(viewId) : null;
+                const inTimeline = viewNode
+                    ? resolveNodeDefinition(viewNode).interior === 'timeline'
+                    : false;
+                if (inTimeline) {
+                    const arr = useArrangementStore.getState();
+                    if (e.code === 'Space' && !e.repeat) {
+                        e.preventDefault();
+                        if (arr.isPlaying) arr.stop();
+                        else arr.play();
+                        return;
+                    }
+                    if (matchesAction(e, 'edit.undo')) {
+                        e.preventDefault();
+                        arr.undo();
+                        return;
+                    }
+                    if (matchesAction(e, 'edit.redo')) {
+                        e.preventDefault();
+                        arr.redo();
+                        return;
+                    }
+                    if (matchesAction(e, 'edit.delete') || e.key === 'Backspace') {
+                        e.preventDefault();
+                        if (arr.selectedClipId) {
+                            arr.apply({ kind: 'removeClip', clipId: arr.selectedClipId });
+                            arr.selectClip(null);
+                        }
+                        return;
+                    }
+                }
             }
 
             // Delete/Backspace always works - delete nodes and clips
