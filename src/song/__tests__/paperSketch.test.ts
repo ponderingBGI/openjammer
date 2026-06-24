@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { buildPaperSketch } from '../songs/paperSketch';
 import { conduct } from '../conduct';
 import { specToGraph } from '../spec';
+import { arrangementForExport, readArrangement } from '../project';
 import { exportWorkflow, importWorkflow } from '../../engine/serialization';
+import type { SerializedWorkflow } from '../../engine/types';
 
 describe('Paper Sketch No. 1', () => {
     it('is a multi-track, multi-section arrangement', () => {
@@ -36,5 +38,28 @@ describe('Paper Sketch No. 1', () => {
         );
         // Connections survive too.
         expect(imported.connections.length).toBe(arr.graph.connections?.length ?? 0);
+    });
+
+    it('round-trips the ARRANGEMENT (not just the graph) through export -> JSON -> import (FROZEN-3)', () => {
+        const arr = buildPaperSketch();
+        const { nodes, connections } = specToGraph(arr.graph);
+        const exported: SerializedWorkflow = {
+            ...exportWorkflow(nodes, connections, arr.name),
+            arrangement: arrangementForExport(arr),
+        };
+        // Through the REAL on-disk path: serialize to JSON and read it back.
+        const imported = importWorkflow(JSON.stringify(exported));
+        const reread = readArrangement(imported.arrangement);
+        expect(reread).toBeDefined();
+        expect(reread!.schemaVersion).toBe(1);
+        // Lossless where it matters: the re-read arrangement lowers IDENTICALLY, so a
+        // reopened song plays exactly what was saved (the export's reason to exist).
+        expect(conduct(reread!)).toEqual(conduct(arr));
+    });
+
+    it('readArrangement refuses a future major version + ignores a non-arrangement blob', () => {
+        expect(readArrangement({ ...buildPaperSketch(), schemaVersion: 999 })).toBeUndefined();
+        expect(readArrangement({ nope: true })).toBeUndefined();
+        expect(readArrangement(null)).toBeUndefined();
     });
 });

@@ -13,6 +13,7 @@ import { resolve } from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import { conduct } from '../../src/song/conduct';
 import { specToGraph } from '../../src/song/spec';
+import { arrangementForExport } from '../../src/song/project';
 import { buildPaperSketch } from '../../src/song/songs/paperSketch';
 import { exportWorkflow } from '../../src/engine/serialization';
 import { render } from './render';
@@ -56,7 +57,8 @@ export async function song(args: string[]): Promise<number> {
             {
                 ...workflow,
                 transport: { bpm: arr.tempoBpm, timeSignature: arr.timeSignature ?? [4, 4] },
-                arrangement: arr,
+                // The whole timeline, schema-versioned, read back by readArrangement.
+                arrangement: arrangementForExport(arr),
             },
             null,
             2,

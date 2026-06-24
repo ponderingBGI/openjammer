@@ -84,6 +84,9 @@ export interface CodeNode {
 /** The whole song. */
 export interface Arrangement {
     name: string;
+    /** Persisted-shape version; absent = v1 (pre-versioning). Stamped on export so a
+     * future breaking change can migrate, and the first real saves never need one. */
+    schemaVersion?: number;
     tempoBpm: number;
     /** Pulses per quarter note. Default 960. */
     ppq?: number;

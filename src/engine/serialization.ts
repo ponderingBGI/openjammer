@@ -93,7 +93,7 @@ export function exportWorkflow(
  */
 export function importWorkflow(
     json: string | SerializedWorkflow
-): { nodes: GraphNode[]; connections: Connection[] } {
+): { nodes: GraphNode[]; connections: Connection[]; arrangement?: unknown } {
     const workflow: SerializedWorkflow =
         typeof json === 'string' ? JSON.parse(json) : json;
 
@@ -184,7 +184,9 @@ export function importWorkflow(
             type: serialized.type
         }));
 
-    return { nodes, connections };
+    // Pass the song-layer timeline through UNTOUCHED (the song layer interprets it
+    // via readArrangement) so a saved project keeps its whole timeline — FROZEN-3.
+    return { nodes, connections, arrangement: workflow.arrangement };
 }
 
 // ============================================================================

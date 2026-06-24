@@ -579,6 +579,14 @@ export interface SerializedWorkflow {
     createdAt: string;
     nodes: SerializedNode[];
     connections: SerializedConnection[];
+    /**
+     * OPAQUE pass-through for a song's timeline (the song-layer `Arrangement`). The
+     * engine never interprets it — the song layer reads it via `readArrangement` — so
+     * a saved project keeps the user's WHOLE timeline (FROZEN-3) without the engine
+     * depending on the song layer. Mirrors the "opaque blob passed through untouched"
+     * rule of STABILITY.md §FROZEN-1.
+     */
+    arrangement?: unknown;
 }
 
 export interface SerializedNode {
