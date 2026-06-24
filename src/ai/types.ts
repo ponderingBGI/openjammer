@@ -23,6 +23,7 @@
 import type { NodeType, PortDefinition, Position } from '../engine/types';
 import type { ParamDecl } from '../engine/manifest';
 import type { WorkflowPlan } from './plan';
+import type { Verb } from '../song/verbs';
 import type { Severity } from '@openjammer/oj-protocol';
 
 // ============================================================================
@@ -91,6 +92,8 @@ export const AGENT_TOOL_NAMES = [
     'get_signal',
     'get_settings',
     'update_settings',
+    'describe_arrangement',
+    'edit_timeline',
 ] as const;
 
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
@@ -345,6 +348,27 @@ export interface SettingsPatch {
     defaultVelocity?: number;
 }
 
+/**
+ * Arguments for the READ tool `describe_arrangement`: none. Returns a readable
+ * summary of the current SONG TIMELINE — tracks (by stable id), clips, notes (count +
+ * pitch range), sections, tempo, and automation, all at bar.beat. SIDE-EFFECT-FREE.
+ * The agent calls it to GROUND itself in the arrangement before editing it (the same
+ * "read the canvas first" discipline `get_graph` serves for the node graph).
+ */
+export type DescribeArrangementArgs = Record<string, never>;
+
+/**
+ * Arguments for `edit_timeline`: an ORDERED list of reversible timeline {@link Verb}s
+ * — the SAME vocabulary a human GUI drag emits — applied live to the ONE Arrangement
+ * and undoable with Ctrl+Z (they ride the shared command-log). Ids for ADDED entities
+ * may be omitted; they are minted for you. Times are PPQN ticks (read `ppq` + bar
+ * positions from `describe_arrangement`). This is how the agent AUTHORS the timeline.
+ */
+export interface EditTimelineArgs {
+    /** The reversible timeline edits to apply, in order, as one undoable step. */
+    verbs: Verb[];
+}
+
 /** Discriminated union of every concrete tool call an agent may emit. */
 export type AgentToolCall =
     | { name: 'add_node'; args: AddNodeArgs }
@@ -364,7 +388,9 @@ export type AgentToolCall =
     | { name: 'get_diagnostics'; args: GetDiagnosticsArgs }
     | { name: 'get_signal'; args: GetSignalArgs }
     | { name: 'get_settings'; args: GetSettingsArgs }
-    | { name: 'update_settings'; args: UpdateSettingsArgs };
+    | { name: 'update_settings'; args: UpdateSettingsArgs }
+    | { name: 'describe_arrangement'; args: DescribeArrangementArgs }
+    | { name: 'edit_timeline'; args: EditTimelineArgs };
 
 // ============================================================================
 // Streamed transcript events

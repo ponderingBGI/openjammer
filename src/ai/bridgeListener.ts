@@ -18,6 +18,7 @@ import { applyToolCall, applyGetSignal, type DspNodeRegistrar } from './tools';
 import { createGraphStoreApi } from './graphAdapter';
 import { createPlanEnv } from './planAdapter';
 import { createEnvPort } from './envAdapter';
+import { createArrangementPort } from './arrangementAdapter';
 import {
     isAgentToolName,
     type AgentToolCall,
@@ -35,6 +36,8 @@ const READ_TOOLS = new Set<AgentToolName>([
     'get_logs',
     'get_diagnostics',
     'get_settings',
+    // Timeline READ: the song summary the agent grounds itself in before editing.
+    'describe_arrangement',
 ]);
 
 /** Reads never register a node; a no-op registrar satisfies the signature. */
@@ -85,6 +88,7 @@ export async function startBridgeListener(): Promise<(() => void) | null> {
                     NOOP_REGISTRAR,
                     createPlanEnv(),
                     createEnvPort(),
+                    createArrangementPort(),
                 );
                 result = { ok: applied.ok, data: applied.data };
             } else {

@@ -68,6 +68,7 @@ import {
 import { createGraphStoreApi } from '../ai/graphAdapter';
 import { createPlanEnv } from '../ai/planAdapter';
 import { createEnvPort } from '../ai/envAdapter';
+import { createArrangementPort } from '../ai/arrangementAdapter';
 import type { Position } from '../engine/types';
 
 // ============================================================================
@@ -330,6 +331,7 @@ function applyStreamedToolCall(call: AgentToolCall): ActionChip {
             dspRegistrar,
             createPlanEnv(),
             createEnvPort(),
+            createArrangementPort(),
         );
         return { name: call.name, summary: result.summary, ok: result.ok };
     } catch (err) {
