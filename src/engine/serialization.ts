@@ -40,7 +40,12 @@ const WORKFLOW_VERSION = '1.1.0';
 export function exportWorkflow(
     nodes: Map<string, GraphNode>,
     connections: Map<string, Connection>,
-    name: string = 'Untitled Workflow'
+    name: string = 'Untitled Workflow',
+    /** The song-layer timeline to persist alongside the graph (FROZEN-3). OPAQUE here
+     *  — the engine never interprets it; the song layer produces it via
+     *  `arrangementForExport` and reads it back via `readArrangement`. Omit when there
+     *  is no timeline. */
+    arrangement?: unknown
 ): SerializedWorkflow {
     const serializedNodes: SerializedNode[] = [];
     const serializedConnections: SerializedConnection[] = [];
@@ -78,13 +83,19 @@ export function exportWorkflow(
         });
     });
 
-    return {
+    const out: SerializedWorkflow = {
         version: WORKFLOW_VERSION,
         name,
         createdAt: new Date().toISOString(),
         nodes: serializedNodes,
         connections: serializedConnections
     };
+    // Carry the timeline through UNTOUCHED so a saved project keeps its whole
+    // arrangement (FROZEN-3); omitted entirely when there is no song.
+    if (arrangement !== undefined && arrangement !== null) {
+        out.arrangement = arrangement;
+    }
+    return out;
 }
 
 /**

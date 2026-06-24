@@ -1,5 +1,9 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { exportWorkflow, importWorkflow } from '../serialization';
+import { arrangementForExport, readArrangement } from '../../song/project';
+import { conduct } from '../../song/conduct';
+import { normalizeArrangement } from '../../song/normalize';
+import { buildPaperSketch } from '../../song/songs/paperSketch';
 import { resolveNodeDefinition } from '../registry';
 import {
     registerDynamicPlugin,
@@ -9,6 +13,27 @@ import {
     _resetDynamicRegistryForTests,
 } from '../dynamicRegistry';
 import type { GraphNode, Connection, SerializedWorkflow } from '../types';
+
+describe('workflow serialization — timeline persistence (FROZEN-3)', () => {
+    it('round-trips the arrangement through export -> import, losslessly', () => {
+        const arr = normalizeArrangement(buildPaperSketch());
+        const workflow = exportWorkflow(new Map(), new Map(), 'song', arrangementForExport(arr));
+        // The opaque blob is carried on the serialized form …
+        expect(workflow.arrangement).toBeDefined();
+        const { arrangement } = importWorkflow(workflow);
+        const reopened = readArrangement(arrangement);
+        expect(reopened).toBeDefined();
+        // … and a reopened song conducts to the EXACT same sound (the timeline survived).
+        expect(conduct(reopened!)).toEqual(conduct(arr));
+    });
+
+    it('omits the arrangement entirely when there is no song', () => {
+        const workflow = exportWorkflow(new Map(), new Map(), 'graph-only');
+        expect('arrangement' in workflow).toBe(false);
+        // And importing a graph-only workflow yields no arrangement (the GUI clears it).
+        expect(importWorkflow(workflow).arrangement).toBeUndefined();
+    });
+});
 
 describe('workflow serialization', () => {
     it('drops imported connections that reference removed ports', () => {

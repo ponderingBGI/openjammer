@@ -9,6 +9,8 @@ import { useCanvasStore } from '../../store/canvasStore';
 import { useAudioStore } from '../../store/audioStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useTransportStore } from '../../store/transportStore';
+import { useArrangementStore } from '../../store/arrangementStore';
+import { arrangementForExport, readArrangement } from '../../song/project';
 import { exportWorkflow, downloadWorkflow, loadWorkflowFromFile, importWorkflow } from '../../engine/serialization';
 import { getExecutor } from '../../audio/executor';
 import { DropdownMenu, type MenuItemOrSeparator } from './DropdownMenu';
@@ -68,7 +70,15 @@ export function Toolbar() {
             // oj.state save half) so the export persists it and a reopen restores the
             // plugin. No-op on the browser tier; non-fatal if the engine declines.
             await getExecutor().capturePluginStates();
-            const workflow = exportWorkflow(nodes, connections, 'OpenJammer Workflow');
+            // Persist the timeline alongside the graph (FROZEN-3): a reopened export
+            // keeps its whole arrangement.
+            const arr = useArrangementStore.getState().arrangement;
+            const workflow = exportWorkflow(
+                nodes,
+                connections,
+                'OpenJammer Workflow',
+                arr ? arrangementForExport(arr) : undefined,
+            );
             downloadWorkflow(workflow);
             toast.success('Workflow exported');
         } catch (err) {
@@ -88,8 +98,11 @@ export function Toolbar() {
 
         try {
             const workflow = await loadWorkflowFromFile(file);
-            const { nodes: importedNodes, connections: importedConnections } = importWorkflow(workflow);
+            const { nodes: importedNodes, connections: importedConnections, arrangement } =
+                importWorkflow(workflow);
             loadGraph(importedNodes, importedConnections);
+            // Hydrate the timeline (or clear it when the import has none) — FROZEN-3.
+            useArrangementStore.getState().setArrangement(readArrangement(arrangement) ?? null);
         } catch (err) {
             console.error('Failed to import workflow:', err);
             toast.error('Failed to import workflow. Please check the file format.');
@@ -149,6 +162,8 @@ export function Toolbar() {
             } else {
                 clearGraph();
             }
+            // Hydrate the timeline from the project (or clear it when absent) — FROZEN-3.
+            useArrangementStore.getState().setArrangement(readArrangement(manifest.arrangement) ?? null);
             resetView();
         } catch (err) {
             if ((err as DOMException).name !== 'AbortError') {
@@ -179,10 +194,13 @@ export function Toolbar() {
         }
 
         try {
+            const arr = useArrangementStore.getState().arrangement;
             const graphData = {
                 nodes: Array.from(nodes.values()),
                 edges: Array.from(connections.values()),
                 viewport: { x: 0, y: 0, zoom },
+                // The timeline rides along (FROZEN-3): a reopened project keeps its song.
+                arrangement: arr ? arrangementForExport(arr) : undefined,
             };
             await saveProject(graphData);
             toast.success('Project saved');
@@ -206,6 +224,8 @@ export function Toolbar() {
             } else {
                 clearGraph();
             }
+            // Hydrate the timeline from the project (or clear it when absent) — FROZEN-3.
+            useArrangementStore.getState().setArrangement(readArrangement(manifest.arrangement) ?? null);
             resetView();
         } catch (err) {
             console.error('Failed to open recent project:', err);
