@@ -60,8 +60,25 @@ export function buildPaperSketch(): Arrangement {
     const clip = (start: number, notes: ArrangementNote[]): ArrangementClip[] =>
         notes.length ? [{ startTick: start, notes: notes.map((n) => ({ ...n, tick: n.tick - start })) }] : [];
 
+    // The "lift": a stepped sweep that opens the lowpass on the chords through the
+    // lift section and settles it back for the outro — automation on the Biquad
+    // frequency (param id 1), lowered to stepped setParam events that ride the
+    // engine's per-sample smoother.
+    const filterSweep = [
+        { tick: 0, value: 900 },
+        { tick: 8 * BAR, value: 700 },
+        { tick: 10 * BAR, value: 3400 },
+        { tick: 12 * BAR, value: 1800 },
+        { tick: 14 * BAR, value: 1100 },
+    ];
+
     const tracks: ArrangementTrack[] = [
-        { name: 'Nylon Chords', ref: 'chords', clips: clip(0, chordNotes) },
+        {
+            name: 'Nylon Chords',
+            ref: 'chords',
+            clips: clip(0, chordNotes),
+            automation: [{ ref: 'lpfChords', param: 1, points: filterSweep }],
+        },
         { name: 'Bass', ref: 'bass', clips: clip(2 * BAR, bassNotes) },
         { name: 'Lead', ref: 'lead', clips: clip(8 * BAR, leadNotes) },
     ];
@@ -84,12 +101,22 @@ export function buildPaperSketch(): Arrangement {
                 { ref: 'chords', type: 'instrument', data: { instrumentId: 'karplus-nylon' } },
                 { ref: 'bass', type: 'instrument', data: { instrumentId: 'gm-electric-bass-finger' } },
                 { ref: 'lead', type: 'instrument', data: { instrumentId: 'karplus-electric' } },
+                // A warm lowpass on the chords (the filter-sweep target); a delay for
+                // space on the lead; per-voice pan so the mix is genuinely stereo.
+                { ref: 'lpfChords', type: 'effect', data: { effectType: 'filter', params: { q: 0.8 } } },
+                { ref: 'delayLead', type: 'effect', data: { effectType: 'delay' } },
+                { ref: 'panChords', type: 'pan', data: { pan: -0.35 } },
+                { ref: 'panLead', type: 'pan', data: { pan: 0.4 } },
                 { ref: 'spk', type: 'speaker' },
             ],
             connections: [
-                { from: 'chords', to: 'spk' },
+                { from: 'chords', to: 'lpfChords' },
+                { from: 'lpfChords', to: 'panChords' },
+                { from: 'panChords', to: 'spk' },
                 { from: 'bass', to: 'spk' },
-                { from: 'lead', to: 'spk' },
+                { from: 'lead', to: 'delayLead' },
+                { from: 'delayLead', to: 'panLead' },
+                { from: 'panLead', to: 'spk' },
             ],
         },
         tracks,
