@@ -13,8 +13,16 @@ import { specToGraph } from './spec';
 import type { Arrangement, CodeNode, ScheduleEvent } from './types';
 import type { IrNode, OjGraph } from '../../packages/oj-protocol-ts/src/index';
 
+/** Which engine backend the conduct graph is remapped for. The SCHEDULE (events +
+ * trackIndex) is identical across backends — only the graph's per-node manifest/kind
+ * mapping differs, exactly as the live canvas graph differs between tiers. So a live
+ * browser preview and a headless native bounce play the SAME notes at the SAME ticks
+ * (one core, two clocks). */
+export type ConductBackend = 'native' | 'wasm';
+
 export interface ConductResult {
-    /** The flat IR, backend-remapped for native — exactly what `oj render` loads. */
+    /** The flat IR, backend-remapped — `oj render` loads the native form, the browser
+     *  timeline preview loads the wasm form; the schedule below is backend-independent. */
     graph: OjGraph;
     /** The note/param schedule in seconds — exactly the render bin's SchedEvent shape. */
     events: ScheduleEvent[];
@@ -46,15 +54,17 @@ function clampVel(v: number | undefined): number {
     return Math.max(0, Math.min(127, Math.round(v ?? 100)));
 }
 
-export function conduct(arr: Arrangement): ConductResult {
+export function conduct(arr: Arrangement, backend: ConductBackend = 'native'): ConductResult {
     const { nodes, connections } = specToGraph(arr.graph);
     const sampleRate = arr.sampleRate ?? DEFAULTS.sampleRate;
     const blockSize = arr.blockSize ?? DEFAULTS.blockSize;
 
     // Lower the graph EXACTLY as the canvas does, and grab the ref -> NodeIdx map so
-    // a track can address its instrument's RtCommands at the right node.
+    // a track can address its instrument's RtCommands at the right node. The NodeIdx
+    // are assigned by emitWithIndex BEFORE the backend remap, so they (and thus the
+    // schedule) are identical for 'native' and 'wasm' — only the graph differs.
     const { graph, index } = emitWithIndex(nodes, connections, { sampleRate, blockSize });
-    const remapped = remapForBackend(graph, 'native');
+    const remapped = remapForBackend(graph, backend);
 
     const ppq = arr.ppq ?? DEFAULTS.ppq;
     const secPerTick = 60 / (arr.tempoBpm * ppq);

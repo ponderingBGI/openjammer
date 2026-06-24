@@ -41,6 +41,18 @@ describe('conduct', () => {
         expect(conduct(base)).toEqual(conduct(base));
     });
 
+    it('the SCHEDULE is backend-independent (wasm preview == native bounce notes)', () => {
+        const native = conduct(base, 'native');
+        const wasm = conduct(base, 'wasm');
+        // Same notes, same ticks, same node indices, same length — one core, two clocks.
+        expect(wasm.events).toEqual(native.events);
+        expect(wasm.trackIndex).toEqual(native.trackIndex);
+        expect(wasm.seconds).toBe(native.seconds);
+        // The graph node COUNT matches (same topology); only per-node backend mapping differs.
+        expect(wasm.graph.nodes.length).toBe(native.graph.nodes.length);
+        expect(wasm.graph.nodes.map((n) => n.id)).toEqual(native.graph.nodes.map((n) => n.id));
+    });
+
     it('a muted track emits no notes (the always-correct gate)', () => {
         const muted: Arrangement = {
             ...base,
