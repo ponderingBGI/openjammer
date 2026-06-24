@@ -25,6 +25,8 @@
     "setup:hooks": "bun scripts/install-git-hooks.ts",
     "dev": "vite",
     "native": "bun scripts/oj/index.ts dev",
+    "native:plugins": "bun scripts/oj/index.ts dev --plugins",
+    "native:clap": "bun scripts/oj/index.ts dev --clap",
     "dev:native": "bun scripts/oj/index.ts dev",
     "oj": "bun scripts/oj/index.ts",
     "build": "tsc -b && vite build",

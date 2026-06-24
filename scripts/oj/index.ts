@@ -6,7 +6,8 @@
 //   oj preflight  [--json] [--affected] [--plan] [--base <ref>]
 //   oj plan       [--json] [--base <ref>]
 //   oj scaffold   <node|dsp-kernel> ...     (planned — exits 2)
-//   oj dev        [--engine] [tauri-flags…]  (native dev loop; --engine = bacon inner-loop)
+//   oj dev        [--engine] [--plugins|--clap|--plugin-host <mode>] [tauri-flags…]
+//                 (native dev loop; --engine = bacon inner-loop)
 //   oj design     <map|status> [--json]      (design-system bridge: component-map + sync health)
 //
 // Shared lib/ (git, cache, ssot, report) means version-sync logic lives ONCE.
@@ -116,7 +117,7 @@ function usage(): void {
       '  oj preflight [--json] [--affected] [--plan] [--base <ref>]',
       '  oj plan      [--json] [--base <ref>]',
       '  oj scaffold  <node|dsp-kernel> ...   (not yet implemented)',
-      '  oj dev       [--engine] [tauri-flags...]',
+      '  oj dev       [--engine] [--plugins|--clap|--plugin-host <scaffold|clap|juce>] [tauri-flags...]',
       '  oj setup     [--install] [--yes] [--dry-run] [--wasm] [--json]',
       '  oj render    [--graph g.json] [--schedule s.json] [--secs n] [--out w.wav]',
       '               [--report r.json] [--assert expr]...   (device-free audition)',
@@ -124,7 +125,9 @@ function usage(): void {
       '               (friendly node/wire spec -> OjGraph via emitOjGraph)',
       '',
       'oj dev: one-command native loop (Vite HMR + ojcore-native engine, unified',
-      '        logs, clean Ctrl+C). --engine runs the windowless bacon inner-loop.',
+      '        logs, clean Ctrl+C). Default plugin host is the fast scaffold;',
+      '        use --plugins for JUCE VST3/CLAP/AU or --clap for pure-Rust CLAP.',
+      '        --engine runs the windowless bacon inner-loop.',
       'oj setup: detect + install the native build prerequisites (Rust, MSVC/WebView2,',
       '          Linux system libs). Confirms before installing; --dry-run to preview.',
       '',

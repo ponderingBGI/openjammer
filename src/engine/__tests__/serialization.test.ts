@@ -14,7 +14,7 @@ import {
 } from '../dynamicRegistry';
 import type { GraphNode, Connection, SerializedWorkflow } from '../types';
 
-describe('workflow serialization — timeline persistence (FROZEN-3)', () => {
+describe('workflow serialization — timeline persistence (FROZEN-1)', () => {
     it('round-trips the arrangement through export -> import, losslessly', () => {
         const arr = normalizeArrangement(buildPaperSketch());
         const workflow = exportWorkflow(new Map(), new Map(), 'song', arrangementForExport(arr));

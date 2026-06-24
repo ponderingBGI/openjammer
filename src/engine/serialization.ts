@@ -41,7 +41,7 @@ export function exportWorkflow(
     nodes: Map<string, GraphNode>,
     connections: Map<string, Connection>,
     name: string = 'Untitled Workflow',
-    /** The song-layer timeline to persist alongside the graph (FROZEN-3). OPAQUE here
+    /** The song-layer timeline to persist alongside the graph (FROZEN-1). OPAQUE here
      *  — the engine never interprets it; the song layer produces it via
      *  `arrangementForExport` and reads it back via `readArrangement`. Omit when there
      *  is no timeline. */
@@ -91,7 +91,7 @@ export function exportWorkflow(
         connections: serializedConnections
     };
     // Carry the timeline through UNTOUCHED so a saved project keeps its whole
-    // arrangement (FROZEN-3); omitted entirely when there is no song.
+    // arrangement (FROZEN-1); omitted entirely when there is no song.
     if (arrangement !== undefined && arrangement !== null) {
         out.arrangement = arrangement;
     }
@@ -196,7 +196,7 @@ export function importWorkflow(
         }));
 
     // Pass the song-layer timeline through UNTOUCHED (the song layer interprets it
-    // via readArrangement) so a saved project keeps its whole timeline — FROZEN-3.
+    // via readArrangement) so a saved project keeps its whole timeline — FROZEN-1.
     return { nodes, connections, arrangement: workflow.arrangement };
 }
 

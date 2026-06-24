@@ -138,12 +138,15 @@ them here. In short: `bun native` delegates the whole Vite+cargo lifecycle and C
 the Tauri CLI (the edge that already does recursive process-tree kill on every OS — never add a
 sibling orchestrator here); it runs the config's `beforeDevCommand` (`bun run dev` →
 `http://localhost:5173`), opens the window with web-UI HMR, and recompiles + restarts the window on
-Rust edits. The raw `bun run tauri dev` still works for debugging the shell directly.
+Rust edits. The default plugin host is the fast scaffold (no VST/AU scan, no JUCE/CMake build), so
+normal app work starts like a dev server. The raw `bun run tauri dev` still works for debugging the
+shell directly.
 
 **Tauri-specific knobs.** The bundled Pi (Ctrl+K AI) sidecar builds **lazily** — only on first run
 or after a Pi upgrade; set `OJ_DEV_SKIP_PI=1` to skip it, or `OPENJAMMER_PI_BIN` to point at an
-external Pi. For fast Rust/DSP iteration without the window restart, `bun native --engine` runs the
-windowless [bacon](https://dystroy.org/bacon/) loop over the `render`/`nextest` harnesses
+external Pi. Use `bun native --plugins` for the full JUCE VST3/CLAP/AU host (first build can take
+minutes), `bun native --clap` for the pure-Rust CLAP host, and `bun native --engine` for the
+windowless [bacon](https://dystroy.org/bacon/) Rust/DSP loop over the `render`/`nextest` harnesses
 (`cargo install --locked bacon`).
 
 ## Building / verifying
@@ -155,8 +158,9 @@ cargo fmt --all -- --check                    # format clean
 cargo test -p oj-tauri                         # backend unit tests (device-less safe)
 ```
 
-A full `bun run tauri build` produces the platform installer locally; it is
-heavy, so CI (below) is the canonical installer build.
+A full `bun run tauri build --features plugin-host-juce` produces the platform installer locally
+with the same hosted-plugin backend as releases; it is heavy, so CI (below) is the canonical
+installer build.
 
 ## Release flow (CI)
 
@@ -170,8 +174,8 @@ heavy, so CI (below) is the canonical installer build.
    `ubuntu-latest`, and `windows-latest`, installing the Linux webview deps in
    the Ubuntu job.
 3. `tauri-apps/tauri-action` runs the config's `beforeBuildCommand`
-   (`bun run build`) to build the web frontend, then `tauri build` to produce
-   each platform's installers:
+   (`bun run build`) to build the web frontend, then `tauri build --features plugin-host-juce` to
+   produce each platform's installers:
    - macOS: `.app`, `.dmg`
    - Linux: `.deb`, `.AppImage`
    - Windows: `.msi`, `.exe`

@@ -40,7 +40,7 @@ describe('Paper Sketch No. 1', () => {
         expect(imported.connections.length).toBe(arr.graph.connections?.length ?? 0);
     });
 
-    it('round-trips the ARRANGEMENT (not just the graph) through export -> JSON -> import (FROZEN-3)', () => {
+    it('round-trips the ARRANGEMENT (not just the graph) through export -> JSON -> import (FROZEN-1)', () => {
         const arr = buildPaperSketch();
         const { nodes, connections } = specToGraph(arr.graph);
         const exported: SerializedWorkflow = {

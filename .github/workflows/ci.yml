@@ -153,12 +153,10 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy (-D warnings)
-        # Exclude oj-tauri: its DEFAULT feature is the full JUCE host
-        # (plugin-host-juce -> ojhost/juce), which needs CMake + the VST3 SDK and is
-        # founder-rig-only. A `--workspace` build pulls that default in via feature
-        # unification and dies at the JUCE CMake configure here. The desktop shell is
-        # linted with the pure-Rust CLAP backend in the "Plugin host" step below, and
-        # built for real (JUCE) by the native Windows/macOS jobs.
+        # Exclude oj-tauri from the broad workspace pass because the desktop shell
+        # has its own feature gates below: fast scaffold by default, pure-Rust CLAP
+        # for real hosting code, and JUCE only in installer/release jobs. Keeping the
+        # shell out of the catch-all avoids accidental feature unification noise.
         run: cargo clippy --workspace --exclude oj-tauri --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace --exclude oj-tauri
@@ -193,9 +191,9 @@ jobs:
         run: |
           cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings
           cargo test -p ojhost --features clap-host
-          # The desktop shell (oj-tauri) is excluded from the workspace gate above
-          # (its default is the founder-rig JUCE host). Lint + test it here with the
-          # pure-Rust CLAP backend so the IPC surface + commands stay green — no CMake.
+          # The desktop shell (oj-tauri) is excluded from the workspace gate above.
+          # Lint + test it here with the pure-Rust CLAP backend so the IPC surface +
+          # commands stay green while normal `bun native` remains scaffold-fast.
           cargo clippy -p oj-tauri --no-default-features --features plugin-host-clap --all-targets -- -D warnings
           cargo test -p oj-tauri --no-default-features --features plugin-host-clap
 
@@ -273,7 +271,7 @@ jobs:
       - name: Stage Pi sidecar resource dir (bundle-only)
         shell: bash
         run: mkdir -p src-tauri/binaries
-      - name: Build the native desktop app (oj-tauri)
+      - name: Build the native desktop app (oj-tauri, fast scaffold host)
         run: cargo build -p oj-tauri
       - name: Engine tests on Windows
         run: cargo test -p ojcore -p ojinstrument -p ojcore-native

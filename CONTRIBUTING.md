@@ -40,11 +40,13 @@ bun run oj setup   # one-time: install the native prerequisites (first run only)
 bun native         # run the desktop app — opens the window, streams logs live
 ```
 
-`bun native` is the desktop counterpart to `bun dev`. The window opens on its own once the
-engine builds; **edit `src/**`** and it hot-reloads, **edit Rust (`crates/**`, `src-tauri/**`)**
-and it rebuilds + restarts the window, **Ctrl+C** stops everything. (There's no Vite-style
-keypress menu: the loop hands its whole lifecycle and clean Ctrl+C teardown to the Tauri CLI,
-so it behaves identically on Windows/macOS/Linux — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).)
+`bun native` is the desktop counterpart to `bun dev`. It uses the fast scaffold plugin host by
+default (real ojcore-native audio, no VST/AU scan and no JUCE/CMake build), so a warm start opens
+in a few seconds. The window opens on its own once the engine builds; **edit `src/**`** and it
+hot-reloads, **edit Rust (`crates/**`, `src-tauri/**`)** and it rebuilds + restarts the window,
+**Ctrl+C** stops everything. (There's no Vite-style keypress menu: the loop hands its whole
+lifecycle and clean Ctrl+C teardown to the Tauri CLI, so it behaves identically on
+Windows/macOS/Linux — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).)
 
 `oj setup` detects every native prerequisite (Rust; **Win:** MSVC "Desktop development with C++"
 \+ WebView2; **macOS:** Xcode CLT; **Linux:** the `libwebkit2gtk-4.1`/`gtk-3`/`libsoup-3` set) and
@@ -52,9 +54,11 @@ installs the missing ones after a confirm. Its set is derived from CI, so local 
 `--dry-run` previews, `--wasm` adds the browser-worklet nightly, and `bun run oj doctor --check
 native-readiness` reports without installing.
 
-<sub>Power-user extras: `bun native --engine` is a windowless Rust/DSP inner-loop (bacon over the
-`render`/`nextest` harnesses — `cargo install --locked bacon`); `OJ_DEV_SKIP_PI=1` skips the
-Ctrl+K AI sidecar build. `bun native` is also reachable as `just dev` / `bun run dev:native`.</sub>
+<sub>Power-user extras: `bun native --plugins` opts into the full JUCE VST3/CLAP/AU host (first
+CMake build can take minutes), `bun native --clap` uses the pure-Rust CLAP host, and
+`bun native --engine` is a windowless Rust/DSP inner-loop (bacon over the `render`/`nextest`
+harnesses — `cargo install --locked bacon`). `OJ_DEV_SKIP_PI=1` skips the Ctrl+K AI sidecar build.
+`bun native` is also reachable as `just dev` / `bun run dev:native`.</sub>
 
 ### Design system
 

@@ -35,6 +35,20 @@ const NATIVE_EXECUTOR = 'ojcore-native';
 const PI_PKG = '@earendil-works/pi-coding-agent';
 const PI_STAMP = 'src-tauri/binaries/openjammer-pi-runtime.json';
 
+type PluginHostMode = 'scaffold' | 'clap' | 'juce';
+type HostSource = 'default' | 'env' | 'flag' | 'tauri-features';
+
+interface NativeDevOptions {
+  passthrough: string[];
+  pluginHost: PluginHostMode;
+  hostSource: HostSource;
+}
+
+const PLUGIN_HOST_FEATURE: Record<Exclude<PluginHostMode, 'scaffold'>, string> = {
+  clap: 'plugin-host-clap',
+  juce: 'plugin-host-juce',
+};
+
 export async function dev(args: string[]): Promise<number> {
   // `oj dev --engine [job …]` → the windowless bacon inner-loop.
   if (args.includes('--engine')) {
@@ -44,7 +58,13 @@ export async function dev(args: string[]): Promise<number> {
 }
 
 /** The full-app native loop: preflight, lazy Pi, then delegate to `tauri dev`. */
-async function nativeDev(passthrough: string[]): Promise<number> {
+async function nativeDev(rawArgs: string[]): Promise<number> {
+  const opts = parseNativeDevOptions(rawArgs);
+  if ('error' in opts) {
+    process.stderr.write(`oj dev: ${opts.error}\n`);
+    return 2;
+  }
+
   // 1. Native-readiness soft warning. Probes the tier-1 build prereqs (Rust +
   //    per-OS MSVC/WebView2 / Xcode CLT / Linux libs) and, if any are missing,
   //    names them and points at `oj setup` — then CONTINUES (degraded-but-safe:
@@ -72,29 +92,165 @@ async function nativeDev(passthrough: string[]): Promise<number> {
   //    self-documenting).
   if (!process.env.VITE_OJ_EXECUTOR) process.env.VITE_OJ_EXECUTOR = NATIVE_EXECUTOR;
 
-  // 4. Print the controls once, then delegate the whole lifecycle to the Tauri
+  // 4. Default to the scaffold plugin host so `bun native` opens quickly. The
+  //    heavy JUCE CMake/MSBuild path is still one flag away (`--plugins`) but is
+  //    never sprung on a normal dev-server launch.
+  const tauriArgs = withPluginHostFeature(opts.passthrough, opts.pluginHost);
+
+  // 5. Print the controls once, then delegate the whole lifecycle to the Tauri
   //    CLI. Inherit stdio so logs are unified and Ctrl+C reaches `tauri`
   //    directly. NO keypress/signal handler — the window auto-opens, edits
   //    hot-reload (src) or restart it (Rust), and Tauri owns clean teardown.
   //    A keypress menu would mean taking that teardown back (Bun can't kill a
   //    process tree on Windows) — so we print the controls instead of faking a
   //    Vite-style menu that the non-TTY child can't deliver anyway.
-  if (!passthrough.length) printControls();
-  return spawnInherited([BUN, 'run', 'tauri', 'dev', ...passthrough], {
+  printControls(opts.pluginHost, opts.hostSource);
+  return spawnInherited([BUN, 'run', 'tauri', 'dev', ...tauriArgs], {
     notFoundHint: 'is `@tauri-apps/cli` installed? run `bun install`.',
   });
 }
 
 /** The one-time "what's happening + how to drive it" banner for `bun native`. */
-function printControls(): void {
+function printControls(pluginHost: PluginHostMode, hostSource: HostSource): void {
+  const host = pluginHostSummary(pluginHost, hostSource);
   process.stdout.write(
     '\n  OpenJammer · native dev\n' +
       '  The desktop window opens on its own once the engine builds.\n' +
+      `  Plugin host: ${host}\n` +
       '    • edit src/**            → window hot-reloads instantly\n' +
       '    • edit Rust (crates/**)  → window rebuilds + restarts\n' +
       '    • Ctrl+C                 → stop everything\n' +
       '  Live logs (Vite + Rust engine) stream below.\n\n',
   );
+}
+
+function parseNativeDevOptions(args: string[]): NativeDevOptions | { error: string } {
+  const passthrough: string[] = [];
+  const requested: { host: PluginHostMode; source: 'flag' }[] = [];
+  const envRaw = process.env.OJ_DEV_PLUGIN_HOST;
+  let envHost: PluginHostMode | null = null;
+
+  if (envRaw && envRaw.trim()) {
+    envHost = parsePluginHostValue(envRaw);
+    if (!envHost) {
+      return {
+        error:
+          'OJ_DEV_PLUGIN_HOST must be one of scaffold, clap, or juce ' +
+          `(got ${JSON.stringify(envRaw)})`,
+      };
+    }
+  }
+
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]!;
+    if (arg === '--plugins' || arg === '--juce' || arg === '--plugin-host-juce') {
+      requested.push({ host: 'juce', source: 'flag' });
+      continue;
+    }
+    if (arg === '--clap' || arg === '--plugin-host-clap') {
+      requested.push({ host: 'clap', source: 'flag' });
+      continue;
+    }
+    if (arg === '--scaffold' || arg === '--no-plugins' || arg === '--plugin-host-scaffold') {
+      requested.push({ host: 'scaffold', source: 'flag' });
+      continue;
+    }
+    if (arg === '--plugin-host') {
+      const value = args[i + 1];
+      if (!value || value.startsWith('--')) return { error: 'missing value for --plugin-host' };
+      const host = parsePluginHostValue(value);
+      if (!host) return { error: `unknown --plugin-host value ${JSON.stringify(value)}` };
+      requested.push({ host, source: 'flag' });
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--plugin-host=')) {
+      const value = arg.slice('--plugin-host='.length);
+      const host = parsePluginHostValue(value);
+      if (!host) return { error: `unknown --plugin-host value ${JSON.stringify(value)}` };
+      requested.push({ host, source: 'flag' });
+      continue;
+    }
+    passthrough.push(arg);
+  }
+
+  const explicitHosts = new Set(requested.map((r) => r.host));
+  if (explicitHosts.size > 1) {
+    return { error: 'choose only one plugin host: scaffold, clap, or juce' };
+  }
+
+  const tauriFeatureHost = inferPluginHostFromTauriFeatures(passthrough);
+  const explicit = requested.at(-1);
+  const selectedHost = explicit?.host ?? envHost ?? tauriFeatureHost ?? 'scaffold';
+  if ((explicit || envHost) && tauriFeatureHost && tauriFeatureHost !== selectedHost) {
+    const selectedSource = explicit ? 'plugin host flag' : 'OJ_DEV_PLUGIN_HOST';
+    return {
+      error:
+        `${selectedSource} selects ${selectedHost}, but passthrough Tauri features select ` +
+        `${tauriFeatureHost}`,
+    };
+  }
+
+  return {
+    passthrough,
+    pluginHost: selectedHost,
+    hostSource: explicit?.source ?? (envHost ? 'env' : tauriFeatureHost ? 'tauri-features' : 'default'),
+  };
+}
+
+function parsePluginHostValue(value: string): PluginHostMode | null {
+  switch (value.trim().toLowerCase()) {
+    case 'scaffold':
+    case 'none':
+    case 'off':
+    case 'no':
+      return 'scaffold';
+    case 'clap':
+    case 'clap-only':
+      return 'clap';
+    case 'juce':
+    case 'plugins':
+    case 'full':
+    case 'vst':
+    case 'vst3':
+      return 'juce';
+    default:
+      return null;
+  }
+}
+
+function inferPluginHostFromTauriFeatures(args: string[]): PluginHostMode | null {
+  // Tauri accepts `--features plugin-host-juce`, `-f plugin-host-juce`, and
+  // comma-separated feature lists. We only need to recognize our three feature
+  // names so the banner remains honest when a developer passes raw Tauri flags.
+  const joined = args.join(' ');
+  if (/\bplugin-host-juce\b/.test(joined)) return 'juce';
+  if (/\bplugin-host-clap\b/.test(joined)) return 'clap';
+  if (/\bplugin-host-scaffold\b/.test(joined)) return 'scaffold';
+  return null;
+}
+
+function withPluginHostFeature(args: string[], host: PluginHostMode): string[] {
+  if (host === 'scaffold' || inferPluginHostFromTauriFeatures(args)) return args;
+  const feature = PLUGIN_HOST_FEATURE[host];
+  const separator = args.indexOf('--');
+  if (separator === -1) return [...args, '--features', feature];
+  return [...args.slice(0, separator), '--features', feature, ...args.slice(separator)];
+}
+
+function pluginHostSummary(host: PluginHostMode, source: HostSource): string {
+  const origin = source === 'default' ? 'default' : source === 'env' ? 'OJ_DEV_PLUGIN_HOST' : 'selected';
+  switch (host) {
+    case 'scaffold':
+      return `${origin} fast scaffold (no VST/AU scan; use \`bun native --plugins\` for JUCE)`;
+    case 'clap':
+      return `${origin} CLAP-only host (pure Rust; no CMake/JUCE)`;
+    case 'juce':
+      return (
+        `${origin} JUCE host (VST3/CLAP/AU; first CMake build can take minutes — ` +
+        'plain `bun native` skips it)'
+      );
+  }
 }
 
 /** The engine inner-loop: bacon owns its own TUI + child lifecycle. */

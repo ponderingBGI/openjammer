@@ -54,7 +54,7 @@ export interface ProjectManifest {
   /** The song-layer timeline (the on-canvas DAW's Arrangement), OPAQUE here — the
    *  project store never interprets it; the song layer produces it via
    *  `arrangementForExport` and reads it back via `readArrangement`. So a saved
-   *  project keeps its whole timeline (FROZEN-3). */
+   *  project keeps its whole timeline (FROZEN-1). */
   arrangement?: unknown;
 }
 
@@ -736,7 +736,7 @@ export const useProjectStore = create<ProjectState>()(
             edges: validatedGraph.edges,
             viewport: validateViewport(graphData.viewport)
           };
-          // Persist the timeline UNTOUCHED (opaque; FROZEN-3). Present => keep it,
+          // Persist the timeline UNTOUCHED (opaque; FROZEN-1). Present => keep it,
           // explicit null/undefined => drop it (the project has no song).
           if (graphData.arrangement !== undefined && graphData.arrangement !== null) {
             manifest.arrangement = graphData.arrangement;

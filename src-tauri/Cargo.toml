@@ -76,14 +76,15 @@ tracing = { workspace = true }
 tracing-appender = { workspace = true }
 
 [features]
-# Shipped desktop default: full JUCE host (VST2 when owner-provisioned, VST3,
-# CLAP, and AU on macOS). Use `--no-default-features` for the scaffold/no-host
-# test build, or `--no-default-features --features plugin-host-clap` for the
-# pure-Rust CLAP-only backend.
-default = ["plugin-host-juce"]
+# Fast local default: the native app opens with the real ojcore engine but the
+# third-party plugin host in scaffold mode (scan returns empty, no CMake/JUCE
+# build). `bun native` must feel like a dev server, not a minutes-long installer
+# build. Release/canary installer jobs opt into `plugin-host-juce` explicitly;
+# local plugin-host testing can use `bun native --plugins` (JUCE) or `--clap`.
+default = ["plugin-host-scaffold"]
+plugin-host-scaffold = []
 plugin-host-juce = ["ojhost/juce"]
 plugin-host-clap = ["ojhost/clap-host"]
-plugin-host-scaffold = []
 
 # NOTE: the dev/test crash-boundary harness is gated on the ENV VAR
 # `OJHOST_FAULT_INJECT=1` (read by ojhost's build.rs), NOT a cargo feature — so it

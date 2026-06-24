@@ -71,7 +71,7 @@ jobs:
           OJHOST_ENABLE_VST2: ${{ secrets.OJHOST_ENABLE_VST2 }}
           VST2_SDK_DIR: ${{ secrets.VST2_SDK_DIR }}
           VST3_SDK_DIR: ${{ secrets.VST3_SDK_DIR }}
-        run: bun run tauri build
+        run: bun run tauri build --features plugin-host-juce
 
       - name: Upload installers
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

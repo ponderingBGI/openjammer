@@ -70,7 +70,7 @@ export function Toolbar() {
             // oj.state save half) so the export persists it and a reopen restores the
             // plugin. No-op on the browser tier; non-fatal if the engine declines.
             await getExecutor().capturePluginStates();
-            // Persist the timeline alongside the graph (FROZEN-3): a reopened export
+            // Persist the timeline alongside the graph (FROZEN-1): a reopened export
             // keeps its whole arrangement.
             const arr = useArrangementStore.getState().arrangement;
             const workflow = exportWorkflow(
@@ -101,7 +101,7 @@ export function Toolbar() {
             const { nodes: importedNodes, connections: importedConnections, arrangement } =
                 importWorkflow(workflow);
             loadGraph(importedNodes, importedConnections);
-            // Hydrate the timeline (or clear it when the import has none) — FROZEN-3.
+            // Hydrate the timeline (or clear it when the import has none) — FROZEN-1.
             useArrangementStore.getState().setArrangement(readArrangement(arrangement) ?? null);
         } catch (err) {
             console.error('Failed to import workflow:', err);
@@ -162,7 +162,7 @@ export function Toolbar() {
             } else {
                 clearGraph();
             }
-            // Hydrate the timeline from the project (or clear it when absent) — FROZEN-3.
+            // Hydrate the timeline from the project (or clear it when absent) — FROZEN-1.
             useArrangementStore.getState().setArrangement(readArrangement(manifest.arrangement) ?? null);
             resetView();
         } catch (err) {
@@ -199,7 +199,7 @@ export function Toolbar() {
                 nodes: Array.from(nodes.values()),
                 edges: Array.from(connections.values()),
                 viewport: { x: 0, y: 0, zoom },
-                // The timeline rides along (FROZEN-3): a reopened project keeps its song.
+                // The timeline rides along (FROZEN-1): a reopened project keeps its song.
                 arrangement: arr ? arrangementForExport(arr) : undefined,
             };
             await saveProject(graphData);
@@ -224,7 +224,7 @@ export function Toolbar() {
             } else {
                 clearGraph();
             }
-            // Hydrate the timeline from the project (or clear it when absent) — FROZEN-3.
+            // Hydrate the timeline from the project (or clear it when absent) — FROZEN-1.
             useArrangementStore.getState().setArrangement(readArrangement(manifest.arrangement) ?? null);
             resetView();
         } catch (err) {

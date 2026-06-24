@@ -116,6 +116,11 @@ panel can do.
 - **describe_arrangement** — Read the current SONG TIMELINE as a readable summary — tracks (by stable id), clips, notes (count + pitch range), sections, tempo, and automation, all at bar.beat. Side-effect-free. GROUND yourself with this before editing the timeline (the "read the song first" twin of get_graph for the node graph).
 - **edit_timeline** — Author the SONG TIMELINE with an ordered list of reversible `verbs` — the SAME vocabulary a human GUI drag emits — applied live and undoable with Ctrl+Z. Verb kinds: setTempo; setTrackMute/setTrackName; addTrack/removeTrack; addClip/removeClip/moveClip; addNote/removeNote/editNote; addSection/removeSection; addAutomationLane/removeAutomationLane; setAutomationPoint/removeAutomationPoint. Ids for ADDED entities are minted for you (omit them). Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.
 
+**Authoring the timeline.** `describe_arrangement` + `edit_timeline` drive the on-canvas
+DAW — the same shared `Arrangement` a human drags by hand, with one shared Ctrl+Z. Read the
+song first, then author it. See **[timeline.md](timeline.md)** for the feature, the full verb
+vocabulary, and the roadmap of what the timeline will grow into.
+
 **A worked "get sound back" loop.** When a player says *"I hear nothing"*: call
 `get_diagnostics` (is the AudioContext even running? is the round-trip latency
 sane? is a USB interface selected?), then `get_logs` with

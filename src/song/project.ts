@@ -1,6 +1,6 @@
 // src/song/project.ts — persist an Arrangement inside a .openjammer project and read
 // it back losslessly. The engine's serialization carries it as an OPAQUE blob
-// (SerializedWorkflow.arrangement) so a saved song keeps its WHOLE timeline (FROZEN-3)
+// (SerializedWorkflow.arrangement) so a saved song keeps its WHOLE timeline (FROZEN-1)
 // without the engine layer depending on the song layer; this module is where the song
 // layer interprets that blob — and where the timeline GUI hydrates its store from.
 
