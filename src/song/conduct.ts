@@ -34,6 +34,14 @@ function kindRank(cmd: ScheduleEvent['cmd']): number {
     return cmd === 'setParam' ? 0 : cmd === 'noteOff' ? 1 : 2;
 }
 
+/** A deterministic per-kind tiebreak (a setParam by its param id, a note by its
+ * pitch) so two events at the same tick/kind/node still order stably. */
+function evDetail(ev: ScheduleEvent): number {
+    if (ev.cmd === 'setParam') return ev.param;
+    if (ev.cmd === 'noteOn' || ev.cmd === 'noteOff') return ev.note;
+    return 0;
+}
+
 function clampVel(v: number | undefined): number {
     return Math.max(0, Math.min(127, Math.round(v ?? 100)));
 }
@@ -63,7 +71,10 @@ export function conduct(arr: Arrangement): ConductResult {
         return idx as number;
     };
 
-    const events: ScheduleEvent[] = [];
+    // Build events carrying their INTEGER tick, so we can sort on a total integer
+    // order (not the post-conversion float `at`) — the bit-identical bounce must hold
+    // by construction, never by V8 stable-sort accident.
+    const timed: { tick: number; ev: ScheduleEvent }[] = [];
     const trackIndex: Record<string, number> = {};
     let lastTick = 0;
 
@@ -78,8 +89,8 @@ export function conduct(arr: Arrangement): ConductResult {
                     const offTick = onTick + Math.max(1, n.durTick);
                     lastTick = Math.max(lastTick, offTick);
                     const note = clampMidi(n.pitch);
-                    events.push({ at: tickToSec(onTick), cmd: 'noteOn', node, note, vel: clampVel(n.vel) });
-                    events.push({ at: tickToSec(offTick), cmd: 'noteOff', node, note });
+                    timed.push({ tick: onTick, ev: { at: tickToSec(onTick), cmd: 'noteOn', node, note, vel: clampVel(n.vel) } });
+                    timed.push({ tick: offTick, ev: { at: tickToSec(offTick), cmd: 'noteOff', node, note } });
                 }
             }
         }
@@ -88,46 +99,82 @@ export function conduct(arr: Arrangement): ConductResult {
             const anode = idxOf(lane.ref);
             for (const pt of lane.points) {
                 lastTick = Math.max(lastTick, pt.tick);
-                events.push({ at: tickToSec(pt.tick), cmd: 'setParam', node: anode, param: lane.param, value: pt.value });
+                timed.push({ tick: pt.tick, ev: { at: tickToSec(pt.tick), cmd: 'setParam', node: anode, param: lane.param, value: pt.value } });
             }
         }
     }
 
-    events.sort((a, b) => a.at - b.at || kindRank(a.cmd) - kindRank(b.cmd));
+    // Total integer-tick order: tick, then kind (params settle -> notes release ->
+    // notes start), then node, then a per-kind detail — fully deterministic.
+    timed.sort(
+        (a, b) =>
+            a.tick - b.tick ||
+            kindRank(a.ev.cmd) - kindRank(b.ev.cmd) ||
+            a.ev.node - b.ev.node ||
+            evDetail(a.ev) - evDetail(b.ev),
+    );
+    const events = timed.map((t) => t.ev);
 
-    // Splice in each agent-AUTHORED code node as a mono effect right after its
-    // track's instrument: instrument -> authored -> [the instrument's former
-    // consumers]. The render bin compiles the faust source to a native .dll and
-    // hosts it as a real WasmHost node (--code-node). Pure IR rewiring — the events
-    // are untouched (the instrument keeps its NodeIdx; only edges change).
+    // Splice each agent-AUTHORED code node into its track's signal path as a mono
+    // effect: instrument -> cn0 -> cn1 -> ... -> [the instrument's former consumers],
+    // chained in DECLARED order per track. Pure IR rewiring — events untouched (the
+    // instrument keeps its NodeIdx; only edges move). The render bin compiles each
+    // faust source to a native .dll and hosts it (--code-node), reconciling each
+    // WasmHost node's REAL audio arity from the .dll at LOAD (conduct is pure TS and
+    // cannot know it) — so the 1-in/1-out here is the mono-effect topology hint.
     const codeNodes = arr.codeNodes ?? [];
     if (codeNodes.length > 0) {
-        // Clone edges so we never mutate the emit/remap output's shared array.
+        // Own the edges (remapForBackend shares the emit array) before we rewire.
         remapped.edges = remapped.edges.map((e) => ({ ...e })) as IrEdge[];
         let nextId = remapped.nodes.reduce((m, n) => Math.max(m, n.id), -1) + 1;
+
+        // Group by target track, preserving declared order, so several nodes on one
+        // track chain correctly (the previous per-node rewrite reversed/broke them).
+        const byTrack = new Map<string, CodeNode[]>();
         for (const cn of codeNodes) {
-            const instIdx = idxOf(cn.onTrack);
-            const newIdx = nextId++;
-            for (const e of remapped.edges) {
-                if (e.from_node === instIdx) e.from_node = newIdx;
+            const list = byTrack.get(cn.onTrack) ?? [];
+            list.push(cn);
+            byTrack.set(cn.onTrack, list);
+        }
+
+        for (const [ref, chain] of byTrack) {
+            const instIdx = idxOf(ref);
+            // Snapshot the instrument's CURRENT consumers BEFORE rewiring, and the
+            // output port that feeds them — carry the REAL from_port (never a
+            // hardcoded 0 that would mis-route a multi-output source).
+            const consumerEdges = remapped.edges.filter((e) => e.from_node === instIdx);
+            const fromPort = consumerEdges.length > 0 ? consumerEdges[0]!.from_port : 0;
+
+            let upstream = instIdx;
+            let upstreamPort = fromPort;
+            for (const cn of chain) {
+                const newIdx = nextId++;
+                const authored: IrNode = {
+                    id: newIdx,
+                    manifest_id: cn.id,
+                    kind: 'WasmHost',
+                    params: [],
+                    assets: [],
+                    n_in: 1,
+                    n_out: 1,
+                };
+                remapped.nodes.push(authored);
+                remapped.edges.push({
+                    from_node: upstream,
+                    from_port: upstreamPort,
+                    to_node: newIdx,
+                    to_port: 0,
+                    kind: 'Audio',
+                });
+                upstream = newIdx;
+                upstreamPort = 0; // a code node has a single output port
             }
-            remapped.edges.push({
-                from_node: instIdx,
-                from_port: 0,
-                to_node: newIdx,
-                to_port: 0,
-                kind: 'Audio',
-            });
-            const authored: IrNode = {
-                id: newIdx,
-                manifest_id: cn.id,
-                kind: 'WasmHost',
-                params: [],
-                assets: [],
-                n_in: 1,
-                n_out: 1,
-            };
-            remapped.nodes.push(authored);
+
+            // Redirect the instrument's former consumers to read from the LAST node.
+            for (const e of consumerEdges) {
+                e.from_node = upstream;
+                e.from_port = 0;
+            }
         }
     }
 
