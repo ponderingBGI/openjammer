@@ -104,7 +104,7 @@ async function nativeDev(rawArgs: string[]): Promise<number> {
   //    A keypress menu would mean taking that teardown back (Bun can't kill a
   //    process tree on Windows) — so we print the controls instead of faking a
   //    Vite-style menu that the non-TTY child can't deliver anyway.
-  printControls(opts.pluginHost, opts.hostSource);
+  if (!isHelpLike(opts.passthrough)) printControls(opts.pluginHost, opts.hostSource);
   return spawnInherited([BUN, 'run', 'tauri', 'dev', ...tauriArgs], {
     notFoundHint: 'is `@tauri-apps/cli` installed? run `bun install`.',
   });
@@ -236,6 +236,10 @@ function withPluginHostFeature(args: string[], host: PluginHostMode): string[] {
   const separator = args.indexOf('--');
   if (separator === -1) return [...args, '--features', feature];
   return [...args.slice(0, separator), '--features', feature, ...args.slice(separator)];
+}
+
+function isHelpLike(args: string[]): boolean {
+  return args.some((a) => a === '--help' || a === '-h' || a === '--version' || a === '-V');
 }
 
 function pluginHostSummary(host: PluginHostMode, source: HostSource): string {

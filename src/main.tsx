@@ -6,6 +6,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import App from './App.tsx'
 import { AppErrorBoundary } from './components/AppErrorBoundary'
+import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens'
 import { installConsoleCapture, installGlobalErrorHandlers } from './utils/log'
 import { recoverFromStaleBundle } from './utils/staleBundleGuard'
 import './components/AppErrorBoundary.css'
@@ -19,6 +20,13 @@ installConsoleCapture()
 // extension noise never pollutes the DevLog. Must run before app code so an
 // early throw is still captured.
 installGlobalErrorHandlers()
+
+// Apply the saved/default theme before React's first paint. `index.html` has a
+// static boot shell so the native webview never opens as a blank white rectangle;
+// this keeps the first React frame on the same paper/ink tokens instead of
+// flashing un-themed CSS custom properties.
+const initialTheme = getThemeById(getSavedThemeId())
+if (initialTheme) applyTheme(initialTheme)
 
 // Desktop only: if the webview's HTTP cache is serving a stale bundle after an
 // in-place update, reload once from a cache-busted URL so the player opens on the

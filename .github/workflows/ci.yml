@@ -187,7 +187,7 @@ jobs:
         # real hosting code. This compiles, lints, and tests the REAL pure-Rust
         # CLAP backend (clack, MIT — no C++/CMake) so the plugin-host path stays
         # green on every commit. The JUCE VST3/AU backend (`--features juce`) needs
-        # CMake + a C++ toolchain + the VST3 SDK and is built on the founder's rig.
+        # CMake + a C++ toolchain + the VST3 SDK and is exercised by installer/release jobs.
         run: |
           cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings
           cargo test -p ojhost --features clap-host

@@ -37,9 +37,9 @@ ojproto = { path = "../crates/ojproto" }
 
 # --- third-party plugin host (U-JUCE) ----------------------------------------
 # Scans for and hosts VST2/VST3/CLAP/AU plugins as ojcore nodes (NATIVE-ONLY).
-# The shipped desktop app enables the full JUCE host via this crate's default
-# `plugin-host-juce` feature. Constrained/test builds can opt out with
-# `--no-default-features` (scaffold/no-host) or select `plugin-host-clap`.
+# Local dev defaults to the scaffold backend so `bun native` stays fast; release
+# and installer jobs opt into `plugin-host-juce`, while `plugin-host-clap` gives a
+# pure-Rust CLAP-only backend for CI and local plugin-host work.
 ojhost = { path = "../crates/ojhost" }
 
 # --- AI DSP-node authoring (U20) ---------------------------------------------

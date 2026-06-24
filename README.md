@@ -76,10 +76,11 @@ bun native    # desktop app, native low-latency engine (first run: bun run oj se
 ```
 
 For the browser tier, open the printed URL and click **Start OpenJammer**. For the desktop
-tier, `bun native` opens the app window on its own. First workflow: right-click the canvas →
-add a Keyboard node and an Instrument (e.g. Classic Piano), connect them, and play the Q–P
-row — or press **Ctrl/Cmd+K** and ask the AI to build it for you. Native setup +
-prerequisites: **[CONTRIBUTING.md](CONTRIBUTING.md#native-desktop-tauri)**.
+tier, `bun native` opens the app window on its own with the fast scaffold plugin host (no
+JUCE/CMake build); use `bun native --plugins` when you specifically need hosted VST3/CLAP/AU.
+First workflow: right-click the canvas → add a Keyboard node and an Instrument (e.g. Classic
+Piano), connect them, and play the Q–P row — or press **Ctrl/Cmd+K** and ask the AI to build it
+for you. Native setup + prerequisites: **[CONTRIBUTING.md](CONTRIBUTING.md#native-desktop-tauri)**.
 
 > OpenJammer uses **`bun`** for every package operation — never `npm`, `yarn`, or `pnpm`
 > (one toolchain, one lockfile). See **[CONTRIBUTING.md](CONTRIBUTING.md)**.
@@ -89,9 +90,9 @@ prerequisites: **[CONTRIBUTING.md](CONTRIBUTING.md#native-desktop-tauri)**.
 ## How it works — the core
 
 OpenJammer is powered by **`ojcore`**: one minimal, real-time-safe **Rust** audio core
-that compiles to **native** (low-latency `cpal`, with VST3/AU/CLAP plugin hosting via a
-JUCE/CLAP host) **and** to **WebAssembly** (the zero-install AudioWorklet PWA), driven by
-one shared **React 19 + TypeScript** control plane and selected by `VITE_OJ_EXECUTOR`. The
+that compiles to **native** (low-latency `cpal`; optional VST3/AU/CLAP hosting via JUCE or
+pure-Rust CLAP feature flags) **and** to **WebAssembly** (the zero-install AudioWorklet PWA),
+driven by one shared **React 19 + TypeScript** control plane and selected by `VITE_OJ_EXECUTOR`. The
 audio thread never allocates, locks, or blocks — a guarantee enforced mechanically in CI.
 
 **Stack:** Bun · React 19 + TypeScript · Rust `ojcore` · Zustand · Tauri (desktop) ·

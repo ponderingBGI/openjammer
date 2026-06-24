@@ -79,8 +79,9 @@ test('wasm-nightly install pins the documented nightly date', () => {
 });
 
 test('DEBIAN_TAURI_LIBS is the complete native-build apt set (build tools + Tauri/cpal/X11 libs)', () => {
-  // Build tools the JUCE/ojhost C++ + the link step need (cmake was the drift that
-  // a dead test hid — a dev without it builds fine until ojhost's CMake step).
+  // Build tools the optional JUCE/ojhost C++ path + the link step need (cmake was
+  // the drift that a dead test hid — a dev without it builds fine until opting
+  // into ojhost's CMake step).
   for (const tool of ['build-essential', 'cmake', 'pkg-config']) {
     expect(DEBIAN_TAURI_LIBS).toContain(tool);
   }

@@ -27,9 +27,9 @@ export const WASM_NIGHTLY = '2026-06-01';
 const WEBVIEW2_GUID = '{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
 
 /**
- * The COMPLETE Debian/apt set the native build needs — build tools (build-essential,
- * cmake for the JUCE/ojhost C++ build, pkg-config), the Tauri/cpal libs, and the
- * freetype/fontconfig/X11/GL libs a Linux build links. MUST equal the apt list in
+ * The COMPLETE Debian/apt superset for native builds — build tools
+ * (build-essential, optional-JUCE CMake, pkg-config), the Tauri/cpal libs, and the
+ * freetype/fontconfig/X11/GL libs a Linux JUCE build links. MUST equal the apt list in
  * .github/actions/setup-rust/action.yml (enforced by prereqs-ssot.test.ts) so a dev's
  * `oj setup` installs EXACTLY what CI does — no "works in CI, fails on my box" drift.
  */

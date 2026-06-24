@@ -89,8 +89,9 @@ Pi is bundled with **native desktop releases only**. The browser/PWA build does
 not ship or run Pi; it continues to show the desktop-required state.
 
 1. **Use the desktop app.** `bun native` (lazily — only when stale) and
-   `bun run tauri build` (always) run `bun run build:pi-runtime`, which compiles
-   the pinned Pi sidecar into `src-tauri/binaries/` and bundles it as a Tauri
+   `bun run tauri build --features plugin-host-juce` (always, for release-like
+   installers) run `bun run build:pi-runtime`, which compiles the pinned Pi sidecar
+   into `src-tauri/binaries/` and bundles it as a Tauri
    resource. At runtime
    OpenJammer copies that resource into `~/.openjammer/pi-runtime/<version>/`
    and launches it over `--mode rpc`. Developers can override with
