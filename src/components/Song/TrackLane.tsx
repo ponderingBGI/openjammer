@@ -22,6 +22,8 @@ const PAD_Y = 8;
 
 export function TrackLane({ track, pxPerTick, gutterPx, laneHeight, fieldWidth }: TrackLaneProps) {
     const apply = useArrangementStore((s) => s.apply);
+    const selectClip = useArrangementStore((s) => s.selectClip);
+    const selectedClipId = useArrangementStore((s) => s.selectedClipId);
 
     // Pitch range across this track's notes, for vertical mapping (with a margin so a
     // single-pitch track sits centred rather than on an edge).
@@ -70,8 +72,12 @@ export function TrackLane({ track, pxPerTick, gutterPx, laneHeight, fieldWidth }
                     return (
                         <div
                             key={clip.id}
-                            className="song-clip"
+                            className={`song-clip ${selectedClipId === clip.id ? 'selected' : ''}`}
                             style={{ left: start, width, height: laneHeight - 6 }}
+                            onMouseDown={(e) => {
+                                e.stopPropagation();
+                                selectClip(clip.id!);
+                            }}
                         >
                             {clip.notes.map((n) => (
                                 <span

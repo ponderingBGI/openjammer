@@ -63,6 +63,16 @@ describe('SongInterior — the on-canvas timeline', () => {
             expect(store().arrangement!.tracks[0]!.mute).toBeUndefined();
         });
 
+        it('clicking a clip selects it (and highlights it)', () => {
+            const { container } = render(<SongInterior songNodeId="song-1" />);
+            const clip = container.querySelector('.song-clip')!;
+            fireEvent.mouseDown(clip);
+            const firstClipId = store().arrangement!.tracks[0]!.clips[0]!.id;
+            expect(store().selectedClipId).toBe(firstClipId);
+            // Re-render reflects the selection class.
+            expect(container.querySelector('.song-clip.selected')).toBeTruthy();
+        });
+
         it('the playhead exists and the rewind seeks to the start', () => {
             const { container } = render(<SongInterior songNodeId="song-1" />);
             expect(container.querySelector('.song-playhead')).toBeTruthy();
