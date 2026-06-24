@@ -22,6 +22,7 @@ import { design } from './design';
 import { setup } from './setup';
 import { render } from './render';
 import { author } from './author';
+import { song } from './song';
 
 interface ParsedFlags {
   json: boolean;
@@ -148,6 +149,10 @@ async function main(): Promise<number> {
   if (sub === 'render') return render(rest);
   // `author` lowers a friendly patch spec to an OjGraph via the headless emitOjGraph.
   if (sub === 'author') return author(rest);
+  // `song` authors a whole Arrangement (the timeline feature), conducts it, renders
+  // it device-free, self-grades, and exports a human-openable project. Passthrough
+  // args (extra --assert/--secs) reach the render bin unmangled, like render/author.
+  if (sub === 'song' || sub === 'arrange') return song(rest);
 
   let flags: ReturnType<typeof parseFlags>;
   try {
