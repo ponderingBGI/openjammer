@@ -33,6 +33,22 @@ export interface ConductResult {
     /** Agent-authored code nodes that were spliced into the IR — `oj song` writes
      * each source to a .dsp and passes `--code-node id=path` to the render bin. */
     codeNodes: CodeNode[];
+    /** Track/automation refs that did NOT survive lowering and were SKIPPED — only
+     * populated in `lenient` mode (preview), empty otherwise (the strict bounce throws
+     * on the first bad ref instead). The caller can warn about exactly what fell out. */
+    skipped: string[];
+}
+
+/** Options for {@link conduct}. */
+export interface ConductOptions {
+    /**
+     * LENIENT lowering for live preview: a track/automation ref that did not survive
+     * lowering is SKIPPED (collected into `skipped`) instead of throwing, so one stale
+     * ref silences only its own track, never the whole song (a held note beats a
+     * glitch). The headless bounce leaves this false so a bad arrangement fails LOUD
+     * (an authoring error the agent/CLI must see).
+     */
+    lenient?: boolean;
 }
 
 const DEFAULTS = { ppq: 960, sampleRate: 48_000, blockSize: 256 } as const;
@@ -54,7 +70,11 @@ function clampVel(v: number | undefined): number {
     return Math.max(0, Math.min(127, Math.round(v ?? 100)));
 }
 
-export function conduct(arr: Arrangement, backend: ConductBackend = 'native'): ConductResult {
+export function conduct(
+    arr: Arrangement,
+    backend: ConductBackend = 'native',
+    opts: ConductOptions = {},
+): ConductResult {
     const { nodes, connections } = specToGraph(arr.graph);
     const sampleRate = arr.sampleRate ?? DEFAULTS.sampleRate;
     const blockSize = arr.blockSize ?? DEFAULTS.blockSize;
@@ -70,9 +90,14 @@ export function conduct(arr: Arrangement, backend: ConductBackend = 'native'): C
     const secPerTick = 60 / (arr.tempoBpm * ppq);
     const tickToSec = (tick: number) => tick * secPerTick;
 
-    const idxOf = (ref: string): number => {
+    const skipped: string[] = [];
+    const idxOf = (ref: string): number | null => {
         const idx = index.get(ref);
         if (idx === undefined) {
+            if (opts.lenient) {
+                if (!skipped.includes(ref)) skipped.push(ref);
+                return null; // skip just this track/lane; the rest of the song plays
+            }
             throw new Error(
                 `conduct: track/automation references node "${ref}" that did not survive ` +
                     `lowering — is it an instrument/effect that makes sound (not a structural/IO node)?`,
@@ -90,6 +115,7 @@ export function conduct(arr: Arrangement, backend: ConductBackend = 'native'): C
 
     for (const track of arr.tracks) {
         const node = idxOf(track.ref);
+        if (node === null) continue; // lenient: this track's ref didn't survive — skip it
         trackIndex[track.ref] = node;
 
         if (!track.mute) {
@@ -107,6 +133,7 @@ export function conduct(arr: Arrangement, backend: ConductBackend = 'native'): C
 
         for (const lane of track.automation ?? []) {
             const anode = idxOf(lane.ref);
+            if (anode === null) continue; // lenient: skip an automation lane with a bad ref
             for (const pt of lane.points) {
                 lastTick = Math.max(lastTick, pt.tick);
                 timed.push({ tick: pt.tick, ev: { at: tickToSec(pt.tick), cmd: 'setParam', node: anode, param: lane.param, value: pt.value } });
@@ -149,6 +176,7 @@ export function conduct(arr: Arrangement, backend: ConductBackend = 'native'): C
 
         for (const [ref, chain] of byTrack) {
             const instIdx = idxOf(ref);
+            if (instIdx === null) continue; // lenient: the code node's track ref didn't survive
             // Snapshot the instrument's CURRENT consumers BEFORE rewiring, and the
             // output port that feeds them — carry the REAL from_port (never a
             // hardcoded 0 that would mis-route a multi-output source).
@@ -193,5 +221,5 @@ export function conduct(arr: Arrangement, backend: ConductBackend = 'native'): C
     const tailSec = Math.max(1, ppq * beatsPerBar * secPerTick);
     const seconds = tickToSec(lastTick) + tailSec;
 
-    return { graph: remapped, events, seconds, trackIndex, codeNodes };
+    return { graph: remapped, events, seconds, trackIndex, codeNodes, skipped };
 }

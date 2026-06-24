@@ -91,6 +91,25 @@ describe('conduct', () => {
         expect(() => conduct(bad)).toThrow(/did not survive/);
     });
 
+    it('lenient mode (preview) SKIPS a bad track instead of silencing the whole song', () => {
+        const mixed: Arrangement = {
+            ...base,
+            tracks: [
+                base.tracks[0]!, // good (keys)
+                { ref: 'ghost', clips: [{ startTick: 0, notes: [{ tick: 0, durTick: 480, pitch: 60 }] }] },
+            ],
+        };
+        // Strict still throws …
+        expect(() => conduct(mixed)).toThrow(/did not survive/);
+        // … lenient skips the ghost track and plays the rest.
+        const r = conduct(mixed, 'native', { lenient: true });
+        expect(r.skipped).toEqual(['ghost']);
+        expect(r.trackIndex['keys']).toBeDefined();
+        expect(r.trackIndex['ghost']).toBeUndefined();
+        // The good track's notes still lowered.
+        expect(r.events.some((e) => e.cmd === 'noteOn')).toBe(true);
+    });
+
     it('splices an agent-authored code node into a track signal path', () => {
         const arr: Arrangement = {
             ...base,

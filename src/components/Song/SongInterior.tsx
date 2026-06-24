@@ -101,7 +101,7 @@ export function SongInterior({ songNodeId }: { songNodeId: string }) {
                             />
                         ))}
                     </div>
-                    <Playhead pxPerTick={pxPerTick} gutterPx={GUTTER_PX} />
+                    <Playhead pxPerTick={pxPerTick} gutterPx={GUTTER_PX} scrollRef={scrollRef} />
                 </div>
             </div>
         </div>

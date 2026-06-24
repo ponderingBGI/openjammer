@@ -47,7 +47,14 @@ function startPreview(arr: Arrangement, playheadTick: number, onEnd: () => void)
     clearEndTimer();
     try {
         const startSec = playheadTick * secondsPerTick(arr);
-        const { graph, events, seconds } = conduct(arr, 'wasm');
+        // LENIENT: a track with an unresolved ref is skipped (the rest of the song still
+        // plays) — a held note beats a glitch. The headless bounce stays strict.
+        const { graph, events, seconds, skipped } = conduct(arr, 'wasm', { lenient: true });
+        if (skipped.length > 0) {
+            log.warn('timeline preview skipped tracks with unresolved refs (the rest plays)', {
+                detail: skipped.join(', '),
+            });
+        }
         getExecutor().startArrangementPreview(graph, events, startSec);
         // Auto-stop at the end of the song (conduct.seconds includes the release tail),
         // so the UI never claims to be playing a finished song and the canvas graph is
