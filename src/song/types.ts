@@ -10,6 +10,11 @@ import type { GraphSpec } from './spec';
 
 /** A note inside a clip, timed in PPQN ticks RELATIVE to the clip start. */
 export interface ArrangementNote {
+    /** Stable identity for selection / drag / reversible verbs / undo. Optional on
+     * disk (golden arrangements omit it); `normalizeArrangement` stamps a
+     * deterministic one wherever it is absent. `conduct` ignores it entirely, so a
+     * bounce is byte-identical whether or not ids are present. */
+    id?: string;
     /** Onset in ticks from the clip start. */
     tick: number;
     /** Length in ticks. */
@@ -22,6 +27,8 @@ export interface ArrangementNote {
 
 /** A clip placed on a track's timeline, timed in absolute PPQN ticks. */
 export interface ArrangementClip {
+    /** Stable identity (see {@link ArrangementNote.id}). */
+    id?: string;
     /** Clip start in absolute ticks from bar 1 beat 1. */
     startTick: number;
     notes: ArrangementNote[];
@@ -39,6 +46,8 @@ export interface AutomationPoint {
  * Lowered to STEPPED `setParam` events that ride the engine's per-sample smoothers.
  */
 export interface AutomationLane {
+    /** Stable identity (see {@link ArrangementNote.id}). */
+    id?: string;
     /** The graph node ref whose param is automated. */
     ref: string;
     /** Numeric param id. */
@@ -48,6 +57,8 @@ export interface AutomationLane {
 
 /** A track plays one instrument node (`ref`) over time via its clips. */
 export interface ArrangementTrack {
+    /** Stable identity (see {@link ArrangementNote.id}). */
+    id?: string;
     name?: string;
     /** The graph node ref this track plays (must survive lowering — an instrument). */
     ref: string;
@@ -59,6 +70,8 @@ export interface ArrangementTrack {
 
 /** A named arrangement section (metadata for the UI + the agent's read surface). */
 export interface ArrangementSection {
+    /** Stable identity (see {@link ArrangementNote.id}). */
+    id?: string;
     name: string;
     /** 1-based bar where the section begins. */
     startBar: number;

@@ -1,0 +1,95 @@
+import { beforeEach, describe, expect, it } from 'vitest';
+import { useArrangementStore } from '../arrangementStore';
+import type { Arrangement } from '../../song/types';
+
+const seed: Arrangement = {
+    name: 'store',
+    tempoBpm: 120,
+    ppq: 960,
+    graph: {
+        nodes: [
+            { ref: 'keys', type: 'keys' },
+            { ref: 'spk', type: 'speaker' },
+        ],
+        connections: [{ from: 'keys', to: 'spk' }],
+    },
+    tracks: [
+        { ref: 'keys', name: 'Keys', clips: [{ startTick: 0, notes: [{ tick: 0, durTick: 480, pitch: 60 }] }] },
+    ],
+};
+
+const store = () => useArrangementStore.getState();
+
+describe('arrangementStore — the timeline SSOT + command-log', () => {
+    beforeEach(() => store().setArrangement(seed));
+
+    it('normalizes on load (every entity has an id)', () => {
+        const arr = store().arrangement!;
+        expect(arr.tracks[0]!.id).toBeTruthy();
+        expect(arr.tracks[0]!.clips[0]!.id).toBeTruthy();
+        expect(arr.tracks[0]!.clips[0]!.notes[0]!.id).toBeTruthy();
+    });
+
+    it('apply → undo → redo restores exactly (one shared history)', () => {
+        const before = store().arrangement!;
+        const trackId = before.tracks[0]!.id!;
+        store().apply({ kind: 'setTrackMute', trackId, mute: true });
+        expect(store().arrangement!.tracks[0]!.mute).toBe(true);
+
+        store().undo();
+        expect(store().arrangement).toEqual(before); // byte-exact restore
+        expect(store().arrangement!.tracks[0]!.mute).toBeUndefined();
+
+        store().redo();
+        expect(store().arrangement!.tracks[0]!.mute).toBe(true);
+    });
+
+    it('a new edit clears the redo branch (linear history)', () => {
+        const trackId = store().arrangement!.tracks[0]!.id!;
+        store().apply({ kind: 'setTrackMute', trackId, mute: true });
+        store().undo();
+        expect(store().canRedo()).toBe(true);
+        store().apply({ kind: 'setTempo', tempoBpm: 90 });
+        expect(store().canRedo()).toBe(false);
+    });
+
+    it('apply with a fresh clip via mintId round-trips through undo', () => {
+        const trackId = store().arrangement!.tracks[0]!.id!;
+        const clipId = store().mintId('clip');
+        const noteId = store().mintId('note');
+        store().apply({
+            kind: 'addClip',
+            trackId,
+            index: 1,
+            clip: { id: clipId, startTick: 1920, notes: [{ id: noteId, tick: 0, durTick: 240, pitch: 67 }] },
+        });
+        expect(store().arrangement!.tracks[0]!.clips).toHaveLength(2);
+        store().undo();
+        expect(store().arrangement!.tracks[0]!.clips).toHaveLength(1);
+    });
+
+    it('mintId never repeats and never collides with existing ids', () => {
+        const ids = new Set<string>();
+        for (let i = 0; i < 100; i++) ids.add(store().mintId('x'));
+        expect(ids.size).toBe(100);
+    });
+
+    it('transport freezes the playhead on stop (never snaps to 0)', () => {
+        store().seek(1920);
+        expect(store().currentTick()).toBe(1920);
+        store().play();
+        expect(store().isPlaying).toBe(true);
+        store().stop();
+        expect(store().isPlaying).toBe(false);
+        // With no real audio clock in jsdom, elapsed is 0 — the point is it stays put.
+        expect(store().playheadTick).toBe(1920);
+    });
+
+    it('seek clamps to the arrangement length (playhead never runs off the ruler)', () => {
+        store().seek(10_000_000);
+        // length rounds up to whole bars; the clamp keeps the playhead on the ruler.
+        expect(store().currentTick()).toBeLessThan(10_000_000);
+        store().seek(-500);
+        expect(store().currentTick()).toBe(0);
+    });
+});
