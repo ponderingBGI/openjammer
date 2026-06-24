@@ -39,6 +39,16 @@ pub(crate) fn build_native_kernel(dll_path: &Path) -> Option<Box<dyn Kernel>> {
         .map(|k| Box::new(k) as Box<dyn Kernel>)
 }
 
+/// Probe a compiled native faust `.dll` for its `(audio_in, audio_out)` arity, or
+/// `None` if it can't be loaded / lacks the `oj_*` exports. Lets an off-RT caller
+/// build a [`ojcore::PluginManifest`] whose ports MATCH the DSP — so a generator
+/// (0-in) and an effect (1-in) each host correctly. Author-time only.
+pub fn native_dll_arity(dll_path: &Path) -> Option<(usize, usize)> {
+    NativeKernel::new(dll_path)
+        .ok()
+        .map(|k| (k.num_in, k.num_out))
+}
+
 /// A faust DSP loaded as a native dynamic library, driven through the `oj_*` C ABI.
 struct NativeKernel {
     // Keep the library loaded for the kernel's lifetime; dropped after `handle` is

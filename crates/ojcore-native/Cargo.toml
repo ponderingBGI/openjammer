@@ -23,6 +23,11 @@ demo = ["dep:ojinstrument", "dep:serde", "dep:serde_json"]
 # L3 — the SQLite/FTS5 persistent log store. Optional so the lean host build
 # stays free of the bundled-SQLite C compile; CI's logstore leg turns it on.
 persist = ["dep:rusqlite"]
+# The agent's PRIMARY creative mode, device-free: `render --code-node ID=src.dsp`
+# compiles an authored faust source to a native .dll and hosts it via ojwasm as a
+# real WasmHost node, so the offline render plays the agent's OWN instrument. Pulls
+# ojwasm[native-host] (libloading); kept optional so the lean host build stays clean.
+author-host = ["dep:ojwasm"]
 
 [dependencies]
 # Engine core (std feature on: we need CommandQueue/CommandConsumer + Engine).
@@ -30,6 +35,9 @@ ojcore = { path = "../ojcore" }
 ojproto = { path = "../ojproto" }
 # Built-in instruments — only for the `demo` render bin (optional, feature-gated).
 ojinstrument = { path = "../ojinstrument", optional = true }
+# Native host for agent-authored faust code nodes (the `author-host` feature):
+# compiles faust -> .dll and hosts it behind the DspInstance trait. Optional.
+ojwasm = { path = "../ojwasm", optional = true, features = ["native-host"] }
 
 # The offline `render` audition tool deserializes an `OjGraph` (+ a note/param
 # schedule) and serializes an `AudioReport` so an agent/CI can "play this graph and
