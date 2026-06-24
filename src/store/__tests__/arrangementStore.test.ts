@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useArrangementStore } from '../arrangementStore';
 import type { Arrangement } from '../../song/types';
 
@@ -91,5 +91,38 @@ describe('arrangementStore — the timeline SSOT + command-log', () => {
         expect(store().currentTick()).toBeLessThan(10_000_000);
         store().seek(-500);
         expect(store().currentTick()).toBe(0);
+    });
+
+    describe('transport honesty (playback stays in sync)', () => {
+        afterEach(() => {
+            store().stop();
+            vi.useRealTimers();
+        });
+
+        it('auto-stops at the end of the song — isPlaying never lies', () => {
+            vi.useFakeTimers();
+            store().play();
+            expect(store().isPlaying).toBe(true);
+            // Advance well past the song + release tail: the end-timer fires stop().
+            vi.advanceTimersByTime(60_000);
+            expect(store().isPlaying).toBe(false);
+        });
+
+        it('an edit while playing keeps playing (re-anchors, does not stop)', () => {
+            vi.useFakeTimers();
+            store().play();
+            const trackId = store().arrangement!.tracks[0]!.id!;
+            store().apply({ kind: 'setTrackMute', trackId, mute: true });
+            expect(store().isPlaying).toBe(true);
+            expect(store().arrangement!.tracks[0]!.mute).toBe(true);
+        });
+
+        it('a seek while playing stays playing and moves the playhead', () => {
+            vi.useFakeTimers();
+            store().play();
+            store().seek(480);
+            expect(store().isPlaying).toBe(true);
+            expect(store().playheadTick).toBe(480);
+        });
     });
 });

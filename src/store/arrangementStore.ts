@@ -26,17 +26,34 @@ function clockNow(): number {
     return getAudioContext()?.currentTime ?? 0;
 }
 
+/** The auto-stop timer: fires `stop()` when playback reaches the song's end (incl. the
+ *  conduct release tail), so isPlaying never lies and the canvas graph is restored. */
+let endTimer: ReturnType<typeof setTimeout> | null = null;
+function clearEndTimer(): void {
+    if (endTimer !== null) {
+        clearTimeout(endTimer);
+        endTimer = null;
+    }
+}
+
 /**
- * Start live audio preview of `arr` from `playheadTick`. Conducts to the wasm backend
- * and hands the graph + schedule to the executor's look-ahead scheduler. Wrapped so a
- * lowering/engine hiccup NEVER breaks the transport — the playhead still moves; a held
- * note beats a glitch. The browser tier plays; the native tier logs + no-ops.
+ * Start (or re-anchor) live audio preview of `arr` from `playheadTick`, and arm the
+ * end-of-song auto-stop. Conducts to the wasm backend and hands the graph + schedule
+ * to the executor's look-ahead scheduler. Wrapped so a lowering/engine hiccup NEVER
+ * breaks the transport — the playhead still moves; a held note beats a glitch. The
+ * browser tier plays; the native tier logs + no-ops. `onEnd` is the store's `stop`.
  */
-function startPreview(arr: Arrangement, playheadTick: number): void {
+function startPreview(arr: Arrangement, playheadTick: number, onEnd: () => void): void {
+    clearEndTimer();
     try {
         const startSec = playheadTick * secondsPerTick(arr);
-        const { graph, events } = conduct(arr, 'wasm');
+        const { graph, events, seconds } = conduct(arr, 'wasm');
         getExecutor().startArrangementPreview(graph, events, startSec);
+        // Auto-stop at the end of the song (conduct.seconds includes the release tail),
+        // so the UI never claims to be playing a finished song and the canvas graph is
+        // restored. A small slop keeps a final note/tail from being clipped.
+        const remainSec = Math.max(0, seconds - startSec);
+        endTimer = setTimeout(onEnd, remainSec * 1000 + 80);
     } catch (err) {
         log.warn('timeline preview could not start; the transport still runs (visual only)', {
             detail: err instanceof Error ? err.message : String(err),
@@ -46,6 +63,7 @@ function startPreview(arr: Arrangement, playheadTick: number): void {
 
 /** Stop live audio preview (release held notes + restore the canvas graph). Never throws. */
 function stopPreview(): void {
+    clearEndTimer();
     try {
         getExecutor().stopArrangementPreview();
     } catch {
@@ -124,105 +142,129 @@ export interface ArrangementStore {
 
 let idCounter = 1;
 
-export const useArrangementStore = create<ArrangementStore>((set, get) => ({
-    arrangement: null,
-    undoStack: [],
-    redoStack: [],
-    selectedClipId: null,
-    selectedNoteIds: [],
-    isPlaying: false,
-    playheadTick: 0,
-    playAnchorSec: null,
+export const useArrangementStore = create<ArrangementStore>((set, get) => {
+    /**
+     * (Re)anchor BOTH clocks to `fromTick` and (re)start the audio preview from there.
+     * The ONE path that keeps the playhead, the audio, and isPlaying in lockstep — used
+     * on play, on seek-while-playing, and on edit-while-playing — so a seek never strands
+     * a note and an edit is always HEARD (the agent-first-class promise). Only ever
+     * called while playing.
+     */
+    const reanchor = (arr: Arrangement, fromTick: number): void => {
+        set({ playheadTick: fromTick, playAnchorSec: clockNow() });
+        startPreview(arr, fromTick, () => get().stop());
+    };
 
-    setArrangement: (arr) => {
-        // Loading a new song stops any preview of the old one (release + restore).
-        stopPreview();
-        const normalized = arr ? normalizeArrangement(arr) : null;
-        idCounter = normalized ? seedCounter(normalized) : 1;
-        set({
-            arrangement: normalized,
-            undoStack: [],
-            redoStack: [],
-            selectedClipId: null,
-            selectedNoteIds: [],
-            isPlaying: false,
-            playheadTick: 0,
-            playAnchorSec: null,
-        });
-    },
+    return {
+        arrangement: null,
+        undoStack: [],
+        redoStack: [],
+        selectedClipId: null,
+        selectedNoteIds: [],
+        isPlaying: false,
+        playheadTick: 0,
+        playAnchorSec: null,
 
-    apply: (verb) => {
-        const arr = get().arrangement;
-        if (!arr) return;
-        const verbs = Array.isArray(verb) ? verb : [verb];
-        if (verbs.length === 0) return;
-        const { next, inverse } = applyVerbs(arr, verbs);
-        // A new edit clears the redo branch (standard linear-history semantics).
-        set({ arrangement: next, undoStack: [...get().undoStack, inverse], redoStack: [] });
-    },
+        setArrangement: (arr) => {
+            // Loading a new song stops any preview of the old one (release + restore).
+            stopPreview();
+            const normalized = arr ? normalizeArrangement(arr) : null;
+            idCounter = normalized ? seedCounter(normalized) : 1;
+            set({
+                arrangement: normalized,
+                undoStack: [],
+                redoStack: [],
+                selectedClipId: null,
+                selectedNoteIds: [],
+                isPlaying: false,
+                playheadTick: 0,
+                playAnchorSec: null,
+            });
+        },
 
-    undo: () => {
-        const arr = get().arrangement;
-        const undoStack = get().undoStack;
-        if (!arr || undoStack.length === 0) return;
-        const inverseBatch = undoStack[undoStack.length - 1]!;
-        const { next, inverse } = applyVerbs(arr, inverseBatch);
-        set({
-            arrangement: next,
-            undoStack: undoStack.slice(0, -1),
-            redoStack: [...get().redoStack, inverse], // inverse-of-inverse = the redo
-        });
-    },
+        apply: (verb) => {
+            const arr = get().arrangement;
+            if (!arr) return;
+            const verbs = Array.isArray(verb) ? verb : [verb];
+            if (verbs.length === 0) return;
+            const { next, inverse } = applyVerbs(arr, verbs);
+            // A new edit clears the redo branch (standard linear-history semantics).
+            set({ arrangement: next, undoStack: [...get().undoStack, inverse], redoStack: [] });
+            // Edit-while-playing: re-conduct + restart from the live position so the
+            // edit is HEARD and audio/playhead stay in sync.
+            if (get().isPlaying) reanchor(next, Math.floor(get().currentTick()));
+        },
 
-    redo: () => {
-        const arr = get().arrangement;
-        const redoStack = get().redoStack;
-        if (!arr || redoStack.length === 0) return;
-        const forwardBatch = redoStack[redoStack.length - 1]!;
-        const { next, inverse } = applyVerbs(arr, forwardBatch);
-        set({
-            arrangement: next,
-            redoStack: redoStack.slice(0, -1),
-            undoStack: [...get().undoStack, inverse],
-        });
-    },
+        undo: () => {
+            const arr = get().arrangement;
+            const undoStack = get().undoStack;
+            if (!arr || undoStack.length === 0) return;
+            const inverseBatch = undoStack[undoStack.length - 1]!;
+            const { next, inverse } = applyVerbs(arr, inverseBatch);
+            set({
+                arrangement: next,
+                undoStack: undoStack.slice(0, -1),
+                redoStack: [...get().redoStack, inverse], // inverse-of-inverse = the redo
+            });
+            if (get().isPlaying) reanchor(next, Math.floor(get().currentTick()));
+        },
 
-    canUndo: () => get().undoStack.length > 0,
-    canRedo: () => get().redoStack.length > 0,
+        redo: () => {
+            const arr = get().arrangement;
+            const redoStack = get().redoStack;
+            if (!arr || redoStack.length === 0) return;
+            const forwardBatch = redoStack[redoStack.length - 1]!;
+            const { next, inverse } = applyVerbs(arr, forwardBatch);
+            set({
+                arrangement: next,
+                redoStack: redoStack.slice(0, -1),
+                undoStack: [...get().undoStack, inverse],
+            });
+            if (get().isPlaying) reanchor(next, Math.floor(get().currentTick()));
+        },
 
-    mintId: (prefix) => `${prefix}-${idCounter++}`,
+        canUndo: () => get().undoStack.length > 0,
+        canRedo: () => get().redoStack.length > 0,
 
-    selectClip: (clipId) => set({ selectedClipId: clipId, selectedNoteIds: [] }),
-    selectNotes: (noteIds) => set({ selectedNoteIds: noteIds }),
+        mintId: (prefix) => `${prefix}-${idCounter++}`,
 
-    play: () => {
-        if (get().isPlaying) return;
-        const arr = get().arrangement;
-        set({ isPlaying: true, playAnchorSec: clockNow() });
-        if (arr) startPreview(arr, get().playheadTick);
-    },
+        selectClip: (clipId) => set({ selectedClipId: clipId, selectedNoteIds: [] }),
+        selectNotes: (noteIds) => set({ selectedNoteIds: noteIds }),
 
-    stop: () => {
-        if (!get().isPlaying) return;
-        // Freeze the playhead exactly where it is (never snap back to 0).
-        set({ isPlaying: false, playheadTick: get().currentTick(), playAnchorSec: null });
-        stopPreview();
-    },
+        play: () => {
+            if (get().isPlaying) return;
+            const arr = get().arrangement;
+            set({ isPlaying: true, playAnchorSec: clockNow() });
+            if (arr) reanchor(arr, get().playheadTick);
+        },
 
-    seek: (tick) => {
-        const arr = get().arrangement;
-        const max = arr ? arrangementLengthTicks(arr) : 0;
-        const clamped = Math.max(0, Math.min(tick, max));
-        // Re-anchor so a seek while playing continues smoothly from the new spot.
-        set({ playheadTick: clamped, playAnchorSec: get().isPlaying ? clockNow() : null });
-    },
+        stop: () => {
+            if (!get().isPlaying) return;
+            // Freeze the playhead exactly where it is (never snap back to 0).
+            set({ isPlaying: false, playheadTick: get().currentTick(), playAnchorSec: null });
+            stopPreview();
+        },
 
-    currentTick: () => {
-        const { arrangement, isPlaying, playheadTick, playAnchorSec } = get();
-        if (!isPlaying || playAnchorSec === null || !arrangement) return playheadTick;
-        const elapsedSec = clockNow() - playAnchorSec;
-        const tick = playheadTick + elapsedSec / secondsPerTick(arrangement);
-        // The playhead stops at the song end (it does not run off the ruler).
-        return Math.min(tick, arrangementLengthTicks(arrangement));
-    },
-}));
+        seek: (tick) => {
+            const arr = get().arrangement;
+            const max = arr ? arrangementLengthTicks(arr) : 0;
+            const clamped = Math.max(0, Math.min(tick, max));
+            if (get().isPlaying && arr) {
+                // Re-anchor BOTH clocks + restart the audio from the new spot, releasing
+                // any note that was sounding (no stranded voice while the playhead moves).
+                reanchor(arr, clamped);
+            } else {
+                set({ playheadTick: clamped, playAnchorSec: null });
+            }
+        },
+
+        currentTick: () => {
+            const { arrangement, isPlaying, playheadTick, playAnchorSec } = get();
+            if (!isPlaying || playAnchorSec === null || !arrangement) return playheadTick;
+            const elapsedSec = clockNow() - playAnchorSec;
+            const tick = playheadTick + elapsedSec / secondsPerTick(arrangement);
+            // The playhead stops at the song end (it does not run off the ruler).
+            return Math.min(tick, arrangementLengthTicks(arrangement));
+        },
+    };
+});
