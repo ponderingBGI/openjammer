@@ -30,6 +30,7 @@ import { MiniLab3Node } from './MiniLab3Node';
 import { MiniLab3VisualNode } from './MiniLab3VisualNode';
 import { SamplerNode } from './SamplerNode';
 import { SamplerVisualNode } from './SamplerVisualNode';
+import { SongNode } from './SongNode';
 import { AutoParamPanel } from '../params/AutoParamPanel';
 import { manifestFor, manifestForDynamic } from '../../engine/manifest';
 import { resolveNodeDefinition } from '../../engine/registry';
@@ -63,7 +64,8 @@ const SCHEMATIC_TYPES = [
     'subtract',
     'library',
     'sampler',
-    'sampler-visual'
+    'sampler-visual',
+    'song'
 ];
 
 export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps) {
@@ -433,6 +435,8 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
                 return <SamplerNode {...schematicProps} />;
             case 'sampler-visual':
                 return <SamplerVisualNode {...schematicProps} />;
+            case 'song':
+                return <SongNode {...schematicProps} />;
         }
     }
 

@@ -38,6 +38,7 @@ const WaveformEditorModal = lazy(() =>
     })),
 );
 import { PresenceOverlay } from '../Collab/PresenceOverlay';
+import { SongInterior } from '../Song/SongInterior';
 import { useCollabStore } from '../../store/collabStore';
 import './NodeCanvas.css';
 
@@ -111,6 +112,16 @@ export function NodeCanvas() {
         return new Map(connArray.map(c => [c.id, c]));
         // eslint-disable-next-line react-hooks/exhaustive-deps -- allConnections is the reactivity trigger: getConnectionsAtLevel reads the store via get(), so this memo must recompute when the connections Map identity changes
     }, [currentViewNodeId, getConnectionsAtLevel, allConnections]);
+    // What kind of interior the current view is: 'timeline' when we have entered a
+    // song node (render the hand-drawn SongInterior instead of the node graph),
+    // 'graph' otherwise (the ordinary node sub-canvas).
+    const interiorMode = useMemo<'graph' | 'timeline'>(() => {
+        if (!currentViewNodeId) return 'graph';
+        const viewNode = allNodes.get(currentViewNodeId);
+        if (!viewNode) return 'graph';
+        return resolveNodeDefinition(viewNode).interior ?? 'graph';
+    }, [currentViewNodeId, allNodes]);
+
     const selectedConnectionIds = useGraphStore((s) => s.selectedConnectionIds);
     const selectConnection = useGraphStore((s) => s.selectConnection);
     const clearSelection = useGraphStore((s) => s.clearSelection);
@@ -825,8 +836,11 @@ export function NodeCanvas() {
                     const definition = resolveNodeDefinition(selectedNode);
                     const canEnter = definition.canEnter !== false;
                     const hasChildren = selectedNode.childIds && selectedNode.childIds.length > 0;
+                    // A timeline interior (the song node) has NO graph children — it is
+                    // entered on its `interior` flag alone, not on childIds.
+                    const isTimelineInterior = definition.interior === 'timeline';
 
-                    if (canEnter && hasChildren) {
+                    if (canEnter && (isTimelineInterior || hasChildren)) {
                         enterNode(selectedNode.id);
                     } else {
                         // Flash node for ANY failure reason (canEnter=false OR no children)
@@ -1187,53 +1201,60 @@ export function NodeCanvas() {
                 backgroundSize: `${20 * zoom}px ${20 * zoom}px`
             }} />
 
-            <div
-                className="node-canvas-content"
-                style={{
-                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
-                }}
-            >
-                {/* Connections Layer */}
-                <div className="connections-layer">
-                    <svg>
-                        {Array.from(connections.values()).map(renderConnection)}
-                        {renderTempConnection()}
-                    </svg>
+            {interiorMode === 'timeline' && currentViewNodeId ? (
+                /* TIMELINE INTERIOR — entered a song node. The hand-drawn DAW timeline
+                   replaces the node/connection/clip layers (its own full-bleed paper
+                   surface + scroll); breadcrumbs/exit/Esc still navigate out of it. */
+                <SongInterior songNodeId={currentViewNodeId} />
+            ) : (
+                <div
+                    className="node-canvas-content"
+                    style={{
+                        transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
+                    }}
+                >
+                    {/* Connections Layer */}
+                    <div className="connections-layer">
+                        <svg>
+                            {Array.from(connections.values()).map(renderConnection)}
+                            {renderTempConnection()}
+                        </svg>
+                    </div>
+
+                    {/* Nodes Layer */}
+                    <div className="nodes-layer">
+                        {Array.from(nodes.values()).map((node) => (
+                            <NodeWrapper key={node.id} node={node} />
+                        ))}
+                    </div>
+
+                    {/* Audio Clips Layer */}
+                    <div className="clips-layer">
+                        {clipsOnCanvas.map((clip) => (
+                            <AudioClipVisual
+                                key={clip.id}
+                                clip={clip}
+                                isOnCanvas={true}
+                                isDragging={clipDragState.draggedClipId === clip.id}
+                                isSelected={selectedClipIds.has(clip.id)}
+                                onDragStart={(e) => {
+                                    const bounds = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                    selectClip(clip.id, e.shiftKey);
+                                    startClipDrag(clip.id, { x: e.clientX, y: e.clientY }, bounds);
+                                }}
+                                onDoubleClick={() => openClipEditor(clip.id)}
+                            />
+                        ))}
+                    </div>
+
+                    {/* Collaboration presence overlay (U23): remote peer cursors +
+                        selection rings. Renders nothing when not in a session. */}
+                    <PresenceOverlay />
+
+                    {/* Selection Box */}
+                    {renderSelectionBox()}
                 </div>
-
-                {/* Nodes Layer */}
-                <div className="nodes-layer">
-                    {Array.from(nodes.values()).map((node) => (
-                        <NodeWrapper key={node.id} node={node} />
-                    ))}
-                </div>
-
-                {/* Audio Clips Layer */}
-                <div className="clips-layer">
-                    {clipsOnCanvas.map((clip) => (
-                        <AudioClipVisual
-                            key={clip.id}
-                            clip={clip}
-                            isOnCanvas={true}
-                            isDragging={clipDragState.draggedClipId === clip.id}
-                            isSelected={selectedClipIds.has(clip.id)}
-                            onDragStart={(e) => {
-                                const bounds = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                selectClip(clip.id, e.shiftKey);
-                                startClipDrag(clip.id, { x: e.clientX, y: e.clientY }, bounds);
-                            }}
-                            onDoubleClick={() => openClipEditor(clip.id)}
-                        />
-                    ))}
-                </div>
-
-                {/* Collaboration presence overlay (U23): remote peer cursors +
-                    selection rings. Renders nothing when not in a session. */}
-                <PresenceOverlay />
-
-                {/* Selection Box */}
-                {renderSelectionBox()}
-            </div>
+            )}
 
             {/* Context Menu */}
             {contextMenu && (

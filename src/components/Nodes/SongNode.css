@@ -1,0 +1,79 @@
+/* Song Node — collapsed on-canvas card (Living Sketchbook: paper, ink, Caveat,
+   a hard blur-free offset shadow). Mirrors the instrument-visual node's voice. */
+
+.song-node {
+    position: absolute;
+    background: #fdfbf7;
+    border: 2px solid #2a2a2a;
+    border-radius: 8px;
+    min-width: 200px;
+    font-family: 'Caveat', cursive;
+    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.12);
+    display: flex;
+    flex-direction: column;
+    user-select: none;
+}
+
+.song-node.selected {
+    border-color: #4a90d9;
+    box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.3), 3px 3px 0 rgba(0, 0, 0, 0.12);
+}
+
+.song-node.dragging {
+    opacity: 0.85;
+    cursor: grabbing;
+}
+
+/* A gentle paper-warm pulse while the transport runs — never a harsh blink. */
+.song-node.playing {
+    border-color: #c98a3c;
+    box-shadow: 0 0 0 2px rgba(201, 138, 60, 0.25), 3px 3px 0 rgba(0, 0, 0, 0.12);
+}
+
+.song-node-header {
+    padding: 6px 12px;
+    border-bottom: 2px solid #2a2a2a;
+    cursor: grab;
+    background: #f1e9d6;
+    border-radius: 6px 6px 0 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.song-node-disc {
+    font-size: 14px;
+    color: #c98a3c;
+    line-height: 1;
+}
+
+.song-node.playing .song-node-disc {
+    color: #b5731f;
+}
+
+.song-node-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: #2a2a2a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.song-node-body {
+    padding: 8px 12px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.song-node-summary {
+    font-size: 15px;
+    color: #4a4336;
+}
+
+.song-node-hint {
+    font-size: 13px;
+    color: #9a8f78;
+    font-style: italic;
+}

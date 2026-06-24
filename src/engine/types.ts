@@ -187,7 +187,8 @@ export type NodeType =
     | 'subtract'       // Subtraction node (phase cancellation)
     | 'library'        // Sample library node for local audio files
     | 'sampler'        // Pitch-shifting sampler instrument (outside view)
-    | 'sampler-visual'; // Visual sampler with detailed controls (inside view)
+    | 'sampler-visual' // Visual sampler with detailed controls (inside view)
+    | 'song';          // Timeline arrangement node — its interior IS the on-canvas DAW timeline
 
 // ============================================================================
 // Plugin Identifiers (additive — see U10)
@@ -245,7 +246,8 @@ export const KNOWN_PLUGIN_IDS = [
     'subtract',
     'library',
     'sampler',
-    'sampler-visual'
+    'sampler-visual',
+    'song'
 ] as const satisfies readonly NodeType[];
 
 /**
@@ -656,6 +658,17 @@ export interface NodeDefinition {
     // Whether this node can be entered with E key (default: true)
     // If false, pressing E will flash red instead of entering
     canEnter?: boolean;
+
+    /**
+     * What the node's INTERIOR is when entered (default: `'graph'`).
+     *   • `'graph'`    — the existing nested sub-canvas of child nodes (container,
+     *                    instrument, sampler…). Entering requires `childIds.length>0`.
+     *   • `'timeline'` — a hand-drawn DAW timeline (the `song` node). It has NO graph
+     *                    children, so the canvas enter-gate lets it in on this flag
+     *                    alone and renders `<SongInterior>` instead of the node layer.
+     * One discriminator, two interiors — depth, never a separate mode (BOUNDARY §9).
+     */
+    interior?: 'graph' | 'timeline';
 }
 
 // ============================================================================

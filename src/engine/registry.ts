@@ -818,6 +818,24 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         },
         dimensions: { width: 180, height: 80 },
         canEnter: false  // This IS the internal view
+    },
+
+    // Song / Timeline — the on-canvas DAW. Press E to open its TIMELINE interior
+    // (SongInterior) instead of a sub-graph. It carries NO audio ports and has no
+    // KIND_BY_TYPE lowering: it is a pure authoring handle over the arrangementStore
+    // (the ONE shared Arrangement). The instruments it plays are ordinary graph
+    // nodes referenced by the arrangement, never owned by the song node.
+    song: {
+        type: 'song',
+        category: 'utility',
+        name: 'Song',
+        description: 'Arrange clips, notes, and automation on a timeline — press E to open',
+        ui: 'react', // SongNode (schematic switch)
+        defaultPorts: [],
+        defaultData: {},
+        dimensions: { width: 200, height: 120 },
+        canEnter: true,      // Press E to enter the timeline …
+        interior: 'timeline' // … which is the DAW timeline, not a node sub-graph.
     }
 };
 
@@ -855,7 +873,7 @@ export const menuCategories: MenuCategory[] = [
     {
         name: 'Utility',
         icon: '🔧',
-        items: ['container', 'add', 'subtract', 'multiplier']
+        items: ['container', 'add', 'subtract', 'multiplier', 'song']
     },
     {
         name: 'Output',

@@ -283,6 +283,11 @@ const PURELY_VISUAL = new Set<string>([
   'container',
   'canvas-input',
   'canvas-output',
+  // The song/timeline node is a pure authoring surface over the arrangementStore —
+  // it has no RT kernel and no KIND_BY_TYPE lowering (its interior is the timeline,
+  // its instruments are ordinary graph nodes). Listed so the gate doesn't read the
+  // absent lowering as drift.
+  'song',
 ]);
 
 export function evaluate(model: CouplingModel): Finding[] {
