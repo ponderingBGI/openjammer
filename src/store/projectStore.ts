@@ -21,6 +21,7 @@ import {
 import { useLibraryStore } from './libraryStore';
 import { useGraphStore } from './graphStore';
 import { useAudioClipStore, clearClipBufferCache } from './audioClipStore';
+import { useArrangementStore } from './arrangementStore';
 
 // ============================================================================
 // Types
@@ -773,6 +774,9 @@ export const useProjectStore = create<ProjectState>()(
 
         // Clear audio clip state
         useAudioClipStore.getState().clearAllClips();
+
+        // Clear the timeline so a closed project never leaks its song into the next.
+        useArrangementStore.getState().setArrangement(null);
 
         // Clear clip buffer cache to free memory
         clearClipBufferCache();

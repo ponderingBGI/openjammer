@@ -7,6 +7,7 @@
 
 import { useMemo } from 'react';
 import { useArrangementStore } from '../../store/arrangementStore';
+import { midiToNote } from '../../music/note';
 import type { ArrangementTrack } from '../../song/types';
 
 interface TrackLaneProps {
@@ -24,6 +25,8 @@ export function TrackLane({ track, pxPerTick, gutterPx, laneHeight, fieldWidth }
     const apply = useArrangementStore((s) => s.apply);
     const selectClip = useArrangementStore((s) => s.selectClip);
     const selectedClipId = useArrangementStore((s) => s.selectedClipId);
+    const selectNotes = useArrangementStore((s) => s.selectNotes);
+    const selectedNoteIds = useArrangementStore((s) => s.selectedNoteIds);
 
     // Pitch range across this track's notes, for vertical mapping (with a margin so a
     // single-pitch track sits centred rather than on an edge).
@@ -55,9 +58,11 @@ export function TrackLane({ track, pxPerTick, gutterPx, laneHeight, fieldWidth }
                 <button
                     className={`song-mute ${muted ? 'is-muted' : ''}`}
                     title={muted ? 'Unmute' : 'Mute'}
+                    aria-label={muted ? 'Unmute track' : 'Mute track'}
+                    aria-pressed={muted}
                     onClick={() => apply({ kind: 'setTrackMute', trackId: track.id!, mute: !muted })}
                 >
-                    {muted ? 'M' : 'M'}
+                    M
                 </button>
                 <span className="song-track-name">{track.name ?? track.ref}</span>
             </div>
@@ -82,13 +87,17 @@ export function TrackLane({ track, pxPerTick, gutterPx, laneHeight, fieldWidth }
                             {clip.notes.map((n) => (
                                 <span
                                     key={n.id}
-                                    className="song-note"
+                                    className={`song-note ${selectedNoteIds.includes(n.id!) ? 'selected' : ''}`}
                                     style={{
                                         left: (clip.startTick + n.tick) * pxPerTick - start,
                                         width: Math.max(3, Math.max(1, n.durTick) * pxPerTick - 1),
                                         top: yFor(n.pitch),
                                     }}
-                                    title={`pitch ${n.pitch}`}
+                                    title={midiToNote(n.pitch)}
+                                    onMouseDown={(e) => {
+                                        e.stopPropagation();
+                                        selectNotes([n.id!]);
+                                    }}
                                 />
                             ))}
                         </div>

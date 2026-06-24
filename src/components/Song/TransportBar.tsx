@@ -14,17 +14,26 @@ import { formatBarBeat, timebase } from '../../song/time';
 
 function TimeReadout() {
     const ref = useRef<HTMLSpanElement>(null);
+    // Mirror the Playhead: the per-frame loop runs only while playing; otherwise a
+    // single write keeps the readout correct after stop/seek (no idle 60fps loop).
+    const isPlaying = useArrangementStore((s) => s.isPlaying);
+    const playheadTick = useArrangementStore((s) => s.playheadTick);
     useEffect(() => {
-        let raf = 0;
-        const frame = () => {
+        const write = () => {
             const { arrangement, currentTick } = useArrangementStore.getState();
             const el = ref.current;
             if (el && arrangement) el.textContent = formatBarBeat(timebase(arrangement), currentTick());
+        };
+        write();
+        if (!isPlaying) return;
+        let raf = 0;
+        const frame = () => {
+            write();
             raf = requestAnimationFrame(frame);
         };
         raf = requestAnimationFrame(frame);
         return () => cancelAnimationFrame(raf);
-    }, []);
+    }, [isPlaying, playheadTick]);
     return <span className="song-time" ref={ref}>1.1</span>;
 }
 

@@ -17,18 +17,28 @@ interface PlayheadProps {
 
 export function Playhead({ pxPerTick, gutterPx }: PlayheadProps) {
     const ref = useRef<HTMLDivElement>(null);
+    // The rAF loop runs ONLY while playing; when stopped the playhead is frozen, so a
+    // single write settles it (and a seek-while-stopped re-runs this effect via the
+    // playheadTick dep) — no idle 60fps loop pinning a core when the timeline is open.
+    const isPlaying = useArrangementStore((s) => s.isPlaying);
+    const playheadTick = useArrangementStore((s) => s.playheadTick);
 
     useEffect(() => {
-        let raf = 0;
-        const frame = () => {
+        const write = () => {
             const tick = useArrangementStore.getState().currentTick();
             const el = ref.current;
             if (el) el.style.transform = `translateX(${tick * pxPerTick}px)`;
+        };
+        write(); // settle the frozen / seeked position immediately
+        if (!isPlaying) return; // stopped: no loop, the playhead holds still
+        let raf = 0;
+        const frame = () => {
+            write();
             raf = requestAnimationFrame(frame);
         };
         raf = requestAnimationFrame(frame);
         return () => cancelAnimationFrame(raf);
-    }, [pxPerTick]);
+    }, [pxPerTick, isPlaying, playheadTick]);
 
     return <div ref={ref} className="song-playhead" style={{ left: gutterPx }} />;
 }

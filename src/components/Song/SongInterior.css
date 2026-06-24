@@ -190,6 +190,9 @@
     background: #d7503a;
     color: #fff;
     border-color: #a83a28;
+    /* A visible glyph difference (struck-through M), so mute state is never conveyed
+       by colour alone — and aria-pressed carries it to screen readers. */
+    text-decoration: line-through;
 }
 
 .song-lane {
@@ -209,10 +212,12 @@
     overflow: hidden;
     cursor: pointer;
 }
+/* Selection uses the warm OCHRE accent, never blue — blue is reserved for "sound"
+   (the port-color language: a selected clip must not read as audio). */
 .song-clip.selected {
-    border-color: #4a90d9;
-    box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.35), 2px 2px 0 rgba(0, 0, 0, 0.06);
-    background: rgba(74, 144, 217, 0.1);
+    border-color: #c98a3c;
+    box-shadow: 0 0 0 2px rgba(201, 138, 60, 0.5), 2px 2px 0 rgba(0, 0, 0, 0.06);
+    background: rgba(201, 138, 60, 0.18);
 }
 .song-note {
     position: absolute;
@@ -220,6 +225,13 @@
     border-radius: 2px;
     background: #4a90d9; /* sound = blue, the port-color language */
     box-shadow: 0 0 0 0.5px rgba(42, 42, 42, 0.25);
+    cursor: pointer;
+}
+/* A selected note: warm ochre + an ink ring, so selection reads as selection (not
+   as the audio-blue of an ordinary note). */
+.song-note.selected {
+    background: #b5731f;
+    box-shadow: 0 0 0 1.5px #2a2a2a;
 }
 
 /* playhead: above lanes, below the sticky gutter/corner so it tucks under them */

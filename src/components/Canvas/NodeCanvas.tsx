@@ -672,7 +672,11 @@ export function NodeCanvas() {
                     }
                     if (matchesAction(e, 'edit.delete') || e.key === 'Backspace') {
                         e.preventDefault();
-                        if (arr.selectedClipId) {
+                        if (arr.selectedNoteIds.length > 0) {
+                            // Delete the selected note(s) as ONE undoable step.
+                            arr.apply(arr.selectedNoteIds.map((noteId) => ({ kind: 'removeNote', noteId })));
+                            arr.selectNotes([]);
+                        } else if (arr.selectedClipId) {
                             arr.apply({ kind: 'removeClip', clipId: arr.selectedClipId });
                             arr.selectClip(null);
                         }

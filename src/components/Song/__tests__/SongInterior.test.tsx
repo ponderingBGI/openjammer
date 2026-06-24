@@ -73,6 +73,22 @@ describe('SongInterior — the on-canvas timeline', () => {
             expect(container.querySelector('.song-clip.selected')).toBeTruthy();
         });
 
+        it('clicking a note selects it (ochre, distinct from audio-blue)', () => {
+            const { container } = render(<SongInterior songNodeId="song-1" />);
+            const note = container.querySelector('.song-note')!;
+            fireEvent.mouseDown(note);
+            expect(store().selectedNoteIds).toHaveLength(1);
+            expect(container.querySelector('.song-note.selected')).toBeTruthy();
+        });
+
+        it('the mute button carries aria-pressed (state not by colour alone)', () => {
+            render(<SongInterior songNodeId="song-1" />);
+            const mute = screen.getAllByTitle('Mute')[0]!;
+            expect(mute.getAttribute('aria-pressed')).toBe('false');
+            fireEvent.click(mute);
+            expect(screen.getAllByTitle('Unmute')[0]!.getAttribute('aria-pressed')).toBe('true');
+        });
+
         it('the playhead exists and the rewind seeks to the start', () => {
             const { container } = render(<SongInterior songNodeId="song-1" />);
             expect(container.querySelector('.song-playhead')).toBeTruthy();
