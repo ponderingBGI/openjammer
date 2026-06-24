@@ -58,17 +58,32 @@ export function commandsUpTo(
 
 /**
  * The NoteOff commands that release exactly the notes left SOUNDING after dispatching
- * `[0, cursor)` — every dispatched noteOn whose matching noteOff is still ahead of the
- * cursor. A stop sends these so no voice strands on the engine (a held note beats a
- * glitch: silence cleanly, never leave a stuck note ringing).
+ * the half-open range `[from, to)` — every dispatched noteOn whose matching noteOff is
+ * still ahead of the cursor. `from` is the cursor playback STARTED at (0 from the top,
+ * or mid-song), so events before it were never sent and are not spuriously released. A
+ * stop sends these so no voice strands on the engine (a held note beats a glitch:
+ * silence cleanly, never leave a stuck note ringing).
  */
-export function heldNoteOffs(events: readonly ScheduledCommand[], cursor: number): RtCommand[] {
+export function heldNoteOffs(
+    events: readonly ScheduledCommand[],
+    from: number,
+    to: number,
+): RtCommand[] {
     const held = new Map<string, { node: number; note: number }>();
-    const end = Math.min(cursor, events.length);
-    for (let i = 0; i < end; i++) {
+    const start = Math.max(0, from);
+    const end = Math.min(to, events.length);
+    for (let i = start; i < end; i++) {
         const e = events[i]!;
         if (e.cmd === 'noteOn') held.set(`${e.node}:${e.note}`, { node: e.node, note: e.note });
         else if (e.cmd === 'noteOff') held.delete(`${e.node}:${e.note}`);
     }
     return [...held.values()].map((h) => ({ NoteOff: { node: h.node, note: h.note } }));
+}
+
+/** The index of the first event at or after `startSec` — the cursor a preview that
+ *  begins mid-song starts dispatching from. Linear scan (the schedule is sorted). */
+export function cursorAtOrAfter(events: readonly ScheduledCommand[], startSec: number): number {
+    let i = 0;
+    while (i < events.length && events[i]!.at < startSec) i++;
+    return i;
 }

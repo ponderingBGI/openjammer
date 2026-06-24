@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { commandsUpTo, heldNoteOffs, toRtCommand, type ScheduledCommand } from '../arrangementScheduler';
+import {
+    commandsUpTo,
+    cursorAtOrAfter,
+    heldNoteOffs,
+    toRtCommand,
+    type ScheduledCommand,
+} from '../arrangementScheduler';
 
 const sched: ScheduledCommand[] = [
     { at: 0, cmd: 'setParam', node: 5, param: 1, value: 900 },
@@ -50,12 +56,24 @@ describe('arrangementScheduler', () => {
 
     it('heldNoteOffs releases exactly the notes still sounding at the cursor', () => {
         // After dispatching the first 2 (setParam + noteOn 60), note 60 is sounding.
-        expect(heldNoteOffs(sched, 2)).toEqual([{ NoteOff: { node: 1, note: 60 } }]);
+        expect(heldNoteOffs(sched, 0, 2)).toEqual([{ NoteOff: { node: 1, note: 60 } }]);
         // After 4 (…noteOff 60, noteOn 64), only 64 is sounding.
-        expect(heldNoteOffs(sched, 4)).toEqual([{ NoteOff: { node: 1, note: 64 } }]);
+        expect(heldNoteOffs(sched, 0, 4)).toEqual([{ NoteOff: { node: 1, note: 64 } }]);
         // After all 5, nothing is held.
-        expect(heldNoteOffs(sched, 5)).toEqual([]);
+        expect(heldNoteOffs(sched, 0, 5)).toEqual([]);
         // Before anything dispatched, nothing is held.
-        expect(heldNoteOffs(sched, 0)).toEqual([]);
+        expect(heldNoteOffs(sched, 0, 0)).toEqual([]);
+    });
+
+    it('a mid-song start does not spuriously release notes that were never sent', () => {
+        // Start at the 0.5 noteOn (index 3): only events [3, to) count.
+        expect(heldNoteOffs(sched, 3, 4)).toEqual([{ NoteOff: { node: 1, note: 64 } }]);
+        // The earlier note 60 (index 1) is NOT released — it was never dispatched.
+    });
+
+    it('cursorAtOrAfter finds the first event at/after a start time', () => {
+        expect(cursorAtOrAfter(sched, 0)).toBe(0);
+        expect(cursorAtOrAfter(sched, 0.5)).toBe(2); // first event with at >= 0.5
+        expect(cursorAtOrAfter(sched, 2)).toBe(5); // past the end
     });
 });

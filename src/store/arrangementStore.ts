@@ -11,14 +11,46 @@
 
 import { create } from 'zustand';
 import { getAudioContext } from '../audio/audioContext';
+import { getExecutor } from '../audio/executor';
+import { conduct } from '../song/conduct';
 import { normalizeArrangement } from '../song/normalize';
 import { applyVerbs, type Verb } from '../song/verbs';
 import { arrangementLengthTicks, secondsPerTick } from '../song/time';
 import type { Arrangement } from '../song/types';
+import { logger } from '../utils/log';
+
+const log = logger('song');
 
 /** Read AudioContext.currentTime, or 0 when there is no context (tests / pre-audio). */
 function clockNow(): number {
     return getAudioContext()?.currentTime ?? 0;
+}
+
+/**
+ * Start live audio preview of `arr` from `playheadTick`. Conducts to the wasm backend
+ * and hands the graph + schedule to the executor's look-ahead scheduler. Wrapped so a
+ * lowering/engine hiccup NEVER breaks the transport — the playhead still moves; a held
+ * note beats a glitch. The browser tier plays; the native tier logs + no-ops.
+ */
+function startPreview(arr: Arrangement, playheadTick: number): void {
+    try {
+        const startSec = playheadTick * secondsPerTick(arr);
+        const { graph, events } = conduct(arr, 'wasm');
+        getExecutor().startArrangementPreview(graph, events, startSec);
+    } catch (err) {
+        log.warn('timeline preview could not start; the transport still runs (visual only)', {
+            detail: err instanceof Error ? err.message : String(err),
+        });
+    }
+}
+
+/** Stop live audio preview (release held notes + restore the canvas graph). Never throws. */
+function stopPreview(): void {
+    try {
+        getExecutor().stopArrangementPreview();
+    } catch {
+        // No executor / already stopped — the transport state is authoritative.
+    }
 }
 
 /**
@@ -103,6 +135,8 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => ({
     playAnchorSec: null,
 
     setArrangement: (arr) => {
+        // Loading a new song stops any preview of the old one (release + restore).
+        stopPreview();
         const normalized = arr ? normalizeArrangement(arr) : null;
         idCounter = normalized ? seedCounter(normalized) : 1;
         set({
@@ -163,13 +197,16 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => ({
 
     play: () => {
         if (get().isPlaying) return;
+        const arr = get().arrangement;
         set({ isPlaying: true, playAnchorSec: clockNow() });
+        if (arr) startPreview(arr, get().playheadTick);
     },
 
     stop: () => {
         if (!get().isPlaying) return;
         // Freeze the playhead exactly where it is (never snap back to 0).
         set({ isPlaying: false, playheadTick: get().currentTick(), playAnchorSec: null });
+        stopPreview();
     },
 
     seek: (tick) => {

@@ -62,6 +62,7 @@ import {
 } from './ojcoreHandles';
 import { classifyLatency, type LatencyReport } from './latency';
 import { logger } from '../../utils/log';
+import type { ScheduledCommand } from './arrangementScheduler';
 import { setEngineHealth, useEngineHealthStore } from '../../store/engineHealthStore';
 import {
     ingestEngineEvents,
@@ -916,6 +917,36 @@ export class OjcoreNativeExecutor implements Executor {
             }
         }
     }
+
+    // --- Timeline preview (browser-tier today; native bounces via `oj render`) ---
+
+    /** Logged once so a developer sees WHY native Play is silent — by design, not a
+     *  defect: the native tier's bit-identical path is the offline bounce. */
+    private previewDeferralLogged = false;
+
+    /**
+     * Native live preview is deferred. The browser (wasm) tier plays the timeline
+     * live; the native tier's strength is the BIT-IDENTICAL offline bounce (`oj
+     * render` / `oj song`), and native live preview (push the conduct graph + schedule
+     * over the cpal-owned engine) is a follow-up the founder can verify on the box.
+     * Honest no-op, logged once — never a silent pretence of playing.
+     */
+    startArrangementPreview(
+        _graph: OjGraph,
+        _events: readonly ScheduledCommand[],
+        _startSec: number,
+    ): void {
+        if (!this.previewDeferralLogged) {
+            this.previewDeferralLogged = true;
+            log.info(
+                'Timeline live-preview is browser-tier today; the native tier renders a ' +
+                    'bit-identical bounce via `oj render`. Native live preview is a follow-up.',
+            );
+        }
+    }
+
+    /** No native preview runs, so there is nothing to stop. */
+    stopArrangementPreview(): void {}
 
     // --- Native command backings for the capability bridge -----------------
 

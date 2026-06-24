@@ -13,6 +13,8 @@
 
 import type { Connection, GraphNode } from '../../engine/types';
 import type { EngineCapabilities } from '../../engine/capabilities';
+import type { OjGraph } from '@openjammer/oj-protocol';
+import type { ScheduledCommand } from './arrangementScheduler';
 import type { LatencyReport } from './latency';
 import type {
     LooperHandle,
@@ -183,4 +185,29 @@ export interface Executor {
 
     /** Forward a decoded sample buffer from a source node to connected samplers. */
     sendSampleBuffer(sourceNodeId: string, buffer: AudioBuffer): void;
+
+    // --- Timeline preview (the on-canvas timeline's transport) ------------
+
+    /**
+     * Begin LIVE PREVIEW of a conducted timeline: load `graph` (the wasm-remapped
+     * `conduct()` IR, which REPLACES the live canvas graph until
+     * {@link stopArrangementPreview}) and dispatch `events` — offsets in seconds from
+     * tick 0 — through a main-thread look-ahead scheduler, starting playback at
+     * `startSec`. Browser-tier timing is honestly ~15–25 ms; the bit-identical
+     * guarantee belongs to the OFFLINE bounce (`oj render`), not this live preview, and
+     * the playhead (AudioContext.currentTime) stays the visual source of truth. A
+     * second call cleanly restarts. NEVER throws (a conduct/engine hiccup must not
+     * break the transport — a held note beats a glitch).
+     *
+     * Tiers: the BROWSER (wasm) tier plays; the NATIVE tier logs and no-ops for now —
+     * its bit-identical path is `oj render`, and native live preview is a follow-up.
+     */
+    startArrangementPreview(
+        graph: OjGraph,
+        events: readonly ScheduledCommand[],
+        startSec: number,
+    ): void;
+
+    /** End live preview: release any sounding notes and restore the canvas graph. */
+    stopArrangementPreview(): void;
 }
