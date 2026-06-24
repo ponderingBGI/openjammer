@@ -54,9 +54,9 @@ installs the missing ones after a confirm. Its set is derived from CI, so local 
 `--dry-run` previews, `--wasm` adds the browser-worklet nightly, and `bun run oj doctor --check
 native-readiness` reports without installing.
 
-<sub>Power-user extras: `bun native --plugins` opts into the full JUCE VST3/CLAP/AU host (first
-CMake build can take minutes), `bun native --clap` uses the pure-Rust CLAP host, and
-`bun native --engine` is a windowless Rust/DSP inner-loop (bacon over the `render`/`nextest`
+<sub>Power-user extras: `bun native --all` opts into the full JUCE VST3/CLAP/AU host (first
+CMake build can take minutes; `--plugins` is an alias), `bun native --clap` uses the pure-Rust
+CLAP host, and `bun native --engine` is a windowless Rust/DSP inner-loop (bacon over the `render`/`nextest`
 harnesses — `cargo install --locked bacon`). `OJ_DEV_SKIP_PI=1` skips the Ctrl+K AI sidecar build.
 `bun native` is also reachable as `just dev` / `bun run dev:native`.</sub>
 

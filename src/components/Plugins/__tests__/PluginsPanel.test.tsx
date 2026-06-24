@@ -25,6 +25,28 @@ function open(): void {
     act(() => window.dispatchEvent(new CustomEvent('openjammer:toggle-plugins')));
 }
 
+/** Mock the three native commands the panel fans out to on scan. `backend:
+ *  'reject'` simulates an older binary that lacks the `hosting_backend` command. */
+function mockNative(opts: {
+    plugins?: unknown[];
+    dirs?: unknown[];
+    backend?: { backend: string; formats: string[] } | 'reject';
+}): void {
+    const plugins = opts.plugins ?? [];
+    const dirs = opts.dirs ?? [];
+    const backend = opts.backend ?? { backend: 'juce', formats: ['vst3', 'clap'] };
+    invokeMock.mockImplementation((cmd: string) => {
+        if (cmd === 'scan_plugins') return Promise.resolve(plugins);
+        if (cmd === 'plugin_dirs') return Promise.resolve(dirs);
+        if (cmd === 'hosting_backend') {
+            return backend === 'reject'
+                ? Promise.reject(new Error('unknown command'))
+                : Promise.resolve(backend);
+        }
+        return Promise.resolve(null); // reveal_path etc.
+    });
+}
+
 describe('PluginsPanel', () => {
     it('is hidden until toggled', () => {
         render(<PluginsPanel />);
@@ -64,21 +86,45 @@ describe('PluginsPanel', () => {
         expect(screen.getByText('effect')).toBeTruthy();
     });
 
-    it('shows an empty-state hint when no plugins are found', async () => {
+    it('shows an empty-state hint when hosting is on but nothing is found', async () => {
         tauriPresent = true;
-        invokeMock.mockResolvedValue([]);
+        mockNative({ plugins: [], backend: { backend: 'juce', formats: ['vst3', 'clap'] } });
         render(<PluginsPanel />);
         open();
         await waitFor(() => expect(screen.getByText(/No plugins found/i)).toBeTruthy());
     });
 
+    it('explains hosting is OFF in a scaffold build and points at `bun native --all`', async () => {
+        tauriPresent = true;
+        // Scaffold (`none`) can never list a plugin — so it must not pretend a
+        // folder drop + Re-scan would help, and must not dump the folder list.
+        mockNative({
+            plugins: [],
+            dirs: [{ path: 'C:\\Program Files\\Common Files\\VST3', scope: 'system' }],
+            backend: { backend: 'none', formats: [] },
+        });
+        render(<PluginsPanel />);
+        open();
+        await waitFor(() => expect(screen.getByText(/hosting is off/i)).toBeTruthy());
+        expect(screen.getByText(/bun native --all/i)).toBeTruthy();
+        expect(screen.queryByText(/Common Files\\VST3/)).toBeNull();
+    });
+
+    it('flags a CLAP-only build so a missing VST3 is explained', async () => {
+        tauriPresent = true;
+        mockNative({ plugins: [], backend: { backend: 'clap', formats: ['clap'] } });
+        render(<PluginsPanel />);
+        open();
+        await waitFor(() => expect(screen.getByText(/CLAP only/i)).toBeTruthy());
+    });
+
     it('lists the real CLAP folders and opens one on demand when empty', async () => {
         tauriPresent = true;
         const clapDir = 'C:\\Program Files\\Common Files\\CLAP';
-        invokeMock.mockImplementation((cmd: string) => {
-            if (cmd === 'plugin_dirs') return Promise.resolve([{ path: clapDir, scope: 'system' }]);
-            if (cmd === 'reveal_path') return Promise.resolve(null);
-            return Promise.resolve([]); // scan_plugins -> no plugins
+        mockNative({
+            plugins: [],
+            dirs: [{ path: clapDir, scope: 'system' }],
+            backend: { backend: 'juce', formats: ['vst3', 'clap'] },
         });
         render(<PluginsPanel />);
         open();

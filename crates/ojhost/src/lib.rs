@@ -46,8 +46,8 @@ pub use node::{
     hosted_plugin_id, HostedPlugin, PluginEditor, PluginHostLoader, PluginHostNode, PLUGIN_HOST_ID,
 };
 pub use scan::{
-    clap_plugin_dirs, default_plugin_dirs, probe_candidate, scan, scan_with, Blacklist,
-    ProbeHelperResponse, ScanCache,
+    candidate_paths, clap_plugin_dirs, default_plugin_dirs, probe_candidate, scan, scan_with,
+    Blacklist, ProbeHelperResponse, ScanCache,
 };
 
 use ojcore::PluginRegistry;
@@ -78,6 +78,18 @@ impl HostingBackend {
         #[cfg(not(any(feature = "clap-host", feature = "juce")))]
         {
             HostingBackend::None
+        }
+    }
+
+    /// Stable lowercase slug for the UI / logs: `"none" | "clap" | "juce"`.
+    /// Lets the shell report which backend a build actually compiled in (the
+    /// signal that tells "no plugins installed" apart from "hosting was never
+    /// built into this `bun native` run").
+    pub const fn slug(self) -> &'static str {
+        match self {
+            HostingBackend::None => "none",
+            HostingBackend::ClapOnly => "clap",
+            HostingBackend::Juce => "juce",
         }
     }
 

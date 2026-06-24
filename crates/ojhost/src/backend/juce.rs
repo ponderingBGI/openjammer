@@ -196,8 +196,10 @@ pub(super) fn probe(
         for d in slice {
             let dpath = cstr_owned(d.path);
             // Only descriptors from the requested binary (the scanner may also
-            // have found neighbours in the same directory).
-            if dpath != target {
+            // have found neighbours in the same directory). Compare NORMALIZED:
+            // JUCE reports its own `File` string (unified separators, Windows
+            // drive-letter/path casing), so a raw `!=` dropped every real match.
+            if !crate::scan::same_plugin_path(&dpath, &target) {
                 continue;
             }
             out.push(PluginDescriptor {

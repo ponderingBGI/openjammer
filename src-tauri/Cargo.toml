@@ -80,7 +80,7 @@ tracing-appender = { workspace = true }
 # third-party plugin host in scaffold mode (scan returns empty, no CMake/JUCE
 # build). `bun native` must feel like a dev server, not a minutes-long installer
 # build. Release/canary installer jobs opt into `plugin-host-juce` explicitly;
-# local plugin-host testing can use `bun native --plugins` (JUCE) or `--clap`.
+# local plugin-host testing can use `bun native --all` / `--plugins` (JUCE) or `--clap`.
 default = ["plugin-host-scaffold"]
 plugin-host-scaffold = []
 plugin-host-juce = ["ojhost/juce"]

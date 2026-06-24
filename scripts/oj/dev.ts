@@ -6,6 +6,8 @@
 //                     Rust/DSP iteration against the render/nextest harnesses.
 //   oj dev <flags>    any other flags pass straight through to `tauri dev`
 //                     (e.g. --release, -f <feature>, --additional-watch-folders).
+//   oj dev --all      run the full hosted-plugin dev loop (JUCE VST3/CLAP/AU),
+//                     matching the release plugin-host feature set.
 //
 // DELEGATION IS THE DESIGN. The hardest part of a cross-platform dev loop —
 // recursive Windows process-tree teardown + correct Ctrl+C — is already solved
@@ -35,10 +37,10 @@ const NATIVE_EXECUTOR = 'ojcore-native';
 const PI_PKG = '@earendil-works/pi-coding-agent';
 const PI_STAMP = 'src-tauri/binaries/openjammer-pi-runtime.json';
 
-type PluginHostMode = 'scaffold' | 'clap' | 'juce';
-type HostSource = 'default' | 'env' | 'flag' | 'tauri-features';
+export type PluginHostMode = 'scaffold' | 'clap' | 'juce';
+export type HostSource = 'default' | 'env' | 'flag' | 'tauri-features';
 
-interface NativeDevOptions {
+export interface NativeDevOptions {
   passthrough: string[];
   pluginHost: PluginHostMode;
   hostSource: HostSource;
@@ -93,8 +95,8 @@ async function nativeDev(rawArgs: string[]): Promise<number> {
   if (!process.env.VITE_OJ_EXECUTOR) process.env.VITE_OJ_EXECUTOR = NATIVE_EXECUTOR;
 
   // 4. Default to the scaffold plugin host so `bun native` opens quickly. The
-  //    heavy JUCE CMake/MSBuild path is still one flag away (`--plugins`) but is
-  //    never sprung on a normal dev-server launch.
+  //    heavy JUCE CMake/MSBuild path is still one flag away (`--all` / `--plugins`)
+  //    but is never sprung on a normal dev-server launch.
   const tauriArgs = withPluginHostFeature(opts.passthrough, opts.pluginHost);
 
   // 5. Print the controls once, then delegate the whole lifecycle to the Tauri
@@ -124,7 +126,7 @@ function printControls(pluginHost: PluginHostMode, hostSource: HostSource): void
   );
 }
 
-function parseNativeDevOptions(args: string[]): NativeDevOptions | { error: string } {
+export function parseNativeDevOptions(args: string[]): NativeDevOptions | { error: string } {
   const passthrough: string[] = [];
   const requested: { host: PluginHostMode; source: 'flag' }[] = [];
   const envRaw = process.env.OJ_DEV_PLUGIN_HOST;
@@ -135,7 +137,7 @@ function parseNativeDevOptions(args: string[]): NativeDevOptions | { error: stri
     if (!envHost) {
       return {
         error:
-          'OJ_DEV_PLUGIN_HOST must be one of scaffold, clap, or juce ' +
+          'OJ_DEV_PLUGIN_HOST must be one of scaffold, clap, juce, or all ' +
           `(got ${JSON.stringify(envRaw)})`,
       };
     }
@@ -143,7 +145,7 @@ function parseNativeDevOptions(args: string[]): NativeDevOptions | { error: stri
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i]!;
-    if (arg === '--plugins' || arg === '--juce' || arg === '--plugin-host-juce') {
+    if (arg === '--all' || arg === '--plugins' || arg === '--juce' || arg === '--plugin-host-juce') {
       requested.push({ host: 'juce', source: 'flag' });
       continue;
     }
@@ -176,7 +178,7 @@ function parseNativeDevOptions(args: string[]): NativeDevOptions | { error: stri
 
   const explicitHosts = new Set(requested.map((r) => r.host));
   if (explicitHosts.size > 1) {
-    return { error: 'choose only one plugin host: scaffold, clap, or juce' };
+    return { error: 'choose only one plugin host: scaffold, clap, or juce/all' };
   }
 
   const tauriFeatureHost = inferPluginHostFromTauriFeatures(passthrough);
@@ -210,6 +212,7 @@ function parsePluginHostValue(value: string): PluginHostMode | null {
       return 'clap';
     case 'juce':
     case 'plugins':
+    case 'all':
     case 'full':
     case 'vst':
     case 'vst3':
@@ -230,7 +233,7 @@ function inferPluginHostFromTauriFeatures(args: string[]): PluginHostMode | null
   return null;
 }
 
-function withPluginHostFeature(args: string[], host: PluginHostMode): string[] {
+export function withPluginHostFeature(args: string[], host: PluginHostMode): string[] {
   if (host === 'scaffold' || inferPluginHostFromTauriFeatures(args)) return args;
   const feature = PLUGIN_HOST_FEATURE[host];
   const separator = args.indexOf('--');
@@ -246,7 +249,7 @@ function pluginHostSummary(host: PluginHostMode, source: HostSource): string {
   const origin = source === 'default' ? 'default' : source === 'env' ? 'OJ_DEV_PLUGIN_HOST' : 'selected';
   switch (host) {
     case 'scaffold':
-      return `${origin} fast scaffold (no VST/AU scan; use \`bun native --plugins\` for JUCE)`;
+      return `${origin} fast scaffold (no VST/AU scan; use \`bun native --all\` for full VST3/CLAP/AU)`;
     case 'clap':
       return `${origin} CLAP-only host (pure Rust; no CMake/JUCE)`;
     case 'juce':

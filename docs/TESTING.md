@@ -32,7 +32,8 @@ claim.
 
 ## 2. Native audio + instruments + MIDI
 ```bash
-bun native     # run the native desktop app — or launch the installed build
+bun native        # run the native desktop app — or launch the installed build
+bun native --all  # run the dev app with the full VST3/CLAP/AU host
 ```
 - Build `keyboard → instrument → effect → speaker`. Play the Arturia → sound, low latency.
 - Verify looper (record/overdub/clear), recorder (capture → WAV), sampler (load a

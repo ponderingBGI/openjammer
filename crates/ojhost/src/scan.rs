@@ -423,7 +423,12 @@ fn scan_helper_path() -> Option<PathBuf> {
 /// Enumerate candidate plugin paths under `dirs` (one level of recursion into
 /// directories; bundles like `.vst3`/`.component` are returned as their
 /// directory path, which is what the backend opens). Missing dirs are skipped.
-fn candidate_paths(dirs: &[PathBuf]) -> Vec<PathBuf> {
+///
+/// Public so the shell can log *how many plugin-shaped files exist on disk*
+/// independently of how many actually probed — the "found N candidates but 0
+/// hosted" diagnostic that distinguishes "nothing installed" from "a backend that
+/// couldn't open them".
+pub fn candidate_paths(dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut found = Vec::new();
     for dir in dirs {
         collect_candidates(dir, &mut found, 0);
@@ -456,6 +461,35 @@ fn collect_candidates(dir: &Path, out: &mut Vec<PathBuf>, depth: usize) {
             collect_candidates(&path, out, depth + 1);
         }
     }
+}
+
+/// Whether two plugin paths name the same binary, tolerating the cosmetic
+/// differences a host introduces. The JUCE scanner reports a plugin's path as its
+/// own normalized `File` string — unified separators, and on Windows a possibly
+/// different drive-letter / path casing than the candidate path we walked off
+/// disk. A raw `candidate == reported` check (which the JUCE probe used to do)
+/// then dropped EVERY match when the two differed only by `/` vs `\` or by case,
+/// i.e. a scan that *found* plugins returned *none*. Normalize both sides (unify
+/// separators, drop a trailing slash, ignore ASCII case on Windows) before
+/// comparing. Pure ASCII-casing keeps it dependency-free and covers the real
+/// cases (drive letter + Program Files path).
+///
+/// Its only caller is the `juce` backend (feature-gated off in the scaffold /
+/// clap-host builds), but it lives here in the always-compiled scan module so the
+/// normalization is unit-tested without the JUCE toolchain — hence the allow when
+/// no backend consumes it.
+#[cfg_attr(not(feature = "juce"), allow(dead_code))]
+pub(crate) fn same_plugin_path(a: &str, b: &str) -> bool {
+    fn norm(s: &str) -> String {
+        let unified = s.replace('\\', "/");
+        let trimmed = unified.trim_end_matches('/');
+        if cfg!(windows) {
+            trimmed.to_ascii_lowercase()
+        } else {
+            trimmed.to_owned()
+        }
+    }
+    norm(a) == norm(b)
 }
 
 #[cfg(test)]
@@ -508,6 +542,30 @@ mod tests {
         assert!(cands.contains(&vst3), "should find .vst3 bundle dir");
         assert!(!cands.contains(&other), "should ignore non-plugin files");
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn same_plugin_path_tolerates_separators_and_trailing_slash() {
+        // `/` vs `\` and a trailing slash are the same plugin (the difference the
+        // JUCE scanner introduces vs. the path we walked off disk).
+        assert!(same_plugin_path(
+            "C:/Program Files/Common Files/VST3/Foo.vst3",
+            r"C:\Program Files\Common Files\VST3\Foo.vst3",
+        ));
+        assert!(same_plugin_path("/a/b/Foo.vst3/", "/a/b/Foo.vst3"));
+        // Different binaries must still NOT match.
+        assert!(!same_plugin_path("/a/b/Foo.vst3", "/a/b/Bar.vst3"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn same_plugin_path_ignores_case_on_windows() {
+        // Drive-letter / Program Files casing differences are the same plugin on
+        // Windows (a case-insensitive filesystem).
+        assert!(same_plugin_path(
+            r"c:\program files\common files\vst3\foo.vst3",
+            r"C:\Program Files\Common Files\VST3\Foo.vst3",
+        ));
     }
 
     #[test]

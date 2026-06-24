@@ -65,7 +65,7 @@ bun run build
 
 # Native desktop app (Tauri)
 bun native                    # run the desktop app: Vite HMR + ojcore-native, fast scaffold plugin host
-bun native --plugins          # same app with full JUCE VST3/CLAP/AU host (heavy first build)
+bun native --all              # same app with full JUCE VST3/CLAP/AU host (heavy first build)
 bun native --engine           # windowless Rust/DSP inner-loop via bacon
 bun run tauri build --features plugin-host-juce  # local installer matching release plugin hosting
 ```
@@ -79,8 +79,8 @@ Windows/macOS/Linux** — never reintroduce a sibling orchestrator (Bun can't re
 tree on Windows; the Tauri CLI already does, in Rust). It deliberately offers **no Vite-style keypress
 menu**: a custom one would force the wrapper to take that teardown back, so it prints a controls
 banner instead. The default plugin host is the scaffold (no VST/AU scan, no JUCE/CMake build) so
-`bun native` behaves like a fast app dev loop; hosted-plugin testing opts in with `bun native --plugins`
-(JUCE) or `bun native --clap` (pure-Rust CLAP). Editing `src/**` is Vite HMR in place
+`bun native` behaves like a fast app dev loop; hosted-plugin testing opts in with `bun native --all`
+(JUCE VST3/CLAP/AU; `--plugins` alias) or `bun native --clap` (pure-Rust CLAP). Editing `src/**` is Vite HMR in place
 (canvas/AudioContext preserved); editing `crates/**` or `src-tauri/**` recompiles and **restarts** the
 native window — for fast DSP iteration use `bun native --engine` (bacon: re-runs the
 `render`/`nextest` harnesses on save, audible pass/fail, no window). The Pi sidecar rebuilds lazily on

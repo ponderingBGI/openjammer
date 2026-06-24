@@ -1,13 +1,12 @@
 /**
  * AI learning (memory) state — the truthful source for the "memory: on" footer.
  *
- * Whether Philia remembers a player across sessions is the presence of the
- * `pi-persistent-intelligence` package in the agent's `settings.json` (toggled by
- * the `ai_set_learning` / `ai_forget` Ctrl+K commands). The host owns that file, so
- * the indicator must READ it (`ai_get_learning`) rather than guess — but a toggle
- * should also reflect AT ONCE, so the commands set the value optimistically and the
- * footer reads from here. Desktop-only: in the browser `getInvoke()` is null and the
- * value stays `null` (the footer simply shows nothing).
+ * Philia's memory is ON by default: the host installs `pi-persistent-intelligence`
+ * on first read/run, unless the player explicitly turned it off. The host owns that
+ * setting, so the indicator must READ it (`ai_get_learning`) rather than guess — but
+ * a toggle should also reflect AT ONCE, so the commands set the value optimistically
+ * and the footer reads from here. Desktop-only: in the browser `getInvoke()` is null
+ * and the value stays `null` (the footer simply shows nothing).
  */
 
 import { create } from 'zustand';

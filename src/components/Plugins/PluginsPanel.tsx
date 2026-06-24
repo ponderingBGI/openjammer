@@ -43,10 +43,18 @@ interface PluginDir {
     format?: 'VST2' | 'VST3' | 'CLAP' | 'AU' | string;
 }
 
+/** Which hosting backend THIS build compiled in (mirrors `HostingInfo` in the
+ *  native shell). `'none'` is the fast scaffold `bun native` that can't host any
+ *  plugin — so an empty list there means "build can't host", not "none installed". */
+interface HostingInfo {
+    backend: 'none' | 'clap' | 'juce' | string;
+    formats: string[];
+}
+
 type ScanState =
     | { kind: 'idle' }
     | { kind: 'scanning' }
-    | { kind: 'ok'; plugins: PluginDescriptor[]; dirs: PluginDir[] }
+    | { kind: 'ok'; plugins: PluginDescriptor[]; dirs: PluginDir[]; backend: HostingInfo | null }
     | { kind: 'error'; message: string }
     | { kind: 'unsupported' };
 
@@ -101,10 +109,14 @@ export function PluginsPanel() {
         try {
             // Empty dirs -> the native side scans the OS-standard plugin folders;
             // `plugin_dirs` returns those same VST2/VST3/CLAP/AU folders so the
-            // empty state can show real paths instead of examples.
-            const [plugins, dirs] = await Promise.all([
+            // empty state can show real paths instead of examples. `hosting_backend`
+            // reports which backend this build compiled in, so an empty list can be
+            // explained honestly (a scaffold build can't host anything). It's a new
+            // command, so tolerate an older binary that lacks it (-> null).
+            const [plugins, dirs, backend] = await Promise.all([
                 invoke('scan_plugins', { dirs: [] }) as Promise<PluginDescriptor[]>,
                 invoke('plugin_dirs') as Promise<PluginDir[]>,
+                (invoke('hosting_backend') as Promise<HostingInfo>).catch(() => null),
             ]);
             const safePlugins = Array.isArray(plugins) ? plugins : [];
             for (const plugin of safePlugins) {
@@ -122,6 +134,7 @@ export function PluginsPanel() {
                 kind: 'ok',
                 plugins: safePlugins,
                 dirs: Array.isArray(dirs) ? dirs : [],
+                backend,
             });
             // Auto-rebind (invariant #4a): the engine just re-registered every
             // scanned plugin, so force a re-push. A node that was degraded because
@@ -205,35 +218,11 @@ export function PluginsPanel() {
                     </Callout>
                 )}
                 {state.kind === 'ok' && state.plugins.length === 0 && (
-                    <div className="plugins-empty">
-                        <Callout variant="info">
-                            No plugins found. OpenJammer scans standard VST2, VST3, CLAP, and macOS AU
-                            folders. Install a plugin into one of the folders below, then <strong>Re-scan</strong>.
-                        </Callout>
-                        {state.dirs.length > 0 && (
-                            <List aria-label="Plugin folders">
-                                {state.dirs.map((dir) => (
-                                    <ListRow
-                                        key={dir.path}
-                                        actions={
-                                            <Button
-                                                onClick={() => void revealPath(dir.path)}
-                                                title="Open this folder in your file manager"
-                                            >
-                                                Open folder
-                                            </Button>
-                                        }
-                                    >
-                                        <span className="plugins-dir">
-                                            <code className="plugins-path">{dir.path}</code>
-                                            <Chip>{dir.format ?? 'Plugin'}</Chip>
-                                            <Chip>{dir.scope === 'user' ? 'your account' : 'all users'}</Chip>
-                                        </span>
-                                    </ListRow>
-                                ))}
-                            </List>
-                        )}
-                    </div>
+                    <PluginsEmptyState
+                        backend={state.backend}
+                        dirs={state.dirs}
+                        onReveal={(path) => void revealPath(path)}
+                    />
                 )}
                 {state.kind === 'ok' && state.plugins.length > 0 && (
                     <List aria-label="Installed plugins">
@@ -264,5 +253,89 @@ export function PluginsPanel() {
                 )}
             </div>
         </Modal>
+    );
+}
+
+/**
+ * The empty state, told honestly by what this build can actually host. The old
+ * copy always said "install a plugin into a folder below, then Re-scan" — a lie in
+ * a scaffold `bun native`, which can't host anything no matter what's installed.
+ * Now the message follows `hosting_backend`:
+ *   • `none`  → hosting is off; point at `bun native --all` (no folder dump — it's
+ *               noise when dropping a plugin can't help).
+ *   • `clap`  → CLAP-only; VST3/AU won't show; folders shown.
+ *   • `juce`/unknown → really scanned and found nothing; folders shown + a nudge to
+ *               Reset quarantine (a plugin that crashed a prior scan stays skipped).
+ */
+function PluginsEmptyState({
+    backend,
+    dirs,
+    onReveal,
+}: {
+    backend: HostingInfo | null;
+    dirs: PluginDir[];
+    onReveal: (path: string) => void;
+}) {
+    const kind = backend?.backend ?? 'unknown';
+
+    if (kind === 'none') {
+        return (
+            <div className="plugins-empty">
+                <Callout variant="info" title="Plugin hosting is off in this build">
+                    This fast <code>bun native</code> build doesn’t scan or host plugins, so nothing
+                    appears here no matter what’s installed. Relaunch with <code>bun native --all</code>{' '}
+                    (VST2/VST3/CLAP/AU) or <code>bun native --clap</code> (CLAP-only), then reopen this panel.
+                </Callout>
+            </div>
+        );
+    }
+
+    const formats = backend?.formats?.length ? backend.formats.join('/').toUpperCase() : '';
+    const title = kind === 'clap' ? 'No CLAP plugins found' : 'No plugins found';
+    const body =
+        kind === 'clap' ? (
+            <>
+                This build hosts <strong>CLAP only</strong> — VST3 and AU plugins won’t appear. Drop a{' '}
+                <code>.clap</code> into a folder below and <strong>Re-scan</strong>, or relaunch with{' '}
+                <code>bun native --all</code> for VST3/AU.
+            </>
+        ) : (
+            <>
+                {formats ? `Hosting is on (${formats}). ` : ''}OpenJammer scanned the folders below and
+                found nothing. If a plugin you installed is missing, try <strong>Reset quarantine</strong>{' '}
+                then <strong>Re-scan</strong> — a plugin that crashed a previous scan stays skipped until
+                quarantine is cleared.
+            </>
+        );
+
+    return (
+        <div className="plugins-empty">
+            <Callout variant="info" title={title}>
+                {body}
+            </Callout>
+            {dirs.length > 0 && (
+                <List aria-label="Plugin folders">
+                    {dirs.map((dir) => (
+                        <ListRow
+                            key={dir.path}
+                            actions={
+                                <Button
+                                    onClick={() => onReveal(dir.path)}
+                                    title="Open this folder in your file manager"
+                                >
+                                    Open folder
+                                </Button>
+                            }
+                        >
+                            <span className="plugins-dir">
+                                <code className="plugins-path">{dir.path}</code>
+                                <Chip>{dir.format ?? 'Plugin'}</Chip>
+                                <Chip>{dir.scope === 'user' ? 'your account' : 'all users'}</Chip>
+                            </span>
+                        </ListRow>
+                    ))}
+                </List>
+            )}
+        </div>
     );
 }

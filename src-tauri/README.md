@@ -145,9 +145,9 @@ shell directly.
 
 **Tauri-specific knobs.** The bundled Pi (Ctrl+K AI) sidecar builds **lazily** — only on first run
 or after a Pi upgrade; set `OJ_DEV_SKIP_PI=1` to skip it, or `OPENJAMMER_PI_BIN` to point at an
-external Pi. Use `bun native --plugins` for the full JUCE VST3/CLAP/AU host (first build can take
-minutes), `bun native --clap` for the pure-Rust CLAP host, and `bun native --engine` for the
-windowless [bacon](https://dystroy.org/bacon/) Rust/DSP loop over the `render`/`nextest` harnesses
+external Pi. Use `bun native --all` for the full JUCE VST3/CLAP/AU host (first build can take
+minutes; `--plugins` is an alias), `bun native --clap` for the pure-Rust CLAP host, and
+`bun native --engine` for the windowless [bacon](https://dystroy.org/bacon/) Rust/DSP loop over the `render`/`nextest` harnesses
 (`cargo install --locked bacon`).
 
 ## Building / verifying

@@ -72,12 +72,14 @@ You only need this to hack on OpenJammer itself — players use the links above.
 ```bash
 bun install   # bun only — one toolchain, one lockfile
 bun dev       # browser dev server (Vite), prints a localhost URL
-bun native    # desktop app, native low-latency engine (first run: bun run oj setup)
+bun native        # desktop app, native low-latency engine (first run: bun run oj setup)
+bun native --all  # full hosted-plugin dev loop: VST3 + CLAP (+ AU on macOS)
 ```
 
 For the browser tier, open the printed URL and click **Start OpenJammer**. For the desktop
 tier, `bun native` opens the app window on its own with the fast scaffold plugin host (no
-JUCE/CMake build); use `bun native --plugins` when you specifically need hosted VST3/CLAP/AU.
+JUCE/CMake build); use `bun native --all` for the full hosted-plugin path (VST3 + CLAP,
++ AU on macOS). `bun native --plugins` remains an alias for the same JUCE host.
 First workflow: right-click the canvas → add a Keyboard node and an Instrument (e.g. Classic
 Piano), connect them, and play the Q–P row — or press **Ctrl/Cmd+K** and ask the AI to build it
 for you. Native setup + prerequisites: **[CONTRIBUTING.md](CONTRIBUTING.md#native-desktop-tauri)**.
