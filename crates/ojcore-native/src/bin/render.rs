@@ -476,10 +476,26 @@ fn print_summary(out: &str, rep: &AudioReport) {
     );
 }
 
+/// The verdict for one `--assert`. `Unknown` is an HONEST "I cannot grade that" — a
+/// typo'd or not-yet-implemented field errors LOUDLY with a field menu instead of
+/// silently reading as a FAIL. The agent's ear must never lie by omission.
+enum AssertOutcome {
+    Pass,
+    Fail,
+    Unknown(String),
+}
+
+/// The menu of gradeable fields, shown when an assert can't be graded.
+const ASSERT_FIELDS: &str = "bool: finite, is_stereo, clipped (optionally !-negated); \
+numeric (ops > >= < <= ==): rms, peak, nonsilent_pct, correlation, left_rms, right_rms, \
+left_freq, right_freq, seconds";
+
 /// Evaluate one `--assert` expression against the report. Supports bool fields
 /// (`finite`, `is_stereo`, `clipped`, optionally `!`-negated) and numeric
-/// comparisons (`rms>0.01`, `peak<=1.5`, `correlation<0.9`, `left_rms>0.1`, …).
-fn check_assert(rep: &AudioReport, expr: &str) -> bool {
+/// comparisons (`rms>0.01`, `peak<=1.5`, `correlation<0.9`, `left_rms>0.1`, …). An
+/// unrecognized field or malformed expression returns `Unknown` (graded loudly),
+/// NEVER a silent `false` that hides a typo or an unimplemented metric.
+fn check_assert(rep: &AudioReport, expr: &str) -> AssertOutcome {
     let e = expr.trim();
     let (neg, name) = match e.strip_prefix('!') {
         Some(s) => (true, s.trim()),
@@ -492,7 +508,11 @@ fn check_assert(rep: &AudioReport, expr: &str) -> bool {
         _ => None,
     };
     if let Some(b) = as_bool {
-        return b ^ neg;
+        return if b ^ neg {
+            AssertOutcome::Pass
+        } else {
+            AssertOutcome::Fail
+        };
     }
     for op in [">=", "<=", "==", ">", "<"] {
         if let Some(pos) = e.find(op) {
@@ -507,12 +527,12 @@ fn check_assert(rep: &AudioReport, expr: &str) -> bool {
                 "left_freq" => rep.left.freq_est,
                 "right_freq" => rep.right.freq_est,
                 "seconds" => rep.seconds,
-                _ => return false,
+                _ => return AssertOutcome::Unknown(format!("field {field:?}")),
             };
             let Ok(rhs) = e[pos + op.len()..].trim().parse::<f32>() else {
-                return false;
+                return AssertOutcome::Unknown(format!("number in {expr:?}"));
             };
-            return match op {
+            let pass = match op {
                 ">=" => lhs >= rhs,
                 "<=" => lhs <= rhs,
                 "==" => (lhs - rhs).abs() < 1e-6,
@@ -520,9 +540,16 @@ fn check_assert(rep: &AudioReport, expr: &str) -> bool {
                 "<" => lhs < rhs,
                 _ => false,
             };
+            return if pass {
+                AssertOutcome::Pass
+            } else {
+                AssertOutcome::Fail
+            };
         }
     }
-    false
+    AssertOutcome::Unknown(format!(
+        "expression {expr:?} (not a known bool field, and no comparison operator)"
+    ))
 }
 
 fn finish(left: &[f32], right: &[f32], sample_rate: u32, opts: &Opts, default_out: &str) -> ! {
@@ -562,11 +589,26 @@ fn finish(left: &[f32], right: &[f32], sample_rate: u32, opts: &Opts, default_ou
     } else {
         let mut all = true;
         for a in &opts.asserts {
-            let pass = check_assert(&report, a);
-            if !opts.quiet {
-                println!("  assert {a:?}: {}", if pass { "PASS" } else { "FAIL" });
+            match check_assert(&report, a) {
+                AssertOutcome::Pass => {
+                    if !opts.quiet {
+                        println!("  assert {a:?}: PASS");
+                    }
+                }
+                AssertOutcome::Fail => {
+                    if !opts.quiet {
+                        println!("  assert {a:?}: FAIL");
+                    }
+                    all = false;
+                }
+                // An ungradeable assert is a LOUD error (exit 2), never a silent FAIL
+                // that hides a typo or a not-yet-implemented metric from the agent.
+                AssertOutcome::Unknown(what) => {
+                    eprintln!("render: cannot grade assert {a:?}: unknown {what}.");
+                    eprintln!("  gradeable fields — {ASSERT_FIELDS}");
+                    std::process::exit(2);
+                }
             }
-            all &= pass;
         }
         all
     };

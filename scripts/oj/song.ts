@@ -5,7 +5,7 @@
 // export loop, end to end, with no GUI and no audio device.
 //
 //   oj song                       # produce + grade "Paper Sketch No. 1"
-//   oj song --assert 'lufs>-20'   # extra render assertions pass through
+//   oj song --assert 'rms>0.05'   # extra render assertions pass through (real fields only)
 //
 // Exit code is the render gate's: 0 when the song plays + meets its assertions.
 
