@@ -64,6 +64,23 @@ export interface ArrangementSection {
     startBar: number;
 }
 
+/**
+ * An agent-AUTHORED DSP node: a faust source the agent dreamed up, spliced into a
+ * track's signal path as a mono effect (instrument -> authored -> consumers).
+ * `conduct` injects it into the IR; the render bin compiles it to a native .dll and
+ * hosts it as a real WasmHost node (--code-node), through the permanent OutputGuard.
+ * This is the agent's PRIMARY creative mode — building its own instrument, not just
+ * arranging presets.
+ */
+export interface CodeNode {
+    /** The WasmHost manifest id (e.g. "ai.wasm.lofi-bass-sat"). */
+    id: string;
+    /** The faust source (a 1-in / 1-out effect). */
+    faustSource: string;
+    /** The track ref whose instrument output this effect is inserted right after. */
+    onTrack: string;
+}
+
 /** The whole song. */
 export interface Arrangement {
     name: string;
@@ -80,6 +97,9 @@ export interface Arrangement {
     /** The graph half — the instruments/effects/routing (the `oj author` spec). */
     graph: GraphSpec;
     tracks: ArrangementTrack[];
+    /** Agent-authored DSP nodes spliced into track signal paths (the agent's own
+     * instruments). Compiled + hosted device-free by the render bin's --code-node. */
+    codeNodes?: CodeNode[];
 }
 
 /**

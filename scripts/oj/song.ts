@@ -70,26 +70,43 @@ export async function song(args: string[]): Promise<number> {
     process.stdout.write(`  schedule -> ${schedPath}\n`);
     process.stdout.write(`  project  -> ${projectPath}\n`);
 
+    // Write each agent-AUTHORED code node's faust source next to the project and
+    // build its `--code-node` flag; the render bin compiles each to a native .dll
+    // and hosts it as a real WasmHost node. Pull `author-host` only when needed.
+    const codeNodeArgs: string[] = [];
+    for (const cn of result.codeNodes) {
+        const safe = cn.id.replace(/[^a-z0-9]+/gi, '_');
+        const dspPath = resolve(outDir, `${safe}.dsp`);
+        await Bun.write(dspPath, cn.faustSource);
+        codeNodeArgs.push('--code-node', `${cn.id}=${dspPath}`);
+        process.stdout.write(`  authored -> ${cn.id} on "${cn.onTrack}" (${dspPath})\n`);
+    }
+    const features = result.codeNodes.length > 0 ? 'demo,author-host' : 'demo';
+
     // PRODUCE: drive the timeline through the device-free render bin and self-grade.
-    const code = await render([
-        '--graph',
-        graphPath,
-        '--schedule',
-        schedPath,
-        '--secs',
-        result.seconds.toFixed(2),
-        '--out',
-        wavPath,
-        '--report',
-        reportPath,
-        '--assert',
-        'finite',
-        '--assert',
-        'rms>0.02',
-        '--assert',
-        'nonsilent_pct>20',
-        ...args,
-    ]);
+    const code = await render(
+        [
+            '--graph',
+            graphPath,
+            '--schedule',
+            schedPath,
+            '--secs',
+            result.seconds.toFixed(2),
+            '--out',
+            wavPath,
+            '--report',
+            reportPath,
+            ...codeNodeArgs,
+            '--assert',
+            'finite',
+            '--assert',
+            'rms>0.02',
+            '--assert',
+            'nonsilent_pct>20',
+            ...args,
+        ],
+        features,
+    );
 
     if (code === 0) {
         process.stdout.write(`oj song: PRODUCED + EXPORTED -> ${wavPath}\n`);

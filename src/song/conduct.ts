@@ -10,8 +10,8 @@ import { emitWithIndex } from '../audio/ojgraph/emit';
 import { remapForBackend } from '../audio/ojgraph';
 import { clampMidi } from '../music/note';
 import { specToGraph } from './spec';
-import type { Arrangement, ScheduleEvent } from './types';
-import type { OjGraph } from '../../packages/oj-protocol-ts/src/index';
+import type { Arrangement, CodeNode, ScheduleEvent } from './types';
+import type { IrEdge, IrNode, OjGraph } from '../../packages/oj-protocol-ts/src/index';
 
 export interface ConductResult {
     /** The flat IR, backend-remapped for native — exactly what `oj render` loads. */
@@ -22,6 +22,9 @@ export interface ConductResult {
     seconds: number;
     /** Surviving track ref -> IR NodeIdx (the agent's read surface / debugging). */
     trackIndex: Record<string, number>;
+    /** Agent-authored code nodes that were spliced into the IR — `oj song` writes
+     * each source to a .dsp and passes `--code-node id=path` to the render bin. */
+    codeNodes: CodeNode[];
 }
 
 const DEFAULTS = { ppq: 960, sampleRate: 48_000, blockSize: 256 } as const;
@@ -92,10 +95,46 @@ export function conduct(arr: Arrangement): ConductResult {
 
     events.sort((a, b) => a.at - b.at || kindRank(a.cmd) - kindRank(b.cmd));
 
+    // Splice in each agent-AUTHORED code node as a mono effect right after its
+    // track's instrument: instrument -> authored -> [the instrument's former
+    // consumers]. The render bin compiles the faust source to a native .dll and
+    // hosts it as a real WasmHost node (--code-node). Pure IR rewiring — the events
+    // are untouched (the instrument keeps its NodeIdx; only edges change).
+    const codeNodes = arr.codeNodes ?? [];
+    if (codeNodes.length > 0) {
+        // Clone edges so we never mutate the emit/remap output's shared array.
+        remapped.edges = remapped.edges.map((e) => ({ ...e })) as IrEdge[];
+        let nextId = remapped.nodes.reduce((m, n) => Math.max(m, n.id), -1) + 1;
+        for (const cn of codeNodes) {
+            const instIdx = idxOf(cn.onTrack);
+            const newIdx = nextId++;
+            for (const e of remapped.edges) {
+                if (e.from_node === instIdx) e.from_node = newIdx;
+            }
+            remapped.edges.push({
+                from_node: instIdx,
+                from_port: 0,
+                to_node: newIdx,
+                to_port: 0,
+                kind: 'Audio',
+            });
+            const authored: IrNode = {
+                id: newIdx,
+                manifest_id: cn.id,
+                kind: 'WasmHost',
+                params: [],
+                assets: [],
+                n_in: 1,
+                n_out: 1,
+            };
+            remapped.nodes.push(authored);
+        }
+    }
+
     // A release tail (one bar, >= 1s) so final notes + reverb/delay ring out.
     const beatsPerBar = arr.timeSignature?.[0] ?? 4;
     const tailSec = Math.max(1, ppq * beatsPerBar * secPerTick);
     const seconds = tickToSec(lastTick) + tailSec;
 
-    return { graph: remapped, events, seconds, trackIndex };
+    return { graph: remapped, events, seconds, trackIndex, codeNodes };
 }

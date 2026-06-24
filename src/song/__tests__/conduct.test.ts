@@ -78,4 +78,26 @@ describe('conduct', () => {
         };
         expect(() => conduct(bad)).toThrow(/did not survive/);
     });
+
+    it('splices an agent-authored code node into a track signal path', () => {
+        const arr: Arrangement = {
+            ...base,
+            codeNodes: [{ id: 'ai.wasm.sat', onTrack: 'keys', faustSource: 'process = *(0.5);' }],
+        };
+        const r = conduct(arr);
+        // The authored node is returned (so oj song writes + --code-node's it) …
+        expect(r.codeNodes.map((c) => c.id)).toEqual(['ai.wasm.sat']);
+        // … and is spliced into the IR as a real WasmHost node.
+        const sat = r.graph.nodes.find((n) => n.manifest_id === 'ai.wasm.sat');
+        expect(sat?.kind).toBe('WasmHost');
+        const keysIdx = r.trackIndex['keys'];
+        // keys -> sat (the instrument now routes INTO the authored node) …
+        expect(r.graph.edges.some((e) => e.from_node === keysIdx && e.to_node === sat!.id)).toBe(
+            true,
+        );
+        // … and sat feeds onward to the instrument's former consumer (the master).
+        expect(r.graph.edges.some((e) => e.from_node === sat!.id)).toBe(true);
+        // The instrument's note events are unchanged (only the wiring moved).
+        expect(r.events.some((e) => e.cmd === 'noteOn' && e.node === keysIdx)).toBe(true);
+    });
 });

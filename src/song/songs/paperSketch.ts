@@ -120,5 +120,15 @@ export function buildPaperSketch(): Arrangement {
             ],
         },
         tracks,
+        // The agent's OWN instrument: a lofi bass saturator it authored in faust,
+        // spliced onto the bass (bass -> saturator -> speaker). Drives + soft-clips
+        // for warmth; the engine's OutputGuard wraps it.
+        codeNodes: [
+            {
+                id: 'ai.wasm.lofi-bass-sat',
+                onTrack: 'bass',
+                faustSource: 'process = max(-0.6, min(0.6, _ * 2.5));',
+            },
+        ],
     };
 }
