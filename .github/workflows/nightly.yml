@@ -25,7 +25,7 @@ jobs:
     name: miri — unsafe ring + hot-swap
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Rust nightly + miri
@@ -47,7 +47,7 @@ jobs:
     name: loom — SPSC ring interleavings
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: Rust stable
@@ -63,7 +63,7 @@ jobs:
     name: fuzz — WAV parse surface (unbounded)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: ALSA dev headers (cpal/alsa-sys)
@@ -75,7 +75,7 @@ jobs:
       - name: Install cargo-fuzz (prebuilt binary)
         # taiki-e/install-action fetches a prebuilt binary in seconds instead of
         # compiling cargo-fuzz from source (matches the per-PR nextest install).
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2
+        uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2
         with:
           tool: cargo-fuzz
       - name: Fuzz the WAV decoder (time-boxed)
@@ -88,7 +88,7 @@ jobs:
     name: durability — real-process SIGKILL crash test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
       - name: ALSA dev headers (cpal/alsa-sys)
