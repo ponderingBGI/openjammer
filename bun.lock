@@ -9,7 +9,7 @@
         "caniuse-lite": "^1.0.30001799",
         "cmdk": "1.1.1",
         "idb-keyval": "^6.2.2",
-        "loro-crdt": "1.13.3",
+        "loro-crdt": "1.14.1",
         "lru-cache": "^11.2.4",
         "music-metadata": "^11.10.3",
         "react": "^19.2.0",
@@ -1529,7 +1529,7 @@
 
     "loose-envify": ["loose-envify@1.4.0", "", { "dependencies": { "js-tokens": "^3.0.0 || ^4.0.0" }, "bin": { "loose-envify": "cli.js" } }, "sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q=="],
 
-    "loro-crdt": ["loro-crdt@1.13.3", "", {}, "sha512-vh+hYxvsGL9MrsUaquPpawbrL97R4Qb84nc41xTh0zEEz7tJsdioH4mhbsLi0R659LFj3/xII2ML2ScZYJTw9Q=="],
+    "loro-crdt": ["loro-crdt@1.14.1", "", {}, "sha512-1BQ7neoQeJdCbD8gxlLHsy8tqCLYIJGrXSZic4s3t7toIsiFfks8Z0nGWvuEWr5miZ7giJx19x5ffkBaw+g9KQ=="],
 
     "lru-cache": ["lru-cache@11.2.4", "", {}, "sha512-B5Y16Jr9LB9dHVkh6ZevG+vAbOsNOYCX+sXvFWFu7B3Iz5mijW3zdbMyhsh8ANd2mSWBYdJgnqi+mL7/LrOPYg=="],
 
