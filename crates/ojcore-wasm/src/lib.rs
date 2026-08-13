@@ -48,12 +48,14 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use ojcore::{
-    compile_with_assets, AssetPcm, AssetResolver, Engine, PluginRegistry, SPEAKER_OUT_ID,
+    compile_resilient, compile_with_assets, AssetPcm, AssetResolver, Engine, PluginRegistry,
+    SPEAKER_OUT_ID,
 };
 use ojcore_midiring::{header_offsets, CmdRing, MidiRing};
 use ojinstrument::{register_all, RegisterOpts};
 use ojproto::{
-    AssetId, EngineFrame, IrNode, NodeIdx, OjGraph, PrimitiveKind, RtCommand, SCHEMA_VERSION,
+    AssetId, EngineFrame, Event, EventKind, FaultKind, IrNode, NodeIdx, OjGraph, PrimitiveKind,
+    RtCommand, Severity, Source, SCHEMA_VERSION,
 };
 
 use wasm_bindgen::prelude::*;
@@ -71,13 +73,16 @@ const CMD_FRAME_MAX: usize = 128;
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
-/// One decoded, host-owned mono sample. The wasm host owns the PCM here (the
-/// `no_std` `ojcore` core never owns asset bytes); the [`WasmAssetStore`]
-/// resolver hands back a borrow of `pcm` at compile time so a Sampler node's
-/// [`ojproto::AssetRef`] installs through [`ojcore::DspInstance::load_asset`].
+/// One decoded, host-owned sample (INTERLEAVED `channels`-major frames; `1` =
+/// mono). The wasm host owns the PCM here (the `no_std` `ojcore` core never owns
+/// asset bytes); the [`WasmAssetStore`] resolver hands back a borrow of `pcm` at
+/// compile time so a Sampler node's [`ojproto::AssetRef`] installs through
+/// [`ojcore::DspInstance::load_asset`] — preserving stereo so a browser Sampler
+/// plays a stereo sample in true stereo, like the native catalog.
 struct StoredAsset {
     id: AssetId,
     pcm: Vec<f32>,
+    channels: u16,
     sample_rate: f32,
 }
 
@@ -95,12 +100,13 @@ impl WasmAssetStore {
     /// Content-address `pcm`/`sample_rate` (FNV-1a over the spec + sample bytes,
     /// folded to `u32` — identical to the native catalog) and store it, returning
     /// its [`AssetId`]. Deduplicates: re-storing identical PCM keeps one copy.
-    fn insert(&mut self, pcm: Vec<f32>, sample_rate: f32) -> AssetId {
-        let id = content_address(&pcm, sample_rate);
+    fn insert(&mut self, pcm: Vec<f32>, channels: u16, sample_rate: f32) -> AssetId {
+        let id = content_address(&pcm, channels, sample_rate);
         if !self.assets.iter().any(|a| a.id == id) {
             self.assets.push(StoredAsset {
                 id,
                 pcm,
+                channels,
                 sample_rate,
             });
         }
@@ -121,23 +127,29 @@ impl WasmAssetStore {
 impl AssetResolver for WasmAssetStore {
     fn resolve(&self, id: AssetId) -> Option<AssetPcm<'_>> {
         let a = self.get(id)?;
-        // The wasm store is mono-only (the JS side downmixes before `store_asset`).
-        Some(AssetPcm::mono(&a.pcm, a.sample_rate))
+        // Hand back the INTERLEAVED PCM + its channel count (zero-copy); the
+        // consuming node keeps the layout it needs (a stereo Sampler plays both
+        // channels, a Convolution downmixes) — symmetric with the native catalog.
+        Some(AssetPcm::from_interleaved(
+            &a.pcm,
+            a.channels,
+            a.sample_rate,
+        ))
     }
 }
 
-/// Compute the deterministic content address of mono PCM at `sample_rate`. Mirrors
-/// `ojcore-native::store::content_address` for the mono case: hash the spec
-/// (channels = 1, the rate) then every sample's IEEE-754 LE bytes, fold the 64-bit
-/// FNV-1a to the `u32` [`AssetId`] domain by XORing its halves.
-fn content_address(pcm: &[f32], sample_rate: f32) -> AssetId {
+/// Compute the deterministic content address of INTERLEAVED PCM at `sample_rate`.
+/// Mirrors `ojcore-native::store::content_address`: hash the spec (`channels`, the
+/// rate) then every sample's IEEE-754 LE bytes, fold the 64-bit FNV-1a to the
+/// `u32` [`AssetId`] domain by XORing its halves. Byte-identical to the old mono
+/// hash when `channels == 1`, so existing mono asset ids are unchanged.
+fn content_address(pcm: &[f32], channels: u16, sample_rate: f32) -> AssetId {
     #[inline]
     fn mix(h: u64, byte: u8) -> u64 {
         (h ^ byte as u64).wrapping_mul(FNV_PRIME)
     }
     let mut h = FNV_OFFSET;
-    // channels = 1 (the wasm store is mono-only, like the native live path).
-    for b in 1u16.to_le_bytes() {
+    for b in channels.max(1).to_le_bytes() {
         h = mix(h, b);
     }
     // The native catalog hashes an integer sample rate; round to match.
@@ -167,8 +179,9 @@ struct Host {
     /// Worker -> worklet MIDI byte ring. Boxed for the same reason. Reserved for
     /// the MIDI input path; exposed to JS now so the SAB layout is fixed.
     midi_ring: Box<MidiRing>,
-    /// Mono master output the worklet copies to its render quantum. Pre-sized to
-    /// `block_size`; written in place by [`process`], never reallocated there.
+    /// PLANAR stereo master output the worklet copies to its render quantum:
+    /// `OUT_CHANNELS` rows of `block_size` (channel `c` at `c*block_size`). Written
+    /// in place by [`process`] via `process_block_into`; never reallocated there.
     out_buf: Vec<f32>,
     /// Scratch popped command frame bytes (reused; never grows on the RT path).
     cmd_scratch: Vec<u8>,
@@ -180,6 +193,25 @@ struct Host {
     block_size: usize,
     /// Sample rate the engine compiles graphs against.
     sample_rate: u32,
+    /// Monotonic sequence stamped on each drained fault [`Event`] (wire parity
+    /// with the native backend's `event_seq`). Bumped per surfaced fault.
+    event_seq: u32,
+    /// Per-slot edge latch for the RUNTIME-degrade fault (a trapped code node /
+    /// crashed host): `runtime_degraded()` is PERMANENT (unlike the per-block budget
+    /// flags), so we emit its `NodeFault{Crashed}` ONCE per degrade and mark the
+    /// slot here — otherwise `has_pending_events` would stay true forever and
+    /// `drain_events` would allocate every block. Reset (all false) on each
+    /// `load_graph`, sized to the new program's instance count.
+    crashed_seen: Vec<bool>,
+    /// Count of nodes that DEGRADED to a passthrough stub in the LAST `load_graph`
+    /// (a missing/incompatible plugin dependency, invariant #4a). The worklet reads
+    /// it via [`last_load_degraded`] to warn — the browser analogue of the native
+    /// host's degraded-stub log.
+    last_load_degraded: u32,
+    /// The IR node ids (`NodeIdx.0`) that degraded in the LAST `load_graph`, read
+    /// via [`last_degraded_node_ids`] so the worklet can badge the exact nodes
+    /// (symmetry with the native `push_graph` degraded-id return).
+    last_degraded_ids: Vec<u32>,
 }
 
 /// The single host instance. SOUND because an AudioWorklet processor runs on
@@ -266,11 +298,15 @@ pub fn init(sample_rate: u32, block_size: u32) {
         engine,
         cmd_ring: Box::new(CmdRing::new()),
         midi_ring: Box::new(MidiRing::new()),
-        out_buf: vec![0.0f32; block_size],
+        out_buf: vec![0.0f32; OUT_CHANNELS * block_size],
         cmd_scratch: vec![0u8; CMD_FRAME_MAX],
         assets,
         block_size,
         sample_rate,
+        event_seq: 0,
+        last_load_degraded: 0,
+        last_degraded_ids: Vec::new(),
+        crashed_seen: Vec::new(),
     };
 
     // SAFETY: single-threaded worklet init; no other reference is live.
@@ -305,14 +341,46 @@ pub fn load_graph(bytes: &[u8]) -> bool {
     // wasm end of the sample-load seam): a Sampler carrying a bound `AssetId`
     // gets its sample installed via `DspInstance::load_asset` here, off the RT
     // thread, before the program goes live — mirroring native `compile_with_assets`.
-    let program = match compile_with_assets(&graph, &host.registry, &host.assets) {
+    // Load-time graceful degrade (invariant #4a): a missing plugin/instrument
+    // dependency becomes a labeled passthrough stub so a loaded project ALWAYS opens
+    // and stays audible, instead of the whole `load_graph` failing. (The bootstrap +
+    // tests stay strict — known-good internal graphs.)
+    let program = match compile_resilient(&graph, &host.registry, &host.assets) {
         Ok(p) => p,
         Err(_) => return false,
     };
+    // Record which nodes degraded to a stub so the worklet can warn AND badge the
+    // exact nodes (invariant #4a, the browser analogue of the native host's
+    // degraded-stub log + the native push_graph degraded-id return).
+    let degraded = program.degraded_stubs(&graph);
+    host.last_load_degraded = degraded.len() as u32;
+    host.last_degraded_ids = degraded.iter().map(|id| id.0).collect();
+    // Reset the runtime-degrade edge latch: the fresh program has fresh instances,
+    // none crashed yet, so a re-instantiate clears any prior runtime-fault badge
+    // (the same auto-clear the native push_graph degraded loop gives).
+    let n_instances = program.instances.len();
     // `install` hands back the old program; dropping it here keeps the RT path
     // allocation/free-free.
     let _old = host.engine.install(program);
+    host.crashed_seen = vec![false; n_instances];
     true
+}
+
+/// Number of nodes that degraded to a passthrough stub in the last [`load_graph`]
+/// (a missing or incompatible plugin dependency). The worklet reads this after a
+/// load to warn — the browser analogue of the native host's degraded-stub log (#4a).
+#[wasm_bindgen]
+pub fn last_load_degraded() -> u32 {
+    host_ref().map_or(0, |h| h.last_load_degraded)
+}
+
+/// The IR node ids (`NodeIdx.0`) that degraded to a passthrough stub in the last
+/// [`load_graph`] — returned to JS as a `Uint32Array` so the worklet can badge the
+/// exact nodes (the browser analogue of the native `push_graph` degraded-id
+/// return). Empty on a clean load.
+#[wasm_bindgen]
+pub fn last_degraded_node_ids() -> Vec<u32> {
+    host_ref().map_or_else(Vec::new, |h| h.last_degraded_ids.clone())
 }
 
 /// Store decoded mono `pcm` (captured at `sample_rate` Hz) in the host's PCM
@@ -325,9 +393,15 @@ pub fn load_graph(bytes: &[u8]) -> bool {
 /// content address only for a degenerate input, so the JS side treats it as "not
 /// stored" only when the host is absent (it checks `ready` first).
 #[wasm_bindgen]
-pub fn store_asset(pcm: &[f32], sample_rate: f32) -> u32 {
+pub fn store_asset(pcm: &[f32], channels: u32, sample_rate: f32) -> u32 {
     let Some(host) = host_mut() else { return 0 };
-    host.assets.insert(pcm.to_vec(), sample_rate).0
+    host.assets
+        .insert(
+            pcm.to_vec(),
+            channels.clamp(1, u16::MAX as u32) as u16,
+            sample_rate,
+        )
+        .0
 }
 
 /// Pointer (byte offset into wasm linear memory) of the FIRST `MicIn` node's
@@ -377,14 +451,20 @@ pub fn mic_in_len() -> u32 {
     }
 }
 
+/// Output channel count the wasm tier renders (stereo). The worklet copies each
+/// of these planar rows (per-channel stride = `block_size`) into its output.
+const OUT_CHANNELS: usize = 2;
+
 /// Render one block. The AudioWorklet calls this every render quantum.
 ///
 /// Steps, all allocation-free:
 ///   1. drain the command ring, applying each [`RtCommand`] to the engine;
-///   2. render `nframes` into the pre-sized output buffer.
+///   2. render `nframes` PLANAR into the output buffer via `process_block_into`.
 ///
 /// `nframes` is clamped to the configured block size. Read the result from
-/// [`output_ptr`] (`nframes` f32s of mono master output).
+/// [`output_ptr`] + [`output_channels`]: channel `c` is the `block_size`-strided
+/// row at `c*block_size` (a mono graph fills every row identically — true stereo
+/// only when a Pan/stereo node feeds the master).
 #[wasm_bindgen]
 pub fn process(nframes: u32) {
     let Some(host) = host_mut() else { return };
@@ -392,8 +472,18 @@ pub fn process(nframes: u32) {
 
     drain_commands(host);
 
-    let out = &mut host.out_buf[..nframes];
-    host.engine.process_block(out, nframes);
+    // Render PLANAR: channel `c` occupies out_buf[c*block .. c*block+nframes]. The
+    // row-slices are built on the stack (split_at_mut) so the RT path allocates
+    // nothing — the same pattern the native host uses.
+    let block = host.block_size;
+    let mut rows: [&mut [f32]; OUT_CHANNELS] = Default::default();
+    let mut rest = &mut host.out_buf[..OUT_CHANNELS * block];
+    for row in rows.iter_mut() {
+        let (head, tail) = rest.split_at_mut(block);
+        *row = &mut head[..nframes];
+        rest = tail;
+    }
+    host.engine.process_block_into(&mut rows, nframes);
 }
 
 /// Drain every pending command frame from the ring and apply it. Wait-free and
@@ -444,11 +534,19 @@ fn apply_command(engine: &mut Engine, cmd: RtCommand) {
 // --- Memory / layout getters: let JS build SAB + typed-array views directly
 // over wasm linear memory, with zero copying across the boundary. ------------
 
-/// Pointer (byte offset into wasm linear memory) of the mono output buffer.
-/// JS reads `nframes` little-endian f32s starting here after each [`process`].
+/// Pointer (byte offset into wasm linear memory) of the PLANAR output buffer.
+/// JS reads each channel's `block_size`-strided row starting here after each
+/// [`process`] (channel `c` at `output_ptr() + c*block_size`).
 #[wasm_bindgen]
 pub fn output_ptr() -> *const f32 {
     host_ref().map_or(core::ptr::null(), |h| h.out_buf.as_ptr())
+}
+
+/// Number of PLANAR output channels [`process`] writes (stereo). Each channel row
+/// is `block_size` f32s; channel `c` starts at `output_ptr() + c*block_size`.
+#[wasm_bindgen]
+pub fn output_channels() -> u32 {
+    OUT_CHANNELS as u32
 }
 
 /// Configured render quantum (frames per [`process`] call / `output` length).
@@ -587,6 +685,242 @@ pub fn drain_meters() -> Vec<f32> {
     out.push(master_id as f32);
     out.push(master_peak);
     out
+}
+
+// --- Looper transport (Stage 2): return path back to the UI -------------------
+
+/// Drain every looper node's transport snapshot as a FLAT
+/// `[node, state, pos, loop_len, peak, ...]` `f32` array (one 5-tuple per looper
+/// node). The wasm tier has no return-frame ring (those are `std`-only), so this
+/// reads each looper instance's [`ojcore::DspInstance::looper_snapshot`] DIRECTLY
+/// — exactly how [`drain_meters`] reads `meters_mut` instead of a ring. UNGATED by
+/// metering: the looper's row/playhead must surface even when level meters are
+/// off (the looper return path is published every block on native, ungated too —
+/// see `exec.rs::publish_looper`). Off the render path (the worklet calls it
+/// between `process` calls), so the `Vec` allocation is fine; an empty `Vec` when
+/// there are no looper nodes / no host costs nothing on the common path.
+#[wasm_bindgen]
+pub fn drain_looper() -> Vec<f32> {
+    let Some(host) = host_mut() else {
+        return Vec::new();
+    };
+    let program = host.engine.program();
+    // Snapshot ids + kinds before borrowing instances (disjoint reads).
+    let n_slots = program.instances.len();
+    let mut out: Vec<f32> = Vec::new();
+    for slot in 0..n_slots {
+        if program.kinds[slot] != PrimitiveKind::Looper {
+            continue;
+        }
+        let id = program.ids[slot].0;
+        if let Some((state, pos, loop_len, peak)) = program.instances[slot].looper_snapshot() {
+            out.push(id as f32);
+            out.push(state as f32);
+            out.push(pos as f32);
+            out.push(loop_len as f32);
+            out.push(peak);
+        }
+    }
+    out
+}
+
+/// Drain any pending looper state-machine EDGE per looper node as a JSON
+/// `Vec<Event>` of [`EventKind::LooperEdge`] — the SAME wire shape `drain_events`
+/// (faults) returns, so the worklet rides them on the existing `events`
+/// postMessage and the one TS fault-pipe seam routes the LooperEdge tag (a commit
+/// signal, not a fault) to the looper handle. UNGATED, off the render path: an
+/// edge (cycle wrap / STOP commit) is the AUTHORITATIVE row-create signal and must
+/// never be dropped, so unlike snapshots it is loss-proof per-node (the kernel
+/// coalesces onto one pending slot until drained). Returns an empty `Vec` (no
+/// allocation) when no looper edge is pending — the common case.
+#[wasm_bindgen]
+pub fn drain_looper_edges() -> Vec<u8> {
+    let Some(host) = host_mut() else {
+        return Vec::new();
+    };
+    // Disjoint field borrows: `engine` (the program) and `event_seq`.
+    let Host {
+        engine, event_seq, ..
+    } = host;
+    let program = engine.program_mut();
+    let n_slots = program.instances.len();
+    let mut events: Vec<Event> = Vec::new();
+    for slot in 0..n_slots {
+        if program.kinds[slot] != PrimitiveKind::Looper {
+            continue;
+        }
+        let node = program.ids[slot];
+        if let Some((from, to)) = program.instances[slot].take_looper_edge() {
+            *event_seq = event_seq.wrapping_add(1);
+            events.push(Event {
+                v: SCHEMA_VERSION,
+                seq: *event_seq,
+                severity: Severity::Info,
+                kind: EventKind::LooperEdge { node, from, to },
+                source: Source::Wasm,
+                ts_us: 0,
+                corr_id: 0,
+            });
+        }
+    }
+    if events.is_empty() {
+        return Vec::new();
+    }
+    serde_json::to_vec(&events).unwrap_or_default()
+}
+
+/// Copy the MOST-RECENTLY-COMMITTED layer's loop PCM for looper `node` into a
+/// fresh `Float32Array` (`loop_len` mono f32s), or an empty array when the node
+/// is not a looper / has no committed layer yet. This is the WASM end of the
+/// Stage-3 finalize-PCM seam: when the worklet drains a commit `LooperEdge` for
+/// `node` (the Recording|Overdubbing→Playing edge from [`drain_looper_edges`]),
+/// it calls this and `postMessage`s the bytes so the UI can build the real
+/// `AudioBuffer` for that layer's row (true waveform + drag-to-library/export).
+///
+/// The committed layer is read-only on the render path (only read back for
+/// playback, never written), so reading it off the render path between `process`
+/// calls is sound — exactly how [`output_ptr`] exposes the render output buffer.
+/// Off the render path (the worklet calls it from a drained-edge handler), so the
+/// copy into the returned `Vec` is fine. Returns an empty `Vec` (no allocation)
+/// when the host is absent / the id is unknown / nothing is committed.
+#[wasm_bindgen]
+pub fn looper_take_pcm(node: u32) -> Vec<f32> {
+    let Some(host) = host_ref() else {
+        return Vec::new();
+    };
+    let program = host.engine.program();
+    let target = NodeIdx(node);
+    for slot in 0..program.instances.len() {
+        if program.kinds[slot] != PrimitiveKind::Looper {
+            continue;
+        }
+        if program.ids[slot] != target {
+            continue;
+        }
+        let pcm = program.instances[slot].last_committed_layer_pcm();
+        if pcm.is_empty() {
+            return Vec::new();
+        }
+        return pcm.to_vec();
+    }
+    Vec::new()
+}
+
+// --- Fault events (Wave 4): node faults back to the UI ------------------------
+
+/// Build a `NodeFault` [`Event`] with the native wire shape. `ts_us` is left `0`
+/// (there is no wall clock in the AudioWorklet global scope); the main thread
+/// stamps it on receipt. `NodeFault` lifts to `Error` severity, matching the
+/// native `lift_event`. The source is `Wasm` so the DevLog scope reads `wasm`.
+fn node_fault_event(node: NodeIdx, fault: FaultKind, seq: u32) -> Event {
+    Event {
+        v: SCHEMA_VERSION,
+        seq,
+        severity: Severity::Error,
+        kind: EventKind::NodeFault { node, fault },
+        source: Source::Wasm,
+        ts_us: 0,
+        corr_id: 0,
+    }
+}
+
+/// True when the engine has at least one pending node-fault flag. A cheap
+/// O(nodes) bool scan with NO allocation — the worklet calls it every block and
+/// only invokes [`drain_events`] when it is set, so the (allocating) event
+/// serialization never runs on a fault-free block. NOT gated on metering: a fault
+/// must surface even when no meter UI is subscribed.
+#[wasm_bindgen]
+pub fn has_pending_events() -> bool {
+    host_ref().is_some_and(|h| {
+        // Budget flags (NaN/over-budget) OR an UNSEEN runtime-degrade edge (a
+        // trapped code node latched to passthrough). The runtime scan is an O(nodes)
+        // bool/vtable read, alloc-free, gated to UNSEEN slots so a persistently
+        // degraded node does not keep `drain_events` allocating every block.
+        h.engine.budget().any_flagged()
+            || h.engine
+                .program()
+                .instances
+                .iter()
+                .enumerate()
+                .any(|(slot, inst)| {
+                    inst.runtime_degraded() && !h.crashed_seen.get(slot).copied().unwrap_or(false)
+                })
+    })
+}
+
+/// Drain the engine's per-node resilience flags into a JSON `Vec<Event>` — the
+/// SAME wire shape the native `poll_events` returns, so the one TS fault pipe
+/// ingests both tiers identically.
+///
+/// The RT event RING and the CPU watchdog are `std`-only, so the wasm tier
+/// surfaces faults straight from [`NodeBudget`] (the `no_std` NaN/garbage guard
+/// `sanitize` sets `non_finite` from the render path) — exactly how
+/// [`drain_meters`] reads `meters_mut`. Consumed flags are CLEARED so each fault
+/// surfaces once per drain window; a persistently-bad node re-raises next block
+/// and the TS coalescer collapses the storm (parity with native). Returns an
+/// empty `Vec` (no allocation) when there is no fault — the common case. Off the
+/// critical path: a fault means something is already wrong, so the rare alloc is
+/// fine, mirroring `drain_meters`.
+#[wasm_bindgen]
+pub fn drain_events() -> Vec<u8> {
+    let Some(host) = host_mut() else {
+        return Vec::new();
+    };
+    if !host.engine.budget().any_flagged() {
+        return Vec::new();
+    }
+    // Disjoint field borrows: `engine` (the program + flags), `event_seq`, and the
+    // runtime-degrade edge latch.
+    let Host {
+        engine,
+        event_seq,
+        crashed_seen,
+        ..
+    } = host;
+    // Snapshot node ids before borrowing the budget (disjoint from the flag read).
+    let ids = engine.program().ids.clone();
+    let mut events: Vec<Event> = Vec::new();
+    {
+        let budget = engine.budget();
+        for (slot, &flagged) in budget.non_finite.iter().enumerate() {
+            if flagged {
+                *event_seq = event_seq.wrapping_add(1);
+                let node = ids.get(slot).copied().unwrap_or(NodeIdx(0));
+                events.push(node_fault_event(node, FaultKind::NonFinite, *event_seq));
+            }
+        }
+        // `over_budget` is only set when a watchdog is armed (std-only, never on
+        // wasm today), but we surface it too so a future wasm watchdog is covered
+        // with no further wiring.
+        for (slot, &flagged) in budget.over_budget.iter().enumerate() {
+            if flagged {
+                *event_seq = event_seq.wrapping_add(1);
+                let node = ids.get(slot).copied().unwrap_or(NodeIdx(0));
+                events.push(node_fault_event(node, FaultKind::OverBudget, *event_seq));
+            }
+        }
+    }
+    engine.budget_mut().clear();
+    // Runtime-degrade edge: a node that LATCHED to passthrough at runtime (a trapped
+    // code node) emits NodeFault{Crashed} ONCE — `runtime_degraded()` is permanent,
+    // so the per-slot `crashed_seen` latch stops it re-firing every block (and is
+    // reset on `load_graph`, so a fresh instantiate auto-clears the badge).
+    let n = engine.program().instances.len();
+    for slot in 0..n {
+        let already = crashed_seen.get(slot).copied().unwrap_or(false);
+        if !already && engine.program().instances[slot].runtime_degraded() {
+            *event_seq = event_seq.wrapping_add(1);
+            let node = ids.get(slot).copied().unwrap_or(NodeIdx(0));
+            events.push(node_fault_event(node, FaultKind::Crashed, *event_seq));
+            if slot < crashed_seen.len() {
+                crashed_seen[slot] = true;
+            }
+        }
+    }
+    if events.is_empty() {
+        return Vec::new();
+    }
+    serde_json::to_vec(&events).unwrap_or_default()
 }
 
 /// Encode a `Meter` [`EngineFrame`] to JSON — a convenience mirror for tests /
@@ -938,14 +1272,19 @@ mod tests {
     fn asset_store_dedups_identical_pcm() {
         let mut store = WasmAssetStore::default();
         let pcm: Vec<f32> = (0..256).map(|i| (i as f32 / 256.0) - 0.5).collect();
-        let a = store.insert(pcm.clone(), 48_000.0);
-        let b = store.insert(pcm.clone(), 48_000.0);
+        let a = store.insert(pcm.clone(), 1, 48_000.0);
+        let b = store.insert(pcm.clone(), 1, 48_000.0);
         assert_eq!(a, b, "identical PCM must content-address the same");
         assert_eq!(store.assets.len(), 1, "identical PCM must not duplicate");
         // A different rate is a distinct asset (spec is part of the address).
-        let c = store.insert(pcm, 44_100.0);
+        let c = store.insert(pcm.clone(), 1, 44_100.0);
         assert_ne!(a, c);
         assert_eq!(store.assets.len(), 2);
+        // The channel count is part of the spec too: the SAME bytes as 2-channel
+        // address differently (so a stereo sample never collides with a mono one).
+        let d = store.insert(pcm, 2, 48_000.0);
+        assert_ne!(a, d, "channel count distinguishes the content address");
+        assert_eq!(store.assets.len(), 3);
     }
 
     /// The store resolves a stored id back to a borrow of its PCM (the
@@ -954,11 +1293,20 @@ mod tests {
     fn asset_store_resolves_stored_pcm() {
         let mut store = WasmAssetStore::default();
         let pcm = vec![0.25f32; 64];
-        let id = store.insert(pcm.clone(), 48_000.0);
+        let id = store.insert(pcm.clone(), 1, 48_000.0);
         let resolved = store.resolve(id).expect("stored asset resolves");
         assert_eq!(resolved.pcm, &pcm[..]);
+        assert_eq!(resolved.channels, 1);
         assert_eq!(resolved.sample_rate, 48_000.0);
         assert!(store.resolve(AssetId(id.0 ^ 0xffff_ffff)).is_none());
+
+        // A stereo asset resolves with its interleaved buffer + channel count
+        // preserved (no downmix) — what a browser stereo Sampler plays.
+        let interleaved = vec![0.5f32, -0.5, 0.5, -0.5];
+        let sid = store.insert(interleaved.clone(), 2, 48_000.0);
+        let sres = store.resolve(sid).expect("stereo asset resolves");
+        assert_eq!(sres.channels, 2);
+        assert_eq!(sres.pcm, &interleaved[..], "interleaved, not downmixed");
     }
 
     /// A Sampler node carrying an `AssetRef` actually receives its PCM when the
@@ -974,7 +1322,7 @@ mod tests {
         // A loud, finite mono buffer so a played voice meters non-zero.
         let pcm = vec![0.8f32; 512];
         let mut store = WasmAssetStore::default();
-        let id = store.insert(pcm, 48_000.0);
+        let id = store.insert(pcm, 1, 48_000.0);
 
         let graph = OjGraph {
             ir_version: SCHEMA_VERSION,
@@ -1085,6 +1433,120 @@ mod tests {
             out.iter().all(|s| s.abs() <= 1e-6),
             "an unresolved sampler asset stays silent"
         );
+    }
+
+    /// STAGE-3 finalize-PCM (wasm): a Looper that records a known block then
+    /// commits exposes that take's TRUE per-sample PCM via the engine instance's
+    /// `last_committed_layer_pcm` (what `looper_take_pcm` copies out). Drives the
+    /// kernel through a real compiled program: GraphIn -> Looper -> SpeakerOut,
+    /// inject a ramp, RECORD one quantized block (auto-commits to Playing), then
+    /// read the committed PCM back and assert it equals the injected input.
+    #[test]
+    fn looper_committed_layer_pcm_round_trips() {
+        use ojcore::looper::looper_param;
+        use ojcore::{LooperLoader, GAIN_ID, LOOPER_ID};
+        use ojproto::{looper_action, ConnectionType, IrEdge, Param, RtCommand};
+
+        let mut reg = PluginRegistry::new();
+        register_all(&mut reg, RegisterOpts::wasm());
+        reg.register(Box::new(LooperLoader::new()));
+
+        const SR: u32 = 48_000;
+        const BLOCK: usize = 64;
+        // One-block quantized loop, wet=1/dry=0 so the take auto-commits in a block.
+        let mut looper = IrNode {
+            id: NodeIdx(1),
+            manifest_id: String::from(LOOPER_ID),
+            kind: PrimitiveKind::Looper,
+            params: vec![],
+            assets: vec![],
+            n_in: 1,
+            n_out: 1,
+        };
+        looper.params.push(Param {
+            id: looper_param::LOOP_SECS,
+            value: BLOCK as f32 / SR as f32,
+        });
+        looper.params.push(Param {
+            id: looper_param::WET,
+            value: 1.0,
+        });
+        looper.params.push(Param {
+            id: looper_param::DRY,
+            value: 0.0,
+        });
+        let graph = OjGraph {
+            ir_version: SCHEMA_VERSION,
+            sample_rate: SR,
+            block_size: BLOCK as u32,
+            nodes: vec![
+                IrNode {
+                    id: NodeIdx(0),
+                    manifest_id: String::from(GAIN_ID),
+                    kind: PrimitiveKind::GraphIn,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 0,
+                    n_out: 1,
+                },
+                looper,
+                IrNode {
+                    id: NodeIdx(2),
+                    manifest_id: String::from(SPEAKER_OUT_ID),
+                    kind: PrimitiveKind::SpeakerOut,
+                    params: vec![],
+                    assets: vec![],
+                    n_in: 1,
+                    n_out: 0,
+                },
+            ],
+            edges: vec![
+                IrEdge {
+                    from_node: NodeIdx(0),
+                    from_port: 0,
+                    to_node: NodeIdx(1),
+                    to_port: 0,
+                    kind: ConnectionType::Audio,
+                },
+                IrEdge {
+                    from_node: NodeIdx(1),
+                    from_port: 0,
+                    to_node: NodeIdx(2),
+                    to_port: 0,
+                    kind: ConnectionType::Audio,
+                },
+            ],
+            schedule: vec![],
+        };
+        let store = WasmAssetStore::default();
+        let program = compile_with_assets(&graph, &reg, &store).expect("looper graph compiles");
+        let mut engine = Engine::new(program);
+
+        // RECORD, inject a known ramp, render one block -> auto-commit to Playing.
+        engine.apply_rt(RtCommand::Looper {
+            node: NodeIdx(1),
+            action: looper_action::RECORD,
+            arg: 0,
+        });
+        let signal: Vec<f32> = (0..BLOCK).map(|i| (i as f32) * 0.013 - 0.4).collect();
+        let buf = engine.input_mut(NodeIdx(0), 0).expect("graphin buffer");
+        buf[..BLOCK].copy_from_slice(&signal);
+        let mut out = vec![0.0f32; BLOCK];
+        engine.process_block(&mut out, BLOCK);
+
+        // The committed layer's PCM (what `looper_take_pcm` returns) == the input.
+        let slot = engine
+            .program()
+            .slot_of_id(NodeIdx(1))
+            .expect("looper slot");
+        let pcm = engine.program().instances[slot].last_committed_layer_pcm();
+        assert_eq!(pcm.len(), BLOCK, "committed loop is one block long");
+        for (i, (&x, &y)) in signal.iter().zip(pcm.iter()).enumerate() {
+            assert!(
+                (x - y).abs() < 1e-6,
+                "wasm commit pcm frame {i}: {x} != {y}"
+            );
+        }
     }
 
     /// A `MicIn` source node, fed externally via `Engine::input_mut` (the buffer

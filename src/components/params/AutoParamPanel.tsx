@@ -14,9 +14,12 @@
  * change writes straight back through `updateNodeData`.
  */
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
+import { Button, Slider } from '@openjammer/oj-ui';
 import type { GraphNode, NodeData } from '../../engine/types';
 import type { ParamDecl, PluginManifest } from '../../engine/manifest';
+import { HOSTED_PLUGIN_DESCRIPTOR_KEY, type HostedPluginDescriptor } from '../../engine/dynamicRegistry';
+import { getInvoke, isTauri } from '../../ai/tauri';
 import { useGraphStore } from '../../store/graphStore';
 
 interface AutoParamPanelProps {
@@ -40,8 +43,7 @@ function ParamRow({ node, param }: { node: GraphNode; param: ParamDecl }) {
     const value = typeof stored === 'number' && Number.isFinite(stored) ? stored : param.default;
 
     const handleChange = useCallback(
-        (e: React.ChangeEvent<HTMLInputElement>) => {
-            const next = parseFloat(e.target.value);
+        (next: number) => {
             if (Number.isNaN(next)) return;
             updateNodeData<NodeData>(node.id, { [param.name]: next });
         },
@@ -56,8 +58,8 @@ function ParamRow({ node, param }: { node: GraphNode; param: ParamDecl }) {
                     {value.toFixed(2)}
                 </span>
             </div>
-            <input
-                type="range"
+            <Slider
+                aria-label={param.name}
                 min={param.min}
                 max={param.max}
                 step={stepFor(param)}
@@ -70,17 +72,56 @@ function ParamRow({ node, param }: { node: GraphNode; param: ParamDecl }) {
     );
 }
 
+function HostedEditorControls({ node }: { node: GraphNode }) {
+    const [status, setStatus] = useState<string | null>(null);
+    const descriptor = (node.data as Record<string, unknown>)[HOSTED_PLUGIN_DESCRIPTOR_KEY] as
+        | HostedPluginDescriptor
+        | undefined;
+    if (!descriptor) return null;
+    if (!isTauri()) {
+        return <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Native editor requires desktop app</div>;
+    }
+    const call = async (cmd: 'plugin_editor_open' | 'plugin_editor_focus' | 'plugin_editor_close') => {
+        const invoke = getInvoke();
+        if (!invoke) return;
+        try {
+            if (cmd === 'plugin_editor_open') {
+                await invoke(cmd, { nodeId: node.id, descriptor });
+                setStatus('Editor open');
+            } else {
+                await invoke(cmd, { nodeId: node.id });
+                setStatus(cmd === 'plugin_editor_focus' ? 'Editor focused' : 'Editor closed');
+            }
+        } catch (err) {
+            setStatus(err instanceof Error ? err.message : String(err));
+        }
+    };
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '4px' }}>
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+                <Button onClick={() => void call('plugin_editor_open')}>Open editor</Button>
+                <Button onClick={() => void call('plugin_editor_focus')}>Focus</Button>
+                <Button onClick={() => void call('plugin_editor_close')}>Close</Button>
+            </div>
+            {status && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{status}</div>}
+        </div>
+    );
+}
+
 export function AutoParamPanel({ node, manifest }: AutoParamPanelProps) {
+    const editor = manifest.kind === 'PluginHost' ? <HostedEditorControls node={node} /> : null;
     if (manifest.params.length === 0) {
         return (
-            <div className="auto-param-panel" style={{ fontSize: '11px', color: 'var(--text-muted)', padding: '4px' }}>
-                No parameters
+            <div className="auto-param-panel" style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '4px' }}>
+                {editor}
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No parameters</div>
             </div>
         );
     }
 
     return (
         <div className="auto-param-panel" style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '4px' }}>
+            {editor}
             {manifest.params.map((param) => (
                 <ParamRow key={param.id} node={node} param={param} />
             ))}

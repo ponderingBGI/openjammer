@@ -14,23 +14,64 @@
 use std::sync::Mutex;
 
 use ojcore::{DspInstance, ParamDecl, PluginLoader, PluginManifest, PortDecl, ProcessCtx};
-use ojcore::{DspKind, UiKind};
+use ojcore::{DspKind, ExtId, StateSave, UiKind};
 use ojproto::PrimitiveKind;
 
 use crate::backend::{self, HostedBackend};
 use crate::descriptor::PluginDescriptor;
 use crate::error::HostError;
 
-/// The OPEN manifest id every hosted plugin registers under. The specific
-/// plugin is selected by the [`PluginDescriptor`] the loader was built with, not
-/// by the id (so all hosted plugins share one closed [`PrimitiveKind`]).
+/// Historical/base hosted-plugin id prefix. Concrete hosted plugins register
+/// under `host.plugin.<format>.<hash>` so multiple scanned plugins coexist in the
+/// registry instead of overwriting each other.
 pub const PLUGIN_HOST_ID: &str = "host.plugin";
+
+/// Build the stable manifest id for one scanned hosted plugin.
+pub fn hosted_plugin_id(desc: &PluginDescriptor) -> String {
+    let key = format!("{}\0{}\0{}", desc.format.slug(), desc.uid, desc.path);
+    format!(
+        "{PLUGIN_HOST_ID}.{}.{}",
+        desc.format.slug(),
+        fnv1a32_hex(key.as_bytes())
+    )
+}
+
+fn fnv1a32_hex(bytes: &[u8]) -> String {
+    let mut hash: u32 = 0x811c9dc5;
+    for b in bytes {
+        hash ^= u32::from(*b);
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    format!("{hash:08x}")
+}
 
 /// A loaded, processable third-party plugin. The safe wrapper over a
 /// backend-specific [`HostedBackend`]. Construct via [`HostedPlugin::load`].
 pub struct HostedPlugin {
     backend: Box<dyn HostedBackend>,
     descriptor: PluginDescriptor,
+}
+
+/// A native top-level editor window for a hosted plugin. This is control/UI-rate
+/// only and intentionally separate from the audio-thread DSP instance.
+pub struct PluginEditor {
+    backend: Box<dyn backend::EditorBackend>,
+}
+
+impl PluginEditor {
+    pub fn open(desc: &PluginDescriptor) -> Result<Self, HostError> {
+        Ok(Self {
+            backend: backend::open_editor(desc)?,
+        })
+    }
+
+    pub fn focus(&mut self) {
+        self.backend.focus();
+    }
+
+    pub fn close(&mut self) {
+        self.backend.close();
+    }
 }
 
 impl HostedPlugin {
@@ -68,12 +109,27 @@ impl HostedPlugin {
 /// all scratch at load/activate, so `process` is allocation-free.
 pub struct PluginHostNode {
     plugin: HostedPlugin,
+    /// Latched `true` once the plugin faults (a segfault caught at the foreign-code
+    /// boundary). From then on `process` runs a dry passthrough and never re-enters
+    /// the plugin — the crash latch (mirrors `ojwasm`'s `bypassed`). Cleared only by
+    /// a fresh `instantiate` on the next off-RT graph swap.
+    faulted: bool,
 }
 
 impl PluginHostNode {
     /// Wrap an already-loaded [`HostedPlugin`] as a DSP node.
     pub fn new(plugin: HostedPlugin) -> Self {
-        Self { plugin }
+        Self {
+            plugin,
+            faulted: false,
+        }
+    }
+
+    /// Whether this instance has latched into the crash-fault passthrough. Off-RT
+    /// diagnostic; the RT path reads the field directly (mirror of
+    /// `WasmHostNode::is_bypassed`).
+    pub fn is_faulted(&self) -> bool {
+        self.faulted
     }
 
     /// Plugin-reported latency in samples (for PDC budget enforcement).
@@ -88,11 +144,25 @@ impl DspInstance for PluginHostNode {
     }
 
     fn process(&mut self, ctx: &mut ProcessCtx<'_, '_>) {
-        // Forward the engine's channel-major buffers straight through; the
-        // backend copies into its pre-allocated scratch internally (RT-safe).
-        self.plugin
+        // Already crashed once -> never touch the foreign plugin again; hold a
+        // guarded dry passthrough so the rest of the graph keeps playing.
+        if self.faulted {
+            dry_passthrough(ctx);
+            return;
+        }
+        // Forward through the per-node fault boundary. The backend copies into its
+        // pre-allocated scratch internally (RT-safe). A `true` return means the
+        // plugin FAULTED this block: latch the crash, and hold a clean passthrough
+        // for this block too (its output can't be trusted) — a held note beats a
+        // glitch. We never re-enter the plugin this session (latch-and-quarantine).
+        let faulted = self
+            .plugin
             .backend
-            .process(ctx.inputs, ctx.outputs, ctx.nframes);
+            .process_guarded(ctx.inputs, ctx.outputs, ctx.nframes);
+        if faulted {
+            self.faulted = true;
+            dry_passthrough(ctx);
+        }
     }
 
     fn set_param(&mut self, id: u16, value: f32) {
@@ -107,15 +177,41 @@ impl DspInstance for PluginHostNode {
         self.plugin.backend.note_off(note);
     }
 
+    fn runtime_degraded(&self) -> bool {
+        self.faulted
+    }
+
+    /// Provide the `oj.state` capability (save half): a caller downcasts the
+    /// returned `Any` to `&PluginHostNode` and calls [`StateSave::save`]. A faulted
+    /// node keeps providing it (its last good state is still the backend's).
+    fn extension(&self, id: ExtId) -> Option<&dyn core::any::Any> {
+        match id {
+            ExtId::State => Some(self),
+            _ => None,
+        }
+    }
+
+    /// Restore half of `oj.state`: push a prior session's blob into the plugin at
+    /// construction (off-RT), so a reloaded project comes up exactly as left.
+    fn restore_state(&mut self, blob: &[u8]) {
+        self.plugin.backend.restore_state(blob);
+    }
+
     fn deactivate(&mut self) {
         self.plugin.backend.deactivate();
     }
 }
 
+impl StateSave for PluginHostNode {
+    fn save(&self) -> Vec<u8> {
+        self.plugin.backend.save_state()
+    }
+}
+
 /// A [`PluginLoader`] that mints [`PluginHostNode`]s for ONE scanned plugin.
 ///
-/// Each scanned [`PluginDescriptor`] produces one loader; they all share the
-/// `host.plugin` manifest id (the open key) and lower to
+/// Each scanned [`PluginDescriptor`] produces one loader under a stable unique
+/// manifest id (`host.plugin.<format>.<hash>`) and lowers to
 /// [`PrimitiveKind::PluginHost`] (the closed kind), per "everything is a plugin".
 /// The manifest's name/ports reflect the specific plugin so the UI can label and
 /// wire it.
@@ -134,27 +230,57 @@ pub struct PluginHostLoader {
 impl PluginHostLoader {
     /// Build a loader for a specific scanned plugin.
     pub fn new(descriptor: PluginDescriptor) -> Self {
-        let params = (0..descriptor.param_count.min(u16::MAX as u32) as u16)
-            .map(|i| ParamDecl {
-                id: i,
-                name: alloc_param_name(i),
-                min: 0.0,
-                max: 1.0,
-                default: 0.0,
-            })
-            .collect();
+        // Prefer the detailed param list (real names + the plugin's own ranges)
+        // the backend captured at scan; fall back to generic index-named params
+        // when only a count is known (the JUCE backend, or an older scan cache).
+        let params: Vec<ParamDecl> = if descriptor.params.is_empty() {
+            (0..descriptor.param_count.min(u16::MAX as u32) as u16)
+                .map(|i| ParamDecl {
+                    id: i,
+                    name: alloc_param_name(i),
+                    min: 0.0,
+                    max: 1.0,
+                    default: 0.0,
+                })
+                .collect()
+        } else {
+            descriptor
+                .params
+                .iter()
+                .take(u16::MAX as usize)
+                .enumerate()
+                .map(|(i, p)| ParamDecl {
+                    id: i as u16,
+                    name: p.name.clone(),
+                    min: p.min as f32,
+                    max: p.max as f32,
+                    default: p.default as f32,
+                })
+                .collect()
+        };
         let manifest = PluginManifest {
-            id: PLUGIN_HOST_ID.to_string(),
+            abi: None,
+            id: hosted_plugin_id(&descriptor),
             name: descriptor.name.clone(),
             kind: PrimitiveKind::PluginHost,
             dsp: DspKind::None, // hosting is native-only; not one of builtin/faust/wasm
             ui: UiKind::Auto,
             params,
             ports: PortDecl {
-                audio_in: descriptor.ports.audio_in.min(u8::MAX as u16) as u8,
-                audio_out: descriptor.ports.audio_out.min(u8::MAX as u16) as u8,
+                // ONE audio port per side that carries the plugin's channel count
+                // (docs/CHANNELS.md model B: a stereo cable is one connection of N
+                // channels, not N mono ports). A stereo reverb is one stereo-in +
+                // one stereo-out port. The compiler multiplies `audio_*_channels`
+                // into render lanes (`compile.rs`: lanes = n_out × out_channels),
+                // and the JUCE/CLAP backends already copy exactly that many planar
+                // channels from the descriptor's layout — so the reshape is the only
+                // change needed to host a real stereo plugin in stereo.
+                audio_in: (descriptor.ports.audio_in > 0) as u8,
+                audio_out: (descriptor.ports.audio_out > 0) as u8,
                 control_in: 0,
                 control_out: 0,
+                audio_in_channels: descriptor.ports.audio_in.min(u8::MAX as u16) as u8,
+                audio_out_channels: descriptor.ports.audio_out.min(u8::MAX as u16) as u8,
             },
         };
         Self {
@@ -201,6 +327,28 @@ fn alloc_param_name(i: u16) -> String {
     format!("param{i}")
 }
 
+/// Copy each input channel to the matching output channel, silencing outputs with
+/// no matching input. RT-safe (no alloc/lock): the dry passthrough used both when a
+/// hosted plugin can't LOAD (the [`PassthroughNode`] fallback) and when one FAULTS
+/// at runtime (the [`PluginHostNode`] crash latch).
+fn dry_passthrough(ctx: &mut ProcessCtx<'_, '_>) {
+    for (out_idx, out) in ctx.outputs.iter_mut().enumerate() {
+        if let Some(input) = ctx.inputs.get(out_idx) {
+            let out_len = out.len();
+            let n = ctx.nframes.min(input.len()).min(out_len);
+            out[..n].copy_from_slice(&input[..n]);
+            let tail = ctx.nframes.min(out_len);
+            for s in out[n..tail].iter_mut() {
+                *s = 0.0;
+            }
+        } else {
+            for s in out.iter_mut().take(ctx.nframes) {
+                *s = 0.0;
+            }
+        }
+    }
+}
+
 /// A do-nothing node: copies input to output (or silences when channel counts
 /// mismatch). Used as the fallback when a hosted plugin can't be loaded, so the
 /// engine still runs.
@@ -210,21 +358,7 @@ impl DspInstance for PassthroughNode {
     fn activate(&mut self, _sample_rate: f32, _max_block: usize) {}
 
     fn process(&mut self, ctx: &mut ProcessCtx<'_, '_>) {
-        for (out_idx, out) in ctx.outputs.iter_mut().enumerate() {
-            if let Some(input) = ctx.inputs.get(out_idx) {
-                let out_len = out.len();
-                let n = ctx.nframes.min(input.len()).min(out_len);
-                out[..n].copy_from_slice(&input[..n]);
-                let tail = ctx.nframes.min(out_len);
-                for s in out[n..tail].iter_mut() {
-                    *s = 0.0;
-                }
-            } else {
-                for s in out.iter_mut().take(ctx.nframes) {
-                    *s = 0.0;
-                }
-            }
-        }
+        dry_passthrough(ctx);
     }
 
     fn set_param(&mut self, _id: u16, _value: f32) {}
@@ -248,18 +382,28 @@ mod tests {
                 audio_out: 2,
             },
             param_count: params,
+            params: Vec::new(),
             latency_samples: 128,
         }
     }
 
     #[test]
     fn loader_manifest_lowers_to_plugin_host() {
-        let loader = PluginHostLoader::new(sample_desc(3));
+        let desc = sample_desc(3);
+        let expected_id = hosted_plugin_id(&desc);
+        let loader = PluginHostLoader::new(desc);
         let m = loader.manifest();
-        assert_eq!(m.id, PLUGIN_HOST_ID);
+        assert_eq!(m.id, expected_id);
         assert_eq!(m.kind, PrimitiveKind::PluginHost);
         assert_eq!(m.name, "Acme Synth");
-        assert_eq!(m.ports.audio_out, 2);
+        // A 2-out instrument is ONE stereo output port carrying 2 channels (model
+        // B), not two mono ports — so the compiler derives 1 × 2 = 2 output lanes.
+        assert_eq!(m.ports.audio_out, 1, "one audio-out port per side");
+        assert_eq!(
+            m.ports.audio_out_channels, 2,
+            "carrying the plugin's 2 channels"
+        );
+        assert_eq!(m.ports.audio_in, 0, "an instrument has no audio input");
         assert_eq!(m.params.len(), 3);
     }
 
@@ -322,5 +466,177 @@ mod tests {
             let res = HostedPlugin::load(&sample_desc(0), 48_000.0, 64);
             assert!(matches!(res, Err(HostError::Unavailable)));
         }
+    }
+
+    /// A backend that reports a guarded-process FAULT starting at its `fault_at`-th
+    /// `process_guarded` call, standing in for a real crashing plugin so the crash
+    /// latch is provable in the device-free sandbox. (The real-segfault path — the
+    /// SEH/signal boundary actually catching a `processBlock` crash — is exercised
+    /// by the `OJHOST_FAULT_INJECT=1` harness (env-gated, see build.rs): it compiles
+    /// a one-shot null-deref into the guard, armed via `ojhost::arm_fault`, so the
+    /// boundary can be PROVEN on a provisioned machine. That build still can't run
+    /// here, hence this device-free stand-in.)
+    struct FaultingBackend {
+        calls: usize,
+        fault_at: usize,
+    }
+
+    impl HostedBackend for FaultingBackend {
+        fn activate(&mut self, _sample_rate: f32, _max_block: usize) {}
+
+        fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], nframes: usize) {
+            // A healthy block writes a recognizable constant the test can detect.
+            for out in outputs.iter_mut() {
+                for s in out.iter_mut().take(nframes) {
+                    *s = 0.5;
+                }
+            }
+        }
+
+        fn process_guarded(
+            &mut self,
+            inputs: &[&[f32]],
+            outputs: &mut [&mut [f32]],
+            nframes: usize,
+        ) -> bool {
+            self.calls += 1;
+            if self.calls >= self.fault_at {
+                // Simulate the foreign-code boundary catching a crash: the output is
+                // garbage the latch MUST discard, and the fault is reported.
+                for out in outputs.iter_mut() {
+                    for s in out.iter_mut().take(nframes) {
+                        *s = f32::NAN;
+                    }
+                }
+                true
+            } else {
+                self.process(inputs, outputs, nframes);
+                false
+            }
+        }
+
+        fn set_param(&mut self, _id: u16, _value: f32) {}
+
+        fn latency_samples(&self) -> u32 {
+            0
+        }
+    }
+
+    #[test]
+    fn a_faulting_plugin_latches_to_passthrough_without_crashing_the_graph() {
+        // The node hosts a backend that faults on its 2nd block. The fault must
+        // latch the node to a dry passthrough — the app and the rest of the graph
+        // keep running, and no garbage escapes ("a held note beats a glitch").
+        let plugin = HostedPlugin {
+            backend: Box::new(FaultingBackend {
+                calls: 0,
+                fault_at: 2,
+            }),
+            descriptor: sample_desc(0),
+        };
+        let mut node = PluginHostNode::new(plugin);
+        node.activate(48_000.0, 64);
+
+        let input: Vec<f32> = (0..64).map(|i| i as f32 * 0.01 - 0.3).collect();
+        let run = |node: &mut PluginHostNode, input: &[f32]| -> Vec<f32> {
+            let mut out = vec![0.0f32; 64];
+            {
+                let ins: [&[f32]; 1] = [input];
+                let mut outs: [&mut [f32]; 1] = [&mut out];
+                let mut ctx = ProcessCtx {
+                    inputs: &ins,
+                    outputs: &mut outs,
+                    nframes: 64,
+                };
+                node.process(&mut ctx);
+            }
+            out
+        };
+
+        // Block 1: healthy -> the plugin's signal passes through, not latched.
+        let b1 = run(&mut node, &input);
+        assert!(!node.is_faulted(), "a healthy block must not latch");
+        assert!(
+            b1.iter().all(|&s| (s - 0.5).abs() < 1e-6),
+            "the plugin's output passed through cleanly"
+        );
+
+        // Block 2: the plugin faults -> latch, and the block holds a CLEAN dry
+        // passthrough of the input (the faulting NaN output is discarded).
+        let b2 = run(&mut node, &input);
+        assert!(node.is_faulted(), "a fault must latch the node");
+        assert!(
+            node.runtime_degraded(),
+            "the off-RT poll reports the degrade"
+        );
+        assert!(b2.iter().all(|s| s.is_finite()), "no NaN escapes the latch");
+        assert_eq!(b2, input, "the fault block holds a dry passthrough");
+
+        // Block 3: stays latched, never re-enters the plugin, stays a passthrough.
+        let b3 = run(&mut node, &input);
+        assert!(node.is_faulted());
+        assert_eq!(b3, input, "still a dry passthrough after latching");
+    }
+
+    /// A backend that round-trips an opaque state blob, standing in for a real
+    /// plugin's getStateInformation/setStateInformation (or the CLAP state ext).
+    struct StatefulBackend {
+        blob: Vec<u8>,
+    }
+
+    impl HostedBackend for StatefulBackend {
+        fn activate(&mut self, _sample_rate: f32, _max_block: usize) {}
+        fn process(&mut self, _inputs: &[&[f32]], outputs: &mut [&mut [f32]], nframes: usize) {
+            for out in outputs.iter_mut() {
+                for s in out.iter_mut().take(nframes) {
+                    *s = 0.0;
+                }
+            }
+        }
+        fn set_param(&mut self, _id: u16, _value: f32) {}
+        fn latency_samples(&self) -> u32 {
+            0
+        }
+        fn save_state(&self) -> Vec<u8> {
+            self.blob.clone()
+        }
+        fn restore_state(&mut self, blob: &[u8]) {
+            self.blob = blob.to_vec();
+        }
+    }
+
+    #[test]
+    fn hosted_plugin_provides_the_oj_state_save_restore_seam() {
+        // SAVE via the engine's path: extension(State) -> downcast -> StateSave::save.
+        let node = PluginHostNode::new(HostedPlugin {
+            backend: Box::new(StatefulBackend {
+                blob: vec![9, 8, 7],
+            }),
+            descriptor: sample_desc(0),
+        });
+        let any = node
+            .extension(ExtId::State)
+            .expect("a hosted plugin provides oj.state");
+        let saver = any
+            .downcast_ref::<PluginHostNode>()
+            .expect("downcasts to the node");
+        assert_eq!(StateSave::save(saver), vec![9, 8, 7]);
+        assert!(
+            node.extension(ExtId::Latency).is_none(),
+            "only oj.state is provided (not yet-unwired capabilities)"
+        );
+
+        // RESTORE into a fresh node via the &mut seam (what compile applies at load).
+        let mut fresh = PluginHostNode::new(HostedPlugin {
+            backend: Box::new(StatefulBackend { blob: Vec::new() }),
+            descriptor: sample_desc(0),
+        });
+        fresh.restore_state(&[1, 2, 3]);
+        let restored = fresh.extension(ExtId::State).unwrap();
+        assert_eq!(
+            StateSave::save(restored.downcast_ref::<PluginHostNode>().unwrap()),
+            vec![1, 2, 3],
+            "the blob restored into the fresh instance"
+        );
     }
 }

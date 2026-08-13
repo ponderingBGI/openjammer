@@ -29,7 +29,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: docs-pages-${{ github.ref }}
+  # Per-PR-head-SHA so a mid-build push can't drop this run (see ci.yml).
+  group: docs-pages-${{ github.event.pull_request.head.sha || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -42,7 +43,7 @@ jobs:
       run:
         working-directory: apps/docs
     steps:
-      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0  # v6.0.3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6  # v2

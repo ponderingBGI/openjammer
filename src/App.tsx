@@ -2,24 +2,43 @@
  * OpenJammer - Node-based music generation tool
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
 import { Toaster, toast } from 'sonner';
 import { NodeCanvas } from './components/Canvas/NodeCanvas';
 import { Toolbar } from './components/Toolbar/Toolbar';
 import { Breadcrumbs } from './components/Toolbar/Breadcrumbs';
 import { HelpPanel } from './components/Toolbar/HelpPanel';
-import { SettingsPanel } from './components/Settings/SettingsPanel';
-import { CommandBar } from './components/CommandBar/CommandBar';
+// The full settings surface (panels, guides, the low-latency walkthrough) is a
+// modal opened on demand — never part of first paint. Code-split it behind a
+// real dynamic import so its weight stays out of the entry chunk; it is already
+// rendered only when `showSettings` is true, so the Suspense fallback is never
+// seen on the hot path (it loads the first time the gear is opened).
+const SettingsPanel = lazy(() =>
+    import('./components/Settings/SettingsPanel').then((m) => ({
+        default: m.SettingsPanel,
+    })),
+);
+const SafeModeScreen = lazy(() =>
+    import('./components/SafeMode/SafeModeScreen').then((m) => ({
+        default: m.SafeModeScreen,
+    })),
+);
+import { CommandBarHost } from './components/CommandBar/CommandBarHost';
 import { DevLogPanel } from './components/DevLog/DevLogPanel';
 import { IssueReporter } from './components/IssueReporter/IssueReporter';
 import { AudioHealthPanel } from './components/AudioHealth/AudioHealthPanel';
+import { useEngineHealthToast } from './components/EngineHealthDot/useEngineHealthToast';
 import { PwaUpdatePrompt } from './components/PwaUpdatePrompt';
 import { NativeUpdaterRunner } from './components/NativeUpdaterRunner';
-import { PluginsPanel } from './components/Plugins/PluginsPanel';
+const PluginsPanel = lazy(() =>
+    import('./components/Plugins/PluginsPanel').then((module) => ({
+      default: module.PluginsPanel,
+    })),
+);
 import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
-import { initAudioContext, isAudioReady, getLatencyMetrics } from './audio/audioContext';
+import { initAudioContext, isAudioReady } from './audio/audioContext';
 import { getExecutor, isTauri } from './audio/executor';
 import type { GraphNode, Connection } from './engine/types';
 import { initMidiVoiceRouting, disposeMidiVoiceRouting } from './midi';
@@ -28,8 +47,52 @@ import { useGraphStore } from './store/graphStore';
 import { useProjectStore } from './store/projectStore';
 import { useCanvasStore } from './store/canvasStore';
 import { useKeybindingsStore } from './store/keybindingsStore';
-import { applyTheme, getSavedThemeId, getThemeById } from './styles/themes';
+import { useEngineHealthStore, setEngineLive } from './store/engineHealthStore';
+import { useCrashRecovery } from './persistence/recovery/useCrashRecovery';
+import { useUsbLowLatencyDefault } from './hooks/useUsbLowLatencyDefault';
+import { useAutoDetectedSampleRate } from './hooks/useAutoDetectedSampleRate';
+import { writeEmergencyBackup } from './persistence/recovery';
+import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens';
+import { isEditableTarget } from './utils/editableTarget';
+import { logger } from './utils/log';
 import './styles/global.css';
+
+/**
+ * Keep native plugin discovery out of the browser's first-paint bundle. The host
+ * catches the first shortcut/command, then hands all later toggles to the mounted
+ * panel's existing listeners. Once requested, the panel remains mounted so its
+ * scan results and open/closed state survive subsequent toggles.
+ */
+function PluginsPanelHost() {
+  const [requested, setRequested] = useState(false);
+
+  useEffect(() => {
+    if (requested) return;
+    const request = () => setRequested(true);
+    const onKey = (event: KeyboardEvent) => {
+      const hit =
+        (event.ctrlKey || event.metaKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === 'p';
+      if (!hit) return;
+      event.preventDefault();
+      request();
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('openjammer:toggle-plugins', request);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('openjammer:toggle-plugins', request);
+    };
+  }, [requested]);
+
+  if (!requested) return null;
+  return (
+    <Suspense fallback={null}>
+      <PluginsPanel initiallyOpen />
+    </Suspense>
+  );
+}
 
 function App() {
   // Native (Tauri) boots straight into a live canvas — no autoplay gate exists
@@ -40,6 +103,23 @@ function App() {
   const setAudioContextReady = useAudioStore((s) => s.setAudioContextReady);
   const audioConfig = useAudioStore((s) => s.audioConfig);
   const updateAudioMetrics = useAudioStore((s) => s.updateAudioMetrics);
+
+  // Calm, deduped engine-dead toast (Phase 2). The ONLY toast the health store
+  // raises — DEGRADED stays ambient; a fault storm yields one signal, not many.
+  useEngineHealthToast();
+
+  // Default Low Latency Mode ON when a USB / pro audio interface is in use — a
+  // default, never an override, and never a mid-set restart (see the hook).
+  useUsbLowLatencyDefault();
+
+  // Once a backend reports its negotiated device rate, make Settings reflect the
+  // truth. This is UI/store sync only — no stream rebuild, no surprise dropout.
+  useAutoDetectedSampleRate();
+
+  // Crash recovery (Track B P0): at boot, restore work that survived an unclean
+  // shutdown — or, after repeated crashes, drop to Safe Mode rather than reopening
+  // into a deadly crash cycle. Runs once, before the autosave effects engage.
+  const recovery = useCrashRecovery();
 
   // Initialize theme
   useEffect(() => {
@@ -68,14 +148,28 @@ function App() {
   useEffect(() => {
     if (!isAudioContextReady) return;
 
-    // Create subscription wrappers for graph store
-    // Zustand's subscribe returns an unsubscribe function
+    // Create subscription wrappers for graph store.
+    // Zustand's subscribe returns an unsubscribe function. CRITICAL: the executor
+    // reconcile (graph → engine lowering) runs INSIDE this Zustand listener, and a
+    // throw here would ABORT the store's listener loop — starving every subscriber
+    // registered after it (the canvas re-render via `useGraphStore`, and the
+    // persist middleware's post-loop `setItem`). That is exactly the "deleting a
+    // node wedges the canvas + the delete doesn't persist" bug. So the reconcile is
+    // isolated: a lowering error is logged and contained, never propagated, so a
+    // graph edit ALWAYS re-renders live and ALWAYS persists.
+    const log = logger('graph');
     const subscribeToNodes = (callback: (nodes: Map<string, GraphNode>) => void) => {
       let prevNodes = useGraphStore.getState().nodes;
       return useGraphStore.subscribe((state) => {
         if (state.nodes !== prevNodes) {
           prevNodes = state.nodes;
-          callback(state.nodes);
+          try {
+            callback(state.nodes);
+          } catch (err) {
+            log.error('node reconcile failed (contained; UI + persistence preserved)', {
+              error: err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err),
+            });
+          }
         }
       });
     };
@@ -85,7 +179,13 @@ function App() {
       return useGraphStore.subscribe((state) => {
         if (state.connections !== prevConnections) {
           prevConnections = state.connections;
-          callback(state.connections);
+          try {
+            callback(state.connections);
+          } catch (err) {
+            log.error('connection reconcile failed (contained; UI + persistence preserved)', {
+              error: err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err),
+            });
+          }
         }
       });
     };
@@ -105,6 +205,14 @@ function App() {
     // events against the live graph and drives the Executor note seam. Uses the
     // default routing context (graph store + executor + MIDIManager).
     initMidiVoiceRouting();
+
+    // Engine is up: lift the honest IDLE → LIVE so crash-recovery knows the
+    // session reached a known-good state (Track B P0). Only lift out of IDLE,
+    // never downgrade a real DEAD/DEGRADED signal (the native executor sets LIVE
+    // on its first accepted graph push; this covers the browser tier).
+    if (useEngineHealthStore.getState().health === 'IDLE') {
+      setEngineLive('audio engine initialized');
+    }
 
     return () => {
       disposeMidiVoiceRouting();
@@ -257,40 +365,55 @@ function App() {
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
   }, [projectName, projectHandleKey, saveProject]);
 
-  // Emergency backup on beforeunload (tab close/refresh)
+  // Default-on crash backup (Track B P0): persist the working graph to
+  // localStorage on every change (debounced), REGARDLESS of whether a project
+  // folder is connected, so an app/OS crash can restore unsaved work — and the
+  // boot-time recovery (useCrashRecovery) actually reads it. This is the
+  // localStorage tier of "default-on durability"; the crash-safe OPFS journal +
+  // native fsync tiers are Track B P1. The previous code wrote this blob only
+  // when a folder was connected AND never read it back on boot.
   useEffect(() => {
-    if (!projectName || !projectHandleKey) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastBackupVersion = useGraphStore.getState().version;
 
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      const currentVersion = useGraphStore.getState().version;
-      if (currentVersion !== lastVersionRef.current) {
-        // Emergency backup to localStorage
-        try {
-          localStorage.setItem('openjammer-emergency-backup', JSON.stringify({
-            timestamp: Date.now(),
-            projectName,
-            nodes: Array.from(useGraphStore.getState().nodes.values()),
-            edges: Array.from(useGraphStore.getState().connections.values()),
-          }));
-        } catch {
-          // Ignore storage errors
-        }
-        e.preventDefault();
-        e.returnValue = '';
-      }
+    const flush = () => {
+      const s = useGraphStore.getState();
+      // Nothing meaningful to back up — don't clobber a good backup with empty.
+      if (s.nodes.size === 0 && s.connections.size === 0) return;
+      writeEmergencyBackup({
+        nodes: Array.from(s.nodes.values()),
+        edges: Array.from(s.connections.values()),
+        projectName: useProjectStore.getState().name,
+      });
     };
 
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [projectName, projectHandleKey]);
+    const unsubscribe = useGraphStore.subscribe((state) => {
+      if (state.version === lastBackupVersion) return;
+      lastBackupVersion = state.version;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(flush, 2000);
+    });
+
+    // Final flush on page hide (the hook marks the clean exit separately). No
+    // "leave site?" prompt: with durable autosave the work is recoverable, so we
+    // never nag the performer on the way out.
+    const onPageHide = () => flush();
+    window.addEventListener('pagehide', onPageHide);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('pagehide', onPageHide);
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   // Global keyboard shortcut for save (Ctrl+S / Cmd+S)
   useEffect(() => {
     const { matchesAction } = useKeybindingsStore.getState();
 
     const handleKeyDown = async (e: KeyboardEvent) => {
-      // Skip if typing in input
-      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+      // Skip if typing in an editable control.
+      if (isEditableTarget(e.target)) return;
 
       // Handle Ctrl+S / Cmd+S - Save project
       if (matchesAction(e, 'file.save')) {
@@ -355,17 +478,9 @@ function App() {
         // localStorage may be unavailable (private mode) — the hint is optional.
       }
 
-      // Web-Audio latency metrics are only meaningful in the browser tier; on
-      // native, latency comes from the Rust/cpal engine, not this AudioContext.
-      if (!isTauri()) {
-        const metrics = getLatencyMetrics();
-        if (metrics) {
-          updateAudioMetrics({
-            ...metrics,
-            lastUpdated: Date.now()
-          });
-        }
-      }
+      // Latency is no longer read here. It is polled centrally from the ACTIVE
+      // executor's backend (the effect below), so the native cpal stream and the
+      // browser AudioContext never get confused for one another.
     } catch (err) {
       console.error('Failed to initialize audio:', err);
       // On native, sound is the Rust/cpal engine over IPC — it does NOT need the
@@ -381,7 +496,7 @@ function App() {
           'Check your browser/OS audio permissions and device, then try again. Open “Audio health” (Ctrl/Cmd+Shift+H) or ask the AI for help.',
       });
     }
-  }, [setAudioContextReady, audioConfig, updateAudioMetrics]);
+  }, [setAudioContextReady, audioConfig]);
 
   // Native (Tauri) auto-start: no autoplay gate. Run the same activation sequence
   // on mount so the Rust engine wires up (the App-init effect keyed on
@@ -394,10 +509,55 @@ function App() {
     }
   }, [handleActivate]);
 
+  // Central latency readout. Poll the ACTIVE executor's backend — the native cpal
+  // stream (via `query_stream`) or the browser AudioContext — on a calm 1 s
+  // cadence and publish the one honest number into the store. This replaces the
+  // two old populators (the browser-only App-init read and the Settings-panel
+  // monitor), so the native readout can never show the WebView2 decode context's
+  // latency — the ghost that made a sub-5 ms MOTU stream report ~111 ms.
+  useEffect(() => {
+    if (!isAudioContextReady) return;
+    let cancelled = false;
+    const poll = async () => {
+      const report = await getExecutor().getLatency();
+      if (cancelled || !report) return;
+      updateAudioMetrics({
+        source: report.source,
+        running: report.running,
+        baseLatency: report.baseLatency,
+        outputLatency: report.outputLatency,
+        totalLatency: report.baseLatency + report.outputLatency,
+        estimatedRoundTrip: report.roundTripMs,
+        classification: report.classification,
+        isBluetoothSuspected: report.isBluetoothSuspected,
+        bufferFrames: report.bufferFrames,
+        sampleRate: report.sampleRate,
+        lastUpdated: Date.now(),
+      });
+    };
+    void poll();
+    const id = setInterval(() => void poll(), 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [isAudioContextReady, updateAudioMetrics]);
+
   return (
     <>
-      {/* Welcome screen (browser tier only — native auto-starts, see useState above) */}
-      {showActivation && (
+      {/* Safe Mode (Track B P0) — shown only after repeated crashes; offers calm
+          choices instead of reopening into a deadly crash cycle. */}
+      {recovery.safeMode && (
+        <Suspense fallback={null}>
+          <SafeModeScreen api={recovery} />
+        </Suspense>
+      )}
+
+      {/* Welcome screen (browser tier only — native auto-starts, see useState above).
+          Suppressed in Safe Mode: SafeModeScreen is its own aria-modal dialog, and
+          two modal dialogs must never co-render (a held note beats a glitch — one
+          calm surface at a time). */}
+      {showActivation && !recovery.safeMode && (
         <div
           className="oj-welcome"
           role="dialog"
@@ -478,10 +638,14 @@ function App() {
       </div>
 
       {/* Settings Panel */}
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+      {showSettings && (
+        <Suspense fallback={null}>
+          <SettingsPanel onClose={() => setShowSettings(false)} />
+        </Suspense>
+      )}
 
-      {/* Command Bar (Ctrl/Cmd+K) - owns its own toggle + open state (U19) */}
-      <CommandBar />
+      {/* Command Bar (Ctrl/Cmd+K) - host stays eager; heavy palette UI loads on demand. */}
+      <CommandBarHost />
 
       {/* DevLog panel (L4) — the on-device structured-log surface; the AI agent
           reads the same store. Toggled via the command palette / openjammer:toggle-devlog. */}
@@ -497,11 +661,11 @@ function App() {
       <PwaUpdatePrompt />
 
       {/* Native auto-update lifecycle (desktop): silent background download +
-          install-on-quit. Renders nothing; steals no focus. */}
+          install-after-close, with no self-reopen. Renders nothing; steals no focus. */}
       <NativeUpdaterRunner />
 
       {/* Plugins (§3) — discover your installed CLAP/VST3 plugins (desktop host). */}
-      <PluginsPanel />
+      <PluginsPanelHost />
 
       {/* Collaboration Share/Join control + peer list (U23 — collab state plane) */}
       <CollabControl />

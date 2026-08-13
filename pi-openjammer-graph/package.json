@@ -1,0 +1,13 @@
+{
+  "name": "pi-openjammer-graph",
+  "private": true,
+  "type": "module",
+  "keywords": ["pi-package", "openjammer"],
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  }
+}

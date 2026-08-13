@@ -1,8 +1,8 @@
 /**
  * CommandBar (U19 + U20 + M2) — Raycast-style Ctrl/Cmd+K command palette.
  *
- * Rendered once at the app root. Owns its own open/close state and the global
- * Ctrl/Cmd+K toggle. Built from cmdk's primitives (`Command`, `Command.Input`,
+ * Lazy-loaded by CommandBarHost on first palette intent. Owns its own open/close
+ * state once mounted. Built from cmdk's primitives (`Command`, `Command.Input`,
  * `Command.List`, ...) rendered INSIDE this repo's existing overlay/portal
  * pattern (see SettingsPanel) — deliberately NOT `Command.Dialog`, to avoid
  * pulling in the Radix Dialog subtree.
@@ -10,9 +10,9 @@
  * TWO MODES:
  * - 'search' (U19): the action registry, ranked HERE (M2), not by cmdk.
  * - 'ai' (U20): press Tab from search to hand the typed text to the AI agent.
- *   The agent half renders in {@link AiPanel}: a streaming transcript with an
- *   Approve / Reject transaction, or the "AI requires the desktop app" state in
- *   a plain browser.
+ *   The agent half renders in {@link AiPanel}: a streaming transcript whose
+ *   OpenJammer edits apply live as undoable graph actions, or the "AI requires
+ *   the desktop app" state in a plain browser.
  *
  * M2 — the palette OWNS its ordering:
  * - `shouldFilter={false}`: cmdk no longer filters/ranks; this file does.
@@ -30,6 +30,8 @@
  */
 
 import {
+    lazy,
+    Suspense,
     useCallback,
     useEffect,
     useLayoutEffect,
@@ -48,11 +50,24 @@ import {
 import { buildPaletteCtx } from '../../store/actionContext';
 import { usePaletteLearningStore } from '../../store/paletteLearningStore';
 import { score as paletteScore } from '../../store/paletteScore';
-import { useCommandSources } from './useCommandSources';
-import { AiPanel } from './AiPanel';
+// The AI half (AiPanel + the Pi agent backend + the markdown renderer it pulls
+// in) is the single heaviest non-first-paint subtree. It only renders in 'ai'
+// mode, so it is code-split behind a real dynamic import: the command palette
+// (and its global Ctrl+K hotkey, owned by THIS eagerly-loaded component) is
+// untouched, and the AI chunk loads the first time a performer presses Tab /
+// asks the agent. Splitting here — a true async boundary Rollup orders for us —
+// avoids the production-only circular-init crash that manual vendor chunking of
+// app modules caused (see vite.config.ts), and keeps the entry chunk lean.
+const AiPanel = lazy(() =>
+    import('./AiPanel').then((m) => ({ default: m.AiPanel })),
+);
 import { useCommandBarStore } from '../../store/commandBarStore';
-import { startBridgeListener } from '../../ai/bridgeListener';
 import './CommandBar.css';
+
+export type CommandBarOpenIntent =
+    | { kind: 'toggle'; prompt?: string; seq: number }
+    | { kind: 'configure-ai'; prompt?: string; seq: number }
+    | { kind: 'ask-ai'; prompt: string; seq: number };
 
 /** Max rows rendered after ranking (keeps the list snappy). */
 const MAX_ROWS = 50;
@@ -90,8 +105,8 @@ function searchableText(action: Action): string {
     return `${action.title} ${action.group} ${(action.keywords ?? []).join(' ')}`;
 }
 
-export function CommandBar() {
-    const [open, setOpen] = useState(false);
+export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null }) {
+    const [open, setOpen] = useState(() => intent?.kind === 'toggle');
     const [search, setSearch] = useState('');
     // The mode is PERSISTED (commandBarStore): close the bar in AI mode, press
     // Ctrl+K again, and you're back in the chat (conversation restored by the
@@ -100,6 +115,9 @@ export function CommandBar() {
     const setMode = useCommandBarStore((s) => s.setMode);
     // Text carried from the search input into AI mode on the Tab handoff.
     const [aiPrompt, setAiPrompt] = useState('');
+    // When true, the AI panel sends `aiPrompt` as soon as it is ready. This is
+    // the Tab contract: type → Tab → agent starts, no second Enter required.
+    const [aiAutoSend, setAiAutoSend] = useState(false);
     // D6 (M7): when entering AI mode via "Configure AI provider", force the
     // AuthChooser even if a provider is already configured (so it can be changed).
     const [forceAuth, setForceAuth] = useState(false);
@@ -108,35 +126,11 @@ export function CommandBar() {
     const [value, setValue] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // Register node-add + app-action commands while mounted.
-    useCommandSources();
-
     // Subscribe to the registry so newly-registered actions (e.g. AI-authored
     // DSP nodes) re-render the open palette live. We only need the change tick;
     // ranking re-reads getCommands() inside the memo below.
     const [registryTick, setRegistryTick] = useState(0);
     useEffect(() => subscribe(() => setRegistryTick((t) => t + 1)), []);
-
-    // Phase 3: answer the host tool-bridge for the session — read tools return the
-    // real graph state to Pi (grounded reasoning); writes are acked. No-op in the
-    // browser (no Tauri). Started once at app root.
-    useEffect(() => {
-        let unlisten: (() => void) | null = null;
-        let cancelled = false;
-        void startBridgeListener()
-            .then((fn) => {
-                if (cancelled) fn?.();
-                else unlisten = fn;
-            })
-            .catch(() => {
-                // Best-effort: a missing/failed tool bridge (no Tauri, or a test
-                // mock without `listen`) must not surface as an unhandled rejection.
-            });
-        return () => {
-            cancelled = true;
-            unlisten?.();
-        };
-    }, []);
 
     // The local frecency floor (M2). Re-render on changes so picks re-rank.
     const learning = usePaletteLearningStore();
@@ -148,66 +142,46 @@ export function CommandBar() {
         setOpen(false);
         setSearch('');
         setAiPrompt('');
+        setAiAutoSend(false);
         setForceAuth(false);
         setValue('');
     }, []);
 
     // Hand the typed text off to AI mode (Tab from search, or the "Ask AI" item).
-    const enterAiMode = useCallback(() => {
-        setAiPrompt(search);
-        setForceAuth(false);
-        setMode('ai');
-    }, [search, setMode]);
-
-    // D6 (M7): the "Configure AI provider" action opens AI mode straight into the
-    // AuthChooser (forceAuth), so a configured user can still re-pick a provider.
-    useEffect(() => {
-        const onConfigure = () => {
-            setOpen(true);
-            setAiPrompt('');
-            setForceAuth(true);
-            setMode('ai');
-        };
-        window.addEventListener('openjammer:configure-ai', onConfigure);
-        return () => window.removeEventListener('openjammer:configure-ai', onConfigure);
-    }, [setMode]);
-
-    // "Ask the AI to fix this" — open the chat seeded with a prompt (e.g. from the
-    // DevLog / a latency banner), so a player can hand a problem to the assistant
-    // in one tap. The assistant has get_logs / get_diagnostics / update_settings,
-    // so the seed just needs to describe the symptom.
-    useEffect(() => {
-        const onAsk = (e: Event) => {
-            const detail = (e as CustomEvent<{ prompt?: string }>).detail;
-            setOpen(true);
-            setAiPrompt(detail?.prompt ?? '');
+    const enterAiMode = useCallback(
+        (autoSend = false) => {
+            setAiPrompt(search);
+            setAiAutoSend(autoSend && search.trim().length > 0);
             setForceAuth(false);
             setMode('ai');
-        };
-        window.addEventListener('openjammer:ask-ai', onAsk);
-        return () => window.removeEventListener('openjammer:ask-ai', onAsk);
-    }, [setMode]);
+        },
+        [search, setMode],
+    );
+
+    // D6 (M7): host-owned intents open the lazy palette into search or AI flows.
+    useEffect(() => {
+        if (!intent) return;
+        setOpen(true);
+        if (intent.kind === 'configure-ai') {
+            setAiPrompt('');
+            setAiAutoSend(false);
+            setForceAuth(true);
+            setMode('ai');
+        } else if (intent.kind === 'ask-ai') {
+            const prompt = intent.prompt ?? '';
+            setAiPrompt(prompt);
+            setAiAutoSend(prompt.trim().length > 0);
+            setForceAuth(false);
+            setMode('ai');
+        }
+    }, [intent, setMode]);
 
     // Return from AI mode to search. The conversation is preserved (persisted),
     // so coming back to AI later picks up exactly where it left off.
     const backToSearch = useCallback(() => {
+        setAiAutoSend(false);
         setMode('search');
     }, [setMode]);
-
-    // Global Ctrl/Cmd+K toggle. MUST early-return when the palette is already
-    // open/focused so the handler doesn't fight the in-palette key handling
-    // (cmdk owns arrow/enter/escape once focus is inside).
-    useEffect(() => {
-        const onKeyDown = (e: KeyboardEvent) => {
-            const isToggle = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k';
-            if (!isToggle) return;
-            if (open) return;
-            e.preventDefault();
-            setOpen(true);
-        };
-        window.addEventListener('keydown', onKeyDown);
-        return () => window.removeEventListener('keydown', onKeyDown);
-    }, [open]);
 
     // Focus the search input whenever the palette opens or returns to search.
     useEffect(() => {
@@ -327,11 +301,16 @@ export function CommandBar() {
                 data-mode={mode}
             >
                 {mode === 'ai' ? (
-                    <AiPanel
-                        initialPrompt={aiPrompt}
-                        forceAuth={forceAuth}
-                        onBack={backToSearch}
-                    />
+                    <Suspense fallback={null}>
+                        <AiPanel
+                            key={`${aiPrompt}:${aiAutoSend ? 'send' : 'draft'}:${forceAuth ? 'auth' : 'chat'}`}
+                            initialPrompt={aiPrompt}
+                            autoSendInitial={aiAutoSend}
+                            forceAuth={forceAuth}
+                            onBack={backToSearch}
+                            onClose={close}
+                        />
+                    </Suspense>
                 ) : (
                     <Command
                         label="Command Palette"
@@ -351,9 +330,10 @@ export function CommandBar() {
                                     e.preventDefault();
                                     close();
                                 } else if (e.key === 'Tab') {
-                                    // Tab hands the typed text off to the AI agent.
+                                    // Tab is the fast path: if there is text,
+                                    // send it immediately; empty Tab just opens chat.
                                     e.preventDefault();
-                                    enterAiMode();
+                                    enterAiMode(search.trim().length > 0);
                                 }
                             }}
                         />
@@ -395,7 +375,7 @@ export function CommandBar() {
                                     value={AI_ITEM_VALUE}
                                     keywords={['ai', 'ask', 'agent', search]}
                                     className="command-bar-item command-bar-item-ai"
-                                    onSelect={enterAiMode}
+                                    onSelect={() => enterAiMode(search.trim().length > 0)}
                                     disabled={!aiEnabled}
                                 >
                                     {search.trim()

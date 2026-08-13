@@ -158,6 +158,7 @@ impl PluginLoader for OscLoader {
 
 fn osc_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(OSC_ID),
         name: String::from("Oscillator"),
         kind: PrimitiveKind::Osc,
@@ -206,6 +207,8 @@ fn osc_manifest() -> PluginManifest {
             audio_out: 1,
             control_in: 0,
             control_out: 0,
+            audio_in_channels: 1,
+            audio_out_channels: 1,
         },
     }
 }

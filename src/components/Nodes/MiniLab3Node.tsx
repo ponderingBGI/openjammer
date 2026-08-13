@@ -11,6 +11,7 @@ import { useEffect, useCallback, useRef } from 'react';
 import type { GraphNode, MIDIInputNodeData } from '../../engine/types';
 import { useMIDIStore } from '../../store/midiStore';
 import { useGraphStore } from '../../store/graphStore';
+import { Port } from '@openjammer/oj-ui';
 import './MIDIVisualNode.css';
 
 interface MiniLab3NodeProps {
@@ -147,13 +148,16 @@ export function MiniLab3Node({
                 {node.ports.filter(p => p.direction === 'output' && p.name).map((port) => (
                     <div key={port.id} className={`port-row ${port.direction}`}>
                         <span className="port-label">{port.name}</span>
-                        <div
-                            className={`port-circle-marker ${port.type}-port ${port.direction}-port ${hasConnection?.(port.id) ? 'connected' : ''}`}
+                        <Port
+                            kind={port.type}
+                            direction="output"
+                            connected={!!hasConnection?.(port.id)}
+                            style={{ width: '20px', height: '20px' }}
                             data-node-id={node.id}
                             data-port-id={port.id}
                             data-port-type={port.type}
-                            onMouseDown={(e) => handlePortMouseDown?.(port.id, e)}
-                            onMouseUp={(e) => handlePortMouseUp?.(port.id, e)}
+                            onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(port.id, e)}
+                            onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(port.id, e)}
                             onMouseEnter={() => handlePortMouseEnter?.(port.id)}
                             onMouseLeave={handlePortMouseLeave}
                             title={port.name}

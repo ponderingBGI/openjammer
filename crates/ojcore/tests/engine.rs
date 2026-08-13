@@ -15,8 +15,8 @@
 
 use assert_no_alloc::*;
 use ojcore::{
-    compile, CommandQueue, CompileError, Engine, GainLoader, PluginRegistry, ProgramSwap, GAIN_ID,
-    GAIN_PARAM,
+    compile, CommandQueue, CompileError, Engine, GainLoader, PanLoader, PluginRegistry,
+    ProgramSwap, WidthLoader, GAIN_ID, GAIN_PARAM, PAN_ID, WIDTH_ID,
 };
 use ojproto::{ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, Param, PrimitiveKind, RtCommand};
 
@@ -81,6 +81,32 @@ fn graphin_gain_speaker(gain: f32) -> OjGraph {
     g
 }
 
+/// A registry with gain + the stereo Pan and Width built-ins.
+fn stereo_registry() -> PluginRegistry {
+    let mut reg = PluginRegistry::new();
+    reg.register(Box::new(GainLoader::new()));
+    reg.register(Box::new(PanLoader::new()));
+    reg.register(Box::new(WidthLoader::new()));
+    reg
+}
+
+/// GraphIn(1) -> Pan(2) -> Width(3) -> SpeakerOut(4): the new stereo lane path.
+/// Pan widens the mono source into a stereo lane pair and Width processes both
+/// lanes; the mono master then folds them down. One audio PORT per side carries
+/// the lanes (docs/CHANNELS.md model), so n_in/n_out mirror the mono nodes.
+fn graphin_pan_width_speaker() -> OjGraph {
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
+    g.nodes.push(node(2, PAN_ID, PrimitiveKind::Pan, 1, 1));
+    g.nodes.push(node(3, WIDTH_ID, PrimitiveKind::Width, 1, 1));
+    g.nodes
+        .push(node(4, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 0, 2, 0)); // input -> pan
+    g.edges.push(audio_edge(2, 0, 3, 0)); // pan   -> width
+    g.edges.push(audio_edge(3, 0, 4, 0)); // width -> speaker
+    g
+}
+
 /// Write a known signal into the GraphIn source's output buffer.
 fn inject(engine: &mut Engine, signal: &[f32]) {
     let buf = engine.input_mut(NodeIdx(1), 0).expect("graphin buffer");
@@ -103,10 +129,12 @@ fn gain_to_speaker_scales_known_input() {
     inject(&mut engine, &input);
     engine.process_block(&mut out, NB);
 
-    // The gain smoother was snapped to G at compile (params applied + reset),
-    // so output == input * G from the first frame within tolerance.
+    // The gain smoother was snapped to G at compile (params applied + reset), so
+    // output == input * G — THROUGH the master brickwall limiter (decision #1):
+    // samples past the +/-0.4995 knee are softly compressed, so we compare against
+    // the limited expectation, not the raw product. (Quiet frames are unaffected.)
     for (i, (&x, &y)) in input.iter().zip(out.iter()).enumerate() {
-        let expected = x * G;
+        let expected = ojcore_dsp::guards::soft_limit(x * G);
         assert!(
             (y - expected).abs() < 1e-3,
             "frame {i}: got {y}, expected {expected}"
@@ -146,7 +174,8 @@ fn setparam_changes_gain_next_block() {
         engine.process_block(&mut out, NB);
     }
     for (i, (&x, &y)) in input.iter().zip(out.iter()).enumerate() {
-        let expected = x * 2.0;
+        // input * 2.0 through the master brickwall (see gain_to_speaker above).
+        let expected = ojcore_dsp::guards::soft_limit(x * 2.0);
         assert!(
             (y - expected).abs() < 1e-2,
             "frame {i} after SetParam: got {y}, expected ~{expected}"
@@ -237,6 +266,29 @@ fn process_block_is_allocation_free() {
     engine.process_block(&mut out, NB);
 
     // The REQUIRED gate: zero heap allocation on the hot path.
+    assert_no_alloc(|| {
+        for _ in 0..32 {
+            engine.process_block(&mut out, NB);
+        }
+    });
+}
+
+#[test]
+fn stereo_pan_width_process_is_allocation_free() {
+    // Gate the NEW stereo lane-mix hot path the same way as the mono path: Pan
+    // widens the mono source into a stereo lane pair and Width processes both
+    // lanes every block. A per-sample allocation slipping into that path would be
+    // a dropout on a live stereo patch, so prove zero heap traffic here too.
+    let reg = stereo_registry();
+    let prog = compile(&graphin_pan_width_speaker(), &reg).expect("compile");
+    let mut engine = Engine::new(prog);
+    let input = ramp();
+    let mut out = vec![0.0f32; NB];
+
+    // Warm up once outside the gate.
+    inject(&mut engine, &input);
+    engine.process_block(&mut out, NB);
+
     assert_no_alloc(|| {
         for _ in 0..32 {
             engine.process_block(&mut out, NB);
@@ -526,6 +578,7 @@ impl NanLoader {
     fn new() -> Self {
         Self {
             manifest: PluginManifest {
+                abi: None,
                 id: NAN_ID.into(),
                 name: "NaN".into(),
                 kind: PrimitiveKind::Gain, // any processor kind works here
@@ -537,6 +590,8 @@ impl NanLoader {
                     audio_out: 1,
                     control_in: 0,
                     control_out: 0,
+                    audio_in_channels: 1,
+                    audio_out_channels: 1,
                 },
             },
         }
@@ -719,6 +774,7 @@ fn looper_records_then_plays_back_through_engine() {
     tx.push(RtCommand::Looper {
         node: NodeIdx(2),
         action: looper_action::RECORD,
+        arg: 0,
     })
     .unwrap();
     engine.drain(&mut rx);
@@ -741,6 +797,7 @@ fn looper_records_then_plays_back_through_engine() {
     tx.push(RtCommand::Looper {
         node: NodeIdx(2),
         action: looper_action::CLEAR,
+        arg: 0,
     })
     .unwrap();
     engine.drain(&mut rx);
@@ -767,23 +824,98 @@ fn looper_process_is_allocation_free() {
     engine.process_block(&mut out, NB);
 
     // Cycle the looper through every state INSIDE the gate: applying the command
-    // (looper_action) and rendering must both be allocation-free.
+    // (looper_action) and rendering must both be allocation-free. The Stage-3
+    // capture accessors (`last_captured_block` / `last_committed_layer_pcm`) are
+    // read on the RT thread (native streams the captured block each block; both
+    // are borrows into pre-allocated buffers), so they MUST be alloc-free too —
+    // exercise them inside the gate after each render.
+    let looper_slot = engine.program().slot_of_id(NodeIdx(2)).unwrap();
     assert_no_alloc(|| {
-        for &action in &[
-            looper_action::ARM,
-            looper_action::RECORD,
-            looper_action::OVERDUB,
-            looper_action::PLAY,
-            looper_action::STOP,
-            looper_action::CLEAR,
+        for &(action, arg) in &[
+            (looper_action::ARM, 0),
+            (looper_action::RECORD, 0),
+            (looper_action::OVERDUB, 0),
+            (looper_action::PLAY, 0),
+            // Indexed actions are allocation-free too: undo / mute / delete.
+            (looper_action::SET_MUTE, looper_action::MUTE_FLAG), // layer 0, muted
+            (looper_action::DELETE_LAYER, 0),
+            (looper_action::UNDO_LAST, 0),
+            (looper_action::STOP, 0),
+            (looper_action::CLEAR, 0),
         ] {
             tx.push(RtCommand::Looper {
                 node: NodeIdx(2),
                 action,
+                arg,
             })
             .unwrap();
             engine.drain(&mut rx);
             engine.process_block(&mut out, NB);
+            // The native capture seam reads these every block; a borrow must
+            // never allocate. `core::hint::black_box` keeps the reads observable.
+            let inst = &engine.program().instances[looper_slot];
+            let _ = core::hint::black_box(inst.last_captured_block().map(|s| s.len()));
+            let _ = core::hint::black_box(inst.last_committed_layer_pcm().len());
         }
     });
+}
+
+/// THE USER SCENARIO, A/B: `GraphIn -> SpeakerOut` (direct) vs
+/// `GraphIn -> Looper -> SpeakerOut` with the production param defaults the
+/// manifest emits (LOOP_SECS=duration, WET=1, DRY=1) and NO record action, so the
+/// looper sits IDLE. An idle looper inserted in the chain MUST be a perfect
+/// passthrough — both paths produce bit-identical output. Regression guard for
+/// "the looper massively amplifies anything that goes through it." If this FAILS,
+/// the gain bug is in the engine; if it PASSES, the bug is in the graph the UI
+/// emits (e.g. a surviving second path) — not the kernel.
+#[test]
+fn idle_looper_in_path_matches_direct_path() {
+    use ojcore::looper::looper_param;
+    let reg = looper_registry();
+
+    // A: GraphIn(1) -> SpeakerOut(3) — the "no looper" baseline.
+    let mut a = OjGraph::empty(SR, BLOCK);
+    a.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
+    a.nodes
+        .push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    a.edges.push(audio_edge(1, 0, 3, 0));
+    let mut ea = Engine::new(compile(&a, &reg).expect("compile A"));
+
+    // B: GraphIn(1) -> Looper(2, idle, prod defaults) -> SpeakerOut(3).
+    let mut b = OjGraph::empty(SR, BLOCK);
+    b.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
+    let mut lp = node(2, ojcore::LOOPER_ID, PrimitiveKind::Looper, 1, 1);
+    lp.params.push(Param {
+        id: looper_param::LOOP_SECS,
+        value: 10.0,
+    });
+    lp.params.push(Param {
+        id: looper_param::WET,
+        value: 1.0,
+    });
+    lp.params.push(Param {
+        id: looper_param::DRY,
+        value: 1.0,
+    });
+    b.nodes.push(lp);
+    b.nodes
+        .push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    b.edges.push(audio_edge(1, 0, 2, 0));
+    b.edges.push(audio_edge(2, 0, 3, 0));
+    let mut eb = Engine::new(compile(&b, &reg).expect("compile B"));
+
+    let signal = ramp();
+    let mut oa = vec![0.0f32; NB];
+    let mut ob = vec![0.0f32; NB];
+    inject(&mut ea, &signal);
+    ea.process_block(&mut oa, NB);
+    inject(&mut eb, &signal);
+    eb.process_block(&mut ob, NB);
+
+    for (i, (&da, &db)) in oa.iter().zip(ob.iter()).enumerate() {
+        assert!(
+            (da - db).abs() < 1e-6,
+            "idle looper changed the signal at frame {i}: direct {da} vs through-looper {db}"
+        );
+    }
 }

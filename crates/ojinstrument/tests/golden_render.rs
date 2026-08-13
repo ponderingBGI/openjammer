@@ -7,9 +7,8 @@
 //! into a plain `Vec<f32>`, and ASSERT the samples are correct with real numeric
 //! tolerances — not "it ran".
 //!
-//! This suite is the verification backbone that lets us trust ojcore's audio
-//! before deleting the legacy Web Audio engine: if these pass, the compiled
-//! graph -> rendered-buffer path is sample-correct end to end.
+//! This suite is the verification backbone for ojcore's audio: if these pass,
+//! the compiled graph -> rendered-buffer path is sample-correct end to end.
 //!
 //! Signal model. A `GraphIn` source carries host-injected input (the executor
 //! leaves source output buffers intact — see [`Engine::input_mut`]), so
@@ -23,8 +22,8 @@
 use ojcore::effects::{biquad_param, convolution_param, delay_param, waveshaper_param};
 use ojcore::{
     compile, compile_with_assets, master_param, AssetPcm, AssetResolver, Engine, PluginRegistry,
-    BIQUAD_ID, CONVOLUTION_ID, DELAY_ID, GAIN_ID, GAIN_PARAM, GRAPH_IN_ID, LOOPER_ID,
-    SPEAKER_OUT_ID, WAVESHAPER_ID,
+    BIQUAD_ID, CONVOLUTION_ID, DELAY_ID, GAIN_ID, GAIN_PARAM, GRAPH_IN_ID, LOOPER_ID, PAN_ID,
+    SPEAKER_OUT_ID, WAVESHAPER_ID, WIDTH_ID,
 };
 use ojinstrument::{
     param as instr_param, register_all, RegisterOpts, KARPLUS_ID, OSC_ID, SAMPLER_ID,
@@ -89,6 +88,19 @@ fn render(engine: &mut Engine, blocks: usize) -> Vec<f32> {
         engine.process_block(&mut out[b * NB..(b + 1) * NB], NB);
     }
     out
+}
+
+/// Render `blocks` blocks into TWO channel buffers via `process_block_into` — the
+/// stereo counterpart of [`render`], exercising the N-channel device-output path.
+fn render_stereo(engine: &mut Engine, blocks: usize) -> (Vec<f32>, Vec<f32>) {
+    let mut l = vec![0.0f32; blocks * NB];
+    let mut r = vec![0.0f32; blocks * NB];
+    for b in 0..blocks {
+        let (lb, rb) = (&mut l[b * NB..(b + 1) * NB], &mut r[b * NB..(b + 1) * NB]);
+        let mut outs: [&mut [f32]; 2] = [lb, rb];
+        engine.process_block_into(&mut outs, NB);
+    }
+    (l, r)
 }
 
 /// Root-mean-square of a buffer.
@@ -341,8 +353,13 @@ fn waveshaper_changes_amplitude_shape() {
         g.edges.push(audio_edge(2, 3));
         g
     };
+    // Amplitude 0.4 keeps the CLEAN sine under the master limiter's 0.4995 knee
+    // (decision #1), so the clean crest factor stays the pure-sine sqrt(2); only
+    // the waveshaper's distortion (and any limiting it then provokes) lowers it.
+    // Crest factor is amplitude-independent for a pure sine, so this measures the
+    // shaper, not the master brickwall.
     let sine: Vec<f32> = (0..NB)
-        .map(|i| core_f32_sin(2.0 * std::f32::consts::PI * 220.0 * i as f32 / SRF))
+        .map(|i| 0.4 * core_f32_sin(2.0 * std::f32::consts::PI * 220.0 * i as f32 / SRF))
         .collect();
 
     let crest = |amount: f32| -> f32 {
@@ -435,14 +452,20 @@ fn delay_reproduces_impulse_after_n_samples() {
 /// from a test without `ojcore-native`. Returns the same PCM for ANY id.
 struct OneAsset {
     id: AssetId,
+    /// Interleaved PCM (`channels`-major frames); mono when `channels == 1`.
     pcm: Vec<f32>,
+    channels: u8,
     sample_rate: f32,
 }
 
 impl AssetResolver for OneAsset {
     fn resolve(&self, id: AssetId) -> Option<AssetPcm<'_>> {
         if id == self.id {
-            Some(AssetPcm::mono(&self.pcm, self.sample_rate))
+            Some(AssetPcm::from_interleaved(
+                &self.pcm,
+                self.channels as u16,
+                self.sample_rate,
+            ))
         } else {
             None
         }
@@ -493,6 +516,7 @@ fn convolution_dry_without_ir_and_identity_with_unit_ir() {
     let ir = OneAsset {
         id: AssetId(7),
         pcm: vec![1.0], // identity kernel
+        channels: 1,
         sample_rate: SRF,
     };
     let mut engine =
@@ -569,9 +593,20 @@ fn karplus_instrument_note_is_audible_then_rings_down() {
         note: 60,
         vel: 127,
     });
-    let attack = render(&mut engine, 4);
+    let attack = render(&mut engine, 1);
     assert_all_finite(&attack);
     assert!(peak(&attack) > 0.02, "karplus pluck silent");
+
+    // SUSTAIN past the first wavelength. A degenerate ±1 excitation is annihilated
+    // by the averaging lowpass within ONE period (note 60 ≈ 184 samples < one
+    // 256-frame block), so this later window would be ~0 — the "extremely silent"
+    // bug. A proper noise burst keeps ringing, so the string is still audible here.
+    let sustain = render(&mut engine, 8);
+    assert_all_finite(&sustain);
+    assert!(
+        peak(&sustain) > 0.02,
+        "karplus collapsed to a click — no sustained ring"
+    );
 
     engine.apply(RtCommand::NoteOff {
         node: NodeIdx(1),
@@ -601,6 +636,7 @@ fn sampler_plays_resolved_asset_at_root_pitch() {
     let asset = OneAsset {
         id: AssetId(42),
         pcm: pcm.clone(),
+        channels: 1,
         sample_rate: SRF,
     };
 
@@ -646,9 +682,12 @@ fn sampler_plays_resolved_asset_at_root_pitch() {
     // The first `pcm.len()` output frames reproduce the buffer (vel 127 -> amp
     // ~1.0, gain 1.0, attack 0 + sustain 1 -> envelope ~1.0). Allow a small
     // tolerance for the envelope's first-sample ramp.
+    // Compare against the limited expectation: the engine's final output passes
+    // through the master brickwall (decision #1), so any PCM sample past the
+    // 0.4995 knee is softly compressed before it reaches `out`.
     let mut matched = 0;
     for (i, &expected) in pcm.iter().enumerate() {
-        if (out[i] - expected).abs() < 0.05 {
+        if (out[i] - ojcore_dsp::guards::soft_limit(expected)).abs() < 0.05 {
             matched += 1;
         }
     }
@@ -663,6 +702,89 @@ fn sampler_plays_resolved_asset_at_root_pitch() {
     assert!(
         tail_peak < 1e-2,
         "sampler rang past sample end (tail {tail_peak})"
+    );
+}
+
+#[test]
+fn sampler_stereo_asset_renders_distinct_left_and_right() {
+    // An interleaved STEREO asset whose right channel is the phase-inverse of the
+    // left. Played at the root note (unity ratio), the stereo Sampler must route
+    // L -> device L and R -> device R (the last mono boundary, CHANNELS.md §5.3) —
+    // NOT duplicate one channel — so the two device channels are genuine mirror
+    // images. This locks the stereo asset path end-to-end through the real registry.
+    let frames = 64usize;
+    let mut interleaved = Vec::with_capacity(frames * 2);
+    for i in 0..frames {
+        let s = core_f32_sin(2.0 * std::f32::consts::PI * i as f32 / 16.0) * 0.6;
+        interleaved.push(s); // L
+        interleaved.push(-s); // R (phase-inverted)
+    }
+    let asset = OneAsset {
+        id: AssetId(43),
+        pcm: interleaved,
+        channels: 2,
+        sample_rate: SRF,
+    };
+
+    let mut g = OjGraph::empty(SR, BLOCK);
+    let mut sampler = with_params(
+        node(1, SAMPLER_ID, PrimitiveKind::Sampler, 0, 1),
+        &[
+            (instr_param::GAIN, 1.0),
+            (instr_param::ATTACK, 0.0),
+            (instr_param::DECAY, 0.0),
+            (instr_param::SUSTAIN, 1.0),
+            (SAMPLER_PCM_PARAM, 60.0), // root note = 60 -> unity ratio
+        ],
+    );
+    sampler.assets.push(AssetRef {
+        slot: 0,
+        asset: AssetId(43),
+    });
+    g.nodes.push(sampler);
+    g.nodes
+        .push(node(2, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 2));
+
+    let mut engine = Engine::new(
+        compile_with_assets(&g, &registry(), &asset).expect("compile w/ stereo sample"),
+    );
+    engine.apply(RtCommand::NoteOn {
+        node: NodeIdx(1),
+        note: 60,
+        vel: 127,
+    });
+    let (l, r) = render_stereo(&mut engine, 1);
+    assert_all_finite(&l);
+    assert_all_finite(&r);
+
+    // Both device channels carry the sample — neither is silent or dropped.
+    assert!(
+        peak(&l[..frames]) > 0.2,
+        "left carries the sample (peak {})",
+        peak(&l[..frames])
+    );
+    assert!(
+        peak(&r[..frames]) > 0.2,
+        "right carries the sample (peak {})",
+        peak(&r[..frames])
+    );
+    // ...and they are DISTINCT: R is the inverse of L, so L + R ≈ 0 everywhere
+    // (the master brickwall is an odd function, so it preserves the symmetry)
+    // while |L - R| is large — proving the channels are independently routed.
+    let mut max_abs_diff = 0.0f32;
+    for i in 0..frames {
+        assert!(
+            (l[i] + r[i]).abs() < 0.05,
+            "R is the phase-inverse of L (frame {i}: L {} R {})",
+            l[i],
+            r[i]
+        );
+        max_abs_diff = max_abs_diff.max((l[i] - r[i]).abs());
+    }
+    assert!(
+        max_abs_diff > 0.3,
+        "L and R are genuinely distinct, not a duplicated mono lane (max |L-R| {max_abs_diff})"
     );
 }
 
@@ -720,6 +842,7 @@ fn looper_records_plays_overdubs_and_clears() {
     engine.apply(RtCommand::Looper {
         node: NodeIdx(2),
         action: looper_action::RECORD,
+        arg: 0,
     });
     if let Some(b) = engine.input_mut(NodeIdx(1), 0) {
         b.copy_from_slice(&first);
@@ -742,6 +865,7 @@ fn looper_records_plays_overdubs_and_clears() {
     engine.apply(RtCommand::Looper {
         node: NodeIdx(2),
         action: looper_action::OVERDUB,
+        arg: 0,
     });
     if let Some(b) = engine.input_mut(NodeIdx(1), 0) {
         b.copy_from_slice(&second);
@@ -753,6 +877,7 @@ fn looper_records_plays_overdubs_and_clears() {
     engine.apply(RtCommand::Looper {
         node: NodeIdx(2),
         action: looper_action::PLAY,
+        arg: 0,
     });
     if let Some(b) = engine.input_mut(NodeIdx(1), 0) {
         b.fill(0.0);
@@ -772,6 +897,7 @@ fn looper_records_plays_overdubs_and_clears() {
     engine.apply(RtCommand::Looper {
         node: NodeIdx(2),
         action: looper_action::CLEAR,
+        arg: 0,
     });
     if let Some(b) = engine.input_mut(NodeIdx(1), 0) {
         b.fill(0.0);
@@ -953,23 +1079,28 @@ fn osc440_fingerprint() -> Vec<f32> {
 
 /// The committed golden (16 samples). Generated once on a libm rig; identical on
 /// every supported arch. Update ONLY with an intentional DSP change.
+// Re-captured for the master brickwall limiter (decision #1): the engine's final
+// output now passes through `ojcore_dsp::guards::soft_limit` (ceiling 0.999, knee
+// at 0.4995), so samples whose magnitude exceeded the knee are softly compressed.
+// Under-knee samples (e.g. #1, #2, #7, #8, #13, #14) are byte-identical to the
+// pre-limiter golden, confirming the limiter leaves quiet/normal signal untouched.
 const OSC440_GOLDEN: [f32; 16] = [
-    0.8211538,
+    0.69515896,
     -0.40674695,
     -0.12532012,
-    0.6211351,
-    -0.9372757,
-    0.982291,
-    -0.74316037,
+    0.59731567,
+    -0.73280275,
+    0.7450017,
+    -0.6632713,
     0.28905588,
     0.24866231,
-    -0.7144515,
-    0.97357154,
-    -0.9510674,
-    0.6534479,
+    -0.6497807,
+    0.74272686,
+    -0.7366629,
+    0.61717886,
     -0.1668075,
     -0.36808708,
-    0.7965039,
+    0.6857557,
 ];
 
 #[test]
@@ -982,6 +1113,184 @@ fn osc_440_matches_committed_golden() {
         assert!(
             (got - want).abs() <= tol,
             "golden sample #{i} drifted: got {got:?}, want {want:?} (tol {tol:?})"
+        );
+    }
+}
+
+// ===========================================================================
+// Stereo: the channel path through the SHARED registry + process_block_into.
+// A mono GraphIn injected into a real Pan node images to two device channels per
+// the equal-power law (docs/CHANNELS.md) — the end-to-end stereo proof in the gate.
+// ===========================================================================
+
+#[test]
+fn pan_centre_images_injected_input_equal_power() {
+    // GraphIn(1) -> Pan(2, centre) -> SpeakerOut(3). A centred pan sends a mono DC
+    // input to BOTH device channels at the equal-power gain 1/√2 ≈ 0.7071 (not the
+    // 1.0 of a mono fan-out, nor the 0.5 of a linear law) — proving the real Pan
+    // loader ran and process_block_into delivered true two-channel output.
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes
+        .push(node(1, GRAPH_IN_ID, PrimitiveKind::GraphIn, 0, 1));
+    g.nodes.push(node(2, PAN_ID, PrimitiveKind::Pan, 1, 1)); // pan defaults to 0 = centre
+    g.nodes
+        .push(node(3, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 2));
+    g.edges.push(audio_edge(2, 3));
+
+    let mut engine = Engine::new(compile(&g, &registry()).expect("compile pan-centre graph"));
+
+    const DC: f32 = 0.5;
+    if let Some(buf) = engine.input_mut(NodeIdx(1), 0) {
+        buf.copy_from_slice(&vec![DC; NB]);
+    }
+    let (l, r) = render_stereo(&mut engine, 1);
+    assert_all_finite(&l);
+    assert_all_finite(&r);
+
+    let centre = DC * core::f32::consts::FRAC_1_SQRT_2;
+    for i in 1..NB {
+        assert!(
+            (l[i] - centre).abs() < 1e-3,
+            "L[{i}] = {} != {centre}",
+            l[i]
+        );
+        assert!(
+            (r[i] - centre).abs() < 1e-3,
+            "R[{i}] = {} != {centre}",
+            r[i]
+        );
+    }
+}
+
+#[test]
+fn pan_hard_left_routes_input_to_left_channel_only() {
+    // GraphIn(1) -> Pan(2, pan=-1 hard left) -> SpeakerOut(3). The mono input lands
+    // ENTIRELY in the left device channel; the right is silent — true stereo
+    // separation (L != R) end to end through the real path.
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes
+        .push(node(1, GRAPH_IN_ID, PrimitiveKind::GraphIn, 0, 1));
+    g.nodes.push(with_params(
+        node(2, PAN_ID, PrimitiveKind::Pan, 1, 1),
+        &[(0, -1.0)], // pan_param::PAN = 0; -1 = hard left
+    ));
+    g.nodes
+        .push(node(3, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 2));
+    g.edges.push(audio_edge(2, 3));
+
+    let mut engine = Engine::new(compile(&g, &registry()).expect("compile pan-left graph"));
+
+    const DC: f32 = 0.5;
+    if let Some(buf) = engine.input_mut(NodeIdx(1), 0) {
+        buf.copy_from_slice(&vec![DC; NB]);
+    }
+    let (l, r) = render_stereo(&mut engine, 1);
+    assert_all_finite(&l);
+    assert_all_finite(&r);
+
+    for i in 1..NB {
+        assert!(
+            (l[i] - DC).abs() < 1e-3,
+            "L[{i}] = {} != {DC} (hard left)",
+            l[i]
+        );
+        assert!(
+            r[i].abs() < 1e-3,
+            "R[{i}] = {} != 0 (hard left silent)",
+            r[i]
+        );
+    }
+}
+
+// A mid-graph stereo EFFECT (Width) re-imaging a real stereo SOURCE (Pan) — the
+// end-to-end lock for the general lane-aware mix (`mix_input_lane`): Pan's two output
+// lanes must route into Width's two INPUT lanes through the real compile + registry.
+
+#[test]
+fn pan_into_width_unity_routes_the_stereo_chain() {
+    // GraphIn -> Pan(centre) -> Width(unity) -> SpeakerOut. A unity Width is
+    // transparent, so the output is the centred equal-power image, unchanged — proving
+    // the chain ROUTES (Pan's L/R lanes reach Width's two input lanes).
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes
+        .push(node(1, GRAPH_IN_ID, PrimitiveKind::GraphIn, 0, 1));
+    g.nodes.push(node(2, PAN_ID, PrimitiveKind::Pan, 1, 1));
+    g.nodes.push(node(3, WIDTH_ID, PrimitiveKind::Width, 1, 1));
+    g.nodes
+        .push(node(4, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 2));
+    g.edges.push(audio_edge(2, 3));
+    g.edges.push(audio_edge(3, 4));
+
+    let mut engine = Engine::new(compile(&g, &registry()).expect("compile pan->width chain"));
+    const DC: f32 = 0.5;
+    if let Some(buf) = engine.input_mut(NodeIdx(1), 0) {
+        buf.copy_from_slice(&vec![DC; NB]);
+    }
+    let (l, r) = render_stereo(&mut engine, 1);
+    assert_all_finite(&l);
+    assert_all_finite(&r);
+
+    let centre = DC * core::f32::consts::FRAC_1_SQRT_2;
+    for i in 1..NB {
+        assert!(
+            (l[i] - centre).abs() < 1e-3,
+            "L[{i}] = {} != {centre}",
+            l[i]
+        );
+        assert!(
+            (r[i] - centre).abs() < 1e-3,
+            "R[{i}] = {} != {centre}",
+            r[i]
+        );
+    }
+}
+
+#[test]
+fn width_collapses_a_panned_signal_to_mono() {
+    // GraphIn -> Pan(hard left) -> Width(0) -> SpeakerOut. Pan sends the input to L
+    // only (L=DC, R=0); Width receives that stereo pair via the general mix and at
+    // width 0 mid/side-collapses it to the centre (L'=R'=mid=DC/2). The proof that a
+    // stereo EFFECT mid-graph genuinely re-images a real stereo source — commit F.
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes
+        .push(node(1, GRAPH_IN_ID, PrimitiveKind::GraphIn, 0, 1));
+    g.nodes.push(with_params(
+        node(2, PAN_ID, PrimitiveKind::Pan, 1, 1),
+        &[(0, -1.0)], // hard left
+    ));
+    g.nodes.push(with_params(
+        node(3, WIDTH_ID, PrimitiveKind::Width, 1, 1),
+        &[(0, 0.0)], // width 0 = mono collapse
+    ));
+    g.nodes
+        .push(node(4, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 2));
+    g.edges.push(audio_edge(2, 3));
+    g.edges.push(audio_edge(3, 4));
+
+    let mut engine = Engine::new(compile(&g, &registry()).expect("compile pan->width collapse"));
+    const DC: f32 = 0.5;
+    if let Some(buf) = engine.input_mut(NodeIdx(1), 0) {
+        buf.copy_from_slice(&vec![DC; NB]);
+    }
+    let (l, r) = render_stereo(&mut engine, 1);
+    assert_all_finite(&l);
+    assert_all_finite(&r);
+
+    let centre = DC / 2.0; // mid of (DC, 0)
+    for i in 1..NB {
+        assert!(
+            (l[i] - centre).abs() < 1e-3,
+            "L[{i}] = {} != {centre}",
+            l[i]
+        );
+        assert!(
+            (r[i] - centre).abs() < 1e-3,
+            "R[{i}] = {} != {centre}",
+            r[i]
         );
     }
 }

@@ -9,6 +9,7 @@
 
 import type { GraphNode } from '../../engine/types';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
+import { Port } from '@openjammer/oj-ui';
 
 interface MathNodeProps {
     node: GraphNode;
@@ -43,22 +44,23 @@ export function MathNode({
     const isFlashing = flashingNodes.has(node.id);
     const isAdd = node.type === 'add';
 
-    // Get resolved type for port coloring (stored in node data)
+    // Get resolved type for port coloring (stored in node data). A universal
+    // port shows the rainbow until typed; once resolved it takes that wire color.
     const resolvedType = node.data.resolvedType as 'audio' | 'control' | null;
 
-    // Determine port class based on resolved type
-    const getPortClass = (portId: string) => {
-        const isConnected = hasConnection?.(portId);
-        let classes = 'port-dot universal';
-
-        if (resolvedType) {
-            classes += ` resolved-${resolvedType}`;
-        }
-        if (isConnected) {
-            classes += ' connected';
-        }
-        return classes;
-    };
+    const renderPort = (portId: string) => (
+        <Port
+            kind="universal"
+            connected={!!hasConnection?.(portId)}
+            {...(resolvedType ? { resolvedKind: resolvedType } : {})}
+            data-node-id={node.id}
+            data-port-id={portId}
+            onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(portId, e); }}
+            onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(portId, e); }}
+            onMouseEnter={() => handlePortMouseEnter?.(portId)}
+            onMouseLeave={handlePortMouseLeave}
+        />
+    );
 
     // Get input and output ports
     const inputPorts = node.ports.filter(p => p.direction === 'input');
@@ -86,15 +88,7 @@ export function MathNode({
                 <div className="math-inputs">
                     {inputPorts.map((port, i) => (
                         <div key={port.id} className="math-port-row">
-                            <div
-                                className={getPortClass(port.id)}
-                                data-node-id={node.id}
-                                data-port-id={port.id}
-                                onMouseDown={(e) => { e.stopPropagation(); handlePortMouseDown?.(port.id, e); }}
-                                onMouseUp={(e) => { e.stopPropagation(); handlePortMouseUp?.(port.id, e); }}
-                                onMouseEnter={() => handlePortMouseEnter?.(port.id)}
-                                onMouseLeave={handlePortMouseLeave}
-                            />
+                            {renderPort(port.id)}
                             {!isAdd && i === 1 && <span className="subtract-indicator">(−)</span>}
                         </div>
                     ))}
@@ -104,15 +98,7 @@ export function MathNode({
                 <div className="math-outputs">
                     {outputPorts.map(port => (
                         <div key={port.id} className="math-port-row output">
-                            <div
-                                className={getPortClass(port.id)}
-                                data-node-id={node.id}
-                                data-port-id={port.id}
-                                onMouseDown={(e) => { e.stopPropagation(); handlePortMouseDown?.(port.id, e); }}
-                                onMouseUp={(e) => { e.stopPropagation(); handlePortMouseUp?.(port.id, e); }}
-                                onMouseEnter={() => handlePortMouseEnter?.(port.id)}
-                                onMouseLeave={handlePortMouseLeave}
-                            />
+                            {renderPort(port.id)}
                         </div>
                     ))}
                 </div>

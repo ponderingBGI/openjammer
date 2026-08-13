@@ -1,0 +1,68 @@
+name: DCO
+
+# Developer Certificate of Origin sign-off gate. Every commit in a PR must carry a
+# `Signed-off-by:` trailer (see .github/DCO + CONTRIBUTING.md). This is the mechanism
+# that keeps OpenJammer relicensable under future Plugin Exception versions WITHOUT a
+# unanimous-consent campaign (LICENSING.md §6). Self-contained — no external GitHub App,
+# works on fork PRs, owner-controlled. Add "DCO sign-off" to branch protection's required
+# checks to block merges (one-time GitHub-settings step).
+
+on:
+  pull_request:
+    branches: [main, canari]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dco-${{ github.event.pull_request.head.sha || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dco:
+    name: DCO sign-off
+    # Commits promoted from canari were already checked on their original PRs.
+    # Rechecking the accumulated release range would fail on trusted bot commits
+    # and duplicate the gate that protected canari.
+    if: >-
+      github.event_name == 'pull_request' &&
+      !(github.event.pull_request.base.ref == 'main' && github.event.pull_request.head.ref == 'canari')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Every commit carries a Signed-off-by trailer
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Non-merge commits introduced by this PR (merge commits don't need a sign-off).
+          mapfile -t commits < <(git rev-list --no-merges "${BASE_SHA}..${HEAD_SHA}")
+          if [ "${#commits[@]}" -eq 0 ]; then
+            echo "No non-merge commits to check."
+            exit 0
+          fi
+          fail=0
+          for sha in "${commits[@]}"; do
+            subject=$(git show -s --format='%s' "$sha")
+            if git show -s --format='%B' "$sha" | grep -qiE '^Signed-off-by: .+ <.+@.+>'; then
+              echo "ok    $sha  $subject"
+            else
+              echo "FAIL  $sha  $subject  — missing Signed-off-by"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo ""
+            echo "::error::One or more commits lack a Developer Certificate of Origin sign-off (.github/DCO)."
+            echo "Fix one commit:   git commit --amend -s && git push --force-with-lease"
+            echo "Fix many commits: git rebase --signoff ${BASE_SHA} && git push --force-with-lease"
+            exit 1
+          fi
+          echo ""
+          echo "All ${#commits[@]} commit(s) signed off. ✔"

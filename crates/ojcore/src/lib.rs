@@ -54,6 +54,20 @@ pub mod structural;
 // and is registered through the SAME shared `register_builtins` path.
 pub mod looper;
 
+// --- The stereo panner -------------------------------------------------------
+// `pan` is the first built-in node with a 2-channel audio output
+// (`audio_out_channels = 2`): one mono in -> a stereo L/R out. `no_std` (alloc
+// only) so it compiles unchanged for the `wasm32` worklet and registers through
+// the SAME shared `register_builtins` path. See `docs/CHANNELS.md`.
+pub mod pan;
+
+// --- The stereo width node ---------------------------------------------------
+// `width` is the first built-in with a 2-channel audio INPUT (`audio_in_channels =
+// 2`): mid/side re-imaging fed by the general lane-aware mix. `no_std` (alloc only)
+// so it compiles unchanged for the `wasm32` worklet and registers through the SAME
+// shared `register_builtins` path. See `docs/CHANNELS.md`.
+pub mod width;
+
 // --- U4 engine core ---------------------------------------------------------
 // `compile` + `exec` are the engine proper and stay `no_std` (alloc only) so
 // they compile unchanged for the `wasm32` AudioWorklet. `command` (rtrb ring)
@@ -83,13 +97,19 @@ pub use ojproto::PrimitiveKind;
 
 pub use builtin::{GainLoader, GainNode, GAIN_ID, GAIN_PARAM};
 pub use compile::{
-    compile, compile_with_assets, AssetPcm, AssetResolver, CompileError, CompiledProgram, NoAssets,
-    NodeRouting, Source,
+    compile, compile_resilient, compile_resilient_with_state, compile_with_assets, AssetPcm,
+    AssetResolver, CompileError, CompiledProgram, NoAssets, NoState, NodeRouting, Source,
+    StateResolver,
 };
-pub use dsp::{DspInstance, ProcessCtx};
+pub use dsp::{
+    kernel_supports_capability, DspInstance, ExtId, ProcessCtx, StateSave, KERNEL_CONTRACT,
+};
 pub use exec::Engine;
 pub use loader::PluginLoader;
-pub use manifest::{DspKind, ParamDecl, PluginManifest, PortDecl, UiKind};
+pub use manifest::{
+    Abi, AbiUnsupported, Capability, ContractVersion, DspKind, ParamDecl, Permission,
+    PluginManifest, PortDecl, UiKind,
+};
 pub use registry::PluginRegistry;
 
 // --- U-COVERAGE built-in set: effects, structural, and the shared registrar --
@@ -101,6 +121,10 @@ pub use register::{register_builtins, BuiltinOpts};
 
 // --- U-STATEFUL: looper surface ---
 pub use looper::{LooperLoader, LooperNode, LooperState, LOOPER_ID, MAX_LOOP_SECS};
+
+pub use pan::{pan_param, PanLoader, PanNode, PAN_ID};
+
+pub use width::{width_param, WidthLoader, WidthNode, WIDTH_ID};
 
 pub use structural::{
     master_param, StructuralLoader, StructuralNode, ADD_ID, GRAPH_IN_ID, GRAPH_OUT_ID, MIC_IN_ID,
@@ -119,7 +143,7 @@ pub use meter::{EventRing, MeterRing};
 #[cfg(feature = "std")]
 pub use resilience::Watchdog;
 #[cfg(feature = "std")]
-pub use swap::ProgramSwap;
+pub use swap::{ProgramSwap, ProgramSwapRx};
 
 #[cfg(test)]
 mod tests {

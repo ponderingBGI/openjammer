@@ -20,6 +20,7 @@ import type { GraphNode, MIDIInputNodeData } from '../../engine/types';
 import { useMIDIStore } from '../../store/midiStore';
 import { useGraphStore } from '../../store/graphStore';
 import { getPresetRegistry } from '../../midi';
+import { Port } from '@openjammer/oj-ui';
 import './MIDINode.css';
 
 interface MIDINodeProps {
@@ -237,13 +238,17 @@ export const MIDINode = memo(function MIDINode({
                 {node.ports.map((port) => (
                     <div key={port.id} className={`port-row ${port.direction}`}>
                         <span className="port-label">{port.name}</span>
-                        <div
-                            className={`port-circle-marker ${port.type}-port ${port.direction}-port ${hasConnection?.(port.id) ? 'connected' : ''}`}
+                        <Port
+                            kind={port.type}
+                            direction={port.direction}
+                            connected={!!hasConnection?.(port.id)}
+                            {...(port.resolvedType ? { resolvedKind: port.resolvedType } : {})}
+                            style={{ width: '20px', height: '20px' }}
                             data-node-id={node.id}
                             data-port-id={port.id}
                             data-port-type={port.type}
-                            onMouseDown={(e) => handlePortMouseDown?.(port.id, e)}
-                            onMouseUp={(e) => handlePortMouseUp?.(port.id, e)}
+                            onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(port.id, e)}
+                            onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(port.id, e)}
                             onMouseEnter={() => handlePortMouseEnter?.(port.id)}
                             onMouseLeave={handlePortMouseLeave}
                             title={port.name}

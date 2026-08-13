@@ -11,6 +11,17 @@
 # NOT banned: `sqrt` (IEEE-754 correctly-rounded → deterministic across
 # platforms) and ordinary arithmetic. Non-DSP reference/test code that wants a
 # std transcendental opts out locally with `#[allow(clippy::disallowed_methods)]`.
+
+# Test-code exemption for the `oj-tauri` scoped panic guard (Phase 4). That crate
+# sets `[lints.clippy] unwrap_used/expect_used = "deny"` so a panic can't slip into
+# the stage path. But CI runs `clippy --workspace --all-targets`, which lints test
+# targets with `cfg(test)` TRUE — and in a test an `unwrap()`/`expect()` IS the
+# assertion. These two keys exempt every `#[cfg(test)]` block workspace-wide, so the
+# deny fires only on production code (its intent) and the required CI clippy gate
+# stays green. clippy.toml is per-workspace, so this is the only place to set them.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
 disallowed-methods = [
   { path = "f32::sin",        reason = "use libm::sinf for cross-platform-deterministic DSP" },
   { path = "f64::sin",        reason = "use libm::sin for cross-platform-deterministic DSP" },

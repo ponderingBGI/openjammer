@@ -8,7 +8,7 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 There are two ways to get OpenJammer, and **the browser is the honest place to start** —
 it is the whole instrument with nothing to install. Reach for the desktop app when you
-want the lowest latency or to host your own VST3 / AU / CLAP plugins.
+want the lowest latency or to host your own CLAP plugins (VST3 / AU planned).
 
 <CardGrid>
   <Card title="Play now in your browser" icon="rocket">
@@ -18,8 +18,9 @@ want the lowest latency or to host your own VST3 / AU / CLAP plugins.
     [Open openjammer.app →](https://openjammer.app)
   </Card>
   <Card title="Download the desktop app" icon="laptop">
-    The full instrument at native low latency — **under 5 ms** MIDI-to-audio — plus
-    VST3 / AU / CLAP plugin hosting.
+    The full instrument at native low latency — it asks the device for a small 64-frame buffer
+    (~1.3 ms), which many devices grant even in WASAPI shared mode, down to ~10 ms+ on devices
+    that force a larger period — plus CLAP plugin hosting (VST3 / AU planned).
 
     [Install for your OS →](/openjammer/play/install/)
   </Card>
@@ -30,8 +31,8 @@ want the lowest latency or to host your own VST3 / AU / CLAP plugins.
 | | Browser (PWA) | Desktop (native) |
 |---|---|---|
 | **Install** | None — just open a tab | Download an installer per OS |
-| **Latency** | ~15–25 ms (honest tier) | **< 5 ms** MIDI-to-audio |
-| **Plugin hosting** | — | VST3 / AU / CLAP |
+| **Latency** | ~15–25 ms (honest tier) | **device-dependent: ~1.3 ms to ~10 ms+** |
+| **Plugin hosting** | — | CLAP (VST3 / AU planned) |
 | **Best for** | Sketching, jamming, trying it out | Live performance, lowest latency |
 | **Offline** | Works offline after first visit | Always offline |
 

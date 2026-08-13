@@ -1,5 +1,5 @@
 import { defineConfig, type Plugin, type Connect } from 'vite'
-import react from '@vitejs/plugin-react-swc'
+import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 // wasm-bindgen libraries (e.g. loro-crdt, the collab CRDT) import their `.wasm`
 // via the ESM-integration proposal, which Vite's dev server can't transform on
@@ -9,6 +9,19 @@ import { VitePWA } from 'vite-plugin-pwa'
 import wasm from 'vite-plugin-wasm'
 import topLevelAwait from 'vite-plugin-top-level-await'
 import { readFileSync } from 'node:fs'
+
+// Browserslist staleness: we pin `caniuse-lite` as a direct dependency and refresh
+// it with `bunx update-browserslist-db@latest` (NEVER `npx` — bun-only rule), so the
+// data is always the latest PUBLISHED version. Browserslist still prints a "browsers
+// data is N months old" notice purely by comparing the newest browser-release date in
+// that data (currently 2025-12-04, the freshest caniuse-lite ships) against the wall
+// clock — there is nothing newer to install. That notice is a false-stale warning, not
+// a real problem, so we opt into browserslist's own documented suppression knob. Set
+// here (vite.config.ts is evaluated before any browserslist query in the build) so it
+// holds identically on Windows/PowerShell and Linux CI without an inline env prefix or
+// an extra cross-env dependency. To re-check freshness, run `bunx update-browserslist-db`
+// and confirm the registry has no newer caniuse-lite before assuming this is still inert.
+process.env.BROWSERSLIST_IGNORE_OLD_DATA ??= '1'
 
 // App version SSOT: inline package.json's version as `__APP_VERSION__` at build
 // time. The diagnostics snapshot + IssueReporter stamp every bug report with it,
@@ -170,14 +183,80 @@ export default defineConfig({
       // bare workspace specifier and app code resolve to the single source file
       // without a build step. Mirrors the tsconfig `paths` + vitest alias.
       '@openjammer/oj-protocol': '/packages/oj-protocol-ts/src/index.ts',
+      // The design-token SSOT (themes + engine). Same alias-only pattern as the
+      // protocol package — generated CSS is imported by relative path in main.tsx.
+      '@openjammer/oj-tokens': '/packages/oj-tokens/src/index.ts',
+      // The presentational component library (theme-agnostic primitives).
+      '@openjammer/oj-ui': '/packages/oj-ui/src/index.ts',
       events: 'rollup-plugin-node-polyfills/polyfills/events'
     }
   },
-  // Let Rollup/Vite choose chunk boundaries. Hand-written vendor chunks caused
-  // production-only circular ESM initialization crashes (white screen before
-  // React mounted), so startup correctness beats cache-shape micro-optimization.
   build: {
+    // Default 500 kB is too tight for an app that bundles a CRDT + markdown +
+    // tree-view stack; 900 kB is the honest ceiling AFTER the split below. We do
+    // NOT raise it to paper over a fat entry — the manualChunks split keeps the
+    // entry under it (see below).
     chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        // HARD-WON LESSON: hand-splitting React/scheduler/the app's own modules
+        // into vendor chunks caused production-only circular ESM init crashes
+        // (white screen before React mounted). So this split is deliberately
+        // NARROW: it only peels off a few LEAF third-party libraries that have
+        // no import edge back into app code or React internals — the CRDT
+        // (loro-crdt, ~MB of wasm-bindgen glue), the markdown renderer stack
+        // (react-markdown/remark/micromark/unified — large but isolated, only
+        // pulled in by the command bar), and the tree-view + beat-detector
+        // leaves. React, react-dom, zustand, cmdk and ALL src/ stay in the
+        // entry chunk untouched, so the load-order that React's mount depends on
+        // is byte-for-byte what Rollup already proved safe. Anything that is not
+        // one of these explicit leaves falls through to Rollup's default
+        // chunking — no broad `node_modules` catch-all that could re-trip the
+        // circular-init crash.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          // Normalize Windows + pnpm-style paths to a forward-slash form so the
+          // package-name match below is platform-independent.
+          const path = id.replace(/\\/g, '/')
+          // react-dom is the single largest dependency (~520 kB of source). It
+          // and its runtime peers (react, scheduler, the react-reconciler) form
+          // a self-contained vendor island with NO import edge back into app
+          // code, so peeling them into one `react-vendor` chunk is safe — unlike
+          // the earlier broken attempt that grouped app modules WITH React and
+          // tripped a circular-init order bug. The e2e smoke (clicks "Play here",
+          // asserts the worklet posts `ready` and React actually mounted) is the
+          // guard that this load order stays correct.
+          if (
+            /\/node_modules\/(react|react-dom|scheduler|react-reconciler|use-sync-external-store)\//.test(
+              path,
+            )
+          )
+            return 'react-vendor'
+          if (path.includes('/node_modules/loro-crdt/')) return 'loro-crdt'
+          if (
+            /\/node_modules\/(react-markdown|remark-[^/]+|remark|rehype-[^/]+|micromark[^/]*|mdast-[^/]+|hast-[^/]+|unist-[^/]+|unified|vfile[^/]*|property-information|space-separated-tokens|comma-separated-tokens|decode-named-character-reference|character-entities[^/]*|trim-lines|trough|bail|is-plain-obj|ccount|markdown-table|zwitch|longest-streak|html-url-attributes|estree-util-[^/]+|devlop|html-void-elements|web-namespaces)\//.test(
+              path,
+            )
+          )
+            return 'markdown'
+          // The file-tree view (react-arborist + its react-dnd/redux runtime)
+          // and the toast layer (sonner) are large, self-contained leaves used
+          // only by a few panels — split so they don't weigh the entry.
+          if (
+            /\/node_modules\/(react-arborist|react-dnd|react-dnd-html5-backend|dnd-core|@react-dnd\/[^/]+|redux|@redux\/[^/]+)\//.test(
+              path,
+            )
+          )
+            return 'tree-view'
+          if (path.includes('/node_modules/sonner/')) return 'sonner'
+          // idb-keyval is a tiny, dependency-free persistence leaf. Keeping it
+          // separate prevents the project store's IndexedDB adapter from tipping
+          // the initial app chunk over the enforced budget.
+          if (path.includes('/node_modules/idb-keyval/')) return 'idb-keyval'
+          return undefined
+        },
+      },
+    },
   },
   // Worker configuration for AudioWorklet modules
   worker: {

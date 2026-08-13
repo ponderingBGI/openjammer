@@ -1,0 +1,61 @@
+# bacon.toml — the windowless engine inner-loop for `oj dev --engine`
+# (aliases: `just engine-watch`, or plain `bacon`).
+#
+# Each job re-runs an existing harness on save for sub-second Rust/DSP iteration
+# with NO Tauri window and NO relink-the-whole-app tax. The jobs mirror the
+# `justfile` recipes so local and CI agree (the "one command surface" value).
+#
+# CROSS-PLATFORM: we deliberately do NOT set a custom per-job `kill`. A literal
+# `["taskkill", …]` is correct on Windows but would BREAK macOS/Linux (no such
+# binary), and this file is committed for every platform. Every job below EXITS
+# on its own, so bacon's default, OS-correct interruption is sufficient. If a
+# future *background*/streaming job is added (e.g. a live-audio bin that never
+# returns), give THAT job its own per-OS `kill` (Windows:
+# ["taskkill","/F","/T","/PID"]) — don't make it the global default.
+
+default_job = "check"
+
+env.CARGO_TERM_COLOR = "always"
+
+# Audible pass/fail. `[sound] enabled` turns the subsystem on; each job triggers
+# a chime via on_success / on_failure using bacon's built-in sound names.
+[sound]
+enabled = true
+base_volume = "60%"
+
+# Fast type-only loop — the default; stays sub-second once warm.
+[jobs.check]
+command = ["cargo", "check", "--workspace"]
+need_stdout = false
+on_success = "play-sound(name=success,volume=40)"
+on_failure = "play-sound(name=beep-warning,volume=70)"
+
+# Lints with the same `-D warnings` gate CI enforces (mirrors `just clippy`).
+[jobs.clippy]
+command = ["cargo", "clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]
+need_stdout = false
+on_success = "play-sound(name=success,volume=40)"
+on_failure = "play-sound(name=beep-warning,volume=70)"
+
+# Full test suite via nextest (mirrors `just test`; honors .config/nextest.toml).
+[jobs.nextest]
+command = ["cargo", "nextest", "run", "--workspace", "--hide-progress-bar", "--failure-output", "final"]
+need_stdout = true
+on_success = "play-sound(name=success,volume=40)"
+on_failure = "play-sound(name=beep-warning,volume=70)"
+
+# RT no-alloc gate (mirrors `just test-rt`).
+[jobs.test-rt]
+command = ["cargo", "nextest", "run", "-p", "ojcore", "--hide-progress-bar", "--failure-output", "final"]
+need_stdout = true
+on_success = "play-sound(name=success,volume=40)"
+on_failure = "play-sound(name=beep-warning,volume=70)"
+
+# Hear it: render an Osc→Biquad→Delay→Speaker arpeggio to a WAV and self-assert
+# finite / non-silent / sane-RMS (mirrors `just render`). The bin exits 0/1 so
+# the chime is a true pass/fail; open target/oj-render.wav to actually listen.
+[jobs.render]
+command = ["cargo", "run", "-p", "ojcore-native", "--bin", "render", "--features", "demo", "--", "target/oj-render.wav", "2"]
+need_stdout = true
+on_success = "play-sound(name=success,volume=50)"
+on_failure = "play-sound(name=beep-warning,volume=80)"

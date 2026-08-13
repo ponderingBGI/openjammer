@@ -9,6 +9,7 @@
  */
 
 import { useState, useCallback, useEffect, memo } from 'react';
+import { Button, Port } from '@openjammer/oj-ui';
 import type { BundlePortDefinition } from '../engine/types';
 import { ScrollContainer } from './common/ScrollContainer';
 import './BundlePortGroup.css';
@@ -83,14 +84,16 @@ export const BundlePortGroup = memo(function BundlePortGroup({
                     {/* Disclosure triangle + label on left for input panel */}
                     {labelPosition === 'left' && (
                         <>
-                            <button
+                            <Button
+                                variant="ghost"
+                                iconOnly
                                 className="bundle-expand-button"
                                 onClick={handleToggle}
                                 aria-label={`Expand ${bundleInfo.bundleLabel}`}
                                 aria-expanded={false}
                             >
                                 <span className="bundle-triangle">&#9654;</span>
-                            </button>
+                            </Button>
                             <span className="bundle-label" title={bundleInfo.bundleLabel}>
                                 {bundleInfo.bundleLabel}
                                 <span className="bundle-count">({channelCount})</span>
@@ -99,8 +102,11 @@ export const BundlePortGroup = memo(function BundlePortGroup({
                     )}
 
                     {/* Port marker */}
-                    <div
-                        className={`bundle-port-marker ${port.type}-port ${port.direction}-port ${isConnected ? 'connected' : ''}`}
+                    <Port
+                        kind={port.type}
+                        direction={port.direction}
+                        connected={!!isConnected}
+                        style={{ width: 14, height: 14 }}
                         data-node-id={nodeId}
                         data-port-id={port.id}
                         data-port-type={port.type}
@@ -126,14 +132,16 @@ export const BundlePortGroup = memo(function BundlePortGroup({
                                 {bundleInfo.bundleLabel}
                                 <span className="bundle-count">({channelCount})</span>
                             </span>
-                            <button
+                            <Button
+                                variant="ghost"
+                                iconOnly
                                 className="bundle-expand-button"
                                 onClick={handleToggle}
                                 aria-label={`Expand ${bundleInfo.bundleLabel}`}
                                 aria-expanded={false}
                             >
                                 <span className="bundle-triangle">&#9654;</span>
-                            </button>
+                            </Button>
                         </>
                     )}
                 </div>
@@ -148,14 +156,16 @@ export const BundlePortGroup = memo(function BundlePortGroup({
             <div className="bundle-port-row bundle-header">
                 {labelPosition === 'left' && (
                     <>
-                        <button
+                        <Button
+                            variant="ghost"
+                            iconOnly
                             className="bundle-expand-button expanded"
                             onClick={handleToggle}
                             aria-label={`Collapse ${bundleInfo.bundleLabel}`}
                             aria-expanded={true}
                         >
                             <span className="bundle-triangle">&#9660;</span>
-                        </button>
+                        </Button>
                         <span className="bundle-label" title={bundleInfo.bundleLabel}>
                             {bundleInfo.bundleLabel}
                             <span className="bundle-count">({channelCount})</span>
@@ -164,8 +174,11 @@ export const BundlePortGroup = memo(function BundlePortGroup({
                 )}
 
                 {/* Main bundle port marker */}
-                <div
-                    className={`bundle-port-marker ${port.type}-port ${port.direction}-port ${isConnected ? 'connected' : ''}`}
+                <Port
+                    kind={port.type}
+                    direction={port.direction}
+                    connected={!!isConnected}
+                    style={{ width: 12, height: 12 }}
                     data-node-id={nodeId}
                     data-port-id={port.id}
                     data-port-type={port.type}
@@ -184,14 +197,16 @@ export const BundlePortGroup = memo(function BundlePortGroup({
                             {bundleInfo.bundleLabel}
                             <span className="bundle-count">({channelCount})</span>
                         </span>
-                        <button
+                        <Button
+                            variant="ghost"
+                            iconOnly
                             className="bundle-expand-button expanded"
                             onClick={handleToggle}
                             aria-label={`Collapse ${bundleInfo.bundleLabel}`}
                             aria-expanded={true}
                         >
                             <span className="bundle-triangle">&#9660;</span>
-                        </button>
+                        </Button>
                     </>
                 )}
             </div>
@@ -217,7 +232,7 @@ export const BundlePortGroup = memo(function BundlePortGroup({
 
                         {/* Channel port marker (visual only in expanded view) */}
                         <div
-                            className={`bundle-channel-marker ${port.type}-port ${port.direction}-port`}
+                            className={`bundle-channel-marker ${port.type}-port`}
                             data-channel-id={channel.id}
                             role="button"
                             tabIndex={0}

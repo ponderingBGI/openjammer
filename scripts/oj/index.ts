@@ -5,18 +5,25 @@
 //   oj doctor     [--json] [--fix] [--from-files [<files...>]] [--check <id>]
 //   oj preflight  [--json] [--affected] [--plan] [--base <ref>]
 //   oj plan       [--json] [--base <ref>]
-//   oj scaffold   <node|dsp-kernel> ...     (STUB, exit 2)
-//   oj dev        ...                        (STUB, exit 2)
+//   oj scaffold   <node|dsp-kernel> ...     (planned — exits 2)
+//   oj dev        [--engine] [--all|--plugins|--clap|--plugin-host <mode|all>] [tauri-flags…]
+//                 (native dev loop; --engine = bacon inner-loop)
+//   oj design     <map|status> [--json]      (design-system bridge: component-map + sync health)
 //
 // Shared lib/ (git, cache, ssot, report) means version-sync logic lives ONCE.
 // Exit code: non-zero only when a hard failure occurs (any check status `fail`,
-// a preflight recipe failure, or a stubbed subcommand).
+// a preflight recipe failure, or a not-yet-implemented subcommand).
 
 import { doctor } from './doctor';
 import { preflight } from './preflight';
 import { plan } from './plan';
 import { scaffold } from './scaffold';
 import { dev } from './dev';
+import { design } from './design';
+import { setup } from './setup';
+import { render } from './render';
+import { author } from './author';
+import { song } from './song';
 
 interface ParsedFlags {
   json: boolean;
@@ -24,6 +31,10 @@ interface ParsedFlags {
   affected: boolean;
   plan: boolean;
   fromFiles: boolean;
+  install: boolean;
+  yes: boolean;
+  dryRun: boolean;
+  wasm: boolean;
   check?: string;
   base?: string;
   /** Positional / passthrough args after flags are consumed. */
@@ -37,6 +48,10 @@ function parseFlags(argv: string[]): ParsedFlags {
     affected: false,
     plan: false,
     fromFiles: false,
+    install: false,
+    yes: false,
+    dryRun: false,
+    wasm: false,
     rest: [],
   };
 
@@ -57,6 +72,19 @@ function parseFlags(argv: string[]): ParsedFlags {
         break;
       case '--from-files':
         f.fromFiles = true;
+        break;
+      case '--install':
+        f.install = true;
+        break;
+      case '--yes':
+      case '-y':
+        f.yes = true;
+        break;
+      case '--dry-run':
+        f.dryRun = true;
+        break;
+      case '--wasm':
+        f.wasm = true;
         break;
       case '--check': {
         const v = argv[i + 1];
@@ -89,10 +117,24 @@ function usage(): void {
       '  oj preflight [--json] [--affected] [--plan] [--base <ref>]',
       '  oj plan      [--json] [--base <ref>]',
       '  oj scaffold  <node|dsp-kernel> ...   (not yet implemented)',
-      '  oj dev       ...                      (not yet implemented)',
+      '  oj dev       [--engine] [--all|--plugins|--clap|--plugin-host <scaffold|clap|juce|all>] [tauri-flags...]',
+      '  oj setup     [--install] [--yes] [--dry-run] [--wasm] [--json]',
+      '  oj render    [--graph g.json] [--schedule s.json] [--secs n] [--out w.wav]',
+      '               [--report r.json] [--assert expr]...   (device-free audition)',
+      '  oj author    <patch.json> [--out g.json] [--render <render-flags...>]',
+      '               (friendly node/wire spec -> OjGraph via emitOjGraph)',
       '',
-      'doctor checks: version-sync, credentials, coi-headers, docs-accuracy,',
-      '               toolchain, protocol-mirror, node-registry, ssot-set-equality',
+      'oj dev: one-command native loop (Vite HMR + ojcore-native engine, unified',
+      '        logs, clean Ctrl+C). Default plugin host is the fast scaffold;',
+      '        use --all (alias --plugins) for the full JUCE VST3/CLAP/AU host,',
+      '        or --clap for pure-Rust CLAP.',
+      '        --engine runs the windowless bacon inner-loop.',
+      'oj setup: detect + install the native build prerequisites (Rust, MSVC/WebView2,',
+      '          Linux system libs). Confirms before installing; --dry-run to preview.',
+      '',
+      'doctor checks: version-sync, credentials, coi-headers, docs-accuracy, toolchain,',
+      '               native-readiness, protocol-mirror, node-registry, ssot-set-equality,',
+      '               fault-pipe-connectivity',
       '',
     ].join('\n'),
   );
@@ -105,6 +147,16 @@ async function main(): Promise<number> {
     usage();
     return sub ? 0 : 2;
   }
+
+  // `render` passes ALL its args straight to the offline audition bin (so its
+  // `--graph/--schedule/--assert/--report` flags reach cargo unmangled by parseFlags).
+  if (sub === 'render') return render(rest);
+  // `author` lowers a friendly patch spec to an OjGraph via the headless emitOjGraph.
+  if (sub === 'author') return author(rest);
+  // `song` authors a whole Arrangement (the timeline feature), conducts it, renders
+  // it device-free, self-grades, and exports a human-openable project. Passthrough
+  // args (extra --assert/--secs) reach the render bin unmangled, like render/author.
+  if (sub === 'song' || sub === 'arrange') return song(rest);
 
   let flags: ReturnType<typeof parseFlags>;
   try {
@@ -137,6 +189,18 @@ async function main(): Promise<number> {
 
     case 'dev':
       return dev(flags.rest);
+
+    case 'setup':
+      return setup(flags.rest, {
+        install: flags.install,
+        yes: flags.yes,
+        dryRun: flags.dryRun,
+        wasm: flags.wasm,
+        json: flags.json,
+      });
+
+    case 'design':
+      return design(flags.rest, flags.json);
 
     default:
       process.stderr.write(`unknown subcommand: ${sub}\n\n`);

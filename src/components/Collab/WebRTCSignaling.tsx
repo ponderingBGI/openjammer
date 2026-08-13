@@ -10,6 +10,7 @@
  */
 
 import { useState } from 'react';
+import { Button, Textarea } from '@openjammer/oj-ui';
 import { useCollabStore } from '../../store/collabStore';
 
 export function WebRTCSignaling() {
@@ -29,33 +30,33 @@ export function WebRTCSignaling() {
         return (
             <div className="collab-signaling">
                 {step === 'idle' && (
-                    <button
-                        className="collab-secondary"
+                    <Button
+                        variant="secondary"
                         onClick={async () => {
                             setOffer(await webrtc.createOffer());
                             setStep('offered');
                         }}
                     >
                         Generate invite code
-                    </button>
+                    </Button>
                 )}
                 {step !== 'idle' && (
                     <>
                         <label className="collab-field">
                             <span>1. Share this invite code</span>
-                            <textarea readOnly value={offer} rows={3} onFocus={(e) => e.target.select()} />
+                            <Textarea readOnly value={offer} rows={3} onFocus={(e) => e.target.select()} />
                         </label>
                         <label className="collab-field">
                             <span>2. Paste their answer code</span>
-                            <textarea
+                            <Textarea
                                 value={remoteAnswer}
                                 rows={3}
                                 placeholder="Paste answer…"
                                 onChange={(e) => setRemoteAnswer(e.target.value)}
                             />
                         </label>
-                        <button
-                            className="collab-primary"
+                        <Button
+                            variant="primary"
                             disabled={!remoteAnswer.trim() || step === 'done'}
                             onClick={async () => {
                                 await webrtc.acceptAnswer(remoteAnswer.trim());
@@ -63,7 +64,7 @@ export function WebRTCSignaling() {
                             }}
                         >
                             {step === 'done' ? 'Connecting…' : 'Connect'}
-                        </button>
+                        </Button>
                     </>
                 )}
             </div>
@@ -75,15 +76,15 @@ export function WebRTCSignaling() {
         <div className="collab-signaling">
             <label className="collab-field">
                 <span>1. Paste the host's invite code</span>
-                <textarea
+                <Textarea
                     value={remoteOffer}
                     rows={3}
                     placeholder="Paste invite…"
                     onChange={(e) => setRemoteOffer(e.target.value)}
                 />
             </label>
-            <button
-                className="collab-secondary"
+            <Button
+                variant="secondary"
                 disabled={!remoteOffer.trim() || step === 'answered'}
                 onClick={async () => {
                     setAnswer(await webrtc.acceptOffer(remoteOffer.trim()));
@@ -91,11 +92,11 @@ export function WebRTCSignaling() {
                 }}
             >
                 Generate answer
-            </button>
+            </Button>
             {answer && (
                 <label className="collab-field">
                     <span>2. Send this answer back to the host</span>
-                    <textarea readOnly value={answer} rows={3} onFocus={(e) => e.target.select()} />
+                    <Textarea readOnly value={answer} rows={3} onFocus={(e) => e.target.select()} />
                 </label>
             )}
         </div>

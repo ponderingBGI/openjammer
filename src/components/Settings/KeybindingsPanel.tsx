@@ -11,6 +11,7 @@ import {
     type KeybindingAction,
 } from '../../store/keybindingsStore';
 import { KeybindingsErrorBoundary } from './KeybindingsErrorBoundary';
+import { Button } from '@openjammer/oj-ui';
 import './KeybindingsPanel.css';
 
 interface EditingState {
@@ -146,13 +147,14 @@ export function KeybindingsPanel() {
                 <p className="keybindings-description">
                     Click on a shortcut to change it. Press Escape to cancel.
                 </p>
-                <button
+                <Button
+                    variant="danger"
                     className="keybindings-reset-all"
                     onClick={handleResetAll}
                     disabled={Object.keys(customBindings).length === 0}
                 >
                     Reset All to Defaults
-                </button>
+                </Button>
             </div>
 
             {Object.entries(categorizedActions).map(([category, actions]) => (
@@ -180,22 +182,25 @@ export function KeybindingsPanel() {
                                                     : 'Press keys...'}
                                             </span>
                                         ) : (
-                                            <button
+                                            <Button
+                                                variant="ghost"
                                                 className={`keybindings-shortcut ${isCustomized ? 'keybindings-shortcut-custom' : ''}`}
                                                 onClick={() => startEditing(action.id)}
                                             >
                                                 {currentBinding ? keyComboToString(currentBinding) : 'None'}
-                                            </button>
+                                            </Button>
                                         )}
 
                                         {isCustomized && !isEditing && (
-                                            <button
+                                            <Button
+                                                variant="ghost"
+                                                iconOnly
                                                 className="keybindings-reset"
                                                 onClick={() => handleReset(action.id)}
                                                 title="Reset to default"
                                             >
                                                 ↺
-                                            </button>
+                                            </Button>
                                         )}
                                     </div>
                                 </div>
@@ -222,18 +227,18 @@ export function KeybindingsPanel() {
                             Remove the existing binding{conflict.conflicts.length > 1 ? 's' : ''} and assign to this action?
                         </p>
                         <div className="keybindings-conflict-buttons">
-                            <button
-                                className="keybindings-conflict-cancel"
+                            <Button
+                                variant="secondary"
                                 onClick={handleCancelConflict}
                             >
                                 Cancel
-                            </button>
-                            <button
-                                className="keybindings-conflict-confirm"
+                            </Button>
+                            <Button
+                                variant="primary"
                                 onClick={handleConfirmConflict}
                             >
                                 Replace
-                            </button>
+                            </Button>
                         </div>
                     </div>
                 </div>

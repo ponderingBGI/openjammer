@@ -1,0 +1,210 @@
+/* Settings + About panel chrome.
+   Relocated out of the shared SchematicNodes.css node stylesheet, where it was
+   a foreign Settings island. Imported by SettingsPanel.tsx + AboutPanel.tsx.
+   (Phase 3.3 #3 — Settings CSS exile.) */
+
+/* ============================================
+ * Settings Panel (Updated for Sketch Theme)
+ * ============================================ */
+.minimal-settings-overlay {
+    position: fixed;
+    inset: 0;
+    /* Clean ink scrim, no glass blur (DESIGN.md: no glassmorphism by default). */
+    background: color-mix(in srgb, var(--sketch-black) 45%, transparent);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: var(--space-lg);
+    z-index: var(--z-modal, 2000);
+}
+
+.minimal-settings-container {
+    background: var(--bg-node);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-xl);
+    /* Responsive breathing room — was a cramped fixed 600×500. */
+    width: min(680px, 100%);
+    height: min(580px, 90vh);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    color: var(--text-primary);
+    /* Hard, blur-free lift — sticker pressed on paper (Hard-Shadow Rule). */
+    box-shadow: 4px 5px 0 var(--sketch-black);
+}
+
+.minimal-settings-header {
+    padding: var(--space-lg);
+    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.minimal-settings-header h2 {
+    margin: 0;
+    font-family: var(--font-sketch);
+    font-size: var(--text-xl);
+    font-weight: 700;
+}
+
+.minimal-settings-content {
+    flex: 1;
+    display: flex;
+    min-height: 0; /* Required for child overflow-y: auto to work in flex container */
+    overflow: hidden;
+}
+
+/* Sidebar holds the vertical Tabs (SegmentedControl). No horizontal padding so
+   the active tab's inked edge meets the divider; tabs carry their own styling. */
+.minimal-sidebar {
+    flex: none;
+    width: 160px;
+    border-right: 1px solid var(--border-subtle);
+    padding: var(--space-md) 0;
+}
+
+.minimal-main {
+    flex: 1;
+    padding: var(--space-lg);
+    overflow-y: auto;
+    min-height: 0; /* Required for overflow to work in flex container */
+}
+
+/* Narrow viewports: drop the sidebar to a horizontal tab strip above content. */
+@media (max-width: 560px) {
+    .minimal-settings-content {
+        flex-direction: column;
+    }
+
+    .minimal-sidebar {
+        width: auto;
+        border-right: none;
+        border-bottom: 1px solid var(--border-subtle);
+        padding: var(--space-sm) var(--space-sm) 0;
+    }
+
+    /* Wrap to as many rows as needed so no tab is clipped or hidden behind a
+       horizontal scroll (the "About" tab was getting cut off otherwise). */
+    .minimal-sidebar .oj-seg--vertical {
+        flex-flow: row wrap;
+        gap: var(--space-xs);
+    }
+
+    .minimal-sidebar .oj-seg--vertical .oj-seg__btn {
+        width: auto;
+        white-space: nowrap;
+        padding: var(--space-xs) var(--space-sm);
+    }
+
+    /* Active marker moves from the right edge to the bottom edge in the strip. */
+    .minimal-sidebar .oj-seg--vertical .oj-seg__btn.is-active {
+        box-shadow: inset 0 calc(-1 * var(--border-sketch-width)) 0 0 var(--sketch-black);
+    }
+}
+
+.minimal-theme-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: var(--space-md);
+}
+
+.minimal-theme-card {
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.minimal-theme-card:hover {
+    border-color: var(--sketch-light);
+    background: var(--bg-tertiary);
+}
+
+.minimal-theme-card.active {
+    border-color: var(--sketch-black);
+    border-width: var(--border-sketch-width);
+    background: var(--bg-canvas);
+}
+
+/* About Panel */
+.about-panel {
+    padding: var(--space-md);
+}
+
+.about-header {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-md);
+    margin-bottom: var(--space-lg);
+}
+
+.about-header h2 {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+}
+
+.about-version {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+}
+
+.about-description {
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: var(--space-lg);
+}
+
+.about-diagnostics {
+    margin-bottom: var(--space-lg);
+    padding-bottom: var(--space-lg);
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.about-diagnostics-title {
+    margin: 0 0 var(--space-xs);
+    font-size: 1rem;
+}
+
+.about-diagnostics-note {
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin-bottom: var(--space-md);
+}
+
+.about-links {
+    margin-bottom: var(--space-lg);
+}
+
+.about-github-link {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    text-decoration: none;
+    font-weight: 500;
+    transition: all var(--transition-fast);
+}
+
+.about-github-link:hover {
+    border-color: var(--sketch-black);
+    background: var(--bg-canvas);
+}
+
+.about-license {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.about-license-label {
+    font-weight: 500;
+}

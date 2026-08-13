@@ -5,25 +5,35 @@
 import { useCallback, useMemo } from 'react';
 import type { GraphNode, EffectNodeData, EffectType } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
+import { Select, Slider } from '@openjammer/oj-ui';
 
 interface EffectNodeProps {
     node: GraphNode;
 }
 
+// Each option's `params` are the UI control names; they map 1:1 to the chosen
+// effect's REAL kernel param ids in the emitter (`EFFECT_LOWERING` in
+// manifest.ts). Every slider here drives the engine — no dead controls. The old
+// 'pitch' option was removed: there is no pitch-shift primitive in ojcore, so it
+// was a fictional no-op (honesty over a dead menu entry).
 const EFFECT_OPTIONS: { value: EffectType; label: string; params: string[] }[] = [
-    { value: 'distortion', label: '🔥 Distortion', params: ['amount'] },
-    { value: 'pitch', label: '🎵 Pitch Shift', params: ['semitones'] },
-    { value: 'reverb', label: '🏛️ Reverb', params: ['mix', 'decay'] },
+    { value: 'distortion', label: '🔥 Distortion', params: ['amount', 'level'] },
+    { value: 'filter', label: '🎛️ Filter', params: ['frequency', 'q'] },
+    { value: 'reverb', label: '🏛️ Reverb', params: ['mix'] },
     { value: 'delay', label: '📢 Delay', params: ['time', 'feedback', 'mix'] }
 ];
 
+// Slider config per UI param. Ranges mirror the kernel param decls so the UI can
+// never push an out-of-range value (the kernels clamp anyway, but the control
+// should be honest about the real usable range).
 const PARAM_CONFIG: Record<string, { min: number; max: number; step: number; default: number }> = {
-    amount: { min: 0, max: 1, step: 0.1, default: 0.5 },
-    semitones: { min: -12, max: 12, step: 1, default: 0 },
-    mix: { min: 0, max: 1, step: 0.1, default: 0.3 },
-    decay: { min: 0.1, max: 5, step: 0.1, default: 2 },
-    time: { min: 0.05, max: 1, step: 0.05, default: 0.3 },
-    feedback: { min: 0, max: 0.9, step: 0.1, default: 0.4 }
+    amount: { min: 0, max: 1, step: 0.05, default: 0.5 },
+    level: { min: 0, max: 2, step: 0.05, default: 1 },
+    frequency: { min: 20, max: 20_000, step: 10, default: 1000 },
+    q: { min: 0.1, max: 20, step: 0.1, default: 0.707 },
+    mix: { min: 0, max: 1, step: 0.05, default: 0.3 },
+    time: { min: 0, max: 2, step: 0.01, default: 0.25 },
+    feedback: { min: 0, max: 0.9, step: 0.05, default: 0.4 }
 };
 
 export function EffectNode({ node }: EffectNodeProps) {
@@ -63,7 +73,7 @@ export function EffectNode({ node }: EffectNodeProps) {
         <div className="effect-node">
             {/* Effect Type Selector */}
             <div className="node-row">
-                <select
+                <Select
                     className="node-select"
                     value={effectType}
                     onChange={handleTypeChange}
@@ -71,7 +81,7 @@ export function EffectNode({ node }: EffectNodeProps) {
                     {EFFECT_OPTIONS.map(opt => (
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                     ))}
-                </select>
+                </Select>
             </div>
 
             {/* Effect Parameters */}
@@ -89,13 +99,13 @@ export function EffectNode({ node }: EffectNodeProps) {
                                 {typeof value === 'number' ? value.toFixed(2) : value}
                             </span>
                         </div>
-                        <input
-                            type="range"
+                        <Slider
+                            aria-label={param}
                             min={config?.min ?? 0}
                             max={config?.max ?? 1}
                             step={config?.step ?? 0.1}
                             value={value}
-                            onChange={(e) => handleParamChange(param, parseFloat(e.target.value))}
+                            onChange={(v) => handleParamChange(param, v)}
                             style={{ width: '100%' }}
                         />
                     </div>

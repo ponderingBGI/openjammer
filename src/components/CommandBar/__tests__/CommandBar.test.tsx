@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, cleanup, within, waitFor } from '@testing-library/react';
 import { DESKTOP_CAPABILITIES } from '../../../engine/capabilities';
 
 // --- Mocks -----------------------------------------------------------------
@@ -31,9 +31,18 @@ vi.mock('../useCommandSources', () => ({
     useCommandSources: () => {},
 }));
 
+vi.mock('../../../ai/bridgeListener', () => ({
+    startBridgeListener: vi.fn(() => Promise.resolve(undefined)),
+}));
+
 // Stub the AI backend so AI mode renders without a real agent.
 vi.mock('../../../ai', () => ({
-    getAgentBackend: () => ({ name: 'stub' }),
+    getAgentBackend: () => ({
+        id: 'stub',
+        async *run() {
+            yield { kind: 'result', summary: 'done' };
+        },
+    }),
 }));
 
 // A Tauri `invoke` that reports a configured provider, so AiPanel's mount-time
@@ -62,7 +71,8 @@ beforeEach(() => {
     }
 });
 
-import { CommandBar } from '../CommandBar';
+import { CommandBar, type CommandBarOpenIntent } from '../CommandBar';
+import { CommandBarHost } from '../CommandBarHost';
 import {
     register,
     registerAll,
@@ -73,6 +83,7 @@ import { usePaletteLearningStore } from '../../../store/paletteLearningStore';
 import { useGraphStore } from '../../../store/graphStore';
 import { useAuthStore } from '../../../auth/authStore';
 import { useCommandBarStore } from '../../../store/commandBarStore';
+import { useAgentSessionStore } from '../../../store/agentSessionStore';
 
 function makeAction(id: string, title: string, run = vi.fn()): Action {
     return {
@@ -84,9 +95,11 @@ function makeAction(id: string, title: string, run = vi.fn()): Action {
     };
 }
 
-/** Open the palette via the global Ctrl+K toggle. */
-function openPalette(): void {
-    fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+let testIntentSeq = 0;
+
+function openIntent(kind: CommandBarOpenIntent['kind'] = 'toggle', prompt = ''): CommandBarOpenIntent {
+    testIntentSeq += 1;
+    return { kind, prompt, seq: testIntentSeq } as CommandBarOpenIntent;
 }
 
 describe('CommandBar (M2)', () => {
@@ -106,6 +119,15 @@ describe('CommandBar (M2)', () => {
         // D6 (M7): a configured provider so the Tab fast-path reaches the agent
         // input (the unconfigured path routes to the AuthChooser, tested separately).
         useAuthStore.setState({ configured: true, conflict: false });
+        useAgentSessionStore.setState({
+            phase: 'idle',
+            messages: [],
+            error: null,
+            sessionId: null,
+            runBaseline: null,
+            send: vi.fn(),
+            newSession: vi.fn(),
+        });
         // The bar mode is persisted; reset to search so a prior AI-mode test
         // doesn't leak into the next render.
         useCommandBarStore.setState({ mode: 'search' });
@@ -115,37 +137,64 @@ describe('CommandBar (M2)', () => {
         cleanup();
     });
 
-    it('opens on Ctrl+K and renders registered actions', () => {
+    it('host lazy-loads on Ctrl+K and renders registered actions', async () => {
         register(makeAction('node.add.looper', 'Add Looper'));
-        render(<CommandBar />);
+        render(<CommandBarHost />);
 
         expect(screen.queryByPlaceholderText(/Search commands/i)).toBeNull();
-        openPalette();
-        expect(screen.getByPlaceholderText(/Search commands/i)).toBeInTheDocument();
-        expect(screen.getByText('Add Looper')).toBeInTheDocument();
+        fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
+        expect(
+            await screen.findByPlaceholderText(/Search commands/i, undefined, { timeout: 5000 }),
+        ).toBeInTheDocument();
+        expect(await screen.findByText('Add Looper')).toBeInTheDocument();
     });
 
-    it('Tab from search enters AI mode (the U20 fast-path)', () => {
+    it('Tab from search sends the typed prompt to AI (the one-key fast-path)', async () => {
+        const send = vi.fn();
+        useAgentSessionStore.setState({ send });
         register(makeAction('node.add.looper', 'Add Looper'));
-        render(<CommandBar />);
-        openPalette();
+        render(<CommandBar intent={openIntent()} />);
 
         const input = screen.getByPlaceholderText(/Search commands/i);
         fireEvent.change(input, { target: { value: 'reverb' } });
         fireEvent.keyDown(input, { key: 'Tab' });
 
         // AI mode shows the agent prompt input (desktop caps → agent available).
+        // AiPanel is now code-split (lazy + Suspense), so it mounts asynchronously and
+        // its dynamic import resolves the real (heavy) module graph in jsdom (~1s).
+        // Await its appearance with a generous timeout so the full suite's parallel
+        // load can't tip it over the default 1s wait. (Production hides this cost
+        // behind the PWA precache; this latitude is purely a test-environment one.)
         expect(
-            screen.getByPlaceholderText(/Describe what to build/i),
+            await screen.findByPlaceholderText(/Ask anything/i, undefined, { timeout: 5000 }),
         ).toBeInTheDocument();
         // The search input is gone (we left search mode).
         expect(screen.queryByPlaceholderText(/Search commands/i)).toBeNull();
+        await waitFor(() => expect(send).toHaveBeenCalledOnce());
+        expect(send.mock.calls[0][1]).toMatchObject({ prompt: 'reverb' });
+    });
+
+    it('host lazy-loads ask-ai events into AI mode with the supplied prompt', async () => {
+        const send = vi.fn();
+        useAgentSessionStore.setState({ send });
+        render(<CommandBarHost />);
+
+        act(() => {
+            window.dispatchEvent(
+                new CustomEvent('openjammer:ask-ai', { detail: { prompt: 'fix the dropout' } }),
+            );
+        });
+
+        expect(
+            await screen.findByPlaceholderText(/Ask anything/i, undefined, { timeout: 5000 }),
+        ).toBeInTheDocument();
+        await waitFor(() => expect(send).toHaveBeenCalledOnce());
+        expect(send.mock.calls[0][1]).toMatchObject({ prompt: 'fix the dropout' });
     });
 
     it('auto-highlights the AI item when there are ZERO local results (D2-A2)', () => {
         register(makeAction('node.add.looper', 'Add Looper'));
-        render(<CommandBar />);
-        openPalette();
+        render(<CommandBar intent={openIntent()} />);
 
         const input = screen.getByPlaceholderText(/Search commands/i);
         // A query that matches NO registered action.
@@ -169,8 +218,7 @@ describe('CommandBar (M2)', () => {
             prefixWins: { lo: 'node.add.lowpass' },
         });
 
-        render(<CommandBar />);
-        openPalette();
+        render(<CommandBar intent={openIntent()} />);
 
         const input = screen.getByPlaceholderText(/Search commands/i);
         fireEvent.change(input, { target: { value: 'lo' } });
@@ -182,8 +230,7 @@ describe('CommandBar (M2)', () => {
 
     it('matches a non-contiguous subsequence query (fzf, not substring)', () => {
         register(makeAction('node.add.looper', 'Add Looper'));
-        render(<CommandBar />);
-        openPalette();
+        render(<CommandBar intent={openIntent()} />);
 
         const input = screen.getByPlaceholderText(/Search commands/i);
         // 'adlp' is an in-order subsequence of "Add Looper" but NOT a substring.
@@ -197,8 +244,7 @@ describe('CommandBar (M2)', () => {
     it('records a pick before running the action and then closes', () => {
         const run = vi.fn();
         register(makeAction('node.add.looper', 'Add Looper', run));
-        render(<CommandBar />);
-        openPalette();
+        render(<CommandBar intent={openIntent()} />);
 
         fireEvent.click(screen.getByText('Add Looper'));
 
@@ -214,8 +260,7 @@ describe('CommandBar (M2)', () => {
 
     it('Escape closes the palette', () => {
         register(makeAction('a', 'Action A'));
-        render(<CommandBar />);
-        openPalette();
+        render(<CommandBar intent={openIntent()} />);
 
         const input = screen.getByPlaceholderText(/Search commands/i);
         fireEvent.keyDown(input, { key: 'Escape' });
@@ -225,8 +270,7 @@ describe('CommandBar (M2)', () => {
 
     it('keeps the AI item present (not auto-highlighted) when there ARE results', () => {
         register(makeAction('node.add.looper', 'Add Looper'));
-        render(<CommandBar />);
-        openPalette();
+        render(<CommandBar intent={openIntent()} />);
 
         const input = screen.getByPlaceholderText(/Search commands/i);
         fireEvent.change(input, { target: { value: 'looper' } });

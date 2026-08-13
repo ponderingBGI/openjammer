@@ -181,11 +181,12 @@ impl AssetCatalog {
 /// (Sampler -> `set_sample`, Convolution -> `set_ir`) off the RT thread, before
 /// the program goes live. This is the native end of the U6 sample-load seam.
 ///
-/// The engine bus is mono, so a multi-channel asset (a stereo sample or IR) is
-/// summed to mono here via [`AssetPcm::from_interleaved`] — already-mono PCM is
-/// borrowed zero-copy, only a real downmix allocates. (The `load_sample` Tauri
-/// path still stores mono; this is what makes a directly-decoded stereo WAV
-/// resolve and play instead of being silently dropped.)
+/// The decoded PCM is handed back in its INTERLEAVED layout with its channel count
+/// (zero-copy borrow via [`AssetPcm::from_interleaved`]); the consuming node keeps
+/// the layout it needs — a stereo Sampler plays both channels, a Convolution IR
+/// downmixes itself. (The `load_sample` Tauri path still stores mono; this is what
+/// lets a directly-decoded stereo WAV play in true stereo instead of being summed
+/// down or silently dropped.)
 impl AssetResolver for AssetCatalog {
     fn resolve(&self, id: AssetId) -> Option<AssetPcm<'_>> {
         let pcm = self.by_id.get(&id)?;
@@ -286,10 +287,10 @@ mod tests {
     }
 
     #[test]
-    fn asset_resolver_downmixes_stereo_to_mono() {
-        // The inherent `resolve` hands back the stored stereo Pcm verbatim; the
-        // AssetResolver trait (what `compile_with_assets` runs against) sums it to
-        // mono so a stereo sample/IR plays instead of resolving to None.
+    fn asset_resolver_preserves_stereo_interleaved() {
+        // The AssetResolver trait (what `compile_with_assets` runs against) now
+        // hands back the stereo buffer + channel count UNCHANGED so a stereo
+        // Sampler can play both channels; downmixing moved to the consuming node.
         let mut cat = AssetCatalog::new();
         let frames = 8;
         let mut samples = Vec::with_capacity(frames * 2);
@@ -297,6 +298,7 @@ mod tests {
             samples.push(1.0_f32); // L
             samples.push(-1.0_f32); // R
         }
+        let expected = samples.clone();
         let id = cat
             .insert(Pcm {
                 samples,
@@ -305,12 +307,14 @@ mod tests {
             })
             .expect("insert stereo");
 
-        let mono = AssetResolver::resolve(&cat, id).expect("stereo resolves (downmixed), not None");
-        assert_eq!(mono.pcm.len(), frames, "one mono sample per frame");
-        for &s in mono.pcm.iter() {
-            assert!(s.abs() < 1e-6, "L(+1) + R(-1) averages to 0");
-        }
-        assert_eq!(mono.sample_rate, 48_000.0);
+        let asset = AssetResolver::resolve(&cat, id).expect("stereo resolves, not None");
+        assert_eq!(asset.channels, 2, "the channel count rides along");
+        assert_eq!(
+            asset.pcm.as_ref(),
+            expected.as_slice(),
+            "interleaved, no downmix"
+        );
+        assert_eq!(asset.sample_rate, 48_000.0);
     }
 
     #[test]
@@ -320,6 +324,7 @@ mod tests {
         let expected = pcm.samples.clone();
         let id = cat.insert(pcm).expect("insert mono");
         let mono = AssetResolver::resolve(&cat, id).expect("mono resolves");
+        assert_eq!(mono.channels, 1);
         assert_eq!(mono.pcm.as_ref(), expected.as_slice());
         assert_eq!(mono.sample_rate, 44_100.0);
     }

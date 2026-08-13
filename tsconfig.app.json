@@ -9,9 +9,10 @@
     "skipLibCheck": true,
 
     /* Path mapping for the shared TS protocol package (the wire/event SSOT). */
-    "baseUrl": ".",
     "paths": {
-      "@openjammer/oj-protocol": ["./packages/oj-protocol-ts/src/index.ts"]
+      "@openjammer/oj-protocol": ["./packages/oj-protocol-ts/src/index.ts"],
+      "@openjammer/oj-tokens": ["./packages/oj-tokens/src/index.ts"],
+      "@openjammer/oj-ui": ["./packages/oj-ui/src/index.ts"]
     },
 
     /* Bundler mode */

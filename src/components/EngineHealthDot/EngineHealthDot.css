@@ -1,0 +1,68 @@
+/* EngineHealthDot (Phase 2) — the calm ambient health pill in the toolbar
+   status strip. The dot fill + label colour come from oj-ui StatusDot tokens
+   (pine/ochre/clay), never literals; this file is just the pill chrome. It
+   mirrors `.toolbar-status` so it sits at home next to the project / offline
+   chips. Hard, blur-free shadow only (the Hard-Shadow Rule); no glow, no pulse
+   (No-Surprise Rule) — the colour and glyph are the whole signal. */
+
+.engine-health-dot {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-sm);
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    color: var(--text-primary, var(--sketch-black));
+    background: var(--surface-paper, var(--bg-node, #fff));
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-pill, 999px);
+    /* Hard, blur-free offset shadow — a sticker pressed onto paper. */
+    box-shadow: 2px 2px 0 var(--sketch-black);
+    cursor: pointer;
+    /* Feedback is colour/border/offset only; motion is gated below. */
+    transition: transform 80ms ease, box-shadow 80ms ease;
+}
+
+.engine-health-dot:hover {
+    transform: translateY(-1px);
+    box-shadow: 3px 3px 0 var(--sketch-black);
+}
+
+.engine-health-dot:active {
+    transform: translateY(1px);
+    box-shadow: 1px 1px 0 var(--sketch-black);
+}
+
+.engine-health-dot:focus-visible {
+    outline: 2px solid var(--accent, var(--sketch-black));
+    outline-offset: 2px;
+}
+
+/* The redundant glyph cue, so the signal never relies on colour alone. */
+.engine-health-dot__glyph {
+    font-size: var(--text-xs);
+    line-height: 1;
+}
+
+.engine-health-dot__label {
+    white-space: nowrap;
+}
+
+/* Honour reduced-motion: drop the lift/press transform entirely (the colour +
+   glyph still carry the full signal). */
+@media (prefers-reduced-motion: reduce) {
+    .engine-health-dot,
+    .engine-health-dot:hover,
+    .engine-health-dot:active {
+        transition: none;
+        transform: none;
+    }
+}
+
+/* On narrow chrome, collapse to the dot + glyph; the title/aria-label keep the
+   full text reachable. */
+@media (max-width: 768px) {
+    .engine-health-dot__label {
+        display: none;
+    }
+}

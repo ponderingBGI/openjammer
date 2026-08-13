@@ -14,6 +14,7 @@ use ojwasm::{compile_faust_to_dll, WasmHostLoader};
 
 fn mono_gain_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: "ai.native.gain".into(),
         name: "Faust Gain (native)".into(),
         kind: PrimitiveKind::WasmHost,
@@ -31,6 +32,8 @@ fn mono_gain_manifest() -> PluginManifest {
             audio_out: 1,
             control_in: 0,
             control_out: 0,
+            audio_in_channels: 1,
+            audio_out_channels: 1,
         },
     }
 }

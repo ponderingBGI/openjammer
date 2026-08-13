@@ -1,0 +1,116 @@
+/*
+ * Port — DESIGN.md §5. 16px circle, 2px ink border, filled by wiring color;
+ * hover scales 1.25x; connected brightens with an 8px colored glow (the one
+ * place a soft glow is allowed — it signals a live connection, which is meaning).
+ */
+.oj-port {
+    display: inline-block;
+    width: var(--port-size);
+    height: var(--port-size);
+    border-radius: 50%;
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    background: var(--bg-canvas);
+    cursor: crosshair;
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast),
+        background var(--transition-fast);
+}
+
+.oj-port:hover {
+    transform: scale(1.25);
+    background: var(--bg-tertiary);
+}
+
+.oj-port--audio-input {
+    background: var(--audio-input);
+}
+
+.oj-port--audio-output {
+    background: var(--audio-output);
+}
+
+.oj-port--control-input {
+    background: var(--control-input);
+}
+
+.oj-port--control-output {
+    background: var(--control-output);
+}
+
+.oj-port--audio-input.is-connected,
+.oj-port--audio-output.is-connected {
+    background: var(--audio-connected);
+    box-shadow: 0 0 8px var(--audio-connected);
+}
+
+.oj-port--control-input.is-connected,
+.oj-port--control-output.is-connected {
+    background: var(--control-connected);
+    box-shadow: 0 0 8px var(--control-connected);
+}
+
+/* Universal — adapts to whatever it connects to. Until typed it shows the
+   rainbow-until-typed gradient (DESIGN.md §2 Wiring — the one sanctioned
+   multi-hue treatment, signalling "any type"); once resolved, the consumer
+   passes `resolvedKind` and the port renders that wiring color instead. */
+.oj-port--universal {
+    background: linear-gradient(135deg, #ff6b6b, #ffe66d, #4ecb71, #4db8ff, #9b59b6);
+    background-size: 200% 200%;
+    animation: oj-port-rainbow 3s ease infinite;
+}
+
+.oj-port--universal.is-connected {
+    /* Connected-but-still-universal: hold the rainbow steady (no resolved type). */
+    animation: none;
+}
+
+@keyframes oj-port-rainbow {
+    0% {
+        background-position: 0% 50%;
+    }
+    50% {
+        background-position: 100% 50%;
+    }
+    100% {
+        background-position: 0% 50%;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .oj-port--universal {
+        animation: none;
+    }
+}
+
+/* A faint dashed slot inviting a new connection (e.g. a node's "+ port"). */
+.oj-port.is-placeholder {
+    opacity: 0.4;
+    border-style: dashed;
+    cursor: copy;
+}
+
+/* Active — a control port firing right now (e.g. a held control key on a
+   keyboard). Success-green fill + the one sanctioned live glow + a brief pulse;
+   a performance signal you read mid-set (DESIGN.md §5). Stilled for reduced motion. */
+.oj-port.is-active {
+    background: var(--accent-success);
+    box-shadow: 0 0 10px var(--accent-success);
+    animation: oj-port-active-pulse 0.3s ease-in-out;
+}
+
+@keyframes oj-port-active-pulse {
+    0% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.2);
+    }
+    100% {
+        transform: scale(1);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .oj-port.is-active {
+        animation: none;
+    }
+}

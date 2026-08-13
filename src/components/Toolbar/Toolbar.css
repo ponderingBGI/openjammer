@@ -37,51 +37,11 @@
     gap: 0;
 }
 
-/* Icon-only buttons (Undo, Redo, Play, Settings) */
-.toolbar-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    gap: var(--space-xs);
-    padding: var(--space-xs) var(--space-sm);
-    border: none;
-    border-radius: var(--radius-sm);
-    font-family: var(--font-sketch);
-    font-size: var(--text-md);
-    font-weight: 500;
-    color: var(--text-primary);
-    background: transparent;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-}
-
-.toolbar-btn:hover {
-    background: var(--bg-tertiary);
-}
-
-.toolbar-btn:active {
-    background: var(--bg-tertiary);
-}
-
-.toolbar-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
+/* Icon-button sizing delta layered on the oj-ui ghost <Button> the toolbar uses. */
 .toolbar-btn-icon {
     min-width: 32px;
     padding: var(--space-xs);
     font-size: var(--text-lg);
-}
-
-.toolbar-btn-active {
-    background: var(--accent-primary);
-    color: white;
-}
-
-.toolbar-btn-active:hover {
-    background: var(--accent-secondary);
 }
 
 /* Separator */

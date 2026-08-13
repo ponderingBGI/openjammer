@@ -1,322 +1,509 @@
 /**
- * Audio Settings Panel - Configure audio latency and devices
- * Enhanced with detailed latency monitoring and smart warnings
+ * Audio Settings — essentials first, depth on demand.
+ *
+ * The live latency readout is the hero; the output device and a single clear
+ * "Low latency" control are the body; sample rate (auto-synced to the detected
+ * device rate when possible), the raw latency hint, and the numeric breakdown live
+ * in a collapsed Advanced disclosure. Low latency defaults
+ * ON for a USB interface (see useUsbLowLatencyDefault); changes are staged and
+ * applied on the player's command so the brief audio restart never ambushes a set.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAudioStore } from '../../store/audioStore';
 import type { LatencyClassification } from '../../store/audioStore';
-import { reinitAudioContext, getLatencyMetrics, startLatencyMonitoring } from '../../audio/audioContext';
-import { getExecutor } from '../../audio/executor';
+import { reinitAudioContext } from '../../audio/audioContext';
+import { getExecutor, isTauri } from '../../audio/executor';
+import { useGraphStore } from '../../store/graphStore';
+import type { MicrophoneNodeData, SpeakerNodeData } from '../../engine/types';
+import { detectLowLatencyDevice } from '../../utils/audioDeviceDetection';
 import { LowLatencyGuide } from '../Guides';
 import { useLowLatencyGuide } from '../../store/guideStore';
+import {
+    Button,
+    Callout,
+    Chip,
+    IconBolt,
+    Select,
+    Spinner,
+    StatusDot,
+    Surface,
+    Toggle,
+} from '@openjammer/oj-ui';
+import type { StatusDotStatus } from '@openjammer/oj-ui';
 import './AudioSettingsPanel.css';
 
-// Friendly messages for each latency classification
-const LATENCY_MESSAGES: Record<LatencyClassification, { message: string; hint: string }> = {
-    excellent: {
-        message: 'Perfect for real-time performance',
-        hint: 'Professional-grade latency'
-    },
-    good: {
-        message: 'Great for playing instruments',
-        hint: 'Most musicians won\'t notice any delay'
-    },
-    acceptable: {
-        message: 'Usable with slight delay',
-        hint: 'Fine for practice, consider optimizing for recording'
-    },
-    poor: {
-        message: 'Noticeable delay',
-        hint: 'May affect timing - try enabling Low Latency Mode'
-    },
-    bad: {
-        message: 'High latency detected',
-        hint: 'Not recommended for live playing'
-    }
+/**
+ * A native OUTPUT device, as enumerated by the Rust/cpal host. The
+ * `list_output_devices` Tauri command returns these (B1): `id` is the stable
+ * cpal `DeviceId` string the engine resolves on a controlled stream rebuild;
+ * `name` is the human label for the picker.
+ */
+interface NativeOutputDevice {
+    id: string;
+    name: string;
+}
+
+/**
+ * Resolve the Tauri `invoke` from the global IPC bridge (mirrors the native
+ * executor's resolver — we read the same `__TAURI__` global rather than bundle
+ * the `@tauri-apps/api` SDK). Returns null off the native tier, so the native
+ * device picker simply does not render in the browser (which uses the per-node
+ * Web-Audio picker on the Speaker node instead).
+ */
+function getTauriInvoke():
+    | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>)
+    | null {
+    if (typeof window === 'undefined') return null;
+    const t = (window as unknown as {
+        __TAURI__?: {
+            core?: { invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> };
+            invoke?: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+        };
+    }).__TAURI__;
+    if (!t) return null;
+    if (t.core?.invoke) return t.core.invoke.bind(t.core);
+    if (t.invoke) return t.invoke.bind(t);
+    return null;
+}
+
+// Plain-language verdict for each latency band — the headline a musician reads.
+const LATENCY_VERDICT: Record<LatencyClassification, string> = {
+    excellent: 'Perfect for live performance',
+    good: 'Great for playing live',
+    acceptable: 'Usable, with a slight delay',
+    poor: 'Noticeable delay',
+    bad: 'Too much delay for live playing',
 };
+
+// Classification → the health dot, mirroring AudioHealthPanel so the two surfaces
+// never tell different stories about the same number.
+function latencyDot(c: LatencyClassification): StatusDotStatus {
+    if (c === 'excellent' || c === 'good') return 'ok';
+    if (c === 'acceptable') return 'warn';
+    return 'bad';
+}
+
+const COMMON_SAMPLE_RATES = [44_100, 48_000, 96_000];
+
+function formatSampleRate(rate: number): string {
+    const khz = rate / 1000;
+    return `${Number.isInteger(khz) ? khz : khz.toFixed(1)} kHz`;
+}
+
+function sampleRateOptionsFor(current: number, detected: number | null): number[] {
+    return Array.from(
+        new Set(
+            [...COMMON_SAMPLE_RATES, current, detected]
+                .filter((rate): rate is number => typeof rate === 'number' && Number.isFinite(rate) && rate > 0)
+                .map((rate) => Math.round(rate)),
+        ),
+    ).sort((a, b) => a - b);
+}
 
 export function AudioSettingsPanel() {
     const audioConfig = useAudioStore((s) => s.audioConfig);
     const audioMetrics = useAudioStore((s) => s.audioMetrics);
     const deviceInfo = useAudioStore((s) => s.deviceInfo);
     const setAudioConfig = useAudioStore((s) => s.setAudioConfig);
-    const updateAudioMetrics = useAudioStore((s) => s.updateAudioMetrics);
+    const setLowLatencyUserSet = useAudioStore((s) => s.setLowLatencyUserSet);
     const isAudioContextReady = useAudioStore((s) => s.isAudioContextReady);
     const setAudioContextReady = useAudioStore((s) => s.setAudioContextReady);
 
     const [pendingConfig, setPendingConfig] = useState(audioConfig);
     const [isRestarting, setIsRestarting] = useState(false);
 
+    // Native (Tauri) output-device routing (B1). On the native tier the engine —
+    // not Web Audio — owns the output stream, so the Speaker node's browser picker
+    // does not apply; instead we enumerate the host's cpal devices here and route
+    // the (single) Speaker node to the chosen device via the executor seam. The
+    // whole section is suppressed in the browser, where the per-node picker rules.
+    const isNative = isTauri();
+    const [outputDevices, setOutputDevices] = useState<NativeOutputDevice[]>([]);
+    // Subscribe to the node map (its reference changes on every graph edit) so the
+    // routing controls stay correct as the Speaker / Microphone nodes appear and
+    // vanish on the canvas; derive the (single) target node of each kind from it.
+    const nodes = useGraphStore((s) => s.nodes);
+    const speakerNode = [...nodes.values()].find((n) => n.type === 'speaker');
+    const micNode = [...nodes.values()].find((n) => n.type === 'microphone');
+    const selectedOutput = (speakerNode?.data as SpeakerNodeData | undefined)?.deviceId ?? 'default';
+    const selectedOutputName = outputDevices.find((d) => d.id === selectedOutput)?.name ?? '';
+    const selectedOutputIsLowLatency = detectLowLatencyDevice(selectedOutputName);
+
     // Low latency guide
     const lowLatencyGuide = useLowLatencyGuide();
 
-    // Sync pendingConfig with audioConfig when it changes externally
+    // Enumerate the host's output devices once on the native tier (and refresh
+    // whenever this panel mounts). Best-effort: an empty/failed list just leaves
+    // the picker on "System Default", which is always a valid target.
+    useEffect(() => {
+        if (!isNative) return;
+        const invoke = getTauriInvoke();
+        if (!invoke) return;
+        let cancelled = false;
+        invoke('list_output_devices')
+            .then((res) => {
+                if (cancelled) return;
+                const devices = Array.isArray(res) ? (res as NativeOutputDevice[]) : [];
+                setOutputDevices(devices);
+            })
+            .catch(() => {
+                // Host enumeration failed — keep the default-only picker; selecting
+                // "System Default" still routes correctly via the engine.
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, [isNative]);
+
+    // Route the (single) Speaker node to the chosen output device. The engine
+    // performs a brief controlled stream rebuild on the new device — the same
+    // held-note gap as device-loss recovery (a held note beats a glitch). Records
+    // the choice on the node so it survives reloads and reconciles with autosave.
+    const handleOutputDeviceChange = useCallback(
+        (deviceId: string) => {
+            if (!speakerNode) return;
+            useGraphStore
+                .getState()
+                .updateNodeData<SpeakerNodeData>(speakerNode.id, { deviceId });
+            getExecutor().setSpeakerDevice(speakerNode.id, deviceId);
+        },
+        [speakerNode],
+    );
+
+    // Route the (existing) Microphone node into the engine's input bus. The
+    // executor is the single owner of the OS device; we declare intent (the node's
+    // persisted mute/device) and it acquires/feeds the engine. Only offered when a
+    // Microphone node is on the canvas — removing that node (Ctrl+Z) stops capture.
+    const handleRouteMic = useCallback(() => {
+        if (!micNode) return;
+        const micData = micNode.data as MicrophoneNodeData;
+        getExecutor().setMicrophoneInput(micNode.id, {
+            isMuted: micData.isMuted ?? false,
+            deviceId: micData.deviceId,
+        });
+    }, [micNode]);
+
+    // Sync pendingConfig with audioConfig when it changes externally (e.g. the USB
+    // auto-enable flipping low latency on — the toggle then reflects it with no
+    // pending diff, so no stray "Apply" appears for a default we set automatically).
     useEffect(() => {
         setPendingConfig(audioConfig);
     }, [audioConfig]);
 
-    // Monitor latency
-    useEffect(() => {
-        if (!isAudioContextReady) return;
-
-        const stopMonitoring = startLatencyMonitoring((metrics) => {
-            updateAudioMetrics({
-                ...metrics,
-                lastUpdated: Date.now()
-            });
-        }, 1000);
-
-        return stopMonitoring;
-    }, [updateAudioMetrics, isAudioContextReady]);
-
-    // Apply configuration changes
+    // Apply configuration changes — the one place the engine restarts. The player
+    // chooses the moment (the staged "Apply" button), so the brief gap never
+    // ambushes a live set (the Live Performance Rule).
     const handleApplyConfig = async () => {
         setIsRestarting(true);
-
         try {
-            // Update store config first
             setAudioConfig(pendingConfig);
-
-            // Mark audio context as not ready - this triggers App.tsx to dispose the executor
             setAudioContextReady(false);
-
-            // Dispose the audio graph (clears all audio nodes)
             getExecutor().dispose();
-
-            // Reinitialize audio context with new settings
             await reinitAudioContext({
                 sampleRate: pendingConfig.sampleRate,
                 latencyHint: pendingConfig.latencyHint,
-                lowLatencyMode: pendingConfig.lowLatencyMode
+                lowLatencyMode: pendingConfig.lowLatencyMode,
             });
-
-            // Mark audio context as ready again - this triggers App.tsx to reinitialize
-            // the executor, which will rebuild all audio connections.
-            // MicrophoneNode and other components will reinitialize with new settings.
             setAudioContextReady(true);
-
-            // Update metrics
-            const metrics = getLatencyMetrics();
-            if (metrics) {
-                updateAudioMetrics({
-                    ...metrics,
-                    lastUpdated: Date.now()
-                });
-            }
         } catch (err) {
             console.error('Failed to apply audio config:', err);
-            alert('Failed to apply audio settings. Please try again.');
-            // Try to restore audio context ready state on error
             setAudioContextReady(true);
         } finally {
             setIsRestarting(false);
         }
     };
 
+    // The player flips low latency themselves → record the intent so the USB
+    // auto-enable never fights their choice for the rest of the session.
+    const handleLowLatencyChange = (checked: boolean) => {
+        setPendingConfig((prev) => ({ ...prev, lowLatencyMode: checked }));
+        setLowLatencyUserSet(true);
+    };
+
     const hasChanges = JSON.stringify(pendingConfig) !== JSON.stringify(audioConfig);
+    const measured = isAudioContextReady && audioMetrics.estimatedRoundTrip > 0;
+    const detectedSampleRate =
+        deviceInfo.sampleRate ??
+        (audioMetrics.lastUpdated > 0 && audioMetrics.sampleRate > 0
+            ? Math.round(audioMetrics.sampleRate)
+            : null);
+    const sampleRateOptions = sampleRateOptionsFor(pendingConfig.sampleRate, detectedSampleRate);
+    const sampleRateIsDetected = detectedSampleRate != null && pendingConfig.sampleRate === detectedSampleRate;
+    const latencyHintValue =
+        typeof pendingConfig.latencyHint === 'number' ? 'interactive' : pendingConfig.latencyHint;
+    const showTips =
+        measured &&
+        (audioMetrics.classification === 'poor' || audioMetrics.classification === 'bad') &&
+        !audioConfig.lowLatencyMode;
 
     return (
-        <div className="audio-settings-panel">
-            {/* Low Latency Setup Guide Button */}
-            <button
-                className="guide-launch-btn"
-                onClick={lowLatencyGuide.open}
-            >
-                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M4 19.5A2.5 2.5 0 016.5 17H20" />
-                    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z" />
-                </svg>
-                Low Latency Setup Guide
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="arrow-icon">
-                    <polyline points="9 18 15 12 9 6" />
-                </svg>
-            </button>
-
-            {/* Low Latency Guide Modal */}
-            <LowLatencyGuide />
-
-            {/* USB Audio Interface Detection */}
-            {deviceInfo.isUSBAudioInterface && (
-                <div className="audio-info-banner usb-detected">
-                    <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                        <path d="M12 2L2 7v10c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-10-5z"/>
-                    </svg>
-                    <div>
-                        <strong>USB Audio Interface Detected</strong>
-                        <p>{deviceInfo.deviceLabel}</p>
-                        <p className="suggestion">Enable Low Latency Mode for best performance</p>
-                    </div>
-                </div>
-            )}
-
-            {/* Enhanced Latency Status */}
-            {isAudioContextReady && (
-                <div className="latency-status-section">
-                    <div className="latency-status-card">
-                        <div className={`latency-status-indicator ${audioMetrics.classification}`}>
-                            <span className={`latency-value-large ${audioMetrics.classification}`}>
-                                {audioMetrics.estimatedRoundTrip.toFixed(0)}
+        <div className="oj-aud">
+            {/* Latency hero — the one lifted surface; reflects real measured metrics. */}
+            <Surface className="oj-aud-hero" elevation="rest" radius="lg" role="status" aria-live="polite">
+                {measured ? (
+                    <div className="oj-aud-hero-main">
+                        <div className="oj-aud-hero-state">
+                            <StatusDot status={latencyDot(audioMetrics.classification)} />
+                            <span className="oj-aud-ms">
+                                <span className="oj-aud-ms-num">
+                                    {Math.round(audioMetrics.estimatedRoundTrip)}
+                                </span>{' '}
+                                ms
                             </span>
-                            <span className="latency-label-small">ms round-trip</span>
+                            <span className="oj-aud-verdict">
+                                {LATENCY_VERDICT[audioMetrics.classification]}
+                            </span>
                         </div>
-                        <div className="latency-status-info">
-                            <div className="latency-status-message">
-                                {LATENCY_MESSAGES[audioMetrics.classification].message}
-                            </div>
-                            <div className="latency-status-hint">
-                                {LATENCY_MESSAGES[audioMetrics.classification].hint}
-                            </div>
+                        <div className="oj-aud-hero-meta">
+                            <Chip>{audioMetrics.source === 'native' ? 'Native engine' : 'Browser'}</Chip>
+                            <Chip>{(audioMetrics.sampleRate / 1000).toFixed(1)} kHz</Chip>
+                        </div>
+                    </div>
+                ) : isAudioContextReady ? (
+                    <div className="oj-aud-hero-state">
+                        <Spinner size={18} />
+                        <span className="oj-aud-verdict">Measuring latency…</span>
+                    </div>
+                ) : (
+                    <div className="oj-aud-hero-main">
+                        <div className="oj-aud-hero-state">
+                            <StatusDot status="idle" />
+                            <span className="oj-aud-verdict">Start audio to measure latency</span>
+                        </div>
+                        <span className="oj-aud-hero-hint">
+                            Press <strong>Sound live</strong> to begin.
+                        </span>
+                    </div>
+                )}
+            </Surface>
+
+            {audioMetrics.isBluetoothSuspected && (
+                <Callout variant="warning" className="oj-aud-callout">
+                    Bluetooth output adds delay — wired headphones or a USB interface play tighter.
+                </Callout>
+            )}
+
+            {/* Devices + the one clear low-latency control. */}
+            <div className="oj-aud-group">
+                {isNative ? (
+                    <div className="oj-aud-row">
+                        <div className="oj-aud-row-text">
+                            <span className="oj-aud-row-label">Output</span>
+                            <span className="oj-aud-row-desc">
+                                {speakerNode
+                                    ? 'Where the engine sends sound.'
+                                    : 'Add a Speaker node to the canvas to choose an output.'}
+                            </span>
+                        </div>
+                        <div className="oj-aud-control">
+                            {selectedOutputIsLowLatency && (
+                                <IconBolt
+                                    size={14}
+                                    title="Low-latency interface"
+                                    className="oj-aud-bolt"
+                                />
+                            )}
+                            <Select
+                                id="native-output-device"
+                                value={selectedOutput}
+                                disabled={!speakerNode}
+                                onChange={(e) => handleOutputDeviceChange(e.target.value)}
+                            >
+                                <option value="default">System Default</option>
+                                {outputDevices.map((device) => (
+                                    <option key={device.id} value={device.id}>
+                                        {device.name}
+                                    </option>
+                                ))}
+                            </Select>
+                        </div>
+                    </div>
+                ) : (
+                    <div className="oj-aud-row">
+                        <div className="oj-aud-row-text">
+                            <span className="oj-aud-row-label">Output</span>
+                            <span className="oj-aud-row-desc">
+                                Chosen on the Speaker node on your canvas.
+                            </span>
+                        </div>
+                    </div>
+                )}
+
+                {isNative && micNode && (
+                    <div className="oj-aud-row">
+                        <div className="oj-aud-row-text">
+                            <span className="oj-aud-row-label">Microphone</span>
+                            <span className="oj-aud-row-desc">
+                                Capture your mic into the engine. Use headphones to avoid feedback.
+                            </span>
+                        </div>
+                        <Button variant="secondary" onClick={handleRouteMic}>
+                            Capture mic
+                        </Button>
+                    </div>
+                )}
+
+                <Toggle
+                    label={
+                        <span className="oj-aud-low-label">
+                            Low latency
+                            {deviceInfo.isUSBAudioInterface && (
+                                <Chip tone="success" glyph={<IconBolt size={12} />}>
+                                    USB
+                                </Chip>
+                            )}
+                        </span>
+                    }
+                    description={
+                        deviceInfo.isUSBAudioInterface
+                            ? 'On by default for your USB interface — strips mic processing for the tightest timing.'
+                            : 'Strips echo, noise & gain processing from the mic for tighter timing. Best with a USB interface.'
+                    }
+                    checked={pendingConfig.lowLatencyMode}
+                    onChange={handleLowLatencyChange}
+                />
+            </div>
+
+            {showTips && (
+                <Callout variant="tip" title="How to go faster" className="oj-aud-callout">
+                    <ul className="oj-aud-tips">
+                        <li>Turn on <strong>Low latency</strong> above.</li>
+                        <li>Use wired headphones, not Bluetooth.</li>
+                        <li>Close other apps using audio.</li>
+                        <li>Play through a USB audio interface.</li>
+                    </ul>
+                </Callout>
+            )}
+
+            {/* Advanced — engineer depth, collapsed by default. */}
+            <details className="oj-aud-advanced">
+                <summary>Advanced</summary>
+                <div className="oj-aud-advanced-body">
+                    <div className="oj-aud-row">
+                        <div className="oj-aud-row-text">
+                            <span className="oj-aud-row-label">Sample rate</span>
+                            <span className="oj-aud-row-desc">
+                                {detectedSampleRate
+                                    ? `Detected from the running audio device at ${formatSampleRate(detectedSampleRate)}. Change only if you need another rate.`
+                                    : 'Detected when audio starts; higher rates use more CPU.'}
+                            </span>
+                        </div>
+                        <div className="oj-aud-control">
+                            {sampleRateIsDetected && <Chip>Detected</Chip>}
+                            <Select
+                                value={pendingConfig.sampleRate}
+                                onChange={(e) =>
+                                    setPendingConfig((prev) => ({
+                                        ...prev,
+                                        sampleRate: Number(e.target.value),
+                                    }))
+                                }
+                            >
+                                {sampleRateOptions.map((rate) => (
+                                    <option key={rate} value={rate}>
+                                        {formatSampleRate(rate)}
+                                    </option>
+                                ))}
+                            </Select>
                         </div>
                     </div>
 
-                    {/* Bluetooth Warning */}
-                    {audioMetrics.isBluetoothSuspected && (
-                        <div className="bluetooth-warning">
-                            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-                            </svg>
-                            <span>Bluetooth audio detected - connect wired headphones for lower latency</span>
+                    <div className="oj-aud-row">
+                        <div className="oj-aud-row-text">
+                            <span className="oj-aud-row-label">Latency hint</span>
+                            <span className="oj-aud-row-desc">
+                                {pendingConfig.lowLatencyMode
+                                    ? 'Low latency overrides this.'
+                                    : 'Interactive is the lowest latency.'}
+                            </span>
                         </div>
-                    )}
+                        <Select
+                            value={latencyHintValue}
+                            disabled={pendingConfig.lowLatencyMode}
+                            onChange={(e) =>
+                                setPendingConfig((prev) => ({
+                                    ...prev,
+                                    latencyHint: e.target.value as AudioContextLatencyCategory,
+                                }))
+                            }
+                        >
+                            <option value="interactive">Interactive</option>
+                            <option value="balanced">Balanced</option>
+                            <option value="playback">Playback</option>
+                        </Select>
+                    </div>
 
-                    {/* Detailed Breakdown (expandable) */}
-                    <details className="latency-breakdown">
-                        <summary>View detailed breakdown</summary>
-                        <div className="latency-breakdown-content">
-                            <div className="latency-breakdown-row">
-                                <span className="breakdown-label">Browser Processing</span>
-                                <span className="breakdown-value">{audioMetrics.baseLatency.toFixed(1)} ms</span>
+                    {measured && (
+                        <div className="oj-aud-breakdown">
+                            <div className="oj-aud-bd-row">
+                                <span className="oj-aud-bd-label">Backend</span>
+                                <span className="oj-aud-bd-val">
+                                    {audioMetrics.source === 'native'
+                                        ? 'Native engine (cpal)'
+                                        : 'Browser (AudioContext)'}
+                                </span>
                             </div>
-                            <div className="latency-breakdown-row">
-                                <span className="breakdown-label">Audio Output Device</span>
-                                <span className="breakdown-value">{audioMetrics.outputLatency.toFixed(1)} ms</span>
+                            {audioMetrics.source === 'browser' ? (
+                                <>
+                                    <div className="oj-aud-bd-row">
+                                        <span className="oj-aud-bd-label">Browser processing</span>
+                                        <span className="oj-aud-bd-val">
+                                            {audioMetrics.baseLatency.toFixed(1)} ms
+                                        </span>
+                                    </div>
+                                    <div className="oj-aud-bd-row">
+                                        <span className="oj-aud-bd-label">Output device</span>
+                                        <span className="oj-aud-bd-val">
+                                            {audioMetrics.outputLatency.toFixed(1)} ms
+                                        </span>
+                                    </div>
+                                </>
+                            ) : (
+                                <div className="oj-aud-bd-row">
+                                    <span className="oj-aud-bd-label">Negotiated buffer</span>
+                                    <span className="oj-aud-bd-val">
+                                        {audioMetrics.bufferFrames != null
+                                            ? `${audioMetrics.bufferFrames} frames`
+                                            : 'device period'}
+                                    </span>
+                                </div>
+                            )}
+                            <div className="oj-aud-bd-row oj-aud-bd-total">
+                                <span className="oj-aud-bd-label">Round-trip</span>
+                                <span className="oj-aud-bd-val">
+                                    {audioMetrics.estimatedRoundTrip.toFixed(1)} ms
+                                </span>
                             </div>
-                            <div className="latency-breakdown-row">
-                                <span className="breakdown-label">Tone.js Scheduler</span>
-                                <span className="breakdown-value">{audioMetrics.toneJsLookAhead.toFixed(1)} ms</span>
-                            </div>
-                            <div className="latency-breakdown-row">
-                                <span className="breakdown-label">Sample Rate</span>
-                                <span className="breakdown-value">{(audioMetrics.sampleRate / 1000).toFixed(1)} kHz</span>
-                            </div>
-                            <div className="latency-breakdown-row total">
-                                <span className="breakdown-label">Estimated Round-Trip</span>
-                                <span className="breakdown-value highlight">{audioMetrics.estimatedRoundTrip.toFixed(1)} ms</span>
-                            </div>
-                        </div>
-                    </details>
-
-                    {/* Suggestions for poor/bad latency */}
-                    {(audioMetrics.classification === 'poor' || audioMetrics.classification === 'bad') && !audioConfig.lowLatencyMode && (
-                        <div className="latency-suggestions">
-                            <h4>
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
-                                    <path d="M9 21c0 .55.45 1 1 1h4c.55 0 1-.45 1-1v-1H9v1zm3-19C8.14 2 5 5.14 5 9c0 2.38 1.19 4.47 3 5.74V17c0 .55.45 1 1 1h6c.55 0 1-.45 1-1v-2.26c1.81-1.27 3-3.36 3-5.74 0-3.86-3.14-7-7-7z"/>
-                                </svg>
-                                How to reduce latency
-                            </h4>
-                            <ul>
-                                <li>Enable <strong>Low Latency Mode</strong> below</li>
-                                <li>Use wired headphones instead of Bluetooth</li>
-                                <li>Close other audio applications</li>
-                                <li>Use a USB audio interface (like Focusrite Scarlett)</li>
-                            </ul>
                         </div>
                     )}
                 </div>
+            </details>
+
+            {hasChanges && (
+                <Button
+                    variant="primary"
+                    className="oj-aud-apply"
+                    onClick={handleApplyConfig}
+                    disabled={isRestarting}
+                >
+                    {isRestarting ? (
+                        <>
+                            <Spinner size={14} /> Restarting…
+                        </>
+                    ) : (
+                        'Apply — restarts audio briefly'
+                    )}
+                </Button>
             )}
 
-            {/* Audio Configuration */}
-            <div className="audio-config-section">
-                <h3>Audio Configuration</h3>
-
-                {/* Sample Rate */}
-                <div className="setting-group">
-                    <label>Sample Rate</label>
-                    <select
-                        value={pendingConfig.sampleRate}
-                        onChange={(e) => setPendingConfig({
-                            ...pendingConfig,
-                            sampleRate: Number(e.target.value)
-                        })}
-                    >
-                        <option value={44100}>44.1 kHz (CD Quality)</option>
-                        <option value={48000}>48 kHz (Recommended)</option>
-                        <option value={96000}>96 kHz (High Quality)</option>
-                    </select>
-                    <p className="setting-description">
-                        Higher sample rates provide better audio quality but increase CPU usage.
-                    </p>
-                </div>
-
-                {/* Latency Hint */}
-                <div className="setting-group">
-                    <label>Latency Mode</label>
-                    <select
-                        value={pendingConfig.latencyHint}
-                        onChange={(e) => setPendingConfig({
-                            ...pendingConfig,
-                            latencyHint: e.target.value as AudioContextLatencyCategory
-                        })}
-                    >
-                        <option value="interactive">Interactive (Lowest Latency)</option>
-                        <option value="balanced">Balanced</option>
-                        <option value="playback">Playback (Highest Quality)</option>
-                    </select>
-                    <p className="setting-description">
-                        Interactive mode minimizes latency for live performance.
-                    </p>
-                </div>
-
-                {/* Low Latency Mode Toggle */}
-                <div className="setting-group">
-                    <label className="toggle-label">
-                        <input
-                            type="checkbox"
-                            checked={pendingConfig.lowLatencyMode}
-                            onChange={(e) => setPendingConfig({
-                                ...pendingConfig,
-                                lowLatencyMode: e.target.checked
-                            })}
-                        />
-                        <span>Low Latency Mode</span>
-                    </label>
-                    <p className="setting-description">
-                        Disables echo cancellation, noise suppression, and auto gain control
-                        for microphone input. Reduces latency by 20-50ms.
-                        <strong>Recommended with USB audio interfaces.</strong>
-                    </p>
-                </div>
-
-                {/* Apply Button */}
-                {hasChanges && (
-                    <button
-                        className="apply-config-btn"
-                        onClick={handleApplyConfig}
-                        disabled={isRestarting}
-                    >
-                        {isRestarting ? 'Restarting Audio...' : 'Apply Changes'}
-                    </button>
-                )}
+            <div className="oj-aud-foot">
+                <Button variant="link" onClick={lowLatencyGuide.open}>
+                    Set up low latency
+                </Button>
             </div>
 
-            {/* Browser Support Info */}
-            <div className="audio-info-section">
-                <h3>Browser Audio System</h3>
-                <ul className="info-list">
-                    <li>
-                        <strong>Windows:</strong> Uses WASAPI (10-30ms latency)
-                    </li>
-                    <li>
-                        <strong>macOS:</strong> Uses Core Audio (3-5ms latency)
-                    </li>
-                    <li>
-                        <strong>Note:</strong> ASIO drivers are not accessible from browsers.
-                        Use a USB audio interface for lowest latency.
-                    </li>
-                </ul>
-            </div>
+            <LowLatencyGuide />
         </div>
     );
 }

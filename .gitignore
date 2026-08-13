@@ -18,6 +18,11 @@ dist
 dist-ssr
 *.local
 
+# oj-tokens ships its generated outputs (drift-guarded by `bun run tokens`);
+# keep them tracked even though the bare `dist` rule above would ignore them.
+!/packages/oj-tokens/dist
+!/packages/oj-tokens/dist/**
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -52,6 +57,16 @@ dist-ssr
 test-results/
 playwright-report/
 
+# Ladle component-catalog build output
+.ladle/build/
+
+# Scratch screenshots / browser-test prompts (ad-hoc dev artifacts, never ship)
+.tmp-shots/
+
+# Generated stereo test fixtures — regenerate on demand with
+# `bun test-assets/gen-test-wavs.ts` (the generator is tracked; the WAVs are not)
+test-assets/*.wav
+
 # Update-signing key material — NEVER commit (RCE-grade). Private keys live only
 # on the maintainer's offline backups + in GitHub Actions secrets. Public `.pub`
 # keys are embedded directly in tauri.conf.json / updater.rs instead.
@@ -59,3 +74,13 @@ playwright-report/
 *.key
 *.minisign
 *.pass
+
+# design-sync transient artifacts (durable inputs under .design-sync/ ARE committed)
+.ds-sync/
+ds-bundle/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
+
+# Generated third-party Rust notice bundle (`just licenses`; bundled into installers at release)
+THIRD-PARTY-RUST.html

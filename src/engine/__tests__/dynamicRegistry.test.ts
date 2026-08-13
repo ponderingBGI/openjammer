@@ -28,6 +28,7 @@ function fakeDef(name: string): NodeDefinition {
         category: 'effects',
         name,
         description: `${name} (dynamic)`,
+        ui: 'auto',
         defaultPorts: [],
         defaultData: {},
         canEnter: false,

@@ -71,6 +71,7 @@ pub fn biquad_type(idx: f32) -> FilterType {
 
 fn biquad_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(BIQUAD_ID),
         name: String::from("Biquad"),
         kind: PrimitiveKind::Biquad,
@@ -111,6 +112,8 @@ fn biquad_manifest() -> PluginManifest {
             audio_out: 1,
             control_in: 0,
             control_out: 0,
+            audio_in_channels: 1,
+            audio_out_channels: 1,
         },
     }
 }
@@ -233,6 +236,7 @@ const WAVESHAPER_CURVE_SAMPLES: usize = 2_048;
 
 fn waveshaper_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(WAVESHAPER_ID),
         name: String::from("Waveshaper"),
         kind: PrimitiveKind::Waveshaper,
@@ -259,6 +263,8 @@ fn waveshaper_manifest() -> PluginManifest {
             audio_out: 1,
             control_in: 0,
             control_out: 0,
+            audio_in_channels: 1,
+            audio_out_channels: 1,
         },
     }
 }
@@ -378,6 +384,7 @@ const DELAY_MAX_SECONDS: f32 = 2.0;
 
 fn delay_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(DELAY_ID),
         name: String::from("Delay"),
         kind: PrimitiveKind::Delay,
@@ -411,6 +418,8 @@ fn delay_manifest() -> PluginManifest {
             audio_out: 1,
             control_in: 0,
             control_out: 0,
+            audio_in_channels: 1,
+            audio_out_channels: 1,
         },
     }
 }
@@ -543,6 +552,7 @@ pub const CONVOLUTION_MAX_TAPS: usize = 24_000;
 
 fn convolution_manifest() -> PluginManifest {
     PluginManifest {
+        abi: None,
         id: String::from(CONVOLUTION_ID),
         name: String::from("Convolution"),
         kind: PrimitiveKind::Convolution,
@@ -560,6 +570,8 @@ fn convolution_manifest() -> PluginManifest {
             audio_out: 1,
             control_in: 0,
             control_out: 0,
+            audio_in_channels: 1,
+            audio_out_channels: 1,
         },
     }
 }
@@ -662,11 +674,18 @@ impl DspInstance for ConvolutionNode {
     }
 
     /// OFF-RT asset bind: install the resolved PCM as this node's impulse
-    /// response (the U6 seam reached from [`crate::compile_with_assets`]). The
+    /// response (the U6 seam reached from [`crate::compile_with_assets`]). The IR
+    /// is a single mono kernel, so a multi-channel IR is downmixed here (the
+    /// channel count now rides the asset instead of being collapsed at compile);
     /// `sample_rate` is unused — the IR is taken as-is at the engine rate; slot is
     /// ignored (a single IR). May allocate; never called on the audio thread.
-    fn load_asset(&mut self, _slot: u16, pcm: &[f32], _sample_rate: f32) {
-        self.set_ir(pcm);
+    fn load_asset(&mut self, _slot: u16, pcm: &[f32], channels: u8, _sample_rate: f32) {
+        if channels > 1 {
+            let mono = crate::compile::downmix_to_mono(pcm, channels);
+            self.set_ir(&mono);
+        } else {
+            self.set_ir(pcm);
+        }
     }
 
     fn reset(&mut self) {

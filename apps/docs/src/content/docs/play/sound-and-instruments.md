@@ -28,7 +28,7 @@ instrument sounds identical every run.
 
 ### The timbre families
 
-Every one of the 171 catalogue instruments maps onto one of these families, so a
+Every one of the 133 catalogue instruments maps onto one of these families, so a
 cello and a saxophone genuinely sound different:
 
 | Family | Character | Example instruments |
@@ -75,8 +75,8 @@ their own:
 - **Faust code nodes.** Author a brand-new DSP node from Faust source — the AI
   agent can do this for you, or you can paste source. See
   [the code-node ABI](https://github.com/PonderingBGI/openjammer/blob/main/docs/code-node-abi.md).
-- **Native plugins.** A CLAP/VST3 host (`ojhost`) lets you bring instruments and
-  effects you already own.
+- **Native plugins.** A CLAP plugin host (`ojhost`) lets you bring instruments and
+  effects you already own (VST3 / AU hosting planned).
 
 See the project [ROADMAP](https://github.com/PonderingBGI/openjammer/blob/main/ROADMAP.md)
 §3 for the current status of each bring-your-own path.

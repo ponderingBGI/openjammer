@@ -1,0 +1,99 @@
+/*
+ * KeyTile — DESIGN.md §5. A playable key/pad that is itself a port. Ink border,
+ * hard blur-free offset shadow that shrinks on press (Press-Is-Physical). The
+ * embedded control Port (grey — keys send numbers/triggers, not sound) pins to
+ * a corner as the connection anchor. `active` brightens with the accent (no
+ * blur, no reflow — No-Surprise). Styled only via semantic tokens, so it
+ * follows the active theme.
+ */
+.oj-key-tile {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    padding: var(--space-xs);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    background: var(--bg-node);
+    color: var(--text-primary);
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    line-height: 1.2;
+    cursor: pointer;
+    box-shadow: var(--shadow-sketch);
+    transition: background var(--transition-fast), transform var(--transition-fast),
+        box-shadow var(--transition-fast), color var(--transition-fast);
+}
+
+/* Press is physical: lift on hover, depress on click; the hard shadow grows
+   and shrinks with the motion (<=4px transform, blur radius 0). */
+.oj-key-tile:hover {
+    transform: translateY(-1px);
+    box-shadow: 3px 4px 0 var(--sketch-black);
+}
+
+.oj-key-tile:active,
+.oj-key-tile.is-active {
+    transform: translateY(1px);
+    box-shadow: 1px 1px 0 var(--sketch-black);
+}
+
+/* Lit/pressed: brighten with the accent. State color travels with the key's
+   own label, never on a heading or bare surface (Signal-Not-Brand is honored —
+   this IS the control reporting its pressed state). */
+.oj-key-tile.is-active {
+    background: var(--accent-primary);
+    color: var(--text-on-accent);
+}
+
+/* The embedded control Port — the connection anchor, pinned to a corner so it
+   hugs the tile edge without disturbing the label's layout. */
+.oj-key-tile__port {
+    position: absolute;
+    top: var(--space-xs);
+    right: var(--space-xs);
+}
+
+/* Caveat voice — the key/pad's name (note, drum, or glyph). */
+.oj-key-tile__label {
+    pointer-events: none;
+}
+
+/* ── Piano keys ──────────────────────────────────────────────────────────── */
+
+/* White key — tall, white-fill, label anchored at the bottom like a real key. */
+.oj-key-tile--white {
+    width: calc(var(--space-lg) + var(--space-xs));
+    height: calc(var(--space-xl) * 4);
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    background: var(--bg-node);
+}
+
+/* Black key — tall, ink-fill, shorter and narrower; sits proud above whites. */
+.oj-key-tile--black {
+    width: var(--space-lg);
+    height: calc(var(--space-xl) * 2 + var(--space-md));
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    background: var(--sketch-black);
+    color: var(--text-on-accent);
+}
+
+.oj-key-tile--black .oj-key-tile__label {
+    color: var(--text-on-accent);
+}
+
+/* ── Square computer key ─────────────────────────────────────────────────── */
+.oj-key-tile--key {
+    width: calc(var(--space-xl) + var(--space-sm));
+    height: calc(var(--space-xl) + var(--space-sm));
+    border-radius: var(--radius-sm);
+    align-items: center;
+}
+
+/* ── Rounded drum pad ────────────────────────────────────────────────────── */
+.oj-key-tile--pad {
+    width: calc(var(--space-xl) * 2);
+    height: calc(var(--space-xl) * 2);
+    border-radius: var(--radius-lg);
+    background: var(--bg-tertiary);
+    align-items: center;
+}

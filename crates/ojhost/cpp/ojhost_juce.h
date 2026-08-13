@@ -15,8 +15,8 @@
  *     locks. All buffers it needs are sized by `ojhost_prepare`.
  *
  * Licensing note: JUCE 8 is used under AGPL-3.0 (OpenJammer is AGPL-3.0). The
- * VST3 hosting path additionally requires the Steinberg VST3 SDK (its own
- * license). CLAP is MIT. See crates/ojhost/README.md.
+ * VST2 is owner-provisioned only; VST3 additionally requires the Steinberg VST3
+ * SDK/license. CLAP is MIT. See crates/ojhost/README.md.
  */
 #ifndef OJHOST_JUCE_H
 #define OJHOST_JUCE_H
@@ -30,15 +30,24 @@ extern "C" {
 
 /* Binary format tags — kept numerically in sync with Rust `PluginFormat`. */
 typedef enum OjPluginFormat {
-    OJ_FORMAT_VST3 = 0,
-    OJ_FORMAT_CLAP = 1,
-    OJ_FORMAT_AU = 2, /* macOS only; never emitted off-macOS */
+    OJ_FORMAT_VST2 = 0,
+    OJ_FORMAT_VST3 = 1,
+    OJ_FORMAT_CLAP = 2,
+    OJ_FORMAT_AU = 3, /* macOS only; never emitted off-macOS */
 } OjPluginFormat;
+
+typedef struct OjHostedParam {
+    uint32_t id;
+    const char* name;
+    double min;
+    double max;
+    double default_value;
+} OjHostedParam;
 
 /* One scanned plugin. All `const char*` are NUL-terminated and owned by the
  * C++ side until `ojhost_free_scan` is called on the owning array. */
 typedef struct OjPluginDesc {
-    const char* uid;            /* stable per-plugin id (CLAP id / VST3 UID)  */
+    const char* uid;            /* stable per-plugin id (CLAP id / VST UID)   */
     const char* name;           /* display name                               */
     const char* vendor;         /* manufacturer                               */
     const char* path;           /* binary/bundle path that was scanned        */
@@ -47,6 +56,7 @@ typedef struct OjPluginDesc {
     uint16_t audio_in;          /* main input channel count                   */
     uint16_t audio_out;         /* main output channel count                  */
     uint32_t param_count;       /* number of automatable parameters           */
+    const OjHostedParam* params; /* parameter descriptors, length param_count  */
     uint32_t latency_samples;   /* reported processing latency in samples     */
 } OjPluginDesc;
 
@@ -59,6 +69,7 @@ typedef struct OjScanResult {
 /* Opaque handles. */
 typedef struct OjHost OjHost;       /* a scanning/format-manager context     */
 typedef struct OjPlugin OjPlugin;   /* one loaded, processable plugin        */
+typedef struct OjPluginEditor OjPluginEditor; /* one native plugin editor window */
 
 /* ----------------------------------------------------------------------------
  * Lifecycle / scanning (all OFF the audio thread).
@@ -108,6 +119,25 @@ void ojhost_process(OjPlugin* plugin,
                     float* const* outputs, int32_t out_channels,
                     int32_t nframes);
 
+/* Status of a guarded process call. */
+typedef enum OjProcessStatus {
+    OJ_PROCESS_OK = 0,
+    OJ_PROCESS_FAULT = 1, /* the plugin crashed; outputs were silenced */
+} OjProcessStatus;
+
+/* RT-thread: render `nframes` like `ojhost_process`, but with a per-node fault
+ * boundary (Windows SEH / POSIX signal guard) wrapped ONLY around the foreign
+ * `processBlock` call. Returns `OJ_PROCESS_OK` normally, or `OJ_PROCESS_FAULT` if
+ * the plugin faulted (segfault / illegal op) this block — in which case every
+ * output is silenced for the transition block and the caller (the Rust
+ * `PluginHostNode`) latches the node to a dry passthrough and NEVER calls the
+ * plugin again this session (latch-and-quarantine — we do not resume out of
+ * foreign C++ that may hold the heap lock). Still RT-safe: no allocation. */
+int32_t ojhost_process_guarded(OjPlugin* plugin,
+                               const float* const* inputs, int32_t in_channels,
+                               float* const* outputs, int32_t out_channels,
+                               int32_t nframes);
+
 /* RT-thread: set parameter `index` to a normalized [0,1] `value`. */
 void ojhost_set_param(OjPlugin* plugin, uint32_t index, float value);
 
@@ -121,8 +151,42 @@ uint32_t ojhost_latency_samples(const OjPlugin* plugin);
 /* Number of parameters the instance exposes. */
 uint32_t ojhost_param_count(const OjPlugin* plugin);
 
+/* OFF-RT: serialize the plugin's full opaque state (VST3 getStateInformation).
+ * Returns a malloc'd buffer of `*out_len` bytes the caller frees via
+ * `ojhost_free_state`, or NULL (with `*out_len == 0`) if the plugin has no state.
+ * The `oj.state` capability's save half — never on the audio thread. */
+uint8_t* ojhost_get_state(OjPlugin* plugin, size_t* out_len);
+
+/* Free a buffer returned by `ojhost_get_state` (kept on the C++ allocator). */
+void ojhost_free_state(uint8_t* data, size_t len);
+
+/* OFF-RT: restore the plugin from a `len`-byte blob produced by `ojhost_get_state`
+ * (VST3 setStateInformation). The `oj.state` restore half — applied at load. */
+void ojhost_set_state(OjPlugin* plugin, const uint8_t* data, size_t len);
+
 /* Destroy a loaded plugin instance. */
 void ojhost_unload(OjPlugin* plugin);
+
+#if defined(OJHOST_FAULT_INJECT)
+/* DEV/TEST ONLY (compiled only with `--features juce,fault-inject`; absent from
+ * every shipped build): arm a deliberate one-shot fault INSIDE the next guarded
+ * processBlock, so the crash boundary (SEH on Windows / chained signals on POSIX)
+ * can be PROVEN to catch a real access violation on a live machine — one hosted
+ * node faults, the Rust latch quarantines it, and the rest of the set plays on.
+ * Sets a process-global counter the audio thread reads inside the guard; the next
+ * guarded block faults exactly once. Safe to call from the control thread. */
+void ojhost_arm_fault(void);
+#endif
+
+/* ----------------------------------------------------------------------------
+ * Native editor windows (OFF the audio thread).
+ * ------------------------------------------------------------------------- */
+OjPluginEditor* ojhost_editor_open(const char* path,
+                                   const char* uid,
+                                   OjPluginFormat format,
+                                   const char** err);
+void ojhost_editor_focus(OjPluginEditor* editor);
+void ojhost_editor_close(OjPluginEditor* editor);
 
 #ifdef __cplusplus
 } /* extern "C" */

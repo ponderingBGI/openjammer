@@ -13,12 +13,18 @@
 
 import type { Connection, GraphNode } from '../../engine/types';
 import type { EngineCapabilities } from '../../engine/capabilities';
+import type { OjGraph } from '@openjammer/oj-protocol';
+import type { ScheduledCommand } from './arrangementScheduler';
+import type { LatencyReport } from './latency';
 import type {
     LooperHandle,
     RecorderHandle,
     SamplerHandle,
     SignalLevelsCallback,
 } from './capabilities';
+
+export type { LatencyReport, LatencyClassification } from './latency';
+export { classifyLatency } from './latency';
 
 export type {
     LooperHandle,
@@ -64,6 +70,24 @@ export interface Executor {
     /** Tear down subscriptions and release audio resources. */
     dispose(): void;
 
+    /**
+     * Capture every hosted plugin's opaque state (the `oj.state` save half) and
+     * write it into the owning node's `data` (under `HOSTED_PLUGIN_STATE_KEY`), so a
+     * project export persists it and a reopen restores the plugin. Called before a
+     * project save. On the wasm tier (no native hosting) it is a no-op. Off the undo
+     * history — engine-derived runtime state, not a user edit.
+     */
+    capturePluginStates(): Promise<void>;
+
+    /**
+     * Force a re-push of the current graph even when its bytes are unchanged. The
+     * native host uses this after a plugin RESCAN to instantly rebind a degraded
+     * node onto its now-available plugin (invariant #4a auto-rebind), rather than
+     * waiting for the next canvas edit. A clean graph harmlessly recompiles to
+     * itself; on the wasm tier (no native hosting) it is a plain re-emit.
+     */
+    resync(): void;
+
     // --- Platform capabilities --------------------------------------------
 
     /**
@@ -74,6 +98,16 @@ export interface Executor {
      */
     getCapabilities(): EngineCapabilities;
 
+    /**
+     * The latency of THIS executor's audio backend — the one number the UI shows.
+     * The native executor reports its cpal stream's negotiated buffer (over the
+     * `query_stream` IPC); the wasm executor reports the AudioContext it renders
+     * into. Resolves `null` while the backend is not yet up (no context / device).
+     * Because the UI always asks the active executor, the inactive tier's latency
+     * (e.g. the WebView2 decode context on native) can never be shown.
+     */
+    getLatency(): Promise<LatencyReport | null>;
+
     // --- Note / control input ---------------------------------------------
 
     /** Trigger a note from a keyboard node's row/key (velocity 0-1). */
@@ -81,12 +115,6 @@ export interface Executor {
 
     /** Release a previously triggered keyboard note. */
     noteOff(keyboardId: string, row: number, keyIndex: number): void;
-
-    /** Press the control (sustain pedal) for a keyboard node. */
-    controlDown(keyboardId: string): void;
-
-    /** Release the control (sustain pedal) for a keyboard node. */
-    controlUp(keyboardId: string): void;
 
     /** Flash a control connection's signal-level visualization on. */
     activateControlSignal(connectionId: string): void;
@@ -107,10 +135,31 @@ export interface Executor {
     /** Subscribe to per-connection signal levels (0-1). Returns an unsubscribe. */
     subscribeSignalLevels(callback: SignalLevelsCallback): Unsubscribe;
 
+    /**
+     * Probe ONE node's instantaneous output peak (0-1) for the agent's `get_signal`,
+     * or null when no live reading is available (the node isn't metered, or audio
+     * isn't running). Async because the per-node meter only streams while a
+     * subscriber is mounted: this registers a transient one, lets a poll tick settle,
+     * reads the cached peak, and unsubscribes — off the audio thread, never blocking.
+     */
+    probeSignal(nodeId: string): Promise<number | null>;
+
     // --- Microphone --------------------------------------------------------
 
-    /** Set the AudioNode a microphone node should route its output into. */
-    setMicrophoneOutput(nodeId: string, outputNode: AudioNode): void;
+    /**
+     * Drive a microphone node's ENGINE input from the executor — the SINGLE owner
+     * of the OS mic device. The UI never opens its own `getUserMedia`; it only
+     * declares intent here. `isMuted` is provably silent at the engine seam: the
+     * executor feeds SILENCE into the engine's `MicIn` (wasm: disconnects the
+     * worklet input; native: `set_mic(node, false)`), so a muted mic is truly off
+     * on stage, not merely visually dimmed. `deviceId` selects the OS input device
+     * ('default' or undefined => system default); a change re-acquires the one
+     * owned stream. Idempotent; never throws (permission denial stays unrouted).
+     */
+    setMicrophoneInput(
+        nodeId: string,
+        options: { isMuted: boolean; deviceId?: string },
+    ): void;
 
     // --- Continuous sources (loopers, etc.) -------------------------------
 
@@ -136,4 +185,29 @@ export interface Executor {
 
     /** Forward a decoded sample buffer from a source node to connected samplers. */
     sendSampleBuffer(sourceNodeId: string, buffer: AudioBuffer): void;
+
+    // --- Timeline preview (the on-canvas timeline's transport) ------------
+
+    /**
+     * Begin LIVE PREVIEW of a conducted timeline: load `graph` (the wasm-remapped
+     * `conduct()` IR, which REPLACES the live canvas graph until
+     * {@link stopArrangementPreview}) and dispatch `events` — offsets in seconds from
+     * tick 0 — through a main-thread look-ahead scheduler, starting playback at
+     * `startSec`. Browser-tier timing is honestly ~15–25 ms; the bit-identical
+     * guarantee belongs to the OFFLINE bounce (`oj render`), not this live preview, and
+     * the playhead (AudioContext.currentTime) stays the visual source of truth. A
+     * second call cleanly restarts. NEVER throws (a conduct/engine hiccup must not
+     * break the transport — a held note beats a glitch).
+     *
+     * Tiers: the BROWSER (wasm) tier plays; the NATIVE tier logs and no-ops for now —
+     * its bit-identical path is `oj render`, and native live preview is a follow-up.
+     */
+    startArrangementPreview(
+        graph: OjGraph,
+        events: readonly ScheduledCommand[],
+        startSec: number,
+    ): void;
+
+    /** End live preview: release any sounding notes and restore the canvas graph. */
+    stopArrangementPreview(): void;
 }

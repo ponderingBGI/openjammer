@@ -71,6 +71,16 @@ export type LoopLayer = Loop;
 export interface LooperHandle {
     /** Set the loop cycle length in seconds (`< 0` == infinite / free-run). */
     setDuration(duration: number): void;
+    /** The set loop cycle length in seconds (`< 0` == infinite / free-run). */
+    getDuration(): number;
+    /** The latest engine looper state (IDLE/ARMED/RECORDING/PLAYING/OVERDUBBING),
+     *  driven by the engine return frames — the SSOT for transport UI (`number`
+     *  to keep the interface protocol-version-agnostic; a {@link LooperState}). */
+    getEngineState(): number;
+    /** The loop-level wet gain (0..1) — the balance control for summed layers. */
+    getWet(): number;
+    /** Set the loop-level wet gain (0..1): SetParam(WET) on the looper node. */
+    setWet(wet: number): void;
     /** All captured loop layers, newest last. */
     getLoops(): LoopLayer[];
     /** Begin recording in cycles. */
@@ -81,12 +91,22 @@ export interface LooperHandle {
     toggleLoopMute(loopId: string): void;
     /** Delete a loop layer (and stop it). */
     deleteLoop(loopId: string): void;
+    /** Undo the most-recently committed layer (LIFO): pops the tail row + UNDO_LAST. */
+    undoLast(): void;
     /** Add a loop layer directly from a decoded buffer (clip drop). */
     addLoopFromBuffer(buffer: AudioBuffer): void;
     /** Notified when a new loop layer is captured/added. */
     setOnLoopAdded(callback: (loop: LoopLayer) => void): void;
     /** Notified when a loop layer is deleted (for library trash handling). */
     setOnLoopDeleted(callback: (loop: LoopLayer) => void): void;
+    /** Notified when an existing loop layer is upgraded in place — Stage 3: its
+     *  TRUE captured PCM/waveform arrived after the row was created, so the row
+     *  swaps its live meter-envelope trace for the real shape and gains a
+     *  non-null `buffer` (drag-to-library / export light up). */
+    setOnLoopUpdated(callback: (loop: LoopLayer) => void): void;
+    /** Deliver a committed take's TRUE captured PCM (Stage 3). Matched to the
+     *  layer its commit edge created, in COMMIT ORDER (Nth PCM <-> Nth layer). */
+    onLayerPcm(pcm: Float32Array, sampleRate: number): void;
     /** Notified with the live recording waveform + playhead (0-100) each frame. */
     setOnWaveformHistoryUpdate(
         callback: (history: number[], playheadPosition: number) => void

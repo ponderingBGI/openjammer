@@ -1,6 +1,6 @@
 [package]
 name = "ojfaust"
-description = "Host-side Faust DSP compilation for OpenJammer: turn Faust source (hand-written or AI-authored in U20) into a loadable DSP node, with an agentic compile->error->repair loop. This crate is a FEATURE-GATED scaffold: with the default (`libfaust` OFF) it is a clear stub that builds without any native dependency; the real backend is gated behind the `libfaust` feature."
+description = "Host-side Faust DSP compilation for OpenJammer: turn Faust source (hand-written or AI-authored in U20) into a loadable DSP node, with an agentic compile->error->repair loop. This crate is a FEATURE-GATED scaffold: with the default (`libfaust` OFF) it is a clear stub that builds without any native dependency; the real backend (the CLI Path B that shells the `faust` binary) ships in the default build; the optional in-process libfaust JIT is gated behind the `libfaust` feature."
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -11,11 +11,12 @@ license.workspace = true
 # With `libfaust` OFF:
 #   - `FaustCompiler::compile` returns `FaustError::Unavailable`.
 #   - the agentic `compile_repair` loop is fully present (pure control flow);
-#     it just bottoms out on `Unavailable` from the stub backend.
+#     it bottoms out on `Unavailable` only when the `faust` binary is not on PATH.
 #
 # With `libfaust` ON (cannot be verified in this environment — see README):
-#   - links the chosen native backend (libfaust C API via bindgen, OR the
-#     `faust` CLI ahead-of-time path). Everything behind it is TODO-marked.
+#   - selects the in-process libfaust C-API JIT (Path A). That JIT binding is
+#     not yet implemented and reports Unavailable until it is; the `faust` CLI
+#     path (Path B) is the implemented default backend.
 default = []
 libfaust = ["dep:libc"]
 

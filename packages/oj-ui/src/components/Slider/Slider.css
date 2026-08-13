@@ -1,0 +1,104 @@
+/*
+ * Slider — a range control drawn in the sketchbook hand. The track is a thin
+ * tokenized rail (`--bg-tertiary`) with a `--sketch-light` filled edge; the
+ * thumb is an `--accent-primary` disc carrying a 2px `--sketch-black` ink
+ * border, the same drawn line as every node. Styled only via semantic tokens
+ * (no literal colors, no raw px outside the scale), so it follows the active
+ * theme. Per the No-Surprise Rule, interaction never reflows: feedback is
+ * color and a ≤2px lift/press on the thumb, with no blurred shadow.
+ */
+.oj-slider {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: var(--space-md);
+    margin: 0;
+    background: transparent;
+    cursor: pointer;
+    transition: opacity var(--transition-fast);
+}
+
+/* Track — WebKit */
+.oj-slider::-webkit-slider-runnable-track {
+    height: var(--space-xs);
+    border-radius: var(--radius-pill);
+    background: var(--bg-tertiary);
+    border: var(--border-sketch-width) solid var(--sketch-light);
+}
+
+/* Track — Firefox */
+.oj-slider::-moz-range-track {
+    height: var(--space-xs);
+    border-radius: var(--radius-pill);
+    background: var(--bg-tertiary);
+    border: var(--border-sketch-width) solid var(--sketch-light);
+}
+
+/* Filled portion — Firefox only (WebKit has no equivalent pseudo) */
+.oj-slider::-moz-range-progress {
+    height: var(--space-xs);
+    border-radius: var(--radius-pill);
+    background: var(--sketch-light);
+}
+
+/* Thumb — WebKit */
+.oj-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: var(--space-md);
+    height: var(--space-md);
+    /* Center the disc on the thin track: (thumb - track) / 2, negated. */
+    margin-top: calc((var(--space-md) - var(--space-xs)) / -2);
+    border-radius: var(--radius-pill);
+    background: var(--accent-primary);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    box-shadow: var(--shadow-sketch);
+    cursor: grab;
+    transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+/* Thumb — Firefox */
+.oj-slider::-moz-range-thumb {
+    width: var(--space-md);
+    height: var(--space-md);
+    border-radius: var(--radius-pill);
+    background: var(--accent-primary);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    box-shadow: var(--shadow-sketch);
+    cursor: grab;
+    transition: background var(--transition-fast), transform var(--transition-fast);
+}
+
+/* Hover/press feedback: color + ≤2px transform only (No-Surprise). */
+.oj-slider:hover::-webkit-slider-thumb {
+    background: var(--accent-secondary);
+    transform: translateY(-1px);
+}
+
+.oj-slider:hover::-moz-range-thumb {
+    background: var(--accent-secondary);
+    transform: translateY(-1px);
+}
+
+.oj-slider:active::-webkit-slider-thumb {
+    cursor: grabbing;
+    transform: translateY(1px);
+}
+
+.oj-slider:active::-moz-range-thumb {
+    cursor: grabbing;
+    transform: translateY(1px);
+}
+
+.oj-slider:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.oj-slider:disabled::-webkit-slider-thumb {
+    cursor: not-allowed;
+}
+
+.oj-slider:disabled::-moz-range-thumb {
+    cursor: not-allowed;
+}

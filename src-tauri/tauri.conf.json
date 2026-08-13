@@ -4,7 +4,7 @@
   "version": "0.0.2",
   "identifier": "in.lionman.openjammer",
   "build": {
-    "beforeDevCommand": "bun run build:pi-runtime && bun run dev",
+    "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "bun run build:pi-runtime && bun run build",
     "frontendDist": "../dist"
@@ -32,7 +32,9 @@
     "shortDescription": "Node-driven music creation for live performance.",
     "longDescription": "OpenJammer is a node-based music creation tool for live performance. This native desktop build runs the low-latency Rust ojcore engine behind the existing web UI.",
     "resources": {
-      "binaries/": "pi-runtime/"
+      "binaries/": "pi-runtime/",
+      "../pi-openjammer-graph/": "pi-openjammer-graph/",
+      "../pi-extensions/permission-gate/": "pi-extensions/permission-gate/"
     },
     "icon": [
       "icons/32x32.png",
@@ -49,7 +51,7 @@
         "https://github.com/ponderingBGI/openjammer/releases/latest/download/latest.json"
       ],
       "windows": {
-        "installMode": "passive"
+        "installMode": "quiet"
       }
     }
   }

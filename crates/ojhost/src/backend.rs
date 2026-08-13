@@ -32,6 +32,11 @@ use crate::error::HostError;
 /// pre-allocate all scratch in [`HostedBackend::activate`].
 ///
 /// `Send` so the engine can move a freshly-loaded plugin onto the audio thread.
+pub trait EditorBackend: Send {
+    fn focus(&mut self);
+    fn close(&mut self);
+}
+
 pub trait HostedBackend: Send {
     /// Off-RT: bind to the sample rate and the max block size any later
     /// `process` will request. Backends allocate their channel/buffer scratch
@@ -42,6 +47,25 @@ pub trait HostedBackend: Send {
     /// `inputs`/`outputs` are channel-major (one slice per channel). MUST NOT
     /// allocate, lock, or block.
     fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], nframes: usize);
+
+    /// RT-thread hot path WITH a per-node fault boundary. Render like [`process`],
+    /// returning `true` if the foreign plugin FAULTED this block (a segfault /
+    /// illegal op caught at the language boundary) — in which case `outputs` may be
+    /// garbage and the caller must not trust it. The default has NO boundary: it
+    /// calls [`process`] and reports no fault. The JUCE backend overrides it with
+    /// the per-OS SEH / signal guard around `processBlock`. On a reported fault the
+    /// [`crate::node::PluginHostNode`] latches to a dry passthrough and never
+    /// re-enters the plugin this session ("a held note beats a glitch"; latch-and-
+    /// quarantine, never resume out of foreign C++ that may hold the heap lock).
+    fn process_guarded(
+        &mut self,
+        inputs: &[&[f32]],
+        outputs: &mut [&mut [f32]],
+        nframes: usize,
+    ) -> bool {
+        self.process(inputs, outputs, nframes);
+        false
+    }
 
     /// RT-thread: set parameter `id` to `value`. MUST NOT allocate.
     fn set_param(&mut self, id: u16, value: f32);
@@ -54,6 +78,20 @@ pub trait HostedBackend: Send {
 
     /// Plugin-reported processing latency in samples (post-`activate`), for PDC.
     fn latency_samples(&self) -> u32;
+
+    /// OFF-RT: serialize the plugin's full opaque state — VST3
+    /// `getStateInformation` / the CLAP state extension — so a session can persist
+    /// it and a respawn can restore it (the `oj.state` capability's save half).
+    /// Default empty (a backend with no state surface). MAY allocate; never on the
+    /// audio thread.
+    fn save_state(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    /// OFF-RT: restore the plugin from a blob produced by [`save_state`]
+    /// (`setStateInformation` / CLAP state). Default no-op. Applied at construction
+    /// (before the instance goes live), so it runs off the audio thread; MAY allocate.
+    fn restore_state(&mut self, _blob: &[u8]) {}
 
     /// Off-RT: release activation-time resources. Default no-op.
     fn deactivate(&mut self) {}
@@ -71,6 +109,17 @@ pub(crate) fn open(
     max_block: usize,
 ) -> Result<Box<dyn HostedBackend>, HostError> {
     active::open(desc, sample_rate, max_block)
+}
+
+pub(crate) fn open_editor(desc: &PluginDescriptor) -> Result<Box<dyn EditorBackend>, HostError> {
+    active::open_editor(desc)
+}
+
+/// DEV/TEST ONLY: forward to the JUCE backend's in-guard fault arm (see
+/// [`crate::arm_fault`]). Present only with `juce` + `fault-inject`.
+#[cfg(all(feature = "juce", oj_fault_inject))]
+pub(crate) fn arm_fault() {
+    juce::arm_fault();
 }
 
 // Select the single active backend. `juce` is the superset, so it wins when both
@@ -104,6 +153,12 @@ mod scaffold {
         _sample_rate: f32,
         _max_block: usize,
     ) -> Result<Box<dyn HostedBackend>, HostError> {
+        Err(HostError::Unavailable)
+    }
+
+    pub(super) fn open_editor(
+        _desc: &PluginDescriptor,
+    ) -> Result<Box<dyn EditorBackend>, HostError> {
         Err(HostError::Unavailable)
     }
 }

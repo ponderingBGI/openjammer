@@ -10,6 +10,7 @@ import { useState } from 'react';
 import type { GraphNode } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
+import { Port } from '@openjammer/oj-ui';
 
 interface CanvasIONodeProps {
     node: GraphNode;
@@ -39,8 +40,7 @@ export function CanvasIONode({
     handlePortMouseEnter,
     handlePortMouseLeave,
     isSelected,
-    isDragging,
-    hasConnection
+    isDragging
 }: CanvasIONodeProps) {
     const updateNodeData = useGraphStore(s => s.updateNodeData);
     const flashingNodes = useUIFeedbackStore(s => s.flashingNodes);
@@ -73,7 +73,6 @@ export function CanvasIONode({
 
     // Get the port ID for connections
     const portId = node.ports[0]?.id || (isInput ? 'out' : 'in');
-    const isConnected = hasConnection?.(portId) || false;
 
     return (
         <div
@@ -85,15 +84,17 @@ export function CanvasIONode({
         >
             {/* Port indicator */}
             <div className="io-indicator">
-                <div
-                    className={`port-dot ${isInput ? 'output' : 'input'} ${isConnected ? 'connected' : ''}`}
+                <Port
+                    kind="control"
+                    direction={isInput ? 'output' : 'input'}
+                    style={{ width: '20px', height: '20px' }}
                     data-node-id={node.id}
                     data-port-id={portId}
-                    onMouseDown={(e) => {
+                    onMouseDown={(e: React.MouseEvent) => {
                         e.stopPropagation();
                         handlePortMouseDown?.(portId, e);
                     }}
-                    onMouseUp={(e) => {
+                    onMouseUp={(e: React.MouseEvent) => {
                         e.stopPropagation();
                         handlePortMouseUp?.(portId, e);
                     }}

@@ -198,9 +198,28 @@ export function createDefaultInternalStructure(parentNode: GraphNode): InternalS
         case 'sampler':
             return createSamplerInternals();
 
+        case 'song':
+            // The song node's interior is the TIMELINE (SongInterior), not a graph —
+            // it has NO child nodes. Empty internals keep it childless so it is never
+            // mistaken for a sub-graph container (the canvas enters it on its
+            // `interior:'timeline'` flag, not on childIds).
+            return createEmptyInternals();
+
         default:
             return createGenericInternals();
     }
+}
+
+/** No internal structure at all — for nodes whose interior is a bespoke view
+ * (the song timeline), not a sub-canvas of child nodes. */
+function createEmptyInternals(): InternalStructure {
+    return {
+        internalNodes: new Map<string, GraphNode>(),
+        internalConnections: new Map<string, Connection>(),
+        specialNodes: [],
+        showEmptyInputPorts: false,
+        showEmptyOutputPorts: false,
+    };
 }
 
 /**

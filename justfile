@@ -23,6 +23,18 @@ fmt:
 clippy:
     cargo clippy --workspace --all-targets -- -D warnings
 
+# ── Supply chain / licensing ───────────────────────────────────────────────────
+# License/bans/sources gate — the SAME command the required supply-chain.yml runs.
+# Needs cargo-deny: `cargo install --locked cargo-deny`.
+deny:
+    cargo deny --all-features check bans licenses sources
+
+# Generate the Part-A third-party Rust notice bundle (THIRD-PARTY-RUST.html) for the
+# installer payload, via cargo-about + about.toml/about.hbs. See THIRD-PARTY-LICENSES.md.
+# Needs cargo-about: `cargo install --locked cargo-about`.
+licenses:
+    cargo about generate about.hbs > THIRD-PARTY-RUST.html
+
 # ── Tests ────────────────────────────────────────────────────────────────────
 # nextest gives process-per-test isolation — STRICTLY safer than `cargo test`'s
 # shared process for the global-allocator swap `assert_no_alloc` installs.
@@ -33,12 +45,14 @@ test:
 doctest:
     cargo test --workspace --doc
 
-# RT no-alloc gate (Phase 2: the `devlog` feature is added to ojcore in Phase 2).
-# Trips over_budget / auto_bypass / non_finite (crates/ojcore/src/exec.rs) INSIDE
-# assert_no_alloc with both the meter ring and the event ring attached. Wired as a
-# `needs:` of the aggregate `gate` — a REQUIRED per-PR check, never nightly-only.
+# RT no-alloc gate. The `assert_no_alloc` AllocDisabler is the test-binary global
+# allocator (crates/ojcore/tests/engine.rs), so the *_alloc_free / *_allocation_free
+# tests abort on any heap touch inside the hot loop — over_budget / auto_bypass /
+# non_finite exercised with the meter ring attached. The gate runs on the default
+# (`std`) feature set; no extra feature flag gates these tests. Wired as a `needs:`
+# of the aggregate `gate` — a REQUIRED per-PR check, never nightly-only.
 test-rt:
-    cargo nextest run -p ojcore --features devlog
+    cargo nextest run -p ojcore
 
 # ── Build legs ─────────────────────────────────────────────────────────────────
 # `ojcore` defaults to ["std"]; --no-default-features compiles the no_std core
@@ -74,9 +88,10 @@ web:
     bun run build
 
 # ── Aggregates the CI lanes call (dependency form: run in listed order) ────────
-# NOTE: `test-rt` is intentionally NOT in `rust` yet — it requires the ojcore
-# `devlog` feature, a Phase-2 addition. Run it standalone (`just test-rt`) only
-# after Phase 2 lands; it joins the per-PR gate then (docs/plans/02 + 00 §F3).
+# `test-rt` (assert_no_alloc) is a REQUIRED per-PR check, wired into the ci.yml
+# engine job's merge gate. It is kept as its own recipe (not folded into `rust`)
+# so the no-alloc gate is invoked explicitly and stays a named, single-purpose
+# command CI and lefthook can both call without re-encoding it.
 rust: fmt clippy test doctest nostd wasm render clap-host
 
 ci: rust web
@@ -86,3 +101,15 @@ ci: rust web
 # (cache hits + affected-selection) — it never re-encodes a command.
 preflight *ARGS:
     bun scripts/oj/index.ts preflight {{ARGS}}
+
+# ── Native dev loops ───────────────────────────────────────────────────────────
+# The one-command native loop: Vite HMR + the ojcore-native engine in one
+# terminal, unified logs, clean Ctrl+C. `oj dev` delegates lifecycle + teardown
+# to the Tauri CLI (the edge we don't own), so this recipe stays a thin shell.
+dev *ARGS:
+    bun scripts/oj/index.ts dev {{ARGS}}
+
+# The windowless engine inner-loop: bacon re-runs the render/nextest harnesses on
+# save for sub-second DSP iteration (no cargo-rebuild + window-restart tax).
+engine-watch *ARGS:
+    bacon {{ARGS}}

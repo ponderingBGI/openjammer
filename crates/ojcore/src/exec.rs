@@ -219,7 +219,7 @@ impl Engine {
     /// into a stack buffer and `push`es into the pre-allocated ring, dropping
     /// frames rather than blocking when the ring is full.
     #[cfg(feature = "std")]
-    fn publish_meters(&mut self) {
+    fn publish_levels(&mut self) {
         let Some(ring) = self.meter_ring.as_ref() else {
             return;
         };
@@ -244,6 +244,46 @@ impl Engine {
         let pos = self.transport_pos();
         let n = return_frame::encode_beat(pos.bar, pos.beat, pos.phase, &mut buf);
         let _ = ring.push(&buf[..n]);
+    }
+
+    /// UNGATED looper return path: published every block regardless of the
+    /// metering toggle, because the looper's transport state (the row, the
+    /// playhead) must surface even when level meters are off. For each
+    /// looper-kind slot it pushes a control-rate [`ojproto::EngineFrame::Looper`]
+    /// snapshot onto the (lossy) meter ring AND drains any state-transition edge
+    /// onto the (loss-proof) EVENT ring as [`ojproto::RtEvent::LooperEdge`] —
+    /// exactly like [`Self::emit_node_fault`], so a commit transition is never
+    /// dropped. Allocation-free: stack-buffer encode + ring `push`; non-looper
+    /// nodes inherit `looper_snapshot()/take_looper_edge() == None` and are skipped.
+    #[cfg(feature = "std")]
+    fn publish_looper(&mut self) {
+        use crate::meter::{event_frame, return_frame};
+        let n_slots = self.program.instances.len();
+        for slot in 0..n_slots {
+            if self.program.kinds[slot] != PrimitiveKind::Looper {
+                continue;
+            }
+            let id = self.program.ids[slot];
+
+            // Snapshot -> Looper frame on the meter ring (always, ungated).
+            if let Some((state, pos, loop_len, peak)) =
+                self.program.instances[slot].looper_snapshot()
+            {
+                if let Some(ring) = self.meter_ring.as_ref() {
+                    let mut buf = [0u8; return_frame::MAX_LEN];
+                    let n = return_frame::encode_looper(id, state, pos, loop_len, peak, &mut buf);
+                    let _ = ring.push(&buf[..n]);
+                }
+            }
+
+            // Transition edge -> LooperEdge on the loss-proof EVENT ring.
+            if let Some((from, to)) = self.program.instances[slot].take_looper_edge() {
+                if let Some(ring) = self.event_ring.as_ref() {
+                    let ev = ojproto::RtEvent::LooperEdge { node: id, from, to };
+                    let _ = event_frame::emit(ring, ev);
+                }
+            }
+        }
     }
 
     /// Emit a compact, RT-safe node fault event onto the attached event ring.
@@ -313,9 +353,9 @@ impl Engine {
             RtCommand::TransportPlay => self.playing = true,
             RtCommand::TransportPause => self.playing = false,
             RtCommand::Seek { samples } => self.sample_pos = samples,
-            RtCommand::Looper { node, action } => {
+            RtCommand::Looper { node, action, arg } => {
                 if let Some(slot) = self.program.slot_of_id(node) {
-                    self.program.instances[slot].looper_action(action);
+                    self.program.instances[slot].looper_action(action, arg);
                 }
             }
         }
@@ -355,17 +395,29 @@ impl Engine {
         core::mem::replace(&mut self.program, program)
     }
 
-    /// Render one block of `nframes` into `out` (mono master output).
-    ///
-    /// RT-SAFETY: this path performs NO heap allocation and takes NO locks. It
-    /// walks the pre-computed, cycle-free schedule; for each node it mixes the
-    /// node's inputs into the pre-sized `in_scratch`, points reusable
-    /// channel-pointer arrays at the pre-sized buffers, and calls the node's
-    /// `process`. Finally it sums the master-output node's resolved input into
-    /// `out`.
+    /// Render one block of `nframes` into `out` (a single mono device channel).
+    /// Thin wrapper over [`Engine::process_block_into`] — kept so every existing
+    /// mono caller (the native host, the wasm worklet, the render/loopback bins)
+    /// compiles unchanged and stays byte-identical.
     pub fn process_block(&mut self, out: &mut [f32], nframes: usize) {
+        let mut outs: [&mut [f32]; 1] = [out];
+        self.process_block_into(&mut outs, nframes);
+    }
+
+    /// Render one block of `nframes` into `outs.len()` device channels (the master
+    /// node's resolved input, mapped across the channels — see docs/CHANNELS.md).
+    /// A single channel is bit-identical to the historical mono path.
+    ///
+    /// RT-SAFETY: NO heap allocation, NO locks. It walks the pre-computed,
+    /// cycle-free schedule; for each node it mixes the node's inputs into the
+    /// pre-sized `in_scratch`, points reusable channel-pointer arrays at the
+    /// pre-sized buffers, and calls the node's `process`. Then it emits the
+    /// master-output node's resolved input into every device channel, per-channel
+    /// gained / guarded / limited / metered.
+    pub fn process_block_into(&mut self, outs: &mut [&mut [f32]], nframes: usize) {
         debug_assert!(nframes <= self.program.block_size, "block overrun");
-        let nframes = nframes.min(self.program.block_size).min(out.len());
+        let dev_len = outs.iter().map(|o| o.len()).min().unwrap_or(0);
+        let nframes = nframes.min(self.program.block_size).min(dev_len);
 
         for si in 0..self.program.schedule.len() {
             let node = self.program.schedule[si];
@@ -430,55 +482,81 @@ impl Engine {
             self.meter_node(node, nframes);
         }
 
-        // Emit the master node's RESOLVED INPUT. The master sink (SpeakerOut /
-        // GraphOut) does not itself produce audio; the engine's output IS the
-        // mix feeding its input port 0.
-        for o in out.iter_mut().take(nframes) {
-            *o = 0.0;
-        }
+        // Emit the master node's RESOLVED INPUT into EVERY device channel. The
+        // master sink (SpeakerOut / GraphOut) produces no audio of its own; the
+        // engine's output IS the mix feeding its input port 0. A mono master
+        // upmixes that mix to every device channel (centred); a true stereo master
+        // mapping lane->channel arrives with the adaptation step. Per channel:
+        // master gain, NaN/denormal guard, brickwall limiter. A SINGLE device
+        // channel is bit-identical to the historical mono path.
         let master = self.program.master_out;
-        if let Some(port0) = self
-            .program
-            .routing
-            .get(master)
-            .and_then(|r| r.inputs.first())
-        {
-            // Borrow split: read sources from `out_bufs`, write `out` (caller's
-            // buffer, disjoint). No allocation.
-            for k in 0..port0.len() {
-                let src = self.program.routing[master].inputs[0][k];
-                let src_buf = &self.program.out_bufs[src.node][src.port as usize];
-                for (o, &s) in out.iter_mut().zip(src_buf.iter()).take(nframes) {
-                    *o += s;
+        // Master volume / mute: a single field read; default unity, so graphs whose
+        // SpeakerOut never set a volume stay bit-identical.
+        let mg = self.program.instances[master].master_gain();
+        let mut master_dirty = false;
+        for (ch, out) in outs.iter_mut().enumerate() {
+            for o in out.iter_mut().take(nframes) {
+                *o = 0.0;
+            }
+            if let Some(port0) = self
+                .program
+                .routing
+                .get(master)
+                .and_then(|r| r.inputs.first())
+            {
+                // Borrow split: read sources from `out_bufs` (on `self`), write the
+                // caller's `out` (disjoint). No allocation.
+                //
+                // CHANNEL ADAPTATION (docs/CHANNELS.md §4): a source PORT `p` owns the
+                // `out_bufs` lanes `[p*oc .. p*oc+oc)`. A MONO source (oc == 1) feeds
+                // its one lane to EVERY device channel (centred upmix); a STEREO source
+                // maps lane->channel (clamped to its last lane), so stereo content
+                // plays true stereo. At oc == 1 this is `lane == src.port` — byte-
+                // identical to the historical mono path.
+                for k in 0..port0.len() {
+                    let src = self.program.routing[master].inputs[0][k];
+                    let src_oc = self.program.out_channels[src.node].max(1) as usize;
+                    let lane = src.port as usize * src_oc + ch.min(src_oc - 1);
+                    if let Some(src_buf) = self.program.out_bufs[src.node].get(lane) {
+                        for (o, &s) in out.iter_mut().zip(src_buf.iter()).take(nframes) {
+                            *o += s;
+                        }
+                    }
                 }
             }
-        }
-        // Master volume / mute: scale the resolved master mix by the master
-        // sink's `master_gain` (volume, or 0 when muted). Default is unity, so
-        // graphs whose SpeakerOut never set a volume are bit-identical to before.
-        // A single field read + per-sample multiply — RT-safe, no allocation.
-        let mg = self.program.instances[master].master_gain();
-        if mg != 1.0 {
+            if mg != 1.0 {
+                for o in out.iter_mut().take(nframes) {
+                    *o *= mg;
+                }
+            }
+            // Zero any trailing frames beyond our valid range.
+            for o in out.iter_mut().skip(nframes) {
+                *o = 0.0;
+            }
+            // U16: guard the master output (a non-finite source would otherwise reach
+            // the device). Flag if ANY channel produced non-finite.
+            if sanitize(&mut out[..nframes]) {
+                master_dirty = true;
+            }
+            // Master brickwall limiter — AFTER sanitize (so a master-level NaN/Inf is
+            // still flagged, not swallowed) and BEFORE metering (so the meter reflects
+            // what is heard). Reuses the shared `ojcore-dsp` soft knee; its linear
+            // region passes through untouched, so quiet/normal graphs stay
+            // bit-identical (the committed golden fingerprints hold).
             for o in out.iter_mut().take(nframes) {
-                *o *= mg;
+                *o = ojcore_dsp::guards::soft_limit(*o);
+            }
+            // U15 metering: only the FIRST device channel folds into the single master
+            // meter, so a mono graph is byte-identical to the pre-stereo path.
+            if ch == 0 && self.meters.enabled {
+                self.meters.master.accumulate(&out[..nframes]);
             }
         }
-
-        // Zero any trailing frames beyond our valid range.
-        for o in out.iter_mut().skip(nframes) {
-            *o = 0.0;
-        }
-
-        // U16: guard the master output too (a non-finite source would otherwise
-        // reach the device). U15: fold it into the master meter.
-        if sanitize(&mut out[..nframes]) {
+        if master_dirty {
             // Flag the master node so the control plane sees the garbage.
             self.budget.non_finite[self.program.master_out] = true;
             #[cfg(feature = "std")]
             self.emit_node_fault(self.program.master_out, ojproto::FaultKind::NonFinite);
-        }
-        if self.meters.enabled {
-            self.meters.master.accumulate(&out[..nframes]);
         }
 
         // Advance the minimal transport clock once per block while playing.
@@ -491,10 +569,39 @@ impl Engine {
         self.transport.playing = self.playing;
 
         // U15: non-blocking publish of the meter snapshot + beat at block end.
-        // Only when metering is on (and a ring is attached); alloc-free.
+        // Levels are gated by the metering toggle; alloc-free.
         #[cfg(feature = "std")]
         if self.meters.enabled {
-            self.publish_meters();
+            self.publish_levels();
+        }
+        // Looper telemetry is UNGATED: the loop row + playhead must surface even
+        // with level metering off. Pushes Looper frames + drains transition
+        // edges onto the loss-proof event ring. Alloc-free; skips non-loopers.
+        #[cfg(feature = "std")]
+        self.publish_looper();
+        // Runtime-degrade telemetry: a node that latched to a dry passthrough at
+        // runtime (a crashed hosted plugin / trapped code node) surfaces a
+        // NodeFault{Crashed} so the UI badges it. Alloc-free; skips healthy nodes.
+        #[cfg(feature = "std")]
+        self.publish_faults();
+    }
+
+    /// Emit a [`ojproto::FaultKind::Crashed`] node fault for every node that has
+    /// LATCHED to a dry passthrough at runtime ([`DspInstance::runtime_degraded`] —
+    /// a crashed hosted plugin or a trapped code node). Re-emitted every block it
+    /// stays degraded, so a frame dropped on a full ring re-sends next block
+    /// (naturally loss-proof) and is coalesced off-RT exactly like a persistently
+    /// non-finite node. Alloc-free: a `bool` read per node + the stack-buffer
+    /// `emit_node_fault`. Skips healthy nodes (default `runtime_degraded() == false`).
+    #[cfg(feature = "std")]
+    fn publish_faults(&self) {
+        if self.event_ring.is_none() {
+            return;
+        }
+        for slot in 0..self.program.instances.len() {
+            if self.program.instances[slot].runtime_degraded() {
+                self.emit_node_fault(slot, ojproto::FaultKind::Crashed);
+            }
         }
     }
 
@@ -510,18 +617,26 @@ impl Engine {
         let n_in = self.program.routing[node].inputs.len();
         let n_out = self.program.out_bufs[node].len();
 
-        // --- mix step: fold every source of each input port into its row of
-        // `in_scratch`, then publish a pointer to that row.
+        // --- mix step: fold every source of each input port's CHANNELS into its
+        // `in_scratch` LANES (lane = port*in_ch + channel), with the §4 adaptation,
+        // then publish a pointer to each lane. At in_ch == 1 this is one lane per
+        // port — byte-identical to the historical mono mix (docs/CHANNELS.md).
+        let in_ch = self.program.in_channels[node].max(1) as usize;
+        let n_in_lanes = (n_in * in_ch).min(MAX_CH);
         for port in 0..n_in {
-            self.mix_input(node, port, nframes);
-            self.in_ptrs[port] = self.program.in_scratch[port].as_ptr();
+            for c in 0..in_ch {
+                let lane = port * in_ch + c;
+                self.mix_input_lane(node, port, c, in_ch, nframes);
+                if lane < self.in_ptrs.len() {
+                    self.in_ptrs[lane] = self.program.in_scratch[lane].as_ptr();
+                }
+            }
         }
-        // --- point outputs at the node's own buffers.
+        // --- point outputs at the node's own buffers (already per-lane).
         for port in 0..n_out {
             self.out_ptrs[port] = self.program.out_bufs[node][port].as_mut_ptr();
         }
 
-        let n_in_ch = n_in.min(MAX_CH);
         let n_out_ch = n_out.min(MAX_CH);
         let mut ins: [&[f32]; MAX_CH] = [&[]; MAX_CH];
         let mut outs: [&mut [f32]; MAX_CH] = Default::default();
@@ -529,7 +644,7 @@ impl Engine {
         // the input rows (`in_scratch`) and output rows (`out_bufs[node]`) are
         // disjoint allocations, so these views never alias.
         unsafe {
-            for (i, &p) in self.in_ptrs.iter().take(n_in_ch).enumerate() {
+            for (i, &p) in self.in_ptrs.iter().take(n_in_lanes).enumerate() {
                 ins[i] = core::slice::from_raw_parts(p, nframes);
             }
             for (i, &p) in self.out_ptrs.iter().take(n_out_ch).enumerate() {
@@ -537,28 +652,56 @@ impl Engine {
             }
         }
         let mut ctx = ProcessCtx {
-            inputs: &ins[..n_in_ch],
+            inputs: &ins[..n_in_lanes],
             outputs: &mut outs[..n_out_ch],
             nframes,
         };
         self.program.instances[node].process(&mut ctx);
     }
 
-    /// Sum every source feeding `(node, port)` into `in_scratch[port]`.
-    ///
-    /// `in_scratch` and `out_bufs` are DISTINCT fields, so this needs no raw
-    /// pointers: we split the program's borrows by field. The destination row
-    /// (`in_scratch`) and the producer rows (`out_bufs`) never alias.
+    /// Sum every source feeding `(node, port)` channel 0 into the port's first
+    /// input lane — the mono / bypass-passthrough path. Thin wrapper over
+    /// [`Engine::mix_input_lane`] so there is one mix implementation.
     fn mix_input(&mut self, node: usize, port: usize, nframes: usize) {
+        let in_ch = self.program.in_channels[node].max(1) as usize;
+        self.mix_input_lane(node, port, 0, in_ch, nframes);
+    }
+
+    /// Sum every source feeding `(node, port)` CHANNEL `channel` into the input
+    /// scratch LANE `port*in_ch + channel`, applying the §4 channel adaptation: a
+    /// mono source (out_channels == 1) contributes its one lane to every dest
+    /// channel; a stereo source maps lane->channel (clamped to its last lane). At
+    /// `in_ch == 1` this is one lane per port — byte-identical to the historical
+    /// mono mix (docs/CHANNELS.md).
+    ///
+    /// `in_scratch`, `routing`, `out_bufs`, `out_channels` are DISTINCT fields, so
+    /// this needs no raw pointers: the program's borrows split by field, and the
+    /// destination row (`in_scratch`) never aliases the producer rows (`out_bufs`)
+    /// — the Kahn schedule guarantees a node is never its own source. Alloc-free.
+    fn mix_input_lane(
+        &mut self,
+        node: usize,
+        port: usize,
+        channel: usize,
+        in_ch: usize,
+        nframes: usize,
+    ) {
+        let dest_lane = port * in_ch + channel;
         let prog = &mut self.program;
-        let dst = &mut prog.in_scratch[port][..nframes];
+        if dest_lane >= prog.in_scratch.len() {
+            return;
+        }
+        let dst = &mut prog.in_scratch[dest_lane][..nframes];
         for d in dst.iter_mut() {
             *d = 0.0;
         }
         for src in &prog.routing[node].inputs[port] {
-            let src_buf = &prog.out_bufs[src.node][src.port as usize];
-            for (d, &s) in dst.iter_mut().zip(src_buf.iter()).take(nframes) {
-                *d += s;
+            let src_oc = prog.out_channels[src.node].max(1) as usize;
+            let src_lane = src.port as usize * src_oc + channel.min(src_oc - 1);
+            if let Some(src_buf) = prog.out_bufs[src.node].get(src_lane) {
+                for (d, &s) in dst.iter_mut().zip(src_buf.iter()).take(nframes) {
+                    *d += s;
+                }
             }
         }
     }
@@ -644,7 +787,7 @@ mod apply_rt_tests {
         last_note_on: Cell<Option<(u8, u8)>>,
         last_note_off: Cell<Option<u8>>,
         last_set_param: Cell<Option<(u16, f32)>>,
-        last_looper: Cell<Option<u8>>,
+        last_looper: Cell<Option<(u8, u32)>>,
     }
 
     /// A mock node that records every RT call it receives into a shared
@@ -669,8 +812,8 @@ mod apply_rt_tests {
         fn note_off(&mut self, note: u8) {
             self.state.last_note_off.set(Some(note));
         }
-        fn looper_action(&mut self, action: u8) {
-            self.state.last_looper.set(Some(action));
+        fn looper_action(&mut self, action: u8, arg: u32) {
+            self.state.last_looper.set(Some((action, arg)));
         }
     }
 
@@ -697,6 +840,8 @@ mod apply_rt_tests {
             instances,
             routing: vec![NodeRouting::default(), NodeRouting::default()],
             out_bufs: vec![vec![vec![0.0; 4]], vec![]],
+            out_channels: vec![1, 1],
+            in_channels: vec![1, 1],
             bypassed: vec![false, false],
             kinds: vec![PrimitiveKind::Osc, PrimitiveKind::SpeakerOut],
             ids,
@@ -734,6 +879,80 @@ mod apply_rt_tests {
     }
 
     #[test]
+    fn publish_faults_emits_node_fault_crashed_for_a_runtime_degraded_node() {
+        use crate::meter::{event_frame, EventRing};
+        use alloc::sync::Arc;
+        use ojproto::{FaultKind, RtEvent};
+
+        /// A stub that reports it LATCHED to passthrough at runtime (a crashed
+        /// hosted plugin / trapped code node) — what `runtime_degraded()` returns.
+        struct DegradedNode {
+            degraded: bool,
+        }
+        unsafe impl Send for DegradedNode {}
+        impl DspInstance for DegradedNode {
+            fn activate(&mut self, _sr: f32, _mb: usize) {}
+            fn process(&mut self, _ctx: &mut ProcessCtx<'_, '_>) {}
+            fn set_param(&mut self, _id: u16, _v: f32) {}
+            fn runtime_degraded(&self) -> bool {
+                self.degraded
+            }
+        }
+
+        // Slot 0 = a runtime-degraded node (id 7); slot 1 = a healthy master (id 0).
+        let instances: Vec<Box<dyn DspInstance>> = vec![
+            Box::new(DegradedNode { degraded: true }),
+            Box::new(DegradedNode { degraded: false }),
+        ];
+        let program = CompiledProgram {
+            instances,
+            routing: vec![NodeRouting::default(), NodeRouting::default()],
+            out_bufs: vec![vec![vec![0.0; 4]], vec![]],
+            out_channels: vec![1, 1],
+            in_channels: vec![1, 1],
+            bypassed: vec![false, false],
+            kinds: vec![PrimitiveKind::Osc, PrimitiveKind::SpeakerOut],
+            ids: vec![NodeIdx(7), NodeIdx(0)],
+            id_index: vec![(NodeIdx(0), 1), (NodeIdx(7), 0)],
+            master_out: 1,
+            block_size: 4,
+            in_scratch: vec![vec![0.0; 4]],
+            max_in: 1,
+            max_out: 1,
+            schedule: vec![0, 1],
+        };
+        let mut engine = Engine::new(program);
+        let ring = Arc::new(EventRing::new());
+        engine.attach_event_ring(Some(ring.clone()));
+
+        let mut out = vec![0.0f32; 4];
+        engine.process_block(&mut out, 4);
+
+        let mut faults = Vec::new();
+        event_frame::drain_events(&ring, |ev| faults.push(ev));
+        assert!(
+            faults.iter().any(|ev| matches!(
+                ev,
+                RtEvent::NodeFault {
+                    node: NodeIdx(7),
+                    fault: FaultKind::Crashed,
+                }
+            )),
+            "the degraded node emits NodeFault{{Crashed}}; got {faults:?}"
+        );
+        assert!(
+            !faults.iter().any(|ev| matches!(
+                ev,
+                RtEvent::NodeFault {
+                    node: NodeIdx(0),
+                    ..
+                }
+            )),
+            "a healthy node emits no fault"
+        );
+    }
+
+    #[test]
     fn set_param_reaches_instance() {
         let (mut engine, probe) = probe_engine();
         engine.apply_rt(RtCommand::SetParam {
@@ -750,8 +969,21 @@ mod apply_rt_tests {
         engine.apply_rt(RtCommand::Looper {
             node: NodeIdx(7),
             action: looper_action::RECORD,
+            arg: 0,
         });
-        assert_eq!(probe.last_looper.get(), Some(looper_action::RECORD));
+        assert_eq!(probe.last_looper.get(), Some((looper_action::RECORD, 0)));
+
+        // An indexed action carries its layer index (and packed flags) verbatim
+        // through to the instance.
+        engine.apply_rt(RtCommand::Looper {
+            node: NodeIdx(7),
+            action: looper_action::SET_MUTE,
+            arg: 3 | looper_action::MUTE_FLAG,
+        });
+        assert_eq!(
+            probe.last_looper.get(),
+            Some((looper_action::SET_MUTE, 3 | looper_action::MUTE_FLAG))
+        );
     }
 
     #[test]
@@ -798,5 +1030,219 @@ mod apply_rt_tests {
             vel: 64,
         });
         assert_eq!(probe.last_note_on.get(), None);
+    }
+
+    /// `process_block_into` emits the mono master mix into EVERY device channel
+    /// (the mono->N upmix). Slot 0 is a `GraphIn` source the executor leaves intact,
+    /// so its pre-filled buffer reaches the `SpeakerOut` master at slot 1.
+    #[test]
+    fn process_block_into_upmixes_master_mix_to_every_channel() {
+        use crate::compile::{CompiledProgram, NodeRouting, Source};
+        let instances: Vec<Box<dyn DspInstance>> = vec![
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }),
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }),
+        ];
+        let program = CompiledProgram {
+            instances,
+            // Master (slot 1) input port 0 is fed by the source (slot 0).
+            routing: vec![
+                NodeRouting::default(),
+                NodeRouting {
+                    inputs: vec![vec![Source { node: 0, port: 0 }]],
+                },
+            ],
+            out_bufs: vec![vec![vec![0.1f32; 4]], vec![]], // source emits 0.1
+            out_channels: vec![1, 1],
+            in_channels: vec![1, 1],
+            bypassed: vec![false, false],
+            // GraphIn => the executor leaves slot 0's buffer intact (no process call).
+            kinds: vec![PrimitiveKind::GraphIn, PrimitiveKind::SpeakerOut],
+            ids: vec![NodeIdx(1), NodeIdx(2)],
+            id_index: vec![(NodeIdx(1), 0), (NodeIdx(2), 1)],
+            master_out: 1,
+            block_size: 4,
+            in_scratch: vec![vec![0.0; 4]],
+            max_in: 1,
+            max_out: 1,
+            schedule: vec![0, 1],
+        };
+        let mut engine = Engine::new(program);
+
+        let mut l = [0.0f32; 4];
+        let mut r = [0.0f32; 4];
+        {
+            let mut outs: [&mut [f32]; 2] = [&mut l, &mut r];
+            engine.process_block_into(&mut outs, 4);
+        }
+        // Both device channels receive the same mono master mix (0.1), upmixed.
+        // (0.1 is below the limiter's linear-region ceiling, so it passes through.)
+        assert!(l.iter().all(|&x| (x - 0.1).abs() < 1e-6), "left = mono mix");
+        assert!(
+            r.iter().all(|&x| (x - 0.1).abs() < 1e-6),
+            "right = mono mix (upmixed)"
+        );
+
+        // And the mono wrapper still yields exactly one channel of the same mix.
+        let mut mono = [0.0f32; 4];
+        engine.process_block(&mut mono, 4);
+        assert!(mono.iter().all(|&x| (x - 0.1).abs() < 1e-6));
+    }
+
+    /// A STEREO source (one output port, two channels) maps lane->channel: its left
+    /// lane reaches device channel 0, its right lane device channel 1. (The §4
+    /// adaptation — true stereo, not an upmix.)
+    #[test]
+    fn process_block_into_maps_stereo_source_lanes_to_channels() {
+        use crate::compile::{CompiledProgram, NodeRouting, Source};
+        let instances: Vec<Box<dyn DspInstance>> = vec![
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }),
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }),
+        ];
+        let program = CompiledProgram {
+            instances,
+            routing: vec![
+                NodeRouting::default(),
+                NodeRouting {
+                    // Master input port 0 fed by the stereo source's PORT 0.
+                    inputs: vec![vec![Source { node: 0, port: 0 }]],
+                },
+            ],
+            // Slot 0: ONE output port × 2 channels = 2 lanes: L=0.1, R=0.2.
+            out_bufs: vec![vec![vec![0.1f32; 4], vec![0.2f32; 4]], vec![]],
+            out_channels: vec![2, 1],
+            in_channels: vec![1, 1],
+            bypassed: vec![false, false],
+            kinds: vec![PrimitiveKind::GraphIn, PrimitiveKind::SpeakerOut],
+            ids: vec![NodeIdx(1), NodeIdx(2)],
+            id_index: vec![(NodeIdx(1), 0), (NodeIdx(2), 1)],
+            master_out: 1,
+            block_size: 4,
+            in_scratch: vec![vec![0.0; 4]],
+            max_in: 1,
+            max_out: 2,
+            schedule: vec![0, 1],
+        };
+        let mut engine = Engine::new(program);
+
+        let mut l = [0.0f32; 4];
+        let mut r = [0.0f32; 4];
+        {
+            let mut outs: [&mut [f32]; 2] = [&mut l, &mut r];
+            engine.process_block_into(&mut outs, 4);
+        }
+        assert!(
+            l.iter().all(|&x| (x - 0.1).abs() < 1e-6),
+            "left = source L lane"
+        );
+        assert!(
+            r.iter().all(|&x| (x - 0.2).abs() < 1e-6),
+            "right = source R lane (true stereo, not upmix)"
+        );
+
+        // A mono (1-channel) call folds the stereo source to its LEFT lane (clamp).
+        let mut mono = [0.0f32; 4];
+        engine.process_block(&mut mono, 4);
+        assert!(
+            mono.iter().all(|&x| (x - 0.1).abs() < 1e-6),
+            "mono = left lane"
+        );
+    }
+
+    /// A STEREO signal flows THROUGH a mid-graph node: a stereo source feeds a node
+    /// with a 2-channel input+output port (a per-lane copy), which feeds the master.
+    /// Proves `mix_input_lane` hands the mid node TWO distinct input lanes (L != R)
+    /// and the §4 adaptation carries them end to end. (The general lane-aware mix.)
+    #[test]
+    fn stereo_signal_flows_through_a_mid_graph_node() {
+        use crate::compile::{CompiledProgram, NodeRouting, Source};
+
+        /// Copies each input lane to the matching output lane.
+        struct CopyNode;
+        unsafe impl Send for CopyNode {}
+        impl DspInstance for CopyNode {
+            fn activate(&mut self, _sr: f32, _mb: usize) {}
+            fn process(&mut self, ctx: &mut ProcessCtx<'_, '_>) {
+                let n = ctx.inputs.len().min(ctx.outputs.len());
+                let frames = ctx.nframes;
+                for i in 0..n {
+                    let len = frames.min(ctx.inputs[i].len()).min(ctx.outputs[i].len());
+                    for f in 0..len {
+                        ctx.outputs[i][f] = ctx.inputs[i][f];
+                    }
+                }
+            }
+            fn set_param(&mut self, _id: u16, _v: f32) {}
+        }
+
+        let instances: Vec<Box<dyn DspInstance>> = vec![
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }), // slot 0: stereo source (GraphIn — buffer left intact)
+            Box::new(CopyNode), // slot 1: stereo-in/out copy (rendered)
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }), // slot 2: SpeakerOut master
+        ];
+        let program = CompiledProgram {
+            instances,
+            routing: vec![
+                NodeRouting::default(),
+                // copy node input port 0 fed by the source's port 0.
+                NodeRouting {
+                    inputs: vec![vec![Source { node: 0, port: 0 }]],
+                },
+                // master input port 0 fed by the copy node's port 0.
+                NodeRouting {
+                    inputs: vec![vec![Source { node: 1, port: 0 }]],
+                },
+            ],
+            // Source: 2 lanes L=0.1/R=0.2. Copy: 2 output lanes. Master: none.
+            out_bufs: vec![
+                vec![vec![0.1f32; 4], vec![0.2f32; 4]],
+                vec![vec![0.0f32; 4], vec![0.0f32; 4]],
+                vec![],
+            ],
+            out_channels: vec![2, 2, 1],
+            in_channels: vec![1, 2, 1], // the copy node takes a 2-channel input port
+            bypassed: vec![false, false, false],
+            kinds: vec![
+                PrimitiveKind::GraphIn,
+                PrimitiveKind::Gain,
+                PrimitiveKind::SpeakerOut,
+            ],
+            ids: vec![NodeIdx(1), NodeIdx(2), NodeIdx(3)],
+            id_index: vec![(NodeIdx(1), 0), (NodeIdx(2), 1), (NodeIdx(3), 2)],
+            master_out: 2,
+            block_size: 4,
+            in_scratch: vec![vec![0.0; 4], vec![0.0; 4]], // 2 input lanes for the copy node
+            max_in: 2,
+            max_out: 2,
+            schedule: vec![0, 1, 2],
+        };
+        let mut engine = Engine::new(program);
+
+        let mut l = [0.0f32; 4];
+        let mut r = [0.0f32; 4];
+        {
+            let mut outs: [&mut [f32]; 2] = [&mut l, &mut r];
+            engine.process_block_into(&mut outs, 4);
+        }
+        // The stereo signal survived the trip through the mid node, lane-distinct.
+        assert!(
+            l.iter().all(|&x| (x - 0.1).abs() < 1e-6),
+            "L carried through"
+        );
+        assert!(
+            r.iter().all(|&x| (x - 0.2).abs() < 1e-6),
+            "R carried through"
+        );
     }
 }

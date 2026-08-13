@@ -9,7 +9,7 @@ shells the `faust` BINARY (**Path B**, `crates/ojfaust/src/backend.rs`) to compi
 to `.wasm` and read the `-json` metadata. When `faust` is not on `PATH`, compiling
 returns `FaustError::Unavailable` so the crate still builds + behaves everywhere
 (CI has no faust installed). The optional `libfaust` feature swaps in the
-in-process JIT (Path A), which is a TODO-marked scaffold.
+in-process JIT (Path A), which is documented but not yet implemented.
 
 ```
 cargo build  -p ojfaust                                  # builds anywhere (CLI Path B)
@@ -38,9 +38,9 @@ diagnostic back to the author and retry) from the **terminal** `Unavailable`
 
 ## Enabling the real backend (`--features libfaust`)
 
-The feature currently compiles a **TODO-marked scaffold** in
-`src/backend.rs::native` that returns `FaustError::Unavailable` on call, so it
-cannot masquerade as working or panic in feature-matrix tests. To make it real
+The feature currently compiles an unimplemented `src/backend.rs::native` that
+returns `FaustError::Unavailable` on call, so it cannot masquerade as working or
+panic in feature-matrix tests. To make it real
 you must (a) install the native dependency and (b) implement one of the two paths
 below.
 
@@ -115,6 +115,7 @@ node behaves like any other OpenJammer plugin node in the graph.
 
 ## Lane / status
 
-`crates/ojfaust/**` only. Intentionally a **verifiable scaffold**, not a working
-JIT: the default build + clippy are green; the `libfaust` path is documented and
-TODO-marked pending a native toolchain.
+`crates/ojfaust/**` only. The default CLI Path B is a working compiler (builds +
+clippy green everywhere; compiles real Faust when the `faust` binary is present).
+The optional in-process `libfaust` JIT (Path A) is documented but not yet wired,
+so `--features libfaust` reports Unavailable until a native toolchain implements it.

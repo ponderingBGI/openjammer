@@ -10,20 +10,47 @@
  * DESIGN PRINCIPLES (from the project plan):
  * - The agent is an UNTRUSTED GENERATOR, never a trusted runner. It only ever
  *   EMITS {@link AgentToolCall}s — declarative descriptions of graph mutations
- *   or Faust authoring. NOTHING here executes anything; applying a tool call is
- *   a separate, reviewable step (see {@link applyToolCall} in `./tools`).
- * - Every run is TRANSACTIONAL/REVERSIBLE: the session snapshots the graph
- *   before applying, streams a transcript, and gates the result behind an
- *   explicit Approve / Reject (see `../store/agentSessionStore`).
+ *   or Faust authoring. NOTHING here executes arbitrary code; applying a tool
+ *   call is centralized in {@link applyToolCall} in `./tools`.
+ * - Every run is LIVE/REVERSIBLE: the session applies allowlisted graph verbs as
+ *   they stream, records them through normal graph history, and the player can
+ *   undo with plain Ctrl+Z (see `../store/agentSessionStore`).
  * - AI is NATIVE/HYBRID ONLY. In a plain browser the Tab->AI path is disabled
  *   ("AI requires the desktop app"); only inside Tauri does the Rust backend
  *   spawn Pi. {@link AgentBackend.available} reports which we're in.
  */
 
-import type { NodeType, Position } from '../engine/types';
+import type { NodeType, PortDefinition, Position } from '../engine/types';
 import type { ParamDecl } from '../engine/manifest';
 import type { WorkflowPlan } from './plan';
+import type { Verb } from '../song/verbs';
 import type { Severity } from '@openjammer/oj-protocol';
+
+// ============================================================================
+// Port summaries — the lean port shape the read tools relay to the agent
+// ============================================================================
+
+/**
+ * A node's port as relayed to the agent by the read tools — the LEAN slice of
+ * {@link PortDefinition} the model needs to WIRE correctly: the human NAME (what
+ * `add_connection` and a plan wire reference), the direction, and the signal
+ * type. We never relay ids, positions, or layout, so the per-node payload stays
+ * small even for nodes with dozens of ports. This is the keystone that ends the
+ * guess→reject→retry loop: a read now tells the agent the legal port names.
+ */
+export interface PortSummary {
+    /** The human port NAME shown on the canvas (what a wire references). */
+    name: string;
+    /** Whether the signal flows IN or OUT. */
+    direction: 'input' | 'output';
+    /** The signal type: 'audio' (blue), 'control' (grey), or 'universal'. */
+    type: PortDefinition['type'];
+}
+
+/** Reduce a full {@link PortDefinition} to the lean {@link PortSummary}. */
+export function toPortSummary(p: PortDefinition): PortSummary {
+    return { name: p.name, direction: p.direction, type: p.type };
+}
 
 // ============================================================================
 // Tool calls — the ONLY thing an agent is allowed to emit
@@ -43,27 +70,40 @@ import type { Severity } from '@openjammer/oj-protocol';
  *       (and reverts) atomically.
  * NO app-code self-modify, NO raw WASM, NO running untrusted code on the RT path.
  */
-export type AgentToolName =
-    | 'add_node'
-    | 'remove_node'
-    | 'update_node_data'
-    | 'add_connection'
-    | 'remove_connection'
-    | 'author_dsp_node'
-    | 'author_code_node'
-    | 'get_graph'
-    | 'list_node_types'
-    | 'find_nodes'
-    | 'batch_apply'
-    | 'validate_plan'
-    | 'emit_plan'
+export const AGENT_TOOL_NAMES = [
+    'add_node',
+    'remove_node',
+    'update_node_data',
+    'add_connection',
+    'remove_connection',
+    'author_dsp_node',
+    'author_code_node',
+    'get_graph',
+    'list_node_types',
+    'find_nodes',
+    'batch_apply',
+    'validate_plan',
+    'emit_plan',
     // Diagnostics & settings (the "help me get it working" surface): the agent
     // can READ the on-device logs + environment and READ/WRITE the safe-allowlist
     // settings, so "why is there no sound?" becomes an answerable, fixable question.
-    | 'get_logs'
-    | 'get_diagnostics'
-    | 'get_settings'
-    | 'update_settings';
+    'get_logs',
+    'get_diagnostics',
+    'get_signal',
+    'get_settings',
+    'update_settings',
+    'describe_arrangement',
+    'edit_timeline',
+] as const;
+
+export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
+
+const AGENT_TOOL_NAME_SET: ReadonlySet<string> = new Set(AGENT_TOOL_NAMES);
+
+/** Runtime guard for Pi JSON: never trust a streamed tool name just because TS says so. */
+export function isAgentToolName(name: unknown): name is AgentToolName {
+    return typeof name === 'string' && AGENT_TOOL_NAME_SET.has(name);
+}
 
 /** Arguments for {@link AgentToolName} `add_node`. Mirrors `graphStore.addNode`. */
 export interface AddNodeArgs {
@@ -127,8 +167,8 @@ export interface AuthorDspNodeArgs {
     params?: ParamDecl[];
     /**
      * The content-addressed wasm hash from the native author step (M6). When
-     * present the dynamic id is keyed `ai.wasm.<hash>`; absent → the legacy
-     * `ai.dsp.<sourceHash>` keying (faust unavailable / browser).
+     * present the dynamic id is keyed `ai.wasm.<hash>`; absent → the
+     * `ai.dsp.<sourceHash>` source-keyed id (faust unavailable / browser).
      */
     wasmHash?: string;
 }
@@ -183,7 +223,7 @@ export interface FindNodesArgs {
  * Arguments for `batch_apply` (M3): an ORDERED list of MUTATION sub-calls applied
  * as ONE reversible frame. ALL-OR-NOTHING (D3-A1 fail-closed): if any sub-call
  * fails, the whole frame is reverted. A nested `batch_apply` is rejected (no
- * recursion). The single frame is ONE undo on Reject.
+ * recursion). The single frame is one coherent undoable edit.
  */
 export interface BatchApplyArgs {
     /** The sub-calls to run in order (each a normal {@link AgentToolCall}). */
@@ -228,12 +268,47 @@ export interface GetLogsArgs {
 }
 
 /**
- * Arguments for the READ tool `get_diagnostics`: none. Returns the environment +
- * live audio snapshot (version/channel/executor/isolation/platform, plus whether
- * the AudioContext is running, the measured round-trip latency, sample rate, and
- * the selected output device). SIDE-EFFECT-FREE.
+ * Arguments for the READ tool `get_diagnostics`. With NO `nodeId` it returns the
+ * environment + live audio snapshot (version/channel/executor/isolation/platform,
+ * plus whether the AudioContext is running, the measured round-trip latency,
+ * sample rate, and the selected output device). With a `nodeId` it returns a
+ * NODE-scoped debug snapshot — the node's identity (type / plugin id), its ports,
+ * its data keys (params AS LAST PUSHED, not a live engine read), a best-effort
+ * `degraded` flag, and the recent logs that mention the node — the "why is THIS
+ * node silent?" facet for debugging a custom plugin. SIDE-EFFECT-FREE.
  */
-export type GetDiagnosticsArgs = Record<string, never>;
+export interface GetDiagnosticsArgs {
+    /** A canvas node id to diagnose; omit for the environment-wide snapshot. */
+    nodeId?: string;
+}
+
+/**
+ * Arguments for the READ tool `get_signal`: the `nodeId` whose live output peak to
+ * probe. SIDE-EFFECT-FREE. The one live RT value that catches a node which compiles
+ * and wires correctly yet outputs pure silence (a stuck custom plugin) — reachability
+ * and the degraded flag can't see that; only a real meter read can.
+ */
+export interface GetSignalArgs {
+    /** The canvas node id to probe. */
+    nodeId: string;
+}
+
+/** A node's output level above which we call it "producing sound" (below = silent). */
+export const SIGNAL_SILENCE_FLOOR = 1e-3;
+
+/**
+ * Result of `get_signal`: an INSTANTANEOUS peak read (0–1), or `null` when no live
+ * meter reading is available (the node isn't metered, or audio isn't running). A
+ * single sample — if it reads ~0 once, probe again, since a note may simply be
+ * between transients.
+ */
+export interface SignalProbeResult {
+    nodeId: string;
+    /** Instantaneous output peak in 0–1, or null when no live reading is available. */
+    peak: number | null;
+    /** True when `peak` is present and above {@link SIGNAL_SILENCE_FLOOR}. */
+    hasSignal: boolean;
+}
 
 /**
  * Arguments for the READ tool `get_settings`: none. Returns the current
@@ -273,6 +348,27 @@ export interface SettingsPatch {
     defaultVelocity?: number;
 }
 
+/**
+ * Arguments for the READ tool `describe_arrangement`: none. Returns a readable
+ * summary of the current SONG TIMELINE — tracks (by stable id), clips, notes (count +
+ * pitch range), sections, tempo, and automation, all at bar.beat. SIDE-EFFECT-FREE.
+ * The agent calls it to GROUND itself in the arrangement before editing it (the same
+ * "read the canvas first" discipline `get_graph` serves for the node graph).
+ */
+export type DescribeArrangementArgs = Record<string, never>;
+
+/**
+ * Arguments for `edit_timeline`: an ORDERED list of reversible timeline {@link Verb}s
+ * — the SAME vocabulary a human GUI drag emits — applied live to the ONE Arrangement
+ * and undoable with Ctrl+Z (they ride the shared command-log). Ids for ADDED entities
+ * may be omitted; they are minted for you. Times are PPQN ticks (read `ppq` + bar
+ * positions from `describe_arrangement`). This is how the agent AUTHORS the timeline.
+ */
+export interface EditTimelineArgs {
+    /** The reversible timeline edits to apply, in order, as one undoable step. */
+    verbs: Verb[];
+}
+
 /** Discriminated union of every concrete tool call an agent may emit. */
 export type AgentToolCall =
     | { name: 'add_node'; args: AddNodeArgs }
@@ -290,8 +386,11 @@ export type AgentToolCall =
     | { name: 'emit_plan'; args: EmitPlanArgs }
     | { name: 'get_logs'; args: GetLogsArgs }
     | { name: 'get_diagnostics'; args: GetDiagnosticsArgs }
+    | { name: 'get_signal'; args: GetSignalArgs }
     | { name: 'get_settings'; args: GetSettingsArgs }
-    | { name: 'update_settings'; args: UpdateSettingsArgs };
+    | { name: 'update_settings'; args: UpdateSettingsArgs }
+    | { name: 'describe_arrangement'; args: DescribeArrangementArgs }
+    | { name: 'edit_timeline'; args: EditTimelineArgs };
 
 // ============================================================================
 // Streamed transcript events
@@ -300,7 +399,8 @@ export type AgentToolCall =
 /**
  * One streamed event from a running agent. The backend yields these as the
  * model "thinks", calls tools, and finishes. The UI renders them as a live
- * transcript; tool-call events are also collected so Approve can apply them.
+ * transcript; tool-call events are applied immediately through the allowlisted
+ * graph-tool path.
  */
 /**
  * A UI request surfaced from a Pi extension dialog (`extension_ui_request`):
@@ -317,8 +417,17 @@ export interface AgentUiRequest {
 export type AgentEvent =
     /** Free-form reasoning / narration text from the model. */
     | { kind: 'thought'; text: string }
-    /** A proposed tool call. NOT yet applied — staged for Approve/Reject. */
+    /** Operational status from the Pi runtime; rendered as chrome, not transcript prose. */
+    | { kind: 'status'; message: string }
+    /** An allowlisted OpenJammer tool call to apply through the reversible graph path. */
     | { kind: 'tool-call'; call: AgentToolCall; id: string }
+    /**
+     * A SELF-EDIT: Philia editing its OWN memory/skills (writing pi-memory, learning
+     * a skill, remembering you) — NOT a canvas tool and NOT an "unsupported" line.
+     * It reads as "you editing you": a distinct quiet chip, reversible via Ctrl+K
+     * forget rather than a canvas Ctrl+Z. NOT a terminal event.
+     */
+    | { kind: 'self-edit'; summary: string; id: string }
     /** A terminal success: the agent finished proposing its plan. */
     | { kind: 'result'; summary: string }
     /** A terminal failure (transport error, no backend, model error, ...). */
@@ -336,7 +445,11 @@ export type AgentEvent =
      * the next run / after a restart. NOT a terminal event.
      */
     | { kind: 'session'; sessionId: string }
-    /** A Pi extension UI request (surfaced, not yet interactively answered). */
+    /**
+     * A Pi extension UI request, surfaced to the transcript. Blocking dialogs are
+     * auto-cancelled in the Tauri backend so a run never hangs; driving an
+     * interactive reply is a deferred milestone.
+     */
     | { kind: 'ui-request'; request: AgentUiRequest; id: string };
 
 // ============================================================================
@@ -354,6 +467,15 @@ export interface AgentTask {
      */
     providerKey?: string;
     /**
+     * All provider API keys configured for this app session, keyed by provider id.
+     * Forwarded transiently so Pi can list/select models across configured providers.
+     */
+    providerKeys?: Record<string, string>;
+    /** OpenAI-compatible base URLs configured for this app session, keyed by provider id. */
+    providerBaseUrls?: Record<string, string>;
+    /** Custom model ids configured/typed for this app session, keyed by provider id. */
+    providerCustomModels?: Record<string, string[]>;
+    /**
      * The active provider id (e.g. `'opencode'`). Selects the env var the key is
      * forwarded under (see `ai.rs` `provider_env_var`); omitted → Pi's own config.
      */
@@ -363,11 +485,14 @@ export interface AgentTask {
      * configured default for the provider is used.
      */
     modelId?: string;
+    /** Desired Pi thinking/reasoning level for the next turn. Updated locally by Shift+Tab. */
+    thinkingLevel?: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
     /**
      * YOLO mode (Phase 6): when true the native host drops the OS jail + in-Pi
      * permission-gate and forwards the full shell environment (the real Pi
      * experience). Omitted/false = the default sandbox. Toggling it respawns the
-     * warm child. The graph Approve/Reject gate is unaffected either way.
+     * warm child. The OpenJammer graph-tool allowlist and undoable apply path are
+     * unaffected either way.
      */
     yolo?: boolean;
     /**

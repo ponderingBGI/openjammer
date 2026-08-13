@@ -9,6 +9,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Command } from 'cmdk';
+import { Button } from '@openjammer/oj-ui';
 import { useAgentSessionStore } from '../../store/agentSessionStore';
 import type { SessionInfo } from '../../ai/piSessions';
 
@@ -64,14 +65,13 @@ export function SessionPicker({ onResumed, onCancel }: SessionPickerProps) {
     return (
         <div className="command-bar-sessions">
             <div className="command-bar-ai-header">
-                <button
-                    type="button"
-                    className="command-bar-ai-back"
+                <Button
+                    variant="ghost"
                     onClick={onCancel}
                     aria-label="Back to chat"
                 >
                     ← Chat
-                </button>
+                </Button>
                 <span className="command-bar-ai-badge">Resume</span>
             </div>
             <Command label="Resume a session" loop>

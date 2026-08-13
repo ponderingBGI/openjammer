@@ -1,0 +1,96 @@
+/*
+ * Toggle — a labeled on/off switch. A visually-hidden real checkbox drives a
+ * sketch track + knob (2px ink border, hard-edged, no blur per §4). The knob
+ * slides across the track on toggle; the press is physical (knob nudges down)
+ * but reserves its space so nothing reflows (No-Surprise §4). Styled only via
+ * semantic tokens, so it follows the active theme.
+ */
+.oj-toggle {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    cursor: pointer;
+    font-family: var(--font-sketch);
+}
+
+/* The real control: present for keyboard + screen readers, visually hidden. */
+.oj-toggle__input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+/* The drawn track. */
+.oj-toggle__track {
+    position: relative;
+    flex: none;
+    width: var(--space-xl);
+    height: var(--space-md);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-pill);
+    background: var(--bg-tertiary);
+    transition: background var(--transition-fast);
+}
+
+/* The knob — a small inked disc that slides across the track. */
+.oj-toggle__knob {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: calc(var(--space-md) - var(--space-xs) - 2px);
+    height: calc(var(--space-md) - var(--space-xs) - 2px);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-pill);
+    background: var(--bg-node);
+    transition: transform var(--transition-fast), background var(--transition-fast);
+}
+
+.oj-toggle.is-checked .oj-toggle__track {
+    background: var(--accent-success);
+}
+
+.oj-toggle.is-checked .oj-toggle__knob {
+    /* Slide right by the track width minus the knob and its insets. */
+    transform: translateX(calc(var(--space-xl) - var(--space-md) - 2px));
+    background: var(--text-on-accent);
+}
+
+/* Press-Is-Physical (§4): knob nudges down on click, no layout shift. */
+.oj-toggle:active .oj-toggle__knob {
+    transform: translateY(1px);
+}
+
+.oj-toggle.is-checked:active .oj-toggle__knob {
+    transform: translateX(calc(var(--space-xl) - var(--space-md) - 2px)) translateY(1px);
+}
+
+/* Label + description stack. */
+.oj-toggle__text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.oj-toggle__label {
+    font-size: var(--text-md);
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+
+.oj-toggle__desc {
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+    line-height: 1.5;
+    max-width: 60ch;
+}
+
+.oj-toggle.is-disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}

@@ -5,6 +5,7 @@
 
 import { useState, useCallback, useEffect, memo } from 'react';
 import { toast } from 'sonner';
+import { Button } from '@openjammer/oj-ui';
 import type { GraphNode } from '../../engine/types';
 import { useAudioStore } from '../../store/audioStore';
 import { useProjectStore } from '../../store/projectStore';
@@ -238,22 +239,22 @@ export const RecorderNode = memo(function RecorderNode({ node }: RecorderNodePro
             {/* Record Button */}
             <div className="node-controls">
                 {!isRecording ? (
-                    <button
-                        className="node-btn node-btn-danger"
+                    <Button
+                        variant="danger"
                         onClick={handleStartRecording}
                         disabled={!isAudioContextReady}
                         style={{ flex: 1 }}
                     >
                         ⏺ Start Recording
-                    </button>
+                    </Button>
                 ) : (
-                    <button
-                        className="node-btn node-btn-secondary"
+                    <Button
+                        variant="secondary"
                         onClick={handleStopRecording}
                         style={{ flex: 1 }}
                     >
                         ⏹ Stop Recording
-                    </button>
+                    </Button>
                 )}
             </div>
 
@@ -267,15 +268,15 @@ export const RecorderNode = memo(function RecorderNode({ node }: RecorderNodePro
                             </span>
                             <div className="loop-actions">
                                 {projectName && !recording.savedToProject && (
-                                    <button
-                                        className="node-btn node-btn-success"
+                                    <Button
+                                        variant="success"
                                         onClick={() => handleSaveToProject(recording.id)}
                                         disabled={isSaving === recording.id}
                                         style={{ padding: '2px 6px', fontSize: '10px' }}
                                         title="Save to Project"
                                     >
                                         {isSaving === recording.id ? '...' : '📁'}
-                                    </button>
+                                    </Button>
                                 )}
                                 {recording.savedToProject && (
                                     <span
@@ -285,22 +286,22 @@ export const RecorderNode = memo(function RecorderNode({ node }: RecorderNodePro
                                         ✓
                                     </span>
                                 )}
-                                <button
-                                    className="node-btn node-btn-primary"
+                                <Button
+                                    variant="primary"
                                     onClick={() => handleDownload(recording.id)}
                                     style={{ padding: '2px 6px', fontSize: '10px' }}
                                     title="Download WAV"
                                 >
                                     💾
-                                </button>
-                                <button
-                                    className="node-btn node-btn-danger"
+                                </Button>
+                                <Button
+                                    variant="danger"
                                     onClick={() => handleDelete(recording.id)}
                                     style={{ padding: '2px 6px', fontSize: '10px' }}
                                     title="Delete"
                                 >
                                     ✕
-                                </button>
+                                </Button>
                             </div>
                         </div>
                     ))}

@@ -11,6 +11,7 @@ core (`ojcore`) runs native on the desktop and compiled to WebAssembly in your b
 [![Version](https://img.shields.io/badge/version-0.0.0-orange.svg)](package.json)
 [![Docs](https://img.shields.io/badge/docs-living%20reference-4A7C59.svg)](https://ponderingbgi.github.io/openjammer/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/ponderingBGI/openjammer?utm_source=badge)
 
 </div>
 
@@ -48,7 +49,7 @@ beliefs carry the whole project:
 
 What you get:
 
-- 🎹 **171 instruments out of the box** — distinct procedural voices (piano, strings,
+- 🎹 **133 instruments out of the box** — distinct procedural voices (piano, strings,
   reed, bell, pluck…), zero sample downloads.
 - 🤖 **A Ctrl/Cmd+K AI co-pilot** that builds graphs *and* reads your on-device logs +
   audio diagnostics to fix "there's no sound" — reversibly, undone with plain Ctrl+Z.
@@ -70,12 +71,18 @@ You only need this to hack on OpenJammer itself — players use the links above.
 
 ```bash
 bun install   # bun only — one toolchain, one lockfile
-bun dev        # Vite dev server, prints a localhost URL
+bun dev       # browser dev server (Vite), prints a localhost URL
+bun native        # desktop app, native low-latency engine (first run: bun run oj setup)
+bun native --all  # full hosted-plugin dev loop: VST3 + CLAP (+ AU on macOS)
 ```
 
-Open the printed URL and click **Start OpenJammer**. First workflow: right-click the
-canvas → add a Keyboard node and an Instrument (e.g. Classic Piano), connect them, and
-play the Q–P row — or press **Ctrl/Cmd+K** and ask the AI to build it for you.
+For the browser tier, open the printed URL and click **Start OpenJammer**. For the desktop
+tier, `bun native` opens the app window on its own with the fast scaffold plugin host (no
+JUCE/CMake build); use `bun native --all` for the full hosted-plugin path (VST3 + CLAP,
++ AU on macOS). `bun native --plugins` remains an alias for the same JUCE host.
+First workflow: right-click the canvas → add a Keyboard node and an Instrument (e.g. Classic
+Piano), connect them, and play the Q–P row — or press **Ctrl/Cmd+K** and ask the AI to build it
+for you. Native setup + prerequisites: **[CONTRIBUTING.md](CONTRIBUTING.md#native-desktop-tauri)**.
 
 > OpenJammer uses **`bun`** for every package operation — never `npm`, `yarn`, or `pnpm`
 > (one toolchain, one lockfile). See **[CONTRIBUTING.md](CONTRIBUTING.md)**.
@@ -85,9 +92,9 @@ play the Q–P row — or press **Ctrl/Cmd+K** and ask the AI to build it for yo
 ## How it works — the core
 
 OpenJammer is powered by **`ojcore`**: one minimal, real-time-safe **Rust** audio core
-that compiles to **native** (low-latency `cpal`, with VST3/AU/CLAP plugin hosting via a
-JUCE/CLAP host) **and** to **WebAssembly** (the zero-install AudioWorklet PWA), driven by
-one shared **React 19 + TypeScript** control plane and selected by `OJ_EXECUTOR`. The
+that compiles to **native** (low-latency `cpal`; optional VST3/AU/CLAP hosting via JUCE or
+pure-Rust CLAP feature flags) **and** to **WebAssembly** (the zero-install AudioWorklet PWA),
+driven by one shared **React 19 + TypeScript** control plane and selected by `VITE_OJ_EXECUTOR`. The
 audio thread never allocates, locks, or blocks — a guarantee enforced mechanically in CI.
 
 **Stack:** Bun · React 19 + TypeScript · Rust `ojcore` · Zustand · Tauri (desktop) ·
@@ -120,11 +127,16 @@ the two beliefs, the code values, and the playbook — is in **[agents.md](agent
 
 ## License
 
-OpenJammer is licensed under the **[AGPL-3.0 License](LICENSE)**:
+OpenJammer is licensed under **AGPL-3.0-only WITH the OpenJammer Plugin Exception**
+([LICENSE](LICENSE) + [LICENSE-EXCEPTION.md](LICENSE-EXCEPTION.md)):
 
 - ✅ Free to use, modify, and distribute.
 - ✅ Open source, community-driven.
-- ⚠️ If you run a modified version as a web service, you must share your source code.
+- ✅ **Plugins may carry any license — including paid, proprietary ones** — via the Plugin Exception.
+- ⚠️ If you run a modified version as a web service, you must share your source code (not your plugins).
+
+See [LICENSING.md](LICENSING.md) for the plain-language explainer and [TRADEMARK.md](TRADEMARK.md) for
+the brand policy.
 
 ---
 

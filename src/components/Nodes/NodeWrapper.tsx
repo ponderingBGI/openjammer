@@ -2,7 +2,7 @@
  * Node Wrapper - Handles node positioning, selection, and dragging
  */
 
-import { useCallback, useRef, useState, useMemo, useEffect, memo } from 'react';
+import { useCallback, useRef, useState, useMemo, useEffect, memo, type ReactNode } from 'react';
 import type { GraphNode, Position } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -15,7 +15,7 @@ import { KeyboardVisualNode } from './KeyboardVisualNode';
 import { InstrumentVisualNode } from './InstrumentVisualNode';
 import { LooperNode } from './LooperNode';
 import { EffectNode } from './EffectNode';
-import { AmplifierNode } from './AmplifierNode';
+import { MultiplierNode } from './MultiplierNode';
 import { SpeakerNode } from './SpeakerNode';
 import { RecorderNode } from './RecorderNode';
 import { CanvasIONode } from './CanvasIONode';
@@ -30,10 +30,12 @@ import { MiniLab3Node } from './MiniLab3Node';
 import { MiniLab3VisualNode } from './MiniLab3VisualNode';
 import { SamplerNode } from './SamplerNode';
 import { SamplerVisualNode } from './SamplerVisualNode';
+import { SongNode } from './SongNode';
 import { AutoParamPanel } from '../params/AutoParamPanel';
 import { manifestFor, manifestForDynamic } from '../../engine/manifest';
 import { resolveNodeDefinition } from '../../engine/registry';
 import { getDynamicPlugin } from '../../engine/dynamicRegistry';
+import { NodeFrame, NodeShell, PortRow } from '@openjammer/oj-ui';
 import './BaseNode.css';
 
 interface NodeWrapperProps {
@@ -62,11 +64,11 @@ const SCHEMATIC_TYPES = [
     'subtract',
     'library',
     'sampler',
-    'sampler-visual'
+    'sampler-visual',
+    'song'
 ];
 
 export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps) {
-    const nodeRef = useRef<HTMLDivElement>(null);
     const [isDragging, setIsDragging] = useState(false);
     const dragStart = useRef<Position>({ x: 0, y: 0 });
     const nodeStart = useRef<Position>({ x: 0, y: 0 });
@@ -99,7 +101,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     const setHoverTarget = useCanvasStore((s) => s.setHoverTarget);
 
     const isSelected = selectedNodeIds.has(node.id);
-    // Highlighted while the AI agent's (not-yet-approved) run added this node.
+    // Highlighted while the AI agent's live run has just added this node.
     const isAgentPending = useIsAgentPending(node.id);
     const isSchematic = SCHEMATIC_TYPES.includes(node.type);
 
@@ -433,6 +435,8 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
                 return <SamplerNode {...schematicProps} />;
             case 'sampler-visual':
                 return <SamplerVisualNode {...schematicProps} />;
+            case 'song':
+                return <SongNode {...schematicProps} />;
         }
     }
 
@@ -449,6 +453,28 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
             ? displayDefinition.name
             : node.type.charAt(0).toUpperCase() + node.type.slice(1);
 
+    // Invariant #4a: a non-modal "(missing plugin)" badge when this node degraded
+    // to a passthrough stub — a hosted plugin missing/incompatible on load, or one
+    // that faulted at runtime. Engine-derived (`node.data.pluginLoadError`, off the
+    // undo history); clears automatically when the plugin resolves again. Renders
+    // for ANY node type via the shared NodeShell header (a held note beats a glitch:
+    // the project stays open and the player sees what's missing).
+    const pluginDegraded = (node.data as { pluginLoadError?: boolean }).pluginLoadError === true;
+    const headerTitleNode: ReactNode = pluginDegraded ? (
+        <>
+            {headerTitle}
+            <span
+                className="node-plugin-error-badge"
+                title="This plugin is missing or crashed — audio is passing through. It will reconnect when the plugin returns (rescan your plugins)."
+                aria-label="Plugin missing or crashed"
+            >
+                !
+            </span>
+        </>
+    ) : (
+        headerTitle
+    );
+
     const renderNodeContent = () => {
         // M6: an AI-authored code node carries an OPEN `pluginId` resolving to a
         // dynamic plugin with `ui:'auto'` + the node's REAL compiled params. Render
@@ -458,7 +484,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
             const dynamic = getDynamicPlugin(node.pluginId);
             if (dynamic) {
                 const dynManifest = manifestForDynamic(node.pluginId, dynamic);
-                if (dynManifest.params.length > 0) {
+                if (dynManifest.ui === 'auto') {
                     return <AutoParamPanel node={node} manifest={dynManifest} />;
                 }
             }
@@ -466,8 +492,8 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
         switch (node.type) {
             case 'effect':
                 return <EffectNode node={node} />;
-            case 'amplifier':
-                return <AmplifierNode node={node} />;
+            case 'multiplier':
+                return <MultiplierNode node={node} />;
             case 'recorder':
                 return <RecorderNode node={node} />;
             default: {
@@ -484,71 +510,79 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
         }
     };
 
+    const renderPort = (port: GraphNode['ports'][number], side: 'input' | 'output') => {
+        // GATED port (declared but not engine-wired yet): render it visibly inert
+        // — dimmed, a "why" tooltip, and NO pointer handlers — so a player can't
+        // start/land a connection that would silently do nothing. It stays in the
+        // DOM so it lights up the instant its routing lands; canConnect already
+        // rejects it as a belt-and-braces guard.
+        if (port.disabled) {
+            return (
+                <PortRow
+                    key={port.id}
+                    side={side}
+                    kind={port.type === 'audio' ? 'audio' : 'control'}
+                    connected={false}
+                    hideLabel={!!port.hideExternalLabel}
+                    label={port.name}
+                    className="is-disabled"
+                    title={port.disabledReason}
+                    aria-disabled={true}
+                    data-node-id={node.id}
+                    data-port-id={port.id}
+                    data-port-type={port.type}
+                    data-port-disabled="true"
+                />
+            );
+        }
+        // Universal ports (e.g. the Multiplier's in/out) render violet and adopt
+        // the resolved wire color once typed; audio is blue, everything else grey.
+        const portKind = port.type === 'audio' ? 'audio' : port.type === 'universal' ? 'universal' : 'control';
+        const resolved =
+            (node.data as { resolvedType?: 'audio' | 'control' | null }).resolvedType ??
+            port.resolvedType ??
+            undefined;
+        return (
+            <PortRow
+                key={port.id}
+                side={side}
+                kind={portKind}
+                {...(port.type === 'universal' && resolved ? { resolvedKind: resolved } : {})}
+                connected={hasConnection(port.id)}
+                hideLabel={!!port.hideExternalLabel}
+                label={port.name}
+                data-node-id={node.id}
+                data-port-id={port.id}
+                data-port-type={port.type}
+                onMouseDown={(e: React.MouseEvent) => handlePortMouseDown(port.id, e)}
+                onMouseUp={(e: React.MouseEvent) => handlePortMouseUp(port.id, e)}
+                onMouseEnter={() => handlePortMouseEnter(port.id)}
+                onMouseLeave={handlePortMouseLeave}
+            />
+        );
+    };
+
     return (
-        <div
-            ref={nodeRef}
-            className={`node ${node.type} ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isAgentPending ? 'agent-pending' : ''}`}
-            style={{
-                left: node.position.x,
-                top: node.position.y
-            }}
+        <NodeFrame
+            position={node.position}
+            dragging={isDragging}
+            className={`node ${node.type}`}
             onClick={(e) => e.stopPropagation()}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}
         >
-            {/* Header */}
-            <div className="node-header" onMouseDown={handleHeaderMouseDown}>
-                <span className="node-title">{headerTitle}</span>
-                <span className="node-type">{node.category}</span>
-            </div>
-
-            {/* Ports */}
-            <div className="node-ports">
-                <div className="node-ports-left">
-                    {inputPorts.map((port) => (
-                        <div
-                            key={port.id}
-                            className={`port port-input`}
-                            onMouseDown={(e) => handlePortMouseDown(port.id, e)}
-                            onMouseUp={(e) => handlePortMouseUp(port.id, e)}
-                            onMouseEnter={() => handlePortMouseEnter(port.id)}
-                            onMouseLeave={handlePortMouseLeave}
-                        >
-                            <div
-                                className={`port-dot ${port.type === 'audio' ? 'audio-input' : 'control'} ${hasConnection(port.id) ? 'connected' : ''}`}
-                                data-node-id={node.id}
-                                data-port-id={port.id}
-                            />
-                            {!port.hideExternalLabel && <span className="port-label">{port.name}</span>}
-                        </div>
-                    ))}
-                </div>
-
-                <div className="node-ports-right">
-                    {outputPorts.map((port) => (
-                        <div
-                            key={port.id}
-                            className={`port port-output`}
-                            onMouseDown={(e) => handlePortMouseDown(port.id, e)}
-                            onMouseUp={(e) => handlePortMouseUp(port.id, e)}
-                            onMouseEnter={() => handlePortMouseEnter(port.id)}
-                            onMouseLeave={handlePortMouseLeave}
-                        >
-                            {!port.hideExternalLabel && <span className="port-label">{port.name}</span>}
-                            <div
-                                className={`port-dot ${port.type === 'audio' ? 'audio-output' : 'control'} ${hasConnection(port.id) ? 'connected' : ''}`}
-                                data-node-id={node.id}
-                                data-port-id={port.id}
-                            />
-                        </div>
-                    ))}
-                </div>
-            </div>
-
-            {/* Content */}
-            <div className="node-content">
+            <NodeShell
+                title={headerTitleNode}
+                nodeType={node.category}
+                selected={isSelected}
+                dragging={isDragging}
+                agentPending={isAgentPending}
+                headerProps={{ onMouseDown: handleHeaderMouseDown }}
+                inputs={inputPorts.map((port) => renderPort(port, 'input'))}
+                outputs={outputPorts.map((port) => renderPort(port, 'output'))}
+            >
                 {renderNodeContent()}
-            </div>
-        </div>
+            </NodeShell>
+        </NodeFrame>
     );
 });

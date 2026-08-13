@@ -27,9 +27,17 @@
 //! `Acquire`/`Release` pairing on those two indices is what synchronizes the
 //! data bytes — there is no lock and no CAS, so both operations are wait-free.
 
-#![cfg_attr(not(test), no_std)]
+#![cfg_attr(not(any(test, loom)), no_std)]
 
+// Concurrency primitives: the real ones in production, loom's instrumented ones
+// under `--cfg loom` so the nightly model checker can exhaustively explore the
+// SPSC interleavings. The `cfg(not(loom))` path below is byte-for-byte the shipping
+// code, so loom support cannot change production behaviour (verified by the normal
+// `cargo test` run, which builds the `not(loom)` path).
+#[cfg(not(loom))]
 use core::sync::atomic::{AtomicU32, Ordering};
+#[cfg(loom)]
+use loom::sync::atomic::{AtomicU32, Ordering};
 
 /// Size of the length prefix prepended to every frame, in bytes.
 const LEN_PREFIX: usize = 4;
@@ -77,9 +85,21 @@ pub struct ByteRing<const N: usize> {
     read: AtomicU32,
     /// Constant data capacity in bytes, mirrored into the buffer for JS.
     capacity: u32,
-    /// Inline data region.
+    /// Inline data region. Under `--cfg loom` it is wrapped in loom's tracked cell
+    /// so the model checker observes the producer/consumer byte accesses; the
+    /// production type is the bare array (the frozen `#[repr(C)]` SAB layout).
+    #[cfg(not(loom))]
     data: [u8; N],
+    #[cfg(loom)]
+    data: loom::cell::UnsafeCell<[u8; N]>,
 }
+
+// SAFETY (loom build only): the SPSC contract (one producer owns `write`, one
+// consumer owns `read`, synchronized by the Acquire/Release pairing) is exactly
+// what loom is asked to verify; loom's `UnsafeCell` is `!Sync`, so we assert it for
+// the model. Production is auto-`Sync` (bare array + atomics) and untouched.
+#[cfg(loom)]
+unsafe impl<const N: usize> Sync for ByteRing<N> {}
 
 impl<const N: usize> Default for ByteRing<N> {
     fn default() -> Self {
@@ -100,7 +120,10 @@ impl<const N: usize> ByteRing<N> {
             write: AtomicU32::new(0),
             read: AtomicU32::new(0),
             capacity: N as u32,
+            #[cfg(not(loom))]
             data: [0u8; N],
+            #[cfg(loom)]
+            data: loom::cell::UnsafeCell::new([0u8; N]),
         }
     }
 
@@ -119,13 +142,34 @@ impl<const N: usize> ByteRing<N> {
         let first = core::cmp::min(src.len(), N - start);
         // SAFETY: producer is the sole writer of these bytes; the consumer
         // cannot read them until `write` is published with a Release store.
-        let cell = self.data.as_ptr() as *mut u8;
-        unsafe {
-            core::ptr::copy_nonoverlapping(src.as_ptr(), cell.add(start), first);
-            if first < src.len() {
-                core::ptr::copy_nonoverlapping(src.as_ptr().add(first), cell, src.len() - first);
+        #[cfg(not(loom))]
+        {
+            let cell = self.data.as_ptr() as *mut u8;
+            unsafe {
+                core::ptr::copy_nonoverlapping(src.as_ptr(), cell.add(start), first);
+                if first < src.len() {
+                    core::ptr::copy_nonoverlapping(
+                        src.as_ptr().add(first),
+                        cell,
+                        src.len() - first,
+                    );
+                }
             }
         }
+        #[cfg(loom)]
+        self.data.with_mut(|p| {
+            let cell = p as *mut u8;
+            unsafe {
+                core::ptr::copy_nonoverlapping(src.as_ptr(), cell.add(start), first);
+                if first < src.len() {
+                    core::ptr::copy_nonoverlapping(
+                        src.as_ptr().add(first),
+                        cell,
+                        src.len() - first,
+                    );
+                }
+            }
+        });
     }
 
     /// Copies `len` bytes out of the data region starting at masked index `at`,
@@ -135,20 +179,37 @@ impl<const N: usize> ByteRing<N> {
         let mask = (N - 1) as u32;
         let start = (at & mask) as usize;
         let first = core::cmp::min(dst.len(), N - start);
-        let cell = self.data.as_ptr();
         // SAFETY: these bytes were published by the producer's Release store on
         // `write`, observed via this consumer's Acquire load; they are stable
         // until the consumer advances `read`.
-        unsafe {
-            core::ptr::copy_nonoverlapping(cell.add(start), dst.as_mut_ptr(), first);
-            if first < dst.len() {
-                core::ptr::copy_nonoverlapping(
-                    cell,
-                    dst.as_mut_ptr().add(first),
-                    dst.len() - first,
-                );
+        #[cfg(not(loom))]
+        {
+            let cell = self.data.as_ptr();
+            unsafe {
+                core::ptr::copy_nonoverlapping(cell.add(start), dst.as_mut_ptr(), first);
+                if first < dst.len() {
+                    core::ptr::copy_nonoverlapping(
+                        cell,
+                        dst.as_mut_ptr().add(first),
+                        dst.len() - first,
+                    );
+                }
             }
         }
+        #[cfg(loom)]
+        self.data.with(|p| {
+            let cell = p as *const u8;
+            unsafe {
+                core::ptr::copy_nonoverlapping(cell.add(start), dst.as_mut_ptr(), first);
+                if first < dst.len() {
+                    core::ptr::copy_nonoverlapping(
+                        cell,
+                        dst.as_mut_ptr().add(first),
+                        dst.len() - first,
+                    );
+                }
+            }
+        });
     }
 
     /// Pushes one length-prefixed frame. Single producer only.

@@ -62,6 +62,10 @@ function migrateNodePorts(node: GraphNode): GraphNode {
 
     node.ports = node.ports
         .filter(port => !(node.type === 'looper' && port.id === 'sample-out'))
+        // SEAM-1: the library node's only live seam is `sample-out` (the sampler PCM
+        // feed). Its former `audio-out` / `trigger` ports had no engine consumer —
+        // drop them from saved projects so no dead port lingers on the canvas.
+        .filter(port => !(node.type === 'library' && (port.id === 'audio-out' || port.id === 'trigger')))
         .map(port => ({
             ...port,
             type: (port.type as string) === 'technical' ? 'control' : port.type
@@ -116,7 +120,7 @@ export function getNodeDimensions(node: GraphNode): { width: number; height: num
             };
         }
         default:
-            // Standard nodes (microphone, effect, amplifier, recorder)
+            // Standard nodes (microphone, effect, multiplier, recorder)
             return {
                 width: NODE_DIMENSIONS.DEFAULT_WIDTH,
                 height: NODE_DIMENSIONS.DEFAULT_HEIGHT
@@ -227,6 +231,13 @@ interface GraphStore {
     undo: () => void;
     redo: () => void;
     pushHistory: () => void;
+    /** Begin a user gesture: brackets the following param mutations into ONE undo
+     *  entry (pre-gesture state is snapshotted on the first mutation). Nestable;
+     *  pair every call with {@link endGesture}. Mutations outside a gesture are
+     *  not recorded, so system/per-frame writes never spam history. */
+    beginGesture: () => void;
+    /** End a gesture started with {@link beginGesture}. */
+    endGesture: () => void;
 
     // Getters
     getNode: (nodeId: string) => GraphNode | undefined;
@@ -273,6 +284,27 @@ function rebuildConnectionIndex(connections: Map<string, Connection>): Map<strin
     return index;
 }
 
+// ---------------------------------------------------------------------------
+// Gesture coalescing for undo (REV-1). A user gesture — a scrub/drag, or a single
+// discrete edit — brackets a run of param mutations into ONE undo entry. The
+// pre-gesture snapshot is DEFERRED to the first actual mutation inside the
+// gesture, so an empty gesture creates no history. Mutations OUTSIDE a gesture
+// (system events like MIDI device propagation, per-frame writes) take NO snapshot
+// — so this is ZERO regression until a UI call site opts in via beginGesture()/
+// endGesture(). Module-scoped: transient (never persisted) and correct for the
+// process-wide singleton store.
+// ---------------------------------------------------------------------------
+let _gestureDepth = 0;
+let _gestureSnapshotted = false;
+
+/** Snapshot history ONCE, before the first mutation of an active gesture. */
+function gestureSnapshot(get: () => GraphStore): void {
+    if (_gestureDepth > 0 && !_gestureSnapshotted) {
+        _gestureSnapshotted = true;
+        get().pushHistory();
+    }
+}
+
 export const useGraphStore = create<GraphStore>()(
     persist(
         (set, get) => ({
@@ -314,8 +346,20 @@ export const useGraphStore = create<GraphStore>()(
                 });
             },
 
+            beginGesture: () => {
+                _gestureDepth += 1;
+            },
+
+            endGesture: () => {
+                if (_gestureDepth > 0) _gestureDepth -= 1;
+                if (_gestureDepth === 0) _gestureSnapshotted = false;
+            },
+
             // Undo
             undo: () => {
+                // A jump through history ends any in-flight gesture cleanly.
+                _gestureDepth = 0;
+                _gestureSnapshotted = false;
                 const state = get();
                 if (state.historyIndex < 0) return;
 
@@ -346,6 +390,8 @@ export const useGraphStore = create<GraphStore>()(
 
             // Redo
             redo: () => {
+                _gestureDepth = 0;
+                _gestureSnapshotted = false;
                 const state = get();
                 if (state.historyIndex >= state.history.length - 1) return;
 
@@ -506,6 +552,7 @@ export const useGraphStore = create<GraphStore>()(
                     return {
                         nodes: newNodes,
                         connections: newConnections,
+                        connectionsByNode: rebuildConnectionIndex(newConnections),
                         rootNodeIds: newRootNodeIds,
                         version: state.version + 1
                     };
@@ -580,6 +627,7 @@ export const useGraphStore = create<GraphStore>()(
                     return {
                         nodes: newNodes,
                         connections: newConnections,
+                        connectionsByNode: rebuildConnectionIndex(newConnections),
                         selectedNodeIds: newSelectedNodes,
                         rootNodeIds: newRootNodeIds,
                         version: state.version + 1
@@ -599,6 +647,7 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             updateNodeData: (nodeId, data) => {
+                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
@@ -659,6 +708,7 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             updateNodePorts: (nodeId, ports) => {
+                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
@@ -670,6 +720,7 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             updateNodeType: (nodeId, type) => {
+                gestureSnapshot(get);
                 const definition = getNodeDefinition(type);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
@@ -700,6 +751,7 @@ export const useGraphStore = create<GraphStore>()(
 
             // Instrument Row Actions
             updateInstrumentRow: (nodeId, rowId, updates) => {
+                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
@@ -733,6 +785,7 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             updateKeyGain: (nodeId, rowId, keyIndex, gain) => {
+                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
@@ -762,6 +815,7 @@ export const useGraphStore = create<GraphStore>()(
 
             // Sampler Row Actions
             updateSamplerRow: (nodeId, rowId, updates) => {
+                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node || node.type !== 'sampler') return state;
@@ -1239,8 +1293,8 @@ export const useGraphStore = create<GraphStore>()(
                             resolvedType = targetPort.type as 'audio' | 'control';
                         }
 
-                        // Update source node if it has universal ports (add/subtract)
-                        if ((sourceNode.type === 'add' || sourceNode.type === 'subtract') &&
+                        // Update source node if it has universal ports (add/subtract/multiplier)
+                        if ((sourceNode.type === 'add' || sourceNode.type === 'subtract' || sourceNode.type === 'multiplier') &&
                             sourcePort.type === 'universal') {
                             const currentSource = newNodes.get(sourceNodeId) || sourceNode;
                             newNodes.set(sourceNodeId, {
@@ -1249,8 +1303,8 @@ export const useGraphStore = create<GraphStore>()(
                             });
                         }
 
-                        // Update target node if it has universal ports (add/subtract)
-                        if ((targetNode.type === 'add' || targetNode.type === 'subtract') &&
+                        // Update target node if it has universal ports (add/subtract/multiplier)
+                        if ((targetNode.type === 'add' || targetNode.type === 'subtract' || targetNode.type === 'multiplier') &&
                             targetPort.type === 'universal') {
                             const currentTarget = newNodes.get(targetNodeId) || targetNode;
                             newNodes.set(targetNodeId, {
@@ -1283,7 +1337,7 @@ export const useGraphStore = create<GraphStore>()(
 
                         for (const nodeId of nodesToCheck) {
                             const node = newNodes.get(nodeId);
-                            if (node && (node.type === 'add' || node.type === 'subtract')) {
+                            if (node && (node.type === 'add' || node.type === 'subtract' || node.type === 'multiplier')) {
                                 // Check if node has any remaining connections
                                 const remainingConnections = Array.from(newConnections.values()).some(
                                     conn => conn.sourceNodeId === nodeId || conn.targetNodeId === nodeId

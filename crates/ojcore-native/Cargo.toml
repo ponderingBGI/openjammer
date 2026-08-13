@@ -17,10 +17,17 @@ path = "src/bin/render.rs"
 required-features = ["demo"]
 
 [features]
-demo = ["dep:ojinstrument"]
+# The offline `render` audition tool: instrument loaders + JSON (graph in / report
+# out). All three are pulled ONLY here so the lean host build stays serde-free.
+demo = ["dep:ojinstrument", "dep:serde", "dep:serde_json"]
 # L3 — the SQLite/FTS5 persistent log store. Optional so the lean host build
 # stays free of the bundled-SQLite C compile; CI's logstore leg turns it on.
 persist = ["dep:rusqlite"]
+# The agent's PRIMARY creative mode, device-free: `render --code-node ID=src.dsp`
+# compiles an authored faust source to a native .dll and hosts it via ojwasm as a
+# real WasmHost node, so the offline render plays the agent's OWN instrument. Pulls
+# ojwasm[native-host] (libloading); kept optional so the lean host build stays clean.
+author-host = ["dep:ojwasm"]
 
 [dependencies]
 # Engine core (std feature on: we need CommandQueue/CommandConsumer + Engine).
@@ -28,6 +35,16 @@ ojcore = { path = "../ojcore" }
 ojproto = { path = "../ojproto" }
 # Built-in instruments — only for the `demo` render bin (optional, feature-gated).
 ojinstrument = { path = "../ojinstrument", optional = true }
+# Native host for agent-authored faust code nodes (the `author-host` feature):
+# compiles faust -> .dll and hosts it behind the DspInstance trait. Optional.
+ojwasm = { path = "../ojwasm", optional = true, features = ["native-host"] }
+
+# The offline `render` audition tool deserializes an `OjGraph` (+ a note/param
+# schedule) and serializes an `AudioReport` so an agent/CI can "play this graph and
+# read what it sounds like". Optional + `demo`-gated — the host audio path never
+# touches serde. serde derive comes from the workspace dep.
+serde = { workspace = true, optional = true }
+serde_json = { version = "1.0.150", optional = true }
 
 # Wait-free SPSC ring for the off-RT Recorder capture path (U-STATEFUL): the
 # audio callback writes f32 frames in, the control thread drains them out. Same
@@ -49,7 +66,7 @@ hound = "3.5.1"
 # L3 — SQLite + FTS5 persistent log store (optional; the `persist` feature).
 # `bundled` compiles SQLite from source with FTS5 enabled, so there is no system
 # sqlite dependency and FTS5 is guaranteed present on every target.
-rusqlite = { version = "0.32", optional = true, features = ["bundled"] }
+rusqlite = { version = "0.40.2", optional = true, features = ["bundled"] }
 
 # Promote the audio callback thread to realtime scheduling priority. `dbus` is
 # off: we use the direct pthread/SCHED_FIFO path, not the desktop RT portal.

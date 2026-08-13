@@ -5,6 +5,7 @@
  */
 
 import { useMemo } from 'react';
+import { Button } from '@openjammer/oj-ui';
 import { getPresetRegistry } from '../../midi';
 import './MIDIDeviceCard.css';
 
@@ -41,7 +42,7 @@ export function MIDIDeviceCard({
     const displayManufacturer = manufacturer || preset?.manufacturer || 'Unknown';
 
     return (
-        <button
+        <Button
             className={`midi-device-card ${isConnected ? 'connected' : ''}`}
             onClick={onClick}
             type="button"
@@ -64,6 +65,6 @@ export function MIDIDeviceCard({
                     <span>Connected</span>
                 </div>
             )}
-        </button>
+        </Button>
     );
 }

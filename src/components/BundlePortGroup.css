@@ -72,46 +72,6 @@
     margin-left: 4px;
 }
 
-/* Bundle port marker (thicker than regular ports) */
-.bundle-port-marker {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    border: 2px solid var(--port-border, #666);
-    background-color: var(--port-bg, #333);
-    cursor: crosshair;
-    transition: border-color 0.15s, background-color 0.15s, transform 0.1s;
-    flex-shrink: 0;
-}
-
-.bundle-port-marker:hover {
-    transform: scale(1.2);
-    border-color: var(--port-hover-border, #fff);
-}
-
-.bundle-port-marker.connected {
-    background-color: var(--port-connected-bg, #4a9eff);
-    border-color: var(--port-connected-border, #6ab7ff);
-}
-
-/* Control port colors for bundle */
-.bundle-port-marker.control-port {
-    border-color: var(--control-port-color, #f0a020);
-}
-
-.bundle-port-marker.control-port.connected {
-    background-color: var(--control-port-color, #f0a020);
-}
-
-/* Audio port colors for bundle */
-.bundle-port-marker.audio-port {
-    border-color: var(--audio-port-color, #4a9eff);
-}
-
-.bundle-port-marker.audio-port.connected {
-    background-color: var(--audio-port-color, #4a9eff);
-}
-
 /* Expanded channels container */
 .bundle-channels {
     display: flex;
@@ -173,7 +133,7 @@
 
 /* Channel label */
 .bundle-channel-label {
-    color: var(--text-secondary, #aaa);
+    color: var(--text-secondary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -181,32 +141,23 @@
     flex: 1;
 }
 
-/* Channel port marker (smaller, visual only) */
+/* Channel port marker (smaller, visual only) — semantic wiring colors, matching
+   the oj-ui <Port> the real bundle port now uses (no orphan-token fallbacks). */
 .bundle-channel-marker {
     width: 6px;
     height: 6px;
     border-radius: 50%;
-    border: 1px solid var(--port-border, #666);
-    background-color: var(--port-bg, #333);
+    border: 1px solid var(--sketch-black);
+    background-color: var(--bg-canvas);
     flex-shrink: 0;
 }
 
 .bundle-channel-marker.control-port {
-    border-color: var(--control-port-color, #f0a020);
-    background-color: rgba(240, 160, 32, 0.3);
+    background-color: var(--control-output);
 }
 
 .bundle-channel-marker.audio-port {
-    border-color: var(--audio-port-color, #4a9eff);
-    background-color: rgba(74, 158, 255, 0.3);
-}
-
-/* Collapsed state indicator */
-.bundle-port-group.collapsed .bundle-port-marker {
-    /* Slightly larger to indicate it's a bundle */
-    width: 14px;
-    height: 14px;
-    box-shadow: 0 0 4px rgba(240, 160, 32, 0.4);
+    background-color: var(--audio-output);
 }
 
 /* Animation for expansion */

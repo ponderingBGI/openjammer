@@ -4,6 +4,12 @@
 **Date**: 2026-01-17
 **Target**: Sub-20ms latency with 100+ simultaneous nodes
 
+> **Historical (2026-01).** Written against the pre-`ojcore` architecture (Tone.js /
+> Web Audio API). The audio path has since migrated to `ojcore` — `ojcore-wasm` in an
+> AudioWorklet (~15–25 ms browser) and native `cpal` (<5 ms desktop). Read this as a
+> forward-looking GPU-strategy note; the "Current:" code-path references below
+> describe the retired engine, not today's.
+
 ---
 
 ## Executive Summary
@@ -147,7 +153,7 @@ Loop AudioBuffer[] → WebGPU Compute Shader (parallel)
 
 ### 2.4 Advanced Waveform Synthesis (MEDIUM PRIORITY)
 
-**Current**: WebAudioFont & sample-based synthesis (CPU)
+**Current**: Procedural additive/Karplus voice synthesis (src/audio/voiceSynth.ts + ojcore-dsp), zero sample assets (CPU)
 **Proposed**: GPU-accelerated **wavetable synthesis**
 
 **Use Cases**:

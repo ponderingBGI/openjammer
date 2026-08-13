@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from '@openjammer/oj-ui';
 import { ScrollContainer } from '../common/ScrollContainer';
 import './Guide.css';
 
@@ -59,13 +60,15 @@ export function GuideContainer({
             <h2 id="guide-title" className="guide-header-title">{title}</h2>
             {subtitle && <p className="guide-header-subtitle">{subtitle}</p>}
           </div>
-          <button
+          <Button
+            variant="ghost"
+            iconOnly
             className="guide-close-btn"
             onClick={onClose}
             aria-label="Close guide"
           >
             <CloseIcon />
-          </button>
+          </Button>
         </div>
 
         {/* Scrollable Content */}

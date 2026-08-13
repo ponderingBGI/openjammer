@@ -70,7 +70,7 @@ like:
 
 The two beliefs the whole project rests on — *perception is the medium* and *a minimal
 core made infinite by everyone* — are stated in full in the working covenant
-([.agent/workflows/agents.md](.agent/workflows/agents.md)). Here is how they, and the
+([agents.md](agents.md)). Here is how they, and the
 craft underneath them, become design decisions:
 
 1. **Perception is the medium.** Felt latency and a glitch-free signal are the bar, not a

@@ -1,14 +1,19 @@
 /**
- * MIDI Device Browser - Full-screen modal for selecting MIDI devices/presets
+ * MIDI Device Browser - modal for selecting MIDI devices/presets
  *
  * Features:
  * - Search/filter by device name or manufacturer
  * - Card grid layout for device presets
  * - "Generic Device" option always visible
  * - ESC to close
+ *
+ * The overlay chrome (portal, scrim, Escape, focus-trap, click-outside) is the
+ * oj-ui Modal; the header strip is a PanelHeader and the search field is an
+ * oj-ui Input. The device cards (MIDIDeviceCard) and section layout are kept.
  */
 
 import { useCallback, useMemo } from 'react';
+import { Modal, PanelHeader, Input, Kbd } from '@openjammer/oj-ui';
 import { useMIDIStore } from '../../store/midiStore';
 import { getPresetRegistry } from '../../midi';
 import { MIDIDeviceCard } from './MIDIDeviceCard';
@@ -159,107 +164,67 @@ export function MIDIDeviceBrowser({ onSelectDevice }: MIDIDeviceBrowserProps) {
         [onSelectDevice, closeBrowser]
     );
 
-    // Handle keyboard shortcuts
-    const handleKeyDown = useCallback(
-        (e: React.KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                closeBrowser();
-            }
-        },
-        [closeBrowser]
-    );
-
-    // Handle backdrop click
-    const handleBackdropClick = useCallback(
-        (e: React.MouseEvent) => {
-            if (e.target === e.currentTarget) {
-                closeBrowser();
-            }
-        },
-        [closeBrowser]
-    );
-
-    if (!isOpen) return null;
-
     return (
-        <div
-            className="midi-browser-overlay"
-            onClick={handleBackdropClick}
-            onKeyDown={handleKeyDown}
-            tabIndex={-1}
-        >
-            <div className="midi-browser-container">
-                {/* Header */}
-                <div className="midi-browser-header">
-                    <h2>Select MIDI Device</h2>
-                    <button
-                        className="midi-browser-close"
-                        onClick={closeBrowser}
-                        title="Close (ESC)"
-                    >
-                        &times;
-                    </button>
-                </div>
+        <Modal open={isOpen} onClose={closeBrowser} ariaLabel="Select MIDI Device" size="lg">
+            <PanelHeader title="Select MIDI Device" onClose={closeBrowser}>
+                <Input
+                    type="text"
+                    placeholder="Search devices..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    autoFocus
+                    aria-label="Search MIDI devices"
+                />
+            </PanelHeader>
 
-                {/* Search bar */}
-                <div className="midi-browser-search">
-                    <input
-                        type="text"
-                        placeholder="Search devices..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        autoFocus
-                        aria-label="Search MIDI devices"
-                    />
-                </div>
-
-                {/* Connected Devices Section */}
-                {connectedDevices.length > 0 && (
-                    <ScrollContainer mode="dropdown" className="midi-browser-section">
-                        <h3>Connected Devices</h3>
-                        <div className="midi-device-grid">
-                            {connectedDevices.map((device) => (
-                                <MIDIDeviceCard
-                                    key={device.deviceId}
-                                    name={device.name}
-                                    presetId={device.presetId}
-                                    isConnected={device.isConnected}
-                                    onClick={() =>
-                                        handleSelectDevice(device.deviceId, device.presetId)
-                                    }
-                                />
-                            ))}
-                        </div>
-                    </ScrollContainer>
-                )}
-
-                {/* All Presets Section */}
+            {/* Connected Devices Section */}
+            {connectedDevices.length > 0 && (
                 <ScrollContainer mode="dropdown" className="midi-browser-section">
-                    <h3>Device Presets</h3>
+                    <h3>Connected Devices</h3>
                     <div className="midi-device-grid">
-                        {filteredPresets.map((preset) => (
+                        {connectedDevices.map((device) => (
                             <MIDIDeviceCard
-                                key={preset.id}
-                                name={preset.name}
-                                presetId={preset.id}
-                                manufacturer={preset.manufacturer}
-                                isConnected={false}
-                                onClick={() => handleSelectPreset(preset.id)}
+                                key={device.deviceId}
+                                name={device.name}
+                                presetId={device.presetId}
+                                isConnected={device.isConnected}
+                                onClick={() =>
+                                    handleSelectDevice(device.deviceId, device.presetId)
+                                }
                             />
                         ))}
                     </div>
-                    {filteredPresets.length === 0 && (
-                        <div className="midi-browser-empty">
-                            No presets match your search
-                        </div>
-                    )}
                 </ScrollContainer>
+            )}
 
-                {/* Footer hint */}
-                <div className="midi-browser-footer">
-                    <span>Press ESC to close</span>
+            {/* All Presets Section */}
+            <ScrollContainer mode="dropdown" className="midi-browser-section">
+                <h3>Device Presets</h3>
+                <div className="midi-device-grid">
+                    {filteredPresets.map((preset) => (
+                        <MIDIDeviceCard
+                            key={preset.id}
+                            name={preset.name}
+                            presetId={preset.id}
+                            manufacturer={preset.manufacturer}
+                            isConnected={false}
+                            onClick={() => handleSelectPreset(preset.id)}
+                        />
+                    ))}
                 </div>
+                {filteredPresets.length === 0 && (
+                    <div className="midi-browser-empty">
+                        No presets match your search
+                    </div>
+                )}
+            </ScrollContainer>
+
+            {/* Footer hint */}
+            <div className="midi-browser-footer">
+                <span>
+                    Press <Kbd>Esc</Kbd> to close
+                </span>
             </div>
-        </div>
+        </Modal>
     );
 }

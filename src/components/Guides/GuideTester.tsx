@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '@openjammer/oj-ui';
 import './Guide.css';
 
 export type TestStatus = 'idle' | 'testing' | 'success' | 'failure' | 'warning';
@@ -68,8 +69,8 @@ export function GuideTester({
   return (
     <div className="guide-tester">
       {status === 'idle' || status === 'testing' ? (
-        <button
-          className={`guide-test-btn ${status === 'testing' ? 'testing' : ''}`}
+        <Button
+          variant="primary"
           onClick={handleTest}
           disabled={disabled || status === 'testing'}
         >
@@ -84,7 +85,7 @@ export function GuideTester({
               {label}
             </>
           )}
-        </button>
+        </Button>
       ) : (
         <>
           <div className={`guide-test-result ${status}`}>
@@ -93,14 +94,14 @@ export function GuideTester({
             {status === 'warning' && <WarningIcon />}
             <span>{message || getDefaultMessage(status)}</span>
           </div>
-          <button
-            className="guide-test-btn"
+          <Button
+            variant="secondary"
             onClick={handleRetry}
             disabled={disabled}
           >
             <RefreshIcon />
             Retry
-          </button>
+          </Button>
         </>
       )}
     </div>

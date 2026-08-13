@@ -1,0 +1,95 @@
+/*
+ * WaveformView — a clip preview card. Sketch border, --radius-md, the hard
+ * sketch shadow (offset of solid ink, zero blur — Hard-Shadow Rule). The name
+ * is Caveat (Caveat-Is-the-Voice) and truncates; the duration is mono
+ * (Mono-Means-Exact). Selected/drop-target states are hard accent rings drawn
+ * with box-shadow at 0 blur — color is the feedback, nothing reflows
+ * (No-Surprise Rule). Styled only via semantic tokens, so it follows the theme.
+ */
+.oj-waveform-view {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-node);
+    border: var(--border-sketch-width) solid var(--border-sketch);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sketch);
+    overflow: hidden;
+    cursor: grab;
+    user-select: none;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
+        opacity var(--transition-fast);
+}
+
+.oj-waveform-view:active {
+    cursor: grabbing;
+}
+
+/* The waveform sits on the canvas tone; the duration/crop badges overlay it. */
+.oj-waveform-view__preview {
+    position: relative;
+    background: var(--bg-canvas);
+    padding: var(--space-xs);
+}
+
+.oj-waveform-view__trace {
+    display: block;
+}
+
+/* Exact length — mono so it can be read digit by digit (Mono-Means-Exact). */
+.oj-waveform-view__duration {
+    position: absolute;
+    top: var(--space-xs);
+    right: var(--space-xs);
+    padding: 0 var(--space-xs);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: 1.4;
+    color: var(--text-muted);
+    background: var(--bg-node);
+    border-radius: var(--radius-sm);
+}
+
+/* Cropped marker — a quiet warning glyph, label-bearing (Signal-Not-Brand). */
+.oj-waveform-view__crop {
+    position: absolute;
+    bottom: var(--space-xs);
+    left: var(--space-xs);
+    font-size: var(--text-xs);
+    line-height: 1;
+    color: var(--accent-warning);
+}
+
+/* The clip name — Caveat, the hand-drawn voice, truncated to one line. */
+.oj-waveform-view__name {
+    padding: var(--space-xs) var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Selected — a hard accent ring (0 blur) in the audio-connected wiring color. */
+.oj-waveform-view.is-selected {
+    border-color: var(--audio-connected);
+    box-shadow: 0 0 0 2px var(--audio-connected);
+}
+
+.oj-waveform-view.is-selected .oj-waveform-view__name {
+    color: var(--audio-connected);
+}
+
+/* Drop target — a hard success ring (0 blur); color carries the meaning. */
+.oj-waveform-view.is-drop-target {
+    border-color: var(--accent-success);
+    box-shadow: 0 0 0 2px var(--accent-success);
+}
+
+/* Dragging — dim the source so the drag layer reads as the live copy. */
+.oj-waveform-view.is-dragging {
+    opacity: 0.6;
+    cursor: grabbing;
+}

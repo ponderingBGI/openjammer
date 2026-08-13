@@ -28,6 +28,68 @@ export function cmd_ring_ptr() {
 }
 
 /**
+ * Drain the engine's per-node resilience flags into a JSON `Vec<Event>` — the
+ * SAME wire shape the native `poll_events` returns, so the one TS fault pipe
+ * ingests both tiers identically.
+ *
+ * The RT event RING and the CPU watchdog are `std`-only, so the wasm tier
+ * surfaces faults straight from [`NodeBudget`] (the `no_std` NaN/garbage guard
+ * `sanitize` sets `non_finite` from the render path) — exactly how
+ * [`drain_meters`] reads `meters_mut`. Consumed flags are CLEARED so each fault
+ * surfaces once per drain window; a persistently-bad node re-raises next block
+ * and the TS coalescer collapses the storm (parity with native). Returns an
+ * empty `Vec` (no allocation) when there is no fault — the common case. Off the
+ * critical path: a fault means something is already wrong, so the rare alloc is
+ * fine, mirroring `drain_meters`.
+ * @returns {Uint8Array}
+ */
+export function drain_events() {
+    const ret = wasm.drain_events();
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
+ * Drain every looper node's transport snapshot as a FLAT
+ * `[node, state, pos, loop_len, peak, ...]` `f32` array (one 5-tuple per looper
+ * node). The wasm tier has no return-frame ring (those are `std`-only), so this
+ * reads each looper instance's [`ojcore::DspInstance::looper_snapshot`] DIRECTLY
+ * — exactly how [`drain_meters`] reads `meters_mut` instead of a ring. UNGATED by
+ * metering: the looper's row/playhead must surface even when level meters are
+ * off (the looper return path is published every block on native, ungated too —
+ * see `exec.rs::publish_looper`). Off the render path (the worklet calls it
+ * between `process` calls), so the `Vec` allocation is fine; an empty `Vec` when
+ * there are no looper nodes / no host costs nothing on the common path.
+ * @returns {Float32Array}
+ */
+export function drain_looper() {
+    const ret = wasm.drain_looper();
+    var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
+ * Drain any pending looper state-machine EDGE per looper node as a JSON
+ * `Vec<Event>` of [`EventKind::LooperEdge`] — the SAME wire shape `drain_events`
+ * (faults) returns, so the worklet rides them on the existing `events`
+ * postMessage and the one TS fault-pipe seam routes the LooperEdge tag (a commit
+ * signal, not a fault) to the looper handle. UNGATED, off the render path: an
+ * edge (cycle wrap / STOP commit) is the AUTHORITATIVE row-create signal and must
+ * never be dropped, so unlike snapshots it is loss-proof per-node (the kernel
+ * coalesces onto one pending slot until drained). Returns an empty `Vec` (no
+ * allocation) when no looper edge is pending — the common case.
+ * @returns {Uint8Array}
+ */
+export function drain_looper_edges() {
+    const ret = wasm.drain_looper_edges();
+    var v1 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v1;
+}
+
+/**
  * Drain the current per-node + master meter windows as a FLAT `[node, peak, ...]`
  * `f32` array (node ids are exact integers within `f32`'s safe range for any
  * realistic node count). The master level is appended last under the master
@@ -77,6 +139,19 @@ export function encode_meter_frame(node, rms, peak) {
 }
 
 /**
+ * True when the engine has at least one pending node-fault flag. A cheap
+ * O(nodes) bool scan with NO allocation — the worklet calls it every block and
+ * only invokes [`drain_events`] when it is set, so the (allocating) event
+ * serialization never runs on a fault-free block. NOT gated on metering: a fault
+ * must surface even when no meter UI is subscribed.
+ * @returns {boolean}
+ */
+export function has_pending_events() {
+    const ret = wasm.has_pending_events();
+    return ret !== 0;
+}
+
+/**
  * Initialize the engine host. Call ONCE from the AudioWorklet constructor,
  * before any [`process`] call.
  *
@@ -91,6 +166,31 @@ export function encode_meter_frame(node, rms, peak) {
  */
 export function init(sample_rate, block_size) {
     wasm.init(sample_rate, block_size);
+}
+
+/**
+ * The IR node ids (`NodeIdx.0`) that degraded to a passthrough stub in the last
+ * [`load_graph`] — returned to JS as a `Uint32Array` so the worklet can badge the
+ * exact nodes (the browser analogue of the native `push_graph` degraded-id
+ * return). Empty on a clean load.
+ * @returns {Uint32Array}
+ */
+export function last_degraded_node_ids() {
+    const ret = wasm.last_degraded_node_ids();
+    var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
+}
+
+/**
+ * Number of nodes that degraded to a passthrough stub in the last [`load_graph`]
+ * (a missing or incompatible plugin dependency). The worklet reads this after a
+ * load to warn — the browser analogue of the native host's degraded-stub log (#4a).
+ * @returns {number}
+ */
+export function last_load_degraded() {
+    const ret = wasm.last_load_degraded();
+    return ret >>> 0;
 }
 
 /**
@@ -111,6 +211,31 @@ export function load_graph(bytes) {
     const len0 = WASM_VECTOR_LEN;
     const ret = wasm.load_graph(ptr0, len0);
     return ret !== 0;
+}
+
+/**
+ * Copy the MOST-RECENTLY-COMMITTED layer's loop PCM for looper `node` into a
+ * fresh `Float32Array` (`loop_len` mono f32s), or an empty array when the node
+ * is not a looper / has no committed layer yet. This is the WASM end of the
+ * Stage-3 finalize-PCM seam: when the worklet drains a commit `LooperEdge` for
+ * `node` (the Recording|Overdubbing→Playing edge from [`drain_looper_edges`]),
+ * it calls this and `postMessage`s the bytes so the UI can build the real
+ * `AudioBuffer` for that layer's row (true waveform + drag-to-library/export).
+ *
+ * The committed layer is read-only on the render path (only read back for
+ * playback, never written), so reading it off the render path between `process`
+ * calls is sound — exactly how [`output_ptr`] exposes the render output buffer.
+ * Off the render path (the worklet calls it from a drained-edge handler), so the
+ * copy into the returned `Vec` is fine. Returns an empty `Vec` (no allocation)
+ * when the host is absent / the id is unknown / nothing is committed.
+ * @param {number} node
+ * @returns {Float32Array}
+ */
+export function looper_take_pcm(node) {
+    const ret = wasm.looper_take_pcm(node);
+    var v1 = getArrayF32FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+    return v1;
 }
 
 /**
@@ -170,8 +295,19 @@ export function node_count() {
 }
 
 /**
- * Pointer (byte offset into wasm linear memory) of the mono output buffer.
- * JS reads `nframes` little-endian f32s starting here after each [`process`].
+ * Number of PLANAR output channels [`process`] writes (stereo). Each channel row
+ * is `block_size` f32s; channel `c` starts at `output_ptr() + c*block_size`.
+ * @returns {number}
+ */
+export function output_channels() {
+    const ret = wasm.output_channels();
+    return ret >>> 0;
+}
+
+/**
+ * Pointer (byte offset into wasm linear memory) of the PLANAR output buffer.
+ * JS reads each channel's `block_size`-strided row starting here after each
+ * [`process`] (channel `c` at `output_ptr() + c*block_size`).
  * @returns {number}
  */
 export function output_ptr() {
@@ -184,10 +320,12 @@ export function output_ptr() {
  *
  * Steps, all allocation-free:
  *   1. drain the command ring, applying each [`RtCommand`] to the engine;
- *   2. render `nframes` into the pre-sized output buffer.
+ *   2. render `nframes` PLANAR into the output buffer via `process_block_into`.
  *
  * `nframes` is clamped to the configured block size. Read the result from
- * [`output_ptr`] (`nframes` f32s of mono master output).
+ * [`output_ptr`] + [`output_channels`]: channel `c` is the `block_size`-strided
+ * row at `c*block_size` (a mono graph fills every row identically — true stereo
+ * only when a Pan/stereo node feeds the master).
  * @param {number} nframes
  */
 export function process(nframes) {
@@ -261,21 +399,19 @@ export function set_metering(on) {
  * content address only for a degenerate input, so the JS side treats it as "not
  * stored" only when the host is absent (it checks `ready` first).
  * @param {Float32Array} pcm
+ * @param {number} channels
  * @param {number} sample_rate
  * @returns {number}
  */
-export function store_asset(pcm, sample_rate) {
+export function store_asset(pcm, channels, sample_rate) {
     const ptr0 = passArrayF32ToWasm0(pcm, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
-    const ret = wasm.store_asset(ptr0, len0, sample_rate);
+    const ret = wasm.store_asset(ptr0, len0, channels, sample_rate);
     return ret >>> 0;
 }
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
-        __wbg___wbindgen_throw_ea4887a5f8f9a9db: function(arg0, arg1) {
-            throw new Error(getStringFromWasm0(arg0, arg1));
-        },
         __wbindgen_init_externref_table: function() {
             const table = wasm.__wbindgen_externrefs;
             const offset = table.grow(4);
@@ -297,6 +433,11 @@ function getArrayF32FromWasm0(ptr, len) {
     return getFloat32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
 }
 
+function getArrayU32FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
+}
+
 function getArrayU8FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint8ArrayMemory0().subarray(ptr / 1, ptr / 1 + len);
@@ -310,8 +451,12 @@ function getFloat32ArrayMemory0() {
     return cachedFloat32ArrayMemory0;
 }
 
-function getStringFromWasm0(ptr, len) {
-    return decodeText(ptr >>> 0, len);
+let cachedUint32ArrayMemory0 = null;
+function getUint32ArrayMemory0() {
+    if (cachedUint32ArrayMemory0 === null || cachedUint32ArrayMemory0.byteLength === 0) {
+        cachedUint32ArrayMemory0 = new Uint32Array(wasm.memory.buffer);
+    }
+    return cachedUint32ArrayMemory0;
 }
 
 let cachedUint8ArrayMemory0 = null;
@@ -336,20 +481,6 @@ function passArrayF32ToWasm0(arg, malloc) {
     return ptr;
 }
 
-let cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
-cachedTextDecoder.decode();
-const MAX_SAFARI_DECODE_BYTES = 2146435072;
-let numBytesDecoded = 0;
-function decodeText(ptr, len) {
-    numBytesDecoded += len;
-    if (numBytesDecoded >= MAX_SAFARI_DECODE_BYTES) {
-        cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
-        cachedTextDecoder.decode();
-        numBytesDecoded = len;
-    }
-    return cachedTextDecoder.decode(getUint8ArrayMemory0().subarray(ptr, ptr + len));
-}
-
 let WASM_VECTOR_LEN = 0;
 
 let wasmModule, wasmInstance, wasm;
@@ -358,6 +489,7 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedFloat32ArrayMemory0 = null;
+    cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();
     return wasm;

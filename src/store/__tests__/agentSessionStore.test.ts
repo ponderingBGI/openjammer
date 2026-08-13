@@ -119,6 +119,17 @@ describe('agentSessionStore chat', () => {
         expect(rootNodeCount()).toBe(before);
     });
 
+    it('keeps runtime status out of assistant markdown', async () => {
+        const script: AgentEvent[] = [
+            { kind: 'status', message: 'Starting Pi in C:/agent/workspace' },
+            { kind: 'thought', text: 'Hello!' },
+            { kind: 'result', summary: 'done' },
+        ];
+        await useAgentSessionStore.getState().send(new MockAgentBackend({ script }), { prompt: 'q' });
+        expect(lastAssistant().markdown).toBe('Hello!');
+        expect(useAgentSessionStore.getState().runtimeStatus).toBeNull();
+    });
+
     it('coalesces multiple thought deltas into one assistant markdown', async () => {
         const script: AgentEvent[] = [
             { kind: 'thought', text: 'Step one. ' },
@@ -157,7 +168,7 @@ describe('agentSessionStore chat', () => {
     });
 
     it('a silent read tool produces no action chip', async () => {
-        useGraphStore.getState().addNode('amplifier', { x: 0, y: 0 }, null);
+        useGraphStore.getState().addNode('multiplier', { x: 0, y: 0 }, null);
         const script: AgentEvent[] = [
             { kind: 'tool-call', id: 'r1', call: { name: 'get_graph', args: {} } },
             { kind: 'result', summary: 'Inspected the graph.' },
@@ -178,7 +189,7 @@ describe('agentSessionStore chat', () => {
                         calls: [
                             { name: 'add_node', args: { type: 'looper' as NodeType } },
                             { name: 'add_node', args: { type: 'speaker' as NodeType } },
-                            { name: 'add_node', args: { type: 'amplifier' as NodeType } },
+                            { name: 'add_node', args: { type: 'multiplier' as NodeType } },
                         ],
                     },
                 },
@@ -220,6 +231,36 @@ describe('agentSessionStore chat', () => {
         expect(useAgentSessionStore.getState().messages).toHaveLength(0);
         // No warm child in the test env, so the next run starts a fresh session.
         expect(useAgentSessionStore.getState().sessionId).toBeNull();
+    });
+
+    it('rewindTo() truncates to before a turn and returns its prompt to edit', async () => {
+        useAgentSessionStore.setState({
+            messages: [
+                { id: 'u1', role: 'user', text: 'add a keyboard' },
+                { id: 'a1', role: 'assistant', markdown: 'Added.', actions: [], streaming: false },
+                { id: 'u2', role: 'user', text: 'add a revrb' },
+                { id: 'a2', role: 'assistant', markdown: 'Hmm.', actions: [], streaming: false },
+            ],
+            sessionId: 'old-session',
+        });
+        const prompt = await useAgentSessionStore.getState().rewindTo(2);
+        expect(prompt).toBe('add a revrb');
+        expect(useAgentSessionStore.getState().messages.map((m) => m.id)).toEqual(['u1', 'a1']);
+        // A fresh Pi session continues from here (no warm child in tests → null).
+        expect(useAgentSessionStore.getState().sessionId).toBeNull();
+    });
+
+    it('rewindTo() is conversation-only — the canvas is left untouched', async () => {
+        await useAgentSessionStore
+            .getState()
+            .send(new MockAgentBackend({ script: addTwoNodesScript }), { prompt: 'build' });
+        const builtNodes = rootNodeCount();
+        expect(builtNodes).toBeGreaterThan(0);
+
+        await useAgentSessionStore.getState().rewindTo(0);
+        expect(useAgentSessionStore.getState().messages).toHaveLength(0);
+        // The nodes the agent built remain; Ctrl+Z (not rewind) reverts them.
+        expect(rootNodeCount()).toBe(builtNodes);
     });
 
     it('persists the conversation to localStorage', async () => {

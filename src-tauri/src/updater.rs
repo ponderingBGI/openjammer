@@ -4,9 +4,9 @@
 //! The novel, live-safety part lives in `ojcore-native` (`update_gate.rs`): a
 //! verified update is STAGED and only installed when audio is idle, atomically
 //! (no TOCTOU). The download/verify/install is `tauri-plugin-updater` (Tauri v2),
-//! Win + Linux only — macOS is compiled-off until notarization
-//! (OWNER-PROVISIONING.md §4); the commands still exist there as inert no-ops so
-//! the `invoke_handler` list stays platform-uniform.
+//! ACTIVE on Win + Linux, and ready on macOS the moment the build is notarized
+//! (the `apple-notarized` feature — OWNER-PROVISIONING.md §4). Until then the
+//! macOS commands are inert no-ops so the `invoke_handler` list stays uniform.
 //!
 //! CHANNEL IS RUNTIME, not build-time: the user picks Stable or Canary in
 //! Settings. The STABLE pubkey + endpoint live in `tauri.conf.json`
@@ -37,20 +37,28 @@ pub enum Channel {
     Canary,
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 const GITHUB_RELEASES_API: &str = "https://api.github.com/repos/ponderingBGI/openjammer/releases";
 
 /// The CANARI updater public key (minisign). Public; safe to commit. Its private
 /// counterpart signs canari builds in `canary.yml` (the
 /// `TAURI_SIGNING_PRIVATE_KEY_CANARY` secret). A canari-channel check verifies
 /// the downloaded `latest.json` against this.
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 const CANARY_UPDATER_PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZFRDU1NkQwNjZBNTNGMkYKUldRdlA2Vm0wRmJWL2dZVzZ2WC9HU2hpUUUrTTh5MGZqQXFoSTdXM0RLSnRwQ25WUERkRXpLankK";
 
 // --- native-side mirror of the auto-update preference ------------------------
 
-/// The frontend's auto-update preference, mirrored natively so the on-quit exit
-/// handler can decide install-on-quit without a frontend round-trip.
+/// The frontend's auto-update preference, mirrored natively so the close-path
+/// handler can decide install-after-close without a frontend round-trip.
 #[derive(Debug, Clone, Copy)]
 pub struct AutoUpdateSettings {
     pub enabled: bool,
@@ -60,7 +68,7 @@ pub struct AutoUpdateSettings {
 impl Default for AutoUpdateSettings {
     fn default() -> Self {
         // Disabled until the frontend syncs the real pref on mount (it defaults
-        // ON). Conservative: never install-on-quit before the UI has spoken.
+        // ON). Conservative: never install-after-close before the UI has spoken.
         Self {
             enabled: false,
             channel: Channel::Stable,
@@ -83,6 +91,65 @@ pub fn update_set_config(
     let mut g = config.0.lock().unwrap_or_else(|p| p.into_inner());
     g.enabled = enabled;
     g.channel = channel;
+}
+
+fn platform_name() -> &'static str {
+    if cfg!(windows) {
+        "windows"
+    } else if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "unknown"
+    }
+}
+
+fn native_update_capability() -> (&'static str, bool, Option<&'static str>) {
+    if cfg!(debug_assertions) {
+        return (
+            "dev",
+            false,
+            Some("Developer builds do not auto-update. Use a packaged release to test updates."),
+        );
+    }
+
+    if cfg!(windows) {
+        return ("nsis", true, None);
+    }
+
+    if cfg!(target_os = "linux") {
+        if std::env::var_os("APPIMAGE").is_some() {
+            return ("appimage", true, None);
+        }
+        return (
+            "linux-package",
+            false,
+            Some("This Linux install is managed manually or by your package manager."),
+        );
+    }
+
+    if cfg!(target_os = "macos") {
+        if cfg!(feature = "apple-notarized") {
+            // Notarized build: the `.app` updater is active, same as Win/Linux.
+            return ("app", true, None);
+        }
+        return (
+            "dmg",
+            false,
+            Some("This build updates via a manual .dmg download; notarized auto-update activates when the build is signed with an Apple Developer ID."),
+        );
+    }
+
+    (
+        "unsupported",
+        false,
+        Some("Automatic updates are not available on this platform."),
+    )
+}
+
+fn can_native_auto_update() -> bool {
+    native_update_capability().1
 }
 
 // --- the audio-safe gate seam (channel-agnostic) -----------------------------
@@ -121,12 +188,20 @@ pub fn update_try_install(
 
 /// A downloaded-and-verified update awaiting an audio-idle install, with its
 /// bytes. Lives between [`update_check_and_stage`] (download + verify + stage) and
-/// the install (on quit, or the explicit [`update_install_if_idle`]). Win/Linux.
-#[cfg(any(windows, target_os = "linux"))]
+/// the install (after close, or the explicit [`update_install_if_idle`]). Win/Linux.
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 #[derive(Default)]
 pub struct PendingUpdate(pub Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>>);
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 #[derive(Debug, serde::Deserialize)]
 struct GithubRelease {
     tag_name: String,
@@ -135,14 +210,22 @@ struct GithubRelease {
     assets: Vec<GithubAsset>,
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 #[derive(Debug, serde::Deserialize)]
 struct GithubAsset {
     name: String,
     browser_download_url: String,
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 fn canari_version(tag: &str) -> Option<semver::Version> {
     let raw = tag.strip_prefix('v').unwrap_or(tag);
     let version = semver::Version::parse(raw).ok()?;
@@ -154,7 +237,11 @@ fn canari_version(tag: &str) -> Option<semver::Version> {
     }
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 fn select_latest_canari_manifest_url(releases: &[GithubRelease]) -> Option<String> {
     releases
         .iter()
@@ -171,7 +258,11 @@ fn select_latest_canari_manifest_url(releases: &[GithubRelease]) -> Option<Strin
         .map(|(_, url)| url)
 }
 
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 async fn latest_canari_manifest_url() -> Result<url::Url, String> {
     let releases = reqwest::Client::new()
         .get(GITHUB_RELEASES_API)
@@ -194,7 +285,11 @@ async fn latest_canari_manifest_url() -> Result<url::Url, String> {
 /// Build the updater for `channel`: the canari channel resolves the newest
 /// numbered prerelease endpoint and embeds the canari pubkey; stable uses the
 /// `tauri.conf.json` defaults.
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 async fn channel_updater(
     app: &tauri::AppHandle,
     channel: Channel,
@@ -225,9 +320,16 @@ pub async fn update_check_and_stage(
     app: tauri::AppHandle,
     channel: Channel,
 ) -> Result<Option<String>, String> {
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    ))]
     {
         use tauri::Manager;
+        if !can_native_auto_update() {
+            return Ok(None);
+        }
         let Some(update) = channel_updater(&app, channel)
             .await?
             .check()
@@ -238,7 +340,7 @@ pub async fn update_check_and_stage(
         };
         let version = update.version.clone();
         // The minisign verification is part of `download`; hold the bytes until
-        // audio is idle (on quit or an explicit install).
+        // audio is idle (after close or an explicit install).
         let bytes = update
             .download(|_chunk, _total| {}, || {})
             .await
@@ -250,7 +352,11 @@ pub async fn update_check_and_stage(
         app.state::<UpdateGateState>().stage();
         Ok(Some(version))
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    )))]
     {
         let _ = (&app, channel);
         Ok(None)
@@ -264,9 +370,16 @@ pub async fn update_check_and_stage(
 /// tick. The idle check + gate transition are atomic (no TOCTOU). macOS: `false`.
 #[tauri::command]
 pub fn update_install_if_idle(app: tauri::AppHandle) -> Result<bool, String> {
-    #[cfg(any(windows, target_os = "linux"))]
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    ))]
     {
         use tauri::Manager;
+        if !can_native_auto_update() {
+            return Ok(false);
+        }
         let running = app
             .state::<BackendState>()
             .0
@@ -290,7 +403,11 @@ pub fn update_install_if_idle(app: tauri::AppHandle) -> Result<bool, String> {
         }
         Ok(true)
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    )))]
     {
         let _ = &app;
         Ok(false)
@@ -309,8 +426,18 @@ pub struct UpdateStatus {
     /// The version held in the last-good backup, when one exists (the rollback
     /// target). Drives the "Roll back to <version>" affordance.
     pub last_good_version: Option<String>,
-    /// Whether the native updater is even available on this platform/build.
+    /// Whether the updater plugin is compiled into this platform/build.
     pub supported: bool,
+    /// Native OS reported to the UI for manual download selection.
+    pub platform: &'static str,
+    /// Native CPU arch reported to the UI for manual download selection.
+    pub arch: &'static str,
+    /// Runtime install kind (`nsis`, `appimage`, `linux-package`, `dmg`, `dev`, ...).
+    pub install_kind: &'static str,
+    /// Whether this exact platform/install kind may auto-update safely.
+    pub can_auto_update: bool,
+    /// Human-readable reason shown when auto-update is unavailable.
+    pub manual_reason: Option<&'static str>,
 }
 
 /// Report current version + pending-update + rollback state to the UI.
@@ -318,7 +445,12 @@ pub struct UpdateStatus {
 pub fn update_status(app: tauri::AppHandle) -> UpdateStatus {
     let current_version = app.package_info().version.to_string();
     let last_good_version = crate::backup::last_good_version(&app);
-    #[cfg(any(windows, target_os = "linux"))]
+    let (install_kind, can_auto_update, manual_reason) = native_update_capability();
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    ))]
     {
         use tauri::Manager;
         let pending_version = app
@@ -329,13 +461,26 @@ pub fn update_status(app: tauri::AppHandle) -> UpdateStatus {
             .and_then(|g| g.as_ref().map(|(u, _)| u.version.clone()));
         UpdateStatus {
             current_version,
-            pending: app.state::<UpdateGateState>().is_pending(),
-            pending_version,
+            pending: can_auto_update && app.state::<UpdateGateState>().is_pending(),
+            pending_version: if can_auto_update {
+                pending_version
+            } else {
+                None
+            },
             last_good_version,
             supported: true,
+            platform: platform_name(),
+            arch: std::env::consts::ARCH,
+            install_kind,
+            can_auto_update,
+            manual_reason,
         }
     }
-    #[cfg(not(any(windows, target_os = "linux")))]
+    #[cfg(not(any(
+        windows,
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    )))]
     {
         UpdateStatus {
             current_version,
@@ -343,17 +488,106 @@ pub fn update_status(app: tauri::AppHandle) -> UpdateStatus {
             pending_version: None,
             last_good_version,
             supported: false,
+            platform: platform_name(),
+            arch: std::env::consts::ARCH,
+            install_kind,
+            can_auto_update,
+            manual_reason,
         }
     }
 }
 
-/// Install a staged update on the way out (the Ableton-style "installs when you
-/// quit"). Called from the window `CloseRequested` handler. Best-effort: a failed
-/// install must never block quitting. No-op unless the user has auto-update on and
-/// a verified update is staged. macOS: no-op (updater compiled-off).
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(any(windows, all(test, target_os = "linux")))]
+fn windows_install_on_quit_args() -> [&'static str; 2] {
+    // Tauri's default NSIS updater args include `/R`, which relaunches the app
+    // after a passive/quiet update. The automatic close-path must never reopen
+    // OpenJammer, so it uses the NSIS silent flag plus update mode only.
+    ["/S", "/UPDATE"]
+}
+
+#[cfg(windows)]
+fn safe_update_version_for_filename(version: &str) -> String {
+    version
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+fn spawn_windows_quiet_install_on_quit(version: &str, bytes: &[u8]) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let dir = std::env::temp_dir().join("openjammer-updater");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("failed to create updater temp dir: {e}"))?;
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let installer_path = dir.join(format!(
+        "OpenJammer-update-{}-{}-{nonce}.exe",
+        safe_update_version_for_filename(version),
+        std::process::id(),
+    ));
+
+    std::fs::write(&installer_path, bytes)
+        .map_err(|e| format!("failed to write updater installer: {e}"))?;
+
+    // Current releases publish the Windows updater as the NSIS setup exe. Spawn
+    // it detached from the closing app, silently, and deliberately omit `/R` so
+    // the app does not reopen after the automatic close-path install.
+    std::process::Command::new(&installer_path)
+        .args(windows_install_on_quit_args())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|e| format!("failed to start updater installer: {e}"))?;
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn install_staged_update_on_quit(update: tauri_plugin_updater::Update, bytes: Vec<u8>) -> bool {
+    // Best-effort: a failed update must never block quitting. Do not fall back
+    // to `update.install(bytes)` here; Tauri's Windows path passes `/R` and
+    // would reopen OpenJammer after the user explicitly closed it.
+    spawn_windows_quiet_install_on_quit(&update.version, &bytes).is_ok()
+}
+
+#[cfg(all(
+    not(windows),
+    any(
+        target_os = "linux",
+        all(target_os = "macos", feature = "apple-notarized")
+    )
+))]
+fn install_staged_update_on_quit(update: tauri_plugin_updater::Update, bytes: Vec<u8>) -> bool {
+    // Linux AppImage replacement (deb/rpm stay manual) and the notarized macOS
+    // `.app` swap both go through Tauri's installer; neither relaunches here.
+    update.install(bytes).is_ok()
+}
+
+/// Install a staged update on the way out (the Ableton-style "installs after you
+/// close"). Called from the window `CloseRequested` handler. Best-effort: a
+/// failed install must never block quitting. No-op unless the user has
+/// auto-update on and a verified update is staged. macOS: no-op (updater
+/// compiled-off).
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+))]
 pub fn install_on_quit(app: &tauri::AppHandle) {
     use tauri::Manager;
+    if !can_native_auto_update() {
+        return;
+    }
     let enabled = app
         .state::<AutoUpdateConfig>()
         .0
@@ -379,13 +613,27 @@ pub fn install_on_quit(app: &tauri::AppHandle) {
         .unwrap_or_else(|p| p.into_inner())
         .take();
     if let Some((update, bytes)) = staged {
-        // No relaunch — the user asked to quit; the installer applies on exit.
-        let _ = update.install(bytes);
+        let started = install_staged_update_on_quit(update, bytes);
+        #[cfg(windows)]
+        if started {
+            // Match Tauri's Windows updater contract: after launching the NSIS
+            // updater, exit immediately so the installer does not have to kill
+            // a still-closing OpenJammer process. Unlike Tauri's default path,
+            // our installer args omit `/R`, so this does not reopen the app.
+            app.cleanup_before_exit();
+            std::process::exit(0);
+        }
+        #[cfg(not(windows))]
+        let _ = started;
     }
 }
 
-/// macOS / unsupported platforms: nothing to install on quit.
-#[cfg(not(any(windows, target_os = "linux")))]
+/// macOS / unsupported platforms: nothing to install after close.
+#[cfg(not(any(
+    windows,
+    target_os = "linux",
+    all(target_os = "macos", feature = "apple-notarized")
+)))]
 pub fn install_on_quit(_app: &tauri::AppHandle) {}
 
 #[cfg(all(test, any(windows, target_os = "linux")))]
@@ -447,5 +695,15 @@ mod tests {
         ];
 
         assert!(select_latest_canari_manifest_url(&releases).is_none());
+    }
+
+    #[test]
+    fn windows_install_on_quit_args_do_not_relaunch() {
+        let args = windows_install_on_quit_args();
+        assert!(args.contains(&"/S"));
+        assert!(args.contains(&"/UPDATE"));
+        assert!(!args.contains(&"/P"));
+        assert!(!args.contains(&"/R"));
+        assert!(!args.contains(&"/ARGS"));
     }
 }

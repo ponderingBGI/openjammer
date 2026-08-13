@@ -3,11 +3,11 @@
 //!
 //! TRANSPORT: `rpc-subprocess`. This module owns the `ai_run` Tauri command. It
 //! spawns Pi (`pi --mode rpc`, github.com/earendil-works/pi) as a SUBPROCESS,
-//! confined to a THROWAWAY git worktree with a STRIPPED env that forwards ONLY
-//! the user's one configured provider key, speaks Pi's LF-delimited JSONL RPC,
+//! confined to a persistent jailed workspace with a STRIPPED env that forwards ONLY
+//! the user's configured provider keys, speaks Pi's LF-delimited JSONL RPC,
 //! normalizes each event to a [`PiStreamLine`], and re-emits it to the webview as
 //! a Tauri event on a per-run channel. The frontend ([`src/ai/PiAgentBackend.ts`])
-//! turns those into the streamed transcript and the Approve/Reject transaction.
+//! turns those into the streamed transcript and reversible live graph edits.
 //!
 //! # RPC protocol (pi.dev `rpc.md`) — M1 "transport truth"
 //!
@@ -38,19 +38,19 @@
 //!   accumulate and the agent learns) and its cwd at a jailed project dir beneath
 //!   it ([`AgentWorkspace`]). The OS jail (`sandbox.rs`) confines writes to those
 //!   roots; the in-Pi `permission-gate` extension (fed `OJ_PROJECT_ROOT` /
-//!   `OJ_MEMORY_ROOTS` / `OJ_KEY_VAR`) polices bash + redacts the key.
+//!   `OJ_MEMORY_ROOTS` / `OJ_KEY_VAR(S)`) polices bash + redacts keys.
 //! * **Env allowlist.** The child starts from an EMPTY environment; we forward
-//!   only `PATH`/`HOME` (so `pi` and `git` resolve) plus the ONE provider key
-//!   the user supplied, under the var name that provider expects
-//!   ([`stripped_env`]). Every other secret in the parent env is dropped.
+//!   only `PATH`/`HOME` (so `pi` and `git` resolve) plus the configured provider
+//!   keys the user supplied, each under the var name that provider expects. Every
+//!   other secret in the parent env is dropped.
 //! * **No key storage.** The key is passed transiently to the child and never
 //!   written to disk by OpenJammer.
 //! * **Tool calls are forwarded, not executed here.** Graph mutations are
-//!   surfaced to the frontend and only applied behind the user's Approve.
+//!   surfaced to the frontend as reversible live edits that undo with Ctrl+Z.
 //! * **Blocking extension dialogs are auto-cancelled.** M1 surfaces an
-//!   `extension_ui_request` as a `ui-request` event but does not yet drive an
-//!   interactive reply; to keep a run from hanging on a dialog we never answer,
-//!   blocking methods (`select`/`confirm`/`input`/`editor`) get an immediate
+//!   `extension_ui_request` as a `ui-request` event for the UI to observe; to
+//!   keep a run from hanging on a dialog the host never answers, blocking
+//!   methods (`select`/`confirm`/`input`/`editor`) get an immediate
 //!   `extension_ui_response{cancelled:true}`.
 //!
 //! # Reality / fallback
@@ -75,9 +75,9 @@ use tauri::{AppHandle, Emitter, Manager};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PiStreamLine {
-    /// `"thought" | "tool-call" | "result" | "error" | "ui-request"`.
+    /// `"thought" | "status" | "tool-call" | "result" | "error" | "ui-request" | "session"`.
     pub kind: String,
-    /// Present for `thought` / `result` / `error`.
+    /// Present for `thought` / `status` / `result` / `error`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     /// Present for `tool-call`: `{ "name": <toolName>, "args": <args> }`,
@@ -91,6 +91,10 @@ pub struct PiStreamLine {
     /// title, options, …) for the frontend to render.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<serde_json::Value>,
+    /// Present for command results that carry structured data (`get_state`,
+    /// `get_commands`, `compact`, …).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
 }
 
 impl PiStreamLine {
@@ -101,6 +105,18 @@ impl PiStreamLine {
             call: None,
             id: None,
             request: None,
+            data: None,
+        }
+    }
+
+    fn status(text: impl Into<String>) -> Self {
+        Self {
+            kind: "status".into(),
+            text: Some(text.into()),
+            call: None,
+            id: None,
+            request: None,
+            data: None,
         }
     }
 
@@ -111,6 +127,18 @@ impl PiStreamLine {
             call: None,
             id: None,
             request: None,
+            data: None,
+        }
+    }
+
+    fn result_with_data(text: impl Into<String>, data: Option<serde_json::Value>) -> Self {
+        Self {
+            kind: "result".into(),
+            text: Some(text.into()),
+            call: None,
+            id: None,
+            request: None,
+            data,
         }
     }
 
@@ -121,6 +149,7 @@ impl PiStreamLine {
             call: None,
             id: None,
             request: None,
+            data: None,
         }
     }
 
@@ -132,6 +161,7 @@ impl PiStreamLine {
             call: Some(serde_json::json!({ "name": name, "args": args })),
             id,
             request: None,
+            data: None,
         }
     }
 
@@ -145,6 +175,7 @@ impl PiStreamLine {
             call: None,
             id: None,
             request: None,
+            data: None,
         }
     }
 
@@ -160,6 +191,7 @@ impl PiStreamLine {
             call: None,
             id,
             request: Some(request),
+            data: None,
         }
     }
 }
@@ -182,12 +214,58 @@ pub fn ai_run(
     app: AppHandle,
     prompt: String,
     provider_key: Option<String>,
+    provider_keys: Option<HashMap<String, String>>,
+    provider_base_urls: Option<HashMap<String, String>>,
+    provider_custom_models: Option<HashMap<String, Vec<String>>>,
     provider: Option<String>,
     model_id: Option<String>,
+    thinking_level: Option<String>,
     yolo: Option<bool>,
     // When present, resume this Pi session (so the run continues that
     // conversation's context); when absent, Pi uses/creates its current session
     // and we report the active id back so the frontend can persist it.
+    session_id: Option<String>,
+    channel: String,
+) -> Result<(), String> {
+    // Do not run Pi on the Tauri IPC/UI thread. A long agent turn (code search,
+    // subprocess startup, model listing) otherwise makes Windows mark the app
+    // "Not responding" and desaturate the window.
+    let app_for_thread = app.clone();
+    std::thread::spawn(move || {
+        let warm = app_for_thread.state::<WarmChildState>();
+        let bridge = app_for_thread.state::<crate::bridge::BridgeState>();
+        let _ = ai_run_blocking(
+            app_for_thread.clone(),
+            prompt,
+            provider_key,
+            provider_keys,
+            provider_base_urls,
+            provider_custom_models,
+            provider,
+            model_id,
+            thinking_level,
+            yolo,
+            session_id,
+            channel,
+            warm,
+            bridge,
+        );
+    });
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ai_run_blocking(
+    app: AppHandle,
+    prompt: String,
+    provider_key: Option<String>,
+    provider_keys: Option<HashMap<String, String>>,
+    provider_base_urls: Option<HashMap<String, String>>,
+    provider_custom_models: Option<HashMap<String, Vec<String>>>,
+    provider: Option<String>,
+    model_id: Option<String>,
+    thinking_level: Option<String>,
+    yolo: Option<bool>,
     session_id: Option<String>,
     channel: String,
     warm: tauri::State<'_, WarmChildState>,
@@ -214,38 +292,43 @@ pub fn ai_run(
         }
     };
 
-    // D6 (M7): forward the key under the ACTIVE provider's env var so Pi's
-    // provider reads it. A `conflict` (Pi's own auth.json would resolve a working
-    // key) means we must NOT also inject ours — defer to Pi's resolution. The key
-    // SOURCE is still the provider_key param / env (keychain is founder-gated).
-    let conflict = provider
-        .as_deref()
-        .map(|p| {
-            crate::auth::auth_status(Some(p.to_string()))
-                .map(|s| s.conflict)
-                .unwrap_or(false)
-        })
-        .unwrap_or(false);
-    let key_for_env = if conflict {
-        None
-    } else {
-        provider_key.as_deref()
-    };
+    // D6 (M7): forward every configured provider key under that provider's env
+    // var so Pi's own model registry can list/select models across providers.
+    // Conflicts still defer to Pi's own auth.json for that provider. Keys are
+    // transient process env only; OpenJammer never persists them.
+    let provider_key_entries = collect_provider_key_entries(
+        provider_key.as_deref(),
+        provider.as_deref(),
+        provider_keys.as_ref(),
+    );
+    let filtered_provider_key_entries = filter_conflicting_provider_keys(provider_key_entries);
+    let provider_base_urls = sanitized_provider_base_urls(provider_base_urls.as_ref());
+    let provider_custom_models = sanitized_provider_custom_models(provider_custom_models.as_ref());
+    if write_openjammer_models_json(
+        &workspace.agent_home,
+        &provider_base_urls,
+        &provider_custom_models,
+    )
+    .is_err()
+    {
+        emit(
+            &app,
+            &channel,
+            PiStreamLine::thought("note: could not update custom model config"),
+        );
+    }
+    let auth_fingerprint = runtime_fingerprint(
+        &filtered_provider_key_entries,
+        &provider_base_urls,
+        &provider_custom_models,
+    );
     let jailed = !yolo.unwrap_or(false);
 
     // JAILED (default): a STRIPPED allowlist env + the gate's jail-boundary vars.
-    // YOLO: the FULL parent environment (the real Pi experience) + the key only,
+    // YOLO: the FULL parent environment (the real Pi experience) + provider keys,
     // and no gate vars. HOME points at the persistent global brain in BOTH modes,
     // so the agent keeps its learned memory/sessions regardless.
-    let mut env = if jailed {
-        stripped_env_for(key_for_env, provider.as_deref())
-    } else {
-        let mut full: HashMap<String, String> = std::env::vars().collect();
-        if let Some(k) = key_for_env.filter(|k| !k.is_empty()) {
-            full.insert(provider_key_var(provider.as_deref()), k.to_string());
-        }
-        full
-    };
+    let mut env = env_for_provider_keys(jailed, &filtered_provider_key_entries);
     env.insert(
         "HOME".to_string(),
         workspace.agent_home.to_string_lossy().into_owned(),
@@ -275,11 +358,16 @@ pub fn ai_run(
                 .collect::<Vec<_>>()
                 .join(":"),
         );
-        if key_for_env.is_some() {
-            env.insert(
-                "OJ_KEY_VAR".to_string(),
-                provider_key_var(provider.as_deref()),
-            );
+        let key_vars = provider_key_vars(&filtered_provider_key_entries);
+        if let Some(active_key_var) = provider
+            .as_deref()
+            .map(|p| provider_key_var(Some(p)))
+            .filter(|v| key_vars.iter().any(|k| k == v))
+        {
+            env.insert("OJ_KEY_VAR".to_string(), active_key_var);
+        }
+        if !key_vars.is_empty() {
+            env.insert("OJ_KEY_VARS".to_string(), key_vars.join(":"));
         }
     }
 
@@ -297,6 +385,7 @@ pub fn ai_run(
                 || c.model_id.as_deref() != model_id.as_deref()
                 || c.project_root != workspace.project_root
                 || c.jailed != jailed
+                || c.auth_fingerprint != auth_fingerprint
         }
     };
     if needs_respawn {
@@ -304,9 +393,18 @@ pub fn ai_run(
         drop(guard.take());
         // Load/drop the permission-gate to match the mode BEFORE Pi reads settings.
         configure_gate(&workspace.agent_home, jailed, &app, &channel);
+        // Memory is ON by default: first run installs pi-persistent-intelligence;
+        // an explicit Ctrl+K "memory off" persists as an opt-out and removes it.
+        if ensure_learning_default(&workspace.agent_home).is_err() {
+            emit(
+                &app,
+                &channel,
+                PiStreamLine::thought("note: could not update the memory config".to_string()),
+            );
+        }
         // Install the graph-verb extension in EVERY mode (the core capability, so
         // Pi can build the canvas); it is never dropped by YOLO.
-        let graph_pkg = graph_extension_dir().to_string_lossy().into_owned();
+        let graph_pkg = graph_extension_dir(&app).to_string_lossy().into_owned();
         let _ = set_settings_package(&workspace.agent_home, &graph_pkg, true);
         // The hard OS jail (Linux) — present in jailed mode, absent in YOLO.
         let jail = if jailed {
@@ -323,6 +421,7 @@ pub fn ai_run(
             &workspace.project_root,
             provider.as_deref(),
             model_id.as_deref(),
+            auth_fingerprint,
             jail,
             &app,
             &channel,
@@ -373,6 +472,11 @@ pub fn ai_run(
                 }
             }
         }
+    }
+
+    if apply_thinking_level_if_needed(child, thinking_level.as_deref(), &app, &channel).is_err() {
+        drop(guard.take());
+        return Ok(());
     }
 
     if let Err(e) = send_command(
@@ -428,10 +532,22 @@ pub struct WarmChild {
     /// Whether this child was spawned jailed (gate loaded + env stripped) vs YOLO
     /// (gate dropped + full env). A mode flip forces a respawn.
     jailed: bool,
+    /// Fingerprint of forwarded provider keys. A provider/key change forces a respawn.
+    auth_fingerprint: String,
+    /// Last thinking level successfully applied to this warm child.
+    thinking_level: Option<String>,
     /// The Pi session this child is currently on, tracked so a session change
     /// `switch_session`es the live child instead of respawning, and so the active
     /// id can be reported back to the frontend for persistence / reattach.
     current_session: Option<String>,
+    /// Windows ONLY: the kill-on-close Job Object the child (and its descendants)
+    /// were adopted into. Held for the child's whole life; dropping it here reaps
+    /// the WHOLE process tree, closing the orphan gap a bare `Child::kill()` leaves
+    /// on Windows. `None` if the job couldn't be created (best-effort fallback).
+    // Never read by name — it is an RAII reap guard whose only job is `Drop`.
+    #[cfg(windows)]
+    #[allow(dead_code)]
+    job: Option<JobObject>,
 }
 
 impl WarmChild {
@@ -443,10 +559,15 @@ impl WarmChild {
 
 impl Drop for WarmChild {
     /// Kill + reap on drop (respawn or app exit) so no Pi child is ever orphaned —
-    /// `std::process::Child` does NOT kill on drop by default.
+    /// `std::process::Child` does NOT kill on drop by default. On Windows the Job
+    /// Object (dropped right after, see field order) additionally reaps any
+    /// DESCENDANTS Pi spawned, which a single-handle `kill()` cannot reach.
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        // The `job` field then drops, closing the kill-on-close job and reaping the
+        // rest of the tree (Windows). Field drop order is declaration order, so the
+        // explicit kill+wait above runs first; the job is the backstop for orphans.
     }
 }
 
@@ -454,6 +575,331 @@ impl Drop for WarmChild {
 /// The `Mutex` serializes prompts (one agent turn at a time).
 #[derive(Default)]
 pub struct WarmChildState(pub std::sync::Mutex<Option<WarmChild>>);
+
+fn collect_provider_key_entries(
+    provider_key: Option<&str>,
+    provider: Option<&str>,
+    provider_keys: Option<&HashMap<String, String>>,
+) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    if let Some(keys) = provider_keys {
+        for (provider, key) in keys {
+            if !provider.trim().is_empty() && !key.trim().is_empty() {
+                out.insert(provider.trim().to_string(), key.to_string());
+            }
+        }
+    }
+    if let Some(key) = provider_key.filter(|k| !k.trim().is_empty()) {
+        out.insert(provider.unwrap_or_default().to_string(), key.to_string());
+    }
+    out
+}
+
+fn filter_conflicting_provider_keys(keys: HashMap<String, String>) -> HashMap<String, String> {
+    keys.into_iter()
+        .filter(|(provider, _)| {
+            provider.is_empty()
+                || !crate::auth::auth_status(Some(provider.clone()))
+                    .map(|s| s.conflict)
+                    .unwrap_or(false)
+        })
+        .collect()
+}
+
+fn provider_key_vars(keys: &HashMap<String, String>) -> Vec<String> {
+    let mut vars = keys
+        .keys()
+        .map(|provider| provider_key_var((!provider.is_empty()).then_some(provider.as_str())))
+        .collect::<Vec<_>>();
+    vars.sort();
+    vars.dedup();
+    vars
+}
+
+fn env_for_provider_keys(jailed: bool, keys: &HashMap<String, String>) -> HashMap<String, String> {
+    let mut env = if jailed {
+        stripped_env_for(None, None)
+    } else {
+        std::env::vars().collect()
+    };
+    for (provider, key) in keys {
+        env.insert(
+            provider_key_var((!provider.is_empty()).then_some(provider.as_str())),
+            key.to_string(),
+        );
+    }
+    env
+}
+
+fn auth_fingerprint(keys: &HashMap<String, String>) -> String {
+    let mut pairs = keys.iter().collect::<Vec<_>>();
+    pairs.sort_by(|a, b| a.0.cmp(b.0));
+    let mut bytes = Vec::new();
+    for (provider, key) in pairs {
+        bytes.extend_from_slice(provider.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(key.as_bytes());
+        bytes.push(0xff);
+    }
+    fnv1a_hex(&bytes)
+}
+
+fn sanitized_provider_base_urls(
+    provider_base_urls: Option<&HashMap<String, String>>,
+) -> HashMap<String, String> {
+    provider_base_urls
+        .into_iter()
+        .flat_map(|m| m.iter())
+        .filter_map(|(provider, url)| {
+            let provider = provider.trim();
+            let url = url.trim();
+            if provider.is_empty() || url.is_empty() {
+                None
+            } else {
+                Some((provider.to_string(), url.to_string()))
+            }
+        })
+        .collect()
+}
+
+fn sanitized_provider_custom_models(
+    provider_custom_models: Option<&HashMap<String, Vec<String>>>,
+) -> HashMap<String, Vec<String>> {
+    let mut out = HashMap::new();
+    for (provider, models) in provider_custom_models.into_iter().flat_map(|m| m.iter()) {
+        let provider = provider.trim();
+        if provider.is_empty() {
+            continue;
+        }
+        let mut ids = models
+            .iter()
+            .map(|id| id.trim())
+            .filter(|id| !id.is_empty())
+            .map(String::from)
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids.dedup();
+        if !ids.is_empty() {
+            out.insert(provider.to_string(), ids);
+        }
+    }
+    out
+}
+
+fn model_config_fingerprint(
+    base_urls: &HashMap<String, String>,
+    custom_models: &HashMap<String, Vec<String>>,
+) -> String {
+    let mut bytes = Vec::new();
+    let mut urls = base_urls.iter().collect::<Vec<_>>();
+    urls.sort_by(|a, b| a.0.cmp(b.0));
+    for (provider, url) in urls {
+        bytes.extend_from_slice(provider.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(url.as_bytes());
+        bytes.push(0xfe);
+    }
+    let mut models = custom_models.iter().collect::<Vec<_>>();
+    models.sort_by(|a, b| a.0.cmp(b.0));
+    for (provider, ids) in models {
+        bytes.extend_from_slice(provider.as_bytes());
+        bytes.push(0);
+        for id in ids {
+            bytes.extend_from_slice(id.as_bytes());
+            bytes.push(0xfd);
+        }
+    }
+    fnv1a_hex(&bytes)
+}
+
+fn runtime_fingerprint(
+    keys: &HashMap<String, String>,
+    base_urls: &HashMap<String, String>,
+    custom_models: &HashMap<String, Vec<String>>,
+) -> String {
+    format!(
+        "{}:{}",
+        auth_fingerprint(keys),
+        model_config_fingerprint(base_urls, custom_models),
+    )
+}
+
+fn write_openjammer_models_json(
+    agent_home: &Path,
+    base_urls: &HashMap<String, String>,
+    custom_models: &HashMap<String, Vec<String>>,
+) -> std::io::Result<()> {
+    if base_urls.is_empty() && custom_models.is_empty() {
+        return Ok(());
+    }
+    let models_path = agent_home.join(".pi").join("agent").join("models.json");
+    let mut root: serde_json::Value = std::fs::read_to_string(&models_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !root.is_object() {
+        root = serde_json::json!({});
+    }
+    if !root.get("providers").is_some_and(|v| v.is_object()) {
+        root["providers"] = serde_json::json!({});
+    }
+
+    for provider in base_urls
+        .keys()
+        .chain(custom_models.keys())
+        .collect::<std::collections::BTreeSet<_>>()
+    {
+        let provider = provider.as_str();
+        if !root["providers"]
+            .get(provider)
+            .is_some_and(|v| v.is_object())
+        {
+            root["providers"][provider] = serde_json::json!({});
+        }
+        let entry = &mut root["providers"][provider];
+        if let Some(base_url) = base_urls.get(provider) {
+            entry["baseUrl"] = serde_json::json!(base_url);
+            entry["api"] = serde_json::json!("openai-completions");
+            entry["apiKey"] = serde_json::json!(format!("${}", provider_key_var(Some(provider))));
+            if base_url.contains("openrouter.ai") {
+                entry["compat"] = serde_json::json!({ "thinkingFormat": "openrouter" });
+            }
+        }
+        if let Some(ids) = custom_models.get(provider) {
+            let mut existing = entry
+                .get("models")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let mut seen = existing
+                .iter()
+                .filter_map(|v| v.get("id").and_then(|id| id.as_str()).map(String::from))
+                .collect::<std::collections::BTreeSet<_>>();
+            for id in ids {
+                if seen.insert(id.clone()) {
+                    existing.push(serde_json::json!({ "id": id, "name": id }));
+                }
+            }
+            entry["models"] = serde_json::Value::Array(existing);
+        }
+    }
+
+    if let Some(parent) = models_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let serialized = serde_json::to_string_pretty(&root).map_err(std::io::Error::other)?;
+    // Crash-safe (temp + fsync + atomic rename) so an interrupted write can't leave
+    // a torn models.json that fails to parse on next launch.
+    ojcore_native::atomic_write_path(&models_path, serialized.as_bytes())
+}
+
+// ============================================================================
+// Windows process hygiene — reliable whole-tree reap + no console flash.
+// ============================================================================
+//
+// On stage two Windows-specific things bite: (1) `Child::kill()` is a single
+// `TerminateProcess` on the Pi handle, so any descendants Pi spawned (node, git,
+// a provider helper) are ORPHANED and linger after a respawn/quit; (2) spawning a
+// console subprocess without `CREATE_NO_WINDOW` flashes a console window in front
+// of the performer. We fix both: a Windows **Job Object** with
+// `KILL_ON_JOB_CLOSE` adopts the whole tree, so dropping the job handle (on a
+// respawn, on `WarmChild::drop`, or on app exit) reaps every descendant reliably;
+// `CREATE_NO_WINDOW` suppresses the flash (matching `updater.rs`). Both are
+// CONTROL-PLANE only (off the audio RT path). Non-Windows is unaffected.
+
+/// The `CREATE_NO_WINDOW` process creation flag — no console window flashes when
+/// the Pi child (a console program) is spawned. Same constant `updater.rs` uses.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// An owned Windows Job Object that whole-tree-reaps the process(es) assigned to
+/// it when its handle closes. Configured with `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`
+/// so that closing the handle (on `Drop`) terminates every still-living process in
+/// the job — the Pi child AND any descendants it spawned — closing the orphan gap
+/// `Child::kill()` leaves on Windows.
+#[cfg(windows)]
+struct JobObject(windows_sys::Win32::Foundation::HANDLE);
+
+// The job handle is only ever created, assigned to once, and closed on drop, all
+// from the control thread that owns the `WarmChild`. The raw `HANDLE` (a pointer)
+// is not `Send` by default; this wrapper is moved into `WarmChild`, which crosses
+// threads via Tauri managed state, so assert it is safe to send (we never share it
+// concurrently — Win32 job handles are process-global and the ops we call are
+// thread-safe).
+#[cfg(windows)]
+unsafe impl Send for JobObject {}
+
+#[cfg(windows)]
+impl JobObject {
+    /// Create a kill-on-close job. Returns `None` if the OS refuses (best-effort:
+    /// a missing job degrades to today's single-process kill, never a failed spawn).
+    fn create_kill_on_close() -> Option<Self> {
+        use windows_sys::Win32::System::JobObjects::{
+            CreateJobObjectW, JobObjectExtendedLimitInformation, SetInformationJobObject,
+            JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+
+        // SAFETY: a null name + null security attributes is the documented way to
+        // create an anonymous job; the returned handle is checked below.
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() {
+            return None;
+        }
+        let job = JobObject(handle);
+
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
+        info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // SAFETY: `info` is a fully-initialized POD of the matching class size; the
+        // handle is valid (checked above).
+        let ok = unsafe {
+            SetInformationJobObject(
+                job.0,
+                JobObjectExtendedLimitInformation,
+                std::ptr::addr_of!(info) as *const core::ffi::c_void,
+                std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            )
+        };
+        if ok == 0 {
+            return None; // `job` drops here, closing the handle.
+        }
+        Some(job)
+    }
+
+    /// Adopt `child` (and thus its future descendants) into the job. Best-effort.
+    fn assign(&self, child: &Child) -> bool {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
+
+        let process = child.as_raw_handle() as windows_sys::Win32::Foundation::HANDLE;
+        // SAFETY: `self.0` is a live job handle; `process` is the child's live
+        // process handle owned by `Child` for the duration of this call.
+        unsafe { AssignProcessToJobObject(self.0, process) != 0 }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for JobObject {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        // Closing the only handle to a KILL_ON_JOB_CLOSE job terminates every
+        // process still inside it — the whole Pi tree — then frees the job.
+        // SAFETY: `self.0` is a valid handle this type uniquely owns.
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
+/// Apply Windows-only spawn hygiene to `cmd`: suppress the console-window flash.
+/// (Tree-reap is handled post-spawn by [`JobObject`].) A no-op on other targets.
+#[cfg(windows)]
+fn apply_windows_spawn_hygiene(cmd: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn apply_windows_spawn_hygiene(_cmd: &mut Command) {}
 
 /// Spawn a fresh Pi child, run the `get_commands` handshake, and pin the model
 /// ONCE. Emits a reasoned `error` line and returns `Err(())` on any failure (the
@@ -465,6 +911,7 @@ fn spawn_and_configure(
     project_root: &Path,
     provider: Option<&str>,
     model_id: Option<&str>,
+    auth_fingerprint: String,
     jail: Option<crate::sandbox::Jail>,
     app: &AppHandle,
     channel: &str,
@@ -473,7 +920,7 @@ fn spawn_and_configure(
     emit(
         app,
         channel,
-        PiStreamLine::thought(format!("Starting Pi in {}", project_root.display())),
+        PiStreamLine::status(format!("Starting Pi in {}", project_root.display())),
     );
     if jailed && !crate::sandbox::jail_supported() {
         // Be honest where the hard OS jail isn't wired yet (macOS/Windows): the
@@ -481,8 +928,8 @@ fn spawn_and_configure(
         emit(
             app,
             channel,
-            PiStreamLine::thought(
-                "note: OS-level file jail isn't available on this platform — the in-Pi permission-gate is the active layer.".to_string(),
+            PiStreamLine::status(
+                "OS-level file jail isn't available on this platform — the in-Pi permission-gate is the active layer.".to_string(),
             ),
         );
     }
@@ -501,6 +948,8 @@ fn spawn_and_configure(
     if let Some(j) = jail {
         crate::sandbox::apply(&mut cmd, j);
     }
+    // Windows: no console-window flash on stage (CREATE_NO_WINDOW). No-op elsewhere.
+    apply_windows_spawn_hygiene(&mut cmd);
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -511,6 +960,44 @@ fn spawn_and_configure(
                 PiStreamLine::error(format!("failed to spawn `pi`: {e}")),
             );
             return Err(());
+        }
+    };
+
+    // Windows: adopt the child into a kill-on-close Job Object BEFORE it spawns its
+    // own descendants, so dropping the job (respawn / WarmChild::drop / app exit)
+    // reaps the WHOLE Pi tree — not just the one process `Child::kill()` reaches.
+    // Best-effort: if the job can't be created/assigned we keep the child and fall
+    // back to today's single-process kill rather than failing the spawn.
+    #[cfg(windows)]
+    let job = {
+        match JobObject::create_kill_on_close() {
+            Some(j) if j.assign(&child) => Some(j),
+            Some(_) => {
+                // Created but could NOT adopt the child: a held-but-unassigned job
+                // reaps nothing, so keeping it is a false sense of protection. Drop
+                // it now and SAY so — the fallback to single-process kill must be
+                // visible, never silent (descendants may then orphan on force-kill).
+                emit(
+                    app,
+                    channel,
+                    PiStreamLine::status(
+                        "Windows Job Object assignment failed; falling back to single-process kill"
+                            .to_string(),
+                    ),
+                );
+                None
+            }
+            None => {
+                emit(
+                    app,
+                    channel,
+                    PiStreamLine::status(
+                        "Windows Job Object unavailable; falling back to single-process kill"
+                            .to_string(),
+                    ),
+                );
+                None
+            }
         }
     };
 
@@ -607,17 +1094,27 @@ fn spawn_and_configure(
         model_id: model_id.map(String::from),
         project_root: project_root.to_path_buf(),
         jailed,
+        auth_fingerprint,
+        thinking_level: None,
         // A fresh child starts on Pi's own current/auto session; the first run
         // resolves + reports the real id (or switches to a requested one).
         current_session: None,
+        #[cfg(windows)]
+        job,
     })
 }
 
 /// Where the bundled permission-gate extension lives. Overridable for packaging
 /// via `OPENJAMMER_GATE_DIR`; the dev fallback is the in-repo `pi-extensions`.
-fn gate_extension_dir() -> PathBuf {
+fn gate_extension_dir(app: &AppHandle) -> PathBuf {
     if let Ok(p) = std::env::var("OPENJAMMER_GATE_DIR") {
         return PathBuf::from(p);
+    }
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join("pi-extensions").join("permission-gate");
+        if bundled.exists() {
+            return bundled;
+        }
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -629,9 +1126,15 @@ fn gate_extension_dir() -> PathBuf {
 /// gives Pi the graph verbs (`add_node`/`add_connection`/…) so it can build the
 /// canvas. Overridable via `OPENJAMMER_GRAPH_DIR`. Installed in EVERY mode (it is
 /// the core capability, not a guard), unlike the permission-gate which YOLO drops.
-fn graph_extension_dir() -> PathBuf {
+fn graph_extension_dir(app: &AppHandle) -> PathBuf {
     if let Ok(p) = std::env::var("OPENJAMMER_GRAPH_DIR") {
         return PathBuf::from(p);
+    }
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join("pi-openjammer-graph");
+        if bundled.exists() {
+            return bundled;
+        }
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -639,17 +1142,76 @@ fn graph_extension_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("pi-openjammer-graph"))
 }
 
-/// Add (`present`) or remove a `package` entry from the agent home's
-/// `settings.json` `packages[]` — the one mechanism Pi loads packages through.
-/// Shared by the permission-gate (sandbox) and pi-persistent-intelligence (learning).
-fn set_settings_package(agent_home: &Path, package: &str, present: bool) -> std::io::Result<()> {
-    let settings_path = agent_home.join(".pi").join("agent").join("settings.json");
+fn same_openjammer_package_family(existing: &str, package: &str) -> bool {
+    fn normalized(s: &str) -> String {
+        s.replace('\\', "/").trim_end_matches('/').to_string()
+    }
+    let existing = normalized(existing);
+    let package = normalized(package);
 
-    let mut root: serde_json::Value = std::fs::read_to_string(&settings_path)
+    fn ends_with_path_segment(path: &str, segment: &str) -> bool {
+        path.strip_suffix(segment)
+            .is_some_and(|prefix| prefix.is_empty() || prefix.ends_with('/'))
+    }
+
+    for marker in ["pi-openjammer-graph", "permission-gate"] {
+        if ends_with_path_segment(&package, marker) && ends_with_path_segment(&existing, marker) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Turn a self-authored package name into a SAFE directory slug — lowercase ASCII
+/// alphanumerics + single dashes, bounded. Rejects an empty result, so no `.`, `..`,
+/// or path separator can survive: a self-package can NEVER escape the packages dir.
+fn slugify_package_name(name: &str) -> Result<String, String> {
+    let mut slug = String::new();
+    let mut last_dash = false;
+    for ch in name.trim().to_lowercase().chars() {
+        if ch.is_ascii_alphanumeric() {
+            slug.push(ch);
+            last_dash = false;
+        } else if !last_dash && !slug.is_empty() {
+            slug.push('-');
+            last_dash = true;
+        }
+    }
+    let slug: String = slug.trim_matches('-').chars().take(48).collect();
+    let slug = slug.trim_matches('-').to_string();
+    if slug.is_empty() {
+        return Err("package name must contain a letter or digit".to_string());
+    }
+    Ok(slug)
+}
+
+fn settings_path(agent_home: &Path) -> PathBuf {
+    agent_home.join(".pi").join("agent").join("settings.json")
+}
+
+fn read_settings_root(agent_home: &Path) -> serde_json::Value {
+    std::fs::read_to_string(settings_path(agent_home))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
+        .unwrap_or_else(|| serde_json::json!({}))
+}
 
+fn write_settings_root(agent_home: &Path, root: &serde_json::Value) -> std::io::Result<()> {
+    let path = settings_path(agent_home);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let serialized = serde_json::to_string_pretty(root).map_err(std::io::Error::other)?;
+    // Crash-safe (temp + fsync + atomic rename): never leave a torn settings.json.
+    ojcore_native::atomic_write_path(&path, serialized.as_bytes())
+}
+
+/// Mutate `root.packages[]` in memory. Returns whether anything changed.
+fn set_settings_package_in_root(
+    root: &mut serde_json::Value,
+    package: &str,
+    present: bool,
+) -> bool {
     let mut packages: Vec<String> = root
         .get("packages")
         .and_then(|v| v.as_array())
@@ -660,21 +1222,48 @@ fn set_settings_package(agent_home: &Path, package: &str, present: bool) -> std:
         })
         .unwrap_or_default();
 
+    // Installer paths can change across app versions. Keep only the current
+    // OpenJammer package path for this package family so stale resource paths do
+    // not duplicate tools or keep the old permission gate active in YOLO.
+    let before_prune = packages.len();
+    packages.retain(|p| p == package || !same_openjammer_package_family(p, package));
+    let mut changed = packages.len() != before_prune;
+
     let has = packages.iter().any(|p| p == package);
     if present && !has {
         packages.push(package.to_string());
+        changed = true;
     } else if !present && has {
         packages.retain(|p| p != package);
-    } else {
-        return Ok(()); // already in the desired state
+        changed = true;
     }
 
-    root["packages"] = serde_json::json!(packages);
-    if let Some(parent) = settings_path.parent() {
-        std::fs::create_dir_all(parent)?;
+    if changed {
+        root["packages"] = serde_json::json!(packages);
     }
-    let serialized = serde_json::to_string_pretty(&root).map_err(std::io::Error::other)?;
-    std::fs::write(&settings_path, serialized)
+    changed
+}
+
+/// Add (`present`) or remove a `package` entry from the agent home's
+/// `settings.json` `packages[]` — the one mechanism Pi loads packages through.
+/// Shared by the permission-gate (sandbox) and pi-persistent-intelligence (learning).
+fn set_settings_package(agent_home: &Path, package: &str, present: bool) -> std::io::Result<()> {
+    let mut root = read_settings_root(agent_home);
+    if !set_settings_package_in_root(&mut root, package, present) {
+        return Ok(()); // already in the desired state
+    }
+    write_settings_root(agent_home, &root)
+}
+
+/// Test helper: whether `package` is currently present in the agent home's
+/// `settings.json` `packages[]`.
+#[cfg(test)]
+fn settings_has_package(agent_home: &Path, package: &str) -> bool {
+    read_settings_root(agent_home)
+        .get("packages")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().any(|v| v.as_str() == Some(package)))
+        .unwrap_or(false)
 }
 
 /// Make the in-Pi permission-gate ACTIVE (jailed) or DROPPED (YOLO) by editing the
@@ -682,7 +1271,7 @@ fn set_settings_package(agent_home: &Path, package: &str, present: bool) -> std:
 /// This is what turns the verified gate policy into live enforcement — and what
 /// YOLO removes. Best-effort: a write failure is surfaced as a note, never fatal.
 fn configure_gate(agent_home: &Path, jailed: bool, app: &AppHandle, channel: &str) {
-    let gate = gate_extension_dir().to_string_lossy().into_owned();
+    let gate = gate_extension_dir(app).to_string_lossy().into_owned();
     if set_settings_package(agent_home, &gate, jailed).is_err() {
         emit(
             app,
@@ -699,16 +1288,121 @@ fn persistent_intelligence_pkg() -> String {
         .unwrap_or_else(|_| "pi-persistent-intelligence".to_string())
 }
 
-/// Opt-in learning (Phase 7): install/remove pi-persistent-intelligence in the
-/// agent home so the agent remembers your taste across sessions (local frecency is
-/// the floor either way). A mode change takes effect on the next (re)spawn.
+const OPENJAMMER_SETTINGS_KEY: &str = "openjammer";
+const AI_LEARNING_ENABLED_KEY: &str = "aiLearningEnabled";
+
+fn explicit_learning_preference(agent_home: &Path) -> Option<bool> {
+    read_settings_root(agent_home)
+        .get(OPENJAMMER_SETTINGS_KEY)
+        .and_then(|v| v.get(AI_LEARNING_ENABLED_KEY))
+        .and_then(|v| v.as_bool())
+}
+
+fn set_learning_state(agent_home: &Path, enabled: bool) -> std::io::Result<()> {
+    let mut root = read_settings_root(agent_home);
+    let pkg = persistent_intelligence_pkg();
+    let mut changed = set_settings_package_in_root(&mut root, &pkg, enabled);
+
+    if !root
+        .get(OPENJAMMER_SETTINGS_KEY)
+        .is_some_and(|v| v.is_object())
+    {
+        root[OPENJAMMER_SETTINGS_KEY] = serde_json::json!({});
+        changed = true;
+    }
+    if root[OPENJAMMER_SETTINGS_KEY][AI_LEARNING_ENABLED_KEY].as_bool() != Some(enabled) {
+        root[OPENJAMMER_SETTINGS_KEY][AI_LEARNING_ENABLED_KEY] = serde_json::json!(enabled);
+        changed = true;
+    }
+
+    if changed {
+        write_settings_root(agent_home, &root)?;
+    }
+    Ok(())
+}
+
+/// Memory is ON by default. A missing preference is treated as first run and writes
+/// the package + explicit `openjammer.aiLearningEnabled: true`; an explicit false is
+/// a durable opt-out and removes the package if some older build left it present.
+fn ensure_learning_default(agent_home: &Path) -> std::io::Result<bool> {
+    let enabled = explicit_learning_preference(agent_home).unwrap_or(true);
+    set_learning_state(agent_home, enabled)?;
+    Ok(enabled)
+}
+
+/// Enable/disable pi-persistent-intelligence in the agent home so the agent
+/// remembers your taste across sessions (local frecency is the floor either way).
+/// A mode change takes effect on the next (re)spawn.
 #[tauri::command]
 pub fn ai_set_learning(enabled: bool) -> Result<(), String> {
     let agent_home = AgentWorkspace::ensure()
         .map_err(|e| e.to_string())?
         .agent_home;
-    set_settings_package(&agent_home, &persistent_intelligence_pkg(), enabled)
-        .map_err(|e| e.to_string())
+    set_learning_state(&agent_home, enabled).map_err(|e| e.to_string())
+}
+
+/// Read whether learning is currently ON. First read also applies the default-on
+/// policy, so the footer is truthful before the first Pi child is spawned.
+#[tauri::command]
+pub fn ai_get_learning() -> Result<bool, String> {
+    let agent_home = AgentWorkspace::ensure()
+        .map_err(|e| e.to_string())?
+        .agent_home;
+    ensure_learning_default(&agent_home).map_err(|e| e.to_string())
+}
+
+/// Sanity cap on a self-authored package's source — not a security boundary (the
+/// permission gate + OS jail are); just a guard against a runaway write. 256 KiB is
+/// ample for a Pi extension.
+const MAX_SELF_PACKAGE_SOURCE: usize = 256 * 1024;
+
+/// SHAPE-SELF: the agent authors itself a reusable Pi package (a real tool/skill) and
+/// the host writes it into the brain + registers it COLD-START-DEFERRED — it loads on
+/// the NEXT Pi spawn, never restarting the warm child (a mid-session restart would
+/// steal focus from a live set). HOST-MEDIATED on purpose: the in-Pi gate forbids the
+/// agent writing its own `packages/` + `settings.json` directly, so this is the ONE
+/// sanctioned path. It is safe even in jailed mode because `ai_run_blocking`
+/// re-asserts the permission gate via `configure_gate` on EVERY jailed spawn — so a
+/// self-authored package can never persistently drop its own gate. Returns the slug
+/// the package was saved under. The agent reverses it with Ctrl+K forget / by asking.
+#[tauri::command]
+pub fn ai_save_self_package(
+    name: String,
+    source: String,
+    description: Option<String>,
+) -> Result<String, String> {
+    if source.len() > MAX_SELF_PACKAGE_SOURCE {
+        return Err(format!(
+            "package source is too large ({} bytes; max {MAX_SELF_PACKAGE_SOURCE})",
+            source.len()
+        ));
+    }
+    let slug = slugify_package_name(&name)?;
+    let agent_home = AgentWorkspace::ensure()
+        .map_err(|e| e.to_string())?
+        .agent_home;
+    let pkg_dir = agent_home
+        .join(".pi")
+        .join("agent")
+        .join("packages")
+        .join(&slug);
+    std::fs::create_dir_all(&pkg_dir).map_err(|e| e.to_string())?;
+    let manifest = serde_json::json!({
+        "name": format!("openjammer-self-{slug}"),
+        "private": true,
+        "type": "module",
+        "keywords": ["pi-package", "openjammer", "self-authored"],
+        "description": description.unwrap_or_default(),
+        "pi": { "extensions": ["./index.mjs"] },
+    });
+    let manifest_str = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    std::fs::write(pkg_dir.join("package.json"), manifest_str).map_err(|e| e.to_string())?;
+    std::fs::write(pkg_dir.join("index.mjs"), source.as_bytes()).map_err(|e| e.to_string())?;
+    // Register the package dir. COLD-START-DEFERRED: the warm child is NOT restarted,
+    // so this applies on the next spawn — no focus-steal mid-set.
+    set_settings_package(&agent_home, &pkg_dir.to_string_lossy(), true)
+        .map_err(|e| e.to_string())?;
+    Ok(slug)
 }
 
 /// Forget the agent's learned memory (Phase 7) — wipes the pi-memory dir, leaving
@@ -814,8 +1508,8 @@ fn extract_session_id(value: &serde_json::Value) -> Option<String> {
             }
         }
     }
-    // Some shapes nest it under a `state` / `session` object.
-    for outer in ["state", "session"] {
+    // Some shapes nest it under a `data` / `state` / `session` object.
+    for outer in ["data", "state", "session"] {
         if let Some(obj) = value.get(outer) {
             if let Some(s) = extract_session_id(obj) {
                 return Some(s);
@@ -986,11 +1680,60 @@ fn first_tool_name(content: Option<&serde_json::Value>) -> Option<String> {
 /// Requires a running warm child (start a prompt first); otherwise it surfaces a
 /// clear error rather than spawning a child with no prompt context.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub fn ai_command(
     app: AppHandle,
     command: serde_json::Value,
     channel: String,
+    provider_key: Option<String>,
+    provider_keys: Option<HashMap<String, String>>,
+    provider_base_urls: Option<HashMap<String, String>>,
+    provider_custom_models: Option<HashMap<String, Vec<String>>>,
+    provider: Option<String>,
+    model_id: Option<String>,
+    thinking_level: Option<String>,
+    yolo: Option<bool>,
+) -> Result<(), String> {
+    // Same rule as ai_run: command RPC may spawn/configure/read Pi, so it must
+    // not occupy the native UI/IPC thread while the frontend waits on events.
+    let app_for_thread = app.clone();
+    std::thread::spawn(move || {
+        let warm = app_for_thread.state::<WarmChildState>();
+        let bridge = app_for_thread.state::<crate::bridge::BridgeState>();
+        let _ = ai_command_blocking(
+            app_for_thread.clone(),
+            command,
+            channel,
+            provider_key,
+            provider_keys,
+            provider_base_urls,
+            provider_custom_models,
+            provider,
+            model_id,
+            thinking_level,
+            yolo,
+            warm,
+            bridge,
+        );
+    });
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ai_command_blocking(
+    app: AppHandle,
+    command: serde_json::Value,
+    channel: String,
+    provider_key: Option<String>,
+    provider_keys: Option<HashMap<String, String>>,
+    provider_base_urls: Option<HashMap<String, String>>,
+    provider_custom_models: Option<HashMap<String, Vec<String>>>,
+    provider: Option<String>,
+    model_id: Option<String>,
+    thinking_level: Option<String>,
+    yolo: Option<bool>,
     warm: tauri::State<'_, WarmChildState>,
+    bridge: tauri::State<'_, crate::bridge::BridgeState>,
 ) -> Result<(), String> {
     let cmd_name = command
         .get("type")
@@ -1006,13 +1749,134 @@ pub fn ai_command(
         return Ok(());
     }
 
-    let mut guard = warm.0.lock().unwrap_or_else(|e| e.into_inner());
-    let Some(child) = guard.as_mut() else {
+    let Some(pi) = find_pi(&app) else {
+        emit(&app, &channel, PiStreamLine::error(PI_MISSING_HELP));
+        return Ok(());
+    };
+    let workspace = match AgentWorkspace::ensure() {
+        Ok(ws) => ws,
+        Err(e) => {
+            emit(
+                &app,
+                &channel,
+                PiStreamLine::error(format!("could not prepare the agent workspace: {e}")),
+            );
+            return Ok(());
+        }
+    };
+    let provider_key_entries = collect_provider_key_entries(
+        provider_key.as_deref(),
+        provider.as_deref(),
+        provider_keys.as_ref(),
+    );
+    let filtered_provider_key_entries = filter_conflicting_provider_keys(provider_key_entries);
+    let provider_base_urls = sanitized_provider_base_urls(provider_base_urls.as_ref());
+    let provider_custom_models = sanitized_provider_custom_models(provider_custom_models.as_ref());
+    if write_openjammer_models_json(
+        &workspace.agent_home,
+        &provider_base_urls,
+        &provider_custom_models,
+    )
+    .is_err()
+    {
         emit(
             &app,
             &channel,
-            PiStreamLine::error("the AI agent isn't running yet — ask it something first."),
+            PiStreamLine::thought("note: could not update custom model config"),
         );
+    }
+    let auth_fingerprint = runtime_fingerprint(
+        &filtered_provider_key_entries,
+        &provider_base_urls,
+        &provider_custom_models,
+    );
+    let jailed = !yolo.unwrap_or(false);
+    let _runtime_thinking_level = sanitize_thinking_level(thinking_level.as_deref());
+    let mut env = env_for_provider_keys(jailed, &filtered_provider_key_entries);
+    env.insert(
+        "HOME".to_string(),
+        workspace.agent_home.to_string_lossy().into_owned(),
+    );
+    if let Some((addr, token)) = crate::bridge::ensure_started(&app, &bridge) {
+        env.insert("OJ_BRIDGE_ADDR".to_string(), addr);
+        env.insert("OJ_BRIDGE_TOKEN".to_string(), token);
+    }
+    if jailed {
+        env.insert(
+            "OJ_PROJECT_ROOT".to_string(),
+            workspace.project_root.to_string_lossy().into_owned(),
+        );
+        env.insert(
+            "OJ_MEMORY_ROOTS".to_string(),
+            workspace
+                .memory_roots()
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(":"),
+        );
+        let key_vars = provider_key_vars(&filtered_provider_key_entries);
+        if let Some(active_key_var) = provider
+            .as_deref()
+            .map(|p| provider_key_var(Some(p)))
+            .filter(|v| key_vars.iter().any(|k| k == v))
+        {
+            env.insert("OJ_KEY_VAR".to_string(), active_key_var);
+        }
+        if !key_vars.is_empty() {
+            env.insert("OJ_KEY_VARS".to_string(), key_vars.join(":"));
+        }
+    }
+
+    let mut guard = warm.0.lock().unwrap_or_else(|e| e.into_inner());
+    let needs_respawn = match guard.as_mut() {
+        None => true,
+        Some(c) => {
+            c.is_dead()
+                || c.provider.as_deref() != provider.as_deref()
+                || c.model_id.as_deref() != model_id.as_deref()
+                || c.project_root != workspace.project_root
+                || c.jailed != jailed
+                || c.auth_fingerprint != auth_fingerprint
+        }
+    };
+    if needs_respawn {
+        drop(guard.take());
+        configure_gate(&workspace.agent_home, jailed, &app, &channel);
+        if ensure_learning_default(&workspace.agent_home).is_err() {
+            emit(
+                &app,
+                &channel,
+                PiStreamLine::thought("note: could not update the memory config".to_string()),
+            );
+        }
+        let graph_pkg = graph_extension_dir(&app).to_string_lossy().into_owned();
+        let _ = set_settings_package(&workspace.agent_home, &graph_pkg, true);
+        let jail = if jailed {
+            Some(crate::sandbox::Jail::new(
+                workspace.project_root.clone(),
+                workspace.agent_home.clone(),
+            ))
+        } else {
+            None
+        };
+        match spawn_and_configure(
+            &pi,
+            env,
+            &workspace.project_root,
+            provider.as_deref(),
+            model_id.as_deref(),
+            auth_fingerprint,
+            jail,
+            &app,
+            &channel,
+        ) {
+            Ok(c) => *guard = Some(c),
+            Err(()) => return Ok(()),
+        }
+    }
+
+    let Some(child) = guard.as_mut() else {
         return Ok(());
     };
 
@@ -1046,10 +1910,26 @@ pub fn ai_command(
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false)
             {
+                if cmd_name == "set_model" {
+                    child.provider = command
+                        .get("provider")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                    child.model_id = command
+                        .get("modelId")
+                        .and_then(|v| v.as_str())
+                        .map(String::from);
+                } else if cmd_name == "set_thinking_level" {
+                    child.thinking_level = command
+                        .get("level")
+                        .and_then(|v| v.as_str())
+                        .and_then(|level| sanitize_thinking_level(Some(level)));
+                }
+                let data = value.get("data").cloned();
                 emit(
                     &app,
                     &channel,
-                    PiStreamLine::result(format!("{cmd_name} ok")),
+                    PiStreamLine::result_with_data(format!("{cmd_name} ok"), data),
                 );
             } else {
                 emit(
@@ -1069,6 +1949,241 @@ pub fn ai_command(
         }
     }
     Ok(())
+}
+
+/// Pre-warm the Pi child on intent (the frontend calls this when the user enters
+/// AI mode), so the FIRST real prompt pays NO cold start — spawn, handshake, and
+/// `set_model` are already done. Runs the SAME spawn/configure path as [`ai_run`]
+/// / [`ai_command`] but sends no command. IDEMPOTENT: if a warm child already
+/// matches this runtime's fingerprint it returns at once, so re-entering AI mode
+/// is free. Off the UI/IPC thread like every other `ai_*`. The frontend gates it
+/// on configured + capable, so the search-only / pure-instrument majority never
+/// spawns Pi; the single idle child is reaped on the next respawn or app exit.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn ai_prewarm(
+    app: AppHandle,
+    provider_key: Option<String>,
+    provider_keys: Option<HashMap<String, String>>,
+    provider_base_urls: Option<HashMap<String, String>>,
+    provider_custom_models: Option<HashMap<String, Vec<String>>>,
+    provider: Option<String>,
+    model_id: Option<String>,
+    yolo: Option<bool>,
+) -> Result<(), String> {
+    let app_for_thread = app.clone();
+    std::thread::spawn(move || {
+        let warm = app_for_thread.state::<WarmChildState>();
+        let bridge = app_for_thread.state::<crate::bridge::BridgeState>();
+        ai_prewarm_blocking(
+            app_for_thread.clone(),
+            provider_key,
+            provider_keys,
+            provider_base_urls,
+            provider_custom_models,
+            provider,
+            model_id,
+            yolo,
+            warm,
+            bridge,
+        );
+    });
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn ai_prewarm_blocking(
+    app: AppHandle,
+    provider_key: Option<String>,
+    provider_keys: Option<HashMap<String, String>>,
+    provider_base_urls: Option<HashMap<String, String>>,
+    provider_custom_models: Option<HashMap<String, Vec<String>>>,
+    provider: Option<String>,
+    model_id: Option<String>,
+    yolo: Option<bool>,
+    warm: tauri::State<'_, WarmChildState>,
+    bridge: tauri::State<'_, crate::bridge::BridgeState>,
+) {
+    // Best-effort + silent: status/errors go to an internal channel the frontend
+    // does not subscribe to, so a failed prewarm just means the first prompt pays
+    // the cold start it would have paid anyway.
+    const CHANNEL: &str = "oj-ai-prewarm";
+    let Some(pi) = find_pi(&app) else {
+        return;
+    };
+    let Ok(workspace) = AgentWorkspace::ensure() else {
+        return;
+    };
+
+    let provider_key_entries = collect_provider_key_entries(
+        provider_key.as_deref(),
+        provider.as_deref(),
+        provider_keys.as_ref(),
+    );
+    let filtered_provider_key_entries = filter_conflicting_provider_keys(provider_key_entries);
+    let provider_base_urls = sanitized_provider_base_urls(provider_base_urls.as_ref());
+    let provider_custom_models = sanitized_provider_custom_models(provider_custom_models.as_ref());
+    let _ = write_openjammer_models_json(
+        &workspace.agent_home,
+        &provider_base_urls,
+        &provider_custom_models,
+    );
+    let auth_fingerprint = runtime_fingerprint(
+        &filtered_provider_key_entries,
+        &provider_base_urls,
+        &provider_custom_models,
+    );
+    let jailed = !yolo.unwrap_or(false);
+    let mut env = env_for_provider_keys(jailed, &filtered_provider_key_entries);
+    env.insert(
+        "HOME".to_string(),
+        workspace.agent_home.to_string_lossy().into_owned(),
+    );
+    if let Some((addr, token)) = crate::bridge::ensure_started(&app, &bridge) {
+        env.insert("OJ_BRIDGE_ADDR".to_string(), addr);
+        env.insert("OJ_BRIDGE_TOKEN".to_string(), token);
+    }
+    if jailed {
+        env.insert(
+            "OJ_PROJECT_ROOT".to_string(),
+            workspace.project_root.to_string_lossy().into_owned(),
+        );
+        env.insert(
+            "OJ_MEMORY_ROOTS".to_string(),
+            workspace
+                .memory_roots()
+                .iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(":"),
+        );
+        let key_vars = provider_key_vars(&filtered_provider_key_entries);
+        if let Some(active_key_var) = provider
+            .as_deref()
+            .map(|p| provider_key_var(Some(p)))
+            .filter(|v| key_vars.iter().any(|k| k == v))
+        {
+            env.insert("OJ_KEY_VAR".to_string(), active_key_var);
+        }
+        if !key_vars.is_empty() {
+            env.insert("OJ_KEY_VARS".to_string(), key_vars.join(":"));
+        }
+    }
+
+    let mut guard = warm.0.lock().unwrap_or_else(|e| e.into_inner());
+    let needs_respawn = match guard.as_mut() {
+        None => true,
+        Some(c) => {
+            c.is_dead()
+                || c.provider.as_deref() != provider.as_deref()
+                || c.model_id.as_deref() != model_id.as_deref()
+                || c.project_root != workspace.project_root
+                || c.jailed != jailed
+                || c.auth_fingerprint != auth_fingerprint
+        }
+    };
+    if !needs_respawn {
+        return; // already warm and matching this runtime — nothing to do.
+    }
+    drop(guard.take());
+    configure_gate(&workspace.agent_home, jailed, &app, CHANNEL);
+    let _ = ensure_learning_default(&workspace.agent_home);
+    let graph_pkg = graph_extension_dir(&app).to_string_lossy().into_owned();
+    let _ = set_settings_package(&workspace.agent_home, &graph_pkg, true);
+    let jail = if jailed {
+        Some(crate::sandbox::Jail::new(
+            workspace.project_root.clone(),
+            workspace.agent_home.clone(),
+        ))
+    } else {
+        None
+    };
+    if let Ok(child) = spawn_and_configure(
+        &pi,
+        env,
+        &workspace.project_root,
+        provider.as_deref(),
+        model_id.as_deref(),
+        auth_fingerprint,
+        jail,
+        &app,
+        CHANNEL,
+    ) {
+        *guard = Some(child);
+    }
+}
+
+/// Drop the warm Pi child so the next prompt respawns and reloads settings,
+/// bundled packages, extensions, skills, and prompt templates.
+#[tauri::command]
+pub fn ai_restart(warm: tauri::State<'_, WarmChildState>) -> Result<(), String> {
+    drop(warm.0.lock().unwrap_or_else(|e| e.into_inner()).take());
+    Ok(())
+}
+
+fn valid_thinking_level(level: &str) -> bool {
+    matches!(
+        level,
+        "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    )
+}
+
+fn sanitize_thinking_level(level: Option<&str>) -> Option<String> {
+    level
+        .map(str::trim)
+        .filter(|level| valid_thinking_level(level))
+        .map(String::from)
+}
+
+fn apply_thinking_level_if_needed(
+    child: &mut WarmChild,
+    level: Option<&str>,
+    app: &AppHandle,
+    channel: &str,
+) -> Result<(), ()> {
+    let Some(level) = sanitize_thinking_level(level) else {
+        return Ok(());
+    };
+    if child.thinking_level.as_deref() == Some(level.as_str()) {
+        return Ok(());
+    }
+    let req = serde_json::json!({ "type": "set_thinking_level", "level": level.as_str() });
+    if send_command(&mut child.stdin, &req).is_err() {
+        emit(
+            app,
+            channel,
+            PiStreamLine::error("could not send thinking-level change"),
+        );
+        return Err(());
+    }
+    match await_response(
+        &mut child.reader,
+        &mut child.stdin,
+        app,
+        channel,
+        "set_thinking_level",
+    ) {
+        Ok(true) => {
+            child.thinking_level = Some(level);
+            Ok(())
+        }
+        Ok(false) => {
+            emit(
+                app,
+                channel,
+                PiStreamLine::thought("Pi rejected the selected thinking level"),
+            );
+            Ok(())
+        }
+        Err(()) => {
+            emit(
+                app,
+                channel,
+                PiStreamLine::error("Pi closed the stream while setting thinking level."),
+            );
+            Err(())
+        }
+    }
 }
 
 /// Write one JSON command to Pi's stdin (LF-framed) and flush.
@@ -1196,6 +2311,33 @@ fn is_blocking_dialog(method: &str) -> bool {
     matches!(method, "select" | "confirm" | "input" | "editor")
 }
 
+/// The only Pi tools OpenJammer's webview is allowed to interpret as canvas
+/// graph verbs. Generic Pi tools (`read`, `bash`, `edit`, …) may run inside Pi,
+/// especially in YOLO, but they must NEVER be routed into `applyToolCall`.
+const OPENJAMMER_TOOL_NAMES: &[&str] = &[
+    "add_node",
+    "remove_node",
+    "update_node_data",
+    "add_connection",
+    "remove_connection",
+    "author_dsp_node",
+    "author_code_node",
+    "get_graph",
+    "list_node_types",
+    "find_nodes",
+    "batch_apply",
+    "validate_plan",
+    "emit_plan",
+    "get_logs",
+    "get_diagnostics",
+    "get_settings",
+    "update_settings",
+];
+
+fn is_openjammer_tool(name: &str) -> bool {
+    OPENJAMMER_TOOL_NAMES.contains(&name)
+}
+
 /// Translate one Pi RPC event into an optional [`PiStreamLine`]. `None` means
 /// the event carries no transcript signal (lifecycle / partial / housekeeping)
 /// and is intentionally dropped rather than degraded to a noisy `thought`.
@@ -1205,6 +2347,9 @@ fn parse_pi_event(value: &serde_json::Value) -> Option<PiStreamLine> {
         // The executed tool call (final args) → forward as `tool-call`.
         "tool_execution_start" => {
             let name = value.get("toolName").and_then(|v| v.as_str()).unwrap_or("");
+            if !is_openjammer_tool(name) {
+                return None;
+            }
             let args = value
                 .get("args")
                 .cloned()
@@ -1528,6 +2673,21 @@ impl AgentWorkspace {
         std::fs::create_dir_all(pi_agent.join("pi-memory"))?;
         std::fs::create_dir_all(pi_agent.join("sessions"))?;
         std::fs::create_dir_all(&project_root)?;
+        // Seed the agent's writable pi-memory with two starter files the persona
+        // points at: the SEE hand's debugging skill and the SHAPE-SELF hand's
+        // about-you.md. Idempotent — only written when absent, so the agent's own
+        // refinements (pi-memory is agent-writable) are never clobbered. Best-effort:
+        // a failed seed just leaves the persona's pointer fileless until next run.
+        let mem = pi_agent.join("pi-memory");
+        for (name, body) in [
+            ("debugging.md", include_str!("../assets/agent/debugging.md")),
+            ("about-you.md", include_str!("../assets/agent/about-you.md")),
+        ] {
+            let path = mem.join(name);
+            if !path.exists() {
+                let _ = std::fs::write(&path, body);
+            }
+        }
         Ok(Self {
             agent_home,
             project_root,
@@ -2016,6 +3176,32 @@ mod tests {
     }
 
     #[test]
+    fn slugify_package_name_is_safe_and_contained() {
+        // Normal names slugify predictably.
+        assert_eq!(
+            slugify_package_name("Tempo Helper").unwrap(),
+            "tempo-helper"
+        );
+        assert_eq!(
+            slugify_package_name("  my__cool.tool!! ").unwrap(),
+            "my-cool-tool"
+        );
+        // Path-traversal / separators can NEVER survive — no escape from packages/.
+        assert_eq!(
+            slugify_package_name("../../etc/passwd").unwrap(),
+            "etc-passwd"
+        );
+        assert_eq!(slugify_package_name("a/b\\c").unwrap(), "a-b-c");
+        // Empty-after-slug is rejected (no nameless dir).
+        assert!(slugify_package_name("   ").is_err());
+        assert!(slugify_package_name("////").is_err());
+        // No leading/trailing dashes survive.
+        let s = slugify_package_name("--edge--").unwrap();
+        assert!(!s.starts_with('-') && !s.ends_with('-'));
+        assert_eq!(s, "edge");
+    }
+
+    #[test]
     fn stripped_env_omits_key_when_none() {
         let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("OPENJAMMER_AI_KEY_VAR");
@@ -2050,6 +3236,133 @@ mod tests {
         assert_eq!(none_env.get("ANTHROPIC_API_KEY"), None);
     }
 
+    #[test]
+    fn env_for_provider_keys_forwards_multiple_configured_providers() {
+        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("OPENJAMMER_AI_KEY_VAR");
+        let keys = HashMap::from([
+            ("opencode".to_string(), "sk-zen".to_string()),
+            ("openai".to_string(), "sk-openai".to_string()),
+        ]);
+
+        let env = env_for_provider_keys(true, &keys);
+
+        assert_eq!(
+            env.get("OPENCODE_API_KEY").map(String::as_str),
+            Some("sk-zen")
+        );
+        assert_eq!(
+            env.get("OPENAI_API_KEY").map(String::as_str),
+            Some("sk-openai"),
+        );
+        assert!(!env.contains_key("ANTHROPIC_API_KEY"));
+        assert_eq!(
+            provider_key_vars(&keys),
+            vec!["OPENAI_API_KEY", "OPENCODE_API_KEY"],
+        );
+        assert_eq!(auth_fingerprint(&keys), auth_fingerprint(&keys));
+    }
+
+    #[test]
+    fn writes_custom_openai_compatible_models_json() {
+        let dir = std::env::temp_dir().join(format!(
+            "openjammer-models-json-test-{}",
+            std::process::id(),
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let base_urls = HashMap::from([(
+            "openai".to_string(),
+            "https://openrouter.ai/api/v1".to_string(),
+        )]);
+        let custom_models = HashMap::from([(
+            "openai".to_string(),
+            vec!["anthropic/claude-sonnet-4".to_string()],
+        )]);
+
+        write_openjammer_models_json(&dir, &base_urls, &custom_models).expect("write models");
+
+        let path = dir.join(".pi").join("agent").join("models.json");
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let provider = &json["providers"]["openai"];
+        assert_eq!(provider["baseUrl"], "https://openrouter.ai/api/v1");
+        assert_eq!(provider["apiKey"], "$OPENAI_API_KEY");
+        assert_eq!(provider["api"], "openai-completions");
+        assert_eq!(provider["compat"]["thinkingFormat"], "openrouter");
+        assert_eq!(provider["models"][0]["id"], "anthropic/claude-sonnet-4");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn openjammer_package_family_matches_across_install_paths() {
+        assert!(same_openjammer_package_family(
+            r#"C:\Program Files\OpenJammer\resources\pi-openjammer-graph"#,
+            r#"C:\Users\u\AppData\Local\OpenJammer\resources\pi-openjammer-graph"#,
+        ));
+        assert!(same_openjammer_package_family(
+            "/old/resources/pi-extensions/permission-gate/",
+            "/new/resources/pi-extensions/permission-gate",
+        ));
+        assert!(!same_openjammer_package_family(
+            "pi-persistent-intelligence",
+            "/new/resources/pi-openjammer-graph",
+        ));
+        assert!(!same_openjammer_package_family(
+            "/old/resources/not-pi-openjammer-graph",
+            "/new/resources/pi-openjammer-graph",
+        ));
+    }
+
+    fn temp_agent_home(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "openjammer-ai-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn learning_defaults_on_and_installs_persistent_intelligence() {
+        let dir = temp_agent_home("learning-default-on");
+
+        assert!(ensure_learning_default(&dir).unwrap());
+
+        assert!(settings_has_package(&dir, "pi-persistent-intelligence"));
+        assert_eq!(explicit_learning_preference(&dir), Some(true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn learning_off_is_a_durable_opt_out() {
+        let dir = temp_agent_home("learning-opt-out");
+
+        set_learning_state(&dir, false).unwrap();
+        assert!(!ensure_learning_default(&dir).unwrap());
+
+        assert!(!settings_has_package(&dir, "pi-persistent-intelligence"));
+        assert_eq!(explicit_learning_preference(&dir), Some(false));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn learning_on_readds_package_after_opt_out() {
+        let dir = temp_agent_home("learning-reenable");
+
+        set_learning_state(&dir, false).unwrap();
+        set_learning_state(&dir, true).unwrap();
+
+        assert!(settings_has_package(&dir, "pi-persistent-intelligence"));
+        assert_eq!(explicit_learning_preference(&dir), Some(true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // ---- RPC event mapping (the M1 "transport truth") ----------------------
 
     #[test]
@@ -2064,6 +3377,15 @@ mod tests {
         let call = line.call.expect("call present");
         assert_eq!(call["name"], "add_node");
         assert_eq!(call["args"]["type"], "looper");
+    }
+
+    #[test]
+    fn unsupported_tool_execution_start_is_skipped() {
+        let value: serde_json::Value = serde_json::from_str(
+            r#"{"type":"tool_execution_start","toolCallId":"call_1","toolName":"read","args":{"path":"Cargo.toml"}}"#,
+        )
+        .unwrap();
+        assert!(parse_pi_event(&value).is_none());
     }
 
     #[test]

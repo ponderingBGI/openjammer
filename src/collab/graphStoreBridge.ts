@@ -205,7 +205,7 @@ export class GraphStoreBridge implements AiCollabFrameTarget {
     }
 
     // ------------------------------------------------------------------------
-    // G2 — AI frame (M3): batch an optimistic AI run into ONE commit / discard
+    // G2 — AI frame (M3): batch a live AI run into ONE collab commit
     // ------------------------------------------------------------------------
 
     /** Open the AI frame: the store->CRDT subscriber is suppressed; the AI delta
@@ -215,9 +215,9 @@ export class GraphStoreBridge implements AiCollabFrameTarget {
     }
 
     /**
-     * Approve path: close the frame and push the ACCUMULATED net delta as ONE
-     * commit (a single transactLocal via {@link pushStoreToCrdt}), then re-sync
-     * the high-water mark so the next local verb diffs cleanly.
+     * Turn-complete path: close the frame and push the ACCUMULATED net delta as
+     * ONE commit (a single transactLocal via {@link pushStoreToCrdt}), then
+     * re-sync the high-water mark so the next local verb diffs cleanly.
      */
     commitAiFrame(): void {
         this.aiFrame = false;
@@ -227,10 +227,10 @@ export class GraphStoreBridge implements AiCollabFrameTarget {
     }
 
     /**
-     * Reject path: close the frame WITHOUT pushing. After a Reject the store has
-     * been reverted to its pre-run state, which already equals the CRDT, so the
-     * net delta is empty — emitting the diff would be a no-op anyway. We just
-     * re-sync the high-water mark to the (reverted) version.
+     * Abandoned-run path: close the frame WITHOUT pushing. If the store has been
+     * reverted to its pre-run state, it already equals the CRDT, so the net delta
+     * is empty — emitting the diff would be a no-op anyway. We just re-sync the
+     * high-water mark to the reverted version.
      */
     discardAiFrame(): void {
         this.aiFrame = false;

@@ -10,6 +10,34 @@ use std::fs::File;
 use std::io::{Cursor, Write};
 use std::path::Path;
 
+use crate::fs::unique_temp_path;
+
+/// Fsync of `path`'s parent directory so a just-completed rename survives power
+/// loss. On Unix this is what makes the rename itself durable, so a failure
+/// PROPAGATES (`?`). On Windows opening a directory handle this way fails and the
+/// rename is durable regardless, so it stays best-effort.
+fn sync_parent_dir(path: &Path) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        let dir = if dir.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            dir
+        };
+        #[cfg(not(windows))]
+        {
+            let d = File::open(dir)?;
+            d.sync_all()?;
+        }
+        #[cfg(windows)]
+        {
+            if let Ok(d) = File::open(dir) {
+                let _ = d.sync_all(); // best-effort; the rename is durable regardless
+            }
+        }
+    }
+    Ok(())
+}
+
 use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::probe::Hint;
@@ -142,6 +170,12 @@ impl AssetStore {
         let mut samples: Vec<f32> = Vec::new();
         let mut channels: u16 = 0;
         let mut sample_rate: u32 = 0;
+        // `copy_to_vec_interleaved` REPLACES its target with just this packet's
+        // samples (it is "copy to", not "append to"). Decode each packet into a
+        // scratch buffer and EXTEND the accumulator, or every sample longer than one
+        // packet (~16 ms) is truncated to its final packet. (Surfaced by the offline
+        // audition tool: a 2 s WAV decoded to 0.01 s.)
+        let mut packet_samples: Vec<f32> = Vec::new();
 
         loop {
             let packet = match format.next_packet() {
@@ -158,7 +192,8 @@ impl AssetStore {
                     let spec = decoded.spec();
                     sample_rate = spec.rate();
                     channels = spec.channels().count() as u16;
-                    decoded.copy_to_vec_interleaved(&mut samples);
+                    decoded.copy_to_vec_interleaved(&mut packet_samples);
+                    samples.extend_from_slice(&packet_samples);
                 }
                 // Skip recoverable per-packet errors; halt on the rest.
                 Err(SymphoniaError::DecodeError(_)) | Err(SymphoniaError::IoError(_)) => continue,
@@ -173,10 +208,44 @@ impl AssetStore {
         })
     }
 
-    /// Write interleaved f32 [`Pcm`] to a WAV file as 32-bit float samples.
+    /// Write interleaved f32 [`Pcm`] to a WAV file as 32-bit float samples,
+    /// CRASH-SAFELY (Track B durability — "a held take beats a lost take").
+    ///
+    /// A recording is written WHILE the user performs, and `hound` finalizes the
+    /// RIFF header LAST — so a direct `File::create` + write that is interrupted
+    /// (app crash / power loss) leaves a torn, headerless, undecodable file in
+    /// place of any prior take. Instead we write to a sibling temp, fsync it,
+    /// atomically rename it over the destination, then fsync the directory. A
+    /// crash at any point leaves the COMPLETE old file (or none) — never a torn
+    /// one. POSIX-atomic on the same filesystem; the dir-fsync (no-op on Windows,
+    /// where the rename is durable regardless) makes the rename itself survive
+    /// power loss.
     pub fn write_wav_file<P: AsRef<Path>>(&self, path: P, pcm: &Pcm) -> Result<(), AssetError> {
-        let file = File::create(path)?;
-        Self::write_wav(file, pcm)
+        let path = path.as_ref();
+        // Unique per write (`<path>.<pid>.<nonce>.ojtmp`) so concurrent exports to
+        // the same destination never clobber each other's staged bytes.
+        let tmp = unique_temp_path(path);
+        // Stage the WAV into the temp + fsync it; on ANY failure remove THIS write's
+        // temp so it never leaks. `&File` is Write + Seek, so `hound` can finalize
+        // the header while we retain `file` to fsync the data + header before the
+        // rename.
+        let stage = (|| -> Result<(), AssetError> {
+            let file = File::create(&tmp)?;
+            Self::write_wav(&file, pcm)?;
+            file.sync_all()?;
+            Ok(())
+        })();
+        if let Err(e) = stage {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(e);
+        }
+        // Atomic replace, then make the rename durable.
+        if let Err(e) = std::fs::rename(&tmp, path) {
+            let _ = std::fs::remove_file(&tmp); // don't leak the temp on failure
+            return Err(e.into());
+        }
+        sync_parent_dir(path)?;
+        Ok(())
     }
 
     /// Encode interleaved f32 [`Pcm`] to an in-memory WAV byte buffer (32-bit
@@ -291,6 +360,47 @@ mod tests {
     }
 
     #[test]
+    fn wav_roundtrip_multi_packet_full_length() {
+        // The decoder reads the stream packet-by-packet; a sample longer than one
+        // packet MUST accumulate EVERY packet, not keep only the last. Regression:
+        // `copy_to_vec_interleaved` REPLACES its target, so the loop used to
+        // truncate any sample > ~16 ms to its final packet (the other round-trip
+        // tests use <1-packet samples, so they never caught it — the offline
+        // audition tool did). Use a multi-packet length and assert the full span.
+        let store = AssetStore::new();
+        let frames = 20_000; // ~0.42 s @ 48 kHz — spans many decode packets
+        let samples: Vec<f32> = (0..frames)
+            .map(|i| ((i % 100) as f32 / 100.0) * 2.0 - 1.0) // sawtooth (libm-free)
+            .collect();
+        let original = Pcm {
+            samples,
+            channels: 1,
+            sample_rate: 48_000,
+        };
+        let bytes = store.encode_wav_bytes(&original).expect("encode");
+        let decoded = store.decode_wav_bytes(bytes).expect("decode");
+
+        assert_eq!(decoded.channels, 1);
+        assert_eq!(decoded.sample_rate, 48_000);
+        assert_eq!(
+            decoded.frames(),
+            frames,
+            "multi-packet WAV truncated: got {} of {frames} frames",
+            decoded.frames()
+        );
+        // The bug kept only the LAST packet, so the head + middle would be lost.
+        assert!(
+            (decoded.samples[0] - original.samples[0]).abs() < 1e-6,
+            "head lost"
+        );
+        let mid = frames / 2;
+        assert!(
+            (decoded.samples[mid] - original.samples[mid]).abs() < 1e-6,
+            "middle lost"
+        );
+    }
+
+    #[test]
     fn decode_garbage_bytes_is_error_not_panic() {
         let store = AssetStore::new();
         let err = store.decode_wav_bytes(vec![0u8; 32]);
@@ -306,5 +416,106 @@ mod tests {
         };
         assert_eq!(p.frames(), 0);
         assert!(p.is_empty());
+    }
+
+    // ---- Crash-safe write (Track B durability) ----
+
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    /// A process-unique temp dir for a file test (no tempfile dep).
+    fn unique_dir(tag: &str) -> std::path::PathBuf {
+        static N: AtomicU64 = AtomicU64::new(0);
+        let n = N.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("oj-asset-{}-{}-{}", tag, std::process::id(), n));
+        std::fs::create_dir_all(&dir).expect("mkdir temp");
+        dir
+    }
+
+    /// True if `dir` holds ANY staged `.ojtmp` sibling (the temp name is now unique
+    /// per write — `<dest>.<pid>.<nonce>.ojtmp` — so we scan rather than guess it).
+    fn any_ojtmp(dir: &Path) -> bool {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .any(|e| e.unwrap().file_name().to_string_lossy().ends_with(".ojtmp"))
+    }
+
+    #[test]
+    fn write_wav_file_roundtrips_and_leaves_no_temp() {
+        let store = AssetStore::new();
+        let dir = unique_dir("roundtrip");
+        let path = dir.join("take.wav");
+        let pcm = test_pcm();
+
+        store.write_wav_file(&path, &pcm).expect("atomic write");
+
+        // The destination exists and decodes back to the same PCM...
+        let back = store.decode_wav_file(&path).expect("decode");
+        assert_eq!(back.channels, pcm.channels);
+        assert_eq!(back.samples.len(), pcm.samples.len());
+        // ...and the sibling temp was renamed away, never left behind.
+        assert!(!any_ojtmp(&dir), "temp must not leak");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_wav_file_atomically_replaces_and_a_stale_temp_is_harmless() {
+        let store = AssetStore::new();
+        let dir = unique_dir("replace");
+        let path = dir.join("take.wav");
+
+        // An existing, GOOD take (v1: 1 mono frame).
+        let v1 = Pcm {
+            samples: vec![0.25],
+            channels: 1,
+            sample_rate: 48_000,
+        };
+        store.write_wav_file(&path, &v1).expect("write v1");
+
+        // A stale temp left by a hypothetical earlier interrupted write — it must
+        // NOT corrupt the destination (the dest is only ever changed by rename).
+        // The temp name is unique per write, so a leftover from a prior crash is a
+        // distinct file the new write never touches; what matters is that it cannot
+        // reach the destination.
+        let stale = {
+            let mut s = path.clone().into_os_string();
+            s.push(".stale.ojtmp");
+            std::path::PathBuf::from(s)
+        };
+        std::fs::write(&stale, b"torn garbage, never renamed").unwrap();
+        // v1 is still intact and decodable despite the stale temp.
+        assert_eq!(
+            store
+                .decode_wav_file(&path)
+                .expect("decode v1")
+                .samples
+                .len(),
+            1
+        );
+
+        // A new take (v2: 3 frames) atomically replaces v1; its OWN temp is renamed
+        // away, leaving no temp from this write behind (the unrelated stale one is
+        // harmless and simply ignored).
+        let v2 = Pcm {
+            samples: vec![0.1, -0.2, 0.3],
+            channels: 1,
+            sample_rate: 48_000,
+        };
+        store.write_wav_file(&path, &v2).expect("write v2");
+        assert_eq!(
+            store
+                .decode_wav_file(&path)
+                .expect("decode v2")
+                .samples
+                .len(),
+            3
+        );
+        // The stale temp never reached the dest (dest is the complete v2 above), and
+        // removing it leaves no `.ojtmp` from this write's own staging.
+        std::fs::remove_file(&stale).unwrap();
+        assert!(!any_ojtmp(&dir), "this write's own temp was renamed away");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

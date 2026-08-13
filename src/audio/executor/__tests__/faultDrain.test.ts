@@ -1,0 +1,194 @@
+/**
+ * Phase 1 fault-pipe keystone: the drain-time coalescing that protects the
+ * 5000-cap DevLog ring from a per-block fault storm, and the tri-state engine
+ * health store. These are the reliability-critical pure pieces — a faulting node
+ * emits a NodeFault EVERY block, so without coalescing the ring would evict real
+ * history (and jank React) during the exact dropout we need to diagnose.
+ */
+
+import { describe, it, expect, beforeEach } from 'vitest';
+import type { Event as EngineEvent } from '../../../../packages/oj-protocol-ts/src/index';
+import { coalesceEvents } from '../OjcoreNativeExecutor';
+import { ingestEngineEvents, logNewlyDegradedStubs, remapFaultNodes } from '../faultPipe';
+import { useEngineHealthStore, setEngineHealth } from '../../../store/engineHealthStore';
+import { useLogStore, _resetLogStoreForTests } from '../../../store/logStore';
+
+function ev(seq: number, kind: EngineEvent['kind'], severity: EngineEvent['severity'] = 'Warn'): EngineEvent {
+    return { v: 1, seq, severity, kind, source: 'Engine', ts_us: seq * 1000, corr_id: 0 };
+}
+
+describe('coalesceEvents', () => {
+    it('folds repeated Xruns into one summed entry', () => {
+        const out = coalesceEvents([
+            ev(1, { Xrun: { dropped: 2 } }),
+            ev(2, { Xrun: { dropped: 3 } }),
+            ev(3, { Xrun: { dropped: 1 } }),
+        ]);
+        expect(out).toHaveLength(1);
+        expect(out[0].kind).toEqual({ Xrun: { dropped: 6 } });
+        // The first envelope is the representative (its seq/ts survive for corr).
+        expect(out[0].seq).toBe(1);
+    });
+
+    it('dedups identical (node, fault) NodeFaults but keeps distinct ones', () => {
+        const out = coalesceEvents([
+            ev(1, { NodeFault: { node: 3, fault: 'NonFinite' } }, 'Error'),
+            ev(2, { NodeFault: { node: 3, fault: 'NonFinite' } }, 'Error'),
+            ev(3, { NodeFault: { node: 4, fault: 'NonFinite' } }, 'Error'),
+            ev(4, { NodeFault: { node: 3, fault: 'OverBudget' } }, 'Error'),
+        ]);
+        // node3/NonFinite collapses to one; node4 and node3/OverBudget survive.
+        expect(out).toHaveLength(3);
+        expect(out[0].seq).toBe(1);
+        expect(out[1].seq).toBe(3);
+        expect(out[2].seq).toBe(4);
+    });
+
+    it('passes non-noisy kinds through verbatim, in order', () => {
+        const out = coalesceEvents([
+            ev(1, 'Lifecycle'),
+            ev(2, { Xrun: { dropped: 5 } }),
+            ev(3, 'GraphSwap'),
+        ]);
+        // Lifecycle + GraphSwap pass through; the single Xrun is appended last.
+        expect(out.map((e) => e.kind)).toEqual([
+            'Lifecycle',
+            'GraphSwap',
+            { Xrun: { dropped: 5 } },
+        ]);
+    });
+
+    it('returns an empty array unchanged', () => {
+        expect(coalesceEvents([])).toEqual([]);
+    });
+});
+
+describe('remapFaultNodes', () => {
+    const index = new Map<number, string>([
+        [3, 'node-aaa'],
+        [4, 'node-bbb'],
+    ]);
+    const resolve = (n: number) => index.get(n);
+
+    it('rewrites a NodeFault engine index to its visual node id', () => {
+        const out = remapFaultNodes(
+            [ev(1, { NodeFault: { node: 3, fault: 'NonFinite' } }, 'Error')],
+            resolve,
+        );
+        expect(out[0].kind).toEqual({ NodeFault: { node: 'node-aaa', fault: 'NonFinite' } });
+    });
+
+    it('passes through a fault whose index has no mapping (a just-removed node)', () => {
+        const out = remapFaultNodes(
+            [ev(1, { NodeFault: { node: 99, fault: 'NonFinite' } }, 'Error')],
+            resolve,
+        );
+        expect(out[0].kind).toEqual({ NodeFault: { node: 99, fault: 'NonFinite' } });
+    });
+
+    it('leaves non-fault kinds untouched', () => {
+        const out = remapFaultNodes([ev(1, { Xrun: { dropped: 2 } }), ev(2, 'Lifecycle')], resolve);
+        expect(out.map((e) => e.kind)).toEqual([{ Xrun: { dropped: 2 } }, 'Lifecycle']);
+    });
+
+    it('the remapped fault still coalesces by node+fault (the storm still collapses)', () => {
+        const remapped = remapFaultNodes(
+            [
+                ev(1, { NodeFault: { node: 3, fault: 'NonFinite' } }, 'Error'),
+                ev(2, { NodeFault: { node: 3, fault: 'NonFinite' } }, 'Error'),
+            ],
+            resolve,
+        );
+        expect(coalesceEvents(remapped)).toHaveLength(1);
+        expect(coalesceEvents(remapped)[0].kind).toEqual({
+            NodeFault: { node: 'node-aaa', fault: 'NonFinite' },
+        });
+    });
+});
+
+describe('logNewlyDegradedStubs (the load-path twin: degraded stubs → get_logs)', () => {
+    beforeEach(() => {
+        _resetLogStoreForTests();
+    });
+    const describeNode = (id: string) => `${id} (reverb)`;
+
+    it('appends one Warn entry per newly-degraded node, with the degraded SSOT field', () => {
+        logNewlyDegradedStubs(new Set(['node-a', 'node-b']), new Set(), describeNode);
+        const entries = useLogStore.getState().entries;
+        expect(entries).toHaveLength(2);
+        expect(entries[0].level).toBe('Warn');
+        expect(entries[0].scope).toBe('engine');
+        expect(entries[0].message).toContain('node-a (reverb)');
+        expect(entries[0].message).toContain('degraded to passthrough');
+        // The structured field the node-diagnostics facet reads as its degraded SSOT.
+        expect(entries[0].fields).toEqual({ node: 'node-a', degraded: true });
+    });
+
+    it('does NOT re-log a node already degraded on the prior push (no per-push storm)', () => {
+        // node-a was already degraded last push; only node-b is new this push.
+        logNewlyDegradedStubs(new Set(['node-a', 'node-b']), new Set(['node-a']), describeNode);
+        const entries = useLogStore.getState().entries;
+        expect(entries).toHaveLength(1);
+        expect(entries[0].message).toContain('node-b');
+    });
+
+    it('logs nothing when the degraded set is empty or unchanged', () => {
+        logNewlyDegradedStubs(new Set(), new Set(), describeNode);
+        logNewlyDegradedStubs(new Set(['node-a']), new Set(['node-a']), describeNode);
+        expect(useLogStore.getState().entries).toHaveLength(0);
+    });
+});
+
+describe('engineHealthStore', () => {
+    beforeEach(() => {
+        useEngineHealthStore.setState({ health: 'IDLE', reason: '' });
+    });
+
+    it('starts IDLE with no reason (never an alarm before the first graph)', () => {
+        expect(useEngineHealthStore.getState().health).toBe('IDLE');
+        expect(useEngineHealthStore.getState().reason).toBe('');
+    });
+
+    it('transitions on setHealth and carries a reason', () => {
+        setEngineHealth('DEGRADED', 'graph rejected; last good sound held');
+        expect(useEngineHealthStore.getState().health).toBe('DEGRADED');
+        expect(useEngineHealthStore.getState().reason).toBe('graph rejected; last good sound held');
+        setEngineHealth('DEAD', 'native IPC bridge unavailable');
+        expect(useEngineHealthStore.getState().health).toBe('DEAD');
+    });
+
+    it('is idempotent for an identical state + reason', () => {
+        setEngineHealth('DEGRADED', 'x');
+        const first = useEngineHealthStore.getState();
+        setEngineHealth('DEGRADED', 'x');
+        // No new object identity churn when nothing changed.
+        expect(useEngineHealthStore.getState()).toBe(first);
+    });
+});
+
+describe('ingestEngineEvents (the shared fault sink, both tiers)', () => {
+    beforeEach(() => {
+        _resetLogStoreForTests();
+        useEngineHealthStore.setState({ health: 'IDLE', reason: '' });
+    });
+
+    it('coalesces, ingests into the DevLog ring, and nudges health to DEGRADED', () => {
+        // A per-block NodeFault storm for ONE (node, fault) must collapse to a
+        // single ring entry — not 3 — so real history is not evicted.
+        ingestEngineEvents([
+            ev(1, { NodeFault: { node: 2, fault: 'NonFinite' } }, 'Error'),
+            ev(2, { NodeFault: { node: 2, fault: 'NonFinite' } }, 'Error'),
+            ev(3, { NodeFault: { node: 2, fault: 'NonFinite' } }, 'Error'),
+        ]);
+        const entries = useLogStore.getState().entries;
+        expect(entries).toHaveLength(1);
+        expect(useEngineHealthStore.getState().health).toBe('DEGRADED');
+        expect(useEngineHealthStore.getState().reason).toBe('engine reported a fault');
+    });
+
+    it('does nothing for an empty batch (no health churn, no ring entry)', () => {
+        ingestEngineEvents([]);
+        expect(useLogStore.getState().entries).toHaveLength(0);
+        expect(useEngineHealthStore.getState().health).toBe('IDLE');
+    });
+});

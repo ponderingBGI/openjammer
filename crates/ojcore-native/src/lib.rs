@@ -23,20 +23,40 @@
 //! path returns a clear error (never a panic) so the harness can report "no
 //! audio device available" cleanly, and the device-requiring test is `#[ignore]`d.
 
+/// Offline-render audio analysis (the audition `AudioReport`). Demo-gated: only the
+/// `render` bin + tests need it, so it stays out of the lean serde-free host build.
+#[cfg(feature = "demo")]
+pub mod analysis;
 pub mod asset;
+pub mod backend;
+pub mod device;
+pub mod device_listener;
+pub mod fs;
 pub mod host;
 pub mod latency;
 pub mod log;
 #[cfg(feature = "persist")]
 pub mod logstore;
+pub mod looper_capture;
+pub mod offline;
 pub mod recorder;
 pub mod store;
+pub mod supervisor;
 pub mod update_gate;
 
+#[cfg(feature = "demo")]
+pub use analysis::{analyze_stereo, AudioReport, ChannelReport};
 pub use asset::{AssetError, AssetStore, Pcm};
+pub use backend::{supervise_once, AudioBackend};
+pub use device::{
+    classify as classify_device_fault, device_fault_channel, probe_default_output, DeviceFault,
+    DeviceFaultRx, DeviceFaultTx, DeviceIdentity, DeviceWatcher,
+};
+pub use device_listener::{install as install_device_listener, DeviceListener};
+pub use fs::{atomic_write, atomic_write_path, OjFs, RealFs};
 pub use host::{
-    default_output_sample_rate, render_block, AudioHost, BlockProcessor, HostError, StreamRequest,
-    DEFAULT_RUN,
+    default_output_sample_rate, render_block, AudioHost, BlockProcessor, HostError, StreamFault,
+    StreamRequest, DEFAULT_RUN,
 };
 pub use latency::{
     detect_onset, frames_to_ms, measure_round_trip_frames, ms_to_frames, LatencyEstimate,
@@ -44,8 +64,13 @@ pub use latency::{
 pub use log::init_logging;
 #[cfg(feature = "persist")]
 pub use logstore::{LogHit, LogRecord, LogStore};
+pub use looper_capture::{
+    LooperCapture, LooperCaptureSink, DEFAULT_RING_FRAMES as LOOPER_CAPTURE_RING_FRAMES,
+};
+pub use offline::OfflineDriver;
 pub use recorder::{Recorder, RecorderSink, DEFAULT_RING_FRAMES};
 pub use store::{content_address, AssetCatalog};
+pub use supervisor::{DeviceSupervisor, RecoveryAction, SupervisorState};
 pub use update_gate::{UpdateGate, UpdateState};
 
 /// The amplitude threshold used to detect the loopback impulse in the captured

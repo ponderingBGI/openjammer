@@ -60,6 +60,33 @@ describe('voice synthesis', () => {
         const unique = new Set(heads);
         expect(unique.size).toBe(fams.length);
     });
+
+    it('renders DISTINCT PCM for different instruments in the SAME family', () => {
+        // Two pianos share the family recipe but must not be byte-identical — the
+        // per-instrument variation is what makes a within-family picker switch
+        // audibly change the sound (the "they all sound the same" fix).
+        const grand = getInstrumentVoice('gm-acoustic-grand-piano', 'Acoustic Grand Piano', 'piano');
+        const honky = getInstrumentVoice('gm-honky-tonk-piano', 'Honky-tonk Piano', 'piano');
+        const bright = getInstrumentVoice('gm-bright-acoustic-piano', 'Bright Acoustic Piano', 'piano');
+        expect(grand.pcm.length).toBe(honky.pcm.length); // same family duration
+        const slice = (v: typeof grand) => Array.from(v.pcm.slice(2000, 2200)).join(',');
+        const unique = new Set([slice(grand), slice(honky), slice(bright)]);
+        expect(unique.size).toBe(3); // three distinct waveforms
+        // All three remain finite + audible (normalized, never silent).
+        for (const v of [grand, honky, bright]) {
+            const p = peak(v.pcm);
+            expect(p).toBeGreaterThan(0.5);
+            expect(p).toBeLessThanOrEqual(0.91);
+        }
+    });
+
+    it('is deterministic per instrument id (same id → identical PCM)', () => {
+        const a = getInstrumentVoice('gm-honky-tonk-piano', 'Honky-tonk Piano', 'piano').pcm;
+        _resetVoiceCacheForTests();
+        const b = getInstrumentVoice('gm-honky-tonk-piano', 'Honky-tonk Piano', 'piano').pcm;
+        expect(a.length).toBe(b.length);
+        expect(Array.from(a.slice(0, 256))).toEqual(Array.from(b.slice(0, 256)));
+    });
 });
 
 describe('resolveVoiceFamily — instrument → timbre', () => {
@@ -76,6 +103,11 @@ describe('resolveVoiceFamily — instrument → timbre', () => {
         ['gm-alto-sax', 'Alto Sax', 'reed'],
         ['gm-flute', 'Flute', 'flute'],
         ['gm-acoustic-bass', 'Acoustic Bass', 'bass'],
+        // A real bass stays `bass`, but `\bbass\b` must NOT swallow these: a bowed
+        // contrabass is a (sampler) string, and a bassoon is a (sampler) reed —
+        // neither is a plucked-bass Karplus instrument.
+        ['gm-contrabass', 'Contrabass', 'strings'],
+        ['gm-bassoon', 'Bassoon', 'reed'],
         ['gm-lead-1-square', 'Lead 1 (square)', 'lead'],
         ['gm-pad-1-new-age', 'Pad 1 (new age)', 'pad'],
         ['gm-acoustic-snare', 'Acoustic Snare', 'percussion'],
@@ -130,19 +162,26 @@ describe('Karplus routing — plucked strings use the real primitive', () => {
 });
 
 describe('getVoiceForInstrumentNode — executor seam', () => {
-    it('uses data.instrumentId when present', () => {
+    it('keys the bound voice on the instrumentId when present', () => {
+        // Keyed on the INSTRUMENT (not its family) so switching between two
+        // instruments in one family re-binds — see the per-instrument voices below.
         const sax = getVoiceForInstrumentNode('instrument', { instrumentId: 'gm-alto-sax' });
-        expect(sax.key).toBe('reed');
+        expect(sax.key).toBe('gm-alto-sax');
         const piano = getVoiceForInstrumentNode('instrument', { instrumentId: 'gm-acoustic-grand-piano' });
-        expect(piano.key).toBe('piano');
+        expect(piano.key).toBe('gm-acoustic-grand-piano');
+        // Two instruments in the SAME family still get distinct keys (so the picker
+        // re-binds), even though both resolve to the 'piano' family.
+        const honky = getVoiceForInstrumentNode('instrument', { instrumentId: 'gm-honky-tonk-piano' });
+        expect(honky.key).toBe('gm-honky-tonk-piano');
+        expect(honky.key).not.toBe(piano.key);
         // Different selections → different bound voices.
         expect(sax.key).not.toBe(piano.key);
     });
 
-    it('resolves from the node type when there is no instrumentId', () => {
-        expect(getVoiceForInstrumentNode('cello', undefined).key).toBe('strings');
-        expect(getVoiceForInstrumentNode('saxophone', undefined).key).toBe('reed');
-        expect(getVoiceForInstrumentNode('piano', {}).key).toBe('piano');
+    it('keys on the node type (not its family) when there is no instrumentId', () => {
+        expect(getVoiceForInstrumentNode('cello', undefined).key).toBe('type:cello');
+        expect(getVoiceForInstrumentNode('saxophone', undefined).key).toBe('type:saxophone');
+        expect(getVoiceForInstrumentNode('piano', {}).key).toBe('type:piano');
     });
 
     it('returns a stable key for re-bind comparison', () => {

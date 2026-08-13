@@ -11,7 +11,8 @@
  * Rust host sets at spawn:
  *   - OJ_PROJECT_ROOT   — the write-jail boundary (the open project folder)
  *   - OJ_MEMORY_ROOTS   — `:`-separated extra writable roots (pi-memory, sessions)
- *   - OJ_KEY_VAR        — the name of the env var holding the provider key to redact
+ *   - OJ_KEY_VAR        — the active provider key env var to redact (compat)
+ *   - OJ_KEY_VARS       — `:`-separated provider key env vars to redact
  *
  * NOTE: this is the cooperative belt on top of the OS jail, which is the hard
  * guarantee. If a future Pi renames the tool/event shape, the OS jail still holds;
@@ -43,8 +44,12 @@ function pathOf(input) {
 function jailConfig(env = process.env) {
     const projectRoot = env.OJ_PROJECT_ROOT || '';
     const memoryRoots = (env.OJ_MEMORY_ROOTS || '').split(':').filter(Boolean);
-    const secret = env.OJ_KEY_VAR ? env[env.OJ_KEY_VAR] || '' : '';
-    return { writableRoots: [projectRoot, ...memoryRoots].filter(Boolean), secret };
+    const keyVars = new Set((env.OJ_KEY_VARS || '').split(':').filter(Boolean));
+    if (env.OJ_KEY_VAR) keyVars.add(env.OJ_KEY_VAR);
+    const secrets = Array.from(keyVars)
+        .map((keyVar) => env[keyVar] || '')
+        .filter(Boolean);
+    return { writableRoots: [projectRoot, ...memoryRoots].filter(Boolean), secrets };
 }
 
 /**
@@ -56,6 +61,9 @@ export function vetoToolCall(toolName, input, cfg) {
     const name = String(toolName || '').toLowerCase();
 
     if (BASH_TOOLS.has(name)) {
+        // A write-capable command (cp/mv/sed -i/touch/mkdir) is now vetted so it
+        // can't target the agent's own config (the gate-drop hole); general
+        // containment stays the OS jail's job (it tracks cwd; this layer can't).
         const verdict = isCommandAllowed(commandOf(input));
         return verdict.allowed ? null : { block: true, reason: verdict.reason };
     }
@@ -88,11 +96,15 @@ export default function register(ctx) {
         if (verdict) return verdict; // { block: true, reason }
     });
 
-    if (cfg.secret) {
+    if (cfg.secrets.length) {
         ctx.on('tool_result', (event) => {
             const out = event?.output ?? event?.result;
             if (typeof out === 'string') {
-                return { output: redactSecret(out, cfg.secret) };
+                const redacted = cfg.secrets.reduce(
+                    (text, secret) => redactSecret(text, secret),
+                    out,
+                );
+                return { output: redacted };
             }
         });
     }

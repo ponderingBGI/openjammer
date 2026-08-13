@@ -12,12 +12,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { applyToolCall, type AgentEnvPort, type DspNodeRegistrar } from '../tools';
+import { applyToolCall, applyGetSignal, type AgentEnvPort, type DspNodeRegistrar } from '../tools';
 import type { GraphStoreApi } from '../graphAdapter';
 import { createEnvPort } from '../envAdapter';
 import { useAudioStore } from '../../store/audioStore';
+import { useGraphStore } from '../../store/graphStore';
 import { useLogStore, _resetLogStoreForTests } from '../../store/logStore';
-import { getSavedThemeId } from '../../styles/themes';
+import { getSavedThemeId } from '@openjammer/oj-tokens';
 
 // The diagnostics/settings handlers never touch the graph store; batch_apply
 // only reads listNodes/listConnections for its post-state summary.
@@ -55,6 +56,29 @@ function makeFakeEnv() {
             latencyClass: 'excellent',
             outputDeviceLabel: 'MOTU M4',
             usbAudioInterface: true,
+        })),
+        getNodeDiagnostics: vi.fn((nodeId: string) => ({
+            nodeId,
+            found: true,
+            type: 'reverb',
+            name: 'Reverb',
+            dataKeys: ['mix', 'decay'],
+            ports: [{ name: 'Audio In', direction: 'input' as const, type: 'audio' as const }],
+            degraded: true,
+            recentLogs: [
+                {
+                    ts: 5,
+                    level: 'Warn' as const,
+                    source: 'Engine' as const,
+                    scope: 'engine',
+                    message: `${nodeId}: degraded to passthrough`,
+                },
+            ],
+        })),
+        getSignal: vi.fn(async (args: { nodeId: string }) => ({
+            nodeId: args.nodeId,
+            peak: 0.42,
+            hasSignal: true,
         })),
         getSettings: vi.fn(() => ({
             sampleRate: 48000,
@@ -114,6 +138,21 @@ describe('diagnostics/settings tools — pure dispatch (fake env)', () => {
         expect(res.summary).toContain('round-trip');
     });
 
+    it('get_diagnostics({nodeId}) routes to the node facet and flags degraded', () => {
+        const { env } = makeFakeEnv();
+        const res = applyToolCall(
+            { name: 'get_diagnostics', args: { nodeId: 'node-7' } },
+            STUB_STORE,
+            STUB_REGISTRAR,
+            undefined,
+            env,
+        );
+        expect(res.ok).toBe(true);
+        expect(env.getNodeDiagnostics).toHaveBeenCalledWith('node-7');
+        expect(res.summary).toContain('DEGRADED');
+        expect(res.data).toMatchObject({ nodeId: 'node-7', found: true, degraded: true });
+    });
+
     it('get_settings summarizes the current knobs', () => {
         const { env } = makeFakeEnv();
         const res = applyToolCall(
@@ -126,6 +165,48 @@ describe('diagnostics/settings tools — pure dispatch (fake env)', () => {
         expect(res.ok).toBe(true);
         expect(res.summary).toContain('48000 Hz');
         expect(res.summary).toContain('cream');
+    });
+
+    it('applyGetSignal relays the live peak and reports producing sound', async () => {
+        const { env } = makeFakeEnv();
+        const res = await applyGetSignal({ nodeId: 'node-7' }, env);
+        expect(res.ok).toBe(true);
+        expect(env.getSignal).toHaveBeenCalledWith({ nodeId: 'node-7' });
+        expect(res.summary).toContain('peak 0.420');
+        expect(res.summary).toContain('producing sound');
+        expect(res.data).toMatchObject({ nodeId: 'node-7', peak: 0.42, hasSignal: true });
+    });
+
+    it('applyGetSignal calls a silent node ~0 and a null read "not metered"', async () => {
+        const silentEnv: AgentEnvPort = {
+            ...makeFakeEnv().env,
+            getSignal: vi.fn(async (a: { nodeId: string }) => ({
+                nodeId: a.nodeId,
+                peak: 0,
+                hasSignal: false,
+            })),
+        };
+        const silent = await applyGetSignal({ nodeId: 'dead' }, silentEnv);
+        expect(silent.summary).toContain('~0 (silent)');
+        expect(silent.data).toMatchObject({ peak: 0, hasSignal: false });
+
+        const nullEnv: AgentEnvPort = {
+            ...makeFakeEnv().env,
+            getSignal: vi.fn(async (a: { nodeId: string }) => ({
+                nodeId: a.nodeId,
+                peak: null,
+                hasSignal: false,
+            })),
+        };
+        const unmetered = await applyGetSignal({ nodeId: 'ghost' }, nullEnv);
+        expect(unmetered.summary).toContain("isn't metered");
+    });
+
+    it('applyGetSignal degrades clearly when no env port is wired', async () => {
+        const res = await applyGetSignal({ nodeId: 'node-7' }, undefined);
+        expect(res.ok).toBe(true);
+        expect(res.data).toBeNull();
+        expect(res.summary).toMatch(/no environment port/i);
     });
 
     it('update_settings applies + exposes a reversible undo', () => {
@@ -231,6 +312,55 @@ describe('createEnvPort — live against the real stores', () => {
     it('updateSettings with an unchanged value applies nothing', () => {
         const { applied } = createEnvPort().updateSettings({ sampleRate: 48000 });
         expect(applied).toEqual([]);
+    });
+
+    it('getNodeDiagnostics: identity + ports + degraded + node-scoped logs', () => {
+        const id = useGraphStore.getState().addNode('looper', { x: 0, y: 0 }, null, {});
+        try {
+            useLogStore.getState().append({
+                level: 'Warn',
+                source: 'Engine',
+                scope: 'engine',
+                message: `${id}: degraded to passthrough, missing dependency`,
+            });
+            useLogStore
+                .getState()
+                .append({ level: 'Info', source: 'Ui', scope: 'a', message: 'unrelated line' });
+            const d = createEnvPort().getNodeDiagnostics(id);
+            expect(d.found).toBe(true);
+            expect(d.type).toBe('looper');
+            expect(Array.isArray(d.ports)).toBe(true);
+            expect(d.degraded).toBe(true);
+            expect(d.recentLogs).toHaveLength(1);
+            expect(d.recentLogs[0].message).toContain('degraded');
+        } finally {
+            useGraphStore.getState().removeNode(id);
+        }
+    });
+
+    it('getNodeDiagnostics: reads the structured degraded SSOT, not just the message', () => {
+        // The executor stamps `fields.degraded:true` on a degraded-stub entry; the
+        // facet must trust that even when the MESSAGE wouldn't match the old regex.
+        const id = useGraphStore.getState().addNode('looper', { x: 0, y: 0 }, null, {});
+        try {
+            useLogStore.getState().append({
+                level: 'Warn',
+                source: 'Engine',
+                scope: 'engine',
+                message: `${id} (some.plugin): stubbed`, // no "degrad"/"passthrough" wording
+                fields: { node: id, degraded: true },
+            });
+            const d = createEnvPort().getNodeDiagnostics(id);
+            expect(d.degraded).toBe(true);
+        } finally {
+            useGraphStore.getState().removeNode(id);
+        }
+    });
+
+    it('getNodeDiagnostics: a missing node reports found:false', () => {
+        const d = createEnvPort().getNodeDiagnostics('does-not-exist');
+        expect(d.found).toBe(false);
+        expect(d.recentLogs).toEqual([]);
     });
 
     it('getLogs filters by level, returns newest-first, and respects limit', () => {

@@ -11,9 +11,10 @@
  *   3. invokes `ai_run`, and
  *   4. yields normalized {@link AgentEvent}s until a terminal event arrives.
  *
- * Pi is an UNTRUSTED GENERATOR: nothing here executes its tool calls. We only
- * forward them upward as `tool-call` events; the session decides whether to
- * apply them, gated by Approve/Reject.
+ * Pi is an UNTRUSTED GENERATOR: nothing here executes arbitrary code. We only
+ * forward allowlisted OpenJammer graph verbs upward as `tool-call` events; the
+ * session applies them through the same undoable store actions the user drives by
+ * hand.
  *
  * When Pi is not installed / not configured, the Rust side returns an error,
  * which is surfaced as a single terminal `error` event (never a throw). When NOT
@@ -22,6 +23,7 @@
  */
 
 import { getInvoke, isTauri, listen } from './tauri';
+import { isAgentToolName } from './types';
 import type {
     AgentBackend,
     AgentEvent,
@@ -37,8 +39,8 @@ import type {
  * serialization in `src-tauri/src/ai.rs`.
  */
 export interface PiStreamLine {
-    kind: 'thought' | 'tool-call' | 'result' | 'error' | 'ui-request' | 'session';
-    /** Present for `thought` / `result` / `error`; the session id for `session`. */
+    kind: 'thought' | 'status' | 'tool-call' | 'result' | 'error' | 'ui-request' | 'session';
+    /** Present for `thought` / `status` / `result` / `error`; the session id for `session`. */
     text?: string;
     /** Present for `tool-call`: the proposed call. */
     call?: AgentToolCall;
@@ -46,6 +48,8 @@ export interface PiStreamLine {
     id?: string;
     /** Present for `ui-request`: the raw extension UI request payload. */
     request?: AgentUiRequest;
+    /** Present for command responses with structured payloads. */
+    data?: unknown;
 }
 
 let runCounter = 0;
@@ -57,14 +61,65 @@ function newRunChannel(): string {
     return `ai-run://${Date.now()}-${runCounter}-${rand}`;
 }
 
+/** The base name of a path (last segment), for a readable self-edit summary. */
+function baseName(p: string): string {
+    const parts = p.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] ?? p;
+}
+
+/**
+ * Recognize a SELF-EDIT — Philia editing its own memory/skills — among the NON-oj
+ * Pi tools, so it reads as "you editing you" (a distinct chip) instead of an
+ * "unsupported tool" line. Two reliable signals: a file write/edit/bash whose path
+ * (or command) targets `pi-memory`, and the memory-package verbs by name. Returns a
+ * human summary for the chip, or null when it's some other (genuinely unsupported)
+ * Pi tool.
+ */
+export function classifySelfEdit(name: string, args: unknown): string | null {
+    const a = (args ?? {}) as Record<string, unknown>;
+    // The host-mediated self-package tool is unambiguous — Philia authoring a tool.
+    if (name === 'save_self_package') {
+        const pkg = String(a.name ?? '').trim();
+        return pkg ? `saved itself a tool (${pkg})` : 'saved itself a tool';
+    }
+    const pathLike = String(a.path ?? a.file ?? a.filename ?? a.target ?? '');
+    const cmd = String(a.command ?? a.cmd ?? '');
+    const touchesMemory = pathLike.includes('pi-memory') || cmd.includes('pi-memory');
+    const isWrite = /^(write|edit|create|append|str_replace|fs_write|bash|sh|tee|cp|mv)\b/i.test(name);
+    if (isWrite && touchesMemory) {
+        if (/about-you\.md/i.test(pathLike)) return 'updated what it knows about you';
+        if (/\.md$/i.test(pathLike)) return `learned a skill (${baseName(pathLike)})`;
+        return 'updated its memory';
+    }
+    // pi-persistent-intelligence verbs (name-based): remember / recall / learn / memory.
+    if (/(^|[._-])(remember|recall|memor|learn)/i.test(name)) {
+        return 'remembered something for next time';
+    }
+    return null;
+}
+
 /** Normalize a raw Pi line into a typed {@link AgentEvent}. */
 function toAgentEvent(line: PiStreamLine): AgentEvent {
     switch (line.kind) {
-        case 'tool-call':
-            if (line.call) {
-                return { kind: 'tool-call', call: line.call, id: line.id ?? '' };
+        case 'tool-call': {
+            const call = line.call as Partial<AgentToolCall> | undefined;
+            if (call && isAgentToolName(call.name)) {
+                return { kind: 'tool-call', call: call as AgentToolCall, id: line.id ?? '' };
             }
-            return { kind: 'thought', text: 'malformed tool-call line (ignored)' };
+            const name = typeof call?.name === 'string' ? call.name : 'unknown';
+            // A self-edit is the SHAPE-SELF hand at work — legitimate, just not a
+            // canvas tool. Surface it as its own kind, never an "unsupported" line.
+            const selfSummary = classifySelfEdit(name, (call as { args?: unknown })?.args);
+            if (selfSummary) {
+                return { kind: 'self-edit', summary: selfSummary, id: line.id ?? '' };
+            }
+            return {
+                kind: 'thought',
+                text: `Ignored unsupported Pi tool "${name}". OpenJammer only applies canvas graph tools.\n`,
+            };
+        }
+        case 'status':
+            return { kind: 'status', message: line.text ?? '' };
         case 'result':
             return { kind: 'result', summary: line.text ?? 'Done.' };
         case 'error':
@@ -129,8 +184,12 @@ export class PiAgentBackend implements AgentBackend {
         invoke('ai_run', {
             prompt: task.prompt,
             providerKey: task.providerKey ?? null,
+            providerKeys: task.providerKeys ?? null,
+            providerBaseUrls: task.providerBaseUrls ?? null,
+            providerCustomModels: task.providerCustomModels ?? null,
             provider: task.provider ?? null,
             modelId: task.modelId ?? null,
+            thinkingLevel: task.thinkingLevel ?? null,
             yolo: task.yolo ?? false,
             sessionId: task.sessionId ?? null,
             channel,

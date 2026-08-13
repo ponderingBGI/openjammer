@@ -23,6 +23,7 @@ const PROBES: ToolProbe[] = [
   { cmd: 'rustc', args: ['--version'], label: 'rustc', hint: 'install via https://rustup.rs', required: false },
   { cmd: 'cargo', args: ['--version'], label: 'cargo', hint: 'install via https://rustup.rs', required: false },
   { cmd: 'just', args: ['--version'], label: 'just', hint: 'cargo install just (or: winget install Casey.Just)', required: false },
+  { cmd: 'bacon', args: ['--version'], label: 'bacon', hint: 'cargo install --locked bacon (powers `oj dev --engine`)', required: false },
 ];
 
 async function probe(p: ToolProbe): Promise<{ ok: boolean; version: string }> {

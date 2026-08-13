@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { isTauri } from '../ai/tauri';
 
 // ============================================================================
 // Types
@@ -149,6 +150,9 @@ export interface UseServiceWorkerResult {
   dismissUpdate: () => void;
 }
 
+/** How often a long-open browser session re-checks for a new deployment (~1h). */
+const SW_UPDATE_POLL_MS = 60 * 60 * 1000;
+
 /**
  * Hook for service worker updates
  * Note: This integrates with vite-plugin-pwa's virtual module
@@ -157,8 +161,15 @@ export function useServiceWorker(): UseServiceWorkerResult {
   const [offlineReady, setOfflineReady] = useState(false);
   const [needRefresh, setNeedRefresh] = useState(false);
   const [updateSW, setUpdateSW] = useState<(() => void) | null>(null);
+  const native = isTauri();
 
   useEffect(() => {
+    if (native) return;
+    // A long-open session (a live set) may never navigate, so the browser's own
+    // SW update checks (navigation + ~24h) can miss a fresh deploy. Poll for one
+    // periodically; a found update is surfaced via onNeedRefresh and applied on
+    // idle by PwaUpdatePrompt (never reloads under live audio). Cleared on unmount.
+    let updatePoll: ReturnType<typeof setInterval> | undefined;
     // Dynamic import to avoid issues during SSR/testing
     import('virtual:pwa-register').then(({ registerSW }) => {
       const update = registerSW({
@@ -168,8 +179,12 @@ export function useServiceWorker(): UseServiceWorkerResult {
         onOfflineReady() {
           setOfflineReady(true);
         },
-        onRegistered(_registration: ServiceWorkerRegistration | undefined) {
-          // SW registered successfully
+        onRegistered(registration: ServiceWorkerRegistration | undefined) {
+          if (registration) {
+            updatePoll = setInterval(() => {
+              void registration.update();
+            }, SW_UPDATE_POLL_MS);
+          }
         },
         onRegisterError(error: Error) {
           console.error('[SW] Registration error:', error);
@@ -179,7 +194,10 @@ export function useServiceWorker(): UseServiceWorkerResult {
     }).catch(() => {
       // PWA not available (dev mode or unsupported)
     });
-  }, []);
+    return () => {
+      if (updatePoll) clearInterval(updatePoll);
+    };
+  }, [native]);
 
   const updateServiceWorker = useCallback(() => {
     if (updateSW) {

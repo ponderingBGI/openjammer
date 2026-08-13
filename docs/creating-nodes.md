@@ -201,9 +201,9 @@ export type NodeType =
 Add to `src/engine/registry.ts`:
 
 ```typescript
-const nodeDefinitions: Map<NodeType, NodeDefinition> = new Map([
+export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
     // ... existing nodes
-    ['my-new-node', {
+    'my-new-node': {
         type: 'my-new-node',
         name: 'My New Node',
         category: 'effects',  // or 'input', 'instruments', 'routing', 'output'
@@ -212,13 +212,13 @@ const nodeDefinitions: Map<NodeType, NodeDefinition> = new Map([
             { id: 'in', name: 'Input', type: 'audio', direction: 'input' },
             { id: 'out', name: 'Output', type: 'audio', direction: 'output' }
         ],
-        isAtomic: true,  // true = no internal structure, false = has children
+        // omit canEnter — this node is atomic (no internal canvas to enter)
         defaultData: {
             // Custom data for this node type
             gain: 1.0
         }
-    }]
-]);
+    }
+};
 ```
 
 ### Step 3: Create the Component
@@ -279,16 +279,16 @@ case 'my-new-node':
 
 Hierarchical nodes contain other nodes inside. When you press `E` on them, you enter an internal canvas.
 
-### Step 1: Set `isAtomic: false` in Registry
+### Step 1: Set `canEnter: true` in Registry
 
 ```typescript
-['my-container', {
+'my-container': {
     type: 'my-container',
     name: 'My Container',
     category: 'routing',
-    isAtomic: false,  // ← This enables hierarchical behavior
+    canEnter: true,  // ← This enables hierarchical behavior (E key enters the internal canvas)
     defaultPorts: []  // Ports come from internal panels
-}]
+}
 ```
 
 ### Step 2: Create Internal Structure
@@ -626,14 +626,14 @@ export type NodeType =
 ### 2. Registry (`src/engine/registry.ts`)
 
 ```typescript
-['mixer', {
+'mixer': {
     type: 'mixer',
     name: 'Mixer',
     category: 'effects',
     description: 'Mix multiple audio inputs into one output',
-    isAtomic: false,
+    canEnter: true,
     defaultPorts: []  // Synced from panels
-}]
+}
 ```
 
 ### 3. Internal Structure (`src/utils/nodeInternals.ts`)

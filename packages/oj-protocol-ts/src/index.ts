@@ -74,12 +74,16 @@ export const PRIMITIVE_KINDS = [
   "Waveshaper",
   "Delay",
   "Convolution",
+  "Pan",
+  "Width",
   // host-bridged / extension
   "FaustHost",
   "WasmHost",
   "PluginHost",
   // routing / io
   "Add",
+  "Subtract",
+  "Multiply",
   "MicIn",
   "SpeakerOut",
   "GraphIn",
@@ -87,7 +91,6 @@ export const PRIMITIVE_KINDS = [
   "Passthrough",
   // stateful (U-STATEFUL)
   "Looper",
-  "Recorder",
 ] as const;
 
 /** The closed primitive-kind union, derived from {@link PRIMITIVE_KINDS}. */
@@ -155,7 +158,7 @@ export interface OjGraph {
  *   "TransportPlay"
  *   "TransportPause"
  *   { "Seek": { "samples": 9000 } }
- *   { "Looper": { "node": 3, "action": 5 } }
+ *   { "Looper": { "node": 3, "action": 5, "arg": 0 } }
  */
 export type RtCommand =
   | { SetParam: { node: NodeIdx; param: number; value: number } }
@@ -165,15 +168,24 @@ export type RtCommand =
   | "TransportPlay"
   | "TransportPause"
   | { Seek: { samples: number } }
-  | { Looper: { node: NodeIdx; action: LooperAction } };
+  | { Looper: { node: NodeIdx; action: LooperAction; arg: number } };
 
 /**
  * Looper transport actions carried by `RtCommand.Looper.action` (a bare `u8` on
  * the wire). Mirrors Rust's `ojproto::looper_action` consts — kept as a numeric
- * union so the JSON shape stays `{ "Looper": { "node": n, "action": k } }`.
- *   ARM = 0, RECORD = 1, PLAY = 2, STOP = 3, CLEAR = 4, OVERDUB = 5
+ * union so the JSON shape stays `{ "Looper": { "node": n, "action": k, "arg": a } }`.
+ *
+ * The transport actions (ARM..OVERDUB) ignore `arg`; the indexed actions address
+ * a layer through it:
+ *   - UNDO_LAST   — `arg` ignored (pops the most-recent layer, LIFO).
+ *   - SET_MUTE    — `arg` low bits = layer index; high bit (`LOOPER_MUTE_FLAG`)
+ *                   set = muted, clear = unmuted.
+ *   - DELETE_LAYER — `arg` = layer index.
+ *
+ *   ARM=0, RECORD=1, PLAY=2, STOP=3, CLEAR=4, OVERDUB=5,
+ *   UNDO_LAST=6, SET_MUTE=7, DELETE_LAYER=8
  */
-export type LooperAction = 0 | 1 | 2 | 3 | 4 | 5;
+export type LooperAction = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 /** Named `LooperAction` values, mirroring Rust's `ojproto::looper_action`. */
 export const LooperAction = {
@@ -183,7 +195,39 @@ export const LooperAction = {
   STOP: 3,
   CLEAR: 4,
   OVERDUB: 5,
+  UNDO_LAST: 6,
+  SET_MUTE: 7,
+  DELETE_LAYER: 8,
 } as const satisfies Record<string, LooperAction>;
+
+/**
+ * High bit of `RtCommand.Looper.arg` for `LooperAction.SET_MUTE`: set = the
+ * addressed layer is muted, clear = unmuted. The remaining bits are the layer
+ * index. Mirrors Rust's `ojproto::looper_action::MUTE_FLAG` (`1 << 31`).
+ *
+ * Use `>>> 0` when packing so the result stays an unsigned 32-bit number on the
+ * wire (matching the Rust `u32`):
+ *   `(layerIdx | LOOPER_MUTE_FLAG) >>> 0`
+ */
+export const LOOPER_MUTE_FLAG = 0x8000_0000 as const;
+
+/**
+ * Looper state-machine state codes, carried as a bare `u8` by
+ * `EngineFrame.Looper.state` and the `from`/`to` fields of
+ * `RtEvent.LooperEdge` / `EventKind.LooperEdge`. Mirrors Rust's
+ * `ojproto::looper_state` consts (which in turn mirror `ojcore::LooperState`).
+ *   IDLE = 0, ARMED = 1, RECORDING = 2, PLAYING = 3, OVERDUBBING = 4
+ */
+export type LooperState = 0 | 1 | 2 | 3 | 4;
+
+/** Named `LooperState` values, mirroring Rust's `ojproto::looper_state`. */
+export const LooperState = {
+  IDLE: 0,
+  ARMED: 1,
+  RECORDING: 2,
+  PLAYING: 3,
+  OVERDUBBING: 4,
+} as const satisfies Record<string, LooperState>;
 
 /**
  * Hot parameter patch: a hand-packed 7-byte frame on the highest-rate UI->RT
@@ -243,6 +287,7 @@ export function paramPatchFromBytes(bytes: Uint8Array): ParamPatch {
  *   { "Meter":  { "node": 3, "rms": 0.1, "peak": 0.9 } }
  *   { "IrAck":  { "ir_version": 1, "ok": true } }
  *   { "Beat":   { "bar": 2, "beat": 3, "phase": 0.5 } }
+ *   { "Looper": { "node": 3, "state": 3, "pos": 1024, "loop_len": 48000, "peak": 0.5 } }
  *   { "Error":  { "code": 42, "message": "boom" } }
  */
 export type EngineFrame =
@@ -257,6 +302,15 @@ export type EngineFrame =
   | { Meter: { node: NodeIdx; rms: number; peak: number } }
   | { IrAck: { ir_version: number; ok: boolean } }
   | { Beat: { bar: number; beat: number; phase: number } }
+  | {
+      Looper: {
+        node: NodeIdx;
+        state: LooperState;
+        pos: number;
+        loop_len: number;
+        peak: number;
+      };
+    }
   | { Error: { code: number; message: string } };
 
 // ============================================================================
@@ -278,7 +332,7 @@ export type Severity = "Trace" | "Debug" | "Info" | "Warn" | "Error";
 export type Source = "Engine" | "Wasm" | "Ui" | "Native";
 
 /** RT fault taxonomy. Rust: `enum FaultKind` — bare string. */
-export type FaultKind = "NonFinite" | "OverBudget" | "AutoBypassed";
+export type FaultKind = "NonFinite" | "OverBudget" | "AutoBypassed" | "Crashed";
 
 /**
  * The closed, versioned event taxonomy (control-rate). Rust: `enum EventKind`,
@@ -290,6 +344,7 @@ export type FaultKind = "NonFinite" | "OverBudget" | "AutoBypassed";
  *   "GraphSwap"
  *   { "Xrun": { "dropped": 3 } }
  *   { "NodeFault": { "node": 3, "fault": "NonFinite" } }
+ *   { "LooperEdge": { "node": 3, "from": 2, "to": 3 } }
  *   "RingFull"
  *   "Asset"
  *   "Plugin"
@@ -302,6 +357,7 @@ export type EventKind =
   | "GraphSwap"
   | { Xrun: { dropped: number } }
   | { NodeFault: { node: NodeIdx; fault: FaultKind } }
+  | { LooperEdge: { node: NodeIdx; from: LooperState; to: LooperState } }
   | "RingFull"
   | "Asset"
   | "Plugin"
@@ -345,9 +401,11 @@ export interface Event {
  * Wire examples (pinned by wire_shapes.rs):
  *   { "Xrun": { "dropped": 5 } }
  *   { "NodeFault": { "node": 3, "fault": "OverBudget" } }
+ *   { "LooperEdge": { "node": 3, "from": 2, "to": 3 } }
  *   "RingFull"
  */
 export type RtEvent =
   | { Xrun: { dropped: number } }
   | { NodeFault: { node: NodeIdx; fault: FaultKind } }
+  | { LooperEdge: { node: NodeIdx; from: LooperState; to: LooperState } }
   | "RingFull";

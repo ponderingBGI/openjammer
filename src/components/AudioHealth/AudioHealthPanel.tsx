@@ -10,23 +10,26 @@
  *
  * It reads the live Zustand audio store directly (reactive), mirroring the shape
  * of {@link import('../../ai/envAdapter').createEnvPort}'s diagnostics so the
- * panel and the agent never tell the player two different stories.
+ * panel and the agent never tell the player two different stories. The overlay
+ * chrome (portal, scrim, Escape, focus-trap, click-outside) is the oj-ui Modal;
+ * the header, status dots, and actions are oj-ui primitives.
  */
 
 import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { Modal, PanelHeader, Button, StatusDot } from '@openjammer/oj-ui';
+import type { StatusDotStatus } from '@openjammer/oj-ui';
 import { useAudioStore } from '../../store/audioStore';
 import { isTauri } from '../../audio/executor';
 import { gatherDiagnostics } from '../../utils/diagnostics';
 import './AudioHealthPanel.css';
 
-type Status = 'ok' | 'warn' | 'bad' | 'idle';
+type Status = StatusDotStatus;
 
 /** One readout row. */
 function Row({ label, value, status, hint }: { label: string; value: string; status: Status; hint?: string }) {
     return (
-        <div className="ah-row" data-status={status} title={hint}>
-            <span className="ah-dot" data-status={status} aria-hidden />
+        <div className="ah-row" title={hint}>
+            <StatusDot status={status} />
             <span className="ah-label">{label}</span>
             <span className="ah-value">{value}</span>
         </div>
@@ -58,13 +61,10 @@ export function AudioHealthPanel() {
     const device = useAudioStore((s) => s.deviceInfo);
     const config = useAudioStore((s) => s.audioConfig);
 
-    // Global toggle + Escape-to-close + the palette-command bridge.
+    // Global toggle (Ctrl/Cmd+Shift+H) + the palette-command bridge. Escape-to-
+    // close is now owned by the Modal's focus-trapped handler.
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                setOpen((v) => (v ? false : v));
-                return;
-            }
             const hit = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'h';
             if (!hit) return;
             e.preventDefault();
@@ -79,7 +79,7 @@ export function AudioHealthPanel() {
         };
     }, []);
 
-    if (!open) return null;
+    const close = () => setOpen(false);
 
     const env = gatherDiagnostics();
     const rtMs = metrics.estimatedRoundTrip;
@@ -94,66 +94,51 @@ export function AudioHealthPanel() {
         window.dispatchEvent(new CustomEvent('openjammer:toggle-settings'));
     };
 
-    return createPortal(
-        <div className="ah-overlay" onClick={() => setOpen(false)}>
-            <div
-                className="ah-panel"
-                onClick={(e) => e.stopPropagation()}
-                role="dialog"
-                aria-modal="true"
-                aria-label="Audio health"
-            >
-                <header className="ah-header">
-                    <span className="ah-title">Audio health</span>
-                    <span className="ah-spacer" />
-                    <button className="ah-btn" onClick={() => setOpen(false)} title="Close (Ctrl/Cmd+Shift+H)">
-                        ✕
-                    </button>
-                </header>
+    return (
+        <Modal open={open} onClose={close} ariaLabel="Audio health" size="sm">
+            <PanelHeader title="Audio health" onClose={close} />
 
-                <div className="ah-rows">
-                    <Row
-                        label="Audio engine"
-                        value={ready ? 'running' : 'not started'}
-                        status={ready ? 'ok' : 'idle'}
-                        hint={ready || isTauri() ? undefined : 'Choose "Play here in your browser" to enable audio.'}
-                    />
-                    <Row
-                        label="Round-trip latency"
-                        value={ready ? `${Math.round(rtMs)} ms (${metrics.classification})` : '—'}
-                        status={ready ? latencyStatus(metrics.classification) : 'idle'}
-                        hint="Lower is better; a USB interface + the interactive hint help."
-                    />
-                    <Row
-                        label="Sample rate"
-                        value={ready ? `${metrics.sampleRate || config.sampleRate} Hz` : `${config.sampleRate} Hz (set)`}
-                        status="ok"
-                    />
-                    <Row
-                        label="Output device"
-                        value={device.deviceLabel || 'system default'}
-                        status={device.isUSBAudioInterface ? 'ok' : 'warn'}
-                        hint={device.isUSBAudioInterface ? 'USB audio interface detected.' : 'Built-in output — a USB interface lowers latency.'}
-                    />
-                    <Row
-                        label="Cross-origin isolation"
-                        value={coi ? 'on (low-latency path)' : 'off (fallback path)'}
-                        status={coi ? 'ok' : 'warn'}
-                        hint="Required for the SharedArrayBuffer zero-latency control ring."
-                    />
-                    <Row label="OpenJammer" value={`${env.version} (${env.channel})`} status="ok" />
-                </div>
-
-                <footer className="ah-footer">
-                    <button className="ah-btn ah-btn-primary" onClick={openSettings}>
-                        Open Settings
-                    </button>
-                    <button className="ah-btn ah-btn-ai" onClick={askAi}>
-                        Ask AI to fix
-                    </button>
-                </footer>
+            <div className="ah-rows">
+                <Row
+                    label="Audio engine"
+                    value={ready ? 'running' : 'not started'}
+                    status={ready ? 'ok' : 'idle'}
+                    hint={ready || isTauri() ? undefined : 'Choose "Play here in your browser" to enable audio.'}
+                />
+                <Row
+                    label="Round-trip latency"
+                    value={ready ? `${Math.round(rtMs)} ms (${metrics.classification})` : '—'}
+                    status={ready ? latencyStatus(metrics.classification) : 'idle'}
+                    hint="Lower is better; a USB interface + the interactive hint help."
+                />
+                <Row
+                    label="Sample rate"
+                    value={ready ? `${metrics.sampleRate || config.sampleRate} Hz` : `${config.sampleRate} Hz (set)`}
+                    status="ok"
+                />
+                <Row
+                    label="Output device"
+                    value={device.deviceLabel || 'system default'}
+                    status={device.isUSBAudioInterface ? 'ok' : 'warn'}
+                    hint={device.isUSBAudioInterface ? 'USB audio interface detected.' : 'Built-in output — a USB interface lowers latency.'}
+                />
+                <Row
+                    label="Cross-origin isolation"
+                    value={coi ? 'on (low-latency path)' : 'off (fallback path)'}
+                    status={coi ? 'ok' : 'warn'}
+                    hint="Required for the SharedArrayBuffer zero-latency control ring."
+                />
+                <Row label="OpenJammer" value={`${env.version} (${env.channel})`} status="ok" />
             </div>
-        </div>,
-        document.body,
+
+            <footer className="ah-footer">
+                <Button variant="secondary" className="ah-footer__btn" onClick={openSettings}>
+                    Open Settings
+                </Button>
+                <Button variant="primary" className="ah-footer__btn" onClick={askAi}>
+                    Ask AI to fix
+                </Button>
+            </footer>
+        </Modal>
     );
 }

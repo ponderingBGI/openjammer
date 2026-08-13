@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect, useCallback } from 'react';
+import { Button } from '@openjammer/oj-ui';
 import { useAudioStore } from '../../store/audioStore';
 
 const HELP_DISMISSED_KEY = 'openjammer:help-dismissed';
@@ -51,8 +52,9 @@ export function HelpPanel() {
 
     if (!isVisible) {
         return (
-            <button
-                className={`toolbar-btn help-btn-minimized ${isModeUnassigned ? 'warning' : ''}`}
+            <Button
+                variant="ghost"
+                className={`help-btn-minimized ${isModeUnassigned ? 'warning' : ''}`}
                 onClick={handleToggle}
                 style={{
                     position: 'fixed',
@@ -65,7 +67,7 @@ export function HelpPanel() {
                 }}
             >
                 {isModeUnassigned ? '⚠️' : '❓'} Help
-            </button>
+            </Button>
         );
     }
 
@@ -73,17 +75,9 @@ export function HelpPanel() {
         <div className={`help-panel ${isModeUnassigned ? 'help-panel-warning' : ''}`}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3>🎹 OpenJammer</h3>
-                <button
-                    onClick={handleClose}
-                    style={{
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-muted)',
-                        cursor: 'pointer'
-                    }}
-                >
+                <Button variant="ghost" iconOnly onClick={handleClose} style={{ color: 'var(--text-muted)' }}>
                     ✕
-                </button>
+                </Button>
             </div>
 
             {/* Mode Indicator */}

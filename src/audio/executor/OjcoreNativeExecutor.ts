@@ -1,5 +1,10 @@
 /**
- * OjcoreNativeExecutor (U17) — the native, sub-5ms audio path.
+ * OjcoreNativeExecutor (U17) — the native, low-latency audio path.
+ *
+ * Latency honesty: on Windows over WASAPI-shared (the default cpal path) this is
+ * realistically ~10 ms+, NOT sub-5 ms. True sub-5 ms needs WASAPI-exclusive or
+ * ASIO, which OpenJammer does not yet route — so we never advertise the native
+ * tier as sub-5 ms. (The audio health dot tooltip carries the same honest tier.)
  *
  * When OpenJammer runs inside the Tauri desktop shell, audio is rendered by the
  * native Rust `ojcore` engine on a small-buffer cpal stream (the founder's MOTU
@@ -48,12 +53,32 @@ import type {
     OjGraph,
     RtCommand,
     EngineFrame,
+    Event as EngineEvent,
 } from '../../../packages/oj-protocol-ts/src/index';
 import {
     OjcoreCapabilityRegistry,
     monoPcmToWavBlob,
     type OjcoreBridge,
 } from './ojcoreHandles';
+import { classifyLatency, type LatencyReport } from './latency';
+import { logger } from '../../utils/log';
+import type { ScheduledCommand } from './arrangementScheduler';
+import { setEngineHealth, useEngineHealthStore } from '../../store/engineHealthStore';
+import {
+    ingestEngineEvents,
+    logNewlyDegradedStubs,
+    remapFaultNodes,
+    routeRuntimeFaults,
+} from './faultPipe';
+import { setNodeVoiceLoadError } from './voiceLoadError';
+import { describeNodeForLog, setNodePluginLoadError } from './pluginLoadError';
+import { HOSTED_PLUGIN_STATE_KEY } from '../../engine/dynamicRegistry';
+import { useGraphStore } from '../../store/graphStore';
+
+// Re-exported for back-compat: `coalesceEvents` moved to the shared `faultPipe`
+// seam (Wave 4) so both executor tiers share one fault path. Existing importers
+// (and tests) that reach for it here still resolve.
+export { coalesceEvents } from './faultPipe';
 
 /** Minimal shape of the Tauri global IPC bridge (`withGlobalTauri`). */
 interface TauriGlobal {
@@ -73,6 +98,31 @@ function getInvoke(): ((cmd: string, args?: Record<string, unknown>) => Promise<
 
 /** How often (ms) to poll the engine for fresh per-node meter levels. */
 const METER_POLL_MS = 50;
+
+/** Settle time for an agent `probeSignal`: a couple of {@link METER_POLL_MS} ticks
+ *  so at least one fresh meter frame lands before we read the cached peak. */
+const PROBE_SETTLE_MS = METER_POLL_MS * 2 + 30;
+
+/** A no-op signal subscriber used to keep the meter stream alive during a probe. */
+const NOOP_SIGNAL_CB: SignalLevelsCallback = () => {};
+
+/** Resolve after `ms`, off the audio thread (probe settle). */
+const delay = (ms: number): Promise<void> =>
+    new Promise((resolve) => window.setTimeout(resolve, ms));
+
+/**
+ * How often (ms) to drain the engine's fault-event ring. SEPARATE from the meter
+ * poll on purpose: meters early-return when no signal-level UI is mounted, but a
+ * fault must be drained whether or not any meter is on screen — folding the two
+ * would silently never surface a dropout during a set with no meter open. A
+ * fault that lands one block late at 100 ms cadence is still "instant" to a human
+ * ear; it does not need the 50 ms meter rate, and a slower tick keeps the ring
+ * drained without churning React.
+ */
+const EVENT_POLL_MS = 100;
+
+/** Scope-bound DevLog logger for this executor (routes through the L4 facade). */
+const log = logger('native');
 
 /** True when running inside a Tauri webview (the native desktop shell). */
 export function isTauri(): boolean {
@@ -99,6 +149,9 @@ export class OjcoreNativeExecutor implements Executor {
     private index: NodeIdxMap = new Map();
     /** Reverse map NodeIdx -> visual node id, for routing meter frames back. */
     private reverseIndex = new Map<number, string>();
+    /** Visual ids degraded to a passthrough stub on the LAST accepted push — diffed
+     *  each push so a still-broken plugin is logged once, not on every re-push. */
+    private degradedVisualIds = new Set<string>();
     /** Which built-in voice (family key) is currently bound per instrument node,
      *  so the picker selection re-binds but a plain re-push does not. */
     private boundVoiceKey = new Map<string, string>();
@@ -107,13 +160,24 @@ export class OjcoreNativeExecutor implements Executor {
     private levels = new Map<string, number>();
     /** Interval id for the meter poll loop (engine -> UI level stream). */
     private meterPollId: number | null = null;
+    /** Interval id for the DEDICATED, unconditional fault-event drain loop. Its
+     *  own timer so it drains regardless of whether any meter UI is mounted. */
+    private eventPollId: number | null = null;
+    /** Serialized last-pushed OjGraph, to skip redundant `push_graph` IPC when a
+     *  store notification fires but the audio graph is unchanged (dedupe). */
+    private lastPushedGraph: string | null = null;
+    /** Latest engine loop length (samples) per looper NodeIdx, cached from the
+     *  drained `Looper` frames. On a commit edge we pass it to `looper_take_pcm`
+     *  so the streamed capture is trimmed to the committed cycle (Stage 3). */
+    private looperLoopLen = new Map<number, number>();
 
     /** The engine-side seam the capability handles drive (native impl). */
     private readonly bridge: OjcoreBridge = {
         nodeIndex: (nodeId) => this.index.get(nodeId),
         sendCommand: (cmd) => this.send(cmd),
-        loadSample: (nodeId, pcm, sampleRate, rootNote) =>
-            this.loadSampleNative(nodeId, pcm, sampleRate, rootNote),
+        nodeLevel: (nodeId) => this.levels.get(nodeId) ?? 0,
+        loadSample: (nodeId, pcm, sampleRate, rootNote, channels) =>
+            this.loadSampleNative(nodeId, pcm, sampleRate, rootNote, channels),
         startCapture: (nodeId) => this.recorderStartNative(nodeId),
         stopCapture: (nodeId) => this.recorderStopNative(nodeId),
     };
@@ -132,10 +196,14 @@ export class OjcoreNativeExecutor implements Executor {
         this.getConnections = getConnections;
 
         if (!this.invoke) {
-            console.warn(
-                '[OjcoreNativeExecutor] Tauri global IPC bridge not found ' +
-                    '(set app.withGlobalTauri=true in tauri.conf.json). Native audio disabled.',
+            // We were selected as the NATIVE executor (Tauri was detected) yet the
+            // global IPC bridge is missing — the engine cannot make sound. Surface
+            // DEAD (not a lone console.warn) so the fault is visible, calmly.
+            log.error(
+                'Tauri global IPC bridge not found (set app.withGlobalTauri=true ' +
+                    'in tauri.conf.json). Native audio disabled.',
             );
+            setEngineHealth('DEAD', 'native IPC bridge unavailable');
         }
 
         const unsubNodes = subscribeToNodes(() => this.pushGraph());
@@ -150,11 +218,49 @@ export class OjcoreNativeExecutor implements Executor {
 
         // Begin the engine -> UI meter event stream (no-op without Tauri).
         this.startMeterStream();
+        // Begin the dedicated fault-event drain (its OWN cadence; see startEventDrain).
+        this.startEventDrain();
     }
 
     /** The native (Tauri) capability row — the flagship. */
     getCapabilities(): EngineCapabilities {
         return DESKTOP_CAPABILITIES;
+    }
+
+    /**
+     * Latency of the native backend: the cpal stream's negotiated buffering floor
+     * over the `query_stream` IPC (`engine::StreamInfo`). THIS — not the WebView2
+     * decode AudioContext — is what the MOTU is actually playing through, so it is
+     * the only honest native number. `StreamInfo` serializes with serde's default
+     * snake_case keys. Resolves `null` off the native tier or if the engine is not
+     * up yet, so the UI simply shows no reading rather than a wrong one.
+     */
+    async getLatency(): Promise<LatencyReport | null> {
+        const invoke = getInvoke();
+        if (!invoke) return null;
+        try {
+            const s = (await invoke('query_stream')) as {
+                running: boolean;
+                sample_rate: number;
+                channels: number;
+                buffer_frames: number | null;
+                latency_ms: number;
+            };
+            return {
+                source: 'native',
+                running: s.running,
+                baseLatency: 0,
+                outputLatency: s.latency_ms,
+                roundTripMs: s.latency_ms,
+                sampleRate: s.sample_rate,
+                bufferFrames: s.buffer_frames ?? null,
+                classification: classifyLatency(s.latency_ms),
+                isBluetoothSuspected: false,
+            };
+        } catch {
+            // IPC unavailable / engine down — no reading beats a wrong one.
+            return null;
+        }
     }
 
     dispose(): void {
@@ -164,13 +270,24 @@ export class OjcoreNativeExecutor implements Executor {
             clearInterval(this.meterPollId);
             this.meterPollId = null;
         }
+        if (this.eventPollId !== null) {
+            clearInterval(this.eventPollId);
+            this.eventPollId = null;
+        }
         this.signalCallbacks.clear();
         this.levels.clear();
+        this.looperLoopLen.clear();
         this.caps.clear();
         this.getNodes = null;
         this.getConnections = null;
         this.index = new Map();
         this.reverseIndex = new Map();
+        // Forget which default voices were bound: a re-initialize starts a fresh
+        // engine with NO assets, so a stale key would make `loadDefaultInstrumentVoices`
+        // skip the (now-needed) re-bind and leave melodic nodes silent.
+        this.boundVoiceKey.clear();
+        // Reset the dedupe cache so a re-initialize re-pushes the graph.
+        this.lastPushedGraph = null;
     }
 
     /** Enable engine metering and poll the meter return ring, fanning per-node
@@ -180,16 +297,23 @@ export class OjcoreNativeExecutor implements Executor {
         if (!this.invoke || this.meterPollId !== null) return;
         // Ask the backend to enable metering (zero-cost while no graph runs).
         this.invoke('subscribe_meters', {}).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] subscribe_meters failed:', err);
+            log.error('subscribe_meters failed', { detail: String(err) });
         });
         this.meterPollId = window.setInterval(() => {
             void this.pollMeters();
         }, METER_POLL_MS);
     }
 
-    /** Poll the engine for the latest meter frames and deliver level snapshots. */
+    /**
+     * Poll the engine for the latest return frames. The drain is UNCONDITIONAL —
+     * the single meter ring now carries both `Meter` AND `Looper` frames (one
+     * consumer decodes all tags, see engine.rs drain_meters), and a looper's
+     * transport frames must reach its handle whether or not a signal-level meter
+     * is mounted. So we always drain, route every `Looper` frame to its handle,
+     * and only fan `Meter` levels out when a signal subscriber actually exists.
+     */
     private async pollMeters(): Promise<void> {
-        if (!this.invoke || this.signalCallbacks.size === 0) return;
+        if (!this.invoke) return;
         let frames: EngineFrame[];
         try {
             frames = (await this.invoke('poll_meters', {})) as EngineFrame[];
@@ -197,15 +321,40 @@ export class OjcoreNativeExecutor implements Executor {
             return; // transient; next tick retries
         }
         if (!Array.isArray(frames) || frames.length === 0) return;
+        const haveSignalSubs = this.signalCallbacks.size > 0;
         let changed = false;
         for (const frame of frames) {
-            if (!frame || typeof frame !== 'object' || !('Meter' in frame)) continue;
-            const { node, peak } = (frame as { Meter: { node: NodeIdx; rms: number; peak: number } })
-                .Meter;
-            const nodeId = this.reverseIndex.get(node);
-            if (nodeId === undefined) continue;
-            this.levels.set(nodeId, Math.max(0, Math.min(1, peak)));
-            changed = true;
+            if (!frame || typeof frame !== 'object') continue;
+            if ('Looper' in frame) {
+                // Looper transport snapshot — ALWAYS routed (ungated by metering).
+                const { node, state, pos, loop_len, peak } = (
+                    frame as {
+                        Looper: {
+                            node: NodeIdx;
+                            state: number;
+                            pos: number;
+                            loop_len: number;
+                            peak: number;
+                        };
+                    }
+                ).Looper;
+                const nodeId = this.reverseIndex.get(node);
+                if (nodeId === undefined) continue;
+                // Cache the loop length per NodeIdx so a commit edge can trim the
+                // streamed capture to the committed cycle (Stage 3 take PCM).
+                if (loop_len > 0) this.looperLoopLen.set(node, loop_len);
+                this.caps.looper(nodeId).onEngineFrame(state, pos, loop_len, peak);
+                continue;
+            }
+            if (haveSignalSubs && 'Meter' in frame) {
+                const { node, peak } = (
+                    frame as { Meter: { node: NodeIdx; rms: number; peak: number } }
+                ).Meter;
+                const nodeId = this.reverseIndex.get(node);
+                if (nodeId === undefined) continue;
+                this.levels.set(nodeId, Math.max(0, Math.min(1, peak)));
+                changed = true;
+            }
         }
         if (changed) {
             const snapshot = new Map(this.levels);
@@ -213,36 +362,322 @@ export class OjcoreNativeExecutor implements Executor {
         }
     }
 
+    // --- Fault-event drain -------------------------------------------------
+    // A DEDICATED, unconditional loop — NOT folded into the meter poll above,
+    // which early-returns when no signal-level subscriber is mounted. A fault
+    // must reach the DevLog whether or not a meter is on screen, so this drain
+    // runs on its own cadence and only ever stops on `dispose()`.
+
+    /** Begin draining the engine's fault-event ring on a fixed cadence.
+     *  Idempotent (a single loop); self-disables (no spam) without Tauri. */
+    private startEventDrain(): void {
+        if (this.eventPollId !== null) return;
+        this.eventPollId = window.setInterval(() => {
+            void this.pollEvents();
+        }, EVENT_POLL_MS);
+    }
+
+    /**
+     * Drain pending engine fault events, COALESCE repeated Xrun/NodeFault, and
+     * ingest the result into the DevLog ring. Coalescing happens at the drain,
+     * BEFORE ingest, because a faulting node emits a NodeFault EVERY block: an
+     * unfiltered firehose would evict real history from the 5000-cap ring (and
+     * jank React) during the exact dropout we need to diagnose.
+     *
+     * Self-disabling: when the IPC bridge is absent the drain is a quiet no-op
+     * (no console spam every tick) — the DEAD state was already surfaced at
+     * `initialize`.
+     */
+    private async pollEvents(): Promise<void> {
+        if (!this.invoke) return;
+        let events: EngineEvent[];
+        try {
+            events = (await this.invoke('poll_events', {})) as EngineEvent[];
+        } catch {
+            return; // transient; next tick retries
+        }
+        if (!Array.isArray(events) || events.length === 0) return;
+        // Tap the loss-proof event stream for LooperEdge transitions BEFORE the
+        // fault sink: the event ring is the AUTHORITATIVE commit signal (a cycle
+        // wrap / STOP), so a RECORDING|OVERDUBBING -> PLAYING edge must reach the
+        // looper handle to create its row. Routing here (not in the fault pipe)
+        // keeps the fault path tag-agnostic — LooperEdge is not a fault.
+        this.routeLooperEdges(events);
+        // Tap runtime CRASH faults (NodeFault{Crashed}) to the per-node badge — the
+        // runtime twin of the load-degraded surface (invariant #4a). Done on the
+        // raw engine-indexed batch (this tier owns the reverse map), set-only; the
+        // push_graph degraded loop owns clearing. Shared helper -> wasm tier reuses it.
+        routeRuntimeFaults(events, (n) => this.reverseIndex.get(n));
+        // Make every fault NODE-ADDRESSABLE before the shared sink: rewrite each
+        // NodeFault's engine index to its visual node id (this tier owns the reverse
+        // index) so the agent's get_logs / get_diagnostics map a fault to a canvas
+        // node, not an opaque engine number.
+        const addressable = remapFaultNodes(events, (n) => this.reverseIndex.get(n));
+        // The ONE shared fault sink (coalesce -> ingest -> health), identical for
+        // the wasm tier — see `faultPipe.ts`. No second owner of the fault path.
+        ingestEngineEvents(addressable);
+    }
+
+    /** ojcore `LooperState` codes mirrored for the commit-edge filter (kept in
+     *  sync with the protocol enum the wasm worklet also hard-codes). */
+    private static readonly LOOPER_RECORDING = 2;
+    private static readonly LOOPER_PLAYING = 3;
+    private static readonly LOOPER_OVERDUBBING = 4;
+
+    /** Route any `LooperEdge` events in a drained batch to their looper handle's
+     *  `onEngineEdge`. Shared shape with the wasm tier (which taps the same edge
+     *  off its `events` postMessage). On a COMMIT edge (Recording|Overdubbing ->
+     *  Playing) ALSO pull the just-committed take's TRUE PCM off-RT via the
+     *  `looper_take_pcm` command return (Stage 3) and hand it to the handle's
+     *  `onLayerPcm`, so the row gains a real AudioBuffer + true waveform. */
+    private routeLooperEdges(events: EngineEvent[]): void {
+        for (const ev of events) {
+            const kind = ev?.kind;
+            if (typeof kind !== 'object' || !('LooperEdge' in kind)) continue;
+            const { node, from, to } = kind.LooperEdge;
+            const nodeId = this.reverseIndex.get(node);
+            if (nodeId === undefined) continue;
+            this.caps.looper(nodeId).onEngineEdge(from, to);
+            const committed =
+                to === OjcoreNativeExecutor.LOOPER_PLAYING &&
+                (from === OjcoreNativeExecutor.LOOPER_RECORDING ||
+                    from === OjcoreNativeExecutor.LOOPER_OVERDUBBING);
+            if (committed) void this.fetchLooperTake(node, nodeId);
+        }
+    }
+
+    /**
+     * Pull the just-committed take's TRUE captured PCM for `node` off the engine
+     * via the `looper_take_pcm` command (the PCM rides the command RETURN, like
+     * `recorder_stop` — NOT an EngineFrame, so no new wire shape). The off-RT
+     * per-looper buffer keeps only the LATEST take per node (the take clears it),
+     * so this must be called promptly on the commit edge. Best-effort: a null
+     * result (device-less sandbox / nothing captured) simply leaves the row on
+     * its meter-envelope waveform with a null buffer. The committed-cycle length
+     * (cached from the drained frames) trims the streamed capture to one cycle.
+     */
+    private async fetchLooperTake(node: NodeIdx, nodeId: string): Promise<void> {
+        if (!this.invoke) return;
+        const loopLen = this.looperLoopLen.get(node) ?? 0;
+        try {
+            const res = (await this.invoke('looper_take_pcm', {
+                node,
+                loopLen,
+            })) as { pcm: number[]; sample_rate: number } | null;
+            if (!res || !res.pcm || res.pcm.length === 0) return;
+            this.caps.looper(nodeId).onLayerPcm(Float32Array.from(res.pcm), res.sample_rate);
+        } catch (err) {
+            log.warn('looper_take_pcm failed', { detail: String(err) });
+        }
+    }
+
+    /** Tell the engine to discard a looper's pending captured take (Stage 3) on a
+     *  CLEAR / undo / delete-before-commit, so a later take never inherits a stale
+     *  tail. Best-effort fire-and-forget. */
+    private discardLooperTake(node: NodeIdx): void {
+        if (!this.invoke) return;
+        this.invoke('looper_discard_pcm', { node }).catch((err: unknown) => {
+            log.warn('looper_discard_pcm failed', { detail: String(err) });
+        });
+    }
+
     /** Emit + remap + push the current graph to the native engine. */
-    private pushGraph(): void {
+    /** Force a re-push of the current graph even when its bytes are unchanged —
+     *  the seam a plugin rescan uses to INSTANTLY rebind a degraded node onto its
+     *  now-available real plugin (the engine re-registered it on scan), instead of
+     *  waiting for the next canvas edit. A clean graph just recompiles to itself. */
+    resync(): void {
+        this.pushGraph(true);
+    }
+
+    /** Capture each hosted plugin's opaque state into its node.data (off-undo) so a
+     *  project export persists it (the oj.state save half). The engine reads the
+     *  live instances off-RT (pre-publish), returning `(ir_node_id, blob)`; we map
+     *  the IR id back to the visual node via the reverse index. Non-fatal on error
+     *  (the project still saves, just without plugin state). No-op device-less. */
+    async capturePluginStates(): Promise<void> {
+        if (!this.invoke) return;
+        try {
+            const states = (await this.invoke('save_plugin_states')) as
+                | { node: number; blob: number[] }[]
+                | undefined;
+            if (!Array.isArray(states)) return;
+            const store = useGraphStore.getState();
+            for (const { node, blob } of states) {
+                const visualId = this.reverseIndex.get(node);
+                if (visualId !== undefined && Array.isArray(blob) && blob.length > 0) {
+                    // Off-undo (outside any gesture): engine-derived state, not a user edit.
+                    store.updateNodeData(visualId, { [HOSTED_PLUGIN_STATE_KEY]: blob });
+                }
+            }
+        } catch (err) {
+            log.warn('save_plugin_states failed; project saved without plugin state', {
+                detail: String(err),
+            });
+        }
+    }
+
+    private pushGraph(force = false): void {
+        // Isolate the reconcile: lowering the visual graph to the engine IR must
+        // NEVER throw out of a store-change subscriber — that would abort Zustand's
+        // listener loop and wedge the canvas (later subscribers, and the persist
+        // middleware's post-loop setItem, are skipped). Contain it: keep the last
+        // good audio, log for the DevLog, and let the next edit retry.
+        // `force` bypasses the byte-identical dedupe — used by `resync()` after a
+        // plugin rescan, where the OjGraph is unchanged but the registry now has the
+        // plugin, so a re-push recompiles a degraded node onto its real loader.
+        try {
+            this.pushGraphInner(force);
+        } catch (err) {
+            log.error('graph lowering failed; keeping last good audio', {
+                detail: err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err),
+            });
+        }
+    }
+
+    private pushGraphInner(force = false): void {
         if (!this.getNodes || !this.getConnections) return;
         // The native engine registers a WasmHost loader per AI-authored faust node
         // (author_faust_native), so lower compiled code nodes to their real WasmHost
         // manifest — they play the actual DSP instead of the effect fallback.
         const { graph, index } = emitWithIndex(this.getNodes(), this.getConnections(), {
             codeNodesAsWasmHost: true,
+            hostedPluginsAsPluginHost: true,
         });
-        this.index = index;
-        // Build the reverse NodeIdx -> visual id map for routing meter frames.
-        this.reverseIndex = new Map();
-        for (const [id, idx] of index) this.reverseIndex.set(idx, id);
+        // Build the next NodeIdx interning + reverse (NodeIdx -> visual id) maps as
+        // LOCALS — they are committed to `this.index`/`this.reverseIndex` only once
+        // the engine ACCEPTS this graph (see sendGraph). Committing them here, before
+        // the IPC is accepted, would point meter-frame routing (`reverseIndex.get`)
+        // and RtCommand addressing (`index.get`) at a graph the engine never adopted
+        // when the push is rejected.
+        const nextReverseIndex = new Map<number, string>();
+        for (const [id, idx] of index) nextReverseIndex.set(idx, id);
         const native = remapForBackend(graph, 'native');
-        void this.sendGraph(native);
-    }
-
-    private async sendGraph(graph: OjGraph): Promise<void> {
-        if (!this.invoke) return;
-        try {
-            await this.invoke('push_graph', { graph });
-        } catch (err) {
-            console.error('[OjcoreNativeExecutor] push_graph failed:', err);
+        // Dedupe: a store notification can fire without the audio graph actually
+        // changing (or the same graph can be re-emitted by a re-render). The
+        // OjGraph is the audio IR (no canvas positions), so a byte-identical emit
+        // means "nothing to push" — skip the IPC entirely. This keeps a noisy
+        // subscriber (or a render loop) from hammering the native engine.
+        const serialized = JSON.stringify(native);
+        if (!force && serialized === this.lastPushedGraph) {
+            // The audio IR is unchanged, but an instrument PICKER change does not
+            // alter the emitted graph (the default voice is bound out-of-band via
+            // load_sample, not as graph data), so a deduped push would otherwise
+            // skip the voice swap and every instrument in a family would keep one
+            // sound. Reconcile default voices against the current node data here,
+            // off the IPC: it re-binds only when a node's selection actually changed
+            // (boundVoiceKey miss) and is a cheap no-op otherwise.
+            this.loadDefaultInstrumentVoices();
             return;
         }
-        // A UI push REPLACES the engine's kept graph, dropping any imperatively
-        // bound sample (see engine.rs push_graph), so (re)install the built-in
-        // default voice for instrument nodes that ship one. Without this a
-        // freshly-wired Keys/Piano/… node lowers to an EMPTY builtin.sampler and
-        // is silent — the note routes correctly but there is no PCM to play.
+        // Remember the prior accepted graph so a REJECTED push can roll the dedupe
+        // cache back — keeping the last good audio AND letting the next store
+        // notification re-attempt instead of being deduped away (held-note rule).
+        const prev = this.lastPushedGraph;
+        this.lastPushedGraph = serialized;
+        void this.sendGraph(native, prev, serialized, index, nextReverseIndex);
+    }
+
+    private async sendGraph(
+        graph: OjGraph,
+        prevSerialized: string | null,
+        attemptedSerialized: string,
+        nextIndex: NodeIdxMap,
+        nextReverseIndex: Map<number, string>,
+    ): Promise<void> {
+        if (!this.invoke) return;
+        // oj.state RESTORE: stage any saved opaque blobs (from a loaded project's
+        // node.data) BEFORE the push, so the engine restores each hosted plugin on
+        // this adopt — applied as the base, before its params (so a later param edit
+        // wins). Re-staged each push so a graph edit never drops the restored
+        // non-param state. No blobs (the common path) -> no stage IPC.
+        if (this.getNodes) {
+            const getNodes = this.getNodes;
+            const restores: { node: number; blob: number[] }[] = [];
+            for (const [visualId, irIdx] of nextIndex) {
+                const blob = (getNodes().get(visualId)?.data as Record<string, unknown> | undefined)?.[
+                    HOSTED_PLUGIN_STATE_KEY
+                ];
+                if (Array.isArray(blob) && blob.length > 0) {
+                    restores.push({ node: irIdx as unknown as number, blob: blob as number[] });
+                }
+            }
+            if (restores.length > 0) {
+                try {
+                    await this.invoke('stage_plugin_restores', { restores });
+                } catch (err) {
+                    log.warn('stage_plugin_restores failed; plugins load at defaults', {
+                        detail: String(err),
+                    });
+                }
+            }
+        }
+        let degradedIds: number[] = [];
+        try {
+            // push_graph returns the IR node ids that degraded to a passthrough stub
+            // (a missing / incompatible hosted plugin — invariant #4a).
+            const result = await this.invoke('push_graph', { graph });
+            degradedIds = Array.isArray(result) ? (result as number[]) : [];
+        } catch (err) {
+            // HELD NOTE BEATS A GLITCH: a rejected push (Compile / RingFull) does
+            // NOT tear down the prior graph — the engine keeps the last good
+            // program running (see engine.rs adopt(): it only swaps on success).
+            // STALE-FAILURE GUARD: pushes are fire-and-forget, so an older push can
+            // reject AFTER a newer one was already accepted. Only roll the dedupe
+            // cache back / flip health if THIS push is still the current one
+            // (`lastPushedGraph` hasn't moved on) — otherwise a stale rejection would
+            // clobber the newer graph's cache and report DEGRADED on old news.
+            if (this.lastPushedGraph === attemptedSerialized) {
+                this.lastPushedGraph = prevSerialized;
+                log.warn('push_graph rejected; keeping last good audio', { detail: String(err) });
+                setEngineHealth('DEGRADED', 'graph rejected; last good sound held');
+            } else {
+                log.warn('stale push_graph rejected; superseded by a newer graph', {
+                    detail: String(err),
+                });
+            }
+            return;
+        }
+        // The push was ACCEPTED: only now is the new interning the engine's truth, so
+        // commit the locals computed in pushGraph. Routing (`reverseIndex.get` for
+        // meter frames) and RtCommand addressing (`index.get`) move to the graph the
+        // engine actually adopted — on rejection above we touched neither, so they
+        // stay pointed at the last good graph (held-note rule).
+        this.index = nextIndex;
+        this.reverseIndex = nextReverseIndex;
+        // Badge any node that degraded to a passthrough stub (missing / incompatible
+        // plugin) and CLEAR the rest — so a rescan that re-resolves the plugin (a
+        // clean re-push with an empty degraded set) makes the badge disappear. The
+        // setter only writes on change, so this is a cheap no-op for steady graphs.
+        const degradedSet = new Set(degradedIds);
+        const nowDegraded = new Set<string>();
+        for (const [idx, visualId] of nextReverseIndex) {
+            const isDeg = degradedSet.has(idx);
+            setNodePluginLoadError(visualId, isDeg);
+            if (isDeg) nowDegraded.add(visualId);
+        }
+        // Surface NEW degradations into the DevLog so the agent's get_logs /
+        // get_diagnostics can see a missing/incompatible plugin (the badge above is
+        // the player's surface; this is the agent's). Logged once per node, diffed
+        // against the prior push so a steadily-broken plugin does not spam the ring.
+        logNewlyDegradedStubs(nowDegraded, this.degradedVisualIds, describeNodeForLog);
+        this.degradedVisualIds = nowDegraded;
+        // A graph is live and the engine accepted it, so the executor has observed
+        // real recovery. Lift IDLE or DEGRADED to LIVE (the positive state
+        // crash-recovery waits for); keep DEAD sticky unless a caller performs a
+        // stronger explicit recovery.
+        const health = useEngineHealthStore.getState().health;
+        if (health === 'IDLE' || health === 'DEGRADED') {
+            setEngineHealth('LIVE', 'engine active');
+        }
+        // Install the built-in default voice for instrument nodes that ship one,
+        // so a freshly-wired Keys/Piano/… node has PCM to play (an empty
+        // builtin.sampler is silent — the note routes but there is nothing to
+        // sound). The ENGINE now forward-merges a bound sample across pushes
+        // (engine.rs push_graph: single-owner persistence), so a plain re-push no
+        // longer drops the binding and `boundVoiceKey` keeps this to a no-op unless
+        // the instrument's voice family actually changed. We are NOT a second owner
+        // of sample persistence — this only seeds/changes the DEFAULT voice.
         this.loadDefaultInstrumentVoices();
     }
 
@@ -256,24 +691,57 @@ export class OjcoreNativeExecutor implements Executor {
             if (!DEFAULT_VOICE_INSTRUMENTS.has(node.type)) continue;
             if (this.index.get(node.id) === undefined) continue;
             // Karplus-routed plucked strings are note-triggered; they need no PCM.
-            if (instrumentUsesKarplus(node.type, node.data as Record<string, unknown> | undefined))
+            // FORGET this node's bound voice when it leaves the sampler path: the
+            // engine forward-merges a sample binding only Sampler->Sampler
+            // (engine.rs forward_merge_sample_bindings), so on the way BACK to a
+            // sampler instrument the asset is dropped — and a stale `boundVoiceKey`
+            // would suppress the re-bind, leaving the node silent until reload.
+            // Clearing it here makes any return re-bind the default voice, so a
+            // picker switch (even one that passes through a Karplus instrument like
+            // Harpsichord/Clavinet) never goes mute.
+            if (instrumentUsesKarplus(node.type, node.data as Record<string, unknown> | undefined)) {
+                this.boundVoiceKey.delete(node.id);
                 continue;
-            const { voice, key } = getVoiceForInstrumentNode(
-                node.type,
-                node.data as Record<string, unknown> | undefined,
-            );
-            // Re-send only when the instrument selection (its voice family) changed,
-            // so changing the picker re-binds but a plain re-push does not.
-            if (this.boundVoiceKey.get(node.id) === key) continue;
-            this.boundVoiceKey.set(node.id, key);
-            void this.loadSampleNative(node.id, voice.pcm, voice.sampleRate, voice.rootNote);
+            }
+            // Per-node try/catch: one node's voice-resolution failure must NOT abort
+            // the pass and starve LATER nodes of their default voice (a held note
+            // beats a glitch). The failing node gets its own non-focus-stealing "!"
+            // badge (ERR-1) — never a modal — and the diagnostic goes to the DevLog.
+            try {
+                const { voice, key } = getVoiceForInstrumentNode(
+                    node.type,
+                    node.data as Record<string, unknown> | undefined,
+                );
+                // Re-send only when the instrument selection changed, so changing the
+                // picker re-binds but a plain re-push does not.
+                if (this.boundVoiceKey.get(node.id) === key) continue;
+                this.boundVoiceKey.set(node.id, key);
+                // Built-in default voices are mono.
+                void this.loadSampleNative(node.id, voice.pcm, voice.sampleRate, voice.rootNote, 1);
+                setNodeVoiceLoadError(node.id, false);
+            } catch (err) {
+                log.error('default voice load failed for node; continuing', {
+                    detail: `${node.id}: ${err instanceof Error ? err.message : String(err)}`,
+                });
+                this.boundVoiceKey.delete(node.id);
+                setNodeVoiceLoadError(node.id, true);
+                continue;
+            }
         }
     }
 
     private send(cmd: RtCommand): void {
         if (!this.invoke) return;
+        // Stage 3: a looper CLEAR aborts any in-flight take, so also discard the
+        // off-RT captured PCM for that node — otherwise a later take could inherit
+        // a stale tail. (Committed-layer delete/undo operate on layers whose PCM
+        // is already in the UI; only the in-flight capture buffer needs clearing.)
+        if (typeof cmd === 'object' && cmd !== null && 'Looper' in cmd) {
+            const { node, action } = cmd.Looper;
+            if (action === 4 /* CLEAR */) this.discardLooperTake(node as NodeIdx);
+        }
         this.invoke('send_command', { cmd }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] send_command failed:', err);
+            log.error('send_command failed', { detail: String(err) });
         });
     }
 
@@ -315,10 +783,6 @@ export class OjcoreNativeExecutor implements Executor {
         }
     }
 
-    // Sustain pedal: no dedicated RtCommand yet (CC handled engine-side later).
-    controlDown(_keyboardId: string): void {}
-    controlUp(_keyboardId: string): void {}
-
     // Control-signal VISUALIZATION is a UI affordance; the native path drives no
     // Web Audio analyser, so flashes are emitted as 1/0 levels to subscribers.
     activateControlSignal(connectionId: string): void {
@@ -354,7 +818,7 @@ export class OjcoreNativeExecutor implements Executor {
             volume: isMuted ? 0 : volume,
             muted: isMuted,
         }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] set_speaker_volume failed:', err);
+            log.error('set_speaker_volume failed', { detail: String(err) });
         });
     }
     setSpeakerDevice(nodeId: string, deviceId: string): void {
@@ -362,7 +826,7 @@ export class OjcoreNativeExecutor implements Executor {
         const node = this.index.get(nodeId);
         if (node === undefined) return;
         this.invoke('set_speaker_device', { node, deviceId }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] set_speaker_device failed:', err);
+            log.error('set_speaker_device failed', { detail: String(err) });
         });
     }
 
@@ -379,17 +843,38 @@ export class OjcoreNativeExecutor implements Executor {
         };
     }
 
+    async probeSignal(nodeId: string): Promise<number | null> {
+        // A transient subscriber makes `haveSignalSubs` true so `pollMeters` fills
+        // `levels`; wait a couple of poll ticks for a fresh frame, read the node's
+        // peak, then unsubscribe. (The meter poll interval is left running — the same
+        // lifecycle the UI meters use — but stops populating once no subs remain.)
+        const unsub = this.subscribeSignalLevels(NOOP_SIGNAL_CB);
+        try {
+            await delay(PROBE_SETTLE_MS);
+            return this.levels.get(nodeId) ?? null;
+        } finally {
+            unsub();
+        }
+    }
+
     // --- Microphone --------------------------------------------------------
     // Native mic capture is an engine duplex-input concern: the `set_mic` command
-    // tells the backend which graph node should receive the mic bus. The
-    // Web-Audio `outputNode` has no meaning natively (the engine owns routing),
-    // so only the node id crosses the seam.
-    setMicrophoneOutput(nodeId: string, _outputNode: AudioNode): void {
+    // tells the backend which graph node should receive the mic bus, and whether
+    // it is live. The engine owns the OS device (cpal duplex input), so only the
+    // node id + enabled flag cross the seam — no Web-Audio node.
+    //
+    // MUTE maps to `set_mic(node, false)`: the backend re-opens the host WITHOUT
+    // the duplex input, so the engine's `MicIn` reads silence — a muted mic is
+    // provably off at the engine, not merely dimmed in the UI. Unmute re-enables.
+    setMicrophoneInput(nodeId: string, options: { isMuted: boolean; deviceId?: string }): void {
         if (!this.invoke) return;
         const node = this.index.get(nodeId);
         if (node === undefined) return;
-        this.invoke('set_mic', { node, enabled: true }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] set_mic failed:', err);
+        // deviceId selection on native is a future cpal-input-routing concern; the
+        // engine currently sources the system default input. We honour mute here —
+        // the stage-critical guarantee — and ignore deviceId until input routing lands.
+        this.invoke('set_mic', { node, enabled: !options.isMuted }).catch((err: unknown) => {
+            log.error('set_mic failed', { detail: String(err) });
         });
     }
 
@@ -433,14 +918,46 @@ export class OjcoreNativeExecutor implements Executor {
         }
     }
 
+    // --- Timeline preview (browser-tier today; native bounces via `oj render`) ---
+
+    /** Logged once so a developer sees WHY native Play is silent — by design, not a
+     *  defect: the native tier's bit-identical path is the offline bounce. */
+    private previewDeferralLogged = false;
+
+    /**
+     * Native live preview is deferred. The browser (wasm) tier plays the timeline
+     * live; the native tier's strength is the BIT-IDENTICAL offline bounce (`oj
+     * render` / `oj song`), and native live preview (push the conduct graph + schedule
+     * over the cpal-owned engine) is a follow-up the founder can verify on the box.
+     * Honest no-op, logged once — never a silent pretence of playing.
+     */
+    startArrangementPreview(
+        _graph: OjGraph,
+        _events: readonly ScheduledCommand[],
+        _startSec: number,
+    ): void {
+        if (!this.previewDeferralLogged) {
+            this.previewDeferralLogged = true;
+            log.info(
+                'Timeline live-preview is browser-tier today; the native tier renders a ' +
+                    'bit-identical bounce via `oj render`. Native live preview is a follow-up.',
+            );
+        }
+    }
+
+    /** No native preview runs, so there is nothing to stop. */
+    stopArrangementPreview(): void {}
+
     // --- Native command backings for the capability bridge -----------------
 
-    /** Lower mono PCM into the engine sampler for `nodeId` via `load_sample`. */
+    /** Lower interleaved PCM (`channels`-major) into the engine sampler for
+     *  `nodeId` via `load_sample`. `channels === 1` is plain mono. */
     private async loadSampleNative(
         nodeId: string,
         pcm: Float32Array,
         sampleRate: number,
         rootNote: number,
+        channels: number,
     ): Promise<void> {
         if (!this.invoke) return;
         const idx = this.index.get(nodeId);
@@ -448,15 +965,17 @@ export class OjcoreNativeExecutor implements Executor {
         try {
             // Transfer PCM as a plain number array (control-rate asset load, NOT
             // the audio thread — the engine resolves it into the AssetCatalog and
-            // calls the sampler's set_sample off-RT).
+            // calls the sampler's set_sample off-RT). Interleaved + channels so a
+            // stereo sample plays in true stereo.
             await this.invoke('load_sample', {
                 node: idx,
                 pcm: Array.from(pcm),
+                channels,
                 sampleRate,
                 rootNote,
             });
         } catch (err) {
-            console.error('[OjcoreNativeExecutor] load_sample failed:', err);
+            log.error('load_sample failed', { detail: String(err) });
         }
     }
 
@@ -466,7 +985,7 @@ export class OjcoreNativeExecutor implements Executor {
         const idx = this.index.get(nodeId);
         if (idx === undefined) return;
         this.invoke('recorder_start', { node: idx }).catch((err: unknown) => {
-            console.error('[OjcoreNativeExecutor] recorder_start failed:', err);
+            log.error('recorder_start failed', { detail: String(err) });
         });
     }
 
@@ -486,7 +1005,7 @@ export class OjcoreNativeExecutor implements Executor {
             if (!res || !res.pcm || res.pcm.length === 0) return null;
             return monoPcmToWavBlob(Float32Array.from(res.pcm), res.sampleRate);
         } catch (err) {
-            console.error('[OjcoreNativeExecutor] recorder_stop failed:', err);
+            log.error('recorder_stop failed', { detail: String(err) });
             return null;
         }
     }

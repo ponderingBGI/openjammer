@@ -11,6 +11,7 @@ import { useState } from 'react';
 import type { GraphNode } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
+import { Port } from '@openjammer/oj-ui';
 
 interface ContainerNodeProps {
     node: GraphNode;
@@ -113,12 +114,16 @@ export function ContainerNode({
                 {/* Input ports on left */}
                 {inputPorts.map(port => (
                     <div key={port.id} className="port-row input">
-                        <div
-                            className={`port-dot ${port.type} ${hasConnection?.(port.id) ? 'connected' : ''}`}
+                        <Port
+                            kind={port.type}
+                            direction="input"
+                            connected={!!hasConnection?.(port.id)}
+                            {...(port.type === 'universal' && port.resolvedType ? { resolvedKind: port.resolvedType } : {})}
                             data-node-id={node.id}
                             data-port-id={port.id}
-                            onMouseDown={(e) => { e.stopPropagation(); handlePortMouseDown?.(port.id, e); }}
-                            onMouseUp={(e) => { e.stopPropagation(); handlePortMouseUp?.(port.id, e); }}
+                            data-port-type={port.type}
+                            onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(port.id, e); }}
+                            onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(port.id, e); }}
                             onMouseEnter={() => handlePortMouseEnter?.(port.id)}
                             onMouseLeave={handlePortMouseLeave}
                         />
@@ -130,12 +135,16 @@ export function ContainerNode({
                 {outputPorts.map(port => (
                     <div key={port.id} className="port-row output">
                         <span className="port-label">{port.name}</span>
-                        <div
-                            className={`port-dot ${port.type} ${hasConnection?.(port.id) ? 'connected' : ''}`}
+                        <Port
+                            kind={port.type}
+                            direction="output"
+                            connected={!!hasConnection?.(port.id)}
+                            {...(port.type === 'universal' && port.resolvedType ? { resolvedKind: port.resolvedType } : {})}
                             data-node-id={node.id}
                             data-port-id={port.id}
-                            onMouseDown={(e) => { e.stopPropagation(); handlePortMouseDown?.(port.id, e); }}
-                            onMouseUp={(e) => { e.stopPropagation(); handlePortMouseUp?.(port.id, e); }}
+                            data-port-type={port.type}
+                            onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(port.id, e); }}
+                            onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(port.id, e); }}
                             onMouseEnter={() => handlePortMouseEnter?.(port.id)}
                             onMouseLeave={handlePortMouseLeave}
                         />

@@ -14,6 +14,7 @@ import { useGraphStore } from '../store/graphStore';
 import { useCanvasStore } from '../store/canvasStore';
 import { useCanvasNavigationStore } from '../store/canvasNavigationStore';
 import { nodeDefinitions, menuCategories } from '../engine/registry';
+import { toPortSummary, type PortSummary } from './types';
 
 /**
  * One addable node type, as surfaced by `list_node_types` (M3): the registry id,
@@ -26,6 +27,18 @@ export interface NodeTypeInfo {
     name: string;
     description: string;
     category: string;
+    /**
+     * The type's declared ports (its static `defaultPorts`), lean — so the agent
+     * can wire a planned node by a real port NAME. Empty when the type GENERATES
+     * its ports at runtime (see {@link dynamicPorts}).
+     */
+    ports: PortSummary[];
+    /**
+     * True when this type's ports only appear once the node is ADDED (container /
+     * internal-io nodes have empty `defaultPorts`): the agent should add it, then
+     * call get_graph / find_nodes to read the node's real ports.
+     */
+    dynamicPorts: boolean;
 }
 
 /**
@@ -172,6 +185,8 @@ function listAddableNodeTypes(): NodeTypeInfo[] {
                 name: def.name,
                 description: def.description,
                 category: category.name,
+                ports: def.defaultPorts.map(toPortSummary),
+                dynamicPorts: def.defaultPorts.length === 0,
             });
         }
     }

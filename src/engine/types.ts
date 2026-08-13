@@ -28,6 +28,16 @@ export interface PortDefinition {
     // Hide label on parent node's external port (label still shows inside panel)
     // Default: false (labels are shown on parent)
     hideExternalLabel?: boolean;
+
+    // GATED port: the surface is declared (so it can light up the moment its
+    // routing lands) but is NOT wired to the engine yet, so connections to it are
+    // REJECTED (canConnect) and the UI renders it visibly inert instead of
+    // shipping a silently-dead port. `disabledReason` is the affordance copy shown
+    // to the player. No built-in currently ships one — the affordance is kept for
+    // future nodes whose routing is staged behind the kernel.
+    // Default: false (the port is live).
+    disabled?: boolean;
+    disabledReason?: string;
 }
 
 // Port layout configuration for dynamic port positioning
@@ -132,6 +142,16 @@ export type NodeCategory =
     | 'output'
     | 'utility';
 
+/**
+ * How a node's control surface is presented (frozen v1, mirrors the manifest
+ * `ui` facet). It is declared HERE — on the {@link NodeDefinition} — as the
+ * SINGLE source of truth for whether a node owns a bespoke React component
+ * (`'react'`, rendered by NodeWrapper's switch) or falls back to the FREE
+ * AutoParamPanel (`'auto'`). The manifest's `ui` is DERIVED from this field, so
+ * there is no second hand-maintained list to drift (was the old `REACT_UI` set).
+ */
+export type UiKind = 'auto' | 'react';
+
 export type NodeType =
     | 'keyboard'
     | 'keyboard-key'    // Individual keyboard key (signal generator)
@@ -153,7 +173,9 @@ export type NodeType =
     | 'instrument' // Generic instrument node (uses instrumentId in data)
     | 'looper'
     | 'effect'
-    | 'amplifier'
+    | 'pan'             // Stereo panner (mono -> L/R; the first stereo built-in)
+    | 'width'           // Stereo width / mid-side (the first stereo-IN built-in)
+    | 'multiplier'
     | 'speaker'
     | 'recorder'
     | 'canvas-input'   // Input node (receives from parent level)
@@ -165,7 +187,8 @@ export type NodeType =
     | 'subtract'       // Subtraction node (phase cancellation)
     | 'library'        // Sample library node for local audio files
     | 'sampler'        // Pitch-shifting sampler instrument (outside view)
-    | 'sampler-visual'; // Visual sampler with detailed controls (inside view)
+    | 'sampler-visual' // Visual sampler with detailed controls (inside view)
+    | 'song';          // Timeline arrangement node — its interior IS the on-canvas DAW timeline
 
 // ============================================================================
 // Plugin Identifiers (additive — see U10)
@@ -209,7 +232,9 @@ export const KNOWN_PLUGIN_IDS = [
     'instrument',
     'looper',
     'effect',
-    'amplifier',
+    'pan',
+    'width',
+    'multiplier',
     'speaker',
     'recorder',
     'canvas-input',
@@ -221,7 +246,8 @@ export const KNOWN_PLUGIN_IDS = [
     'subtract',
     'library',
     'sampler',
-    'sampler-visual'
+    'sampler-visual',
+    'song'
 ] as const satisfies readonly NodeType[];
 
 /**
@@ -241,6 +267,15 @@ export interface Position {
 export interface NodeData {
     // Common fields
     [key: string]: unknown;
+
+    /**
+     * Engine-derived runtime flag (NOT a user edit, never in undo history): the
+     * node degraded to a labeled passthrough stub — a hosted plugin that is
+     * missing / `abi`-incompatible on load (invariant #4a) or that FAULTED at
+     * runtime (the crash latch). The UI shows a non-modal "(missing plugin)" badge;
+     * it clears automatically when the plugin resolves again (a rescan/auto-rebind).
+     */
+    pluginLoadError?: boolean;
 }
 
 /**
@@ -287,6 +322,10 @@ export interface InstrumentNodeData extends NodeData {
     noteOffsets?: { [portId: string]: number }; // Per-input note adjustment (0-6 for C-B)
     activeInputs?: string[]; // List of active input port IDs
     isLoading?: boolean; // For UI loading indicator
+    // PERSIST-1 / ERR-1: set true by the executor when this node's built-in default
+    // voice failed to load (a bad PCM build). Non-focus-stealing: drives a small "!"
+    // badge on the node, never a modal/toast. Written outside any undo gesture.
+    voiceLoadError?: boolean;
 }
 
 export interface KeyConfig {
@@ -315,6 +354,9 @@ export interface LooperNodeData extends NodeData {
     isRecording: boolean;
     loops: LoopData[];
     currentTime: number;
+    /** Loop-level wet gain (0..1): balances the summed loop layers against the
+     *  live/dry signal — drives SetParam(WET) on the looper. Default 1. */
+    loopVolume?: number;
 }
 
 export interface LoopData {
@@ -326,16 +368,27 @@ export interface LoopData {
     effects: string[]; // Effect node IDs applied to this loop
 }
 
-/** Audio effect kinds an EffectNode can apply. */
-export type EffectType = 'distortion' | 'pitch' | 'reverb' | 'delay';
+/**
+ * Audio effect kinds an EffectNode can apply. Each lowers to a REAL ojcore DSP
+ * primitive (see {@link EFFECT_KIND_BY_TYPE} in the emitter): distortion ->
+ * Waveshaper, filter -> Biquad, reverb -> Convolution, delay -> Delay. The old
+ * `pitch` option was removed — no pitch-shift primitive exists, so it was a dead
+ * menu entry that silently no-op'd (honesty over a fictional control).
+ */
+export type EffectType = 'distortion' | 'filter' | 'reverb' | 'delay';
 
 export interface EffectNodeData extends NodeData {
     effectType: EffectType;
     params: Record<string, number>;
 }
 
-export interface AmplifierNodeData extends NodeData {
-    gain: number; // Multiplier: 2 = double, -2 = half
+export interface MultiplierNodeData extends NodeData {
+    /** The on-node multiplier, used when the second input ('in-2') is unconnected.
+     *  Floors at 0 (×0 mutes); no ceiling. When 'in-2' is wired, that signal is the
+     *  multiplier instead and this value is overridden. */
+    factor: number;
+    /** Resolved wire type for the universal ports once connected (audio/control). */
+    resolvedType?: 'audio' | 'control' | null;
 }
 
 export interface SpeakerNodeData extends NodeData {
@@ -402,6 +455,12 @@ export interface SamplerNodeData extends NodeData {
     // Visual data for waveform display
     waveformData?: number[];       // 50-point waveform peaks
     duration?: number;             // Sample duration in seconds
+
+    // True when the persisted sampleId could not be re-resolved to PCM on the
+    // last mount (file moved/deleted, permission revoked). Drives the ERR-1
+    // non-modal "failed to load" slot so a broken sample is visually distinct
+    // from an empty one. Cleared on any successful (re)load or clear.
+    sampleLoadError?: boolean;
 
     // Core audio parameters
     rootNote: number;              // MIDI note (default: 60 = C4)
@@ -522,6 +581,14 @@ export interface SerializedWorkflow {
     createdAt: string;
     nodes: SerializedNode[];
     connections: SerializedConnection[];
+    /**
+     * OPAQUE pass-through for a song's timeline (the song-layer `Arrangement`). The
+     * engine never interprets it — the song layer reads it via `readArrangement` — so
+     * a saved project keeps the user's WHOLE timeline (FROZEN-1) without the engine
+     * depending on the song layer. Mirrors the "opaque blob passed through untouched"
+     * rule of STABILITY.md §FROZEN-1.
+     */
+    arrangement?: unknown;
 }
 
 export interface SerializedNode {
@@ -569,6 +636,16 @@ export interface NodeDefinition {
     category: NodeCategory;
     name: string;
     description: string;
+
+    /**
+     * SINGLE SOURCE OF TRUTH for the node's control surface (see {@link UiKind}).
+     * `'react'` IFF NodeWrapper renders this type with a bespoke component (its
+     * schematic switch OR the renderNodeContent switch); `'auto'` otherwise (the
+     * FREE AutoParamPanel). The manifest's `ui` is derived from this — keep it in
+     * lockstep with NodeWrapper (the node-registry gate enforces the equivalence).
+     */
+    ui: UiKind;
+
     defaultPorts: PortDefinition[];
     defaultData: NodeData;
 
@@ -581,6 +658,17 @@ export interface NodeDefinition {
     // Whether this node can be entered with E key (default: true)
     // If false, pressing E will flash red instead of entering
     canEnter?: boolean;
+
+    /**
+     * What the node's INTERIOR is when entered (default: `'graph'`).
+     *   • `'graph'`    — the existing nested sub-canvas of child nodes (container,
+     *                    instrument, sampler…). Entering requires `childIds.length>0`.
+     *   • `'timeline'` — a hand-drawn DAW timeline (the `song` node). It has NO graph
+     *                    children, so the canvas enter-gate lets it in on this flag
+     *                    alone and renders `<SongInterior>` instead of the node layer.
+     * One discriminator, two interiors — depth, never a separate mode (BOUNDARY §9).
+     */
+    interior?: 'graph' | 'timeline';
 }
 
 // ============================================================================

@@ -10,9 +10,9 @@
  * the worst a user clicking around the canvas can do, and every step is undoable.
  *
  * Each {@link applyToolCall} returns an {@link AppliedToolResult} carrying an
- * `undo()` closure, so the session can REVERT the whole batch on Reject without
- * relying on the global history stack. (Graph history is also pushed by the
- * verbs themselves; the explicit undo keeps Reject deterministic and local.)
+ * `undo()` closure. Batch/plan tools use those closures internally for
+ * all-or-nothing rollback, while normal live edits also enter the graph history
+ * so the player can revert with plain Ctrl+Z.
  *
  * The DSP-authoring tool (`author_dsp_node`) is the one tool that does NOT add a
  * node directly: it registers a command-palette entry for the authored DSP node
@@ -25,6 +25,7 @@
 import type { GraphStoreApi } from './graphAdapter';
 import type { Connection, GraphNode } from '../engine/types';
 import type { Severity, Source } from '@openjammer/oj-protocol';
+import type { Verb } from '../song/verbs';
 import type {
     AddConnectionArgs,
     AddNodeArgs,
@@ -32,9 +33,14 @@ import type {
     AuthorCodeNodeArgs,
     AuthorDspNodeArgs,
     BatchApplyArgs,
+    EditTimelineArgs,
     EmitPlanArgs,
     FindNodesArgs,
+    GetDiagnosticsArgs,
     GetLogsArgs,
+    GetSignalArgs,
+    PortSummary,
+    SignalProbeResult,
     RemoveConnectionArgs,
     RemoveNodeArgs,
     SettingsPatch,
@@ -42,6 +48,7 @@ import type {
     UpdateSettingsArgs,
     ValidatePlanArgs,
 } from './types';
+import { toPortSummary } from './types';
 import { planToToolCalls, type PlanPortResolver, type RefToId } from './plan';
 import { validatePlan, type PlanError, type PlanLookups } from './planValidator';
 
@@ -65,7 +72,7 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
         name: 'add_node',
         description:
             'Add a node of the given registry `type` to the canvas (e.g. "looper", ' +
-            '"amplifier", "sampler", "speaker"). Mirrors the UI add-node action.',
+            '"multiplier", "sampler", "speaker"). Mirrors the UI add-node action.',
     },
     {
         name: 'remove_node',
@@ -86,13 +93,6 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
     {
         name: 'remove_connection',
         description: 'Remove the connection with the given `connectionId`.',
-    },
-    {
-        name: 'author_dsp_node',
-        description:
-            'Author a brand-new DSP effect from Faust source. Registers a ' +
-            'command-palette entry; on the desktop build with libfaust present the ' +
-            'source is compiled via the ojfaust crate. Reversible by deleting the node.',
     },
     {
         name: 'author_code_node',
@@ -163,7 +163,19 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'Read the environment + live audio snapshot: app version/channel/executor, ' +
             'cross-origin isolation, platform, whether the AudioContext is running, the ' +
             'measured round-trip latency, sample rate, and the selected output device. ' +
-            'Side-effect-free. Call it first when the user says something is broken.',
+            'Pass a `nodeId` to instead get a NODE-scoped debug snapshot (identity, ports, ' +
+            'data keys, a degraded flag, and the logs that mention the node) — the ' +
+            '"why is this node silent?" facet. Side-effect-free. Call it first when the ' +
+            'user says something is broken.',
+    },
+    {
+        name: 'get_signal',
+        description:
+            "Probe a node's LIVE output level by `nodeId`: returns an instantaneous " +
+            'peak (0–1) or null when nothing is metered / audio is stopped. ' +
+            'Side-effect-free. This is the one live read that catches a node which ' +
+            'compiles and wires correctly yet outputs pure silence — if it reads ~0, ' +
+            'probe again (a note may be between transients).',
     },
     {
         name: 'get_settings',
@@ -178,8 +190,27 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'Change settings via a `patch` over the safe allowlist (sampleRate, ' +
             'latencyHint, lowLatencyMode, outputDeviceId, inputDeviceId, themeId, ' +
             'defaultVelocity). Unknown keys are ignored; the change is REVERSIBLE ' +
-            '(Ctrl+Z / Reject restores the previous values). Use it to FIX a setup — ' +
+            '(Ctrl+Z restores the previous values). Use it to FIX a setup — ' +
             'e.g. select the USB interface or switch to the interactive latency hint.',
+    },
+    {
+        name: 'describe_arrangement',
+        description:
+            'Read the current SONG TIMELINE as a readable summary — tracks (by stable ' +
+            'id), clips, notes (count + pitch range), sections, tempo, and automation, ' +
+            'all at bar.beat. Side-effect-free. GROUND yourself with this before editing ' +
+            'the timeline (the "read the song first" twin of get_graph for the node graph).',
+    },
+    {
+        name: 'edit_timeline',
+        description:
+            'Author the SONG TIMELINE with an ordered list of reversible `verbs` — the ' +
+            'SAME vocabulary a human GUI drag emits — applied live and undoable with ' +
+            'Ctrl+Z. Verb kinds: setTempo; setTrackMute/setTrackName; addTrack/removeTrack; ' +
+            'addClip/removeClip/moveClip; addNote/removeNote/editNote; addSection/' +
+            'removeSection; addAutomationLane/removeAutomationLane; setAutomationPoint/' +
+            'removeAutomationPoint. Ids for ADDED entities are minted for you (omit them). ' +
+            'Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
     },
 ];
 
@@ -233,12 +264,19 @@ export interface PerSubCall {
     summary: string;
 }
 
-/** Compact node summary used by the read tools (id/type/data keys). */
+/** Compact node summary used by the read tools (id/type/data keys/ports). */
 export interface NodeSummary {
     id: string;
     type: string;
     /** The KEYS of the node's `data` (not values — keeps the relay small). */
     dataKeys: string[];
+    /**
+     * The node's CURRENT (instance) ports, lean — so the agent wires by a real
+     * port NAME instead of guessing one the validator will reject. Instance ports
+     * (not the type's static defaults), so authored/container nodes show the ports
+     * they actually have.
+     */
+    ports: PortSummary[];
 }
 
 /** Compact connection summary (id + endpoints) used by the read tools. */
@@ -352,6 +390,40 @@ export interface DiagnosticsReadResult {
     usbAudioInterface: boolean;
 }
 
+/**
+ * The `get_diagnostics({ nodeId })` NODE facet: a node-shaped debug snapshot, so
+ * "why is THIS node silent?" is answered from evidence. Only the data KEYS are
+ * included (never values), and they reflect what was last PUSHED to the engine,
+ * not a live read — the running CompiledProgram lives on the audio thread, off-RT.
+ */
+export interface NodeDiagnosticsResult {
+    /** The node id that was asked about. */
+    nodeId: string;
+    /** Whether the node exists on the canvas. */
+    found: boolean;
+    /** The node's registry type, or its open plugin id for an authored node. */
+    type?: string;
+    /** The node's human name from the registry / dynamic def. */
+    name?: string;
+    /**
+     * The open plugin identity for an authored/custom node (e.g. "ai.wasm.<hash>");
+     * the hash content-addresses its source. Undefined for a built-in.
+     */
+    pluginId?: string;
+    /** The KEYS of the node's data (its params as LAST PUSHED — not a live read). */
+    dataKeys?: string[];
+    /** The node's current ports (lean), so a silent node's wiring is inspectable. */
+    ports?: PortSummary[];
+    /**
+     * True when the logs show this node degraded to a passthrough stub (best-effort:
+     * matched from the engine's degraded message; a numeric-only NodeFault won't
+     * correlate until the fault id-map lands).
+     */
+    degraded: boolean;
+    /** Recent log entries that MENTION this node (newest first) — the evidence. */
+    recentLogs: LogEntrySummary[];
+}
+
 /** The `get_settings` / `update_settings` relay: the safe-allowlist settings. */
 export interface SettingsReadResult {
     /** AudioContext sample rate in Hz. */
@@ -393,10 +465,35 @@ export interface AgentEnvPort {
     getLogs(args: GetLogsArgs): LogsReadResult;
     /** Read the environment + live audio diagnostics snapshot. */
     getDiagnostics(): DiagnosticsReadResult;
+    /** Read a NODE-scoped debug snapshot (identity, ports, data keys, a degraded
+     *  flag, and the recent logs that mention the node) for `get_diagnostics({nodeId})`. */
+    getNodeDiagnostics(nodeId: string): NodeDiagnosticsResult;
+    /** Probe a node's LIVE output peak (async: a transient meter read needs a poll
+     *  tick to settle). Returns `peak: null` when no live reading is available. */
+    getSignal(args: GetSignalArgs): Promise<SignalProbeResult>;
     /** Read the current safe-allowlist settings. */
     getSettings(): SettingsReadResult;
     /** Apply a settings patch (allowlisted, reversible). */
     updateSettings(patch: SettingsPatch): SettingsUpdateResult;
+}
+
+/**
+ * The TIMELINE port, injected into {@link applyToolCall} so the song-authoring tools
+ * (`describe_arrangement`, `edit_timeline`) stay PURE and unit-testable with a fake.
+ * {@link createArrangementPort} (in `./arrangementAdapter`) binds it to the live
+ * arrangement store; tests pass an in-memory fake. OPTIONAL everywhere: when a caller
+ * omits it the two timeline tools degrade to a clear "no timeline in this context"
+ * result rather than throwing, so every existing caller keeps working unchanged.
+ */
+export interface ArrangementToolPort {
+    /** A readable summary of the current song (describeArrangement), or null when none. */
+    describe(): { text: string } | null;
+    /**
+     * Apply an ordered list of reversible timeline verbs, minting ids for ADDED
+     * entities, through the shared command-log. Returns whether it applied, a
+     * one-line summary, and a reversible `undo` (a single Ctrl+Z's worth).
+     */
+    apply(verbs: Verb[]): { ok: boolean; summary: string; undo: () => void };
 }
 
 /**
@@ -406,7 +503,9 @@ export interface AgentEnvPort {
  * `store` and `registrar` are injected (not imported) so this stays pure and
  * unit-testable with a fake store — no Zustand, no React, no DOM required.
  * `planEnv` (D3, M7) supplies the registry lookups the plan tools need; it is
- * OPTIONAL so the verb-only callers from M0–M6 are unchanged.
+ * OPTIONAL so the verb-only callers from M0–M6 are unchanged. `arrangement` (the
+ * timeline port) is likewise OPTIONAL — the two song-timeline tools degrade cleanly
+ * without it.
  */
 export function applyToolCall(
     call: AgentToolCall,
@@ -414,6 +513,7 @@ export function applyToolCall(
     registrar: DspNodeRegistrar,
     planEnv?: PlanEnv,
     env?: AgentEnvPort,
+    arrangement?: ArrangementToolPort,
 ): AppliedToolResult {
     switch (call.name) {
         case 'add_node':
@@ -439,21 +539,44 @@ export function applyToolCall(
             return applyFindNodes(call.args, store);
         // BATCH (M3): one reversible frame, all-or-nothing.
         case 'batch_apply':
-            return applyBatch(call.args, store, registrar, planEnv, env);
+            return applyBatch(call.args, store, registrar, planEnv, env, arrangement);
         // PLAN (M7): pure validation + the one-frame plan apply.
         case 'validate_plan':
             return applyValidatePlan(call.args, planEnv);
         case 'emit_plan':
-            return applyEmitPlan(call.args, store, registrar, planEnv, env);
+            return applyEmitPlan(call.args, store, registrar, planEnv, env, arrangement);
+        // TIMELINE: read the song summary; author it with reversible verbs.
+        case 'describe_arrangement':
+            return applyDescribeArrangement(arrangement);
+        case 'edit_timeline':
+            return applyEditTimeline(call.args, arrangement);
         // DIAGNOSTICS & SETTINGS: read logs/env/settings; write allowlisted settings.
         case 'get_logs':
             return applyGetLogs(call.args, env);
         case 'get_diagnostics':
-            return applyGetDiagnostics(env);
+            return applyGetDiagnostics(call.args, env);
+        case 'get_signal':
+            // get_signal is ASYNC (a transient meter probe) and is answered live by
+            // the host bridge via {@link applyGetSignal}; the synchronous streamed
+            // path has no value to add, so it is a benign, SILENT no-op here.
+            return {
+                ok: true,
+                summary: 'get_signal is answered live via the host bridge.',
+                undo: NO_OP,
+                data: null,
+            };
         case 'get_settings':
             return applyGetSettings(env);
         case 'update_settings':
             return applyUpdateSettings(call.args, env);
+        default: {
+            const name = (call as { name?: unknown }).name;
+            return {
+                ok: false,
+                summary: `Ignored unsupported AI tool "${typeof name === 'string' ? name : 'unknown'}".`,
+                undo: NO_OP,
+            };
+        }
     }
 }
 
@@ -575,7 +698,7 @@ function applyAuthorDspNode(
  * supports it (native authors Faust→`.wasm` + a validated manifest and registers
  * an `ai.wasm.<hash>` dynamic plugin with the REAL params). A registrar predating
  * M6 (only {@link DspNodeRegistrar.registerDspNode}) is adapted by mapping the
- * code-node args onto the legacy stored-source path — so `author_code_node` is
+ * code-node args onto the stored-source path — so `author_code_node` is
  * back-compatible with `author_dsp_node` and never silently drops a node.
  */
 function applyAuthorCodeNode(
@@ -608,6 +731,7 @@ function summarizeNode(node: GraphNode): NodeSummary {
         id: node.id,
         type: node.type,
         dataKeys: Object.keys((node.data ?? {}) as Record<string, unknown>),
+        ports: (node.ports ?? []).map(toPortSummary),
     };
 }
 
@@ -689,6 +813,7 @@ function applyBatch(
     registrar: DspNodeRegistrar,
     planEnv?: PlanEnv,
     env?: AgentEnvPort,
+    arrangement?: ArrangementToolPort,
 ): AppliedToolResult {
     const subUndos: Array<() => void> = [];
     const status: PerSubCall[] = [];
@@ -710,7 +835,7 @@ function applyBatch(
             break;
         }
 
-        const res = applyToolCall(sub, store, registrar, planEnv, env);
+        const res = applyToolCall(sub, store, registrar, planEnv, env, arrangement);
         status.push({ index: i, name: sub.name, ok: res.ok, summary: res.summary });
         if (res.ok) {
             subUndos.push(res.undo);
@@ -805,6 +930,7 @@ function applyEmitPlan(
     registrar: DspNodeRegistrar,
     planEnv?: PlanEnv,
     env?: AgentEnvPort,
+    arrangement?: ArrangementToolPort,
 ): AppliedToolResult {
     if (!planEnv) {
         return {
@@ -825,7 +951,7 @@ function applyEmitPlan(
     let index = 0;
 
     const runSub = (call: AgentToolCall, name: AgentToolCall['name']): AppliedToolResult => {
-        const res = applyToolCall(call, store, registrar, planEnv, env);
+        const res = applyToolCall(call, store, registrar, planEnv, env, arrangement);
         status.push({ index: index++, name, ok: res.ok, summary: res.summary });
         if (res.ok) subUndos.push(res.undo);
         else failed = true;
@@ -917,10 +1043,22 @@ function applyGetLogs(args: GetLogsArgs, env?: AgentEnvPort): AppliedToolResult 
     };
 }
 
-/** `get_diagnostics`: relay the environment + live audio snapshot. SIDE-EFFECT-FREE. */
-function applyGetDiagnostics(env?: AgentEnvPort): AppliedToolResult {
+/**
+ * `get_diagnostics`: relay the environment + live audio snapshot, OR — when a
+ * `nodeId` is given — a NODE-scoped debug snapshot (identity + ports + data keys +
+ * degraded flag + the logs that mention the node). SIDE-EFFECT-FREE.
+ */
+function applyGetDiagnostics(args: GetDiagnosticsArgs, env?: AgentEnvPort): AppliedToolResult {
     if (!env) {
         return { ok: true, summary: `get_diagnostics: ${ENV_MISSING}.`, undo: NO_OP, data: null };
+    }
+    // Node facet: "why is THIS node silent?" — identity, wiring, and the evidence.
+    if (args?.nodeId) {
+        const n = env.getNodeDiagnostics(args.nodeId);
+        const summary = n.found
+            ? `Diagnosed ${n.type ?? 'node'} (${n.nodeId})${n.degraded ? ' — DEGRADED to a passthrough stub' : ''}: ${n.recentLogs.length} recent log line(s) mention it.`
+            : `No node ${args.nodeId} is on the canvas.`;
+        return { ok: true, summary, undo: NO_OP, data: n };
     }
     const d = env.getDiagnostics();
     const audio = d.audioReady
@@ -932,6 +1070,31 @@ function applyGetDiagnostics(env?: AgentEnvPort): AppliedToolResult {
         undo: NO_OP,
         data: d,
     };
+}
+
+/**
+ * `get_signal`: probe a node's LIVE output peak. SIDE-EFFECT-FREE. The one ASYNC
+ * tool — a transient meter probe needs a poll tick to settle — so it is handled
+ * OUTSIDE the synchronous {@link applyToolCall} switch (the bridge awaits it), the
+ * established shape for an async tool (cf. `codeNodeAuthor`). Without an env port
+ * it returns a clearly-labelled null rather than throwing, mirroring the other
+ * diagnostics reads.
+ */
+export async function applyGetSignal(
+    args: GetSignalArgs,
+    env?: AgentEnvPort,
+): Promise<AppliedToolResult> {
+    if (!env) {
+        return { ok: true, summary: `get_signal: ${ENV_MISSING}.`, undo: NO_OP, data: null };
+    }
+    const r = await env.getSignal(args);
+    const summary =
+        r.peak === null
+            ? `No live signal at ${args.nodeId} — it isn't metered, or audio isn't running.`
+            : r.hasSignal
+              ? `${args.nodeId} peak ${r.peak.toFixed(3)} — it is producing sound.`
+              : `${args.nodeId} reads ~0 (silent) right now — probe again if a note may be between transients.`;
+    return { ok: true, summary, undo: NO_OP, data: r };
 }
 
 /** `get_settings`: relay the current safe-allowlist settings. SIDE-EFFECT-FREE. */
@@ -953,8 +1116,8 @@ function applyGetSettings(env?: AgentEnvPort): AppliedToolResult {
  *
  * The port validates the patch against the safe allowlist and returns the
  * applied keys + the post-patch settings + an `undo` that restores the previous
- * values — so this tool is exactly as reversible as a graph edit (Ctrl+Z /
- * Reject). A patch that changes nothing is a successful no-op.
+ * values — so this tool is exactly as reversible as a graph edit (Ctrl+Z).
+ * A patch that changes nothing is a successful no-op.
  */
 function applyUpdateSettings(args: UpdateSettingsArgs, env?: AgentEnvPort): AppliedToolResult {
     if (!env) {
@@ -976,6 +1139,51 @@ function applyUpdateSettings(args: UpdateSettingsArgs, env?: AgentEnvPort): Appl
         undo: once(undo),
         data: { applied, settings },
     };
+}
+
+// ============================================================================
+// Timeline tools — read the song summary; author it with reversible verbs
+// ============================================================================
+
+/** The shared "this caller didn't wire the timeline port" message. */
+const ARRANGEMENT_MISSING = 'the timeline is not available in this context (no song port wired)';
+
+/**
+ * `describe_arrangement`: relay a readable summary of the current song timeline.
+ * SIDE-EFFECT-FREE. Without an {@link ArrangementToolPort} it returns a clearly
+ * labelled empty result rather than throwing, mirroring the diagnostics reads.
+ */
+function applyDescribeArrangement(arrangement?: ArrangementToolPort): AppliedToolResult {
+    if (!arrangement) {
+        return { ok: true, summary: `describe_arrangement: ${ARRANGEMENT_MISSING}.`, undo: NO_OP, data: null };
+    }
+    const summary = arrangement.describe();
+    if (!summary) {
+        return {
+            ok: true,
+            summary: 'No song is open on the timeline yet.',
+            undo: NO_OP,
+            data: { text: 'No song is open on the timeline yet.' },
+        };
+    }
+    return { ok: true, summary: 'Read the song timeline.', undo: NO_OP, data: summary };
+}
+
+/**
+ * `edit_timeline`: apply an ordered list of reversible timeline verbs (the SAME
+ * vocabulary the GUI emits), minting ids for added entities, as ONE undoable step.
+ * Without a port it fails closed with a clear message (never silently drops an edit).
+ */
+function applyEditTimeline(args: EditTimelineArgs, arrangement?: ArrangementToolPort): AppliedToolResult {
+    if (!arrangement) {
+        return { ok: false, summary: `edit_timeline failed: ${ARRANGEMENT_MISSING}.`, undo: NO_OP };
+    }
+    const verbs = args.verbs ?? [];
+    if (verbs.length === 0) {
+        return { ok: true, summary: 'edit_timeline: no verbs to apply (no-op).', undo: NO_OP };
+    }
+    const res = arrangement.apply(verbs);
+    return { ok: res.ok, summary: res.summary, undo: once(res.undo) };
 }
 
 /** Wrap a side-effecting closure so it runs at most once (idempotent undo). */

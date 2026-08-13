@@ -140,6 +140,26 @@ impl Recorder {
         self.pcm.is_empty()
     }
 
+    /// Discard any buffered capture: drain and drop everything still in the ring,
+    /// then clear the accumulated PCM. Called when ARMING a fresh recording so a
+    /// new capture never inherits a previous session's tail. Off-RT.
+    pub fn reset(&mut self) {
+        while self.rx.pop().is_ok() {}
+        self.pcm.clear();
+    }
+
+    /// Drain the ring and MOVE OUT the captured PCM, leaving the recorder empty
+    /// and ready to capture again (the RT-side [`RecorderSink`] keeps working).
+    /// Ends a recording WITHOUT consuming the recorder. Off-RT.
+    pub fn take(&mut self) -> Pcm {
+        self.drain();
+        Pcm {
+            samples: std::mem::take(&mut self.pcm),
+            channels: self.channels,
+            sample_rate: self.sample_rate,
+        }
+    }
+
     /// Drain any remaining samples and snapshot the capture as a [`Pcm`] WITHOUT
     /// consuming the recorder (so capture can continue afterwards). Use
     /// [`Recorder::finish`] to take ownership and end the recording.

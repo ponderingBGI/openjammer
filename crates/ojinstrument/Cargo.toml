@@ -27,3 +27,19 @@ libm = { workspace = true }                              # no_std exp/pow for th
 # SF2 backend (versions pinned from a fresh `cargo add` resolve). Pure-Rust
 # SoundFont synth; needs std, so it sits behind the `sf2` feature.
 rustysynth = { version = "1.3.6", optional = true }
+
+[dev-dependencies]
+# CodSpeed-compatible criterion: plain criterion locally (`cargo bench`),
+# instruction-count + allocation instrumented in the CodSpeed CI action. Covers
+# the polyphonic voice render path and a realistic full patch (Track A P1).
+codspeed-criterion-compat = "5.0.1"
+
+[[bench]]
+name = "instruments"
+harness = false
+
+# End-to-end MIDI->audio latency at the production buffer (the latency-budget
+# gate). Auto-picked up by the CodSpeed build (`-p ojinstrument`).
+[[bench]]
+name = "latency"
+harness = false

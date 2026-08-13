@@ -45,17 +45,20 @@ fn primitive_kind_is_bare_variant_string() {
         (PrimitiveKind::Waveshaper, "\"Waveshaper\""),
         (PrimitiveKind::Delay, "\"Delay\""),
         (PrimitiveKind::Convolution, "\"Convolution\""),
+        (PrimitiveKind::Pan, "\"Pan\""),
+        (PrimitiveKind::Width, "\"Width\""),
         (PrimitiveKind::FaustHost, "\"FaustHost\""),
         (PrimitiveKind::WasmHost, "\"WasmHost\""),
         (PrimitiveKind::PluginHost, "\"PluginHost\""),
         (PrimitiveKind::Add, "\"Add\""),
+        (PrimitiveKind::Subtract, "\"Subtract\""),
+        (PrimitiveKind::Multiply, "\"Multiply\""),
         (PrimitiveKind::MicIn, "\"MicIn\""),
         (PrimitiveKind::SpeakerOut, "\"SpeakerOut\""),
         (PrimitiveKind::GraphIn, "\"GraphIn\""),
         (PrimitiveKind::GraphOut, "\"GraphOut\""),
         (PrimitiveKind::Passthrough, "\"Passthrough\""),
         (PrimitiveKind::Looper, "\"Looper\""),
-        (PrimitiveKind::Recorder, "\"Recorder\""),
     ];
     for (kind, expected) in all {
         assert_json(&kind, expected);
@@ -180,15 +183,44 @@ fn rt_command_external_tagging() {
         &RtCommand::Seek { samples: 9000 },
         r#"{"Seek":{"samples":9000}}"#,
     );
-    // Looper carries a node + a u8 action (one of `looper_action::*`); `action`
-    // serializes as a bare number, mirrored on the TS side as `number`.
+    // Looper carries a node + a u8 action (one of `looper_action::*`) + a u32
+    // `arg` (layer index / packed flags for the indexed actions, ignored by the
+    // transport actions). `action`/`arg` serialize as bare numbers, mirrored on
+    // the TS side as `number`.
     assert_json(
         &RtCommand::Looper {
             node: NodeIdx(3),
             action: looper_action::OVERDUB,
+            arg: 0,
         },
-        r#"{"Looper":{"node":3,"action":5}}"#,
+        r#"{"Looper":{"node":3,"action":5,"arg":0}}"#,
     );
+    // Indexed action: SET_MUTE of layer 2 with the mute flag set in `arg`'s high
+    // bit — pins both the action code (7) and the MUTE_FLAG packing.
+    assert_json(
+        &RtCommand::Looper {
+            node: NodeIdx(3),
+            action: looper_action::SET_MUTE,
+            arg: 2 | looper_action::MUTE_FLAG,
+        },
+        r#"{"Looper":{"node":3,"action":7,"arg":2147483650}}"#,
+    );
+}
+
+/// Pin the numeric looper-action codes so the TS mirror's `LooperAction` union
+/// can never silently drift from the Rust consts.
+#[test]
+fn looper_action_codes() {
+    assert_eq!(looper_action::ARM, 0);
+    assert_eq!(looper_action::RECORD, 1);
+    assert_eq!(looper_action::PLAY, 2);
+    assert_eq!(looper_action::STOP, 3);
+    assert_eq!(looper_action::CLEAR, 4);
+    assert_eq!(looper_action::OVERDUB, 5);
+    assert_eq!(looper_action::UNDO_LAST, 6);
+    assert_eq!(looper_action::SET_MUTE, 7);
+    assert_eq!(looper_action::DELETE_LAYER, 8);
+    assert_eq!(looper_action::MUTE_FLAG, 0x8000_0000);
 }
 
 #[test]
@@ -225,6 +257,19 @@ fn engine_frame_external_tagging() {
         },
         r#"{"Beat":{"bar":2,"beat":3,"phase":0.5}}"#,
     );
+    // Looper telemetry frame: node + state(u8) + pos(u32) + loop_len(u32) + peak(f32).
+    // `state` is a bare number (one of `looper_state::*`); mirrored on the TS
+    // side by the `LooperState` numeric union.
+    assert_json(
+        &EngineFrame::Looper {
+            node: NodeIdx(3),
+            state: looper_state::PLAYING,
+            pos: 1024,
+            loop_len: 48_000,
+            peak: 0.5,
+        },
+        r#"{"Looper":{"node":3,"state":3,"pos":1024,"loop_len":48000,"peak":0.5}}"#,
+    );
     assert_json(
         &EngineFrame::Error {
             code: 42,
@@ -239,6 +284,7 @@ fn event_taxonomy_shapes_match_ts_mirror() {
     assert_json(&Severity::Warn, "\"Warn\"");
     assert_json(&Source::Engine, "\"Engine\"");
     assert_json(&FaultKind::OverBudget, "\"OverBudget\"");
+    assert_json(&FaultKind::Crashed, "\"Crashed\"");
 
     assert_json(&EventKind::Xrun { dropped: 2 }, r#"{"Xrun":{"dropped":2}}"#);
     assert_json(
@@ -247,6 +293,14 @@ fn event_taxonomy_shapes_match_ts_mirror() {
             fault: FaultKind::NonFinite,
         },
         r#"{"NodeFault":{"node":4,"fault":"NonFinite"}}"#,
+    );
+    assert_json(
+        &EventKind::LooperEdge {
+            node: NodeIdx(3),
+            from: looper_state::RECORDING,
+            to: looper_state::PLAYING,
+        },
+        r#"{"LooperEdge":{"node":3,"from":2,"to":3}}"#,
     );
     assert_json(&EventKind::RingFull, "\"RingFull\"");
     assert_json(
@@ -263,6 +317,16 @@ fn event_taxonomy_shapes_match_ts_mirror() {
             fault: FaultKind::AutoBypassed,
         },
         r#"{"NodeFault":{"node":4,"fault":"AutoBypassed"}}"#,
+    );
+
+    // The RT-safe LooperEdge subset rides the event ring; same external tagging.
+    assert_json(
+        &RtEvent::LooperEdge {
+            node: NodeIdx(3),
+            from: looper_state::RECORDING,
+            to: looper_state::PLAYING,
+        },
+        r#"{"LooperEdge":{"node":3,"from":2,"to":3}}"#,
     );
 
     assert_json(

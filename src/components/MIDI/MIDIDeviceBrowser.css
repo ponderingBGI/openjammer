@@ -1,136 +1,22 @@
 /**
- * MIDI Device Browser - Full-screen modal styles
- * Theme-aware modal for browsing and selecting MIDI devices
+ * MIDI Device Browser — inner-content layout only.
+ *
+ * The overlay chrome (scrim/panel/header/close) is the oj-ui Modal +
+ * PanelHeader, and the search field is an oj-ui Input — those own their own
+ * tokens. This file is just the section/grid/empty/footer layout inside the
+ * panel.
  */
-
-.midi-browser-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.6);
-    backdrop-filter: blur(4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    animation: browserFadeIn 0.2s ease;
-}
-
-@keyframes browserFadeIn {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
-}
-
-.midi-browser-container {
-    width: 90%;
-    max-width: 1200px;
-    max-height: 90vh;
-    background: var(--bg-secondary);
-    border: var(--border-sketch-width, 2px) solid var(--border-sketch);
-    border-radius: var(--radius-lg, 12px);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    animation: browserSlideUp 0.3s ease;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-}
-
-@keyframes browserSlideUp {
-    from {
-        transform: translateY(20px);
-        opacity: 0;
-    }
-    to {
-        transform: translateY(0);
-        opacity: 1;
-    }
-}
-
-/* Header */
-.midi-browser-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--space-md, 16px) var(--space-lg, 24px);
-    border-bottom: var(--border-sketch-width, 2px) solid var(--border-sketch);
-    background: var(--bg-node-header);
-}
-
-.midi-browser-header h2 {
-    margin: 0;
-    font-family: var(--font-sketch);
-    font-size: var(--text-xl, 20px);
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.midi-browser-close {
-    width: 32px;
-    height: 32px;
-    padding: 0;
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    font-size: 28px;
-    cursor: pointer;
-    line-height: 1;
-    border-radius: var(--radius-sm, 4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all var(--transition-fast, 0.15s);
-}
-
-.midi-browser-close:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-}
-
-/* Search bar */
-.midi-browser-search {
-    padding: var(--space-md, 16px) var(--space-lg, 24px);
-    border-bottom: 1px solid var(--border-subtle);
-    background: var(--bg-primary);
-}
-
-.midi-browser-search input {
-    width: 100%;
-    padding: var(--space-sm, 12px) var(--space-md, 16px);
-    font-family: var(--font-sketch);
-    font-size: var(--text-md, 16px);
-    border: var(--border-sketch-width, 2px) solid var(--border-sketch);
-    border-radius: var(--radius-md, 8px);
-    background: var(--bg-node);
-    color: var(--text-primary);
-    outline: none;
-    transition: border-color var(--transition-fast, 0.15s);
-}
-
-.midi-browser-search input:focus {
-    border-color: var(--accent-primary);
-}
-
-.midi-browser-search input::placeholder {
-    color: var(--text-muted);
-}
 
 /* Sections */
 .midi-browser-section {
-    padding: var(--space-md, 16px) var(--space-lg, 24px);
+    padding: var(--space-md) var(--space-lg);
     overflow-y: auto;
-    flex: 1;
 }
 
 .midi-browser-section h3 {
-    margin: 0 0 var(--space-md, 16px);
+    margin: 0 0 var(--space-md);
     font-family: var(--font-sketch);
-    font-size: var(--text-sm, 14px);
+    font-size: var(--text-sm);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -141,23 +27,22 @@
 .midi-device-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: var(--space-md, 16px);
+    gap: var(--space-md);
 }
 
 /* Empty state */
 .midi-browser-empty {
     text-align: center;
-    padding: var(--space-xl, 40px);
+    padding: var(--space-xl);
     color: var(--text-muted);
     font-style: italic;
 }
 
 /* Footer */
 .midi-browser-footer {
-    padding: var(--space-sm, 12px) var(--space-lg, 24px);
+    padding: var(--space-sm) var(--space-lg);
     border-top: 1px solid var(--border-subtle);
     text-align: center;
-    font-size: var(--text-xs, 12px);
+    font-size: var(--text-xs);
     color: var(--text-muted);
-    background: var(--bg-primary);
 }

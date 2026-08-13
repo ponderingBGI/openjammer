@@ -13,7 +13,7 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
     <h1 set:html={title} />
     {tagline && <p class="oj-tagline" set:html={tagline} />}
     <p class="oj-tiers">
-      <span class="oj-tier oj-tier--native">native <code>&lt;5ms</code></span>
+      <span class="oj-tier oj-tier--native">native <code>device-dependent</code></span>
       <span class="oj-tier oj-tier--browser">browser <code>~15-25ms</code></span>
     </p>
     {actions.length > 0 && (

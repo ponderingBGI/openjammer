@@ -1,0 +1,9 @@
+{
+  "name": "@openjammer/oj-figma-plugin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "In-house Figma plugin that stamps each oj-ui component master with its code import + deep links (the free-tier substitute for Code Connect). Driven by the repo-root component-map.json.",
+  "scripts": {
+    "build": "bun build src/code.ts --outfile dist/code.js --target browser --format iife"
+  }
+}

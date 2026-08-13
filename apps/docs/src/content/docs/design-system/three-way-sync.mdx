@@ -1,0 +1,255 @@
+---
+title: The 3-way sync — design ↔ code ↔ Claude Design
+description: How OpenJammer keeps the codebase, claude.ai/design, and Figma in lockstep — and the seamless path from a design idea to production that a technical designer can drive end-to-end.
+---
+
+import { Steps, Aside, CardGrid, Card, LinkCard, Badge } from '@astrojs/starlight/components';
+
+OpenJammer's look lives in **one component library** (`@openjammer/oj-ui`) and **one set of
+design tokens** (`packages/oj-tokens`). Three surfaces consume them — your **code**, the
+**claude.ai/design** agent, and **Figma**. This page is the contract for keeping them in
+lockstep and the playbook for taking an idea from a sketch to shipped, without anyone ever
+hand-copying a value or starting from a stale design.
+
+<Aside type="tip" title="The one promise">
+A relatively-technical designer can own the whole path — design → variations → working feel →
+production PR — and a developer reviews the PR (or takes over the code step). No step requires
+hand-syncing; the machine regenerates everything from one source.
+</Aside>
+
+## The model: one source of truth per concern
+
+It is **not** a triangle of equal peers. Two different things flow two different ways.
+
+```
+              ┌─ Style Dictionary ───→  CODE        (oj-ui reads var(--…))
+ TOKENS ──────┼─ Tokens Studio (Git) ──→  FIGMA Variables   ← one-way: repo → Figma (free)
+ (DTCG, the   └─ design-sync ─────────→  claude.ai/design
+  one source)
+
+ COMPONENTS ──┬─ design-sync ──────────→ claude.ai/design          (automatic)
+ (oj-ui code, └─ designer builds masters → FIGMA  ──(Code Connect)──→ links back to code
+  the source)
+```
+
+- **Tokens** (color, spacing, radius, type, shadows) have one home: the DTCG JSON in
+  `packages/oj-tokens/tokens/`. Everything else *derives* from it. On the current free/Education
+  stack the **Figma leg is one-way** (repo → Figma): a designer **Pulls** the tokens, switches
+  themes, and **Applies** them in Figma, but **cannot push token edits back** — multi-file folder
+  sync is pull-only on Tokens Studio's free tier. Tokens are authored in the repo as PRs.
+- **Components** have one home: the **code** (`oj-ui`). The Figma component masters are design
+  representations that *match* the code; **Code Connect** links them so Figma's Dev Mode shows
+  the real snippet. They do **not** flow back into code — a component change is a code change.
+
+<Aside type="caution" title="The rule that prevents 90% of drift">
+**Tokens are authored in code; Figma mirrors them.** Restyling (color/spacing/type) is a DTCG
+edit in the repo (a PR) — it flows out to Figma and Claude Design, never back from them. A
+*structural* or *new* component is likewise always authored in code; Figma and Claude Design are
+where you design and prove it first, not where it ships from.
+</Aside>
+
+## Two workflows — pick by what you're changing
+
+### A. Restyle — "make it look different" (tokens)
+
+The code-first path. Use it for any color, spacing, radius, type, or theme change —
+including authoring the **new default theme**.
+
+<Steps>
+
+1. **Edit the DTCG in the repo.** Change token values in `packages/oj-tokens/tokens/` on a
+   branch and open a **PR into `canari`**. This is where tokens are authored — the repo is the
+   one source of truth.
+
+2. **CI rebuilds for you.** A PR that touches the DTCG triggers
+   [`tokens.yml`](https://github.com/ponderingBGI/openjammer/blob/main/.github/workflows/tokens.yml),
+   which runs `bun run tokens` to regenerate **every** artifact from the DTCG and **commits the
+   result straight back onto the PR branch**. (Fork PRs, which CI can't push to, fail with a "run
+   it locally" message instead — see the contributing note.)
+
+3. **Review & merge.** Anyone — including the designer — reviews the token diff and merges.
+   Merging applies the change to the app immediately.
+
+4. **Mirror into Figma (designer, free path).** In the **Tokens Studio** plugin, hit **Pull** to
+   bring the merged tokens in, then switch the **Theme** mode and **Apply** to restyle the Figma
+   masters. This leg is **read-only on the free/Education stack** — designers consume the themes,
+   they don't push edits back.
+
+5. **Propagate to Claude Design.** A maintainer re-runs `/design-sync` so claude.ai/design
+   shows the new look. (Components are untouched — they read only semantic tokens.)
+
+</Steps>
+
+<Aside type="note">
+Because every component reads **only** semantic tokens, flipping the **new default theme** is a
+values-only change — one token PR restyles the code, Figma, *and* Claude Design with zero
+component rewrites. That is the entire reason the system is token-first.
+</Aside>
+
+### B. Build — "a new node or a fundamental new component"
+
+Design and prove it in the visual tools first, then bring it into code. This is the seamless
+design→production path.
+
+<Steps>
+
+1. **Design in Figma.** Build the component master (or node) using the **library Variables** —
+   bind fills, spacing, radius, and type to tokens, never hardcode. Use the existing components
+   as parts where you can.
+
+2. **Bring it into Claude Design.** In claude.ai/design, compose it into real screens, spin up
+   **variations**, and test the **functionality and feel** with the real components until it's
+   right. This is where the idea becomes a working interaction, not just a picture.
+
+3. **Into code, as a PR.** Implement it in `oj-ui` (a new component, the same `PluginManifest` +
+   `DspInstance` shape for a node) on a branch → **PR to `canari`**. A technical designer can
+   open the PR; a **developer reviews it, or takes over from the Claude-Design→code step**.
+
+4. **Re-align the surfaces.** Once merged: `/design-sync` refreshes Claude Design, and
+   **Code Connect** links the new Figma master to the new code component (Dev Mode shows the
+   real snippet).
+
+</Steps>
+
+<Aside type="caution" title="Why Figma/Claude Design come first for new things">
+Designing the feel *before* writing code is cheap and fast; rewriting a shipped component is
+not. Figma proves the look, Claude Design proves the interaction — then code ships it once,
+right. The reverse (build in code, redesign later) is the expensive path we're avoiding.
+</Aside>
+
+## Where each surface fits
+
+<CardGrid>
+  <Card title="Code — oj-ui + oj-tokens" icon="seti:typescript">
+    The source of truth for **component behavior** and the **token values**. Everything else
+    derives from here. A maintainer owns merges to `canari`.
+  </Card>
+  <Card title="Figma" icon="figma">
+    Where the **look** is designed: token Variables (mirrored one-way from the repo via Tokens
+    Studio on free) and the component **masters**. The designer's home. Linked to code via the
+    component index (and Code Connect once on Org/Enterprise).
+  </Card>
+  <Card title="claude.ai/design" icon="puzzle">
+    Where ideas become **working, varied, testable** UI built from the real components — the
+    proving ground between a Figma sketch and a code PR.
+  </Card>
+</CardGrid>
+
+## What each Figma plan tier gives you
+
+The sync is **code-first by design** so it works on a free Figma plan. Most of what
+OpenJammer needs is already on **Professional** (which the file currently has via an Education
+grant); only three capabilities are gated higher.
+
+| Capability | Starter (Free) | Professional | Organization | Enterprise |
+| --- | --- | --- | --- | --- |
+| Publish team libraries | No | Yes | Yes | Yes |
+| Dev Mode (inspect) | No | Yes (Full/Dev seat) | Yes | Yes |
+| Code Connect (code snippets in Dev Mode) | No | No | Yes | Yes |
+| Branching & merging | No | No | Yes | Yes |
+| Variable modes per collection | 1 (effectively none) | up to 10 | up to 20 | unlimited |
+| REST Variables API (write, headless CI) | No | No | No | Yes |
+| Version history | 30 days | unlimited | unlimited | unlimited |
+
+<Aside type="note">
+The OpenJammer file runs on **Education = Professional** (a Dev seat). Education is a *personal*
+student/educator grant (SheerID, re-verified yearly) — it isn't available to an open-source
+project as an entity. The system is built to **degrade, not break**: if the grant lapses the file
+drops to Starter and the three Theme modes become **read-only** (the data is safe, editing is
+frozen). The code-first token path is unaffected — it never depended on Figma writing anything.
+Pricing moves periodically; re-check [figma.com/pricing](https://www.figma.com/pricing/).
+</Aside>
+
+## Upgrade ladder (zero-rework)
+
+Every rung is additive — nothing built on the rung below is thrown away. You climb only when a
+capability is worth paying for.
+
+<Steps>
+
+1. **Today — Education / Professional (free, fragile).** Dev Mode, library publishing, and up to
+   10 variable modes all work. Designers Pull tokens and theme-switch. The catch is fragility: a
+   personal grant that can lapse. Good enough to build and ship the design system.
+
+2. **Insurance — a durable Pro Dev seat (~$12/mo).** If the Education grant lapses, a paid
+   **Professional Dev seat** restores exactly the same capabilities, permanently. Same workflow,
+   no rework — it just removes the annual-reverification risk. (Re-check current pricing.)
+
+3. **Sponsored — Organization.** Add the **`FIGMA_ACCESS_TOKEN`** repo secret and **publish the
+   oj-ui library**. The 53 committed `.figma.tsx` mappings publish **unchanged**, Dev-Mode code
+   snippets light up, and **native branching** becomes available. Zero code changes — one secret
+   and one publish action.
+
+4. **Enterprise — headless token push (optional).** The **REST Variables write API** unlocks a
+   CI job that could push tokens into Figma automatically. OpenJammer does not ship
+   such a job today — the code-first path (`tokens.yml`) and the Tokens Studio Pro
+   write-back (`figma-tokens-sync.yml`) cover the live flows. Extended variable collections matter
+   only if the theme count outgrows 20 modes.
+
+</Steps>
+
+## Anti-drift — the rules that make it safe
+
+The whole point is that you never start from an old design or hand-copy a value. These are the
+guarantees:
+
+- **One command regenerates everything.** `bun run tokens` emits `variables.css`,
+  `themes.ts`, **and** the design-sync snapshot (`oj-ui/oj-tokens.css`) from the same DTCG.
+  There is no second place to update.
+- **You never run `bun run tokens` by hand.** A PR that touches the DTCG triggers
+  [`tokens.yml`](https://github.com/ponderingBGI/openjammer/blob/main/.github/workflows/tokens.yml),
+  which rebuilds every artifact and **commits the result straight back onto the PR branch**
+  (fork PRs, which CI can't push to, get a hard "run it locally" failure instead). So a stale or
+  hand-edited generated file simply can't survive a PR.
+- **Figma always Pulls; it never authors tokens.** Tokens Studio's Git sync means the repo is the
+  truth. On the free/Education stack the folder sync is **pull-only**, so a designer Pulls the
+  latest tokens, theme-switches, and Applies — there's no way to push a stale or divergent token
+  set back from Figma. (A Figma → repo write-back IS implemented — the
+  `figma-tokens-sync.yml` workflow rebuilds the token artifacts from a Tokens Studio
+  push and opens a PR into `canari` — but it stays dormant on the free/Education tier,
+  because pushing the multi-file token folder needs Tokens Studio Pro. See the upgrade ladder.)
+- **The sync anchor catches component drift.** `/design-sync` records content hashes
+  (`_ds_sync.json`); a re-sync re-verifies and re-uploads only what changed, so Claude Design
+  can't silently rot.
+- **Components flow one way.** Because Figma/Claude Design never write component *code*, there's
+  no merge conflict between a designer's Figma edit and an engineer's code — the code is
+  authoritative, Figma matches it via Code Connect.
+
+## One-time setup
+
+<Steps>
+
+1. **Tokens Studio → repo (pull-only on free).** Install *Tokens Studio for Figma* → Settings →
+   Sync providers → **GitHub** → a PAT with Code read access → folder `packages/oj-tokens/tokens`,
+   branch `canari`, **token format: W3C DTCG**. Pull. You get a **Primitives** collection and a
+   **Theme** collection with **Cream / Cyberpunk / Midnight** modes (already defined by
+   `$metadata.json` / `$themes.json` in that folder). Multi-file folder sync is **read-only on the
+   free tier** — Pull and Apply themes; pushing edits back would need Tokens Studio Pro (and is not
+   part of the current code-first workflow).
+
+2. **Code Connect — mappings already written, publish is automated.** All **53 components** have
+   committed Code Connect mappings — **53 mappings across 37 `.figma.tsx` files**
+   (`packages/oj-ui/src/components/**`; multi-export files like Menu and Icons hold several),
+   snippets rewritten to `@openjammer/oj-ui` via `figma.config.json`. A PR validates them; merging
+   to `canari` **publishes them to Figma automatically** ([`code-connect.yml`](https://github.com/ponderingBGI/openjammer/blob/main/.github/workflows/code-connect.yml)).
+   Three one-time prerequisites — all on the **Organization/Enterprise** rung of the ladder above:
+   **publish the oj-ui library** in Figma (Code Connect only maps published components), an
+   **Org/Enterprise plan** (Code Connect isn't on Starter/Professional/Education), and a repo
+   secret **`FIGMA_ACCESS_TOKEN`**. Until the token exists the publish step skips cleanly. Enrich
+   the auto-generated examples over time — the node links are already correct.
+
+3. **Claude Design.** The library is already synced (`/design-sync`). Re-run it after any merged
+   token or component change to keep it current.
+
+</Steps>
+
+## Who does what
+
+| Step | Designer (technical) | Developer |
+| --- | --- | --- |
+| Restyle (tokens) | Opens the DTCG PR; Pulls + applies the theme in Figma to verify | Reviews the token diff; merges |
+| New look / theme | Authors the DTCG values in the repo PR | Merges; re-runs `/design-sync` |
+| New component / node | Designs in Figma → proves in Claude Design → opens the code PR | **Reviews the PR, or takes over the Claude-Design→code step** |
+| Releasing to `main` | — | Owns `canari → main` promotion |
+
+<LinkCard title="Designer handoff details" href="https://github.com/ponderingBGI/openjammer/blob/main/docs/design-figma-handoff.md" description="The day-one checklist, the FigJam-vs-design-file note, and the full component inventory." />

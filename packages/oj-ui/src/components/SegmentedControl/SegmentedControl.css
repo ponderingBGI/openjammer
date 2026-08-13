@@ -1,0 +1,100 @@
+/*
+ * SegmentedControl — a row/column of sketch buttons, exactly one active.
+ * Styled only via semantic tokens (no literal colors), so it follows the
+ * active theme. Selection is the only feedback: segments never move on hover
+ * or press (DESIGN.md No-Surprise), the active pill simply inks.
+ */
+
+/* ── Horizontal (default): the inline channel toggle (was .oj-upd-seg) ── */
+.oj-seg {
+    display: inline-flex;
+    align-self: flex-start;
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+    background: var(--bg-node);
+}
+
+.oj-seg__btn {
+    appearance: none;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    padding: var(--space-xs) var(--space-lg);
+    cursor: pointer;
+    transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+/* Hairline divider between adjacent segments. */
+.oj-seg__btn + .oj-seg__btn {
+    border-left: var(--border-sketch-width) solid var(--border-subtle);
+}
+
+.oj-seg__btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.oj-seg__btn:disabled {
+    cursor: not-allowed;
+    color: var(--text-muted);
+}
+
+.oj-seg__btn:disabled:hover {
+    background: transparent;
+    color: var(--text-muted);
+}
+
+.oj-seg__btn.is-active {
+    background: var(--accent-primary);
+    color: var(--text-on-accent);
+}
+
+/* Whole control frozen (e.g. channel locked while an update is pinned). The
+   per-button :disabled already mutes the segments; dim the pill so the inked
+   active fill reads as inactive too, and block the pointer. */
+.oj-seg.is-disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* ── Vertical: the Settings sidebar (was .minimal-tab-btn) ── */
+.oj-seg--vertical {
+    display: flex;
+    flex-direction: column;
+    align-self: stretch;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    overflow: visible;
+}
+
+.oj-seg--vertical .oj-seg__btn {
+    width: 100%;
+    text-align: left;
+    padding: var(--space-sm) var(--space-lg);
+    font-size: var(--text-md);
+    color: var(--text-muted);
+    transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+/* No left hairline in the column layout; the divider is the active edge below. */
+.oj-seg--vertical .oj-seg__btn + .oj-seg__btn {
+    border-left: none;
+}
+
+.oj-seg--vertical .oj-seg__btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.oj-seg--vertical .oj-seg__btn.is-active {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    /* Inked right edge marks the selected row; border (not shadow) keeps depth
+       offset-only and avoids layout shift (Hard-Shadow + No-Surprise). */
+    box-shadow: inset calc(-1 * var(--border-sketch-width)) 0 0 0 var(--sketch-black);
+}

@@ -2,7 +2,7 @@
  * Node Canvas - Main canvas with pan/zoom, box selection, and node rendering
  */
 
-import { useCallback, useRef, useState, useEffect, useMemo, memo } from 'react';
+import { useCallback, useRef, useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import type { Position, Connection } from '../../engine/types';
 import { useGraphStore, getNodeDimensions, type NodeBounds } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -18,15 +18,35 @@ import { getExecutor } from '../../audio/executor';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
 import { ContextMenu } from './ContextMenu';
 import { NodeWrapper } from '../Nodes/NodeWrapper';
+import { Cable } from '@openjammer/oj-ui';
 import { useMIDIStore } from '../../store/midiStore';
 import { useAudioClipStore } from '../../store/audioClipStore';
 import { useLibraryStore, getSampleFile } from '../../store/libraryStore';
 import { createClipFromSample, generateWaveformPeaksAsync } from '../../utils/clipUtils';
 import { getAudioContext } from '../../audio/audioContext';
+import { hasNativeTextSelection, isEditableTarget } from '../../utils/editableTarget';
 import { AudioClipVisual } from '../Clips/AudioClipVisual';
 import { ClipDragLayer } from '../Clips/ClipDragLayer';
-import { WaveformEditorModal } from '../Clips/WaveformEditorModal';
+// The waveform editor is a heavy, on-demand modal (canvas rendering + clip DSP)
+// that renders null until a clip is opened for editing. Code-split it behind a
+// real dynamic import so its weight stays out of the first-paint entry chunk;
+// the canvas itself loads eagerly. The Suspense fallback is never seen on the
+// hot path — only on the first clip-edit open, where a frame's delay is invisible.
+const WaveformEditorModal = lazy(() =>
+    import('../Clips/WaveformEditorModal').then((m) => ({
+        default: m.WaveformEditorModal,
+    })),
+);
 import { PresenceOverlay } from '../Collab/PresenceOverlay';
+// The timeline editor is only needed after entering a Song node. Keeping it behind
+// a dynamic import avoids charging the full arrangement UI to the canvas's initial
+// production chunk while preserving the same store-backed editing surface.
+const SongInterior = lazy(() =>
+    import('../Song/SongInterior').then((module) => ({
+        default: module.SongInterior,
+    })),
+);
+import { useArrangementStore } from '../../store/arrangementStore';
 import { useCollabStore } from '../../store/collabStore';
 import './NodeCanvas.css';
 
@@ -36,61 +56,6 @@ interface SelectionBox {
     currentX: number;
     currentY: number;
 }
-
-/** Props for the memoized ConnectionPath component */
-interface ConnectionPathProps {
-    conn: Connection;
-    path: string;
-    isSelected: boolean;
-    isBundled: boolean;
-    bundleCount: number;
-    signalLevel: number;
-    onSelect: (connId: string) => void;
-}
-
-/**
- * Memoized connection path component - only re-renders when connection changes
- * or signal level changes by more than 1%
- */
-const ConnectionPath = memo(function ConnectionPath({
-    conn,
-    path,
-    isSelected,
-    isBundled,
-    bundleCount,
-    signalLevel,
-    onSelect
-}: ConnectionPathProps) {
-    const signalStyle = {
-        '--signal-level': signalLevel.toFixed(3)
-    } as React.CSSProperties;
-
-    return (
-        <g>
-            <path
-                d={path}
-                data-connection-id={conn.id}
-                className={`connection-line ${conn.type} ${isSelected ? 'selected' : ''} ${isBundled ? 'bundled' : ''}`}
-                style={signalStyle}
-                onClick={(e) => {
-                    e.stopPropagation();
-                    onSelect(conn.id);
-                }}
-            />
-            {isBundled && (
-                <title>{`Bundle (${bundleCount} connections)`}</title>
-            )}
-        </g>
-    );
-}, (prev, next) => {
-    // Custom comparison: skip re-render if signal level changed by less than 1%
-    return prev.conn.id === next.conn.id &&
-           prev.path === next.path &&
-           prev.isSelected === next.isSelected &&
-           prev.isBundled === next.isBundled &&
-           prev.bundleCount === next.bundleCount &&
-           Math.abs(prev.signalLevel - next.signalLevel) < 0.01;
-});
 
 export function NodeCanvas() {
     const canvasRef = useRef<HTMLDivElement>(null);
@@ -155,6 +120,16 @@ export function NodeCanvas() {
         return new Map(connArray.map(c => [c.id, c]));
         // eslint-disable-next-line react-hooks/exhaustive-deps -- allConnections is the reactivity trigger: getConnectionsAtLevel reads the store via get(), so this memo must recompute when the connections Map identity changes
     }, [currentViewNodeId, getConnectionsAtLevel, allConnections]);
+    // What kind of interior the current view is: 'timeline' when we have entered a
+    // song node (render the hand-drawn SongInterior instead of the node graph),
+    // 'graph' otherwise (the ordinary node sub-canvas).
+    const interiorMode = useMemo<'graph' | 'timeline'>(() => {
+        if (!currentViewNodeId) return 'graph';
+        const viewNode = allNodes.get(currentViewNodeId);
+        if (!viewNode) return 'graph';
+        return resolveNodeDefinition(viewNode).interior ?? 'graph';
+    }, [currentViewNodeId, allNodes]);
+
     const selectedConnectionIds = useGraphStore((s) => s.selectedConnectionIds);
     const selectConnection = useGraphStore((s) => s.selectConnection);
     const clearSelection = useGraphStore((s) => s.clearSelection);
@@ -183,6 +158,10 @@ export function NodeCanvas() {
 
     // Audio clip store
     const allClips = useAudioClipStore((s) => s.clips);
+    // Drives the lazy WaveformEditorModal mount: gating the mount on this (instead
+    // of rendering it unconditionally) is what actually defers the code-split chunk
+    // to first clip-edit, rather than fetching it on canvas mount.
+    const editingClipId = useAudioClipStore((s) => s.editingClipId);
     const selectedClipIds = useAudioClipStore((s) => s.selectedClipIds);
     const clipDragState = useAudioClipStore((s) => s.dragState);
     const startClipDrag = useAudioClipStore((s) => s.startDrag);
@@ -271,7 +250,9 @@ export function NodeCanvas() {
             setRightClickStart({ x: e.clientX, y: e.clientY });
             rightClickMoved.current = false;
             // Check if clicking on empty canvas (not on a node)
-            const isOnNode = (e.target as HTMLElement).closest('.node, .schematic-node');
+            const isOnNode = (e.target as HTMLElement).closest(
+                '.node, .schematic-node, .oj-node-frame, .oj-node',
+            );
             rightClickOnCanvas.current = !isOnNode;
             return;
         }
@@ -286,8 +267,12 @@ export function NodeCanvas() {
 
         // Left click on empty canvas - start box selection
         // Check for all node and port classes (standard and schematic)
+        // The union must always be EVERY node-root + port class currently mounted on
+        // the canvas (Invariant B). oj-ui classes are added additively as nodes migrate;
+        // legacy classes are dropped only after their last emitter is gone.
         const isNodeOrPort = (e.target as HTMLElement).closest(
-            '.node, .schematic-node, .port, .port-dot, .port-circle-marker, .note-input-port, .output-port, .speaker-input-port'
+            '.node, .schematic-node, .oj-node-frame, .oj-node, ' +
+                '.oj-port, .oj-port-row'
         );
         if (e.button === 0 && !isNodeOrPort) {
             clearSelection();
@@ -580,8 +565,20 @@ export function NodeCanvas() {
         const { emitKeyboardSignal, releaseKeyboardSignal } = useAudioStore.getState();
 
         function handleKeyDown(e: KeyboardEvent) {
-            // Skip if typing in input
-            if ((e.target as HTMLElement).tagName === 'INPUT') return;
+            // Skip if typing in an editable control. Backspace/Delete must edit text,
+            // not delete canvas nodes, while focus is in the AI composer or any textarea.
+            if (isEditableTarget(e.target)) return;
+
+            // Selected prose/labels/help text own the OS clipboard. The canvas has
+            // an internal node clipboard, so Ctrl/Cmd+C must yield whenever the
+            // browser has a text selection (Settings, guides, agent answers, etc.).
+            if (
+                (e.ctrlKey || e.metaKey) &&
+                e.key.toLowerCase() === 'c' &&
+                hasNativeTextSelection()
+            ) {
+                return;
+            }
 
             // ESC Key - Unified escape behavior (works in all modes)
             if (e.key === 'Escape') {
@@ -650,6 +647,49 @@ export function NodeCanvas() {
                 e.preventDefault();
                 setCurrentMode(keyNum);
                 return;
+            }
+
+            // TIMELINE KEYMAP: inside a Song interior, the DAW muscle-memory keys must
+            // drive the ARRANGEMENT, not the node graph (the covenant's plain-Ctrl+Z
+            // promise). Read fresh state so there is no stale closure. We intercept only
+            // play/undo/redo/delete; everything else (Q to exit, mode keys) falls through.
+            {
+                const viewId = useCanvasNavigationStore.getState().currentViewNodeId;
+                const viewNode = viewId ? useGraphStore.getState().nodes.get(viewId) : null;
+                const inTimeline = viewNode
+                    ? resolveNodeDefinition(viewNode).interior === 'timeline'
+                    : false;
+                if (inTimeline) {
+                    const arr = useArrangementStore.getState();
+                    if (e.code === 'Space' && !e.repeat) {
+                        e.preventDefault();
+                        if (arr.isPlaying) arr.stop();
+                        else arr.play();
+                        return;
+                    }
+                    if (matchesAction(e, 'edit.undo')) {
+                        e.preventDefault();
+                        arr.undo();
+                        return;
+                    }
+                    if (matchesAction(e, 'edit.redo')) {
+                        e.preventDefault();
+                        arr.redo();
+                        return;
+                    }
+                    if (matchesAction(e, 'edit.delete') || e.key === 'Backspace') {
+                        e.preventDefault();
+                        if (arr.selectedNoteIds.length > 0) {
+                            // Delete the selected note(s) as ONE undoable step.
+                            arr.apply(arr.selectedNoteIds.map((noteId) => ({ kind: 'removeNote', noteId })));
+                            arr.selectNotes([]);
+                        } else if (arr.selectedClipId) {
+                            arr.apply({ kind: 'removeClip', clipId: arr.selectedClipId });
+                            arr.selectClip(null);
+                        }
+                        return;
+                    }
+                }
             }
 
             // Delete/Backspace always works - delete nodes and clips
@@ -847,8 +887,11 @@ export function NodeCanvas() {
                     const definition = resolveNodeDefinition(selectedNode);
                     const canEnter = definition.canEnter !== false;
                     const hasChildren = selectedNode.childIds && selectedNode.childIds.length > 0;
+                    // A timeline interior (the song node) has NO graph children — it is
+                    // entered on its `interior` flag alone, not on childIds.
+                    const isTimelineInterior = definition.interior === 'timeline';
 
-                    if (canEnter && hasChildren) {
+                    if (canEnter && (isTimelineInterior || hasChildren)) {
                         enterNode(selectedNode.id);
                     } else {
                         // Flash node for ANY failure reason (canEnter=false OR no children)
@@ -890,8 +933,8 @@ export function NodeCanvas() {
         }
 
         function handleKeyUp(e: KeyboardEvent) {
-            // Skip if typing in input
-            if ((e.target as HTMLElement).tagName === 'INPUT') return;
+            // Skip if typing in an editable control.
+            if (isEditableTarget(e.target)) return;
 
             const key = e.key.toLowerCase();
 
@@ -1022,36 +1065,28 @@ export function NodeCanvas() {
 
         if (!startPos || !endPos) return null;
 
-        const dx = endPos.x - startPos.x;
-        const controlOffset = Math.min(Math.abs(dx) / 2, 100);
-
-        const path = `M ${startPos.x} ${startPos.y}
-                  C ${startPos.x + controlOffset} ${startPos.y},
-                    ${endPos.x - controlOffset} ${endPos.y},
-                    ${endPos.x} ${endPos.y}`;
-
         const isSelected = selectedConnectionIds.has(conn.id);
 
         // Auto-detect bundle status from internal wiring
         const bundleCount = getConnectionBundleCount(conn, allNodes, allConnections);
         const isBundled = bundleCount > 1;
 
-        // Get signal level for visualization (works for all connection types)
-        // Audio: uses "sourceNodeId->targetNodeId" key from RMS analyzer
-        // Control: uses connection ID directly from control signal tracking
+        // Signal level for visualization — Cable maps it to width/opacity/glow.
+        // Audio: "sourceNodeId->targetNodeId" RMS key; control: connection ID.
         const audioConnectionKey = `${conn.sourceNodeId}->${conn.targetNodeId}`;
         const signalLevel = signalLevels.get(audioConnectionKey) ?? signalLevels.get(conn.id) ?? 0;
 
         return (
-            <ConnectionPath
+            <Cable
                 key={conn.id}
-                conn={conn}
-                path={path}
-                isSelected={isSelected}
-                isBundled={isBundled}
+                start={startPos}
+                end={endPos}
+                kind={conn.type}
+                selected={isSelected}
+                bundled={isBundled}
                 bundleCount={bundleCount}
                 signalLevel={signalLevel}
-                onSelect={selectConnection}
+                onSelect={() => selectConnection(conn.id)}
             />
         );
         // eslint-disable-next-line react-hooks/exhaustive-deps -- portLayoutVersion is a deliberate cache-bust: getPortPosition reads the portPositionCache ref (untracked), so this callback must change identity when the cache is invalidated after DOM paint, or cables render with stale anchor positions
@@ -1070,22 +1105,16 @@ export function NodeCanvas() {
                     const startPos = getPortPosition(source.nodeId, source.portId);
                     if (!startPos) return null;
 
-                    const targetX = endPos.x;
+                    // Fan multiple sources out vertically toward the cursor.
                     const targetY = endPos.y + (index * 10);
 
-                    const dx = targetX - startPos.x;
-                    const controlOffset = Math.min(Math.abs(dx) / 2, 100);
-
-                    const path = `M ${startPos.x} ${startPos.y} 
-                              C ${startPos.x + controlOffset} ${startPos.y},
-                                ${targetX - controlOffset} ${targetY},
-                                ${targetX} ${targetY}`;
-
                     return (
-                        <path
+                        <Cable
                             key={`${source.nodeId}-${source.portId}`}
-                            d={path}
-                            className={`connection-line control connection-temp`}
+                            temp
+                            kind="control"
+                            start={startPos}
+                            end={{ x: endPos.x, y: targetY }}
                         />
                     );
                 })}
@@ -1223,53 +1252,62 @@ export function NodeCanvas() {
                 backgroundSize: `${20 * zoom}px ${20 * zoom}px`
             }} />
 
-            <div
-                className="node-canvas-content"
-                style={{
-                    transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
-                }}
-            >
-                {/* Connections Layer */}
-                <div className="connections-layer">
-                    <svg>
-                        {Array.from(connections.values()).map(renderConnection)}
-                        {renderTempConnection()}
-                    </svg>
+            {interiorMode === 'timeline' && currentViewNodeId ? (
+                /* TIMELINE INTERIOR — entered a song node. The hand-drawn DAW timeline
+                   replaces the node/connection/clip layers (its own full-bleed paper
+                   surface + scroll); breadcrumbs/exit/Esc still navigate out of it. */
+                <Suspense fallback={null}>
+                    <SongInterior songNodeId={currentViewNodeId} />
+                </Suspense>
+            ) : (
+                <div
+                    className="node-canvas-content"
+                    style={{
+                        transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
+                    }}
+                >
+                    {/* Connections Layer */}
+                    <div className="connections-layer">
+                        <svg>
+                            {Array.from(connections.values()).map(renderConnection)}
+                            {renderTempConnection()}
+                        </svg>
+                    </div>
+
+                    {/* Nodes Layer */}
+                    <div className="nodes-layer">
+                        {Array.from(nodes.values()).map((node) => (
+                            <NodeWrapper key={node.id} node={node} />
+                        ))}
+                    </div>
+
+                    {/* Audio Clips Layer */}
+                    <div className="clips-layer">
+                        {clipsOnCanvas.map((clip) => (
+                            <AudioClipVisual
+                                key={clip.id}
+                                clip={clip}
+                                isOnCanvas={true}
+                                isDragging={clipDragState.draggedClipId === clip.id}
+                                isSelected={selectedClipIds.has(clip.id)}
+                                onDragStart={(e) => {
+                                    const bounds = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                    selectClip(clip.id, e.shiftKey);
+                                    startClipDrag(clip.id, { x: e.clientX, y: e.clientY }, bounds);
+                                }}
+                                onDoubleClick={() => openClipEditor(clip.id)}
+                            />
+                        ))}
+                    </div>
+
+                    {/* Collaboration presence overlay (U23): remote peer cursors +
+                        selection rings. Renders nothing when not in a session. */}
+                    <PresenceOverlay />
+
+                    {/* Selection Box */}
+                    {renderSelectionBox()}
                 </div>
-
-                {/* Nodes Layer */}
-                <div className="nodes-layer">
-                    {Array.from(nodes.values()).map((node) => (
-                        <NodeWrapper key={node.id} node={node} />
-                    ))}
-                </div>
-
-                {/* Audio Clips Layer */}
-                <div className="clips-layer">
-                    {clipsOnCanvas.map((clip) => (
-                        <AudioClipVisual
-                            key={clip.id}
-                            clip={clip}
-                            isOnCanvas={true}
-                            isDragging={clipDragState.draggedClipId === clip.id}
-                            isSelected={selectedClipIds.has(clip.id)}
-                            onDragStart={(e) => {
-                                const bounds = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                selectClip(clip.id, e.shiftKey);
-                                startClipDrag(clip.id, { x: e.clientX, y: e.clientY }, bounds);
-                            }}
-                            onDoubleClick={() => openClipEditor(clip.id)}
-                        />
-                    ))}
-                </div>
-
-                {/* Collaboration presence overlay (U23): remote peer cursors +
-                    selection rings. Renders nothing when not in a session. */}
-                <PresenceOverlay />
-
-                {/* Selection Box */}
-                {renderSelectionBox()}
-            </div>
+            )}
 
             {/* Context Menu */}
             {contextMenu && (
@@ -1283,8 +1321,13 @@ export function NodeCanvas() {
             {/* Audio Clip Drag Layer (portal) */}
             <ClipDragLayer />
 
-            {/* Waveform Editor Modal (portal) */}
-            <WaveformEditorModal />
+            {/* Waveform Editor Modal (portal) — mounted only while a clip is open
+                for editing, so its lazy chunk loads on first edit, not first paint. */}
+            {editingClipId && (
+                <Suspense fallback={null}>
+                    <WaveformEditorModal />
+                </Suspense>
+            )}
 
             {/* Back to Action button - appears when nodes are not visible on any level */}
             {nodes.size > 0 && !nodesVisibility.visible && nodesVisibility.direction !== null && (

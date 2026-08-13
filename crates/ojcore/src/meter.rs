@@ -142,16 +142,29 @@ pub mod return_frame {
     pub const TAG_METER: u8 = 1;
     /// Tag byte for a `Beat` frame.
     pub const TAG_BEAT: u8 = 2;
+    /// Tag byte for a `Looper` frame. Continues the numbering past
+    /// `TAG_METER = 1` / `TAG_BEAT = 2`. (Note: this `return_frame` tag space is
+    /// independent of `event_frame::TAG_EVENT`, which lives on a different ring.)
+    pub const TAG_LOOPER: u8 = 4;
 
     /// Wire size of a `Meter` frame: tag + node(u32) + rms(f32) + peak(f32).
     pub const METER_LEN: usize = 1 + 4 + 4 + 4;
     /// Wire size of a `Beat` frame: tag + bar(u32) + beat(u32) + phase(f32).
     pub const BEAT_LEN: usize = 1 + 4 + 4 + 4;
+    /// Wire size of a `Looper` frame:
+    /// tag + node(u32) + state(u8) + pos(u32) + loop_len(u32) + peak(f32).
+    pub const LOOPER_LEN: usize = 1 + 4 + 1 + 4 + 4 + 4;
     /// The largest frame the ring will ever carry (for fixed out-buffers).
-    pub const MAX_LEN: usize = if METER_LEN > BEAT_LEN {
-        METER_LEN
-    } else {
-        BEAT_LEN
+    pub const MAX_LEN: usize = {
+        let mut m = if METER_LEN > BEAT_LEN {
+            METER_LEN
+        } else {
+            BEAT_LEN
+        };
+        if LOOPER_LEN > m {
+            m = LOOPER_LEN;
+        }
+        m
     };
 
     /// Encode a `Meter` frame into `buf`, returning the written length.
@@ -174,6 +187,25 @@ pub mod return_frame {
         BEAT_LEN
     }
 
+    /// Encode a `Looper` telemetry frame into `buf`, returning the written length.
+    #[inline]
+    pub fn encode_looper(
+        node: NodeIdx,
+        state: u8,
+        pos: u32,
+        loop_len: u32,
+        peak: f32,
+        buf: &mut [u8; MAX_LEN],
+    ) -> usize {
+        buf[0] = TAG_LOOPER;
+        buf[1..5].copy_from_slice(&node.0.to_le_bytes());
+        buf[5] = state;
+        buf[6..10].copy_from_slice(&pos.to_le_bytes());
+        buf[10..14].copy_from_slice(&loop_len.to_le_bytes());
+        buf[14..18].copy_from_slice(&peak.to_le_bytes());
+        LOOPER_LEN
+    }
+
     /// Decode one wire frame back into an [`EngineFrame`]. Returns `None` on an
     /// unknown tag or a truncated frame.
     pub fn decode(bytes: &[u8]) -> Option<EngineFrame> {
@@ -189,6 +221,20 @@ pub mod return_frame {
                 let beat = u32::from_le_bytes(bytes[5..9].try_into().ok()?);
                 let phase = f32::from_le_bytes(bytes[9..13].try_into().ok()?);
                 Some(EngineFrame::Beat { bar, beat, phase })
+            }
+            TAG_LOOPER if bytes.len() >= LOOPER_LEN => {
+                let node = NodeIdx(u32::from_le_bytes(bytes[1..5].try_into().ok()?));
+                let state = bytes[5];
+                let pos = u32::from_le_bytes(bytes[6..10].try_into().ok()?);
+                let loop_len = u32::from_le_bytes(bytes[10..14].try_into().ok()?);
+                let peak = f32::from_le_bytes(bytes[14..18].try_into().ok()?);
+                Some(EngineFrame::Looper {
+                    node,
+                    state,
+                    pos,
+                    loop_len,
+                    peak,
+                })
             }
             _ => None,
         }
@@ -211,13 +257,18 @@ pub mod event_frame {
     pub const SUB_NODE_FAULT: u8 = 1;
     /// Sub-kind for [`RtEvent::RingFull`].
     pub const SUB_RING_FULL: u8 = 2;
+    /// Sub-kind for [`RtEvent::LooperEdge`].
+    pub const SUB_LOOPER_EDGE: u8 = 3;
 
     const FAULT_NON_FINITE: u8 = 0;
     const FAULT_OVER_BUDGET: u8 = 1;
     const FAULT_AUTO_BYPASSED: u8 = 2;
+    const FAULT_CRASHED: u8 = 3;
 
-    /// Largest event frame: tag + sub + node(u32) + fault(u8) = 7 bytes.
-    pub const MAX_LEN: usize = 1 + 1 + 4 + 1;
+    /// Largest event frame: the looper edge frame is
+    /// tag + sub + node(u32) + from(u8) + to(u8) = 8 bytes (the node-fault frame
+    /// is 7); take the max so the fixed out-buffer always fits.
+    pub const MAX_LEN: usize = 1 + 1 + 4 + 1 + 1;
 
     /// Encode one [`RtEvent`] into `buf`, returning the written length.
     #[inline]
@@ -236,8 +287,16 @@ pub mod event_frame {
                     FaultKind::NonFinite => FAULT_NON_FINITE,
                     FaultKind::OverBudget => FAULT_OVER_BUDGET,
                     FaultKind::AutoBypassed => FAULT_AUTO_BYPASSED,
+                    FaultKind::Crashed => FAULT_CRASHED,
                 };
                 7
+            }
+            RtEvent::LooperEdge { node, from, to } => {
+                buf[1] = SUB_LOOPER_EDGE;
+                buf[2..6].copy_from_slice(&node.0.to_le_bytes());
+                buf[6] = from;
+                buf[7] = to;
+                8
             }
             RtEvent::RingFull => {
                 buf[1] = SUB_RING_FULL;
@@ -259,9 +318,16 @@ pub mod event_frame {
                     FAULT_NON_FINITE => FaultKind::NonFinite,
                     FAULT_OVER_BUDGET => FaultKind::OverBudget,
                     FAULT_AUTO_BYPASSED => FaultKind::AutoBypassed,
+                    FAULT_CRASHED => FaultKind::Crashed,
                     _ => return None,
                 };
                 Some(RtEvent::NodeFault { node, fault })
+            }
+            (TAG_EVENT, Some(SUB_LOOPER_EDGE)) if bytes.len() >= 8 => {
+                let node = NodeIdx(u32::from_le_bytes(bytes[2..6].try_into().ok()?));
+                let from = bytes[6];
+                let to = bytes[7];
+                Some(RtEvent::LooperEdge { node, from, to })
             }
             (TAG_EVENT, Some(SUB_RING_FULL)) => Some(RtEvent::RingFull),
             _ => None,
@@ -394,6 +460,29 @@ mod tests {
     }
 
     #[test]
+    fn return_frame_looper_roundtrips() {
+        let mut buf = [0u8; return_frame::MAX_LEN];
+        let n = return_frame::encode_looper(NodeIdx(7), 3, 1024, 48_000, 0.5, &mut buf);
+        assert_eq!(n, return_frame::LOOPER_LEN);
+        match return_frame::decode(&buf[..n]) {
+            Some(EngineFrame::Looper {
+                node,
+                state,
+                pos,
+                loop_len,
+                peak,
+            }) => {
+                assert_eq!(node, NodeIdx(7));
+                assert_eq!(state, 3);
+                assert_eq!(pos, 1024);
+                assert_eq!(loop_len, 48_000);
+                assert!((peak - 0.5).abs() < 1e-6);
+            }
+            other => panic!("expected Looper, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn return_frame_rejects_garbage() {
         assert!(return_frame::decode(&[]).is_none());
         assert!(return_frame::decode(&[0xFF, 0, 0, 0]).is_none());
@@ -423,6 +512,20 @@ mod tests {
         assert_event_roundtrips(RtEvent::NodeFault {
             node: NodeIdx(u32::MAX),
             fault: FaultKind::AutoBypassed,
+        });
+        assert_event_roundtrips(RtEvent::NodeFault {
+            node: NodeIdx(5),
+            fault: FaultKind::Crashed,
+        });
+        assert_event_roundtrips(RtEvent::LooperEdge {
+            node: NodeIdx(7),
+            from: 2,
+            to: 3,
+        });
+        assert_event_roundtrips(RtEvent::LooperEdge {
+            node: NodeIdx(u32::MAX),
+            from: 0,
+            to: 4,
         });
         assert_event_roundtrips(RtEvent::RingFull);
     }

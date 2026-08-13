@@ -1,0 +1,61 @@
+{
+  "space": {
+    "xs": { "$value": "4px", "$type": "dimension" },
+    "sm": { "$value": "8px", "$type": "dimension" },
+    "md": { "$value": "16px", "$type": "dimension" },
+    "lg": { "$value": "24px", "$type": "dimension" },
+    "xl": { "$value": "32px", "$type": "dimension" }
+  },
+  "radius": {
+    "sm": { "$value": "6px", "$type": "dimension" },
+    "md": { "$value": "10px", "$type": "dimension" },
+    "lg": { "$value": "14px", "$type": "dimension" },
+    "xl": { "$value": "20px", "$type": "dimension" },
+    "pill": { "$value": "50px", "$type": "dimension" }
+  },
+  "text": {
+    "xs": { "$value": "14px", "$type": "dimension" },
+    "sm": { "$value": "16px", "$type": "dimension" },
+    "md": { "$value": "18px", "$type": "dimension" },
+    "lg": { "$value": "22px", "$type": "dimension" },
+    "xl": { "$value": "28px", "$type": "dimension" },
+    "2xl": { "$value": "36px", "$type": "dimension" }
+  },
+  "font": {
+    "sketch": { "$value": "'Caveat', 'Comic Sans MS', cursive", "$type": "fontFamily" },
+    "sans": { "$value": "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", "$type": "fontFamily" },
+    "mono": { "$value": "'JetBrains Mono', 'Fira Code', monospace", "$type": "fontFamily" }
+  },
+  "node": {
+    "min-width": { "$value": "180px", "$type": "dimension" },
+    "header-height": { "$value": "40px", "$type": "dimension" }
+  },
+  "port": {
+    "size": { "$value": "16px", "$type": "dimension" },
+    "spacing": { "$value": "28px", "$type": "dimension" }
+  },
+  "transition": {
+    "fast": { "$value": "0.15s ease" },
+    "normal": { "$value": "0.25s ease" },
+    "slow": { "$value": "0.4s ease" }
+  },
+  "shadow": {
+    "node": { "$value": "2px 3px 0 rgba(0, 0, 0, 0.1)" },
+    "menu": { "$value": "3px 4px 0 rgba(0, 0, 0, 0.15)" },
+    "sketch": { "$value": "2px 2px 0 var(--sketch-black)" }
+  },
+  "border": {
+    "sketch-width": { "$value": "2px", "$type": "dimension" }
+  },
+  "overlay": {
+    "scrim": { "$value": "rgba(0, 0, 0, 0.45)" }
+  },
+  "z": {
+    "node": { "$value": "10" },
+    "panel": { "$value": "100" },
+    "popover": { "$value": "1000" },
+    "modal": { "$value": "2000" },
+    "toast": { "$value": "3000" },
+    "top": { "$value": "10000" }
+  }
+}

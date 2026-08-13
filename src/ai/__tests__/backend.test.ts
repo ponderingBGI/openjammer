@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
-import { PiAgentBackend } from '../PiAgentBackend';
+import { PiAgentBackend, classifySelfEdit } from '../PiAgentBackend';
 import { MockAgentBackend, demoScript } from '../MockAgentBackend';
 import type { AgentEvent } from '../types';
 
@@ -68,5 +68,47 @@ describe('MockAgentBackend', () => {
     it('honours the available flag', () => {
         expect(new MockAgentBackend({ script: [], available: false }).available()).toBe(false);
         expect(new MockAgentBackend({ script: [] }).available()).toBe(true);
+    });
+});
+
+describe('classifySelfEdit — Philia editing its own memory/skills', () => {
+    it('recognizes an about-you write as a remembered-you self-edit', () => {
+        expect(
+            classifySelfEdit('write', { path: '/home/u/.openjammer/agent/.pi/agent/pi-memory/about-you.md' }),
+        ).toBe('updated what it knows about you');
+    });
+
+    it('recognizes a skill markdown write under pi-memory', () => {
+        expect(classifySelfEdit('edit', { path: 'pi-memory/debugging.md' })).toBe(
+            'learned a skill (debugging.md)',
+        );
+    });
+
+    it('recognizes a non-md pi-memory write as a memory update', () => {
+        expect(classifySelfEdit('write', { path: 'pi-memory/notes.txt' })).toBe('updated its memory');
+    });
+
+    it('recognizes a bash command that touches pi-memory', () => {
+        expect(classifySelfEdit('bash', { command: 'echo hi >> pi-memory/log' })).toBe(
+            'updated its memory',
+        );
+    });
+
+    it('recognizes a memory-package verb by name', () => {
+        expect(classifySelfEdit('remember', { fact: 'likes long reverbs' })).toBe(
+            'remembered something for next time',
+        );
+    });
+
+    it('recognizes save_self_package as authoring a tool, with its name', () => {
+        expect(classifySelfEdit('save_self_package', { name: 'tempo helper', source: '…' })).toBe(
+            'saved itself a tool (tempo helper)',
+        );
+        expect(classifySelfEdit('save_self_package', {})).toBe('saved itself a tool');
+    });
+
+    it('returns null for a genuinely unrelated Pi tool', () => {
+        expect(classifySelfEdit('write', { path: '/tmp/scratch.txt' })).toBeNull();
+        expect(classifySelfEdit('web_search', { query: 'x' })).toBeNull();
     });
 });

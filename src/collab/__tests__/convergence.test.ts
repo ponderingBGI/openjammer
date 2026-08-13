@@ -24,8 +24,8 @@ import type { Connection, GraphNode } from '../../engine/types';
 function makeNode(id: string, overrides: Partial<CrdtNode> = {}): CrdtNode {
     return {
         id,
-        type: 'amplifier',
-        category: 'effects',
+        type: 'multiplier',
+        category: 'utility',
         position: { x: 0, y: 0 },
         data: { gain: 1 },
         ports: [],
@@ -229,7 +229,7 @@ describe('GraphStoreBridge origin tagging', () => {
         storeA.setState((s) => {
             const nodes = new Map(s.nodes);
             nodes.set('n1', {
-                id: 'n1', type: 'amplifier', category: 'effects',
+                id: 'n1', type: 'multiplier', category: 'utility',
                 position: { x: 5, y: 5 }, data: { gain: 2 }, ports: [],
                 parentId: null, childIds: [], specialNodes: [],
             });
@@ -306,7 +306,7 @@ describe('GraphStoreBridge origin tagging', () => {
 
 function mkNode(id: string): GraphNode {
     return {
-        id, type: 'amplifier', category: 'effects',
+        id, type: 'multiplier', category: 'utility',
         position: { x: 0, y: 0 }, data: {}, ports: [],
         parentId: null, childIds: [], specialNodes: [],
     };
@@ -400,7 +400,7 @@ describe('GraphStoreBridge AI frame (G2)', () => {
         });
 
         bridge.beginAiFrame();
-        // Apply then fully UNDO the verbs (simulating an optimistic run + Reject).
+        // Apply then fully UNDO the verbs (simulating an abandoned AI run).
         addNodeVerb(store, 'ai-1');
         addNodeVerb(store, 'ai-2');
         removeNodeVerb(store, 'ai-2');
@@ -488,5 +488,65 @@ describe('PresenceManager', () => {
 
         presence.destroy();
         proj.destroy();
+    });
+});
+
+// ----------------------------------------------------------------------------
+// Decode firewall: a corrupt/incompatible blob must never throw out of the
+// decode boundary (Track B P0 — the crash-loop firewall).
+// ----------------------------------------------------------------------------
+
+describe('CRDT decode firewall', () => {
+    it('import() of garbage bytes does not throw, returns false, and keeps last-good state', () => {
+        const p = new CrdtGraphProjection();
+        p.setPeerId(1);
+        p.transactLocal(() => p.writeNode(makeNode('keep', { position: { x: 3, y: 4 } })));
+        const before = normalize(p);
+
+        const garbage = new Uint8Array([0xde, 0xad, 0xbe, 0xef, 0x00, 0x01, 0x02, 0x03]);
+        let applied: boolean | undefined;
+        expect(() => {
+            applied = p.import(garbage);
+        }).not.toThrow();
+
+        expect(applied).toBe(false);
+        // Last-good document is untouched — the bad blob was skipped, not merged.
+        expect(normalize(p)).toEqual(before);
+        expect(p.snapshot().nodes.find((n) => n.id === 'keep')?.position).toEqual({ x: 3, y: 4 });
+
+        p.destroy();
+    });
+
+    it('import() of a truncated REAL snapshot does not throw and is rejected', () => {
+        // Produce a genuine Loro snapshot, then truncate it (a torn write / short
+        // read) — the firewall must catch Loro's decode error, not propagate it.
+        const src = new CrdtGraphProjection();
+        src.setPeerId(1);
+        src.transactLocal(() => src.writeNode(makeNode('n1')));
+        const snapshot = src.exportSnapshot();
+        const truncated = snapshot.slice(0, Math.max(1, Math.floor(snapshot.length / 2)));
+
+        const dst = new CrdtGraphProjection();
+        dst.setPeerId(2);
+        let applied: boolean | undefined;
+        expect(() => {
+            applied = dst.import(truncated);
+        }).not.toThrow();
+        expect(applied).toBe(false);
+        expect(dst.snapshot().nodes).toHaveLength(0);
+
+        // A subsequent VALID import still works — the firewall did not wedge the doc.
+        expect(dst.import(snapshot)).toBe(true);
+        expect(dst.snapshot().nodes.map((n) => n.id)).toEqual(['n1']);
+
+        src.destroy();
+        dst.destroy();
+    });
+
+    it('presence.apply() of garbage bytes does not throw', () => {
+        const presence = new PresenceManager(makeSelfPresence('p1', 'Solo'));
+        const garbage = new Uint8Array([0xff, 0x00, 0xff, 0x00, 0x42]);
+        expect(() => presence.apply(garbage)).not.toThrow();
+        presence.destroy();
     });
 });

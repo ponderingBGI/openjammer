@@ -2,184 +2,19 @@
  * BaseNode.css - Hand-drawn sketch theme for nodes
  */
 
-/* ============================================
- * Base Node Container
- * ============================================ */
-.node {
-    position: absolute;
-    min-width: var(--node-min-width);
-    background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-node);
-    user-select: none;
-    transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
-}
+/* The node card (container + selected/dragging/agent-pending states), its header
+   (title/type), content, and the left/right port rails are now the oj-ui
+   NodeFrame + NodeShell (packages/oj-ui/src/components/{NodeFrame,NodeShell}).
+   NodeFrame keeps the legacy node-root class for the canvas hit-test + ghost-mode
+   dim (Invariant B) but carries NO chrome — NodeShell owns the card, header,
+   rails, and the agent-pending ring.
 
-.node.selected {
-    border-color: var(--accent-primary);
-    box-shadow: var(--shadow-node), 0 0 0 3px color-mix(in srgb, var(--accent-primary) 25%, transparent);
-}
+   The whole port DOM (wrapper, dot marker, and its input/output/audio/control/
+   connected variants) is now the oj-ui Port/PortRow; only the port label below
+   survives here — the standalone name span a few schematic nodes still render
+   beside their Port dots. */
 
-.node.dragging {
-    opacity: 0.95;
-    cursor: grabbing;
-    box-shadow: var(--shadow-menu);
-}
-
-/* Agent-pending — a node the AI agent just added in a not-yet-approved run, so you
-   watch the build happen on the real canvas. An audio-blue HARD ring (spread only,
-   blur 0 — the Hard-Shadow ethos) without moving the node (No-Surprise). The breath
-   is a state pulse, not decoration, and is stilled for reduced-motion. */
-.node.agent-pending {
-    border-color: var(--audio-connected);
-    box-shadow: var(--shadow-node),
-        0 0 0 3px color-mix(in srgb, var(--audio-connected) 45%, transparent);
-    animation: oj-agent-pending 1.2s ease-in-out infinite;
-}
-
-@keyframes oj-agent-pending {
-    0%,
-    100% {
-        box-shadow: var(--shadow-node),
-            0 0 0 2px color-mix(in srgb, var(--audio-connected) 28%, transparent);
-    }
-    50% {
-        box-shadow: var(--shadow-node),
-            0 0 0 4px color-mix(in srgb, var(--audio-connected) 55%, transparent);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .node.agent-pending {
-        animation: none;
-    }
-}
-
-/* ============================================
- * Node Header
- * ============================================ */
-.node-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--space-sm) var(--space-md);
-    background: var(--bg-node-header);
-    border-bottom: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    cursor: grab;
-}
-
-.node-header:active {
-    cursor: grabbing;
-}
-
-.node-title {
-    font-family: var(--font-sketch);
-    font-weight: 600;
-    font-size: var(--text-lg);
-    color: var(--text-primary);
-}
-
-.node-type {
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    color: var(--text-muted);
-}
-
-.node-content {
-    padding: var(--space-md);
-}
-
-/* ============================================
- * Node Ports
- * ============================================ */
-.node-ports {
-    display: flex;
-    justify-content: space-between;
-    padding: var(--space-sm) 0;
-}
-
-.node-ports-left,
-.node-ports-right {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-}
-
-.node-ports-left {
-    align-items: flex-start;
-    padding-left: var(--space-sm);
-}
-
-.node-ports-right {
-    align-items: flex-end;
-    padding-right: var(--space-sm);
-}
-
-/* Port Styling */
-.port {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
-    cursor: crosshair;
-}
-
-.port-input {
-    flex-direction: row;
-}
-
-.port-output {
-    flex-direction: row-reverse;
-}
-
-.port-dot {
-    width: var(--port-size);
-    height: var(--port-size);
-    border-radius: 50%;
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    background: var(--bg-canvas);
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
-    will-change: transform, box-shadow;
-}
-
-.port-dot:hover {
-    transform: scale(1.25);
-    background: var(--bg-tertiary);
-}
-
-.port-dot.audio-input {
-    background: var(--audio-input);
-}
-
-.port-dot.audio-output {
-    background: var(--audio-output);
-}
-
-.port-dot.control {
-    background: var(--control-output);
-}
-
-.port-dot.control-input {
-    background: var(--control-input);
-}
-
-.port-dot.control-output {
-    background: var(--control-output);
-}
-
-.port-dot.control.connected,
-.port-dot.control-input.connected,
-.port-dot.control-output.connected {
-    background: var(--control-connected);
-    box-shadow: 0 0 8px var(--control-connected);
-}
-
-.port-dot.connected {
-    box-shadow: 0 0 8px var(--audio-connected);
-    background: var(--audio-connected);
-}
-
+/* Port label — the name span schematic nodes render beside an oj-ui Port. */
 .port-label {
     font-family: var(--font-sketch);
     font-size: var(--text-sm);
@@ -196,84 +31,9 @@
     border-top: 1px solid var(--border-subtle);
 }
 
-.node-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-xs) var(--space-sm);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-md);
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    background: var(--bg-node);
-    color: var(--text-primary);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-}
-
-.node-btn:hover {
-    background: var(--bg-tertiary);
-    transform: translateY(-1px);
-}
-
-.node-btn:active {
-    transform: translateY(1px);
-}
-
-.node-btn-primary {
-    background: var(--accent-primary);
-    color: white;
-}
-
-.node-btn-primary:hover {
-    background: var(--accent-secondary);
-}
-
-.node-btn-secondary {
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
-}
-
-.node-btn-secondary:hover {
-    background: var(--bg-canvas-alt);
-    color: var(--text-primary);
-}
-
-.node-btn-success {
-    background: var(--accent-success);
-    color: white;
-}
-
-.node-btn-danger {
-    background: var(--accent-danger);
-    color: white;
-}
-
-.node-btn.active {
-    background: var(--accent-success);
-    color: white;
-}
-
 /* ============================================
  * Input Fields
  * ============================================ */
-.node-input {
-    width: 100%;
-    padding: var(--space-xs) var(--space-sm);
-    background: var(--bg-canvas);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    border-radius: var(--radius-sm);
-    color: var(--text-primary);
-    font-size: var(--text-sm);
-    font-family: var(--font-mono);
-}
-
-.node-input:focus {
-    outline: none;
-    border-color: var(--accent-primary);
-}
-
 .node-label {
     font-family: var(--font-sketch);
     font-size: var(--text-sm);
@@ -303,25 +63,6 @@
 .node-select:focus {
     outline: none;
     border-color: var(--accent-primary);
-}
-
-/* ============================================
- * Progress Bar
- * ============================================ */
-.node-progress {
-    width: 100%;
-    height: 6px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--sketch-light);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    margin-top: var(--space-sm);
-}
-
-.node-progress-bar {
-    height: 100%;
-    background: var(--accent-primary);
-    transition: width 0.1s linear;
 }
 
 /* ============================================

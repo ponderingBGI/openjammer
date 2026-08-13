@@ -1,0 +1,81 @@
+/*
+ * Callout — a boxed message (DESIGN.md Signal-Not-Brand, Hard-Shadow).
+ * Node surface, 2px ink sketch border, hard edges (no blur). The variant
+ * accent is confined to the thick left edge and the icon; the surface and
+ * title stay neutral so the box reads as a labelled signal, not a brand panel.
+ * Styled only via semantic tokens (no literal colors), so it follows the
+ * active theme. Title uses --font-sketch (Caveat-Is-the-Voice).
+ */
+.oj-callout {
+    display: flex;
+    gap: var(--space-sm);
+    padding: var(--space-md);
+    background: var(--bg-node);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    /* The accent lives here, on the left edge only (Signal-Not-Brand). */
+    border-left-width: var(--space-xs);
+    border-left-color: var(--callout-accent);
+    border-radius: var(--radius-md);
+}
+
+/* Accent token per variant — referenced by the left border and the icon, and
+   nowhere else. Each maps to a semantic theme color. */
+.oj-callout--info {
+    --callout-accent: var(--audio-connection);
+}
+
+.oj-callout--success {
+    --callout-accent: var(--accent-success);
+}
+
+.oj-callout--warning {
+    --callout-accent: var(--accent-warning);
+}
+
+.oj-callout--danger {
+    --callout-accent: var(--accent-danger);
+}
+
+.oj-callout--tip {
+    --callout-accent: var(--accent-secondary);
+}
+
+/* Icon — the only other place the accent shows. Fixed box so the body text
+   aligns regardless of glyph size. */
+.oj-callout__icon {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: var(--text-lg);
+    height: var(--text-lg);
+    color: var(--callout-accent);
+}
+
+.oj-callout__icon svg {
+    width: 100%;
+    height: 100%;
+}
+
+.oj-callout__body {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Title stays neutral (Signal-Not-Brand: never a heading in a state color),
+   in the Caveat voice. */
+.oj-callout__title {
+    margin-bottom: var(--space-xs);
+    font-family: var(--font-sketch);
+    font-size: var(--text-md);
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.2;
+}
+
+.oj-callout__content {
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.5;
+}

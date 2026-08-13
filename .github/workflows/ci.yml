@@ -7,8 +7,9 @@ name: CI
 # Lane A (per-PR): an affected-selection `changes` job reads `oj plan --json` and
 # runs only the legs a PR actually touches. Non-PR events (push to main/canari,
 # manual dispatch) run EVERYTHING. The aggregate `gate` job is the single
-# required check: it passes when every needed job is success-or-skipped and fails
-# if any failed — so skipping an unaffected leg never weakens the gate.
+# required check: it starts immediately, watches the run live, and passes only
+# when every selected job is green — so skipping an unaffected leg never weakens
+# the gate or leaves the required check unclickable.
 #
 # The repeated checkout/apt/toolchain/cache/bun blocks are collapsed into the
 # `setup-rust` + `setup-web` composite actions (.github/actions/*).
@@ -21,7 +22,10 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # Key on the PR head SHA so a push landing during an in-progress run can never
+  # drop the new commit's run (which would leave the required "Merge gate" check
+  # unreported and block the PR). Falls back to github.ref for push events.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.head.sha || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -35,7 +39,7 @@ jobs:
       engine: ${{ steps.plan.outputs.engine }}
       web: ${{ steps.plan.outputs.web }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # history needed to diff against the base
       - name: Setup web (Bun + install)
@@ -93,6 +97,36 @@ jobs:
           else
             echo "web=false" >> "$GITHUB_OUTPUT"
           fi
+      - name: Write merge-gate selection
+        shell: bash
+        env:
+          ENGINE: ${{ steps.plan.outputs.engine }}
+          WEB: ${{ steps.plan.outputs.web }}
+        run: |
+          mkdir -p ci-gate-selection
+          {
+            echo "Affected selection"
+            if [ "$ENGINE" = "true" ]; then
+              echo "Engine (Rust workspace)"
+            fi
+            if [ "$WEB" = "true" ]; then
+              echo "Web (control plane)"
+            fi
+            if [ "$ENGINE" = "true" ] || [ "$WEB" = "true" ]; then
+              echo "Windows native build + audio gate"
+              echo "macOS engine + audio gate (arm64)"
+              echo "Doctor wiring gates (fault pipe + COI honesty)"
+            fi
+          } > ci-gate-selection/expected-jobs.txt
+          echo "Merge gate expects:"
+          sed 's/^/  - /' ci-gate-selection/expected-jobs.txt
+      - name: Upload merge-gate selection
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ci-gate-selection
+          path: ci-gate-selection/expected-jobs.txt
+          if-no-files-found: error
+          retention-days: 1
 
   engine:
     name: Engine (Rust workspace)
@@ -100,7 +134,7 @@ jobs:
     if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Rust (stable + nightly wasm leg)
         uses: ./.github/actions/setup-rust
         with:
@@ -112,12 +146,30 @@ jobs:
       - name: Stage Pi sidecar resource dir (bundle-only)
         shell: bash
         run: mkdir -p src-tauri/binaries
+      - name: RNG-ban gate (seed-reproducibility, mirrors the libm ban)
+        # Forbid global/thread entropy in the RT/DSP core so a DST run stays
+        # replayable from one seed. Pure bash, no toolchain needed.
+        run: bash scripts/ci/check-rng-ban.sh
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy (-D warnings)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        # Exclude oj-tauri from the broad workspace pass because the desktop shell
+        # has its own feature gates below: fast scaffold by default, pure-Rust CLAP
+        # for real hosting code, and JUCE only in installer/release jobs. Keeping the
+        # shell out of the catch-all avoids accidental feature unification noise.
+        run: cargo clippy --workspace --exclude oj-tauri --all-targets -- -D warnings
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --exclude oj-tauri
+      # RT no-alloc gate (mirrors `just test-rt`). nextest's process-per-test
+      # isolation is STRICTLY safer than `cargo test`'s shared process for the
+      # global-allocator swap `assert_no_alloc` installs. A REQUIRED per-PR check
+      # via the aggregate `gate` — an RT-path heap regression fails the merge.
+      - name: Install cargo-nextest (no-alloc gate)
+        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2
+        with:
+          tool: cargo-nextest
+      - name: RT no-alloc gate (assert_no_alloc)
+        run: cargo nextest run -p ojcore
       - name: no_std core builds (wasm-friendly)
         run: cargo build -p ojcore --no-default-features
       - name: wasm32 build
@@ -135,10 +187,15 @@ jobs:
         # real hosting code. This compiles, lints, and tests the REAL pure-Rust
         # CLAP backend (clack, MIT — no C++/CMake) so the plugin-host path stays
         # green on every commit. The JUCE VST3/AU backend (`--features juce`) needs
-        # CMake + a C++ toolchain + the VST3 SDK and is built on the founder's rig.
+        # CMake + a C++ toolchain + the VST3 SDK and is exercised by installer/release jobs.
         run: |
           cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings
           cargo test -p ojhost --features clap-host
+          # The desktop shell (oj-tauri) is excluded from the workspace gate above.
+          # Lint + test it here with the pure-Rust CLAP backend so the IPC surface +
+          # commands stay green while normal `bun native` remains scaffold-fast.
+          cargo clippy -p oj-tauri --no-default-features --features plugin-host-clap --all-targets -- -D warnings
+          cargo test -p oj-tauri --no-default-features --features plugin-host-clap
 
   web:
     name: Web (control plane)
@@ -146,7 +203,7 @@ jobs:
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup web (Bun + install)
         uses: ./.github/actions/setup-web
       - name: Typecheck
@@ -155,8 +212,36 @@ jobs:
         run: bun run lint
       - name: Test
         run: bun run test:run
-      - name: Build
-        run: bun run build
+      # The `oj` CLI's own tests use `bun:test` + `Bun.file` (they test a Bun program),
+      # so they run under `bun test`, not vitest — and were SILENTLY UNCOLLECTED until
+      # now (hiding a real prereqs drift). The `test-collection` doctor gate keeps every
+      # test file mapped to a runner so none is ever born dead again.
+      - name: CLI tests (bun)
+        run: bun run test:cli
+      - name: Permission-gate security tests (node --test)
+        run: bun run test:pi-ext
+      # Build-warning gate: the production build must emit ZERO warnings. A clean
+      # build is part of the covenant — a chunk-size, browserslist, or deprecation
+      # notice is cosmetic noise that erodes trust and, left unchecked, creeps back.
+      # We capture the FULL build output (stdout+stderr), then fail if any known
+      # warning signature appears. This is fail-closed by signature, not a blanket
+      # "any line with 'warn'": we match the specific notices Vite/Rollup/browserslist
+      # emit so a legitimate filename containing "warning" can't false-trip it.
+      #   - chunk-size .......... "(!) Some chunks are larger than" / "larger than N kB"
+      #   - browserslist ........ "Browserslist: browsers data" / "is N months old"
+      #   - rollup/vite warns ... lines beginning with "warning" or "(!)"
+      #   - deprecations ........ "deprecat" (DEP00xx, "is deprecated", etc.)
+      # The build still writes dist/ for the e2e step below.
+      - name: Build (zero-warning gate)
+        shell: bash
+        run: |
+          set -o pipefail
+          bun run build 2>&1 | tee build.log
+          if grep -niE 'Some chunks are larger than|larger than [0-9]+ ?kB|Browserslist: browsers data|caniuse-lite\) is [0-9]+ months? old|months? old\. Please run|^[[:space:]]*\(!\)|^[[:space:]]*warning|deprecat' build.log; then
+            echo "::error::Production build emitted a warning (see matched lines above). Fix it honestly — do NOT raise the chunk-size limit or silence browserslist without verifying the data is already at the latest published version."
+            exit 1
+          fi
+          echo "Build emitted zero warnings — gate GREEN."
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
       - name: Production PWA smoke test
@@ -165,10 +250,18 @@ jobs:
   windows-native:
     name: Windows native build + audio gate
     needs: changes
-    if: needs.changes.outputs.engine == 'true'
+    # Affected+: the Windows desktop app bundles the web frontend AND links the
+    # engine, so it must re-run when EITHER tier is affected. `engine` already
+    # subsumes `src-tauri/` changes (they select the fmt/clippy/test recipes ->
+    # engine=true in the `changes` job), so engine OR web covers engine, the
+    # Tauri shell, and the bundled frontend/IPC surface — closing the gap where a
+    # web-only IPC-contract change skipped the costliest runner. Non-PR and
+    # untrustworthy diffs set both outputs true (fail-closed), so this still runs
+    # everything then and never fires on a docs-only PR.
+    if: needs.changes.outputs.engine == 'true' || needs.changes.outputs.web == 'true'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup web (Bun + install)
         uses: ./.github/actions/setup-web
       - name: Setup Rust (stable)
@@ -178,30 +271,86 @@ jobs:
       - name: Stage Pi sidecar resource dir (bundle-only)
         shell: bash
         run: mkdir -p src-tauri/binaries
-      - name: Build the native desktop app (oj-tauri)
+      - name: Build the native desktop app (oj-tauri, fast scaffold host)
         run: cargo build -p oj-tauri
       - name: Engine tests on Windows
         run: cargo test -p ojcore -p ojinstrument -p ojcore-native
       - name: Offline audio render gate (Windows, device-free)
         run: cargo run -p ojcore-native --bin render --features demo -- ci-render.wav 2
 
-  gate:
-    name: Merge gate
-    # The SINGLE required check. Runs always so it can adjudicate skipped legs.
-    needs: [changes, engine, web, windows-native]
-    if: always()
+  macos-native:
+    name: macOS engine + audio gate (arm64)
+    needs: changes
+    # macOS + arm64 coverage: CoreAudio's cpal path AND the arm64 libm ULP band
+    # the golden fingerprints depend on. A REQUIRED leg of the `gate` aggregator
+    # (in its `needs`): it runs on the free standard M1 runner — `-large`/`-xlarge`
+    # macOS runners BILL even on public repos, so this stays on the free standard
+    # label.
+    if: needs.changes.outputs.engine == 'true' || needs.changes.outputs.web == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup Rust (stable)
+        uses: ./.github/actions/setup-rust
+      - name: Engine tests on macOS (arm64)
+        run: cargo test -p ojcore -p ojinstrument -p ojcore-native
+      - name: Offline audio render gate (macOS, device-free)
+        run: cargo run -p ojcore-native --bin render --features demo -- "${RUNNER_TEMP}/ci-render.wav" 2
+
+  doctor:
+    name: Doctor wiring gates (fault pipe + COI honesty)
+    # Least-privilege: this job only reads the checked-out tree to run pure-TS
+    # gates — it needs no write scopes. Set explicitly so it never inherits a
+    # broader repository default.
+    permissions:
+      contents: read
+    needs: changes
+    # Affected+: the fault-pipe connectivity gate guards the native drain (engine
+    # /src-tauri surface) AND the ring ingest (web surface), so it must re-run when
+    # EITHER tier is affected. Non-PR and untrustworthy diffs set both true
+    # (fail-closed), so this still runs everything then and never fires on a
+    # docs-only PR.
+    if: needs.changes.outputs.engine == 'true' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Require every needed job to be success-or-skipped
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # This job only reads the tree to run pure-TS gates (no authenticated git
+          # ops), so don't persist the token into .git/config — least token surface.
+          persist-credentials: false
+      - name: Setup web (Bun + install)
+        uses: ./.github/actions/setup-web
+      # Pure-TS doctor checks only (no Rust toolchain needed): the fault-pipe
+      # connectivity gate (poll_events -> ingestEngineEvent must stay wired
+      # end-to-end so a silent-dropout regression can never ship green), the
+      # PrimitiveKind SSOT set-equality, and the COOP/COEP header presence. A
+      # `fail` exits non-zero and blocks the merge; `warn`/`skip` do not.
+      - name: Fault pipe wired end-to-end (connectivity gate)
+        run: bun scripts/oj/index.ts doctor --check fault-pipe-connectivity --json
+      - name: PrimitiveKind SSOT set-equality
+        run: bun scripts/oj/index.ts doctor --check ssot-set-equality --json
+      - name: COOP/COEP cross-origin isolation headers
+        run: bun scripts/oj/index.ts doctor --check coi-headers --json
+      - name: No born-dead tests (every test file has a CI runner)
+        run: bun scripts/oj/index.ts doctor --check test-collection --json
+
+  gate:
+    name: Merge gate
+    # The SINGLE required check. It starts immediately, then watches the selected
+    # CI legs through the GitHub API so the required check is clickable while the
+    # expensive jobs are still running.
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Self-test merge-gate predicate
+        run: bash scripts/ci/gate-selftest.sh
+      - name: Watch selected CI jobs
         shell: bash
         env:
-          RESULTS: ${{ join(needs.*.result, ',') }}
-        run: |
-          echo "needed job results: $RESULTS"
-          # Affected-selection legitimately SKIPS unaffected legs; only a real
-          # failure or cancellation may block a merge.
-          if echo "$RESULTS" | tr ',' '\n' | grep -qE 'failure|cancelled'; then
-            echo "::error::A required CI job failed — the merge gate is RED."
-            exit 1
-          fi
-          echo "All required jobs passed or were skipped — merge gate GREEN."
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci/gate-watch.sh

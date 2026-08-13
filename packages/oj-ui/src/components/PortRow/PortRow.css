@@ -1,0 +1,72 @@
+/*
+ * PortRow — DESIGN.md §5. A port dot beside its name inside a node body.
+ * `input` reads [dot][label] left-aligned; `output` reverses to [label][dot]
+ * right-aligned so the dot always hugs the node edge it wires to. Caveat label,
+ * --space-xs gap. Styled only via semantic tokens (no literal colors), so it
+ * follows the active theme.
+ */
+.oj-port-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.oj-port-row--input {
+    flex-direction: row;
+    justify-content: flex-start;
+    text-align: left;
+}
+
+.oj-port-row--output {
+    flex-direction: row-reverse;
+    justify-content: flex-start;
+    text-align: right;
+}
+
+/* Caveat voice — the friendly label naming what the dot wires. */
+.oj-port-row__label {
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    line-height: 1.2;
+}
+
+/* Visually hidden but kept in the DOM for assistive tech. */
+.oj-port-row__label--hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* A live connection nudges the label to the primary ink — a quiet confirm
+   that pairs with the Port's brighten/glow rather than standing alone. */
+.oj-port-row.is-connected .oj-port-row__label {
+    color: var(--text-primary);
+}
+
+/* A placeholder row reads as a faint invitation, matching its dashed dot. */
+.oj-port-row.is-placeholder .oj-port-row__label {
+    color: var(--text-muted);
+}
+
+/* A GATED row (declared but not engine-wired yet) reads as visibly inert: dimmed,
+   so the player sees the surface exists but won't wire a connection that would
+   silently do nothing. Wiring is already prevented by the gated path omitting the
+   Port's pointer handlers plus the canConnect guard, so the row stays hoverable —
+   `pointer-events: none` here would have killed the hover the `title` (the why)
+   needs, so the explanation could never show. cursor:not-allowed signals it. */
+.oj-port-row.is-disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.oj-port-row.is-disabled .oj-port-row__label {
+    color: var(--text-muted);
+    font-style: italic;
+}

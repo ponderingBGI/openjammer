@@ -18,7 +18,7 @@ name = "openjammer"
 path = "src/main.rs"
 
 [build-dependencies]
-# Pinned from a fresh `cargo search` at scaffold time (governing principle #9).
+# Versions pinned deliberately (governing principle #9).
 tauri-build = { version = "2.6.2", features = [] }
 
 [dependencies]
@@ -27,15 +27,19 @@ tauri-build = { version = "2.6.2", features = [] }
 # `ojcore-native` owns the cpal AudioHost; `ojinstrument` ships the Osc/Sampler/
 # Karplus loaders; `ojproto` is the control-rate IR/command wire type.
 ojcore = { path = "../crates/ojcore" }
-ojcore-native = { path = "../crates/ojcore-native" }
+# `persist` turns on the L3 SQLite/FTS5 local log store (bundled SQLite, no system
+# dep). The shell wires it into the off-RT event drain as the queryable durable
+# local tail (the NDJSON remains the post-crash SSOT). LOCAL-ONLY, never network,
+# and fed ONLY off the audio thread (the control-side `drain_events`).
+ojcore-native = { path = "../crates/ojcore-native", features = ["persist"] }
 ojinstrument = { path = "../crates/ojinstrument" }
 ojproto = { path = "../crates/ojproto" }
 
 # --- third-party plugin host (U-JUCE) ----------------------------------------
-# Scans for and hosts VST3 / CLAP (+ AU on macOS) plugins as ojcore nodes.
-# NATIVE-ONLY. Default features = scaffold (scan returns empty, no native deps);
-# enable real hosting with `--features ojhost/clap-host` (pure-Rust CLAP) or
-# `--features ojhost/juce` (bundled C++ JUCE 8) — see crates/ojhost/README.md.
+# Scans for and hosts VST2/VST3/CLAP/AU plugins as ojcore nodes (NATIVE-ONLY).
+# Local dev defaults to the scaffold backend so `bun native` stays fast; release
+# and installer jobs opt into `plugin-host-juce`, while `plugin-host-clap` gives a
+# pure-Rust CLAP-only backend for CI and local plugin-host work.
 ojhost = { path = "../crates/ojhost" }
 
 # --- AI DSP-node authoring (U20) ---------------------------------------------
@@ -62,24 +66,88 @@ tauri-plugin-opener = "2.5.4"
 serde = { workspace = true, features = ["std"] }
 serde_json = "1.0.150"
 
+# --- off-RT structured logging (L1) ------------------------------------------
+# The shell brings up the `tracing` NDJSON sink (`ojcore_native::init_logging`)
+# and routes a panic hook through it. STD-only, OFF the audio thread — the audio
+# callback owns the engine inside cpal and has no `tracing` dependency, so a
+# `tracing::*` call there cannot compile. `tracing-appender` is needed only to
+# name the `WorkerGuard` flush-guard parked in managed state.
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+
 [features]
+# Fast local default: the native app opens with the real ojcore engine but the
+# third-party plugin host in scaffold mode (scan returns empty, no CMake/JUCE
+# build). `bun native` must feel like a dev server, not a minutes-long installer
+# build. Release/canary installer jobs opt into `plugin-host-juce` explicitly;
+# local plugin-host testing can use `bun native --all` / `--plugins` (JUCE) or `--clap`.
+default = ["plugin-host-scaffold"]
+plugin-host-scaffold = []
+plugin-host-juce = ["ojhost/juce"]
+plugin-host-clap = ["ojhost/clap-host"]
+
+# NOTE: the dev/test crash-boundary harness is gated on the ENV VAR
+# `OJHOST_FAULT_INJECT=1` (read by ojhost's build.rs), NOT a cargo feature — so it
+# reuses the existing JUCE build instead of forcing a second full clone+rebuild.
+# Run `OJHOST_FAULT_INJECT=1 bun native`; arm via `debug_arm_plugin_fault`. A no-op
+# in any build without the var set (the fault code isn't compiled in).
+
 # This feature must be enabled when building the app in production, so the
 # webview loads the bundled frontend instead of the dev server. Tauri's CLI sets
 # it via `tauri build`; harmless in `cargo build`.
 custom-protocol = ["tauri/custom-protocol"]
 
+# macOS auto-update activation. OFF by default — a non-notarized macOS
+# self-updater would be Gatekeeper-quarantined. CI sets this ONLY when Apple
+# signing secrets exist (alongside the notarized build), flipping macOS
+# auto-update on. Adding the secrets activates it with no code change
+# (OWNER-PROVISIONING.md §4).
+apple-notarized = []
+
+# --- scoped panic guard (Phase 4) --------------------------------------------
+# `unwrap()`/`expect()` panic the WHOLE app — on stage that is a dead set, not a
+# recoverable glitch. So the desktop shell, where the audited panic risk lives
+# (subprocess spawn, IPC, env, fs), must surface a `Result`/honest fallback
+# instead. This deny is DELIBERATELY scoped to `oj-tauri` ONLY and is NEVER
+# promoted workspace-wide: the no_std DSP crates (`ojcore`, `ojcore-dsp`, …) are
+# full of legitimate INFALLIBLE unwraps on compile-time-proven invariants, and a
+# workspace deny would push silent `.unwrap_or(default)` fallbacks into the audio
+# path — a lie told to the performer's hands (code-values #4/#6). Tests are
+# exempt (their `unwrap`/`expect` IS the assertion); a handful of production sites
+# whose precondition is a build-time invariant carry a justified, documented
+# `#[allow(clippy::expect_used)]` at the call site.
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
 
+# --- Windows process hygiene (Phase 4) ---------------------------------------
+# Job Object APIs so the Pi agent child is reaped WHOLE-TREE on kill/drop (a bare
+# `Child::kill()` orphans descendants on Windows). Win-only; the same crate Tauri
+# already pulls transitively (no new toolchain). CONTROL-PLANE only, never on the
+# audio RT path. `CREATE_NO_WINDOW` itself needs no crate (it's in `std`).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
 # --- native auto-updater (R2/R4) ---------------------------------------------
-# Win + Linux ONLY. macOS is intentionally excluded: without an Apple Developer
-# ID + notarization Gatekeeper quarantines a swapped `.app`, so the macOS updater
-# stays compiled-off and Mac ships a manual `.dmg` (OWNER-PROVISIONING.md §4).
-# The download-complete path hands off to `ojcore_native::UpdateGate` so an
-# install never swaps the binary out from under live audio (a held note beats a
-# glitch). Owner-enabled: needs the split stable/canary minisign keys + the
-# update endpoints (OWNER-PROVISIONING.md §3) before it does anything.
-[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+# ACTIVE on Windows + Linux, and ready on macOS the moment the build is notarized
+# (the `apple-notarized` feature, set by CI when Apple signing secrets are present
+# — OWNER-PROVISIONING.md §4). The updater code is cfg-gated on
+# `any(windows, linux, macos+apple-notarized)`, so a non-notarized macOS build
+# never ships a Gatekeeper-broken self-updater. These deps build on every desktop
+# target; on a non-updating macOS build the updater code is off and they sit
+# unused. Downloads hand off to `ojcore_native::UpdateGate` so an install never
+# swaps the binary out from under live audio (a held note beats a glitch).
+# Owner-enabled: needs the split stable/canary minisign keys + endpoints
+# (OWNER-PROVISIONING.md §3).
+[target.'cfg(any(windows, target_os = "linux", target_os = "macos"))'.dependencies]
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
 semver = "1.0.28"
 tauri-plugin-updater = "2.10.1"

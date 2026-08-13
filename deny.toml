@@ -1,0 +1,53 @@
+# cargo-deny policy (Track A P0a — supply-chain gate).
+#
+# Closes the supply-chain gap: bans (duplicate/yanked crates), licenses
+# (allowlist), and sources (only the crates.io registry) are checked on every PR
+# that touches Cargo metadata; advisories are checked NIGHTLY (a fresh CVE must
+# never red-wall an unrelated PR). The PR license/bans/sources job is now a REQUIRED
+# check (see supply-chain.yml). cargo-deny v2 has no `deny` list: the allow-list below
+# is exhaustive, so any license not listed — SSPL, BUSL, Commons-Clause, CC-BY-NC, etc.
+# — fails the gate by omission.
+
+[advisories]
+version = 2
+# Run live against the RustSec DB in the nightly lane (continue-on-error there).
+ignore = []
+
+[licenses]
+version = 2
+# Permissive baseline covering the licenses present in the Rust + audio dep tree
+# (confirmed by CI). The workspace itself is AGPL-3.0-only WITH the OpenJammer Plugin
+# Exception — Cargo.toml keeps the bare `AGPL-3.0-only` SPDX id and the exception is
+# expressed out-of-band (LICENSING.md §10). Anything not listed here is denied.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "MPL-2.0",
+    "CC0-1.0",
+    "BSL-1.0",
+    "0BSD",
+    # Permissive data license carried by webpki-root-certs (root cert bundle, via
+    # tauri/reqwest) — confirmed from the first CI run of this gate.
+    "CDLA-Permissive-2.0",
+    "AGPL-3.0",
+    "AGPL-3.0-only",
+]
+confidence-threshold = 0.8
+
+[bans]
+# Duplicate versions bloat the binary and the audit surface — surface them, but
+# do not hard-fail (a transitive dep we don't control often forces a duplicate).
+multiple-versions = "warn"
+wildcards = "warn"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

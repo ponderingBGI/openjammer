@@ -21,7 +21,7 @@
  *     that drive note triggering (RtCommands), not audio wires. We mirror that:
  *     audio edges become audio `IrEdge`s between audio IrNodes; control edges
  *     are emitted as control `IrEdge`s only when BOTH endpoints survive as
- *     IrNodes (e.g. an amplifier's `gain-in`), and are otherwise dropped (the
+ *     IrNodes (a node with a real control input), and are otherwise dropped (the
  *     control endpoint is a keyboard/MIDI/visual node with no IrNode).
  *
  *   • HIERARCHY + BUNDLES are FLATTENED. Purely-structural nodes
@@ -45,13 +45,16 @@
 
 import type { Connection, GraphNode, NodeType, PortDefinition } from '../../engine/types';
 import {
+    effectLoweringFor,
+    effectParamsFromData,
     manifestFor,
     manifestForDynamic,
+    manifestIdFor,
     type ParamDecl,
     type PluginManifest,
     type PrimitiveKind,
 } from '../../engine/manifest';
-import { AI_WASM_ID_PREFIX, getDynamicPlugin } from '../../engine/dynamicRegistry';
+import { AI_WASM_ID_PREFIX, HOSTED_PLUGIN_ID_PREFIX, getDynamicPlugin } from '../../engine/dynamicRegistry';
 import { instrumentUsesKarplus } from '../defaultInstrument';
 import type {
     ConnectionType,
@@ -85,6 +88,12 @@ export interface EmitOptions {
      * fallback, so an unrunnable `WasmHost` node never reaches a loader-less engine.
      */
     codeNodesAsWasmHost?: boolean;
+    /**
+     * When set, hosted plugin dynamic nodes (`host.plugin.*`) lower to their real
+     * `PluginHost` manifests. Only the native executor sets this; browser/default
+     * paths keep the closed effect fallback so loader-less graphs stay runnable.
+     */
+    hostedPluginsAsPluginHost?: boolean;
 }
 
 /**
@@ -188,6 +197,7 @@ export function emitWithIndex(
     // 2) Classify every node: which become IrNodes (audio DSP/IO) vs which are
     //    structural passthroughs that get flattened.
     const codeNodesAsWasmHost = opts.codeNodesAsWasmHost ?? false;
+    const hostedPluginsAsPluginHost = opts.hostedPluginsAsPluginHost ?? false;
     const manifestByType = new Map<NodeType, PluginManifest>();
     const manifestOf = (type: NodeType): PluginManifest => {
         let m = manifestByType.get(type);
@@ -205,7 +215,11 @@ export function emitWithIndex(
      */
     const manifestForNode = (node: GraphNode): PluginManifest => {
         const pid = node.pluginId;
-        if (codeNodesAsWasmHost && pid && pid.startsWith(AI_WASM_ID_PREFIX)) {
+        if (
+            pid &&
+            ((codeNodesAsWasmHost && pid.startsWith(AI_WASM_ID_PREFIX)) ||
+                (hostedPluginsAsPluginHost && pid.startsWith(HOSTED_PLUGIN_ID_PREFIX)))
+        ) {
             const def = getDynamicPlugin(pid);
             if (def) return manifestForDynamic(pid, def);
         }
@@ -236,6 +250,14 @@ export function emitWithIndex(
         // plucked live, per note). The executors skip sample-binding these.
         if (kind === 'Sampler' && instrumentUsesKarplus(node.type, node.data as Record<string, unknown> | undefined)) {
             kind = 'KarplusString';
+        }
+        // EffectNode lowering is DATA-DRIVEN by `effectType`: distortion->Waveshaper,
+        // filter->Biquad, reverb->Convolution, delay->Delay (the real ojcore
+        // primitives). Skip AI-authored code nodes (WasmHost), which keep their own
+        // manifest kind. The kind drives both the RT kernel and the backend remap
+        // (manifestIdForKind), so the right loader is selected per chosen effect.
+        if (node.type === 'effect' && manifest.id === manifestIdFor('effect')) {
+            kind = effectLoweringFor(node.data as Record<string, unknown> | undefined).kind;
         }
         emitted.set(id, { idx: nextIdx as NodeIdx, node, manifest, kind });
         nextIdx++;
@@ -292,6 +314,27 @@ export function emitWithIndex(
         syntheticMaster,
     });
 
+    // 6b) MUL: a Multiply node's second input ('in-2' / port 1) being connected
+    // switches its kernel from "× the on-node number" to "× the incoming signal"
+    // (a VCA). The kernel can't detect connectedness — a disconnected input reaches
+    // `process` as a zero-filled buffer, indistinguishable from a connected-but-
+    // silent one — so derive it HERE from the resolved edges and bake it as the
+    // FACTOR_ACTIVE flag param (multiply_param::FACTOR_ACTIVE = 1). Without this an
+    // unconnected 'in-2' would multiply the signal by silence => out = 0.
+    const MULTIPLY_FACTOR_ACTIVE_ID = 1;
+    const nodesWithSecondInput = new Set<NodeIdx>();
+    for (const e of edges) {
+        if (e.kind === 'Audio' && e.to_port === 1) nodesWithSecondInput.add(e.to_node);
+    }
+    for (const irNode of irNodes) {
+        if (irNode.kind !== 'Multiply') continue;
+        const active = nodesWithSecondInput.has(irNode.id) ? 1 : 0;
+        irNode.params = [
+            ...irNode.params.filter((p) => p.id !== MULTIPLY_FACTOR_ACTIVE_ID),
+            { id: MULTIPLY_FACTOR_ACTIVE_ID, value: active },
+        ];
+    }
+
     // The id -> NodeIdx interning (surviving nodes only).
     const index: NodeIdxMap = new Map();
     for (const [id, e] of emitted) index.set(id, e.idx);
@@ -316,7 +359,15 @@ export function emitWithIndex(
  */
 function buildIrNode(e: EmittedNode, demoteMaster: boolean): IrNode {
     const { idx, node, manifest } = e;
-    const params = paramsFromData(node, manifest.params);
+    // EffectNode params live under `node.data.params.*` and address the chosen
+    // effect's kernel param ids (resolved by `effectParamsFromData`), NOT the
+    // top-level `node.data[name]` the generic `paramsFromData` reads. Routing them
+    // through the generic path produced ZERO params (every slider dead). Resolve
+    // them per chosen effect; any other node keeps the generic manifest-decl path.
+    const isEffect = node.type === 'effect' && manifest.id === manifestIdFor('effect');
+    const params = isEffect
+        ? effectParamsFromData(node.data as Record<string, unknown> | undefined)
+        : paramsFromData(node, manifest.params);
     if (demoteMaster) {
         return {
             id: idx,
@@ -344,12 +395,30 @@ function buildIrNode(e: EmittedNode, demoteMaster: boolean): IrNode {
  * Resolve numeric params from `node.data` against the manifest `ParamDecl[]`.
  * A decl whose name is present (and finite-numeric) in `data` carries its live
  * value; otherwise the decl default is used. Addressed by the decl `id` (u16).
+ *
+ * The resolved value is CLAMPED to the decl's declared `[min,max]` envelope, so a
+ * UI / AI / imported `node.data` value can never drive a kernel param outside the
+ * range it declares. For the multiplier `factor` this floors a negative multiplier
+ * up to 0 (a negative is meaningless once ×0 already mutes) with no musical ceiling
+ * — the kernel accepts any float, so this seam is where the floor is honoured.
  */
 function paramsFromData(node: GraphNode, decls: ParamDecl[]): Param[] {
     const out: Param[] = [];
+    const data = node?.data ?? {};
     for (const decl of decls) {
-        const raw = node.data[decl.name];
-        const value = typeof raw === 'number' && Number.isFinite(raw) ? raw : decl.default;
+        const raw = data[decl.name];
+        // Coerce a boolean node.data field (e.g. a speaker's `isMuted`) to 0/1 so a
+        // declared param can carry it; otherwise a finite number, else the default.
+        const resolved =
+            typeof raw === 'boolean'
+                ? raw
+                    ? 1
+                    : 0
+                : typeof raw === 'number' && Number.isFinite(raw)
+                  ? raw
+                  : decl.default;
+        // Clamp to the declared range (no phase-invert, no runaway over-unity).
+        const value = Math.min(decl.max, Math.max(decl.min, resolved));
         out.push({ id: decl.id, value });
     }
     return out;
@@ -392,8 +461,12 @@ function portCounts(manifest: PluginManifest): { n_in: number; n_out: number } {
             minIn = 1;
             minOut = 1;
             break;
-        // Mixer: two in, one out.
+        // Mixer / difference / product: two in, one out. (Add pre-mixes its two
+        // sources into one port; Subtract and Multiply keep in0 / in1 distinct, so
+        // out = in0 - in1 and out = in0 * in1 respectively.)
         case 'Add':
+        case 'Subtract':
+        case 'Multiply':
             minIn = 2;
             minOut = 1;
             break;
@@ -509,9 +582,9 @@ function buildEdges(args: BuildEdgesArgs): IrEdge[] {
             }
         } else {
             // Control edge: only meaningful if the TARGET is also a real IrNode
-            // with a control surface (e.g. amplifier gain-in). Otherwise the
-            // target is a keyboard/visual/instrument-bundle endpoint driven by
-            // RtCommands, not a routed buffer — drop it.
+            // with a control surface. Otherwise the target is a keyboard/visual/
+            // instrument-bundle endpoint driven by RtCommands, not a routed buffer
+            // — drop it.
             const targetEmitted = emitted.get(conn.targetNodeId);
             if (!targetEmitted) continue;
             pushEdge({
@@ -609,7 +682,7 @@ function portConcreteType(port: PortDefinition | undefined): 'audio' | 'control'
  * or its trailing component.
  */
 function findPort(node: GraphNode | undefined, portId: string): PortDefinition | undefined {
-    if (!node) return undefined;
+    if (!node?.ports) return undefined;
     const direct = node.ports.find((p) => p.id === portId);
     if (direct) return direct;
     const tail = portId.includes(':') ? portId.slice(portId.indexOf(':') + 1) : portId;
@@ -638,7 +711,11 @@ function audioPortIndex(
         if (tail === 'in-1') return 0;
     }
 
-    const audioPorts = node.ports.filter(
+    // Defensive: a node missing its `ports` (a malformed / mid-construction node
+    // that slips into a reconcile) must NOT throw out of graph lowering — that
+    // would abort the store's listener loop and wedge the canvas. Fall back to the
+    // canonical single-audio-port index 0.
+    const audioPorts = (node?.ports ?? []).filter(
         (p) =>
             p.direction === direction &&
             (p.type === 'audio' || (p.type === 'universal' && p.resolvedType === 'audio')),

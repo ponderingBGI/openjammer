@@ -1,8 +1,8 @@
-// scripts/oj/scaffold.ts — STUB.
+// scripts/oj/scaffold.ts — planned (Phase 3).
 //
 // `oj scaffold node|dsp-kernel` will write the coupled files from templates/ and
 // AST-insert (via ts-morph, anchored on stable marker comments) the registry
-// entry + NodeType union member + BOTH NodeWrapper switch cases (:383, :439),
+// entry + NodeType union member + BOTH NodeWrapper `switch (node.type)` blocks,
 // then run `oj doctor --from-files <written>` to prove coupling. This requires
 // ts-morph AST splicing which is deferred to Phase 3.
 //

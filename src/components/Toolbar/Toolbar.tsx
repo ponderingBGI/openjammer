@@ -9,9 +9,14 @@ import { useCanvasStore } from '../../store/canvasStore';
 import { useAudioStore } from '../../store/audioStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useTransportStore } from '../../store/transportStore';
+import { useArrangementStore } from '../../store/arrangementStore';
+import { arrangementForExport, readArrangement } from '../../song/project';
 import { exportWorkflow, downloadWorkflow, loadWorkflowFromFile, importWorkflow } from '../../engine/serialization';
+import { getExecutor } from '../../audio/executor';
 import { DropdownMenu, type MenuItemOrSeparator } from './DropdownMenu';
 import { useOnlineStatus } from '../../hooks/usePWA';
+import { Button } from '@openjammer/oj-ui';
+import { EngineHealthDot } from '../EngineHealthDot/EngineHealthDot';
 import './Toolbar.css';
 
 export function Toolbar() {
@@ -59,9 +64,21 @@ export function Toolbar() {
     }, [toggleGlobalPause]);
 
     // Export workflow
-    const handleExport = useCallback(() => {
+    const handleExport = useCallback(async () => {
         try {
-            const workflow = exportWorkflow(nodes, connections, 'OpenJammer Workflow');
+            // Capture each hosted plugin's opaque state into node.data first (the
+            // oj.state save half) so the export persists it and a reopen restores the
+            // plugin. No-op on the browser tier; non-fatal if the engine declines.
+            await getExecutor().capturePluginStates();
+            // Persist the timeline alongside the graph (FROZEN-1): a reopened export
+            // keeps its whole arrangement.
+            const arr = useArrangementStore.getState().arrangement;
+            const workflow = exportWorkflow(
+                nodes,
+                connections,
+                'OpenJammer Workflow',
+                arr ? arrangementForExport(arr) : undefined,
+            );
             downloadWorkflow(workflow);
             toast.success('Workflow exported');
         } catch (err) {
@@ -81,8 +98,11 @@ export function Toolbar() {
 
         try {
             const workflow = await loadWorkflowFromFile(file);
-            const { nodes: importedNodes, connections: importedConnections } = importWorkflow(workflow);
+            const { nodes: importedNodes, connections: importedConnections, arrangement } =
+                importWorkflow(workflow);
             loadGraph(importedNodes, importedConnections);
+            // Hydrate the timeline (or clear it when the import has none) — FROZEN-1.
+            useArrangementStore.getState().setArrangement(readArrangement(arrangement) ?? null);
         } catch (err) {
             console.error('Failed to import workflow:', err);
             toast.error('Failed to import workflow. Please check the file format.');
@@ -91,7 +111,7 @@ export function Toolbar() {
         e.target.value = '';
     }, [loadGraph]);
 
-    // New workflow (legacy - just clears canvas)
+    // New Canvas — the project-less workflow: just clears the canvas.
     const handleNew = useCallback(() => {
         if (nodes.size > 0) {
             if (!confirm('Clear current workflow? This cannot be undone.')) {
@@ -142,6 +162,8 @@ export function Toolbar() {
             } else {
                 clearGraph();
             }
+            // Hydrate the timeline from the project (or clear it when absent) — FROZEN-1.
+            useArrangementStore.getState().setArrangement(readArrangement(manifest.arrangement) ?? null);
             resetView();
         } catch (err) {
             if ((err as DOMException).name !== 'AbortError') {
@@ -172,10 +194,13 @@ export function Toolbar() {
         }
 
         try {
+            const arr = useArrangementStore.getState().arrangement;
             const graphData = {
                 nodes: Array.from(nodes.values()),
                 edges: Array.from(connections.values()),
                 viewport: { x: 0, y: 0, zoom },
+                // The timeline rides along (FROZEN-1): a reopened project keeps its song.
+                arrangement: arr ? arrangementForExport(arr) : undefined,
             };
             await saveProject(graphData);
             toast.success('Project saved');
@@ -199,6 +224,8 @@ export function Toolbar() {
             } else {
                 clearGraph();
             }
+            // Hydrate the timeline from the project (or clear it when absent) — FROZEN-1.
+            useArrangementStore.getState().setArrangement(readArrangement(manifest.arrangement) ?? null);
             resetView();
         } catch (err) {
             console.error('Failed to open recent project:', err);
@@ -270,7 +297,7 @@ export function Toolbar() {
             },
             { type: 'separator' as const },
         ] as MenuItemOrSeparator[] : []),
-        // Legacy workflow operations
+        // File-based workflow (project-less): new canvas, import/export workflow JSON
         {
             id: 'new',
             label: 'New Canvas',
@@ -351,46 +378,46 @@ export function Toolbar() {
             <div className="toolbar-separator" />
 
             {/* Undo/Redo Buttons */}
-            <button
-                className="toolbar-btn toolbar-btn-icon"
-                onClick={undo}
-                title="Undo (Ctrl+Z)"
-            >
+            <Button variant="ghost" iconOnly className="toolbar-btn-icon" onClick={undo} title="Undo (Ctrl+Z)">
                 ↶
-            </button>
-            <button
-                className="toolbar-btn toolbar-btn-icon"
-                onClick={redo}
-                title="Redo (Ctrl+Shift+Z)"
-            >
+            </Button>
+            <Button variant="ghost" iconOnly className="toolbar-btn-icon" onClick={redo} title="Redo (Ctrl+Shift+Z)">
                 ↷
-            </button>
+            </Button>
 
             <div className="toolbar-separator" />
 
             {/* Global Play/Pause */}
-            <button
-                className="toolbar-btn toolbar-btn-icon"
+            <Button
+                variant="ghost"
+                iconOnly
+                className="toolbar-btn-icon"
                 onClick={handlePlayStop}
                 disabled={!isAudioContextReady}
                 title={isGloballyPaused ? 'Resume All (Space)' : 'Pause All (Space)'}
             >
                 {isGloballyPaused ? '▶' : '⏸'}
-            </button>
+            </Button>
 
             <div className="toolbar-separator" />
 
             {/* Settings */}
-            <button
-                className="toolbar-btn toolbar-btn-icon"
+            <Button
+                variant="ghost"
+                iconOnly
+                className="toolbar-btn-icon"
                 onClick={() => window.dispatchEvent(new CustomEvent('openjammer:toggle-settings'))}
                 title="Settings"
             >
                 ⚙️
-            </button>
+            </Button>
 
             {/* Spacer to push status to right */}
             <div style={{ flex: 1 }} />
+
+            {/* Ambient engine-health signal (Phase 2) — one calm tri-state dot,
+                never a dashboard, never a modal. Opens the Audio-health readout. */}
+            <EngineHealthDot />
 
             {/* Project Status */}
             {projectName && (

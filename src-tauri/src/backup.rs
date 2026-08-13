@@ -66,7 +66,9 @@ pub fn snapshot(app: &tauri::AppHandle, version: &str, channel: &str, webview_st
     if std::fs::create_dir_all(&slot).is_err() {
         return;
     }
-    let _ = std::fs::write(slot.join("webview.json"), webview_state);
+    // Crash-safe (temp + fsync + atomic rename): a bare write here could leave a
+    // torn last-good backup if interrupted — the opposite of its purpose.
+    let _ = ojcore_native::atomic_write_path(&slot.join("webview.json"), webview_state.as_bytes());
     if let Some(agent) = agent_dir() {
         if agent.exists() {
             let _ = copy_dir(&agent, &slot.join("agent"));
@@ -78,7 +80,7 @@ pub fn snapshot(app: &tauri::AppHandle, version: &str, channel: &str, webview_st
         created_unix_ms: now_ms(),
     };
     if let Ok(json) = serde_json::to_string_pretty(&manifest) {
-        let _ = std::fs::write(slot.join("manifest.json"), json);
+        let _ = ojcore_native::atomic_write_path(&slot.join("manifest.json"), json.as_bytes());
     }
 }
 

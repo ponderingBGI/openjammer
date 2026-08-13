@@ -6,19 +6,25 @@
  * (`get_graph` / `list_node_types` / `find_nodes` / `validate_plan`) we compute the
  * REAL result with the same {@link applyToolCall} the agent uses — reads carry a
  * NO-OP undo and mutate nothing — so Pi reasons on ground truth. WRITE verbs are
- * applied by the streamed `tool-call` path (undo / single Approve-Reject / collab
- * guard intact), so here we only ACK them. That split is what keeps a single,
- * verified mutation path and avoids a double-apply.
+ * applied by the streamed `tool-call` path (live, undoable graph verbs with the
+ * collab AI-frame guard intact), so here we only ACK them. That split keeps a
+ * single verified mutation path and avoids a double-apply.
  *
  * In a plain browser `listen` resolves to null (no Tauri), so this is a no-op.
  */
 
 import { listen, getInvoke } from './tauri';
-import { applyToolCall, type DspNodeRegistrar } from './tools';
+import { applyToolCall, applyGetSignal, type DspNodeRegistrar } from './tools';
 import { createGraphStoreApi } from './graphAdapter';
 import { createPlanEnv } from './planAdapter';
 import { createEnvPort } from './envAdapter';
-import type { AgentToolCall, AgentToolName } from './types';
+import { createArrangementPort } from './arrangementAdapter';
+import {
+    isAgentToolName,
+    type AgentToolCall,
+    type AgentToolName,
+    type GetSignalArgs,
+} from './types';
 
 /** Tools that only READ — safe to run here to return real state to Pi. */
 const READ_TOOLS = new Set<AgentToolName>([
@@ -30,6 +36,8 @@ const READ_TOOLS = new Set<AgentToolName>([
     'get_logs',
     'get_diagnostics',
     'get_settings',
+    // Timeline READ: the song summary the agent grounds itself in before editing.
+    'describe_arrangement',
 ]);
 
 /** Reads never register a node; a no-op registrar satisfies the signature. */
@@ -49,22 +57,38 @@ interface BridgeCall {
  * browser). Safe to call once at app root for the session.
  */
 export async function startBridgeListener(): Promise<(() => void) | null> {
-    return listen<BridgeCall>('oj-bridge-call', (payload) => {
+    return listen<BridgeCall>('oj-bridge-call', async (payload) => {
         const invoke = getInvoke();
         if (!invoke) return;
 
         let result: { ok: boolean; data?: unknown; error?: string };
         try {
-            const name = payload.name as AgentToolName;
-            if (READ_TOOLS.has(name)) {
+            if (payload.name === 'save_self_package') {
+                // SHAPE-SELF: host-mediated self-modification, NOT a graph tool (so it
+                // is not in AGENT_TOOL_NAMES) — handled before the agent-tool guard.
+                // The Rust command writes the package + registers it cold-start-deferred.
+                const slug = await invoke('ai_save_self_package', payload.args ?? {});
+                result = { ok: true, data: { slug } };
+            } else if (!isAgentToolName(payload.name)) {
+                throw new Error(`Unsupported OpenJammer bridge tool: ${payload.name}`);
+            } else if (payload.name === 'get_signal') {
+                // The one ASYNC read: a transient meter probe needs a poll tick to
+                // settle, so it is handled outside the synchronous applyToolCall.
+                const applied = await applyGetSignal(
+                    payload.args as unknown as GetSignalArgs,
+                    createEnvPort(),
+                );
+                result = { ok: applied.ok, data: applied.data };
+            } else if (READ_TOOLS.has(payload.name)) {
                 // The read tool's args ARE its fields; mirror the streamed shape.
-                const call = { name, args: payload.args } as AgentToolCall;
+                const call = { name: payload.name, args: payload.args } as AgentToolCall;
                 const applied = applyToolCall(
                     call,
                     createGraphStoreApi(),
                     NOOP_REGISTRAR,
                     createPlanEnv(),
                     createEnvPort(),
+                    createArrangementPort(),
                 );
                 result = { ok: applied.ok, data: applied.data };
             } else {

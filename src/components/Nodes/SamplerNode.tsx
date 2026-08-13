@@ -15,13 +15,15 @@
 import { useCallback, useRef, useState, useEffect, memo } from 'react';
 import type { GraphNode, SamplerNodeData, SamplerRow, AudioClip, ClipDropTarget } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
-import { getItemFile } from '../../store/libraryStore';
+import { getItemFile, useLibraryStore } from '../../store/libraryStore';
 import { getAudioContext } from '../../audio/audioContext';
 import { getExecutor } from '../../audio/executor';
 import { useAudioClipStore, getClipBuffer } from '../../store/audioClipStore';
 import { loadClipAudio } from '../../utils/clipUtils';
 import { isSamplerNodeData } from '../../engine/typeGuards';
+import { resolvePersistedSample } from './samplerPersistence';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
+import { Port } from '@openjammer/oj-ui';
 
 interface SamplerNodeProps {
     node: GraphNode;
@@ -57,6 +59,20 @@ function formatDuration(seconds: number): string {
 
 /** Waveform resolution (number of sample points for display) */
 const WAVEFORM_RESOLUTION = 50;
+
+/**
+ * Set/clear the node's `sampleLoadError` flag (ERR-1) WITHOUT going through the
+ * React `updateNodeData` closure. Read straight from the store so we compare
+ * against the live value (never a stale render closure) and write only on a real
+ * change — no spurious version bump, no undo-history entry (this derived state is
+ * set outside any gesture, so it is correctly non-undoable). Mount-time only.
+ */
+function setLoadError(nodeId: string, value: boolean): void {
+    const store = useGraphStore.getState();
+    const current = store.nodes.get(nodeId)?.data as SamplerNodeData | undefined;
+    if (!current || !!current.sampleLoadError === value) return;
+    store.updateNodeData<SamplerNodeData>(nodeId, { sampleLoadError: value });
+}
 
 /** Parameter ranges and steps */
 const PARAM_RANGES = {
@@ -139,6 +155,16 @@ export const SamplerNode = memo(function SamplerNode({
         : defaultData;
 
     const updateNodeData = useGraphStore((s) => s.updateNodeData);
+    // Persist user-dropped PCM through the SAME project-library path that library
+    // and looper samples use (PERSIST-1): a bring-your-own sample becomes a real,
+    // re-resolvable asset whose itemId we store in node.data — never the decoded
+    // bytes — so undo-history snapshots and project size stay bounded. Read via a
+    // ref so the load callbacks don't re-create when the library store mutates.
+    const saveAudioToLibrary = useLibraryStore((s) => s.saveAudioToLibrary);
+    const saveAudioToLibraryRef = useRef(saveAudioToLibrary);
+    useEffect(() => {
+        saveAudioToLibraryRef.current = saveAudioToLibrary;
+    }, [saveAudioToLibrary]);
     const nodeRef = useRef<HTMLDivElement>(null);
     const sampleAreaRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -196,7 +222,7 @@ export const SamplerNode = memo(function SamplerNode({
             }
 
             // Check if buffer already exists in adapter
-            let buffer = sampler.getBuffer();
+            const buffer = sampler.getBuffer();
             if (buffer) {
                 if (aborted) return;
                 const points = generateWaveform(buffer);
@@ -210,27 +236,39 @@ export const SamplerNode = memo(function SamplerNode({
             }
 
             try {
-                // Check if it's a library sample (not a file: prefix)
-                if (data.sampleId && !data.sampleId.startsWith('file:')) {
-                    const file = await getItemFile(data.sampleId);
-                    if (aborted) return;
-                    if (file) {
-                        const arrayBuffer = await file.arrayBuffer();
-                        if (aborted) return;
-                        buffer = await ctx.decodeAudioData(arrayBuffer);
-                        if (aborted) return;
-                        sampler.setBuffer(buffer);
-                        const points = generateWaveform(buffer);
-                        setWaveformData(points);
+                // PERSIST-1 round-trip (DEFECT 1 fix). The single re-resolve rule
+                // lives in resolvePersistedSample: a REAL asset id (library sample
+                // OR a user-dropped sample we persisted via saveAudioToLibrary) is
+                // decoded and re-installed into the engine via setBuffer so the node
+                // SOUNDS again; a throwaway legacy 'file:' id is unresolvable (its
+                // PCM was never persisted).
+                const result = await resolvePersistedSample(
+                    data.sampleId,
+                    sampler,
+                    getItemFile,
+                    (bytes) => ctx.decodeAudioData(bytes),
+                );
+                if (aborted) return;
+
+                if (result.kind === 'loaded') {
+                    const points = generateWaveform(result.buffer);
+                    setWaveformData(points);
+                    // Clear any stale error: the PCM is back in the engine.
+                    setLoadError(node.id, false);
+                } else if (result.kind === 'unresolved') {
+                    // The engine has no PCM, so the node is silent. Keep the cached
+                    // waveform so the user still recognizes WHICH sample is broken,
+                    // and flag ERR-1 so the dead slot is visually distinct from an
+                    // empty one — never a silent "looks loaded" fake visual.
+                    if (data.waveformData && data.waveformData.length > 0) {
+                        setWaveformData(data.waveformData);
                     }
-                } else if (data.waveformData && data.waveformData.length > 0) {
-                    // For file: samples, use cached waveform data (buffer can't be restored)
-                    if (aborted) return;
-                    setWaveformData(data.waveformData);
+                    setLoadError(node.id, true);
                 }
             } catch (err) {
                 if (!aborted) {
                     console.error('[SamplerNode] Failed to restore sample buffer:', err);
+                    setLoadError(node.id, true);
                 }
             }
         };
@@ -266,7 +304,8 @@ export const SamplerNode = memo(function SamplerNode({
                 sampleId: clip.sampleId,
                 sampleName: clip.sampleName,
                 waveformData: points,
-                duration: buffer.duration
+                duration: buffer.duration,
+                sampleLoadError: false,
             });
         } catch (error) {
             console.error('[SamplerNode] Failed to load clip audio:', error);
@@ -318,11 +357,33 @@ export const SamplerNode = memo(function SamplerNode({
                 if (sampler) sampler.setBuffer(buffer);
                 const points = generateWaveform(buffer);
                 setWaveformData(points);
+
+                // PERSIST-1: write the decoded PCM into the project library — the
+                // SAME store library/looper samples use — so it becomes a real,
+                // re-resolvable asset. We store the resulting itemId (NOT the bytes)
+                // as sampleId; on remount the existing getItemFile -> decode ->
+                // setBuffer flow re-installs the PCM into the engine, so the node
+                // plays again instead of being a silent waveform polyline.
+                //
+                // Fallback: with no project open there is no library to write to,
+                // so we keep the legacy throwaway 'file:' id — the sample still
+                // sounds THIS session (engine has the live buffer); it just can't
+                // be recovered on reload, which is the honest limit of "no project".
+                let persistedId: string | null = null;
+                try {
+                    persistedId = await saveAudioToLibraryRef.current(buffer, file.name, ['sampler']);
+                } catch (saveErr) {
+                    // A library write failure is a background convenience, not a
+                    // performance path — fall through to the live-only fallback id.
+                    console.warn('[SamplerNode] Could not persist sample to library:', saveErr);
+                }
+
                 updateNodeData(node.id, {
                     sampleName: file.name,
-                    sampleId: `file:${file.name}:${Date.now()}`,
+                    sampleId: persistedId ?? `file:${file.name}:${Date.now()}`,
                     waveformData: points,
                     duration: buffer.duration,
+                    sampleLoadError: false,
                 });
             } catch (err) {
                 console.error('[SamplerNode] Failed to decode audio file:', err);
@@ -376,7 +437,8 @@ export const SamplerNode = memo(function SamplerNode({
                         sampleId,
                         sampleName: file.name,
                         waveformData: points,
-                        duration: buffer.duration
+                        duration: buffer.duration,
+                        sampleLoadError: false,
                     });
                 }
             } catch (err) {
@@ -392,7 +454,8 @@ export const SamplerNode = memo(function SamplerNode({
             sampleId: null,
             sampleName: null,
             waveformData: undefined,
-            duration: undefined
+            duration: undefined,
+            sampleLoadError: false,
         });
         setWaveformData([]);
         const sampler = getExecutor().getSamplerAdapter(node.id);
@@ -432,6 +495,11 @@ export const SamplerNode = memo(function SamplerNode({
 
     const hasSample = !!data.sampleName;
     const hasRows = rows.length > 0;
+    // ERR-1: a persisted sample whose PCM could not be re-resolved this mount —
+    // the slot LOOKS loaded (name + cached waveform) but the engine is silent.
+    // Render it distinctly so a broken sample is never mistaken for an empty or a
+    // working one. Non-modal: it never steals focus.
+    const hasLoadError = hasSample && !!data.sampleLoadError;
 
     // Handle drag start for dragging sample OUT of the node
     const handleSampleDragStart = useCallback((e: React.DragEvent) => {
@@ -461,48 +529,38 @@ export const SamplerNode = memo(function SamplerNode({
         >
             {/* Left side input port */}
             {bundleInPort && (
-                <div
+                <Port
+                    kind="control"
+                    direction="input"
+                    connected={!!hasConnection?.(bundleInPort.id) || hasRows}
                     className={`sampler-side-port input ${hasConnection?.(bundleInPort.id) || hasRows ? 'connected' : ''}`}
+                    style={{ width: '14px', height: '14px' }}
                     data-node-id={node.id}
                     data-port-id={bundleInPort.id}
-                    onMouseDown={(e) => { e.stopPropagation(); handlePortMouseDown?.(bundleInPort.id, e); }}
-                    onMouseUp={(e) => handlePortMouseUp?.(bundleInPort.id, e)}
+                    data-port-type="control"
+                    onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(bundleInPort.id, e); }}
+                    onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(bundleInPort.id, e)}
                     onMouseEnter={() => handlePortMouseEnter?.(bundleInPort.id)}
                     onMouseLeave={handlePortMouseLeave}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handlePortMouseDown?.(bundleInPort.id, e as unknown as React.MouseEvent);
-                        }
-                    }}
-                    tabIndex={0}
-                    role="button"
-                    aria-label="Control input port"
                     title="Control input"
                 />
             )}
 
             {/* Right side output port */}
             {audioOutPort && (
-                <div
+                <Port
+                    kind="audio"
+                    direction="output"
+                    connected={!!hasConnection?.(audioOutPort.id)}
                     className={`sampler-side-port output ${hasConnection?.(audioOutPort.id) ? 'connected' : ''}`}
+                    style={{ width: '14px', height: '14px' }}
                     data-node-id={node.id}
                     data-port-id={audioOutPort.id}
-                    onMouseDown={(e) => { e.stopPropagation(); handlePortMouseDown?.(audioOutPort.id, e); }}
-                    onMouseUp={(e) => handlePortMouseUp?.(audioOutPort.id, e)}
+                    data-port-type="audio"
+                    onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(audioOutPort.id, e); }}
+                    onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(audioOutPort.id, e)}
                     onMouseEnter={() => handlePortMouseEnter?.(audioOutPort.id)}
                     onMouseLeave={handlePortMouseLeave}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handlePortMouseDown?.(audioOutPort.id, e as unknown as React.MouseEvent);
-                        }
-                    }}
-                    tabIndex={0}
-                    role="button"
-                    aria-label="Audio output port"
                     title="Audio output"
                 />
             )}
@@ -515,13 +573,19 @@ export const SamplerNode = memo(function SamplerNode({
             {/* Sample drop zone - AudioClipVisual style, draggable OUT */}
             <div
                 ref={sampleAreaRef}
-                className={`sampler-sample-area ${isDragOver || isClipDropTarget ? 'drag-over' : ''} ${hasSample ? 'has-sample' : ''}`}
+                className={`sampler-sample-area ${isDragOver || isClipDropTarget ? 'drag-over' : ''} ${hasSample ? 'has-sample' : ''} ${hasLoadError ? 'load-error' : ''}`}
                 draggable={hasSample}
                 onDragStart={handleSampleDragStart}
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
                 onDrop={handleDrop}
-                title={hasSample ? 'Drag to copy sample to canvas' : 'Drop audio file or clip here'}
+                title={
+                    hasLoadError
+                        ? 'Sample could not be loaded — drop the file again to restore it'
+                        : hasSample
+                          ? 'Drag to copy sample to canvas'
+                          : 'Drop audio file or clip here'
+                }
             >
                 {hasSample ? (
                     <>
@@ -556,6 +620,15 @@ export const SamplerNode = memo(function SamplerNode({
 
                         {/* Sample info bar */}
                         <div className="sampler-info-bar">
+                            {hasLoadError && (
+                                <span
+                                    className="sampler-load-error-badge"
+                                    title="Sample could not be loaded — drop the file again to restore it"
+                                    aria-label="Sample failed to load"
+                                >
+                                    !
+                                </span>
+                            )}
                             <span className="sampler-sample-name" title={data.sampleName || ''}>
                                 {data.sampleName}
                             </span>

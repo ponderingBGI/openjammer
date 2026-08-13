@@ -1,0 +1,58 @@
+/*
+ * Modal — the single overlay dialog (replaces the hand-rolled overlays). A
+ * fixed full-viewport scrim washes the canvas with --overlay-scrim (no blur —
+ * the Hard-Shadow Rule forbids backdrop-filter) and flex-aligns a lifted
+ * Surface panel. Styled only via semantic tokens, so it follows the theme.
+ */
+.oj-modal__scrim {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    display: flex;
+    justify-content: center;
+    padding: var(--space-lg);
+    background: var(--overlay-scrim);
+}
+
+/* Vertical placement of the panel within the scrim. */
+.oj-modal__scrim--align-top {
+    align-items: flex-start;
+}
+
+.oj-modal__scrim--align-center {
+    align-items: center;
+}
+
+.oj-modal__scrim--align-bottom {
+    align-items: flex-end;
+}
+
+/* The panel itself — width is content up to a size-stepped ceiling, and it
+   never exceeds the viewport (minus the scrim padding) so it stays scrollable
+   rather than clipping on a small stage screen. No layout shift on open. */
+.oj-modal {
+    width: 100%;
+    max-height: calc(100vh - 2 * var(--space-lg));
+    overflow: auto;
+    outline: none;
+}
+
+/* Size steps as relative (rem) ceilings — anchored to the type scale, not raw
+   px (consistent with the codebase's relative-unit width caps). */
+.oj-modal--size-sm {
+    max-width: 22.5rem;
+}
+
+.oj-modal--size-md {
+    max-width: 32.5rem;
+}
+
+.oj-modal--size-lg {
+    max-width: 47.5rem;
+}
+
+/* `auto` hugs its content rather than filling the width step. */
+.oj-modal--size-auto {
+    width: auto;
+    max-width: calc(100vw - 2 * var(--space-lg));
+}

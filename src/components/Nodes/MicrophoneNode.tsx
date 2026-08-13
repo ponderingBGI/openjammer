@@ -1,16 +1,27 @@
 /**
  * Microphone Node - Live audio input (Schematic Style)
- * Supports professional audio interfaces with low-latency detection
+ *
+ * SINGLE DEVICE OWNER: this component never opens its own `getUserMedia`. The
+ * EXECUTOR owns exactly one OS mic stream and is the single source of truth; the
+ * node only DECLARES intent (mute + selected device) via
+ * `executor.setMicrophoneInput`, which is provably silent at the engine seam when
+ * muted (wasm disconnects the worklet input; native `set_mic(node, false)`). So a
+ * "muted" mic is truly off on stage, not merely dimmed here.
+ *
+ * The live waveform is driven by the engine's per-node meter
+ * (`subscribeSignalLevels`, keyed by node id) — the REAL signal reaching the
+ * engine — not a parallel AnalyserNode on a second stream. Mute/device persist in
+ * `node.data` and are re-applied to the executor on load (PERSIST-1).
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import type { GraphNode, MicrophoneNodeData } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useAudioStore } from '../../store/audioStore';
-import { getAudioContext } from '../../audio/audioContext';
 import { getExecutor } from '../../audio/executor';
 import { ScrollContainer } from '../common/ScrollContainer';
 import { detectLowLatencyDevice } from '../../utils/audioDeviceDetection';
+import { Port } from '@openjammer/oj-ui';
 
 interface MicrophoneNodeProps {
     node: GraphNode;
@@ -36,8 +47,6 @@ interface AudioDevice {
 }
 
 const NUM_WAVEFORM_BARS = 16;
-const TARGET_FPS = 30;
-const FRAME_INTERVAL = 1000 / TARGET_FPS;
 
 export const MicrophoneNode = memo(function MicrophoneNode({
     node,
@@ -62,22 +71,17 @@ export const MicrophoneNode = memo(function MicrophoneNode({
     // Use node-specific lowLatencyMode if set, otherwise use global setting
     const lowLatencyMode = data.lowLatencyMode ?? audioConfig.lowLatencyMode;
 
-    const [stream, setStream] = useState<MediaStream | null>(null);
-    const [_sourceNode, setSourceNode] = useState<MediaStreamAudioSourceNode | null>(null);
-    const [gainNode, setGainNode] = useState<GainNode | null>(null);
-    const [analyserNode, setAnalyserNode] = useState<AnalyserNode | null>(null);
     const [waveformBars, setWaveformBars] = useState<number[]>(Array(NUM_WAVEFORM_BARS).fill(0));
     const [devices, setDevices] = useState<AudioDevice[]>([]);
     const [showDevices, setShowDevices] = useState(false);
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>(data.deviceId || 'default');
 
-    const animationRef = useRef<number | null>(null);
+    // Smoothed rolling history of the engine meter level, fed into the bars so the
+    // line scrolls like a scope instead of flat-lining (VIS-1 driven by the REAL
+    // engine feed, not a parallel AnalyserNode).
+    const levelHistoryRef = useRef<number[]>(Array(NUM_WAVEFORM_BARS).fill(0));
 
-    // Use refs for cleanup to avoid stale closures
-    const streamRef = useRef<MediaStream | null>(null);
-    const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
-    const gainNodeRef = useRef<GainNode | null>(null);
-    const analyserNodeRef = useRef<AnalyserNode | null>(null);
+    const isMuted = data.isMuted ?? false;
 
     // Get output port
     const outputPort = node.ports.find(p => p.direction === 'output' && p.type === 'audio');
@@ -154,203 +158,48 @@ export const MicrophoneNode = memo(function MicrophoneNode({
         };
     }, [showDevices]);
 
-    // Initialize microphone
-    const initMicrophone = useCallback(async (deviceId?: string) => {
+    // Drive the ENGINE mic input from this node's persisted intent. The executor
+    // is the single device owner: it opens exactly one stream, feeds the engine
+    // MicIn, and goes SILENT at the seam when muted. Re-applied whenever mute or
+    // the selected device changes, AND on (re)load once the audio context is ready
+    // (PERSIST-1) — so a project saved muted reloads muted at the engine.
+    useEffect(() => {
         if (!isAudioContextReady) return;
+        getExecutor().setMicrophoneInput(node.id, {
+            isMuted,
+            deviceId: selectedDeviceId,
+        });
+    }, [isAudioContextReady, node.id, isMuted, selectedDeviceId]);
 
-        // Clean up existing resources using refs (avoids stale closures)
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-        }
-        if (sourceNodeRef.current) {
-            sourceNodeRef.current.disconnect();
-        }
-        if (gainNodeRef.current) {
-            gainNodeRef.current.disconnect();
-        }
-        if (analyserNodeRef.current) {
-            analyserNodeRef.current.disconnect();
-        }
-
-        try {
-            // Use low-latency constraints if enabled
-            // Note: Use 'ideal' for latency/channels since 'exact' values cause OverconstrainedError
-            const constraints = lowLatencyMode ? {
-                audio: {
-                    deviceId: deviceId && deviceId !== 'default' ? { exact: deviceId } : undefined,
-                    echoCancellation: false,
-                    noiseSuppression: false,
-                    autoGainControl: false,
-                    latency: { ideal: 0 },
-                    channelCount: { ideal: 2 }
-                }
-            } : {
-                audio: {
-                    deviceId: deviceId && deviceId !== 'default' ? { exact: deviceId } : undefined,
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    autoGainControl: true
-                }
-            };
-
-            const mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
-
-            const ctx = getAudioContext();
-            if (!ctx) return;
-
-            const source = ctx.createMediaStreamSource(mediaStream);
-            const gain = ctx.createGain();
-            gain.gain.value = data.isMuted ? 0 : 1;
-
-            // Create analyser for waveform (after gain so it reflects mute state)
-            const analyser = ctx.createAnalyser();
-            analyser.fftSize = 64;
-
-            // Connect: source -> gain -> analyser
-            // Analyser is after gain so waveform shows 0 when muted
-            source.connect(gain);
-            gain.connect(analyser);
-
-            // Register the analyser as output (it passes audio through)
-            // This way the waveform reflects what's actually being sent out
-            getExecutor().setMicrophoneOutput(node.id, analyser);
-
-            // Update refs for cleanup
-            streamRef.current = mediaStream;
-            sourceNodeRef.current = source;
-            gainNodeRef.current = gain;
-            analyserNodeRef.current = analyser;
-
-            // Update state for rendering
-            setStream(mediaStream);
-            setSourceNode(source);
-            setGainNode(gain);
-            setAnalyserNode(analyser);
-        } catch (err) {
-            console.error('Failed to access microphone:', err);
-        }
-    }, [isAudioContextReady, node.id, data.isMuted, lowLatencyMode]);
-
-    // Initialize microphone when audio context is ready
-    // This effect handles both initial mount and audio context reinitialization
+    // Drive the waveform from the engine's per-node meter (the REAL level reaching
+    // the engine), keyed by this node's id. When muted the engine feed is silence,
+    // so the meter naturally reads ~0 — the line flattens because the mic is truly
+    // off, not because we zero a local analyser. No second stream, no rAF analyser.
     useEffect(() => {
-        if (isAudioContextReady) {
-            // Initialize (or reinitialize) the microphone
-            // initMicrophone already handles cleanup of existing resources
-            initMicrophone(selectedDeviceId);
-        } else {
-            // Audio context is not ready - clean up resources
-            // This happens when audio settings are changed and context is reinitialized
-            if (animationRef.current) {
-                cancelAnimationFrame(animationRef.current);
-                animationRef.current = null;
-            }
-            if (streamRef.current) {
-                streamRef.current.getTracks().forEach(track => track.stop());
-                streamRef.current = null;
-            }
-            if (sourceNodeRef.current) {
-                sourceNodeRef.current.disconnect();
-                sourceNodeRef.current = null;
-            }
-            if (gainNodeRef.current) {
-                gainNodeRef.current.disconnect();
-                gainNodeRef.current = null;
-            }
-            if (analyserNodeRef.current) {
-                analyserNodeRef.current.disconnect();
-                analyserNodeRef.current = null;
-            }
-            // Clear state
-            setStream(null);
-            setSourceNode(null);
-            setGainNode(null);
-            setAnalyserNode(null);
-        }
+        const unsubscribe = getExecutor().subscribeSignalLevels((levels) => {
+            const level = levels.get(node.id) ?? 0;
+            const history = levelHistoryRef.current;
+            // Scroll the rolling window left and push the newest level on the right.
+            history.shift();
+            history.push(Math.max(0, Math.min(1, level)));
+            setWaveformBars([...history]);
+        });
+        return unsubscribe;
+    }, [node.id]);
 
-        // Cleanup on unmount or when deps change
-        return () => {
-            if (animationRef.current) {
-                cancelAnimationFrame(animationRef.current);
-            }
-            if (streamRef.current) {
-                streamRef.current.getTracks().forEach(track => track.stop());
-            }
-            if (sourceNodeRef.current) {
-                sourceNodeRef.current.disconnect();
-            }
-            if (gainNodeRef.current) {
-                gainNodeRef.current.disconnect();
-            }
-            if (analyserNodeRef.current) {
-                analyserNodeRef.current.disconnect();
-            }
-        };
-    }, [isAudioContextReady, initMicrophone, selectedDeviceId]);
-
-    // Update waveform with FPS throttling for performance
-    useEffect(() => {
-        if (!analyserNode) return;
-
-        const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
-        let lastFrameTime = 0;
-
-        const updateWaveform = () => {
-            const now = performance.now();
-
-            // Throttle to TARGET_FPS for performance with multiple nodes
-            if (now - lastFrameTime >= FRAME_INTERVAL) {
-                lastFrameTime = now;
-
-                // Skip updates when document is hidden (performance optimization)
-                if (!document.hidden) {
-                    analyserNode.getByteFrequencyData(dataArray);
-
-                    // Sample bars from frequency data
-                    const bars: number[] = [];
-                    const step = Math.floor(dataArray.length / NUM_WAVEFORM_BARS);
-                    for (let i = 0; i < NUM_WAVEFORM_BARS; i++) {
-                        const value = dataArray[i * step] / 255;
-                        bars.push(value);
-                    }
-                    setWaveformBars(bars);
-                }
-            }
-
-            animationRef.current = requestAnimationFrame(updateWaveform);
-        };
-
-        updateWaveform();
-
-        return () => {
-            if (animationRef.current) {
-                cancelAnimationFrame(animationRef.current);
-            }
-        };
-    }, [analyserNode]);
-
-    // Update gain when muted changes
-    useEffect(() => {
-        if (gainNode) {
-            // eslint-disable-next-line react-hooks/immutability -- gainNode is a Web Audio GainNode, not React state; setting AudioParam.value is the supported way to drive gain
-            gainNode.gain.value = data.isMuted ? 0 : 1;
-        }
-    }, [data.isMuted, gainNode]);
-
-    // Toggle mute
+    // Toggle mute (persist to node.data; the effect above re-applies to the engine).
     const handleMuteToggle = useCallback(() => {
         updateNodeData<MicrophoneNodeData>(node.id, {
-            isMuted: !data.isMuted
+            isMuted: !isMuted
         });
-    }, [node.id, data.isMuted, updateNodeData]);
+    }, [node.id, isMuted, updateNodeData]);
 
-    // Handle device selection
+    // Handle device selection (persist; the effect re-acquires the owned stream).
     const handleDeviceSelect = useCallback((deviceId: string) => {
         setSelectedDeviceId(deviceId);
         updateNodeData<MicrophoneNodeData>(node.id, { deviceId });
         setShowDevices(false);
-        initMicrophone(deviceId);
-    }, [node.id, updateNodeData, initMicrophone]);
+    }, [node.id, updateNodeData]);
 
     const currentLabel = devices.find(d => d.deviceId === selectedDeviceId)?.label || 'Select source';
 
@@ -404,9 +253,9 @@ export const MicrophoneNode = memo(function MicrophoneNode({
                 <div className="mic-controls-row">
                     {/* Mute Button */}
                     <button
-                        className={`mic-mute-btn ${data.isMuted ? 'muted' : 'live'}`}
+                        className={`mic-mute-btn ${isMuted ? 'muted' : 'live'}`}
                         onClick={handleMuteToggle}
-                        disabled={!stream}
+                        title={isMuted ? 'Muted (engine input silent) — click to go live' : 'Live — click to mute'}
                     >
                         <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
                             <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
@@ -461,18 +310,21 @@ export const MicrophoneNode = memo(function MicrophoneNode({
                     </div>
 
                     {/* Output Port */}
-                    <div
-                        className={`mic-output-port ${hasConnection(outputPortId) ? 'connected' : ''}`}
+                    <Port
+                        kind="audio"
+                        direction="output"
+                        connected={hasConnection(outputPortId)}
+                        style={{ marginLeft: 'auto' }}
                         data-node-id={node.id}
                         data-port-id={outputPortId}
-                        onMouseDown={(e) => handlePortMouseDown?.(outputPortId, e)}
-                        onMouseUp={(e) => handlePortMouseUp?.(outputPortId, e)}
+                        onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(outputPortId, e); }}
+                        onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(outputPortId, e); }}
                         onMouseEnter={() => handlePortMouseEnter?.(outputPortId)}
                         onMouseLeave={handlePortMouseLeave}
                     />
                 </div>
 
-                {/* Waveform Line */}
+                {/* Waveform Line — driven by the engine per-node meter */}
                 <svg className="mic-waveform-line" viewBox="0 0 100 20" preserveAspectRatio="none">
                     <polyline
                         className="mic-waveform-path"

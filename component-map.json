@@ -1,0 +1,438 @@
+{
+  "$generated": "by `bun run gen:component-map` (scripts/oj/design.ts) — do not edit by hand",
+  "figmaFileKey": "ayHEMsJL1BPhvTYWi1CFJs",
+  "claudeDesignProject": "https://claude.ai/design/p/53cf9a90-d179-4e3f-8413-58b270fff363",
+  "repo": "ponderingBGI/openjammer",
+  "branch": "canari",
+  "coverage": {
+    "components": 53,
+    "withStory": 48,
+    "withFigma": 53
+  },
+  "components": [
+    {
+      "name": "Banner",
+      "codePath": "packages/oj-ui/src/components/Banner/Banner.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Banner/Banner.tsx",
+      "ladleStoryId": "composites--banner--title-only",
+      "figmaNodeId": "21:41",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=21-41"
+    },
+    {
+      "name": "Button",
+      "codePath": "packages/oj-ui/src/components/Button/Button.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Button/Button.tsx",
+      "ladleStoryId": "primitives--button--states",
+      "figmaNodeId": "5:16",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=5-16"
+    },
+    {
+      "name": "Cable",
+      "codePath": "packages/oj-ui/src/components/Cable/Cable.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Cable/Cable.tsx",
+      "ladleStoryId": "composites--cable--kinds",
+      "figmaNodeId": "16:14",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=16-14"
+    },
+    {
+      "name": "Callout",
+      "codePath": "packages/oj-ui/src/components/Callout/Callout.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Callout/Callout.tsx",
+      "ladleStoryId": "primitives--callout--title-and-icon-optional",
+      "figmaNodeId": "9:48",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=9-48"
+    },
+    {
+      "name": "Chip",
+      "codePath": "packages/oj-ui/src/components/Chip/Chip.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Chip/Chip.tsx",
+      "ladleStoryId": "primitives--chip--filter-chips",
+      "figmaNodeId": "6:2",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=6-2"
+    },
+    {
+      "name": "CodeBlock",
+      "codePath": "packages/oj-ui/src/components/CodeBlock/CodeBlock.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/CodeBlock/CodeBlock.tsx",
+      "ladleStoryId": "primitives--codeblock--variants",
+      "figmaNodeId": "11:25",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=11-25"
+    },
+    {
+      "name": "DeviceSelect",
+      "codePath": "packages/oj-ui/src/components/DeviceSelect/DeviceSelect.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/DeviceSelect/DeviceSelect.tsx",
+      "ladleStoryId": "composites--deviceselect--closed",
+      "figmaNodeId": "19:2",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=19-2"
+    },
+    {
+      "name": "EditableLabel",
+      "codePath": "packages/oj-ui/src/components/EditableLabel/EditableLabel.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/EditableLabel/EditableLabel.tsx",
+      "ladleStoryId": "composites--editablelabel--centered",
+      "figmaNodeId": "21:46",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=21-46"
+    },
+    {
+      "name": "Field",
+      "codePath": "packages/oj-ui/src/components/Field/Field.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Field/Field.tsx",
+      "ladleStoryId": null,
+      "figmaNodeId": "8:30",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=8-30"
+    },
+    {
+      "name": "IconApple",
+      "codePath": "packages/oj-ui/src/components/Icons/Icons.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Icons/Icons.tsx",
+      "ladleStoryId": "primitives--icons--grid",
+      "figmaNodeId": "7:5",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=7-5"
+    },
+    {
+      "name": "IconBolt",
+      "codePath": "packages/oj-ui/src/components/Icons/Icons.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Icons/Icons.tsx",
+      "ladleStoryId": "primitives--icons--grid",
+      "figmaNodeId": "7:8",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=7-8"
+    },
+    {
+      "name": "IconButton",
+      "codePath": "packages/oj-ui/src/components/IconButton/IconButton.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/IconButton/IconButton.tsx",
+      "ladleStoryId": "composites--iconbutton--disabled",
+      "figmaNodeId": "21:16",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=21-16"
+    },
+    {
+      "name": "IconCheck",
+      "codePath": "packages/oj-ui/src/components/Icons/Icons.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Icons/Icons.tsx",
+      "ladleStoryId": "primitives--icons--grid",
+      "figmaNodeId": "7:11",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=7-11"
+    },
+    {
+      "name": "IconChevronDown",
+      "codePath": "packages/oj-ui/src/components/Icons/Icons.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Icons/Icons.tsx",
+      "ladleStoryId": "primitives--icons--grid",
+      "figmaNodeId": "7:14",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=7-14"
+    },
+    {
+      "name": "IconChevronRight",
+      "codePath": "packages/oj-ui/src/components/Icons/Icons.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Icons/Icons.tsx",
+      "ladleStoryId": "primitives--icons--grid",
+      "figmaNodeId": "7:17",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=7-17"
+    },
+    {
+      "name": "IconClose",
+      "codePath": "packages/oj-ui/src/components/Icons/Icons.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Icons/Icons.tsx",
+      "ladleStoryId": "primitives--icons--grid",
+      "figmaNodeId": "7:18",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=7-18"
+    },
+    {
+      "name": "IconDownload",
+      "codePath": "packages/oj-ui/src/components/Icons/Icons.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Icons/Icons.tsx",
+      "ladleStoryId": "primitives--icons--grid",
+      "figmaNodeId": "7:26",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=7-26"
+    },
+    {
+      "name": "IconLinux",
+      "codePath": "packages/oj-ui/src/components/Icons/Icons.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Icons/Icons.tsx",
+      "ladleStoryId": "primitives--icons--grid",
+      "figmaNodeId": "7:29",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=7-29"
+    },
+    {
+      "name": "IconMute",
+      "codePath": "packages/oj-ui/src/components/Icons/Icons.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Icons/Icons.tsx",
+      "ladleStoryId": "primitives--icons--grid",
+      "figmaNodeId": "7:34",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=7-34"
+    },
+    {
+      "name": "IconSpeaker",
+      "codePath": "packages/oj-ui/src/components/Icons/Icons.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Icons/Icons.tsx",
+      "ladleStoryId": "primitives--icons--grid",
+      "figmaNodeId": "7:39",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=7-39"
+    },
+    {
+      "name": "IconWarning",
+      "codePath": "packages/oj-ui/src/components/Icons/Icons.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Icons/Icons.tsx",
+      "ladleStoryId": "primitives--icons--grid",
+      "figmaNodeId": "7:44",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=7-44"
+    },
+    {
+      "name": "IconWindows",
+      "codePath": "packages/oj-ui/src/components/Icons/Icons.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Icons/Icons.tsx",
+      "ladleStoryId": "primitives--icons--grid",
+      "figmaNodeId": "7:50",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=7-50"
+    },
+    {
+      "name": "Input",
+      "codePath": "packages/oj-ui/src/components/Input/Input.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Input/Input.tsx",
+      "ladleStoryId": null,
+      "figmaNodeId": "8:10",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=8-10"
+    },
+    {
+      "name": "Kbd",
+      "codePath": "packages/oj-ui/src/components/Kbd/Kbd.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Kbd/Kbd.tsx",
+      "ladleStoryId": "primitives--kbd--in-context",
+      "figmaNodeId": "6:4",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=6-4"
+    },
+    {
+      "name": "KeyTile",
+      "codePath": "packages/oj-ui/src/components/KeyTile/KeyTile.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/KeyTile/KeyTile.tsx",
+      "ladleStoryId": "composites--keytile--pad-grid",
+      "figmaNodeId": "15:14",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=15-14"
+    },
+    {
+      "name": "List",
+      "codePath": "packages/oj-ui/src/components/ListRow/ListRow.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/ListRow/ListRow.tsx",
+      "ladleStoryId": "primitives--listrow--states",
+      "figmaNodeId": "11:2",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=11-2"
+    },
+    {
+      "name": "ListRow",
+      "codePath": "packages/oj-ui/src/components/ListRow/ListRow.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/ListRow/ListRow.tsx",
+      "ladleStoryId": "primitives--listrow--states",
+      "figmaNodeId": "11:24",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=11-24"
+    },
+    {
+      "name": "Marquee",
+      "codePath": "packages/oj-ui/src/components/Marquee/Marquee.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Marquee/Marquee.tsx",
+      "ladleStoryId": "primitives--marquee--default",
+      "figmaNodeId": "10:9",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=10-9"
+    },
+    {
+      "name": "Menu",
+      "codePath": "packages/oj-ui/src/components/Menu/Menu.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Menu/Menu.tsx",
+      "ladleStoryId": "composites--menu--context-menu",
+      "figmaNodeId": "22:69",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=22-69"
+    },
+    {
+      "name": "MenuCategory",
+      "codePath": "packages/oj-ui/src/components/Menu/Menu.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Menu/Menu.tsx",
+      "ladleStoryId": "composites--menu--context-menu",
+      "figmaNodeId": "23:30",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=23-30"
+    },
+    {
+      "name": "MenuItem",
+      "codePath": "packages/oj-ui/src/components/Menu/Menu.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Menu/Menu.tsx",
+      "ladleStoryId": "composites--menu--context-menu",
+      "figmaNodeId": "23:23",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=23-23"
+    },
+    {
+      "name": "MenuSeparator",
+      "codePath": "packages/oj-ui/src/components/Menu/Menu.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Menu/Menu.tsx",
+      "ladleStoryId": "composites--menu--context-menu",
+      "figmaNodeId": "23:31",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=23-31"
+    },
+    {
+      "name": "Modal",
+      "codePath": "packages/oj-ui/src/components/Modal/Modal.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Modal/Modal.tsx",
+      "ladleStoryId": "composites--modal--alignments",
+      "figmaNodeId": "19:23",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=19-23"
+    },
+    {
+      "name": "NodeFrame",
+      "codePath": "packages/oj-ui/src/components/NodeFrame/NodeFrame.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/NodeFrame/NodeFrame.tsx",
+      "ladleStoryId": "composites--nodeframe--dragging",
+      "figmaNodeId": "14:13",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=14-13"
+    },
+    {
+      "name": "NodeShell",
+      "codePath": "packages/oj-ui/src/components/NodeShell/NodeShell.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/NodeShell/NodeShell.tsx",
+      "ladleStoryId": null,
+      "figmaNodeId": "14:2",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=14-2"
+    },
+    {
+      "name": "OffscreenPointer",
+      "codePath": "packages/oj-ui/src/components/OffscreenPointer/OffscreenPointer.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/OffscreenPointer/OffscreenPointer.tsx",
+      "ladleStoryId": "primitives--offscreenpointer--directions",
+      "figmaNodeId": "10:10",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=10-10"
+    },
+    {
+      "name": "PanelHeader",
+      "codePath": "packages/oj-ui/src/components/PanelHeader/PanelHeader.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/PanelHeader/PanelHeader.tsx",
+      "ladleStoryId": "composites--panelheader--default",
+      "figmaNodeId": "20:2",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=20-2"
+    },
+    {
+      "name": "Port",
+      "codePath": "packages/oj-ui/src/components/Port/Port.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Port/Port.tsx",
+      "ladleStoryId": null,
+      "figmaNodeId": "13:9",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=13-9"
+    },
+    {
+      "name": "PortRow",
+      "codePath": "packages/oj-ui/src/components/PortRow/PortRow.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/PortRow/PortRow.tsx",
+      "ladleStoryId": "composites--portrow--connected",
+      "figmaNodeId": "13:16",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=13-16"
+    },
+    {
+      "name": "ProgressBar",
+      "codePath": "packages/oj-ui/src/components/ProgressBar/ProgressBar.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/ProgressBar/ProgressBar.tsx",
+      "ladleStoryId": "primitives--progressbar--levels",
+      "figmaNodeId": "6:11",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=6-11"
+    },
+    {
+      "name": "SegmentedControl",
+      "codePath": "packages/oj-ui/src/components/SegmentedControl/SegmentedControl.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/SegmentedControl/SegmentedControl.tsx",
+      "ladleStoryId": "primitives--segmentedcontrol--as-tabs",
+      "figmaNodeId": "10:13",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=10-13"
+    },
+    {
+      "name": "Select",
+      "codePath": "packages/oj-ui/src/components/Select/Select.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Select/Select.tsx",
+      "ladleStoryId": null,
+      "figmaNodeId": "8:18",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=8-18"
+    },
+    {
+      "name": "Slider",
+      "codePath": "packages/oj-ui/src/components/Slider/Slider.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Slider/Slider.tsx",
+      "ladleStoryId": "primitives--slider--states",
+      "figmaNodeId": "9:2",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=9-2"
+    },
+    {
+      "name": "Spinner",
+      "codePath": "packages/oj-ui/src/components/Spinner/Spinner.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Spinner/Spinner.tsx",
+      "ladleStoryId": "primitives--spinner--inline",
+      "figmaNodeId": "6:8",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=6-8"
+    },
+    {
+      "name": "StatusDot",
+      "codePath": "packages/oj-ui/src/components/StatusDot/StatusDot.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/StatusDot/StatusDot.tsx",
+      "ladleStoryId": "primitives--statusdot--statuses",
+      "figmaNodeId": "6:6",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=6-6"
+    },
+    {
+      "name": "Surface",
+      "codePath": "packages/oj-ui/src/components/Surface/Surface.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Surface/Surface.tsx",
+      "ladleStoryId": "primitives--surface--elevations",
+      "figmaNodeId": "10:8",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=10-8"
+    },
+    {
+      "name": "Swatch",
+      "codePath": "packages/oj-ui/src/components/Swatch/Swatch.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Swatch/Swatch.tsx",
+      "ladleStoryId": "primitives--swatch--gallery",
+      "figmaNodeId": "6:10",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=6-10"
+    },
+    {
+      "name": "Tabs",
+      "codePath": "packages/oj-ui/src/components/SegmentedControl/SegmentedControl.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/SegmentedControl/SegmentedControl.tsx",
+      "ladleStoryId": "primitives--segmentedcontrol--as-tabs",
+      "figmaNodeId": "10:25",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=10-25"
+    },
+    {
+      "name": "Textarea",
+      "codePath": "packages/oj-ui/src/components/Textarea/Textarea.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Textarea/Textarea.tsx",
+      "ladleStoryId": "primitives--textarea--states",
+      "figmaNodeId": "8:17",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=8-17"
+    },
+    {
+      "name": "Toggle",
+      "codePath": "packages/oj-ui/src/components/Toggle/Toggle.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Toggle/Toggle.tsx",
+      "ladleStoryId": "primitives--toggle--states",
+      "figmaNodeId": "9:17",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=9-17"
+    },
+    {
+      "name": "ValueScrubber",
+      "codePath": "packages/oj-ui/src/components/ValueScrubber/ValueScrubber.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/ValueScrubber/ValueScrubber.tsx",
+      "ladleStoryId": "composites--valuescrubber--editable",
+      "figmaNodeId": "22:18",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=22-18"
+    },
+    {
+      "name": "Waveform",
+      "codePath": "packages/oj-ui/src/components/Waveform/Waveform.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/Waveform/Waveform.tsx",
+      "ladleStoryId": "composites--waveform--default",
+      "figmaNodeId": "16:33",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=16-33"
+    },
+    {
+      "name": "WaveformView",
+      "codePath": "packages/oj-ui/src/components/WaveformView/WaveformView.tsx",
+      "githubUrl": "https://github.com/ponderingBGI/openjammer/blob/canari/packages/oj-ui/src/components/WaveformView/WaveformView.tsx",
+      "ladleStoryId": "composites--waveformview--single",
+      "figmaNodeId": "18:53",
+      "figmaUrl": "https://www.figma.com/design/ayHEMsJL1BPhvTYWi1CFJs/OpenJammer-oj-ui-Library?node-id=18-53"
+    }
+  ]
+}

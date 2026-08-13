@@ -1,9 +1,9 @@
 /**
  * DevLogPanel (L4, Layer 2) — the in-app developer log surface.
  *
- * A portal overlay (mirroring {@link import('../CommandBar/CommandBar')}'s
- * `createPortal` pattern) toggled with Ctrl/Cmd+Shift+L and via the
- * "Toggle DevLog" command in the Ctrl/Cmd+K palette. It tails the bounded
+ * An oj-ui {@link Modal} overlay (portal + scrim + Escape + focus-trap +
+ * click-outside are owned by the Modal) toggled with Ctrl/Cmd+Shift+L and via
+ * the "Toggle DevLog" command in the Ctrl/Cmd+K palette. It tails the bounded
  * {@link useLogStore} ring and offers:
  *   • a header with a visible "N dropped" badge (ships day one — the ring drops
  *     under load and without this the panel would silently lie), a Clear button
@@ -18,14 +18,23 @@
  * only the rows near the scroll position are mounted (fixed row height + a small
  * overscan), so a full 5000-entry ring costs O(visible) DOM nodes, not O(5000).
  * This is a lightweight manual windowing with zero new dependencies.
- * TODO(perf): upgrade to `@tanstack/react-virtual` if variable-height rows or
- * very large rings make manual windowing insufficient.
+ * If variable-height rows or very large rings ever make manual windowing
+ * insufficient, `@tanstack/react-virtual` is the natural next step.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import { useDebounce } from 'use-debounce';
 import type { Severity } from '@openjammer/oj-protocol';
+import {
+    Modal,
+    PanelHeader,
+    Button,
+    Input,
+    Chip,
+    StatusDot,
+    type ChipTone,
+    type StatusDotStatus,
+} from '@openjammer/oj-ui';
 import {
     useLogStore,
     filterEntries,
@@ -38,6 +47,24 @@ import './DevLogPanel.css';
 
 /** Severities in display order, for the level facet chips. */
 const LEVELS: readonly Severity[] = ['Trace', 'Debug', 'Info', 'Warn', 'Error'];
+
+/** The level → StatusDot status mapping for the facet chips' leading dots. */
+const LEVEL_DOT: Readonly<Record<Severity, StatusDotStatus>> = {
+    Trace: 'idle',
+    Debug: 'idle',
+    Info: 'info',
+    Warn: 'warn',
+    Error: 'bad',
+};
+
+/** The level → Chip tone mapping (Warn/Error read their state color). */
+const LEVEL_TONE: Readonly<Record<Severity, ChipTone>> = {
+    Trace: 'neutral',
+    Debug: 'neutral',
+    Info: 'neutral',
+    Warn: 'warning',
+    Error: 'danger',
+};
 
 /**
  * The prompt the "Ask AI to fix this" button seeds the assistant with. It nudges
@@ -98,13 +125,10 @@ function DevLogPanelInner() {
     const droppedCount = useLogStore((s) => s.droppedCount);
     const clear = useLogStore((s) => s.clear);
 
-    // Global Ctrl/Cmd+Shift+L toggle + Escape-to-close + the command bridge.
+    // Global Ctrl/Cmd+Shift+L toggle + the command bridge. (Escape-to-close is
+    // owned by the Modal once the panel is open.)
     useEffect(() => {
         const onKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                setOpen((v) => (v ? false : v));
-                return;
-            }
             const isToggle = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'l';
             if (!isToggle) return;
             e.preventDefault();
@@ -158,80 +182,113 @@ function DevLogPanelInner() {
         setRawSearch('');
     }, []);
 
-    if (!open) return null;
+    const close = useCallback(() => setOpen(false), []);
 
-    return createPortal(
-        <div className="devlog-overlay" onClick={() => setOpen(false)}>
-            <div className="devlog-panel" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Developer Log">
+    const askAi = useCallback(() => {
+        setOpen(false);
+        window.dispatchEvent(
+            new CustomEvent('openjammer:ask-ai', { detail: { prompt: ASK_AI_SEED } }),
+        );
+    }, []);
+
+    return (
+        <Modal open={open} onClose={close} ariaLabel="Developer Log" align="bottom" size="lg">
+            <div className="devlog-panel">
                 {/* ── Header ─────────────────────────────────────────────── */}
-                <header className="devlog-header">
-                    <span className="devlog-title">DevLog</span>
-                    <span className="devlog-count">
-                        {filtered.length}
-                        {filtered.length !== entries.length ? ` / ${entries.length}` : ''}
-                    </span>
-                    {droppedCount > 0 && (
-                        <span className="devlog-dropped" title="Entries evicted because the ring buffer was full">
-                            {droppedCount} dropped
+                <PanelHeader
+                    title="DevLog"
+                    badge={
+                        <span className="devlog-badge">
+                            <span className="devlog-count">
+                                {filtered.length}
+                                {filtered.length !== entries.length ? ` / ${entries.length}` : ''}
+                            </span>
+                            {droppedCount > 0 && (
+                                <Chip
+                                    tone="danger"
+                                    title="Entries evicted because the ring buffer was full"
+                                >
+                                    {droppedCount} dropped
+                                </Chip>
+                            )}
                         </span>
-                    )}
-                    <span className="devlog-spacer" />
-                    <button
-                        className="devlog-btn devlog-btn-ai"
-                        onClick={() => {
-                            setOpen(false);
-                            window.dispatchEvent(
-                                new CustomEvent('openjammer:ask-ai', { detail: { prompt: ASK_AI_SEED } }),
-                            );
-                        }}
-                        title="Open the AI assistant seeded to diagnose + fix this from the logs"
-                    >
-                        Ask AI to fix this
-                    </button>
-                    <button className="devlog-btn" onClick={clear} title="Clear all log entries">
-                        Clear
-                    </button>
-                    <button className="devlog-btn" onClick={() => setOpen(false)} title="Close (Ctrl/Cmd+Shift+L)">
-                        ✕
-                    </button>
-                </header>
+                    }
+                    actions={
+                        <>
+                            <Button
+                                variant="primary"
+                                onClick={askAi}
+                                title="Open the AI assistant seeded to diagnose + fix this from the logs"
+                            >
+                                Ask AI to fix this
+                            </Button>
+                            <Button onClick={clear} title="Clear all log entries">
+                                Clear
+                            </Button>
+                        </>
+                    }
+                    onClose={close}
+                />
 
                 {/* ── Facets + search ────────────────────────────────────── */}
                 <div className="devlog-facets">
                     <div className="devlog-chips" role="group" aria-label="Filter by level">
-                        {LEVELS.map((level) => (
-                            <button
-                                key={level}
-                                className="devlog-chip"
-                                data-level={level}
-                                data-active={activeLevels?.has(level) ?? false}
-                                aria-pressed={activeLevels?.has(level) ?? false}
-                                aria-label={`Filter by ${level} (${levelTally[level]})`}
-                                onClick={() => toggleLevel(level)}
-                            >
-                                {level}
-                                <span className="devlog-chip-count">{levelTally[level]}</span>
-                            </button>
-                        ))}
+                        {LEVELS.map((level) => {
+                            const active = activeLevels?.has(level) ?? false;
+                            return (
+                                <Chip
+                                    key={level}
+                                    role="button"
+                                    tabIndex={0}
+                                    tone={LEVEL_TONE[level]}
+                                    pressed={active}
+                                    glyph={<StatusDot status={LEVEL_DOT[level]} />}
+                                    count={levelTally[level]}
+                                    aria-pressed={active}
+                                    aria-label={`Filter by ${level} (${levelTally[level]})`}
+                                    className="devlog-chip"
+                                    onClick={() => toggleLevel(level)}
+                                    onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                            e.preventDefault();
+                                            toggleLevel(level);
+                                        }
+                                    }}
+                                >
+                                    {level}
+                                </Chip>
+                            );
+                        })}
                     </div>
                     {scopeTally.size > 0 && (
                         <div className="devlog-chips" role="group" aria-label="Filter by scope">
-                            {Array.from(scopeTally.entries()).map(([scope, count]) => (
-                                <button
-                                    key={scope}
-                                    className="devlog-chip devlog-chip-scope"
-                                    data-active={activeScope === scope}
-                                    aria-pressed={activeScope === scope}
-                                    aria-label={`Filter by scope ${scope} (${count})`}
-                                    onClick={() => toggleScope(scope)}
-                                >
-                                    {scope}
-                                    <span className="devlog-chip-count">{count}</span>
-                                </button>
-                            ))}
+                            {Array.from(scopeTally.entries()).map(([scope, count]) => {
+                                const active = activeScope === scope;
+                                return (
+                                    <Chip
+                                        key={scope}
+                                        role="button"
+                                        tabIndex={0}
+                                        pressed={active}
+                                        count={count}
+                                        aria-pressed={active}
+                                        aria-label={`Filter by scope ${scope} (${count})`}
+                                        className="devlog-chip devlog-chip-scope"
+                                        onClick={() => toggleScope(scope)}
+                                        onKeyDown={(e) => {
+                                            if (e.key === 'Enter' || e.key === ' ') {
+                                                e.preventDefault();
+                                                toggleScope(scope);
+                                            }
+                                        }}
+                                    >
+                                        {scope}
+                                    </Chip>
+                                );
+                            })}
                         </div>
                     )}
-                    <input
+                    <Input
                         className="devlog-search"
                         type="text"
                         placeholder="Search messages…"
@@ -244,17 +301,16 @@ function DevLogPanelInner() {
                 {activeCorr !== null && (
                     <div className="devlog-corr-banner">
                         Showing correlation #{activeCorr}
-                        <button className="devlog-btn devlog-btn-inline" onClick={() => setActiveCorr(null)}>
+                        <Button variant="link" onClick={() => setActiveCorr(null)}>
                             clear
-                        </button>
+                        </Button>
                     </div>
                 )}
 
                 {/* ── Windowed log list ──────────────────────────────────── */}
                 <LogList entries={filtered} onRowClick={onRowClick} onResetFilters={resetFilters} hasRing={entries.length > 0} />
             </div>
-        </div>,
-        document.body,
+        </Modal>
     );
 }
 
@@ -300,9 +356,9 @@ function LogList({
                 {hasRing ? (
                     <>
                         No entries match the current filters.{' '}
-                        <button className="devlog-btn devlog-btn-inline" onClick={onResetFilters}>
+                        <Button variant="link" onClick={onResetFilters}>
                             reset
-                        </button>
+                        </Button>
                     </>
                 ) : (
                     'No log entries yet.'

@@ -61,8 +61,10 @@ On startup the backend:
 
 The Ctrl/Cmd+K command bar's **Ask AI** half (`src/ai/**`,
 `src/components/CommandBar/**`) drives a "Pi-inspired" agent: type a request,
-press Tab, and the agent proposes graph edits / new DSP nodes, streamed live with
-an **Approve / Reject** transaction. AI is **native/hybrid only** — in a plain
+press Tab, and the agent proposes graph edits / new DSP nodes that apply live to
+the canvas, each undoable with plain **Ctrl+Z** (no Approve/Reject gate —
+reversibility plus the OS/Pi sandbox is the boundary). AI is **native/hybrid
+only** — in a plain
 browser the Tab -> AI path shows *"AI requires the desktop app"* and is disabled;
 only inside this Tauri shell does the Rust `ai_run` command drive Pi.
 
@@ -78,17 +80,19 @@ job):
   only process basics plus the **one** provider key the user supplied are
   forwarded. Every other secret is stripped. OpenJammer never stores the key.
 - **Tool calls are forwarded, not executed natively.** Graph mutations are
-  surfaced to the frontend and applied only behind the user's Approve, via the
-  same reversible `graphStore` verbs the UI uses.
+  surfaced to the frontend and applied live as the same reversible `graphStore`
+  verbs the UI uses, each undoable with Ctrl+Z (no Approve/Reject gate).
 
 ### AI setup (one-time)
 
 Pi is bundled with **native desktop releases only**. The browser/PWA build does
 not ship or run Pi; it continues to show the desktop-required state.
 
-1. **Use the desktop app.** `bun run tauri dev` and `bun run tauri build` run
-   `bun run build:pi-runtime`, which compiles the pinned Pi sidecar into
-   `src-tauri/binaries/` and bundles it as a Tauri resource. At runtime
+1. **Use the desktop app.** `bun native` (lazily — only when stale) and
+   `bun run tauri build --features plugin-host-juce` (always, for release-like
+   installers) run `bun run build:pi-runtime`, which compiles the pinned Pi sidecar
+   into `src-tauri/binaries/` and bundles it as a Tauri
+   resource. At runtime
    OpenJammer copies that resource into `~/.openjammer/pi-runtime/<version>/`
    and launches it over `--mode rpc`. Developers can override with
    `OPENJAMMER_PI_BIN=/abs/path/to/pi`.
@@ -106,15 +110,15 @@ not ship or run Pi; it continues to show the desktop-required state.
 
 ### Pi RPC schema
 
-`ai.rs::parse_pi_line` maps Pi's LF-delimited JSONL (split **only** on `\n`)
-into `PiStreamLine`s defensively — recognised `tool_call` / `result` / `error`
-lines are typed, anything else degrades to a `thought` (nothing is lost). Pin a
-Pi version and tighten this mapping once the RPC schema is fixed. The frontend
-mirror is `src/ai/PiAgentBackend.ts`.
+`ai.rs` normalizes Pi's LF-delimited JSONL RPC (split **only** on `\n`) against
+the pinned protocol: `tool_execution_start` -> `tool-call`, a `message_update`
+`text_delta` -> `thought`, `agent_end` -> `result`, and `extension_ui_request`
+-> `ui-request`; every other lifecycle/partial event is skipped (no
+thought-spam). The frontend mirror is `src/ai/PiAgentBackend.ts`.
 
 ### Testing without Pi
 
-The whole tool-call -> graph-verb path and the Approve/Reject transaction are
+The whole tool-call -> graph-verb apply-live + undo path is
 proven with Pi **mocked** (`MockAgentBackend`) — `bun run test:run` covers
 `src/ai/__tests__` and `src/store/__tests__/agentSessionStore.test.ts`. The
 native `ai.rs` env-stripping + JSONL parsing have Rust unit tests
@@ -123,28 +127,28 @@ bundled sidecar; no test here depends on a global Pi install.
 
 ## Local development
 
-From the **repo root** (not this directory):
+Run the desktop app from the **repo root** (not this directory):
 
 ```bash
-bun install                 # installs @tauri-apps/cli (+ web deps)
-bun run tauri dev           # builds bundled Pi runtime, then launches native UI
+bun native   # Vite HMR + the native engine; opens the window, streams logs
 ```
 
-`bun run tauri dev` runs the config's `beforeDevCommand` (`bun run build:pi-runtime && bun run dev`),
-waits for `http://localhost:5173`, then opens the native window with hot reload
-of both the web UI and (on save) the Rust backend.
+Setup, per-OS prerequisites (`bun run oj setup`), and the dev controls are documented once in
+**[CONTRIBUTING.md § Native desktop](../CONTRIBUTING.md#native-desktop-tauri)** — don't duplicate
+them here. In short: `bun native` delegates the whole Vite+cargo lifecycle and Ctrl+C teardown to
+the Tauri CLI (the edge that already does recursive process-tree kill on every OS — never add a
+sibling orchestrator here); it runs the config's `beforeDevCommand` (`bun run dev` →
+`http://localhost:5173`), opens the window with web-UI HMR, and recompiles + restarts the window on
+Rust edits. The default plugin host is the fast scaffold (no VST/AU scan, no JUCE/CMake build), so
+normal app work starts like a dev server. The raw `bun run tauri dev` still works for debugging the
+shell directly.
 
-### Linux build dependencies
-
-The native shell needs the system webview + audio dev libraries:
-
-```bash
-sudo apt install \
-  libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
-  libjavascriptcoregtk-4.1-dev librsvg2-dev libasound2-dev pkg-config
-```
-
-macOS and Windows need only the Rust toolchain + Xcode CLT / MSVC build tools.
+**Tauri-specific knobs.** The bundled Pi (Ctrl+K AI) sidecar builds **lazily** — only on first run
+or after a Pi upgrade; set `OJ_DEV_SKIP_PI=1` to skip it, or `OPENJAMMER_PI_BIN` to point at an
+external Pi. Use `bun native --all` for the full JUCE VST3/CLAP/AU host (first build can take
+minutes; `--plugins` is an alias), `bun native --clap` for the pure-Rust CLAP host, and
+`bun native --engine` for the windowless [bacon](https://dystroy.org/bacon/) Rust/DSP loop over the `render`/`nextest` harnesses
+(`cargo install --locked bacon`).
 
 ## Building / verifying
 
@@ -155,8 +159,9 @@ cargo fmt --all -- --check                    # format clean
 cargo test -p oj-tauri                         # backend unit tests (device-less safe)
 ```
 
-A full `bun run tauri build` produces the platform installer locally; it is
-heavy, so CI (below) is the canonical installer build.
+A full `bun run tauri build --features plugin-host-juce` produces the platform installer locally
+with the same hosted-plugin backend as releases; it is heavy, so CI (below) is the canonical
+installer build.
 
 ## Release flow (CI)
 
@@ -170,8 +175,8 @@ heavy, so CI (below) is the canonical installer build.
    `ubuntu-latest`, and `windows-latest`, installing the Linux webview deps in
    the Ubuntu job.
 3. `tauri-apps/tauri-action` runs the config's `beforeBuildCommand`
-   (`bun run build`) to build the web frontend, then `tauri build` to produce
-   each platform's installers:
+   (`bun run build`) to build the web frontend, then `tauri build --features plugin-host-juce` to
+   produce each platform's installers:
    - macOS: `.app`, `.dmg`
    - Linux: `.deb`, `.AppImage`
    - Windows: `.msi`, `.exe`

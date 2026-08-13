@@ -1,0 +1,19 @@
+OpenJammer
+Copyright (C) the OpenJammer authors.
+
+OpenJammer is licensed under the GNU Affero General Public License, version 3
+("AGPL-3.0-only") WITH the OpenJammer Plugin Exception — an additional permission
+under section 7 of the AGPLv3 that makes plugins (including paid, proprietary ones)
+legal.
+
+Effective license expression:
+    LicenseRef-AGPL-3.0-only-WITH-OpenJammer-Plugin-Exception
+
+  - The AGPL-3.0 text is in        LICENSE
+  - The Plugin Exception is in     LICENSE-EXCEPTION.md
+  - A plain-language explainer is  LICENSING.md
+  - Third-party notices are in     THIRD-PARTY-LICENSES.md
+  - The brand/trademark policy is  TRADEMARK.md
+
+In any conflict, LICENSE and LICENSE-EXCEPTION.md control. This NOTICE is a pointer,
+not a substitute for those files, and is not legal advice.

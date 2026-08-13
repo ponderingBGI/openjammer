@@ -40,10 +40,15 @@ mod error;
 mod node;
 mod scan;
 
-pub use descriptor::{PluginDescriptor, PluginFormat, PortCounts};
+pub use descriptor::{HostedParam, PluginDescriptor, PluginFormat, PortCounts};
 pub use error::HostError;
-pub use node::{HostedPlugin, PluginHostLoader, PluginHostNode, PLUGIN_HOST_ID};
-pub use scan::{default_plugin_dirs, scan, scan_with, Blacklist, ScanCache};
+pub use node::{
+    hosted_plugin_id, HostedPlugin, PluginEditor, PluginHostLoader, PluginHostNode, PLUGIN_HOST_ID,
+};
+pub use scan::{
+    candidate_paths, clap_plugin_dirs, default_plugin_dirs, probe_candidate, scan, scan_with,
+    Blacklist, ProbeHelperResponse, ScanCache,
+};
 
 use ojcore::PluginRegistry;
 
@@ -55,7 +60,7 @@ pub enum HostingBackend {
     None,
     /// Pure-Rust CLAP host via `clack`. CLAP only.
     ClapOnly,
-    /// JUCE C++ host: VST3 + CLAP (+ AU on macOS).
+    /// JUCE C++ host: VST2 (when owner-provisioned) + VST3 + CLAP (+ AU on macOS).
     Juce,
 }
 
@@ -76,29 +81,42 @@ impl HostingBackend {
         }
     }
 
+    /// Stable lowercase slug for the UI / logs: `"none" | "clap" | "juce"`.
+    /// Lets the shell report which backend a build actually compiled in (the
+    /// signal that tells "no plugins installed" apart from "hosting was never
+    /// built into this `bun native` run").
+    pub const fn slug(self) -> &'static str {
+        match self {
+            HostingBackend::None => "none",
+            HostingBackend::ClapOnly => "clap",
+            HostingBackend::Juce => "juce",
+        }
+    }
+
     /// The plugin formats this build can host.
     pub fn formats(self) -> &'static [PluginFormat] {
         match self {
             HostingBackend::None => &[],
             HostingBackend::ClapOnly => &[PluginFormat::Clap],
             #[cfg(target_os = "macos")]
-            HostingBackend::Juce => &[PluginFormat::Vst3, PluginFormat::Clap, PluginFormat::Au],
+            HostingBackend::Juce => &[
+                PluginFormat::Vst2,
+                PluginFormat::Vst3,
+                PluginFormat::Clap,
+                PluginFormat::Au,
+            ],
             #[cfg(not(target_os = "macos"))]
-            HostingBackend::Juce => &[PluginFormat::Vst3, PluginFormat::Clap],
+            HostingBackend::Juce => &[PluginFormat::Vst2, PluginFormat::Vst3, PluginFormat::Clap],
         }
     }
 }
 
 /// Register one [`PluginHostLoader`] per scanned plugin into `reg`.
 ///
-/// All hosted plugins share the `host.plugin` manifest id, so a `PluginRegistry`
-/// (keyed by id) holds exactly ONE of them at a time — the last registered wins.
-/// This is sufficient for the current single-hosted-plugin path; a future unit
-/// can extend the registry / IR to address multiple hosted plugins by descriptor
-/// without changing this crate's public surface. Returns the number registered.
-///
-/// Returns `0` (and registers nothing) in the scaffold build, since [`scan`]
-/// finds no plugins there.
+/// Each hosted plugin registers under a stable unique manifest id derived from
+/// `(format, uid, path)`, so multiple scanned plugins can coexist and the native
+/// IR can address the exact plugin by manifest id. Returns `0` (and registers
+/// nothing) in the scaffold build, since [`scan`] finds no plugins there.
 pub fn register_scanned(reg: &mut PluginRegistry, descriptors: &[PluginDescriptor]) -> usize {
     let mut n = 0;
     for desc in descriptors {
@@ -106,6 +124,22 @@ pub fn register_scanned(reg: &mut PluginRegistry, descriptors: &[PluginDescripto
         n += 1;
     }
     n
+}
+
+/// DEV/TEST ONLY: arm the hosted-plugin crash boundary so the NEXT guarded
+/// `processBlock` deliberately faults — used to PROVE the C++ SEH/signal latch on a
+/// live machine, since the scaffold sandbox has no JUCE build to run it. A node
+/// faults, the Rust latch quarantines it to a dry passthrough + crash badge, and
+/// every sibling keeps playing.
+///
+/// A **no-op unless** the build has `juce` AND was built with `OJHOST_FAULT_INJECT=1`
+/// (build.rs then emits `--cfg oj_fault_inject`). In any other build — including
+/// every shipped one — the fault code is not compiled in, so this does nothing and
+/// can never crash the app. Not for product code; the only caller is the dev-gated
+/// Tauri command.
+pub fn arm_fault() {
+    #[cfg(all(feature = "juce", oj_fault_inject))]
+    backend::arm_fault();
 }
 
 #[cfg(test)]
@@ -151,15 +185,14 @@ mod tests {
                 audio_out: 2,
             },
             param_count: 5,
+            params: Vec::new(),
             latency_samples: 0,
         }];
+        let id = hosted_plugin_id(&descs[0]);
         let n = register_scanned(&mut reg, &descs);
         assert_eq!(n, 1);
-        assert!(reg.contains(PLUGIN_HOST_ID));
-        assert_eq!(
-            reg.lower(PLUGIN_HOST_ID),
-            Some(ojproto::PrimitiveKind::PluginHost)
-        );
+        assert!(reg.contains(&id));
+        assert_eq!(reg.lower(&id), Some(ojproto::PrimitiveKind::PluginHost));
     }
 
     #[test]

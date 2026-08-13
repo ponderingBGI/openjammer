@@ -1,0 +1,20 @@
+/*
+ * NodeFrame — the canvas slot that positions a node. The card chrome (border,
+ * shadow, selected/agent rings) lives in NodeShell; this is purely the
+ * absolute-positioned wrapper. `top: 0; left: 0` anchors the origin so the
+ * inline `translate` transform alone moves the node — keeping drag updates on
+ * the GPU-friendly transform property (Design-for-instant). The grab cursor is
+ * the only affordance: hover and press add no transform (No-Surprise — the
+ * canvas, not the frame, owns motion).
+ */
+.oj-node-frame {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: var(--z-node);
+    cursor: grab;
+}
+
+.oj-node-frame.is-dragging {
+    cursor: grabbing;
+}

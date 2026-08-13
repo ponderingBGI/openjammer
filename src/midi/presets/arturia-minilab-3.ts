@@ -25,7 +25,8 @@ export const arturiaMinilab3Preset: MIDIDevicePreset = {
     },
 
     // 8 RGB velocity & pressure-sensitive pads (Bank A)
-    // Bank B notes are 44-51, but we'll focus on Bank A for now
+    // The 8 pads map the controller's Bank A (notes 36-43, channel 10). Bank B
+    // sends a different note set (44-51) and is not mapped here.
     pads: [
       { id: 'pad-1', name: 'Pad 1', note: 36, channel: 10, hasVelocity: true, hasAftertouch: true, color: '#FF5722' },
       { id: 'pad-2', name: 'Pad 2', note: 37, channel: 10, hasVelocity: true, hasAftertouch: true, color: '#FF9800' },
