@@ -38,7 +38,14 @@ const WaveformEditorModal = lazy(() =>
     })),
 );
 import { PresenceOverlay } from '../Collab/PresenceOverlay';
-import { SongInterior } from '../Song/SongInterior';
+// The timeline editor is only needed after entering a Song node. Keeping it behind
+// a dynamic import avoids charging the full arrangement UI to the canvas's initial
+// production chunk while preserving the same store-backed editing surface.
+const SongInterior = lazy(() =>
+    import('../Song/SongInterior').then((module) => ({
+        default: module.SongInterior,
+    })),
+);
 import { useArrangementStore } from '../../store/arrangementStore';
 import { useCollabStore } from '../../store/collabStore';
 import './NodeCanvas.css';
@@ -1249,7 +1256,9 @@ export function NodeCanvas() {
                 /* TIMELINE INTERIOR — entered a song node. The hand-drawn DAW timeline
                    replaces the node/connection/clip layers (its own full-bleed paper
                    surface + scroll); breadcrumbs/exit/Esc still navigate out of it. */
-                <SongInterior songNodeId={currentViewNodeId} />
+                <Suspense fallback={null}>
+                    <SongInterior songNodeId={currentViewNodeId} />
+                </Suspense>
             ) : (
                 <div
                     className="node-canvas-content"

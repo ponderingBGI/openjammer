@@ -58,8 +58,8 @@ type ScanState =
     | { kind: 'error'; message: string }
     | { kind: 'unsupported' };
 
-export function PluginsPanel() {
-    const [open, setOpen] = useState(false);
+export function PluginsPanel({ initiallyOpen = false }: { initiallyOpen?: boolean }) {
+    const [open, setOpen] = useState(initiallyOpen);
     const [state, setState] = useState<ScanState>({ kind: 'idle' });
     const addNode = useGraphStore((s) => s.addNode);
     const setNodePluginId = useGraphStore((s) => s.setNodePluginId);

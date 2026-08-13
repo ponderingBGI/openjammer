@@ -3332,7 +3332,7 @@ mod tests {
     fn learning_defaults_on_and_installs_persistent_intelligence() {
         let dir = temp_agent_home("learning-default-on");
 
-        assert_eq!(ensure_learning_default(&dir).unwrap(), true);
+        assert!(ensure_learning_default(&dir).unwrap());
 
         assert!(settings_has_package(&dir, "pi-persistent-intelligence"));
         assert_eq!(explicit_learning_preference(&dir), Some(true));
@@ -3344,7 +3344,7 @@ mod tests {
         let dir = temp_agent_home("learning-opt-out");
 
         set_learning_state(&dir, false).unwrap();
-        assert_eq!(ensure_learning_default(&dir).unwrap(), false);
+        assert!(!ensure_learning_default(&dir).unwrap());
 
         assert!(!settings_has_package(&dir, "pi-persistent-intelligence"));
         assert_eq!(explicit_learning_preference(&dir), Some(false));
