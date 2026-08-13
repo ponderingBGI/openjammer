@@ -21,7 +21,7 @@ proptest = "1"
 # CodSpeed-compatible criterion: plain criterion locally, instruction-count +
 # allocation instrumented in CI. Benches the control-plane serialization path
 # (OjGraph push, ParamPatch frame, RtCommand) in benches/codec.rs.
-codspeed-criterion-compat = "4.7.0"
+codspeed-criterion-compat = "5.0.1"
 
 [[bench]]
 name = "codec"

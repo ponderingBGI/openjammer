@@ -55,10 +55,10 @@ jobs:
     # constant across runs so the comparison reflects code, not infrastructure.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Rust toolchain, cache and cargo-codspeed
-        uses: moonrepo/setup-rust@cafffba5d5c8bc38a5120e6e60f3561d541a47cd # v0
+        uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1.3.0
         with:
           channel: stable
           cache-target: release
@@ -68,13 +68,13 @@ jobs:
         run: cargo codspeed build -m simulation -m memory -p ojcore -p ojcore-dsp -p ojproto -p ojinstrument -p ojhost
 
       - name: Run the benchmarks (CPU simulation)
-        uses: CodSpeedHQ/action@63f3e98b61959fe67f146a3ff022e4136fe9bb9c # v4
+        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
         with:
           mode: simulation
           run: cargo codspeed run -m simulation
 
       - name: Run the benchmarks (memory / allocations)
-        uses: CodSpeedHQ/action@63f3e98b61959fe67f146a3ff022e4136fe9bb9c # v4
+        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
         with:
           mode: memory
           run: cargo codspeed run -m memory
@@ -90,10 +90,10 @@ jobs:
     # CodSpeed macro runner — on the shared runner the trend matters, not the value.
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Rust toolchain, cache and cargo-codspeed
-        uses: moonrepo/setup-rust@cafffba5d5c8bc38a5120e6e60f3561d541a47cd # v0
+        uses: moonrepo/setup-rust@abb2d32350334249b178c401e5ec5836e0cd88d3 # v1.3.0
         with:
           channel: stable
           cache-target: release
@@ -103,7 +103,7 @@ jobs:
         run: cargo codspeed build -m walltime -p ojinstrument
 
       - name: Run the benchmarks (walltime)
-        uses: CodSpeedHQ/action@63f3e98b61959fe67f146a3ff022e4136fe9bb9c # v4
+        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
         with:
           mode: walltime
           run: cargo codspeed run -m walltime
