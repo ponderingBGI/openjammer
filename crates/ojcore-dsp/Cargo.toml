@@ -9,7 +9,7 @@ license.workspace = true
 libm = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "4.7.0", package = "codspeed-criterion-compat" }
+criterion = { version = "5.0.1", package = "codspeed-criterion-compat" }
 
 [[bench]]
 name = "dsp"
