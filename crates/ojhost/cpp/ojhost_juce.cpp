@@ -129,7 +129,9 @@ struct OjPluginEditor {
 extern "C" {
 
 #if !defined(_WIN32)
+namespace {
 static void ojInstallHandlersOnce();
+}  // namespace
 #endif
 
 OjHost* ojhost_create(void) {

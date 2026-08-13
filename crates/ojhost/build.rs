@@ -228,6 +228,7 @@ fn link_platform_libs() {
         "AppKit",
         "AudioToolbox",
         "AudioUnit",
+        "CoreAudioKit",
         "Carbon",
         "Cocoa",
         "CoreAudio",
@@ -243,6 +244,34 @@ fn link_platform_libs() {
         println!("cargo:rustc-link-lib=framework={fw}");
     }
     println!("cargo:rustc-link-lib=dylib=c++");
+
+    // Objective-C availability checks in JUCE's macOS modules call compiler-rt
+    // helpers such as `__isPlatformVersionAtLeast`. Cargo's final C/C++ link
+    // uses `-nodefaultlibs`, so clang cannot add its runtime archive for us.
+    // Resolve it from the active Apple toolchain instead of assuming an Xcode
+    // installation path (Command Line Tools use a different root).
+    let output = std::process::Command::new("clang")
+        .arg("--print-resource-dir")
+        .output()
+        .expect("ojhost/juce: failed to run `clang --print-resource-dir`");
+    assert!(
+        output.status.success(),
+        "ojhost/juce: `clang --print-resource-dir` failed with {}",
+        output.status
+    );
+    let resource_dir = String::from_utf8(output.stdout)
+        .expect("ojhost/juce: clang resource directory was not UTF-8");
+    let runtime_dir = std::path::PathBuf::from(resource_dir.trim())
+        .join("lib")
+        .join("darwin");
+    let runtime = runtime_dir.join("libclang_rt.osx.a");
+    assert!(
+        runtime.is_file(),
+        "ojhost/juce: missing Apple clang runtime at {}",
+        runtime.display()
+    );
+    println!("cargo:rustc-link-search=native={}", runtime_dir.display());
+    println!("cargo:rustc-link-lib=static=clang_rt.osx");
 }
 
 #[cfg(all(feature = "juce", target_os = "windows"))]
