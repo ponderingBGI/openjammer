@@ -192,7 +192,20 @@ pub(super) fn probe(
     let target = path.to_string_lossy();
     let mut out = Vec::new();
     unsafe {
-        let slice = std::slice::from_raw_parts(result.items, result.count);
+        // C++ represents an empty scan as `{ nullptr, 0 }`. Rust requires even
+        // zero-length slices to carry a non-null, aligned pointer, so avoid
+        // constructing a slice for that valid empty result.
+        let slice: &[OjPluginDesc] = if result.count == 0 {
+            &[]
+        } else if result.items.is_null() {
+            ojhost_free_scan(result);
+            ojhost_destroy(host);
+            return Err(HostError::Load {
+                message: "ojhost_scan returned a null item array with a non-zero count".into(),
+            });
+        } else {
+            std::slice::from_raw_parts(result.items, result.count)
+        };
         for d in slice {
             let dpath = cstr_owned(d.path);
             // Only descriptors from the requested binary (the scanner may also
