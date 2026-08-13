@@ -24,6 +24,7 @@ import * as protocolMirror from './checks/protocol-mirror';
 import * as nodeRegistry from './checks/node-registry';
 import * as ssotSetEquality from './checks/ssot-set-equality';
 import * as faultPipeConnectivity from './checks/fault-pipe-connectivity';
+import * as testCollection from './checks/test-collection';
 
 export interface RunOpts {
   fix?: boolean;
@@ -48,6 +49,7 @@ export const REGISTRY: CheckModule[] = [
   nodeRegistry,
   ssotSetEquality,
   faultPipeConnectivity,
+  testCollection,
 ];
 
 const REGISTRY_BY_ID = new Map(REGISTRY.map((c) => [c.id, c]));

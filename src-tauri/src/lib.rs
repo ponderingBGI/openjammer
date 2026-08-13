@@ -90,6 +90,31 @@ fn scan_plugins(
         .map_err(|e| e.to_string())
 }
 
+/// Which third-party plugin hosting backend THIS build actually compiled in, plus
+/// the formats it can host. The Plugins panel reads this so its empty state can be
+/// honest: a fast scaffold `bun native` (backend `"none"`) can NEVER list a plugin
+/// no matter what's installed, so it must say "run `bun native --all`" instead of
+/// the misleading "install a plugin here and Re-scan". `"clap"` hosts CLAP only;
+/// `"juce"` hosts VST3/CLAP (+ AU on macOS).
+#[derive(serde::Serialize)]
+struct HostingInfo {
+    /// `"none" | "clap" | "juce"`.
+    backend: &'static str,
+    /// Format slugs this build can host, e.g. `["vst3", "clap"]`. Empty for `"none"`.
+    formats: Vec<&'static str>,
+}
+
+/// Report the live hosting backend so the UI can tell "nothing installed" apart
+/// from "this build can't host plugins". Pure compile-time fact — no engine lock.
+#[tauri::command]
+fn hosting_backend() -> HostingInfo {
+    let backend = ojhost::HostingBackend::current();
+    HostingInfo {
+        backend: backend.slug(),
+        formats: backend.formats().iter().map(|f| f.slug()).collect(),
+    }
+}
+
 /// A plugin folder shown in the Plugins panel, tagged by scope + format so the UI
 /// can explain exactly where VST2/VST3/CLAP/AU plugins are discovered.
 #[derive(serde::Serialize)]
@@ -703,6 +728,15 @@ pub fn run() {
             // fed only off the audio thread (the control-side event drain). A failed
             // open is non-fatal — the instrument keeps running without the tail.
             let backend = BackendState::new();
+            // Record the compiled-in hosting backend at startup, so a log always
+            // names whether this run can host plugins at all (a scaffold `bun
+            // native` reports `"none"`) — the first thing to check when "my VSTs
+            // don't show up" turns out to be "this build never had a host".
+            tracing::info!(
+                target: "engine",
+                backend = ojhost::HostingBackend::current().slug(),
+                "plugin hosting backend"
+            );
             if let Some(log_dir) = log_dir_for_store {
                 let path = log_dir.join("openjammer-events.sqlite");
                 if let Ok(mut be) = backend.0.lock() {
@@ -741,6 +775,7 @@ pub fn run() {
             query_stream,
             engine_running,
             scan_plugins,
+            hosting_backend,
             plugin_dirs,
             reveal_path,
             plugin_quarantine_reset,

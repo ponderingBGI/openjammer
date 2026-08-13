@@ -10,7 +10,7 @@ import type {
     SerializedConnection,
     PortDefinition
 } from './types';
-import { get as getNodeDefinition, isRegisteredPluginId } from './registry';
+import { get as getNodeDefinition } from './registry';
 import {
     HOSTED_PLUGIN_DESCRIPTOR_KEY,
     HOSTED_PLUGIN_ID_PREFIX,
@@ -40,7 +40,12 @@ const WORKFLOW_VERSION = '1.1.0';
 export function exportWorkflow(
     nodes: Map<string, GraphNode>,
     connections: Map<string, Connection>,
-    name: string = 'Untitled Workflow'
+    name: string = 'Untitled Workflow',
+    /** The song-layer timeline to persist alongside the graph (FROZEN-1). OPAQUE here
+     *  — the engine never interprets it; the song layer produces it via
+     *  `arrangementForExport` and reads it back via `readArrangement`. Omit when there
+     *  is no timeline. */
+    arrangement?: unknown
 ): SerializedWorkflow {
     const serializedNodes: SerializedNode[] = [];
     const serializedConnections: SerializedConnection[] = [];
@@ -78,13 +83,19 @@ export function exportWorkflow(
         });
     });
 
-    return {
+    const out: SerializedWorkflow = {
         version: WORKFLOW_VERSION,
         name,
         createdAt: new Date().toISOString(),
         nodes: serializedNodes,
         connections: serializedConnections
     };
+    // Carry the timeline through UNTOUCHED so a saved project keeps its whole
+    // arrangement (FROZEN-1); omitted entirely when there is no song.
+    if (arrangement !== undefined && arrangement !== null) {
+        out.arrangement = arrangement;
+    }
+    return out;
 }
 
 /**
@@ -93,7 +104,7 @@ export function exportWorkflow(
  */
 export function importWorkflow(
     json: string | SerializedWorkflow
-): { nodes: GraphNode[]; connections: Connection[] } {
+): { nodes: GraphNode[]; connections: Connection[]; arrangement?: unknown } {
     const workflow: SerializedWorkflow =
         typeof json === 'string' ? JSON.parse(json) : json;
 
@@ -119,48 +130,49 @@ export function importWorkflow(
     workflow.nodes.forEach((serialized) => migrateLegacyDspNode(serialized));
 
     // Reconstruct nodes with ports.
-    // - Validity check (U10 + M5): drop a node only when neither its closed `type`
-    //   NOR its open `pluginId` resolves to a registered plugin. A node whose
-    //   identity is a REGISTERED dynamic id is KEPT.
+    // - FROZEN-1 (STABILITY.md §2 — "a saved project always opens"): EVERY node is
+    //   KEPT. A node whose identity resolves (a closed `type` or a registered open
+    //   `pluginId`) loads normally; one that does NOT is kept as a labeled
+    //   passthrough STUB rather than dropped — dropping silently loses the user's
+    //   work, the exact violation this contract forbids. The stub preserves
+    //   id/type/pluginId/data and its persisted ports, so the project round-trips
+    //   losslessly and its connections survive; `get()` returns the inert
+    //   MISSING_DEFINITION so the app stays operable, the engine's
+    //   `compile_resilient` degrades the node to a real passthrough, and a later
+    //   load re-binds it if the missing node/plugin reappears. (An unresolved node
+    //   is recomputable on demand via `isRegisteredPluginId`, so no persisted flag
+    //   is needed; the engine already labels its own degraded stubs.)
     // - SELF-HEALING (M5): when a node carries a pluginId that is not yet in the
     //   dynamic registry, RE-REGISTER a dynamic def from the serialized data so
     //   identity resolves after a fresh load (clears MISSING_DEFINITION).
     // - Prefer persisted per-instance ports over the static defaultPorts, so
-    //   dynamically-grown ports survive a round-trip.
-    const nodes: GraphNode[] = workflow.nodes
-        .filter((serialized) => {
-            selfHealDynamicPlugin(serialized);
-            return (
-                isRegisteredPluginId(serialized.type) ||
-                (serialized.pluginId !== undefined &&
-                    isRegisteredPluginId(serialized.pluginId))
-            );
-        })
-        .map((serialized) => {
-            const definition = getNodeDefinition(serialized.type);
-            const ports: PortDefinition[] =
-                serialized.ports && serialized.ports.length > 0
-                    ? serialized.ports.map((port) => ({ ...port }))
-                    : [...definition.defaultPorts];
+    //   dynamically-grown ports (and an unknown node's topology) survive a round-trip.
+    const nodes: GraphNode[] = workflow.nodes.map((serialized) => {
+        selfHealDynamicPlugin(serialized);
+        const definition = getNodeDefinition(serialized.type);
+        const ports: PortDefinition[] =
+            serialized.ports && serialized.ports.length > 0
+                ? serialized.ports.map((port) => ({ ...port }))
+                : [...definition.defaultPorts];
 
-            const node: GraphNode = {
-                id: serialized.id,
-                type: serialized.type,
-                category: serialized.category,
-                position: serialized.position,
-                data: serialized.data,
-                ports,
-                // Flat structure fields - deserialized nodes are root-level by default
-                parentId: null,
-                childIds: [],
-                specialNodes: []
-            };
-            // Carry the OPEN identity back onto the live node (M5).
-            if (serialized.pluginId !== undefined) {
-                node.pluginId = serialized.pluginId;
-            }
-            return node;
-        });
+        const node: GraphNode = {
+            id: serialized.id,
+            type: serialized.type,
+            category: serialized.category,
+            position: serialized.position,
+            data: serialized.data,
+            ports,
+            // Flat structure fields - deserialized nodes are root-level by default
+            parentId: null,
+            childIds: [],
+            specialNodes: []
+        };
+        // Carry the OPEN identity back onto the live node (M5).
+        if (serialized.pluginId !== undefined) {
+            node.pluginId = serialized.pluginId;
+        }
+        return node;
+    });
     const nodesById = new Map(nodes.map(node => [node.id, node]));
 
     // Reconstruct connections
@@ -183,7 +195,9 @@ export function importWorkflow(
             type: serialized.type
         }));
 
-    return { nodes, connections };
+    // Pass the song-layer timeline through UNTOUCHED (the song layer interprets it
+    // via readArrangement) so a saved project keeps its whole timeline — FROZEN-1.
+    return { nodes, connections, arrangement: workflow.arrangement };
 }
 
 // ============================================================================

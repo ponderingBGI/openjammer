@@ -30,7 +30,11 @@ import { AudioHealthPanel } from './components/AudioHealth/AudioHealthPanel';
 import { useEngineHealthToast } from './components/EngineHealthDot/useEngineHealthToast';
 import { PwaUpdatePrompt } from './components/PwaUpdatePrompt';
 import { NativeUpdaterRunner } from './components/NativeUpdaterRunner';
-import { PluginsPanel } from './components/Plugins/PluginsPanel';
+const PluginsPanel = lazy(() =>
+    import('./components/Plugins/PluginsPanel').then((module) => ({
+      default: module.PluginsPanel,
+    })),
+);
 import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
 import { LatencyWarningBanner } from './components/LatencyWarningBanner';
@@ -52,6 +56,43 @@ import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens
 import { isEditableTarget } from './utils/editableTarget';
 import { logger } from './utils/log';
 import './styles/global.css';
+
+/**
+ * Keep native plugin discovery out of the browser's first-paint bundle. The host
+ * catches the first shortcut/command, then hands all later toggles to the mounted
+ * panel's existing listeners. Once requested, the panel remains mounted so its
+ * scan results and open/closed state survive subsequent toggles.
+ */
+function PluginsPanelHost() {
+  const [requested, setRequested] = useState(false);
+
+  useEffect(() => {
+    if (requested) return;
+    const request = () => setRequested(true);
+    const onKey = (event: KeyboardEvent) => {
+      const hit =
+        (event.ctrlKey || event.metaKey) &&
+        event.shiftKey &&
+        event.key.toLowerCase() === 'p';
+      if (!hit) return;
+      event.preventDefault();
+      request();
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('openjammer:toggle-plugins', request);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('openjammer:toggle-plugins', request);
+    };
+  }, [requested]);
+
+  if (!requested) return null;
+  return (
+    <Suspense fallback={null}>
+      <PluginsPanel initiallyOpen />
+    </Suspense>
+  );
+}
 
 function App() {
   // Native (Tauri) boots straight into a live canvas — no autoplay gate exists
@@ -624,7 +665,7 @@ function App() {
       <NativeUpdaterRunner />
 
       {/* Plugins (§3) — discover your installed CLAP/VST3 plugins (desktop host). */}
-      <PluginsPanel />
+      <PluginsPanelHost />
 
       {/* Collaboration Share/Join control + peer list (U23 — collab state plane) */}
       <CollabControl />

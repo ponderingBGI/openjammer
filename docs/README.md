@@ -18,6 +18,9 @@ everything else is the way it is.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): the North star, the `ojcore` crate map, and the
   build/run/test/CI commands.
+- [timeline.md](timeline.md): the on-canvas DAW — the `Song` node, the shared
+  `Arrangement` a human and an agent co-author through reversible verbs, how it plays and
+  persists, and the honest roadmap of what's still ahead.
 - [agent-tools.md](agent-tools.md): the Ctrl+K AI agent's tool surface and the
   reuse-first, untrusted-generator workflow.
 - [creating-nodes.md](creating-nodes.md) and

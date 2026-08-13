@@ -25,6 +25,7 @@
 import type { GraphStoreApi } from './graphAdapter';
 import type { Connection, GraphNode } from '../engine/types';
 import type { Severity, Source } from '@openjammer/oj-protocol';
+import type { Verb } from '../song/verbs';
 import type {
     AddConnectionArgs,
     AddNodeArgs,
@@ -32,6 +33,7 @@ import type {
     AuthorCodeNodeArgs,
     AuthorDspNodeArgs,
     BatchApplyArgs,
+    EditTimelineArgs,
     EmitPlanArgs,
     FindNodesArgs,
     GetDiagnosticsArgs,
@@ -190,6 +192,25 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'defaultVelocity). Unknown keys are ignored; the change is REVERSIBLE ' +
             '(Ctrl+Z restores the previous values). Use it to FIX a setup — ' +
             'e.g. select the USB interface or switch to the interactive latency hint.',
+    },
+    {
+        name: 'describe_arrangement',
+        description:
+            'Read the current SONG TIMELINE as a readable summary — tracks (by stable ' +
+            'id), clips, notes (count + pitch range), sections, tempo, and automation, ' +
+            'all at bar.beat. Side-effect-free. GROUND yourself with this before editing ' +
+            'the timeline (the "read the song first" twin of get_graph for the node graph).',
+    },
+    {
+        name: 'edit_timeline',
+        description:
+            'Author the SONG TIMELINE with an ordered list of reversible `verbs` — the ' +
+            'SAME vocabulary a human GUI drag emits — applied live and undoable with ' +
+            'Ctrl+Z. Verb kinds: setTempo; setTrackMute/setTrackName; addTrack/removeTrack; ' +
+            'addClip/removeClip/moveClip; addNote/removeNote/editNote; addSection/' +
+            'removeSection; addAutomationLane/removeAutomationLane; setAutomationPoint/' +
+            'removeAutomationPoint. Ids for ADDED entities are minted for you (omit them). ' +
+            'Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
     },
 ];
 
@@ -457,13 +478,34 @@ export interface AgentEnvPort {
 }
 
 /**
+ * The TIMELINE port, injected into {@link applyToolCall} so the song-authoring tools
+ * (`describe_arrangement`, `edit_timeline`) stay PURE and unit-testable with a fake.
+ * {@link createArrangementPort} (in `./arrangementAdapter`) binds it to the live
+ * arrangement store; tests pass an in-memory fake. OPTIONAL everywhere: when a caller
+ * omits it the two timeline tools degrade to a clear "no timeline in this context"
+ * result rather than throwing, so every existing caller keeps working unchanged.
+ */
+export interface ArrangementToolPort {
+    /** A readable summary of the current song (describeArrangement), or null when none. */
+    describe(): { text: string } | null;
+    /**
+     * Apply an ordered list of reversible timeline verbs, minting ids for ADDED
+     * entities, through the shared command-log. Returns whether it applied, a
+     * one-line summary, and a reversible `undo` (a single Ctrl+Z's worth).
+     */
+    apply(verbs: Verb[]): { ok: boolean; summary: string; undo: () => void };
+}
+
+/**
  * Apply a single {@link AgentToolCall} against the graph store, returning a
  * reversible {@link AppliedToolResult}.
  *
  * `store` and `registrar` are injected (not imported) so this stays pure and
  * unit-testable with a fake store — no Zustand, no React, no DOM required.
  * `planEnv` (D3, M7) supplies the registry lookups the plan tools need; it is
- * OPTIONAL so the verb-only callers from M0–M6 are unchanged.
+ * OPTIONAL so the verb-only callers from M0–M6 are unchanged. `arrangement` (the
+ * timeline port) is likewise OPTIONAL — the two song-timeline tools degrade cleanly
+ * without it.
  */
 export function applyToolCall(
     call: AgentToolCall,
@@ -471,6 +513,7 @@ export function applyToolCall(
     registrar: DspNodeRegistrar,
     planEnv?: PlanEnv,
     env?: AgentEnvPort,
+    arrangement?: ArrangementToolPort,
 ): AppliedToolResult {
     switch (call.name) {
         case 'add_node':
@@ -496,12 +539,17 @@ export function applyToolCall(
             return applyFindNodes(call.args, store);
         // BATCH (M3): one reversible frame, all-or-nothing.
         case 'batch_apply':
-            return applyBatch(call.args, store, registrar, planEnv, env);
+            return applyBatch(call.args, store, registrar, planEnv, env, arrangement);
         // PLAN (M7): pure validation + the one-frame plan apply.
         case 'validate_plan':
             return applyValidatePlan(call.args, planEnv);
         case 'emit_plan':
-            return applyEmitPlan(call.args, store, registrar, planEnv, env);
+            return applyEmitPlan(call.args, store, registrar, planEnv, env, arrangement);
+        // TIMELINE: read the song summary; author it with reversible verbs.
+        case 'describe_arrangement':
+            return applyDescribeArrangement(arrangement);
+        case 'edit_timeline':
+            return applyEditTimeline(call.args, arrangement);
         // DIAGNOSTICS & SETTINGS: read logs/env/settings; write allowlisted settings.
         case 'get_logs':
             return applyGetLogs(call.args, env);
@@ -765,6 +813,7 @@ function applyBatch(
     registrar: DspNodeRegistrar,
     planEnv?: PlanEnv,
     env?: AgentEnvPort,
+    arrangement?: ArrangementToolPort,
 ): AppliedToolResult {
     const subUndos: Array<() => void> = [];
     const status: PerSubCall[] = [];
@@ -786,7 +835,7 @@ function applyBatch(
             break;
         }
 
-        const res = applyToolCall(sub, store, registrar, planEnv, env);
+        const res = applyToolCall(sub, store, registrar, planEnv, env, arrangement);
         status.push({ index: i, name: sub.name, ok: res.ok, summary: res.summary });
         if (res.ok) {
             subUndos.push(res.undo);
@@ -881,6 +930,7 @@ function applyEmitPlan(
     registrar: DspNodeRegistrar,
     planEnv?: PlanEnv,
     env?: AgentEnvPort,
+    arrangement?: ArrangementToolPort,
 ): AppliedToolResult {
     if (!planEnv) {
         return {
@@ -901,7 +951,7 @@ function applyEmitPlan(
     let index = 0;
 
     const runSub = (call: AgentToolCall, name: AgentToolCall['name']): AppliedToolResult => {
-        const res = applyToolCall(call, store, registrar, planEnv, env);
+        const res = applyToolCall(call, store, registrar, planEnv, env, arrangement);
         status.push({ index: index++, name, ok: res.ok, summary: res.summary });
         if (res.ok) subUndos.push(res.undo);
         else failed = true;
@@ -1089,6 +1139,51 @@ function applyUpdateSettings(args: UpdateSettingsArgs, env?: AgentEnvPort): Appl
         undo: once(undo),
         data: { applied, settings },
     };
+}
+
+// ============================================================================
+// Timeline tools — read the song summary; author it with reversible verbs
+// ============================================================================
+
+/** The shared "this caller didn't wire the timeline port" message. */
+const ARRANGEMENT_MISSING = 'the timeline is not available in this context (no song port wired)';
+
+/**
+ * `describe_arrangement`: relay a readable summary of the current song timeline.
+ * SIDE-EFFECT-FREE. Without an {@link ArrangementToolPort} it returns a clearly
+ * labelled empty result rather than throwing, mirroring the diagnostics reads.
+ */
+function applyDescribeArrangement(arrangement?: ArrangementToolPort): AppliedToolResult {
+    if (!arrangement) {
+        return { ok: true, summary: `describe_arrangement: ${ARRANGEMENT_MISSING}.`, undo: NO_OP, data: null };
+    }
+    const summary = arrangement.describe();
+    if (!summary) {
+        return {
+            ok: true,
+            summary: 'No song is open on the timeline yet.',
+            undo: NO_OP,
+            data: { text: 'No song is open on the timeline yet.' },
+        };
+    }
+    return { ok: true, summary: 'Read the song timeline.', undo: NO_OP, data: summary };
+}
+
+/**
+ * `edit_timeline`: apply an ordered list of reversible timeline verbs (the SAME
+ * vocabulary the GUI emits), minting ids for added entities, as ONE undoable step.
+ * Without a port it fails closed with a clear message (never silently drops an edit).
+ */
+function applyEditTimeline(args: EditTimelineArgs, arrangement?: ArrangementToolPort): AppliedToolResult {
+    if (!arrangement) {
+        return { ok: false, summary: `edit_timeline failed: ${ARRANGEMENT_MISSING}.`, undo: NO_OP };
+    }
+    const verbs = args.verbs ?? [];
+    if (verbs.length === 0) {
+        return { ok: true, summary: 'edit_timeline: no verbs to apply (no-op).', undo: NO_OP };
+    }
+    const res = arrangement.apply(verbs);
+    return { ok: res.ok, summary: res.summary, undo: once(res.undo) };
 }
 
 /** Wrap a side-effecting closure so it runs at most once (idempotent undo). */

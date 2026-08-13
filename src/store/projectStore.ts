@@ -21,6 +21,7 @@ import {
 import { useLibraryStore } from './libraryStore';
 import { useGraphStore } from './graphStore';
 import { useAudioClipStore, clearClipBufferCache } from './audioClipStore';
+import { useArrangementStore } from './arrangementStore';
 
 // ============================================================================
 // Types
@@ -50,6 +51,11 @@ export interface ProjectManifest {
     edges: unknown[];
     viewport?: { x: number; y: number; zoom: number };
   };
+  /** The song-layer timeline (the on-canvas DAW's Arrangement), OPAQUE here — the
+   *  project store never interprets it; the song layer produces it via
+   *  `arrangementForExport` and reads it back via `readArrangement`. So a saved
+   *  project keeps its whole timeline (FROZEN-1). */
+  arrangement?: unknown;
 }
 
 export interface RecentProject {
@@ -77,7 +83,7 @@ export interface ProjectState {
   createProject: (name?: string) => Promise<FileSystemDirectoryHandle>;
   openProject: () => Promise<{ handle: FileSystemDirectoryHandle; manifest: ProjectManifest }>;
   openRecentProject: (project: RecentProject) => Promise<{ handle: FileSystemDirectoryHandle; manifest: ProjectManifest }>;
-  saveProject: (graphData: { nodes: unknown[]; edges: unknown[]; viewport?: { x: number; y: number; zoom: number } }) => Promise<void>;
+  saveProject: (graphData: { nodes: unknown[]; edges: unknown[]; viewport?: { x: number; y: number; zoom: number }; arrangement?: unknown }) => Promise<void>;
   closeProject: () => void;
   markDirty: () => void;
   markClean: () => void;
@@ -730,6 +736,13 @@ export const useProjectStore = create<ProjectState>()(
             edges: validatedGraph.edges,
             viewport: validateViewport(graphData.viewport)
           };
+          // Persist the timeline UNTOUCHED (opaque; FROZEN-1). Present => keep it,
+          // explicit null/undefined => drop it (the project has no song).
+          if (graphData.arrangement !== undefined && graphData.arrangement !== null) {
+            manifest.arrangement = graphData.arrangement;
+          } else {
+            delete manifest.arrangement;
+          }
 
           // Write back
           await writeProjectManifest(handle, manifest);
@@ -761,6 +774,9 @@ export const useProjectStore = create<ProjectState>()(
 
         // Clear audio clip state
         useAudioClipStore.getState().clearAllClips();
+
+        // Clear the timeline so a closed project never leaks its song into the next.
+        useArrangementStore.getState().setArrangement(null);
 
         // Clear clip buffer cache to free memory
         clearClipBufferCache();

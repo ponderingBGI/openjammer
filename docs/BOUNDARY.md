@@ -310,8 +310,14 @@ Two consequences are load-bearing and must stay true:
 So the offline / produce world is reached by *more nodes and more TypeScript*, driven by a second
 clock over the one unchanged kernel — never by forking the core.
 
+**This trajectory has landed.** The on-canvas DAW — the `Song` node, the shared `Arrangement`
+a human and an agent co-author through reversible verbs, `conduct`'s bit-identical lowering,
+live preview, and persistence — is built and shipping. See **[timeline.md](./timeline.md)** for
+the feature, how to drive it by hand and by agent, and the honest roadmap of what's still ahead.
+
 ---
 
 *Related: [agents.md](../agents.md) (the two beliefs + code values this is derived from) ·
+[timeline.md](./timeline.md) (the DAW this section justified) ·
 [ARCHITECTURE.md](./ARCHITECTURE.md) (the crate map + the CI gates that enforce Tier 1) ·
 [PRODUCT.md](../PRODUCT.md) (why the medium is unforgiving).*

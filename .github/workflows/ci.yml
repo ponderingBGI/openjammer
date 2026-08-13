@@ -153,12 +153,10 @@ jobs:
       - name: Format
         run: cargo fmt --all -- --check
       - name: Clippy (-D warnings)
-        # Exclude oj-tauri: its DEFAULT feature is the full JUCE host
-        # (plugin-host-juce -> ojhost/juce), which needs CMake + the VST3 SDK and is
-        # founder-rig-only. A `--workspace` build pulls that default in via feature
-        # unification and dies at the JUCE CMake configure here. The desktop shell is
-        # linted with the pure-Rust CLAP backend in the "Plugin host" step below, and
-        # built for real (JUCE) by the native Windows/macOS jobs.
+        # Exclude oj-tauri from the broad workspace pass because the desktop shell
+        # has its own feature gates below: fast scaffold by default, pure-Rust CLAP
+        # for real hosting code, and JUCE only in installer/release jobs. Keeping the
+        # shell out of the catch-all avoids accidental feature unification noise.
         run: cargo clippy --workspace --exclude oj-tauri --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace --exclude oj-tauri
@@ -189,13 +187,13 @@ jobs:
         # real hosting code. This compiles, lints, and tests the REAL pure-Rust
         # CLAP backend (clack, MIT — no C++/CMake) so the plugin-host path stays
         # green on every commit. The JUCE VST3/AU backend (`--features juce`) needs
-        # CMake + a C++ toolchain + the VST3 SDK and is built on the founder's rig.
+        # CMake + a C++ toolchain + the VST3 SDK and is exercised by installer/release jobs.
         run: |
           cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings
           cargo test -p ojhost --features clap-host
-          # The desktop shell (oj-tauri) is excluded from the workspace gate above
-          # (its default is the founder-rig JUCE host). Lint + test it here with the
-          # pure-Rust CLAP backend so the IPC surface + commands stay green — no CMake.
+          # The desktop shell (oj-tauri) is excluded from the workspace gate above.
+          # Lint + test it here with the pure-Rust CLAP backend so the IPC surface +
+          # commands stay green while normal `bun native` remains scaffold-fast.
           cargo clippy -p oj-tauri --no-default-features --features plugin-host-clap --all-targets -- -D warnings
           cargo test -p oj-tauri --no-default-features --features plugin-host-clap
 
@@ -214,6 +212,14 @@ jobs:
         run: bun run lint
       - name: Test
         run: bun run test:run
+      # The `oj` CLI's own tests use `bun:test` + `Bun.file` (they test a Bun program),
+      # so they run under `bun test`, not vitest — and were SILENTLY UNCOLLECTED until
+      # now (hiding a real prereqs drift). The `test-collection` doctor gate keeps every
+      # test file mapped to a runner so none is ever born dead again.
+      - name: CLI tests (bun)
+        run: bun run test:cli
+      - name: Permission-gate security tests (node --test)
+        run: bun run test:pi-ext
       # Build-warning gate: the production build must emit ZERO warnings. A clean
       # build is part of the covenant — a chunk-size, browserslist, or deprecation
       # notice is cosmetic noise that erodes trust and, left unchecked, creeps back.
@@ -265,7 +271,7 @@ jobs:
       - name: Stage Pi sidecar resource dir (bundle-only)
         shell: bash
         run: mkdir -p src-tauri/binaries
-      - name: Build the native desktop app (oj-tauri)
+      - name: Build the native desktop app (oj-tauri, fast scaffold host)
         run: cargo build -p oj-tauri
       - name: Engine tests on Windows
         run: cargo test -p ojcore -p ojinstrument -p ojcore-native
@@ -325,6 +331,8 @@ jobs:
         run: bun scripts/oj/index.ts doctor --check ssot-set-equality --json
       - name: COOP/COEP cross-origin isolation headers
         run: bun scripts/oj/index.ts doctor --check coi-headers --json
+      - name: No born-dead tests (every test file has a CI runner)
+        run: bun scripts/oj/index.ts doctor --check test-collection --json
 
   gate:
     name: Merge gate

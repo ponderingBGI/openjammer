@@ -7,7 +7,7 @@ interface (MOTU M4 / Scarlett 4i4), MIDI controller (Arturia MiniLab 3),
 plugins, and provider keys. Run them on the **Windows native install**.
 
 ## 0. Get a build
-- **Local:** `bun install && bun run tauri build` → installer in `target/release/bundle/`.
+- **Local:** `bun install && bun run tauri build --features plugin-host-juce` → installer in `target/release/bundle/`.
 - **CI:** run the **“Build installers (on demand)”** workflow from the Actions
   tab → download the `openjammer-windows-latest` artifact.
 
@@ -32,7 +32,8 @@ claim.
 
 ## 2. Native audio + instruments + MIDI
 ```bash
-bun native     # run the native desktop app — or launch the installed build
+bun native        # run the native desktop app — or launch the installed build
+bun native --all  # run the dev app with the full VST3/CLAP/AU host
 ```
 - Build `keyboard → instrument → effect → speaker`. Play the Arturia → sound, low latency.
 - Verify looper (record/overdub/clear), recorder (capture → WAV), sampler (load a
@@ -40,11 +41,11 @@ bun native     # run the native desktop app — or launch the installed build
 
 ## 3. Third-party plugins
 ```bash
-# Shipped desktop path: JUCE host (VST3 + CLAP, AU on macOS; VST2 when owner-provisioned)
+# Fast dev/default path: scaffold host (no VST/AU scan)
 cargo build -p oj-tauri
 
-# Constrained/dev fallback: no plugin host
-cargo build -p oj-tauri --no-default-features
+# Shipped desktop path: JUCE host (VST3 + CLAP, AU on macOS; VST2 when owner-provisioned)
+cargo build -p oj-tauri --features plugin-host-juce
 
 # Pure-Rust CLAP-only fallback
 cargo build -p oj-tauri --no-default-features --features plugin-host-clap

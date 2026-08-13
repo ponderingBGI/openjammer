@@ -393,6 +393,15 @@ fn ai_run_blocking(
         drop(guard.take());
         // Load/drop the permission-gate to match the mode BEFORE Pi reads settings.
         configure_gate(&workspace.agent_home, jailed, &app, &channel);
+        // Memory is ON by default: first run installs pi-persistent-intelligence;
+        // an explicit Ctrl+K "memory off" persists as an opt-out and removes it.
+        if ensure_learning_default(&workspace.agent_home).is_err() {
+            emit(
+                &app,
+                &channel,
+                PiStreamLine::thought("note: could not update the memory config".to_string()),
+            );
+        }
         // Install the graph-verb extension in EVERY mode (the core capability, so
         // Pi can build the canvas); it is never dropped by YOLO.
         let graph_pkg = graph_extension_dir(&app).to_string_lossy().into_owned();
@@ -1176,17 +1185,33 @@ fn slugify_package_name(name: &str) -> Result<String, String> {
     Ok(slug)
 }
 
-/// Add (`present`) or remove a `package` entry from the agent home's
-/// `settings.json` `packages[]` — the one mechanism Pi loads packages through.
-/// Shared by the permission-gate (sandbox) and pi-persistent-intelligence (learning).
-fn set_settings_package(agent_home: &Path, package: &str, present: bool) -> std::io::Result<()> {
-    let settings_path = agent_home.join(".pi").join("agent").join("settings.json");
+fn settings_path(agent_home: &Path) -> PathBuf {
+    agent_home.join(".pi").join("agent").join("settings.json")
+}
 
-    let mut root: serde_json::Value = std::fs::read_to_string(&settings_path)
+fn read_settings_root(agent_home: &Path) -> serde_json::Value {
+    std::fs::read_to_string(settings_path(agent_home))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
+        .unwrap_or_else(|| serde_json::json!({}))
+}
 
+fn write_settings_root(agent_home: &Path, root: &serde_json::Value) -> std::io::Result<()> {
+    let path = settings_path(agent_home);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let serialized = serde_json::to_string_pretty(root).map_err(std::io::Error::other)?;
+    // Crash-safe (temp + fsync + atomic rename): never leave a torn settings.json.
+    ojcore_native::atomic_write_path(&path, serialized.as_bytes())
+}
+
+/// Mutate `root.packages[]` in memory. Returns whether anything changed.
+fn set_settings_package_in_root(
+    root: &mut serde_json::Value,
+    package: &str,
+    present: bool,
+) -> bool {
     let mut packages: Vec<String> = root
         .get("packages")
         .and_then(|v| v.as_array())
@@ -1213,33 +1238,31 @@ fn set_settings_package(agent_home: &Path, package: &str, present: bool) -> std:
         changed = true;
     }
 
-    if !changed {
-        return Ok(()); // already in the desired state
+    if changed {
+        root["packages"] = serde_json::json!(packages);
     }
-
-    root["packages"] = serde_json::json!(packages);
-    if let Some(parent) = settings_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let serialized = serde_json::to_string_pretty(&root).map_err(std::io::Error::other)?;
-    // Crash-safe (temp + fsync + atomic rename): never leave a torn settings.json.
-    ojcore_native::atomic_write_path(&settings_path, serialized.as_bytes())
+    changed
 }
 
-/// Whether `package` is currently present in the agent home's `settings.json`
-/// `packages[]` — the READ-side counterpart of {@link set_settings_package}. A
-/// missing / unreadable / malformed settings file reads as "not present" (false),
-/// never an error, so callers can treat it as a plain boolean.
+/// Add (`present`) or remove a `package` entry from the agent home's
+/// `settings.json` `packages[]` — the one mechanism Pi loads packages through.
+/// Shared by the permission-gate (sandbox) and pi-persistent-intelligence (learning).
+fn set_settings_package(agent_home: &Path, package: &str, present: bool) -> std::io::Result<()> {
+    let mut root = read_settings_root(agent_home);
+    if !set_settings_package_in_root(&mut root, package, present) {
+        return Ok(()); // already in the desired state
+    }
+    write_settings_root(agent_home, &root)
+}
+
+/// Test helper: whether `package` is currently present in the agent home's
+/// `settings.json` `packages[]`.
+#[cfg(test)]
 fn settings_has_package(agent_home: &Path, package: &str) -> bool {
-    let settings_path = agent_home.join(".pi").join("agent").join("settings.json");
-    std::fs::read_to_string(&settings_path)
-        .ok()
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|root| {
-            root.get("packages")
-                .and_then(|v| v.as_array())
-                .map(|a| a.iter().any(|v| v.as_str() == Some(package)))
-        })
+    read_settings_root(agent_home)
+        .get("packages")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().any(|v| v.as_str() == Some(package)))
         .unwrap_or(false)
 }
 
@@ -1265,30 +1288,67 @@ fn persistent_intelligence_pkg() -> String {
         .unwrap_or_else(|_| "pi-persistent-intelligence".to_string())
 }
 
-/// Opt-in learning (Phase 7): install/remove pi-persistent-intelligence in the
-/// agent home so the agent remembers your taste across sessions (local frecency is
-/// the floor either way). A mode change takes effect on the next (re)spawn.
+const OPENJAMMER_SETTINGS_KEY: &str = "openjammer";
+const AI_LEARNING_ENABLED_KEY: &str = "aiLearningEnabled";
+
+fn explicit_learning_preference(agent_home: &Path) -> Option<bool> {
+    read_settings_root(agent_home)
+        .get(OPENJAMMER_SETTINGS_KEY)
+        .and_then(|v| v.get(AI_LEARNING_ENABLED_KEY))
+        .and_then(|v| v.as_bool())
+}
+
+fn set_learning_state(agent_home: &Path, enabled: bool) -> std::io::Result<()> {
+    let mut root = read_settings_root(agent_home);
+    let pkg = persistent_intelligence_pkg();
+    let mut changed = set_settings_package_in_root(&mut root, &pkg, enabled);
+
+    if !root
+        .get(OPENJAMMER_SETTINGS_KEY)
+        .is_some_and(|v| v.is_object())
+    {
+        root[OPENJAMMER_SETTINGS_KEY] = serde_json::json!({});
+        changed = true;
+    }
+    if root[OPENJAMMER_SETTINGS_KEY][AI_LEARNING_ENABLED_KEY].as_bool() != Some(enabled) {
+        root[OPENJAMMER_SETTINGS_KEY][AI_LEARNING_ENABLED_KEY] = serde_json::json!(enabled);
+        changed = true;
+    }
+
+    if changed {
+        write_settings_root(agent_home, &root)?;
+    }
+    Ok(())
+}
+
+/// Memory is ON by default. A missing preference is treated as first run and writes
+/// the package + explicit `openjammer.aiLearningEnabled: true`; an explicit false is
+/// a durable opt-out and removes the package if some older build left it present.
+fn ensure_learning_default(agent_home: &Path) -> std::io::Result<bool> {
+    let enabled = explicit_learning_preference(agent_home).unwrap_or(true);
+    set_learning_state(agent_home, enabled)?;
+    Ok(enabled)
+}
+
+/// Enable/disable pi-persistent-intelligence in the agent home so the agent
+/// remembers your taste across sessions (local frecency is the floor either way).
+/// A mode change takes effect on the next (re)spawn.
 #[tauri::command]
 pub fn ai_set_learning(enabled: bool) -> Result<(), String> {
     let agent_home = AgentWorkspace::ensure()
         .map_err(|e| e.to_string())?
         .agent_home;
-    set_settings_package(&agent_home, &persistent_intelligence_pkg(), enabled)
-        .map_err(|e| e.to_string())
+    set_learning_state(&agent_home, enabled).map_err(|e| e.to_string())
 }
 
-/// Read whether opt-in learning is currently ON — i.e. pi-persistent-intelligence is
-/// present in the agent home's `settings.json`. The read-side of `ai_set_learning`,
-/// so the UI can show a truthful "memory: on" indicator instead of guessing.
+/// Read whether learning is currently ON. First read also applies the default-on
+/// policy, so the footer is truthful before the first Pi child is spawned.
 #[tauri::command]
 pub fn ai_get_learning() -> Result<bool, String> {
     let agent_home = AgentWorkspace::ensure()
         .map_err(|e| e.to_string())?
         .agent_home;
-    Ok(settings_has_package(
-        &agent_home,
-        &persistent_intelligence_pkg(),
-    ))
+    ensure_learning_default(&agent_home).map_err(|e| e.to_string())
 }
 
 /// Sanity cap on a self-authored package's source — not a security boundary (the
@@ -1783,6 +1843,13 @@ fn ai_command_blocking(
     if needs_respawn {
         drop(guard.take());
         configure_gate(&workspace.agent_home, jailed, &app, &channel);
+        if ensure_learning_default(&workspace.agent_home).is_err() {
+            emit(
+                &app,
+                &channel,
+                PiStreamLine::thought("note: could not update the memory config".to_string()),
+            );
+        }
         let graph_pkg = graph_extension_dir(&app).to_string_lossy().into_owned();
         let _ = set_settings_package(&workspace.agent_home, &graph_pkg, true);
         let jail = if jailed {
@@ -2020,6 +2087,7 @@ fn ai_prewarm_blocking(
     }
     drop(guard.take());
     configure_gate(&workspace.agent_home, jailed, &app, CHANNEL);
+    let _ = ensure_learning_default(&workspace.agent_home);
     let graph_pkg = graph_extension_dir(&app).to_string_lossy().into_owned();
     let _ = set_settings_package(&workspace.agent_home, &graph_pkg, true);
     let jail = if jailed {
@@ -3244,6 +3312,55 @@ mod tests {
             "/old/resources/not-pi-openjammer-graph",
             "/new/resources/pi-openjammer-graph",
         ));
+    }
+
+    fn temp_agent_home(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "openjammer-ai-{name}-{}-{nanos}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn learning_defaults_on_and_installs_persistent_intelligence() {
+        let dir = temp_agent_home("learning-default-on");
+
+        assert!(ensure_learning_default(&dir).unwrap());
+
+        assert!(settings_has_package(&dir, "pi-persistent-intelligence"));
+        assert_eq!(explicit_learning_preference(&dir), Some(true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn learning_off_is_a_durable_opt_out() {
+        let dir = temp_agent_home("learning-opt-out");
+
+        set_learning_state(&dir, false).unwrap();
+        assert!(!ensure_learning_default(&dir).unwrap());
+
+        assert!(!settings_has_package(&dir, "pi-persistent-intelligence"));
+        assert_eq!(explicit_learning_preference(&dir), Some(false));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn learning_on_readds_package_after_opt_out() {
+        let dir = temp_agent_home("learning-reenable");
+
+        set_learning_state(&dir, false).unwrap();
+        set_learning_state(&dir, true).unwrap();
+
+        assert!(settings_has_package(&dir, "pi-persistent-intelligence"));
+        assert_eq!(explicit_learning_preference(&dir), Some(true));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // ---- RPC event mapping (the M1 "transport truth") ----------------------

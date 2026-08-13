@@ -14,7 +14,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: System deps (Tauri + cpal + JUCE plugin hosting)
+    - name: System deps (Tauri + cpal + optional JUCE plugin hosting)
       if: runner.os == 'Linux'
       shell: bash
       run: |

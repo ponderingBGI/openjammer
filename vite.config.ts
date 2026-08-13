@@ -249,6 +249,10 @@ export default defineConfig({
           )
             return 'tree-view'
           if (path.includes('/node_modules/sonner/')) return 'sonner'
+          // idb-keyval is a tiny, dependency-free persistence leaf. Keeping it
+          // separate prevents the project store's IndexedDB adapter from tipping
+          // the initial app chunk over the enforced budget.
+          if (path.includes('/node_modules/idb-keyval/')) return 'idb-keyval'
           return undefined
         },
       },

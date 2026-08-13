@@ -32,6 +32,10 @@ export default defineConfig({
             'src/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}',
             'packages/oj-ui/src/**/*.{test,spec}.{ts,tsx}',
         ],
+        // NOTE: the `oj` CLI's tests under scripts/oj/__tests__ use `bun:test` +
+        // `Bun.file` (they test a Bun program), so they run under `bun test`, NOT
+        // vitest — see the `test:cli` script. The `test-collection` doctor check
+        // asserts every test file is covered by EXACTLY ONE runner so none is dead.
         coverage: {
             provider: 'v8',
             reporter: ['text', 'json', 'html'],

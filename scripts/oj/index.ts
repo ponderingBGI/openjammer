@@ -6,7 +6,8 @@
 //   oj preflight  [--json] [--affected] [--plan] [--base <ref>]
 //   oj plan       [--json] [--base <ref>]
 //   oj scaffold   <node|dsp-kernel> ...     (planned — exits 2)
-//   oj dev        [--engine] [tauri-flags…]  (native dev loop; --engine = bacon inner-loop)
+//   oj dev        [--engine] [--all|--plugins|--clap|--plugin-host <mode|all>] [tauri-flags…]
+//                 (native dev loop; --engine = bacon inner-loop)
 //   oj design     <map|status> [--json]      (design-system bridge: component-map + sync health)
 //
 // Shared lib/ (git, cache, ssot, report) means version-sync logic lives ONCE.
@@ -22,6 +23,7 @@ import { design } from './design';
 import { setup } from './setup';
 import { render } from './render';
 import { author } from './author';
+import { song } from './song';
 
 interface ParsedFlags {
   json: boolean;
@@ -115,7 +117,7 @@ function usage(): void {
       '  oj preflight [--json] [--affected] [--plan] [--base <ref>]',
       '  oj plan      [--json] [--base <ref>]',
       '  oj scaffold  <node|dsp-kernel> ...   (not yet implemented)',
-      '  oj dev       [--engine] [tauri-flags...]',
+      '  oj dev       [--engine] [--all|--plugins|--clap|--plugin-host <scaffold|clap|juce|all>] [tauri-flags...]',
       '  oj setup     [--install] [--yes] [--dry-run] [--wasm] [--json]',
       '  oj render    [--graph g.json] [--schedule s.json] [--secs n] [--out w.wav]',
       '               [--report r.json] [--assert expr]...   (device-free audition)',
@@ -123,7 +125,10 @@ function usage(): void {
       '               (friendly node/wire spec -> OjGraph via emitOjGraph)',
       '',
       'oj dev: one-command native loop (Vite HMR + ojcore-native engine, unified',
-      '        logs, clean Ctrl+C). --engine runs the windowless bacon inner-loop.',
+      '        logs, clean Ctrl+C). Default plugin host is the fast scaffold;',
+      '        use --all (alias --plugins) for the full JUCE VST3/CLAP/AU host,',
+      '        or --clap for pure-Rust CLAP.',
+      '        --engine runs the windowless bacon inner-loop.',
       'oj setup: detect + install the native build prerequisites (Rust, MSVC/WebView2,',
       '          Linux system libs). Confirms before installing; --dry-run to preview.',
       '',
@@ -148,6 +153,10 @@ async function main(): Promise<number> {
   if (sub === 'render') return render(rest);
   // `author` lowers a friendly patch spec to an OjGraph via the headless emitOjGraph.
   if (sub === 'author') return author(rest);
+  // `song` authors a whole Arrangement (the timeline feature), conducts it, renders
+  // it device-free, self-grades, and exports a human-openable project. Passthrough
+  // args (extra --assert/--secs) reach the render bin unmangled, like render/author.
+  if (sub === 'song' || sub === 'arrange') return song(rest);
 
   let flags: ReturnType<typeof parseFlags>;
   try {

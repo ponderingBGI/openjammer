@@ -1346,7 +1346,21 @@ impl EngineBackend {
         } else {
             dirs
         };
+        // Diagnostic seam (off-RT): record which backend is actually compiled in,
+        // how many plugin-shaped files exist on disk, and how many survived a
+        // probe. A `candidates > 0, found == 0` line is the fingerprint of a
+        // backend that sees the binaries but can't host them (vs. nothing
+        // installed) — the only way to tell those apart after the fact.
+        let candidates = ojhost::candidate_paths(dirs).len();
         let found = scan(dirs).map_err(BackendError::PluginScan)?;
+        tracing::info!(
+            target: "engine",
+            backend = ojhost::HostingBackend::current().slug(),
+            dirs = dirs.len(),
+            candidates,
+            found = found.len(),
+            "plugin scan"
+        );
         register_scanned(&mut self.registry, &found);
         Ok(found)
     }

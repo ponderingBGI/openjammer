@@ -5,9 +5,147 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OpenJammer</title>
+    <style>
+      :root {
+        --oj-boot-paper: #f5f0e8;
+        --oj-boot-panel: #ede8e0;
+        --oj-boot-ink: #1a1a1a;
+        --oj-boot-muted: #4a4a4a;
+        --oj-boot-node: #ffffff;
+        --oj-boot-ochre: #c68b3f;
+      }
+
+      html,
+      body,
+      #root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        color: var(--oj-boot-ink);
+        background: var(--oj-boot-paper);
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      #root {
+        background-color: var(--oj-boot-paper);
+        background-image: radial-gradient(circle, rgba(0, 0, 0, 0.06) 1px, transparent 1px);
+        background-size: 24px 24px;
+      }
+
+      .oj-boot {
+        min-height: 100%;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px;
+      }
+
+      .oj-boot-card {
+        width: min(480px, 100%);
+        box-sizing: border-box;
+        padding: 28px 32px;
+        border: 2px solid var(--oj-boot-ink);
+        border-radius: 20px;
+        background: var(--oj-boot-node);
+        box-shadow: 2px 2px 0 var(--oj-boot-ink);
+      }
+
+      .oj-boot-title {
+        margin: 0 0 8px;
+        font-family: Caveat, "Comic Sans MS", cursive;
+        font-size: 36px;
+        line-height: 1.1;
+      }
+
+      .oj-boot-copy {
+        margin: 0;
+        color: var(--oj-boot-muted);
+        font-size: 15px;
+        line-height: 1.5;
+      }
+
+      .oj-boot-steps {
+        display: grid;
+        gap: 8px;
+        margin: 20px 0 0;
+        padding: 0;
+        list-style: none;
+        font-size: 14px;
+      }
+
+      .oj-boot-steps li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .oj-boot-steps li::before {
+        content: "";
+        width: 10px;
+        height: 10px;
+        flex: 0 0 auto;
+        border: 2px solid var(--oj-boot-ink);
+        border-radius: 50%;
+        background: var(--oj-boot-ochre);
+        animation: oj-boot-pulse 1.2s ease-in-out infinite;
+      }
+
+      .oj-boot-steps li:nth-child(2)::before {
+        animation-delay: 0.18s;
+      }
+
+      .oj-boot-steps li:nth-child(3)::before {
+        animation-delay: 0.36s;
+      }
+
+      .oj-boot-hint {
+        margin-top: 18px;
+        padding-top: 14px;
+        border-top: 2px solid var(--oj-boot-panel);
+        color: var(--oj-boot-muted);
+        font-size: 13px;
+        line-height: 1.45;
+      }
+
+      @keyframes oj-boot-pulse {
+        0%,
+        100% {
+          transform: translateY(0);
+        }
+        50% {
+          transform: translateY(-2px);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .oj-boot-steps li::before {
+          animation: none;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="oj-boot" role="status" aria-live="polite">
+        <section class="oj-boot-card" aria-label="OpenJammer is starting">
+          <h1 class="oj-boot-title">OpenJammer</h1>
+          <p class="oj-boot-copy">Warming the sketchbook and connecting the native engine.</p>
+          <ul class="oj-boot-steps" aria-label="Startup checks">
+            <li>Loading the canvas</li>
+            <li>Preparing the Rust audio engine</li>
+            <li>Opening the playable window</li>
+          </ul>
+          <p class="oj-boot-hint">
+            If this stays here in dev, check the terminal for the first Vite or Rust error.
+          </p>
+        </section>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -16,9 +16,10 @@ import { resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dir, '..', '..');
 
-export async function render(args: string[]): Promise<number> {
+export async function render(args: string[], features = 'demo'): Promise<number> {
   // `-q` so cargo's compile chatter doesn't muddy the render summary; `--features
-  // demo` pulls the instrument loaders + serde the audition tool needs.
+  // demo` pulls the instrument loaders + serde the audition tool needs. Callers that
+  // use `--code-node` (agent-authored DSP) pass `demo,author-host` to pull ojwasm.
   const cmd = [
     'cargo',
     'run',
@@ -28,7 +29,7 @@ export async function render(args: string[]): Promise<number> {
     '--bin',
     'render',
     '--features',
-    'demo',
+    features,
     '--',
     ...args,
   ];

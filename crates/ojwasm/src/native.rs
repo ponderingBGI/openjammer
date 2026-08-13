@@ -39,6 +39,16 @@ pub(crate) fn build_native_kernel(dll_path: &Path) -> Option<Box<dyn Kernel>> {
         .map(|k| Box::new(k) as Box<dyn Kernel>)
 }
 
+/// Probe a compiled native faust `.dll` for its `(audio_in, audio_out)` arity, or
+/// `None` if it can't be loaded / lacks the `oj_*` exports. Lets an off-RT caller
+/// build a [`ojcore::PluginManifest`] whose ports MATCH the DSP — so a generator
+/// (0-in) and an effect (1-in) each host correctly. Author-time only.
+pub fn native_dll_arity(dll_path: &Path) -> Option<(usize, usize)> {
+    NativeKernel::new(dll_path)
+        .ok()
+        .map(|k| (k.num_in, k.num_out))
+}
+
 /// A faust DSP loaded as a native dynamic library, driven through the `oj_*` C ABI.
 struct NativeKernel {
     // Keep the library loaded for the kernel's lifetime; dropped after `handle` is
@@ -204,6 +214,43 @@ const VCVARS_CANDIDATES: &[&str] = &[
     r"C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvars64.bat",
 ];
 
+/// Discover a `vcvars64.bat`. Prefers `vswhere` (the SUPPORTED way to locate a VS
+/// install at ANY path — e.g. a non-standard `C:\BuildTools`), then falls back to
+/// the well-known install locations. The old hardcoded-only list silently returned
+/// `None` (no audible faust) when a perfectly good toolchain lived off the default
+/// path; this finds it.
+fn find_vcvars() -> Option<PathBuf> {
+    const VSWHERE: &str = r"C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe";
+    if Path::new(VSWHERE).exists() {
+        if let Ok(out) = Command::new(VSWHERE)
+            .args([
+                "-latest",
+                "-products",
+                "*",
+                "-requires",
+                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property",
+                "installationPath",
+            ])
+            .output()
+        {
+            if out.status.success() {
+                let root = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !root.is_empty() {
+                    let bat = Path::new(&root).join(r"VC\Auxiliary\Build\vcvars64.bat");
+                    if bat.exists() {
+                        return Some(bat);
+                    }
+                }
+            }
+        }
+    }
+    VCVARS_CANDIDATES
+        .iter()
+        .map(PathBuf::from)
+        .find(|p| p.exists())
+}
+
 /// Compile faust `src` to a native `.dll` in `out_dir`, returning the dll path.
 ///
 /// Windows dev-environment helper: shells `faust -lang cpp` then `cl.exe` (via a
@@ -235,13 +282,13 @@ pub fn compile_faust_to_dll(src: &str, out_dir: &Path) -> Option<PathBuf> {
         return None;
     }
     std::fs::write(&wrapper, WRAPPER_CPP).ok()?;
-    let vcvars = VCVARS_CANDIDATES.iter().find(|p| Path::new(p).exists())?;
+    let vcvars = find_vcvars()?;
     let bat_src = format!(
         "@echo off\r\n\
          call \"{vcvars}\" >nul\r\n\
          cd /d \"{dir}\"\r\n\
          cl /nologo /LD /EHsc /O2 /I \"{inc}\" wrapper.cpp /Fe:ojfaust.dll\r\n",
-        vcvars = vcvars,
+        vcvars = vcvars.display(),
         dir = out_dir.display(),
         inc = FAUST_INCLUDE,
     );
@@ -256,5 +303,32 @@ pub fn compile_faust_to_dll(src: &str, out_dir: &Path) -> Option<PathBuf> {
         Some(dll)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// End-to-end on a real dev box: faust + cl.exe (via the discovered vcvars)
+    /// compile a trivial DSP to a loadable native `.dll` exposing the `oj_*` ABI.
+    /// Skips gracefully when the toolchain is absent (CI), so it only ASSERTS where
+    /// it can actually build — but on a faust+MSVC machine it proves the whole
+    /// agent-authored-node compile+load path, including the vswhere vcvars discovery.
+    #[test]
+    fn compiles_a_faust_dsp_to_a_loadable_dll() {
+        let src = "process = _ : *(0.5);";
+        let dir = std::env::temp_dir().join("ojwasm_native_faust_test");
+        let _ = std::fs::create_dir_all(&dir);
+        let Some(dll) = compile_faust_to_dll(src, &dir) else {
+            eprintln!("skip: faust/MSVC toolchain unavailable on this machine");
+            return;
+        };
+        assert!(dll.exists(), "compile_faust_to_dll returned a missing path");
+        let kernel = build_native_kernel(&dll);
+        assert!(
+            kernel.is_some(),
+            "compiled .dll did not expose the oj_* exports"
+        );
     }
 }

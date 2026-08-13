@@ -258,8 +258,8 @@ function buildAppCommands(): Command[] {
 /**
  * Agent learning + CLI-parity actions (Phase 4/7). Desktop-only — gated on the
  * capability seam (`caps.agent !== 'none'`) so they never appear in the browser.
- * Thin wrappers over the native `ai_set_learning` / `ai_forget` commands; the
- * persistent global brain means these manage the agent's memory across projects.
+ * Thin wrappers over the native `ai_set_learning` / `ai_forget` commands; memory
+ * is on by default, and the persistent global brain spans projects.
  */
 function buildAiActions(): Action[] {
   const invokeAi = (cmd: string, args?: Record<string, unknown>): void => {
@@ -271,7 +271,7 @@ function buildAiActions(): Action[] {
   return [
     {
       id: "ai.learning.enable",
-      title: "AI: Let Philia remember you (memory on)",
+      title: "AI: Turn Philia memory on",
       group: "AI",
       keywords: [
         "ai",
@@ -293,7 +293,7 @@ function buildAiActions(): Action[] {
     },
     {
       id: "ai.learning.disable",
-      title: "AI: Stop Philia remembering you (memory off)",
+      title: "AI: Turn Philia memory off",
       group: "AI",
       keywords: ["ai", "Philia", "learn", "memory", "stop", "off", "privacy"],
       targets: ["global"],

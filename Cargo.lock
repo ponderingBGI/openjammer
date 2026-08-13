@@ -3362,6 +3362,7 @@ dependencies = [
  "ojcore",
  "ojinstrument",
  "ojproto",
+ "ojwasm",
  "rtrb",
  "rusqlite",
  "serde",
