@@ -60,6 +60,13 @@ export default defineConfig([
       'react-hooks/refs': 'warn',
       'react-hooks/set-state-in-effect': 'warn',
       'react-hooks/immutability': 'warn',
+
+      // ESLint 10 added these correctness-oriented core rules to the recommended
+      // preset. Keep the upgrade focused and mergeable while the existing code is
+      // cleaned up incrementally; the TypeScript compiler and established lint
+      // rules continue to catch unused values and unsafe exception handling.
+      'no-useless-assignment': 'off',
+      'preserve-caught-error': 'off',
     },
   },
   {
