@@ -273,7 +273,7 @@ describe('OjcoreWasmExecutor sampler live-load (mocked worklet)', () => {
             tempos: [{ tick: 0, sample: 0, bpm_start: 120, bpm_end: 120, continuing: false }],
             meters: [{ tick: 0, sample: 0, bar: 1, divisions_per_bar: 4, note_value: 4 }],
         };
-        const timeline = { sample_rate: 48_000, events: [], loop_range: [12_000, 24_000] as [number, number], punch_range: null, end: 96_000 };
+        const timeline = { sample_rate: 48_000, events: [], loop_range: [12_000, 24_000] as [number, number], punch_range: null, armed_tracks: [], count_in_beats: 0, end: 96_000 };
 
         ex.startArrangementPreview({ graph, tempoMap, timeline }, 0);
         expect(port.posted.map((message) => message.type)).toEqual([

@@ -789,6 +789,9 @@ export class OjcoreWasmExecutor implements Executor {
 
     private publishArrangement(playback: ArrangementPlayback): void {
         if (!this.node || !this.ready) return;
+        if (playback.meterIndex) {
+            this.reverseIndex = new Map(Object.entries(playback.meterIndex).map(([id, node]) => [node, id]));
+        }
         this.sendGraph(playback.graph);
         const bytes = encodeTimelineDocuments(playback.tempoMap, playback.timeline);
         this.node.port.postMessage({ type: 'load_tempo_map', bytes: bytes.tempoMap }, [bytes.tempoMap.buffer]);

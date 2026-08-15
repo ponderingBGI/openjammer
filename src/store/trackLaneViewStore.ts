@@ -24,17 +24,23 @@ interface TrackLaneViewStore {
     pitchRanges: Record<string, PitchRange>;
     laneHeights: Record<string, number>;
     expandedPianoRolls: Record<string, string>;
+    automationLaneByTrack: Record<string, string>;
+    mixerOpen: boolean;
     rememberPitchRange: (trackId: string, range: PitchRange) => void;
     setLaneHeight: (trackId: string, height: number) => void;
     resetPitchRanges: () => void;
     togglePianoRoll: (trackId: string, clipId: string) => void;
     closePianoRoll: (trackId: string) => void;
+    showAutomationLane: (trackId: string, laneId: string | null) => void;
+    toggleMixer: () => void;
 }
 
 export const useTrackLaneViewStore = create<TrackLaneViewStore>((set) => ({
     pitchRanges: {},
     laneHeights: {},
     expandedPianoRolls: {},
+    automationLaneByTrack: {},
+    mixerOpen: false,
     rememberPitchRange: (trackId, range) => {
         set((state) => {
             const current = state.pitchRanges[trackId];
@@ -61,4 +67,11 @@ export const useTrackLaneViewStore = create<TrackLaneViewStore>((set) => ({
         delete expandedPianoRolls[trackId];
         return { expandedPianoRolls, laneHeights: { ...state.laneHeights, [trackId]: 72 } };
     }),
+    showAutomationLane: (trackId, laneId) => set((state) => {
+        const automationLaneByTrack = { ...state.automationLaneByTrack };
+        if (laneId === null) delete automationLaneByTrack[trackId];
+        else automationLaneByTrack[trackId] = laneId;
+        return { automationLaneByTrack };
+    }),
+    toggleMixer: () => set((state) => ({ mixerOpen: !state.mixerOpen })),
 }));

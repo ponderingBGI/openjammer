@@ -23,14 +23,19 @@ import {
     eraseNotes,
     insertTime,
     moveClips,
+    moveAutomationPoints,
     moveNotes,
     nudge,
     quantizeNotes,
     resizeNotes,
+    setAutomationPoints,
+    setAutomationRange,
     setVelocity,
     splitAt,
     transposeNotes,
     trimClip,
+    thinAutomation,
+    type OpResult,
     type TimelineOp,
 } from '../song/ops';
 import { useEditingContextStore, type GridUnit } from '../store/editingContextStore';
@@ -95,7 +100,7 @@ export function createArrangementPort(): ArrangementToolPort {
             let selectedNoteIds: string[] | undefined;
             try {
                 for (const operation of ops) {
-                    let result;
+                    let result: OpResult;
                     switch (operation.op) {
                         case 'moveClips': result = moveClips(projected, operation.clipIds, operation.deltaTick, operation); break;
                         case 'trimClip': result = trimClip(projected, operation.clipIds, operation.edge, operation.atTick); break;
@@ -114,6 +119,15 @@ export function createArrangementPort(): ArrangementToolPort {
                         case 'setVelocity': result = setVelocity(projected, operation.noteIds, operation); break;
                         case 'transposeNotes': result = transposeNotes(projected, operation.noteIds, operation.semitones); break;
                         case 'quantizeNotes': result = quantizeNotes(projected, operation.targets, { ...operation, startGrid: operation.grid }); break;
+                        case 'setAutomationPoints': result = setAutomationPoints(projected, operation.laneId, operation.points); break;
+                        case 'moveAutomationPoints': result = moveAutomationPoints(projected, operation.laneId, operation.ticks, operation.deltaTick, operation.deltaValue, operation.push); break;
+                        case 'setAutomationRange': result = setAutomationRange(projected, operation.laneId, operation.fromTick, operation.toTick, operation.points, operation.factor); break;
+                        case 'thinAutomation': result = thinAutomation(projected, operation.laneId, operation.factor); break;
+                        case 'setTrackGain': result = { verbs: [{ kind: 'setTrackGain', trackId: operation.trackId, gainDb: operation.gainDb }] }; break;
+                        case 'setTrackPan': result = { verbs: [{ kind: 'setTrackPan', trackId: operation.trackId, pan: operation.pan }] }; break;
+                        case 'addAutomationPoint': result = setAutomationPoints(projected, operation.laneId, [operation.point]); break;
+                        case 'addAutomationPoints': result = setAutomationPoints(projected, operation.laneId, operation.points); break;
+                        case 'setLaneState': result = { verbs: [{ kind: 'setAutomationLaneState', laneId: operation.laneId, state: operation.state }] }; break;
                     }
                     if (result.rejected) throw new Error(result.rejected);
                     projected = applyVerbs(projected, result.verbs).next;

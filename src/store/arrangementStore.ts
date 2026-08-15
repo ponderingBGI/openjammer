@@ -28,6 +28,7 @@ const visualNow = (): number => globalThis.performance?.now() ?? Date.now();
 /** The auto-stop timer: fires `stop()` when playback reaches the song's end (incl. the
  *  conduct release tail), so isPlaying never lies and the canvas graph is restored. */
 let endTimer: ReturnType<typeof setTimeout> | null = null;
+let gesturePublishTimer: ReturnType<typeof setTimeout> | null = null;
 function clearEndTimer(): void {
     if (endTimer !== null) {
         clearTimeout(endTimer);
@@ -61,7 +62,7 @@ function startPreview(arr: Arrangement, playheadTick: number, onEnd: () => void)
     clearEndTimer();
     try {
         const { executor, result } = lowerPreview(arr);
-        const { graph, tempoMap, timeline, seconds, skipped } = result;
+        const { graph, tempoMap, timeline, meterIndex, seconds, skipped } = result;
         if (skipped.length > 0) {
             log.warn('timeline preview skipped tracks with unresolved refs (the rest plays)', {
                 detail: skipped.join(', '),
@@ -69,7 +70,7 @@ function startPreview(arr: Arrangement, playheadTick: number, onEnd: () => void)
         }
         ensureTransportSubscription();
         const startSample = tickToSample(tempoMap, playheadTick);
-        executor.startArrangementPreview({ graph, tempoMap, timeline }, startSample);
+        executor.startArrangementPreview({ graph, tempoMap, timeline, meterIndex }, startSample);
         // Auto-stop at the end of the song (conduct.seconds includes the release tail),
         // so the UI never claims to be playing a finished song and the canvas graph is
         // restored. A small slop keeps a final note/tail from being clipped.
@@ -86,13 +87,13 @@ function republishPreview(arr: Arrangement, playheadTick: number, onEnd: () => v
     clearEndTimer();
     try {
         const { executor, result } = lowerPreview(arr);
-        const { graph, tempoMap, timeline, seconds, skipped } = result;
+        const { graph, tempoMap, timeline, meterIndex, seconds, skipped } = result;
         if (skipped.length > 0) {
             log.warn('timeline preview skipped tracks with unresolved refs (the rest plays)', {
                 detail: skipped.join(', '),
             });
         }
-        executor.updateArrangementPreview({ graph, tempoMap, timeline });
+        executor.updateArrangementPreview({ graph, tempoMap, timeline, meterIndex });
         const remainSec = Math.max(0, seconds - tickToSample(tempoMap, playheadTick) / tempoMap.sample_rate);
         endTimer = setTimeout(onEnd, remainSec * 1000 + 80);
     } catch (err) {
@@ -105,6 +106,10 @@ function republishPreview(arr: Arrangement, playheadTick: number, onEnd: () => v
 /** Stop live audio preview (release held notes + restore the canvas graph). Never throws. */
 function stopPreview(): void {
     clearEndTimer();
+    if (gesturePublishTimer !== null) {
+        clearTimeout(gesturePublishTimer);
+        gesturePublishTimer = null;
+    }
     try {
         getExecutor().stopArrangementPreview();
     } catch {
@@ -279,6 +284,16 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             previewVerbs = verbs;
             const { next } = applyVerbs(previewBase, verbs);
             set({ arrangement: next });
+            // Mixer/automation gestures are audible while rolling, but graph
+            // publication is bounded to 20 Hz so pointer-rate input cannot flood
+            // the worklet/native bridge.
+            if (get().isPlaying && gesturePublishTimer === null) {
+                gesturePublishTimer = setTimeout(() => {
+                    gesturePublishTimer = null;
+                    const latest = get().arrangement;
+                    if (latest && get().isPlaying) republishPreview(latest, get().currentTick(), () => get().stop());
+                }, 50);
+            }
         },
         commitGesture: () => {
             if (!previewBase) return;
@@ -286,6 +301,10 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             const verbs = previewVerbs;
             previewBase = null;
             previewVerbs = [];
+            if (gesturePublishTimer !== null) {
+                clearTimeout(gesturePublishTimer);
+                gesturePublishTimer = null;
+            }
             if (!verbs.length) {
                 set({ arrangement: base });
                 useHistoryStore.getState().commit();
@@ -313,6 +332,10 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             if (previewBase) set({ arrangement: previewBase });
             previewBase = null;
             previewVerbs = [];
+            if (gesturePublishTimer !== null) {
+                clearTimeout(gesturePublishTimer);
+                gesturePublishTimer = null;
+            }
             useHistoryStore.getState().abort();
         },
 

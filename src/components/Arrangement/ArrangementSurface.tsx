@@ -17,6 +17,8 @@ import { gridTicks } from '../../store/editingContextStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { useUiViewStore } from '../../store/uiViewStore';
 import './ArrangementSurface.css';
+import { MixerDrawer } from './MixerDrawer';
+import { AUTOMATION_LANE_HEIGHT } from './AutomationLaneView';
 
 const HEADER_WIDTH = 200;
 const RULER_HEIGHT = 46;
@@ -27,6 +29,8 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     const gridUnit = useEditingContextStore((state) => state.gridUnit);
     const snapMode = useEditingContextStore((state) => state.snapMode);
     const laneHeights = useTrackLaneViewStore((state) => state.laneHeights);
+    const automationLaneByTrack = useTrackLaneViewStore((state) => state.automationLaneByTrack);
+    const mixerOpen = useTrackLaneViewStore((state) => state.mixerOpen);
     const scrollRef = useRef<HTMLDivElement>(null);
     const [view, setView] = useState({ width: 1000, height: 600, left: 0, top: 0 });
     const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
@@ -100,7 +104,7 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     const contentWidth = Math.max(fieldViewportWidth, lengthTicks * viewport.pxPerTick + fieldViewportWidth * 0.25);
     const sections = (arrangement.locations ?? []).filter((location) => location.kind === 'section');
     const loop = (arrangement.locations ?? []).find((location) => location.kind === 'loop');
-    const heights = arrangement.tracks.map((track) => laneHeights[track.id ?? track.ref] ?? 72);
+    const heights = arrangement.tracks.map((track) => (laneHeights[track.id ?? track.ref] ?? 72) + (automationLaneByTrack[track.id ?? track.ref] ? AUTOMATION_LANE_HEIGHT : 0));
     const offsets = heights.reduce<number[]>((all, height) => [...all, (all.at(-1) ?? 0) + height], [0]);
     const laneTop = Math.max(0, view.top - RULER_HEIGHT);
     const laneBottom = laneTop + view.height - RULER_HEIGHT;
@@ -191,6 +195,7 @@ export function ArrangementSurface({ active, visible = active, transition, songN
                     {marquee && <div className="arrangement-marquee" aria-hidden="true" style={marquee} />}
                 </div>
             </div>
+            {mixerOpen && <MixerDrawer />}
         </div>
     );
 }

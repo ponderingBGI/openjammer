@@ -362,7 +362,7 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
             tempos: [{ tick: 0, sample: 0, bpm_start: 120, bpm_end: 120, continuing: false }],
             meters: [{ tick: 0, sample: 0, bar: 1, divisions_per_bar: 4, note_value: 4 }],
         };
-        const timeline = { sample_rate: 48_000, events: [], loop_range: null, punch_range: null, end: 96_000 };
+        const timeline = { sample_rate: 48_000, events: [], loop_range: null, punch_range: null, armed_tracks: [], count_in_beats: 0, end: 96_000 };
 
         ex.startArrangementPreview({ graph: graph as unknown as OjGraph, tempoMap, timeline }, 12_000);
         await vi.waitFor(() => expect(calls.some((call) => call.cmd === 'send_command' && call.args?.cmd === 'TransportPlay')).toBe(true));

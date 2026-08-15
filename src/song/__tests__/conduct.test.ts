@@ -38,6 +38,8 @@ describe('conduct', () => {
         ]);
         expect(result.timeline.loop_range).toEqual([12_000, 24_000]);
         expect(result.timeline.punch_range).toEqual([6_000, 18_000]);
+        expect(result.timeline.armed_tracks).toEqual([]);
+        expect(result.timeline.count_in_beats).toBe(0);
         expect(result.timeline.end).toBe(Math.round(result.seconds * 48_000));
     });
 

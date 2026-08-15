@@ -12,6 +12,8 @@ import { clampMidi } from '../music/note';
 import { specToGraph } from './spec';
 import { buildTempoMap, tickToSample } from './tempoMap';
 import type { Arrangement, CodeNode, ScheduleEvent } from './types';
+import { dbToGain, outputStageRefs } from './automation';
+import { ENGINE_IDS } from '../audio/ojgraph/backendMap';
 import {
     SchedEventKind,
     type IrNode,
@@ -42,6 +44,8 @@ export interface ConductResult {
     seconds: number;
     /** Surviving track ref -> IR NodeIdx (the agent's read surface / debugging). */
     trackIndex: Record<string, number>;
+    /** Stable document/synthetic address -> IR node, used by the existing meter stream. */
+    meterIndex: Record<string, number>;
     /** Agent-authored code nodes that were spliced into the IR — `oj song` writes
      * each source to a .dsp and passes `--code-node id=path` to the render bin. */
     codeNodes: CodeNode[];
@@ -98,6 +102,64 @@ export function conduct(
     const { graph, index } = emitWithIndex(nodes, connections, { sampleRate, blockSize });
     const remapped = remapForBackend(graph, backend);
 
+    // Every arrangement track owns one addressable output stage. Insert it after
+    // the track's downstream effect chain and before its master consumer. Unity
+    // defaults are golden-equivalent to the pre-mixer graph.
+    let nextOutputNode = remapped.nodes.reduce((max, item) => Math.max(max, item.id), -1) + 1;
+    const trackOutputIndex: Record<string, number> = {};
+    const originalEdges = remapped.edges.map((edge) => ({ ...edge }));
+    const trackRoots = new Set(arr.tracks.flatMap((track) => {
+        const idx = index.get(track.ref);
+        return idx === undefined ? [] : [idx as number];
+    }));
+    const reachCount = new Map<number, number>();
+    for (const root of trackRoots) {
+        const reached = new Set<number>();
+        const queue = [root];
+        while (queue.length) {
+            const node = queue.shift()!;
+            if (reached.has(node)) continue;
+            reached.add(node);
+            queue.push(...originalEdges.filter((edge) => edge.kind === 'Audio' && edge.from_node === node).map((edge) => edge.to_node));
+        }
+        for (const node of reached) reachCount.set(node, (reachCount.get(node) ?? 0) + 1);
+    }
+    const hasSolo = arr.tracks.some((track) => track.solo === true);
+    for (const track of arr.tracks) {
+        const root = index.get(track.ref);
+        if (root === undefined) continue;
+        let tail = root as number;
+        const visited = new Set<number>();
+        while (!visited.has(tail)) {
+            visited.add(tail);
+            const outgoing = originalEdges.filter((edge) => edge.kind === 'Audio' && edge.from_node === tail);
+            if (outgoing.length !== 1) break;
+            const target = remapped.nodes.find((node) => node.id === outgoing[0]!.to_node);
+            if (!target || target.kind === 'SpeakerOut' || target.kind === 'GraphOut' || (reachCount.get(target.id) ?? 0) > 1 || (trackRoots.has(target.id) && target.id !== root)) break;
+            tail = target.id;
+        }
+        const consumers = remapped.edges.filter((edge) => edge.kind === 'Audio' && edge.from_node === tail);
+        const gainNode = nextOutputNode++;
+        const panNode = nextOutputNode++;
+        const refs = outputStageRefs(track);
+        const audible = !track.mute && (!hasSolo || track.solo === true);
+        remapped.nodes.push(
+            { id: gainNode, manifest_id: ENGINE_IDS.gain, kind: 'Gain', params: [{ id: 0, value: audible ? dbToGain(track.gainDb ?? 0) : 0 }], assets: [], n_in: 1, n_out: 1 },
+            { id: panNode, manifest_id: ENGINE_IDS.pan, kind: 'Pan', params: [{ id: 0, value: track.pan ?? 0 }], assets: [], n_in: 1, n_out: 1 },
+        );
+        remapped.edges.push(
+            { from_node: tail, from_port: consumers[0]?.from_port ?? 0, to_node: gainNode, to_port: 0, kind: 'Audio' },
+            { from_node: gainNode, from_port: 0, to_node: panNode, to_port: 0, kind: 'Audio' },
+        );
+        for (const edge of consumers) {
+            edge.from_node = panNode;
+            edge.from_port = 0;
+        }
+        index.set(refs.gain, gainNode);
+        index.set(refs.pan, panNode);
+        trackOutputIndex[track.ref] = panNode;
+    }
+
     const tempoMap = buildTempoMap({ ...arr, sampleRate });
     const ppq = tempoMap.ppq;
     const secPerTick = 60 / (arr.tempoBpm * ppq);
@@ -132,7 +194,7 @@ export function conduct(
         if (node === null) continue; // lenient: this track's ref didn't survive — skip it
         trackIndex[track.ref] = node;
 
-        if (!track.mute) {
+        if (!track.mute && (!hasSolo || track.solo === true)) {
             for (const clip of track.clips) {
                 if (clip.mute || !(clip.lengthTick > 0)) continue;
                 const source = arr.sources?.[clip.sourceId];
@@ -184,16 +246,32 @@ export function conduct(
         }
 
         for (const lane of track.automation ?? []) {
+            if ((lane.state ?? 'Play') !== 'Play') continue;
             const anode = idxOf(lane.ref);
             if (anode === null) continue; // lenient: skip an automation lane with a bad ref
-            for (const pt of lane.points) {
+            const scheduled = lane.interp === 'Linear'
+                ? lane.points.flatMap((point, pointIndex) => {
+                    const next = lane.points[pointIndex + 1];
+                    if (!next || next.tick <= point.tick) return [point];
+                    // Densify authoring-time ramps at 1/32 beat, capped per segment.
+                    const step = Math.max(1, Math.ceil(ppq / 32));
+                    const count = Math.min(128, Math.ceil((next.tick - point.tick) / step));
+                    return Array.from({ length: count }, (_, index) => {
+                        const mix = index / count;
+                        return { tick: Math.round(point.tick + (next.tick - point.tick) * mix), value: point.value + (next.value - point.value) * mix };
+                    });
+                }).concat(lane.points.at(-1) ? [lane.points.at(-1)!] : [])
+                : lane.points;
+            const gainRef = outputStageRefs(track).gain;
+            for (const pt of scheduled) {
+                const value = lane.ref === gainRef ? dbToGain(pt.value) : pt.value;
                 lastTick = Math.max(lastTick, pt.tick);
-                timed.push({ tick: pt.tick, ev: { at: tickToSec(pt.tick), cmd: 'setParam', node: anode, param: lane.param, value: pt.value }, sched: {
+                timed.push({ tick: pt.tick, ev: { at: tickToSec(pt.tick), cmd: 'setParam', node: anode, param: lane.param, value }, sched: {
                     at: tickToSample(tempoMap, pt.tick), node: anode,
                     kind: SchedEventKind.SET_PARAM,
                     a: lane.param & 0xff,
                     b: Math.floor(lane.param / 256) & 0xff,
-                    value: pt.value,
+                    value,
                 } });
             }
         }
@@ -289,8 +367,13 @@ export function conduct(
         events: timed.flatMap((item) => item.sched ? [item.sched] : []),
         loop_range: range('loop'),
         punch_range: range('punch'),
+        armed_tracks: [],
+        count_in_beats: 0,
         end: Math.max(0, Math.round(seconds * sampleRate)),
     };
 
-    return { graph: remapped, events, tempoMap, timeline, seconds, trackIndex, codeNodes, skipped };
+    const meterIndex: Record<string, number> = { ...trackOutputIndex };
+    const master = remapped.nodes.find((node) => node.kind === 'SpeakerOut' || node.kind === 'GraphOut');
+    if (master) meterIndex.__master__ = master.id;
+    return { graph: remapped, events, tempoMap, timeline, seconds, trackIndex, meterIndex, codeNodes, skipped };
 }

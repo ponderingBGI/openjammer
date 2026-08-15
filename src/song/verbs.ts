@@ -12,6 +12,7 @@ import type {
     Location,
     Source,
 } from './types';
+import { descriptorForLane, TRACK_GAIN_MAX_DB, TRACK_GAIN_MIN_DB } from './automation';
 
 export interface NotePatch {
     tick?: number;
@@ -27,7 +28,10 @@ export type Verb =
     | { kind: 'addTrack'; index: number; track: ArrangementTrack }
     | { kind: 'removeTrack'; trackId: string }
     | { kind: 'setTrackMute'; trackId: string; mute: boolean }
+    | { kind: 'setTrackSolo'; trackId: string; solo: boolean }
     | { kind: 'setTrackName'; trackId: string; name?: string }
+    | { kind: 'setTrackGain'; trackId: string; gainDb: number }
+    | { kind: 'setTrackPan'; trackId: string; pan: number }
     | { kind: 'addClip'; trackId: string; clip: ArrangementClip }
     | { kind: 'removeClip'; clipId: string }
     | { kind: 'moveClip'; clipId: string; startTick: number; trackId?: string; index?: number }
@@ -66,7 +70,11 @@ export type Verb =
     | { kind: 'addAutomationLane'; trackId: string; index: number; lane: AutomationLane }
     | { kind: 'removeAutomationLane'; laneId: string }
     | { kind: 'setAutomationPoint'; laneId: string; point: AutomationPoint }
-    | { kind: 'removeAutomationPoint'; laneId: string; tick: number };
+    | { kind: 'removeAutomationPoint'; laneId: string; tick: number }
+    | { kind: 'setAutomationRange'; laneId: string; fromTick: number; toTick: number; points: AutomationPoint[] }
+    | { kind: 'setAutomationLaneState'; laneId: string; state: AutomationLane['state'] }
+    | { kind: 'setAutomationLaneTarget'; laneId: string; ref: string; param: number }
+    | { kind: 'setAutomationLaneInterp'; laneId: string; interp: AutomationLane['interp'] };
 
 export type VerbKind = Verb['kind'];
 
@@ -202,9 +210,25 @@ export function applyVerb(arr: Arrangement, verb: Verb): { next: Arrangement; in
             const { ti, track } = locateTrack(arr, verb.trackId);
             return { next: mapTrack(arr, ti, (item) => withOptional(item, 'mute', verb.mute ? true : undefined)), inverse: { kind: 'setTrackMute', trackId: verb.trackId, mute: track.mute === true } };
         }
+        case 'setTrackSolo': {
+            const { ti, track } = locateTrack(arr, verb.trackId);
+            return { next: mapTrack(arr, ti, (item) => withOptional(item, 'solo', verb.solo ? true : undefined)), inverse: { kind: 'setTrackSolo', trackId: verb.trackId, solo: track.solo === true } };
+        }
         case 'setTrackName': {
             const { ti, track } = locateTrack(arr, verb.trackId);
             return { next: mapTrack(arr, ti, (item) => withOptional(item, 'name', verb.name)), inverse: { kind: 'setTrackName', trackId: verb.trackId, name: track.name } };
+        }
+        case 'setTrackGain': {
+            if (!Number.isFinite(verb.gainDb)) fail('track gain must be finite');
+            const { ti, track } = locateTrack(arr, verb.trackId);
+            const gainDb = Math.max(TRACK_GAIN_MIN_DB, Math.min(TRACK_GAIN_MAX_DB, verb.gainDb));
+            return { next: mapTrack(arr, ti, (item) => withOptional(item, 'gainDb', gainDb === 0 ? undefined : gainDb)), inverse: { kind: 'setTrackGain', trackId: verb.trackId, gainDb: track.gainDb ?? 0 } };
+        }
+        case 'setTrackPan': {
+            if (!Number.isFinite(verb.pan)) fail('track pan must be finite');
+            const { ti, track } = locateTrack(arr, verb.trackId);
+            const pan = Math.max(-1, Math.min(1, verb.pan));
+            return { next: mapTrack(arr, ti, (item) => withOptional(item, 'pan', pan === 0 ? undefined : pan)), inverse: { kind: 'setTrackPan', trackId: verb.trackId, pan: track.pan ?? 0 } };
         }
         case 'addClip':
             return { next: addClip(arr, verb.trackId, verb.clip), inverse: { kind: 'removeClip', clipId: verb.clip.id! } };
@@ -549,8 +573,12 @@ export function applyVerb(arr: Arrangement, verb: Verb): { next: Arrangement; in
         }
         case 'setAutomationPoint': {
             const { ti, li, lane } = locateLane(arr, verb.laneId);
+            if (!Number.isFinite(verb.point.tick) || verb.point.tick < 0) fail('automation point tick must be zero or greater');
+            if (!Number.isFinite(verb.point.value)) fail('automation point value must be finite');
+            const descriptor = descriptorForLane(arr, lane);
+            const point = descriptor ? { ...verb.point, value: Math.max(descriptor.min, Math.min(descriptor.max, verb.point.value)) } : verb.point;
             const index = lane.points.findIndex((point) => point.tick === verb.point.tick);
-            const points = [...(index >= 0 ? removeAt(lane.points, index) : lane.points), verb.point].sort((a, b) => a.tick - b.tick);
+            const points = [...(index >= 0 ? removeAt(lane.points, index) : lane.points), point].sort((a, b) => a.tick - b.tick);
             const next = mapTrack(arr, ti, (track) => ({ ...track, automation: replaceAt(track.automation ?? [], li, { ...lane, points }) }));
             return { next, inverse: index >= 0 ? { kind: 'setAutomationPoint', laneId: verb.laneId, point: lane.points[index]! } : { kind: 'removeAutomationPoint', laneId: verb.laneId, tick: verb.point.tick } };
         }
@@ -560,6 +588,42 @@ export function applyVerb(arr: Arrangement, verb: Verb): { next: Arrangement; in
             if (index < 0) fail(`lane "${verb.laneId}" has no point at tick ${verb.tick}`);
             const next = mapTrack(arr, ti, (track) => ({ ...track, automation: replaceAt(track.automation ?? [], li, { ...lane, points: removeAt(lane.points, index) }) }));
             return { next, inverse: { kind: 'setAutomationPoint', laneId: verb.laneId, point: lane.points[index]! } };
+        }
+        case 'setAutomationRange': {
+            const { ti, li, lane } = locateLane(arr, verb.laneId);
+            if (!(verb.toTick >= verb.fromTick) || verb.fromTick < 0) fail('automation range is invalid');
+            const descriptor = descriptorForLane(arr, lane);
+            const normalized = verb.points.map((point) => ({
+                tick: Math.max(0, Math.round(point.tick)),
+                value: descriptor ? Math.max(descriptor.min, Math.min(descriptor.max, point.value)) : point.value,
+            }));
+            if (normalized.some((point) => !Number.isFinite(point.value))) fail('automation point value must be finite');
+            const affectedFrom = Math.min(verb.fromTick, ...normalized.map((point) => point.tick));
+            const affectedTo = Math.max(verb.toTick, ...normalized.map((point) => point.tick));
+            const replaced = lane.points.filter((point) => point.tick >= affectedFrom && point.tick <= affectedTo);
+            const byTick = new Map<number, AutomationPoint>();
+            for (const point of lane.points) if (point.tick < affectedFrom || point.tick > affectedTo) byTick.set(point.tick, point);
+            for (const point of normalized) byTick.set(point.tick, point);
+            const points = [...byTick.values()].sort((a, b) => a.tick - b.tick);
+            const next = mapTrack(arr, ti, (track) => ({ ...track, automation: replaceAt(track.automation ?? [], li, { ...lane, points }) }));
+            return { next, inverse: { kind: 'setAutomationRange', laneId: verb.laneId, fromTick: affectedFrom, toTick: affectedTo, points: replaced } };
+        }
+        case 'setAutomationLaneState': {
+            const { ti, li, lane } = locateLane(arr, verb.laneId);
+            const state = verb.state ?? 'Play';
+            const next = mapTrack(arr, ti, (track) => ({ ...track, automation: replaceAt(track.automation ?? [], li, withOptional(lane, 'state', state === 'Play' ? undefined : state)) }));
+            return { next, inverse: { kind: 'setAutomationLaneState', laneId: verb.laneId, state: lane.state ?? 'Play' } };
+        }
+        case 'setAutomationLaneTarget': {
+            const { ti, li, lane } = locateLane(arr, verb.laneId);
+            const next = mapTrack(arr, ti, (track) => ({ ...track, automation: replaceAt(track.automation ?? [], li, { ...lane, ref: verb.ref, param: verb.param }) }));
+            return { next, inverse: { kind: 'setAutomationLaneTarget', laneId: verb.laneId, ref: lane.ref, param: lane.param } };
+        }
+        case 'setAutomationLaneInterp': {
+            const { ti, li, lane } = locateLane(arr, verb.laneId);
+            if (verb.interp !== 'Discrete' && verb.interp !== 'Linear') fail('only Discrete and Linear automation are playable in this build');
+            const next = mapTrack(arr, ti, (track) => ({ ...track, automation: replaceAt(track.automation ?? [], li, withOptional(lane, 'interp', verb.interp === 'Discrete' ? undefined : verb.interp)) }));
+            return { next, inverse: { kind: 'setAutomationLaneInterp', laneId: verb.laneId, interp: lane.interp ?? 'Discrete' } };
         }
     }
 }

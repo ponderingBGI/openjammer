@@ -207,13 +207,13 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
         description:
             'Author the SONG TIMELINE with reversible primitive `verbs` or shared high-level `ops` — ' +
             'the SAME operation layer a human GUI drag emits — applied live and undoable with ' +
-            'Ctrl+Z. Verb kinds: setTempo; setTrackMute/setTrackName; addTrack/removeTrack; ' +
+            'Ctrl+Z. Verb kinds: setTempo; setTrackMute/setTrackSolo/setTrackName/setTrackGain/setTrackPan; addTrack/removeTrack; ' +
             'addSource/removeSource; addClip/removeClip/moveClip/setClipWindow/splitClip; ' +
             'setClipGain/setClipFades; addNote/removeNote/editNote; addLocation/removeLocation/' +
             'moveLocation/setLoopRange/setPunchRange; rippleTracks/insertTime/removeTime; ' +
             'stretchClip; compound; addAutomationLane/removeAutomationLane; setAutomationPoint/' +
-            'removeAutomationPoint. Ids for ADDED entities are minted for you (omit them). ' +
-            'Operation names: moveClips, trimClip, splitAt, duplicateClips, deleteClips, setGrid, nudge, deleteTime, insertTime, drawNote, moveNotes, copyNotes, resizeNotes, eraseNotes, setVelocity, transposeNotes, quantizeNotes. Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
+            'removeAutomationPoint/setAutomationRange/setAutomationLaneState/setAutomationLaneInterp. Ids for ADDED entities are minted for you (omit them). ' +
+            'Operation names: moveClips, trimClip, splitAt, duplicateClips, deleteClips, setGrid, nudge, deleteTime, insertTime, drawNote, moveNotes, copyNotes, resizeNotes, eraseNotes, setVelocity, transposeNotes, quantizeNotes, setTrackGain, setTrackPan, addAutomationPoint, addAutomationPoints, setAutomationPoints, moveAutomationPoints, setAutomationRange, thinAutomation, setLaneState. Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
     },
 ];
 

@@ -3,6 +3,7 @@
 import { barToTick, timebase } from './time';
 import { normalizeArrangement } from './normalize';
 import type { Arrangement, ArrangementNote, MidiSource, Source } from './types';
+import { mapAutomationStates } from './automation';
 
 export const ARRANGEMENT_SCHEMA_VERSION = 2;
 
@@ -86,7 +87,7 @@ export function migrateV1toV2(input: V1Arrangement): Arrangement {
 export function arrangementForExport(arr: Arrangement): Arrangement {
     const version = arr.schemaVersion ?? ARRANGEMENT_SCHEMA_VERSION;
     if (version < ARRANGEMENT_SCHEMA_VERSION) return migrateV1toV2(arr as unknown as V1Arrangement);
-    return normalizeArrangement({ ...arr, schemaVersion: ARRANGEMENT_SCHEMA_VERSION });
+    return normalizeArrangement(mapAutomationStates({ ...arr, schemaVersion: ARRANGEMENT_SCHEMA_VERSION }, 'save'));
 }
 
 export function readArrangement(blob: unknown): Arrangement | undefined {
@@ -95,5 +96,5 @@ export function readArrangement(blob: unknown): Arrangement | undefined {
     if (version > ARRANGEMENT_SCHEMA_VERSION) return undefined;
     if (typeof blob.tempoBpm !== 'number' || !isRecord(blob.graph) || !Array.isArray(blob.tracks)) return undefined;
     if (version < ARRANGEMENT_SCHEMA_VERSION) return migrateV1toV2(blob as unknown as V1Arrangement);
-    return blob as unknown as Arrangement;
+    return normalizeArrangement(blob as unknown as Arrangement);
 }

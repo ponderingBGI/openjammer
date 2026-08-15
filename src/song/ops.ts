@@ -1,11 +1,14 @@
-import type { Arrangement, ArrangementClip, ArrangementNote, MidiSource } from './types';
+import type { Arrangement, ArrangementClip, ArrangementNote, AutomationPoint, MidiSource } from './types';
 import type { Verb } from './verbs';
+import { descriptorForLane, evaluateAutomation, thinAutomationPoints } from './automation';
 
 export interface OpResult { verbs: Verb[]; selectedClipIds?: string[]; selectedNoteIds?: string[]; skipped?: string[]; rejected?: string }
 
 export const EDIT_OPS = [
     'moveClips', 'trimClip', 'splitAt', 'duplicateClips', 'deleteClips', 'setGrid', 'nudge', 'deleteTime', 'insertTime',
     'drawNote', 'moveNotes', 'copyNotes', 'resizeNotes', 'eraseNotes', 'setVelocity', 'transposeNotes', 'quantizeNotes',
+    'setAutomationPoints', 'moveAutomationPoints', 'setAutomationRange', 'thinAutomation',
+    'setTrackGain', 'setTrackPan', 'addAutomationPoint', 'addAutomationPoints', 'setLaneState',
 ] as const;
 export type EditOpName = typeof EDIT_OPS[number];
 export type TimelineOp =
@@ -25,7 +28,16 @@ export type TimelineOp =
     | { op: 'eraseNotes'; noteIds?: string[]; range?: NoteRange }
     | { op: 'setVelocity'; noteIds: string[]; mode: 'delta' | 'set' | 'ramp'; amount?: number; from?: number; to?: number; smush?: boolean }
     | { op: 'transposeNotes'; noteIds: string[]; semitones: number }
-    | { op: 'quantizeNotes'; targets: string[]; grid: number; endGrid?: number; snapStart?: boolean; snapEnd?: boolean; strength?: number; swing?: number; threshold?: number; position?: number };
+    | { op: 'quantizeNotes'; targets: string[]; grid: number; endGrid?: number; snapStart?: boolean; snapEnd?: boolean; strength?: number; swing?: number; threshold?: number; position?: number }
+    | { op: 'setAutomationPoints'; laneId: string; points: AutomationPoint[] }
+    | { op: 'moveAutomationPoints'; laneId: string; ticks: number[]; deltaTick?: number; deltaValue?: number; push?: boolean }
+    | { op: 'setAutomationRange'; laneId: string; fromTick: number; toTick: number; points: AutomationPoint[]; factor?: number }
+    | { op: 'thinAutomation'; laneId: string; factor?: number }
+    | { op: 'setTrackGain'; trackId: string; gainDb: number }
+    | { op: 'setTrackPan'; trackId: string; pan: number }
+    | { op: 'addAutomationPoint'; laneId: string; point: AutomationPoint }
+    | { op: 'addAutomationPoints'; laneId: string; points: AutomationPoint[] }
+    | { op: 'setLaneState'; laneId: string; state: 'Off' | 'Play' };
 
 export interface NoteInput { tick: number; durTick: number; pitch: number; vel?: number; id?: string }
 export type NoteOverlapPolicy = 'relax' | 'reject' | 'replace' | 'truncate-existing' | 'truncate-addition' | 'extend';
@@ -453,4 +465,94 @@ export function quantizeNotes(
         if (Object.keys(patch).length) verbs.push({ kind: 'editNote', noteId: note.id!, patch });
     }
     return { verbs };
+}
+
+function locateAutomationLane(arrangement: Arrangement, laneId: string) {
+    for (const track of arrangement.tracks) {
+        const lane = (track.automation ?? []).find((item) => item.id === laneId);
+        if (lane) return { track, lane };
+    }
+    return undefined;
+}
+
+export function setAutomationPoints(arrangement: Arrangement, laneId: string, points: AutomationPoint[]): OpResult {
+    const found = locateAutomationLane(arrangement, laneId);
+    if (!found) return { verbs: [], rejected: `no automation lane "${laneId}"` };
+    return { verbs: points.map((point) => ({ kind: 'setAutomationPoint', laneId, point })) };
+}
+
+/** BC-39: move points as one batch, stopping one tick before an unselected neighbour. */
+export function moveAutomationPoints(
+    arrangement: Arrangement,
+    laneId: string,
+    ticks: readonly number[],
+    deltaTick = 0,
+    deltaValue = 0,
+    push = false,
+): OpResult {
+    const found = locateAutomationLane(arrangement, laneId);
+    if (!found) return { verbs: [], rejected: `no automation lane "${laneId}"` };
+    const selectedTicks = new Set(ticks);
+    const grabbed = found.lane.points.filter((point) => selectedTicks.has(point.tick));
+    if (!grabbed.length) return { verbs: [], skipped: [...ticks].map(String) };
+    const moving = push
+        ? found.lane.points.filter((point) => point.tick >= Math.min(...grabbed.map((item) => item.tick)))
+        : grabbed;
+    const movingTicks = new Set(moving.map((point) => point.tick));
+    const stationary = found.lane.points.filter((point) => !movingTicks.has(point.tick));
+    let safeDelta = Math.round(deltaTick);
+    safeDelta = Math.max(safeDelta, -Math.min(...moving.map((point) => point.tick)));
+    for (const point of moving) {
+        const left = stationary.filter((item) => item.tick < point.tick).at(-1);
+        const right = stationary.find((item) => item.tick > point.tick);
+        if (left) safeDelta = Math.max(safeDelta, left.tick + 1 - point.tick);
+        if (right) safeDelta = Math.min(safeDelta, right.tick - 1 - point.tick);
+    }
+    const descriptor = descriptorForLane(arrangement, found.lane);
+    const moved = moving.map((point) => ({
+        tick: point.tick + safeDelta,
+        value: descriptor
+            ? Math.max(descriptor.min, Math.min(descriptor.max, point.value + deltaValue))
+            : point.value + deltaValue,
+    }));
+    const fromTick = Math.min(...moving.map((point) => point.tick), ...moved.map((point) => point.tick));
+    const toTick = Math.max(...moving.map((point) => point.tick), ...moved.map((point) => point.tick));
+    const untouchedWithin = found.lane.points.filter((point) => point.tick >= fromTick && point.tick <= toTick && !movingTicks.has(point.tick));
+    return { verbs: [{ kind: 'setAutomationRange', laneId, fromTick, toTick, points: [...untouchedWithin, ...moved] }] };
+}
+
+/** BC-40 local range replacement with one-tick boundary guards and commit thinning. */
+export function setAutomationRange(
+    arrangement: Arrangement,
+    laneId: string,
+    fromTick: number,
+    toTick: number,
+    points: AutomationPoint[],
+    factor = 20,
+): OpResult {
+    const found = locateAutomationLane(arrangement, laneId);
+    if (!found) return { verbs: [], rejected: `no automation lane "${laneId}"` };
+    if (!(toTick >= fromTick) || fromTick < 0) return { verbs: [], rejected: 'automation range is invalid' };
+    const descriptor = descriptorForLane(arrangement, found.lane);
+    const authored = descriptor?.toggled ? [...points] : thinAutomationPoints(points, factor);
+    const guarded = [...authored];
+    const leftTick = Math.round(fromTick) - 1;
+    const rightTick = Math.round(toTick) + 1;
+    if (leftTick >= 0 && !found.lane.points.some((point) => point.tick >= leftTick && point.tick < fromTick)) {
+        const value = evaluateAutomation(found.lane.points, leftTick, found.lane.interp);
+        if (value !== undefined) guarded.unshift({ tick: leftTick, value });
+    }
+    if (!found.lane.points.some((point) => point.tick > toTick && point.tick <= rightTick)) {
+        const value = evaluateAutomation(found.lane.points, rightTick, found.lane.interp);
+        if (value !== undefined) guarded.push({ tick: rightTick, value });
+    }
+    return { verbs: [{ kind: 'setAutomationRange', laneId, fromTick, toTick, points: guarded }] };
+}
+
+export function thinAutomation(arrangement: Arrangement, laneId: string, factor = 20): OpResult {
+    const found = locateAutomationLane(arrangement, laneId);
+    if (!found) return { verbs: [], rejected: `no automation lane "${laneId}"` };
+    const descriptor = descriptorForLane(arrangement, found.lane);
+    if (descriptor?.toggled || found.lane.points.length < 3) return { verbs: [] };
+    return { verbs: [{ kind: 'setAutomationRange', laneId, fromTick: found.lane.points[0]!.tick, toTick: found.lane.points.at(-1)!.tick, points: thinAutomationPoints(found.lane.points, factor) }] };
 }

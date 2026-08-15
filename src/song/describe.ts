@@ -8,6 +8,7 @@
 import { midiToNote } from '../music/note';
 import { arrangementLengthTicks, formatBarBeat, timebase, type Timebase } from './time';
 import type { Arrangement, ArrangementNote, ArrangementTrack } from './types';
+import { addressableTrackParams } from './automation';
 
 function clipNotes(arr: Arrangement, sourceId: string): ArrangementNote[] {
     const source = arr.sources?.[sourceId];
@@ -58,7 +59,7 @@ function trackExtent(arr: Arrangement, track: ArrangementTrack): { lo: number; h
 }
 
 function describeTrack(arr: Arrangement, tb: Timebase, track: ArrangementTrack, index: number): string {
-    const head = `  ${index + 1}. "${track.name ?? track.ref}" (id ${track.id}, ref ${track.ref})${track.mute ? ' — MUTED' : ''}`;
+    const head = `  ${index + 1}. "${track.name ?? track.ref}" (id ${track.id}, ref ${track.ref}, gain ${(track.gainDb ?? 0).toFixed(1)} dB, pan ${(track.pan ?? 0).toFixed(2)})${track.mute ? ' — MUTED' : ''}${track.solo ? ' — SOLO' : ''}`;
     const ext = trackExtent(arr, track);
     const clipWord = track.clips.length === 1 ? 'clip' : 'clips';
     const body = ext
@@ -74,8 +75,12 @@ function describeTrack(arr: Arrangement, tb: Timebase, track: ArrangementTrack, 
             return `      • clip ${c.id} at ${formatBarBeat(tb, c.startTick)}, length ${c.lengthTick}, source ${c.sourceId} (${notes.length} notes${gain}${fades})${describeClipNotes(notes)}`;
         })
         .join('\n');
+    const addressable = addressableTrackParams(arr, track);
     const automation = (track.automation ?? [])
-        .map((l) => `      ~ automation ${l.id}: ref ${l.ref} param ${l.param} (${l.points.length} points)`)
+        .map((l) => {
+            const param = addressable.find((item) => item.ref === l.ref && item.id === l.param);
+            return `      ~ automation ${l.id}: ${param?.label ?? `${l.ref} param ${l.param}`} [${l.state ?? 'Play'}] (${l.points.length} points)`;
+        })
         .join('\n');
     return [head, `      ${body}`, clips, automation].filter((s) => s.length > 0).join('\n');
 }

@@ -31,6 +31,23 @@ async function dragHorizontally(page: Page, clipIndex: number, delta: number) {
 }
 
 test.describe('Wave 4a arrangement editing', () => {
+    test('mixer fader drag is one undoable gesture', async ({ page }) => {
+        await openPaperSketch(page);
+        await page.getByTitle('Open mixer').click();
+        const strip = page.getByRole('region', { name: /mixer/i }).locator('.mixer-strip').first();
+        const fader = strip.getByRole('slider', { name: /gain/i });
+        const before = await fader.inputValue();
+        const box = (await fader.boundingBox())!;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.75);
+        await page.mouse.down();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height * 0.2, { steps: 10 });
+        await page.mouse.up();
+        await expect.poll(() => fader.inputValue()).not.toBe(before);
+        await strip.locator('.mixer-strip__name').click();
+        await page.keyboard.press('Control+z');
+        await expect.poll(() => fader.inputValue()).toBe(before);
+    });
+
     test('dragging a clip commits one step and Ctrl+Z restores it', async ({ page }) => {
         const errors: string[] = [];
         page.on('pageerror', (error) => errors.push(error.stack ?? error.message));

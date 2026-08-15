@@ -14,6 +14,8 @@ export interface ArrangementPlayback {
     graph: OjGraph;
     tempoMap: TempoMap;
     timeline: Timeline;
+    /** Stable arrangement address -> IR node for routing EngineFrame::Meter. */
+    meterIndex?: Record<string, number>;
 }
 
 export interface TimelineBytes {

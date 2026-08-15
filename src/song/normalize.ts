@@ -50,7 +50,17 @@ function stableClips(clips: ArrangementClip[]): ArrangementClip[] {
 }
 
 function normalizeLane(lane: AutomationLane, mint: IdMint, trackId: string, index: number): AutomationLane {
-    return { ...lane, id: mint.take(lane.id, `${trackId}.a${index}`) };
+    const byTick = new Map<number, AutomationLane['points'][number]>();
+    for (const point of lane.points) byTick.set(Math.max(0, Math.round(point.tick)), { ...point, tick: Math.max(0, Math.round(point.tick)) });
+    const state = lane.state === 'Write' ? 'Off' : lane.state;
+    const out: AutomationLane = {
+        ...lane,
+        id: mint.take(lane.id, `${trackId}.a${index}`),
+        points: [...byTick.values()].sort((a, b) => a.tick - b.tick),
+    };
+    if (state === undefined || state === 'Play') delete out.state;
+    else out.state = state;
+    return out;
 }
 
 function normalizeTrack(track: ArrangementTrack, mint: IdMint, index: number): ArrangementTrack {
@@ -60,6 +70,9 @@ function normalizeTrack(track: ArrangementTrack, mint: IdMint, index: number): A
         id: mint.take(clip.id, `${id}.c${clipIndex}`),
     }));
     const out: ArrangementTrack = { ...track, id, clips };
+    if (out.gainDb === 0) delete out.gainDb;
+    if (out.pan === 0) delete out.pan;
+    if (out.solo === false) delete out.solo;
     if (track.automation) out.automation = track.automation.map((lane, i) => normalizeLane(lane, mint, id, i));
     return out;
 }

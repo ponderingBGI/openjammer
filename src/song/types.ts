@@ -80,11 +80,18 @@ export interface AutomationPoint {
     value: number;
 }
 
+export type AutomationLaneState = 'Off' | 'Write' | 'Touch' | 'Play' | 'Latch';
+export type AutomationInterpolation = 'Discrete' | 'Linear' | 'Curved' | 'Logarithmic' | 'Exponential';
+
 export interface AutomationLane {
     id?: string;
     ref: string;
     param: number;
     points: AutomationPoint[];
+    /** Wave 6 exposes Off/Play. The remaining values are reserved for recording. */
+    state?: AutomationLaneState;
+    /** Wave 6 authors Discrete lanes; Linear is accepted for at-frame documents. */
+    interp?: AutomationInterpolation;
 }
 
 export interface ArrangementTrack {
@@ -95,6 +102,11 @@ export interface ArrangementTrack {
     clips: ArrangementClip[];
     automation?: AutomationLane[];
     mute?: boolean;
+    solo?: boolean;
+    /** Mixer output gain in decibels. Unity is the absent/zero default. */
+    gainDb?: number;
+    /** Mixer output pan: -1 left, 0 centre, +1 right. */
+    pan?: number;
 }
 
 export type LocationKind = 'mark' | 'range' | 'section' | 'loop' | 'punch' | 'songRange';

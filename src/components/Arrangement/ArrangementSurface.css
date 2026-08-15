@@ -145,6 +145,7 @@
     content-visibility: auto;
     contain-intrinsic-size: auto 72px;
 }
+.arrangement-track.has-automation { contain-intrinsic-size: auto 168px; }
 .arrangement-track__header {
     position: sticky;
     left: 0;
@@ -170,6 +171,94 @@
     overflow: hidden;
     background: var(--timeline-lane-bg);
 }
+
+.arrangement-automation__header {
+    position: sticky;
+    left: 0;
+    z-index: 5;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: 30px 24px;
+    align-content: center;
+    gap: 4px 6px;
+    padding: 6px 8px 6px 16px;
+    border-top: 1px solid var(--timeline-lane-divider);
+    border-right: 2px solid var(--border-strong);
+    background: var(--timeline-chrome-bg);
+}
+.arrangement-automation__header .oj-select { min-width: 0; height: 28px; padding-block: 0; font: 500 14px/1 var(--font-sans); }
+.arrangement-automation__value { align-self: center; color: var(--text-secondary); font: 500 13px/1 var(--font-mono); }
+.arrangement-automation__state,
+.arrangement-automation__interp { height: 20px; border-width: 1px; border-radius: var(--radius-sm); }
+.arrangement-automation__state .oj-seg__btn,
+.arrangement-automation__interp .oj-seg__btn { min-height: 18px; padding: 0 7px; font: 500 12px/18px var(--font-sans); }
+.arrangement-automation__field {
+    position: relative;
+    height: 96px;
+    overflow: hidden;
+    border-top: 1px solid var(--timeline-lane-divider);
+    background: var(--timeline-lane-bg);
+    cursor: crosshair;
+}
+.arrangement-automation__default { position: absolute; right: 0; left: 0; height: 1px; background: var(--timeline-grid-sub); pointer-events: none; }
+.arrangement-automation__curve { position: absolute; inset: 0; width: 100%; height: 96px; overflow: visible; pointer-events: none; }
+.arrangement-automation__curve path { fill: none; stroke: var(--timeline-automation-line); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
+.arrangement-automation__point {
+    position: absolute;
+    z-index: 2;
+    width: 11px;
+    height: 11px;
+    padding: 0;
+    border: 1px solid var(--sketch-black);
+    border-radius: var(--radius-pill);
+    background: var(--timeline-lane-bg);
+    box-shadow: none;
+    transform: translate(-50%, -50%);
+    cursor: grab;
+}
+.arrangement-automation__point:hover { background: var(--timeline-automation-line); }
+.arrangement-automation__point:active { cursor: grabbing; }
+.arrangement-automation__point:focus-visible { background: var(--timeline-selection); outline: 1px dashed var(--sketch-black); outline-offset: 3px; }
+.arrangement-automation__range {
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    bottom: 0;
+    min-width: 2px;
+    padding: 0;
+    border: 1px dashed var(--timeline-selection);
+    border-radius: 0;
+    background: color-mix(in srgb, var(--timeline-selection) 16%, transparent);
+    box-shadow: none;
+    cursor: ns-resize;
+}
+
+.mixer-drawer {
+    flex: 0 0 180px;
+    min-height: 180px;
+    display: flex;
+    border-top: 2px solid var(--border-strong);
+    background-color: var(--timeline-chrome-bg);
+    background-image: radial-gradient(circle, color-mix(in srgb, var(--sketch-black) 6%, transparent) 1px, transparent 1px);
+    background-size: 24px 24px;
+}
+.mixer-drawer__scroll { flex: 1; display: flex; min-width: 0; overflow-x: auto; overflow-y: hidden; }
+.mixer-strip { flex: 0 0 112px; display: grid; grid-template-rows: 28px 1fr 24px; grid-template-columns: 1fr auto; padding: 6px 8px; border-right: 1px solid var(--timeline-lane-divider); }
+.mixer-strip--master { flex-basis: 92px; border-right: 0; border-left: 2px solid var(--border-strong); }
+.mixer-strip__name { grid-column: 1 / -1; overflow: hidden; font: 600 16px/24px var(--font-sans); text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.mixer-strip__body { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 0; }
+.mixer-strip__fader { position: relative; width: 72px; height: 82px; }
+.mixer-strip__fader .oj-slider { position: absolute; top: 31px; left: -5px; width: 82px; transform: rotate(-90deg); }
+.mixer-strip__readout { color: var(--text-secondary); font: 500 11px/1 var(--font-mono); text-align: center; white-space: nowrap; }
+.mixer-strip__fader .mixer-strip__readout { position: absolute; right: 0; bottom: 0; left: 0; }
+.mixer-meter { position: relative; width: 8px; height: 76px; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-tertiary); }
+.mixer-meter > span { position: absolute; inset: 0; background: var(--accent-success); transform-origin: bottom; transition: transform 60ms linear; }
+.mixer-drawer.is-idle .mixer-meter > span { transition: none; }
+.mixer-strip__pan { min-width: 36px; align-self: center; }
+.mixer-strip__pan .oj-value-scrubber__value { min-width: 34px; padding: 2px 4px; border: 1px solid var(--border-strong); border-radius: var(--radius-pill); font-size: 11px; text-align: center; cursor: ns-resize; }
+.mixer-strip__switches { display: flex; align-items: center; gap: 3px; }
+.mixer-master-meter { grid-column: 1 / -1; display: grid; place-items: center; }
+.mixer-strip--master > .mixer-strip__readout { grid-column: 1 / -1; align-self: center; }
 .arrangement-track:has(.arrangement-clip:focus-visible) .arrangement-lane { outline: 2px solid var(--accent-primary); outline-offset: -2px; }
 .arrangement-lane.is-muted { background: var(--timeline-lane-alt-bg); }
 .arrangement-lane__hint { position: absolute; top: 8px; left: 16px; width: min(420px, calc(100% - 32px)); height: calc(100% - 16px); display: grid; place-items: center; border: 1px dashed color-mix(in srgb, var(--sketch-black) 18%, transparent); border-radius: var(--radius-sm); color: color-mix(in srgb, var(--text-primary) 50%, transparent); font: 400 15px/1 var(--font-sketch); }
@@ -231,4 +320,5 @@
     .surface-transition-out { animation: none; }
     .arrangement-magnet,
     .arrangement-transport .oj-button { transition: color 0s, border-color 0s, background-color 0s; transform: none; }
+    .mixer-meter > span { transition: none; }
 }

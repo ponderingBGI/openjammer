@@ -3,6 +3,7 @@ import { useArrangementStore } from '../../store/arrangementStore';
 import { useEditingContextStore } from '../../store/editingContextStore';
 import { timebase } from '../../song/time';
 import { useHistoryStore } from '../../store/historyStore';
+import { useTrackLaneViewStore } from '../../store/trackLaneViewStore';
 
 export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
     const arrangement = useArrangementStore((state) => state.arrangement);
@@ -12,6 +13,7 @@ export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
     const canRedo = useHistoryStore((state) => state.cursor < state.entries.length);
     const pxPerTick = useEditingContextStore((state) => state.viewports.arrangement.pxPerTick);
     const editMode = useEditingContextStore((state) => state.editMode);
+    const mixerOpen = useTrackLaneViewStore((state) => state.mixerOpen);
     if (!arrangement) return <div className="arrangement-transport" aria-hidden="true" />;
     const tb = timebase(arrangement);
     const visibleBars = Math.max(1, fieldWidth / (pxPerTick * tb.ticksPerBar));
@@ -35,6 +37,7 @@ export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
                     <button type="button" aria-pressed={editMode === 'slide'} onClick={() => useEditingContextStore.getState().setEditMode('slide')}>Slide</button>
                     <button type="button" aria-pressed={editMode === 'ripple'} onClick={() => useEditingContextStore.getState().setEditMode('ripple')}>Ripple</button>
                 </div>
+                <Button aria-pressed={mixerOpen} title={mixerOpen ? 'Close mixer' : 'Open mixer'} onClick={() => useTrackLaneViewStore.getState().toggleMixer()}>Mix</Button>
                 <ValueScrubber
                     value={arrangement.tempoBpm}
                     display={`${arrangement.tempoBpm} BPM`}

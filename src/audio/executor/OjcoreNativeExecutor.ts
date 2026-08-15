@@ -959,6 +959,9 @@ export class OjcoreNativeExecutor implements Executor {
             await this.invoke('push_tempo_map', { tempoMap: playback.tempoMap });
             await this.invoke('push_timeline', { timeline: playback.timeline });
             if (generation !== this.previewGeneration) return;
+            if (playback.meterIndex) {
+                this.reverseIndex = new Map(Object.entries(playback.meterIndex).map(([id, node]) => [node, id]));
+            }
             if (startSample !== null && startSample > 0) {
                 await this.invoke('send_command', { cmd: { Seek: { samples: startSample } } });
             }

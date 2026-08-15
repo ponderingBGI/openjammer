@@ -32,10 +32,12 @@ test.describe('Timeline live preview', () => {
             interface Probe {
                 __ojWorkletReady?: boolean;
                 __ojPosted?: Array<{ type: string; kind?: string }>;
+                __ojTimelineSetParams?: number;
             }
             const w = window as unknown as Probe;
             w.__ojWorkletReady = false;
             w.__ojPosted = [];
+            w.__ojTimelineSetParams = 0;
             const Orig = window.AudioWorkletNode;
             if (!Orig) return;
             class Probed extends Orig {
@@ -75,6 +77,10 @@ test.describe('Timeline live preview', () => {
                                 w.__ojPosted!.push({ type: 'graph' });
                             } else if (m?.type === 'load_tempo_map' || m?.type === 'load_timeline') {
                                 w.__ojPosted!.push({ type: m.type });
+                                if (m.type === 'load_timeline' && m.bytes) {
+                                    const timeline = JSON.parse(new TextDecoder().decode(m.bytes)) as { events?: Array<{ kind?: number }> };
+                                    w.__ojTimelineSetParams = (timeline.events ?? []).filter((event) => event.kind === 0).length;
+                                }
                             } else if (m?.type === 'command' && m.bytes) {
                                 const cmd = JSON.parse(new TextDecoder().decode(m.bytes));
                                 const kind = typeof cmd === 'string' ? cmd : Object.keys(cmd)[0];
@@ -147,6 +153,18 @@ test.describe('Timeline live preview', () => {
         await expect(page.locator('.arrangement-track')).toHaveCount(3);
         await expect(page.locator('.arrangement-clip')).toHaveCount(3);
 
+        // Wave 6: reveal the first track's automation lane, author a Linear ramp,
+        // and prove the published immutable timeline contains the densified
+        // SetParam schedule (not pointer-time commands).
+        await page.getByRole('button', { name: /Show automation for/i }).first().click();
+        const automation = page.locator('.arrangement-automation__field').first();
+        await expect(automation).toBeVisible();
+        await page.getByRole('tab', { name: 'Linear' }).first().click();
+        const pointsBefore = await automation.locator('.arrangement-automation__point').count();
+        await automation.dblclick({ position: { x: 24, y: 72 } });
+        await automation.dblclick({ position: { x: 160, y: 20 } });
+        await expect(automation.locator('.arrangement-automation__point')).toHaveCount(pointsBefore + 2);
+
         // Isolate the messages caused by pressing Play.
         await page.evaluate(() => {
             (window as { __ojPosted?: unknown[] }).__ojPosted!.length = 0;
@@ -161,6 +179,7 @@ test.describe('Timeline live preview', () => {
             ((window as { __ojPosted?: Array<{ type: string; kind?: string }> }).__ojPosted ?? [])
                 .some((m) => m.kind === 'TransportPlay'),
         )).toBe(true);
+        await expect.poll(() => page.evaluate(() => (window as { __ojTimelineSetParams?: number }).__ojTimelineSetParams ?? 0)).toBeGreaterThan(2);
 
         const posted = await page.evaluate(
             () => (window as { __ojPosted?: Array<{ type: string; kind?: string }> }).__ojPosted ?? [],
@@ -201,7 +220,7 @@ test.describe('Timeline live preview', () => {
         const selectedNote = roll.locator('.piano-roll-note.is-selected').last();
         const beforeQuantize = await selectedNote.evaluate((element) => (element as HTMLElement).style.left);
         await page.keyboard.press('Control+k');
-        await page.getByRole('combobox').fill('Quantize selected notes');
+        await page.locator('.command-bar-input').fill('Quantize selected notes');
         await page.getByText('Quantize selected notes', { exact: true }).click();
         await expect.poll(() => selectedNote.evaluate((element) => (element as HTMLElement).style.left)).not.toBe(beforeQuantize);
         await page.keyboard.press('Control+z');
