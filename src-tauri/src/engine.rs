@@ -189,6 +189,8 @@ pub struct EngineBackend {
     /// PCM here so `recorder_stop` can return it / `recorder_export` can write a
     /// WAV; the live engine-output tap is the documented gap (see `recorder_start`).
     captures: std::collections::HashMap<u32, CaptureState>,
+    /// Most recently finalized capture completion report for Tauri polling.
+    capture_result: Option<ojproto::CaptureResult>,
     /// The last graph adopted into the engine. Kept so a control command that
     /// must alter the LIVE program without a fresh UI push — binding a freshly
     /// loaded sample to a Sampler node — can re-resolve + recompile the same
@@ -374,6 +376,7 @@ impl EngineBackend {
             catalog: AssetCatalog::new(),
             store: AssetStore::new(),
             captures: std::collections::HashMap::new(),
+            capture_result: None,
             last_graph: None,
             last_degraded: Vec::new(),
             pending_restores: std::collections::HashMap::new(),
@@ -1196,7 +1199,39 @@ impl EngineBackend {
             cap.pcm = pcm.samples;
             cap.sample_rate = pcm.sample_rate;
         }
-        Some((cap.pcm.clone(), cap.sample_rate))
+        let returned = (cap.pcm.clone(), cap.sample_rate);
+        let pcm = Pcm {
+            samples: returned.0.clone(),
+            channels: cap.channels,
+            sample_rate: cap.sample_rate,
+        };
+        if !pcm.samples.is_empty() {
+            if let Ok(asset) = self.catalog.insert(pcm) {
+                let map = self.tempo_map.rx().load_full();
+                let frames = returned.0.len() as u64 / u64::from(cap.channels.max(1));
+                self.capture_result = Some(ojproto::CaptureResult {
+                    take_id: now_us(),
+                    segments: vec![ojproto::CaptureSegment {
+                        node,
+                        asset,
+                        start_sample: 0,
+                        frames,
+                        start_tick: 0,
+                        length_ticks: map.tick_at_sample(frames),
+                        loop_index: 0,
+                        xruns: 0,
+                    }],
+                    notes: Vec::new(),
+                    recovered: false,
+                });
+            }
+        }
+        Some(returned)
+    }
+
+    /// Clone the most recently finalized report; polling is idempotent.
+    pub fn capture_result(&self) -> Option<ojproto::CaptureResult> {
+        self.capture_result.clone()
     }
 
     /// STAGE-3 finalize-PCM: take looper `node`'s just-COMMITTED take as MONO PCM

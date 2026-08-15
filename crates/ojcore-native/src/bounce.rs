@@ -713,6 +713,8 @@ mod tests {
             events,
             loop_range: None,
             punch_range: None,
+            armed_tracks: vec![],
+            count_in_beats: 0,
             end: 2_400,
         };
         let tempo = TempoMap {

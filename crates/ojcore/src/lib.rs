@@ -89,6 +89,8 @@ pub mod timeline;
 pub mod transport;
 
 #[cfg(feature = "std")]
+pub mod capture;
+#[cfg(feature = "std")]
 pub mod command;
 #[cfg(feature = "std")]
 pub mod swap;

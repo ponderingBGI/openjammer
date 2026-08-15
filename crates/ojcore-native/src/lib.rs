@@ -30,6 +30,7 @@ pub mod analysis;
 pub mod asset;
 pub mod backend;
 pub mod bounce;
+pub mod butler;
 pub mod device;
 pub mod device_listener;
 pub mod fs;

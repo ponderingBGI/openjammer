@@ -224,12 +224,14 @@ fn scheduled_event_and_timeline_shapes() {
             events: vec![event],
             loop_range: Some((0, 96_000)),
             punch_range: None,
+            armed_tracks: vec![],
+            count_in_beats: 0,
             end: 192_000,
         },
         concat!(
             r#"{"sample_rate":48000,"events":[{"at":24000,"node":3,"kind":2,"#,
             r#""a":60,"b":100,"value":0.25}],"loop_range":[0,96000],"#,
-            r#""punch_range":null,"end":192000}"#,
+            r#""punch_range":null,"armed_tracks":[],"count_in_beats":0,"end":192000}"#,
         ),
     );
 }
@@ -322,6 +324,38 @@ fn transport_flag_codes() {
     assert_eq!(transport_flag::PUNCH_ENABLE, 1);
     assert_eq!(transport_flag::RECORD_ARM, 2);
     assert_eq!(transport_flag::CLICK, 3);
+    assert_eq!(transport_flag::COUNT_IN, 4);
+}
+
+#[test]
+fn capture_wire_shapes() {
+    assert_json(
+        &CaptureMark {
+            node: NodeIdx(7),
+            kind: capture_mark_kind::NOTE_ON,
+            at_frame: 123,
+            payload: 60 | (100 << 8),
+        },
+        r#"{"node":7,"kind":6,"at_frame":123,"payload":25660}"#,
+    );
+    assert_json(
+        &CaptureResult {
+            take_id: 9,
+            segments: vec![CaptureSegment {
+                node: NodeIdx(7),
+                asset: AssetId(42),
+                start_sample: 10,
+                frames: 20,
+                start_tick: 1,
+                length_ticks: 2,
+                loop_index: 0,
+                xruns: 0,
+            }],
+            notes: vec![],
+            recovered: false,
+        },
+        r#"{"take_id":9,"segments":[{"node":7,"asset":42,"start_sample":10,"frames":20,"start_tick":1,"length_ticks":2,"loop_index":0,"xruns":0}],"notes":[],"recovered":false}"#,
+    );
 }
 
 #[test]

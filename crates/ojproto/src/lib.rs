@@ -297,7 +297,7 @@ pub mod sched_event_kind {
 }
 
 /// Reserved parameter ids used internally to lower [`sched_event_kind::SAMPLER_START`]
-/// through the frozen [`ojcore::DspInstance`] `set_param`/`note_on` surface.
+/// through the frozen `ojcore::DspInstance` `set_param`/`note_on` surface.
 /// They are not user-facing automatable parameters.
 pub mod sched_param {
     /// Low 24 bits of the next sampler voice's source-frame offset.
@@ -317,8 +317,85 @@ pub struct Timeline {
     pub loop_range: Option<(u64, u64)>,
     /// Optional half-open punch range `(start, end)` in timeline samples.
     pub punch_range: Option<(u64, u64)>,
+    /// Input/tap nodes armed for capture when the transport record flag is on.
+    #[serde(default)]
+    pub armed_tracks: Vec<CaptureArm>,
+    /// Number of metronome beats rendered before rolling from the locate point.
+    #[serde(default)]
+    pub count_in_beats: u8,
     /// End of the authored timeline in samples.
     pub end: u64,
+}
+
+/// One capture tap installed atomically with a [`Timeline`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureArm {
+    /// Node whose first output lane is captured.
+    pub node: NodeIdx,
+    /// Alignment policy from [`capture_align`].
+    pub align: u8,
+}
+
+/// Capture alignment policies carried by [`CaptureArm::align`].
+pub mod capture_align {
+    /// Align a physical input against already-playing material.
+    pub const EXISTING_MATERIAL: u8 = 0;
+    /// Preserve the time at which the signal reached the capture tap.
+    pub const CAPTURE_TIME: u8 = 1;
+}
+
+/// Rare capture boundary/event stamped by the realtime thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CaptureMark {
+    pub node: NodeIdx,
+    pub kind: u8,
+    pub at_frame: u64,
+    /// Kind-specific compact data (xrun count or packed note/velocity).
+    pub payload: u32,
+}
+
+/// Capture mark kind codes.
+pub mod capture_mark_kind {
+    pub const RECORD_START: u8 = 0;
+    pub const RECORD_STOP: u8 = 1;
+    pub const PUNCH_IN: u8 = 2;
+    pub const PUNCH_OUT: u8 = 3;
+    pub const LOOP_WRAP: u8 = 4;
+    pub const XRUN: u8 = 5;
+    pub const NOTE_ON: u8 = 6;
+    pub const NOTE_OFF: u8 = 7;
+}
+
+/// One finalized audio region reconstructed from capture marks and PCM.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CaptureSegment {
+    pub node: NodeIdx,
+    pub asset: AssetId,
+    pub start_sample: u64,
+    pub frames: u64,
+    pub start_tick: u64,
+    pub length_ticks: u64,
+    pub loop_index: u32,
+    pub xruns: u32,
+}
+
+/// One captured live note converted off-RT through the capture offset formula.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapturedNote {
+    pub node: NodeIdx,
+    pub note: u8,
+    pub velocity: u8,
+    pub on: bool,
+    pub tick: u64,
+}
+
+/// Completion value returned by the native capture butler.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct CaptureResult {
+    pub take_id: u64,
+    pub segments: Vec<CaptureSegment>,
+    pub notes: Vec<CapturedNote>,
+    pub recovered: bool,
 }
 
 impl OjGraph {
@@ -347,6 +424,8 @@ pub mod transport_flag {
     pub const RECORD_ARM: u8 = 2;
     /// Enable or disable the metronome click.
     pub const CLICK: u8 = 3;
+    /// Enable or disable the timeline's pre-roll count-in.
+    pub const COUNT_IN: u8 = 4;
 }
 
 /// Fixed-size, `Copy`, heap-free commands for the wait-free SPSC queue.

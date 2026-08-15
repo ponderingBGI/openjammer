@@ -171,7 +171,7 @@ proptest! {
         punch_range in prop::option::of((any::<u64>(), any::<u64>())),
         end in any::<u64>(),
     ) {
-        let value = Timeline { sample_rate, events, loop_range, punch_range, end };
+        let value = Timeline { sample_rate, events, loop_range, punch_range, armed_tracks: vec![], count_in_beats: 0, end };
         prop_assert_eq!(json_roundtrip(&value), value);
     }
 
@@ -179,6 +179,12 @@ proptest! {
     #[test]
     fn transport_set_json_roundtrip(flag in any::<u8>(), on in any::<bool>()) {
         let value = RtCommand::TransportSet { flag, on };
+        prop_assert_eq!(json_roundtrip(&value), value);
+    }
+
+    #[test]
+    fn capture_mark_json_roundtrip(node in any::<u32>(), kind in any::<u8>(), at_frame in any::<u64>(), payload in any::<u32>()) {
+        let value = CaptureMark { node: NodeIdx(node), kind, at_frame, payload };
         prop_assert_eq!(json_roundtrip(&value), value);
     }
 

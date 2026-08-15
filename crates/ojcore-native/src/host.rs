@@ -1045,7 +1045,8 @@ impl AudioHost {
         // recorder this is ALWAYS streaming — each looper self-gates via
         // `last_captured_block` (only a mid-take looper pushes), so there is no
         // arm flag to check on the RT path.
-        let (looper_capture, mut looper_sink) = LooperCapture::with_default_ring();
+        let (looper_capture, looper_sink) = LooperCapture::with_default_ring();
+        engine.attach_capture_sink(Some(looper_sink));
         // Promote-once guard for realtime priority.
         let mut promoted = false;
 
@@ -1120,7 +1121,7 @@ impl AudioHost {
                                 ch,
                                 &mut scratch,
                                 cap,
-                                Some(&mut looper_sink),
+                                None,
                             );
                         }
                         _ => render_block_timed(
@@ -1131,7 +1132,7 @@ impl AudioHost {
                             ch,
                             &mut scratch,
                             cap,
-                            Some(&mut looper_sink),
+                            None,
                         ),
                     }
                 },

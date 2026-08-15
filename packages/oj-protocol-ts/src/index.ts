@@ -201,13 +201,14 @@ export interface SchedEvent {
 }
 
 /** Event-kind codes and deterministic same-sample ordering ranks. */
-export type SchedEventKind = 0 | 1 | 2;
+export type SchedEventKind = 0 | 1 | 2 | 3;
 
 /** Named event-kind codes, mirroring Rust's `ojproto::sched_event_kind`. */
 export const SchedEventKind = {
   SET_PARAM: 0,
   NOTE_OFF: 1,
   NOTE_ON: 2,
+  SAMPLER_START: 3,
 } as const satisfies Record<string, SchedEventKind>;
 
 /** An immutable authored timeline document published as a whole. */
@@ -216,8 +217,21 @@ export interface Timeline {
   events: SchedEvent[];
   loop_range: [number, number] | null;
   punch_range: [number, number] | null;
+  armed_tracks?: CaptureArm[];
+  count_in_beats?: number;
   end: number;
 }
+
+export interface CaptureArm { node: NodeIdx; align: CaptureAlign }
+export type CaptureAlign = 0 | 1;
+export const CaptureAlign = { EXISTING_MATERIAL: 0, CAPTURE_TIME: 1 } as const satisfies Record<string, CaptureAlign>;
+
+export type CaptureMarkKind = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export const CaptureMarkKind = { RECORD_START: 0, RECORD_STOP: 1, PUNCH_IN: 2, PUNCH_OUT: 3, LOOP_WRAP: 4, XRUN: 5, NOTE_ON: 6, NOTE_OFF: 7 } as const satisfies Record<string, CaptureMarkKind>;
+export interface CaptureMark { node: NodeIdx; kind: CaptureMarkKind; at_frame: number; payload: number }
+export interface CaptureSegment { node: NodeIdx; asset: AssetId; start_sample: number; frames: number; start_tick: number; length_ticks: number; loop_index: number; xruns: number }
+export interface CapturedNote { node: NodeIdx; note: number; velocity: number; on: boolean; tick: number }
+export interface CaptureResult { take_id: number; segments: CaptureSegment[]; notes: CapturedNote[]; recovered: boolean }
 
 /**
  * Fixed-size, heap-free commands for the wait-free UI->RT queue.
@@ -246,7 +260,7 @@ export type RtCommand =
   | { Looper: { node: NodeIdx; action: LooperAction; arg: number } };
 
 /** Boolean transport-setting codes carried as a bare `u8` on the wire. */
-export type TransportFlag = 0 | 1 | 2 | 3;
+export type TransportFlag = 0 | 1 | 2 | 3 | 4;
 
 /** Named transport-setting codes, mirroring Rust's `ojproto::transport_flag`. */
 export const TransportFlag = {
@@ -254,6 +268,7 @@ export const TransportFlag = {
   PUNCH_ENABLE: 1,
   RECORD_ARM: 2,
   CLICK: 3,
+  COUNT_IN: 4,
 } as const satisfies Record<string, TransportFlag>;
 
 /** A live command scheduled at an absolute timeline sample. */

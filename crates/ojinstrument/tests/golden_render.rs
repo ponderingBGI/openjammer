@@ -1142,6 +1142,8 @@ fn scheduled_timeline_render_has_committed_fingerprint() {
         ],
         loop_range: None,
         punch_range: None,
+        armed_tracks: vec![],
+        count_in_beats: 0,
         end: 512,
     };
     let map = TempoMapRt::one_point(SR, 120.0, 4, 4);

@@ -36,6 +36,8 @@ pub enum Motion {
     DeclickToLocate = 3,
     /// A non-RT locate is outstanding.
     WaitingForLocate = 4,
+    /// Metronome-only pre-roll; timeline time remains fixed.
+    CountIn = 5,
 }
 
 /// What motion should follow a locate.
@@ -175,6 +177,17 @@ impl TransportFsm {
             self.motion,
             Motion::Rolling | Motion::DeclickToStop | Motion::DeclickToLocate
         )
+    }
+
+    pub fn begin_count_in(&mut self) {
+        self.motion = Motion::CountIn;
+        self.declick.reset();
+    }
+
+    pub fn finish_count_in(&mut self) {
+        if self.motion == Motion::CountIn {
+            self.motion = Motion::Rolling;
+        }
     }
 
     pub fn waiting_for_butler(&self) -> bool {
@@ -330,6 +343,7 @@ pub struct Transport {
     punch_on: bool,
     record_armed: bool,
     click_on: bool,
+    count_in_on: bool,
 }
 
 impl Default for Transport {
@@ -350,6 +364,7 @@ impl Transport {
             punch_on: false,
             record_armed: false,
             click_on: false,
+            count_in_on: false,
         }
     }
 
@@ -387,6 +402,10 @@ impl Transport {
 
     pub fn click_on(&self) -> bool {
         self.click_on
+    }
+
+    pub fn count_in_on(&self) -> bool {
+        self.count_in_on
     }
 
     pub fn fsm(&self) -> &TransportFsm {
@@ -429,12 +448,21 @@ impl Transport {
             }
             ojproto::transport_flag::RECORD_ARM => self.record_armed = on,
             ojproto::transport_flag::CLICK => self.click_on = on,
+            ojproto::transport_flag::COUNT_IN => self.count_in_on = on,
             _ => {}
         }
     }
 
     pub fn play(&mut self) {
         self.fsm.start(self.sample_rate);
+    }
+
+    pub fn begin_count_in(&mut self) {
+        self.fsm.begin_count_in();
+    }
+
+    pub fn finish_count_in(&mut self) {
+        self.fsm.finish_count_in();
     }
 
     pub fn pause(&mut self) {

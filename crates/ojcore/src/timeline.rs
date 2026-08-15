@@ -7,7 +7,7 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use ojproto::{sched_event_kind, SchedEvent, Timeline};
+use ojproto::{sched_event_kind, CaptureArm, SchedEvent, Timeline};
 
 /// Compiled swap-whole timeline data. The playback cursor is deliberately kept
 /// on [`crate::Engine`], because this object may be shared by an RCU reader.
@@ -18,6 +18,8 @@ pub struct TimelineRt {
     punch_range: Option<(u64, u64)>,
     end: u64,
     sample_rate: u32,
+    armed_tracks: Box<[CaptureArm]>,
+    count_in_beats: u8,
 }
 
 impl TimelineRt {
@@ -49,6 +51,8 @@ impl TimelineRt {
             punch_range: valid_range(timeline.punch_range),
             end: timeline.end,
             sample_rate: timeline.sample_rate.max(1),
+            armed_tracks: timeline.armed_tracks.clone().into_boxed_slice(),
+            count_in_beats: timeline.count_in_beats,
         }
     }
 
@@ -60,6 +64,8 @@ impl TimelineRt {
             punch_range: None,
             end: 0,
             sample_rate: sample_rate.max(1),
+            armed_tracks: Box::new([]),
+            count_in_beats: 0,
         }
     }
 
@@ -81,6 +87,14 @@ impl TimelineRt {
 
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate
+    }
+
+    pub fn armed_tracks(&self) -> &[CaptureArm] {
+        &self.armed_tracks
+    }
+
+    pub fn count_in_beats(&self) -> u8 {
+        self.count_in_beats
     }
 
     /// First event at or after `at`, used on install, locate, and loop wrap.
@@ -140,6 +154,8 @@ mod tests {
             ],
             loop_range: None,
             punch_range: None,
+            armed_tracks: alloc::vec![],
+            count_in_beats: 0,
             end: 10,
         };
         let map = crate::TempoMapRt::one_point(48_000, 120.0, 4, 4);

@@ -84,6 +84,18 @@ pub struct Engine {
     /// meters so a fault storm cannot evict level frames.
     #[cfg(feature = "std")]
     pub(crate) event_ring: Option<alloc::sync::Arc<crate::meter::EventRing>>,
+    #[cfg(feature = "std")]
+    capture_sink: Option<crate::capture::CaptureSink>,
+    #[cfg(feature = "std")]
+    capture_active: bool,
+    #[cfg(feature = "std")]
+    accumulated_capture_offset: u64,
+    applying_timeline_event: bool,
+    count_in_remaining: u64,
+    count_in_cursor: u64,
+    click_remaining: u8,
+    click_accent: bool,
+    click_gain: f32,
 }
 
 // The raw pointers in the scratch are only ever populated and consumed within a
@@ -126,6 +138,18 @@ impl Engine {
             meter_ring: None,
             #[cfg(feature = "std")]
             event_ring: None,
+            #[cfg(feature = "std")]
+            capture_sink: None,
+            #[cfg(feature = "std")]
+            capture_active: false,
+            #[cfg(feature = "std")]
+            accumulated_capture_offset: 0,
+            applying_timeline_event: false,
+            count_in_remaining: 0,
+            count_in_cursor: 0,
+            click_remaining: 0,
+            click_accent: false,
+            click_gain: 0.2,
         }
     }
 
@@ -137,6 +161,11 @@ impl Engine {
     /// Current transport sample position.
     pub fn sample_pos(&self) -> u64 {
         self.transport.sample_pos()
+    }
+
+    /// Set the post-master metronome gain. Non-finite values become silence.
+    pub fn set_click_gain(&mut self, gain: f32) {
+        self.click_gain = if gain.is_finite() { gain.max(0.0) } else { 0.0 };
     }
 
     // --- U12 musical transport (additive) ----------------------------------
@@ -347,6 +376,25 @@ impl Engine {
         self.event_ring = ring;
     }
 
+    /// Attach the generalized timeline/looper capture producer to the RT thread.
+    #[cfg(feature = "std")]
+    pub fn attach_capture_sink(&mut self, sink: Option<crate::capture::CaptureSink>) {
+        self.capture_sink = sink;
+        self.capture_active = false;
+        self.accumulated_capture_offset = 0;
+    }
+
+    /// Stamp an input overrun into every armed track.
+    #[cfg(feature = "std")]
+    pub fn mark_capture_xrun(&mut self, dropped: u32) {
+        let at = self.transport.sample_pos();
+        if let Some(sink) = self.capture_sink.as_mut() {
+            for arm in self.timeline.armed_tracks() {
+                sink.mark(arm.node.0, ojproto::capture_mark_kind::XRUN, at, dropped);
+            }
+        }
+    }
+
     /// Non-blocking publish of the current meter snapshot + transport beat onto
     /// the attached return ring. Called at block end from `process_block` when
     /// metering is on; safe to call directly too. Allocation-free: it encodes
@@ -488,6 +536,17 @@ impl Engine {
                         self.held[slot] |= 1u128 << note;
                     }
                 }
+                #[cfg(feature = "std")]
+                if !self.applying_timeline_event && self.capture_active {
+                    if let Some(sink) = self.capture_sink.as_mut() {
+                        sink.mark(
+                            node.0,
+                            ojproto::capture_mark_kind::NOTE_ON,
+                            self.transport.sample_pos(),
+                            u32::from(note) | (u32::from(vel) << 8),
+                        );
+                    }
+                }
             }
             RtCommand::NoteOff { node, note } => {
                 if let Some(slot) = self.program.slot_of_id(node) {
@@ -496,23 +555,59 @@ impl Engine {
                         self.held[slot] &= !(1u128 << note);
                     }
                 }
+                #[cfg(feature = "std")]
+                if !self.applying_timeline_event && self.capture_active {
+                    if let Some(sink) = self.capture_sink.as_mut() {
+                        sink.mark(
+                            node.0,
+                            ojproto::capture_mark_kind::NOTE_OFF,
+                            self.transport.sample_pos(),
+                            u32::from(note),
+                        );
+                    }
+                }
             }
             RtCommand::Bypass { node, on } => {
                 if let Some(slot) = self.program.slot_of_id(node) {
                     self.program.bypassed[slot] = on;
                 }
             }
-            RtCommand::TransportPlay => self.transport.play(),
+            RtCommand::TransportPlay => {
+                if self.transport.count_in_on() && self.timeline.count_in_beats() != 0 {
+                    let map = self.tempo_snapshot();
+                    let start = self.transport.sample_pos();
+                    let start_tick = map.tick_at_sample(start);
+                    let end_tick = start_tick.saturating_add(
+                        u64::from(self.timeline.count_in_beats()) * u64::from(ojproto::PPQ),
+                    );
+                    let frames = map.sample_at_tick(end_tick).saturating_sub(start).max(1);
+                    self.count_in_remaining = frames;
+                    self.count_in_cursor = start.saturating_sub(frames);
+                    self.transport.begin_count_in();
+                } else {
+                    self.transport.play();
+                }
+            }
             RtCommand::TransportPause => {
+                #[cfg(feature = "std")]
+                self.stop_capture_marks(self.transport.sample_pos());
+                self.count_in_remaining = 0;
                 self.release_held();
                 self.transport.pause();
             }
             RtCommand::Seek { samples } => {
+                self.count_in_remaining = 0;
                 self.release_held();
                 self.transport.locate(samples);
                 self.sync_timeline_cursor();
             }
-            RtCommand::TransportSet { flag, on } => self.transport.set_flag(flag, on),
+            RtCommand::TransportSet { flag, on } => {
+                #[cfg(feature = "std")]
+                if flag == ojproto::transport_flag::RECORD_ARM && !on {
+                    self.stop_capture_marks(self.transport.sample_pos());
+                }
+                self.transport.set_flag(flag, on);
+            }
             RtCommand::Looper { node, action, arg } => {
                 if let Some(slot) = self.program.slot_of_id(node) {
                     self.program.instances[slot].looper_action(action, arg);
@@ -536,6 +631,7 @@ impl Engine {
     }
 
     fn apply_sched_event(&mut self, event: SchedEvent) {
+        self.applying_timeline_event = true;
         match event.kind {
             sched_event_kind::SET_PARAM => self.apply_rt(RtCommand::SetParam {
                 node: event.node,
@@ -569,6 +665,7 @@ impl Engine {
             }
             _ => {}
         }
+        self.applying_timeline_event = false;
     }
 
     /// Mutable view of a source node's output buffer, so the host can inject
@@ -630,7 +727,6 @@ impl Engine {
         debug_assert!(nframes <= self.program.block_size, "block overrun");
         let dev_len = outs.iter().map(|o| o.len()).min().unwrap_or(0);
         let nframes = nframes.min(self.program.block_size).min(dev_len);
-        #[cfg(feature = "std")]
         let map = self.tempo_snapshot();
 
         self.sync_timeline_snapshot();
@@ -672,12 +768,17 @@ impl Engine {
 
             if splits >= MAX_SPLITS {
                 self.render_audio_span(outs, offset, remaining);
+                #[cfg(feature = "std")]
+                self.capture_span(now, offset, remaining);
                 self.apply_declick(outs, offset, remaining);
                 self.transport.advance(remaining);
                 break;
             }
 
             let mut edge = self.transport.frames_until_edge(remaining);
+            if self.count_in_remaining != 0 {
+                edge = edge.min(self.count_in_remaining as usize);
+            }
             if self.transport.is_playing() {
                 if let Some(event) = self.timeline.events().get(self.timeline_cursor) {
                     edge = edge.min(event.at.saturating_sub(now) as usize);
@@ -702,12 +803,25 @@ impl Engine {
             }
 
             self.render_audio_span(outs, offset, edge);
+            #[cfg(feature = "std")]
+            self.capture_span(now, offset, edge);
+            self.mix_click(outs, offset, edge, &map);
             self.apply_declick(outs, offset, edge);
             self.transport.advance(edge);
+            if self.count_in_remaining != 0 {
+                let used = (edge as u64).min(self.count_in_remaining);
+                self.count_in_remaining -= used;
+                self.count_in_cursor = self.count_in_cursor.saturating_add(used);
+                if self.count_in_remaining == 0 {
+                    self.transport.finish_count_in();
+                }
+            }
             offset += edge;
             let before_edge = self.transport.sample_pos();
             self.transport.finish_edge();
             if self.transport.sample_pos() != before_edge {
+                #[cfg(feature = "std")]
+                self.mark_loop_wrap(before_edge);
                 self.sync_timeline_cursor();
             } else {
                 self.timeline_cursor_pos = self.transport.sample_pos();
@@ -731,6 +845,176 @@ impl Engine {
         self.publish_looper();
         #[cfg(feature = "std")]
         self.publish_faults();
+        #[cfg(feature = "std")]
+        self.capture_looper_blocks();
+    }
+
+    fn mix_click(
+        &mut self,
+        outs: &mut [&mut [f32]],
+        offset: usize,
+        nframes: usize,
+        map: &TempoMapRt,
+    ) {
+        if !self.transport.click_on() && self.count_in_remaining == 0 {
+            return;
+        }
+        let base = if self.count_in_remaining != 0 {
+            self.count_in_cursor
+        } else {
+            self.transport.sample_pos()
+        };
+        for frame in 0..nframes {
+            let sample = base.saturating_add(frame as u64);
+            let tick = map.tick_at_sample(sample);
+            let prior = sample
+                .checked_sub(1)
+                .map_or(tick, |s| map.tick_at_sample(s));
+            let beat = tick / u64::from(ojproto::PPQ);
+            if sample == 0 || beat != prior / u64::from(ojproto::PPQ) {
+                self.click_remaining = 24;
+                self.click_accent = map
+                    .meter_at_sample_with_cursor(sample, &mut MetricCursor::default())
+                    .beat
+                    == 1;
+            }
+            if self.click_remaining != 0 {
+                let envelope = f32::from(self.click_remaining) / 24.0;
+                let polarity = if self.click_remaining.is_multiple_of(2) {
+                    1.0
+                } else {
+                    -1.0
+                };
+                let accent = if self.click_accent { 1.0 } else { 0.65 };
+                let value = polarity * envelope * accent * self.click_gain;
+                for out in outs.iter_mut() {
+                    out[offset + frame] += value;
+                }
+                self.click_remaining -= 1;
+            }
+        }
+    }
+
+    #[cfg(feature = "std")]
+    fn capture_looper_blocks(&mut self) {
+        let Some(sink) = self.capture_sink.as_mut() else {
+            return;
+        };
+        for slot in 0..self.program.instances.len() {
+            if self.program.kinds[slot] == PrimitiveKind::Looper {
+                if let Some(block) = self.program.instances[slot].last_captured_block() {
+                    sink.capture(self.program.ids[slot].0, block);
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "std")]
+    fn capture_span(&mut self, at: u64, output_offset: usize, nframes: usize) {
+        if nframes == 0 || !self.transport.is_playing() || !self.transport.record_armed() {
+            return;
+        }
+        let span_end = at.saturating_add(nframes as u64);
+        let (capture_start, capture_end) = if self.transport.punch_on() {
+            let Some((punch_start, punch_end)) = self.transport.punch_range() else {
+                self.accumulated_capture_offset = self
+                    .accumulated_capture_offset
+                    .saturating_add(nframes as u64);
+                return;
+            };
+            (at.max(punch_start), span_end.min(punch_end))
+        } else {
+            (at, span_end)
+        };
+        if capture_start >= capture_end {
+            self.accumulated_capture_offset = self
+                .accumulated_capture_offset
+                .saturating_add(nframes as u64);
+            return;
+        }
+
+        let local = (capture_start - at) as usize;
+        let len = (capture_end - capture_start) as usize;
+        let first = !self.capture_active;
+        self.capture_active = true;
+        let Some(sink) = self.capture_sink.as_mut() else {
+            return;
+        };
+        for arm in self.timeline.armed_tracks() {
+            let Some(slot) = self.program.slot_of_id(arm.node) else {
+                continue;
+            };
+            if first {
+                let kind = if self.transport.punch_on() {
+                    ojproto::capture_mark_kind::PUNCH_IN
+                } else {
+                    ojproto::capture_mark_kind::RECORD_START
+                };
+                sink.mark(arm.node.0, kind, capture_start, u32::from(arm.align));
+            }
+            let source_offset = if matches!(
+                self.program.kinds[slot],
+                PrimitiveKind::GraphIn | PrimitiveKind::MicIn
+            ) {
+                output_offset + local
+            } else {
+                local
+            };
+            if let Some(buf) = self.program.out_bufs[slot].first() {
+                let end = source_offset.saturating_add(len).min(buf.len());
+                if source_offset < end {
+                    sink.capture(arm.node.0, &buf[source_offset..end]);
+                }
+            }
+        }
+        if self.transport.punch_on()
+            && self
+                .transport
+                .punch_range()
+                .is_some_and(|(_, end)| capture_end == end)
+        {
+            self.stop_capture_marks(capture_end);
+        }
+    }
+
+    #[cfg(feature = "std")]
+    fn stop_capture_marks(&mut self, at: u64) {
+        if !self.capture_active {
+            return;
+        }
+        if let Some(sink) = self.capture_sink.as_mut() {
+            for arm in self.timeline.armed_tracks() {
+                let kind = if self.transport.punch_on() {
+                    ojproto::capture_mark_kind::PUNCH_OUT
+                } else {
+                    ojproto::capture_mark_kind::RECORD_STOP
+                };
+                sink.mark(arm.node.0, kind, at, 0);
+            }
+        }
+        self.capture_active = false;
+    }
+
+    #[cfg(feature = "std")]
+    fn mark_loop_wrap(&mut self, at: u64) {
+        if !self.capture_active {
+            return;
+        }
+        if let Some((start, end)) = self.transport.loop_range() {
+            self.accumulated_capture_offset = self
+                .accumulated_capture_offset
+                .saturating_add(end.saturating_sub(start));
+        }
+        if let Some(sink) = self.capture_sink.as_mut() {
+            for arm in self.timeline.armed_tracks() {
+                sink.mark(
+                    arm.node.0,
+                    ojproto::capture_mark_kind::LOOP_WRAP,
+                    at,
+                    self.accumulated_capture_offset.min(u64::from(u32::MAX)) as u32,
+                );
+            }
+        }
     }
 
     /// Render one event-free span into caller output starting at `output_offset`.
@@ -1077,6 +1361,19 @@ impl Engine {
     }
 }
 
+/// Contiguous captured-frame formula used for audio/MIDI loop passes.
+pub fn accumulated_capture_frame(
+    start: u64,
+    loop_offset: u64,
+    accumulated_capture_offset: u64,
+    event_frame: u64,
+) -> u64 {
+    start
+        .saturating_add(loop_offset)
+        .saturating_add(event_frame)
+        .saturating_sub(accumulated_capture_offset)
+}
+
 #[cfg(test)]
 mod apply_rt_tests {
     //! `no_std` unit tests for [`Engine::apply_rt`] — the SINGLE shared
@@ -1202,6 +1499,8 @@ mod apply_rt_tests {
             events,
             loop_range,
             punch_range: None,
+            armed_tracks: vec![],
+            count_in_beats: 0,
             end: 64,
         };
         TimelineRt::from_wire(&wire, &TempoMapRt::one_point(48_000, 120.0, 4, 4))

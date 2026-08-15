@@ -467,6 +467,18 @@ fn recorder_stop(
         .map(|(pcm, sample_rate)| RecorderStopResult { pcm, sample_rate }))
 }
 
+/// Retrieve the most recently finalized native capture report.
+#[tauri::command]
+fn get_capture_result(
+    state: tauri::State<'_, BackendState>,
+) -> Result<Option<ojproto::CaptureResult>, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .capture_result())
+}
+
 /// One hosted plugin's saved opaque state. `node` is the IR node id; `blob` is the
 /// plugin's `getStateInformation` / CLAP-state bytes. The TS layer base64's the blob
 /// into `node.data` for the project file, lockfile-gated on the hosted plugin id.
@@ -932,6 +944,7 @@ pub fn run() {
             stage_plugin_restores,
             recorder_start,
             recorder_stop,
+            get_capture_result,
             looper_take_pcm,
             looper_discard_pcm,
             recorder_export,

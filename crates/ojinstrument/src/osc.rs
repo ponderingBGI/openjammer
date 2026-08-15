@@ -32,7 +32,7 @@ struct OscVoice {
 }
 
 /// A polyphonic sine instrument. Voice DSP state lives in `voices`; the
-/// [`VoiceAlloc`] tracks which slot plays which note.
+/// `VoiceAlloc` tracks which slot plays which note.
 pub struct OscInstrument {
     sample_rate: f32,
     gain: f32,

@@ -9,7 +9,7 @@
 //!
 //! Two type aliases are provided for the two real uses on the boundary:
 //! [`MidiRing`] (worker -> worklet, variable-length MIDI byte runs) and
-//! [`CmdRing`] (UI -> engine, [`ojproto`]-style command bytes). They differ
+//! [`CmdRing`] (UI -> engine, `ojproto`-style command bytes). They differ
 //! only in capacity; the wire format is identical length-prefixed frames.
 //!
 //! # Wire format
@@ -286,7 +286,7 @@ impl<const N: usize> ByteRing<N> {
 /// Worker -> worklet MIDI byte stream (variable-length runs of MIDI bytes).
 pub type MidiRing = ByteRing<4096>;
 
-/// UI -> engine command stream ([`ojproto`]-style command bytes).
+/// UI -> engine command stream (`ojproto`-style command bytes).
 pub type CmdRing = ByteRing<8192>;
 
 #[cfg(test)]
