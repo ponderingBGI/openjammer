@@ -27,7 +27,7 @@ use std::sync::Mutex;
 use engine::BackendState;
 use ojhost::{PluginDescriptor, PluginEditor};
 use ojproto::{EngineFrame, Event, NodeIdx, OjGraph, RtCommand, TempoMap, TimedCommand, Timeline};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 /// Push a full graph from the UI: recompile it against the plugin registry and
 /// adopt it into the running engine (publish to the program-swap mailbox + run).
@@ -565,6 +565,88 @@ fn recorder_export(
         .map_err(|e| e.to_string())
 }
 
+/// Progress payload emitted on `export-progress` while the blocking bounce
+/// worker advances. `out_path` lets a future UI distinguish concurrent exports.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportProgressEvent {
+    out_path: String,
+    blocks_rendered: u64,
+    total_blocks_estimate: u64,
+}
+
+/// Successful `export_arrangement` result. Level statistics are measured on the
+/// rendered float mix before integer quantization/dither.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportArrangementResult {
+    path: String,
+    max_sample_peak_dbfs: f32,
+    clipped_sample_count: u64,
+    frames: u64,
+    sample_rate: u32,
+    channels: u16,
+}
+
+/// Render and encode a complete arrangement without blocking Tauri's main
+/// thread. The caller-provided path is treated exactly like `recorder_export`:
+/// it is a user-selected host path, while the actual write uses a crash-safe
+/// same-directory temp + atomic replacement inside `ojcore-native`.
+#[tauri::command]
+async fn export_arrangement(
+    graph: OjGraph,
+    timeline: Timeline,
+    tempo_map: TempoMap,
+    spec: ojcore_native::BounceSpec,
+    out_path: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, BackendState>,
+) -> Result<ExportArrangementResult, String> {
+    let (assets, registry) = {
+        let backend = state
+            .0
+            .lock()
+            .map_err(|_| "engine backend mutex poisoned".to_string())?;
+        (backend.asset_catalog_snapshot(), backend.plugin_registry())
+    };
+    let event_path = out_path.clone();
+    let worker_path = out_path.clone();
+    let stats = tauri::async_runtime::spawn_blocking(move || {
+        let registry = registry.read().unwrap_or_else(|error| error.into_inner());
+        ojcore_native::bounce_to_file_with_registry_and_assets(
+            graph,
+            timeline,
+            tempo_map,
+            spec,
+            &registry,
+            &assets,
+            &worker_path,
+            |progress| {
+                let _ = app.emit(
+                    "export-progress",
+                    ExportProgressEvent {
+                        out_path: event_path.clone(),
+                        blocks_rendered: progress.blocks_rendered,
+                        total_blocks_estimate: progress.total_blocks_estimate,
+                    },
+                );
+            },
+        )
+    })
+    .await
+    .map_err(|error| format!("export worker failed: {error}"))?
+    .map_err(|error| error.to_string())?;
+
+    Ok(ExportArrangementResult {
+        path: out_path,
+        max_sample_peak_dbfs: stats.max_sample_peak_dbfs,
+        clipped_sample_count: stats.clipped_sample_count,
+        frames: stats.frames,
+        sample_rate: stats.sample_rate,
+        channels: stats.channels,
+    })
+}
+
 /// Set a speaker node's master volume / mute.
 #[tauri::command]
 fn set_speaker_volume(
@@ -853,6 +935,7 @@ pub fn run() {
             looper_take_pcm,
             looper_discard_pcm,
             recorder_export,
+            export_arrangement,
             set_speaker_volume,
             set_speaker_device,
             set_mic,

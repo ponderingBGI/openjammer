@@ -31,7 +31,7 @@
 //! JSON (governing principle #4).
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use ojcore::meter::{event_frame, return_frame};
 use ojcore::{
@@ -139,7 +139,7 @@ impl StateResolver for PendingStates<'_> {
 /// control-rate and runs on the IPC/control thread, never the audio thread.
 pub struct EngineBackend {
     /// Open registry: `manifest_id -> loader`. Used to recompile a pushed graph.
-    registry: PluginRegistry,
+    registry: Arc<RwLock<PluginRegistry>>,
     /// The live audio host (cpal stream + engine on the audio thread). `None`
     /// when no device is available (headless/CI) — the backend stays usable for
     /// compile/validation and re-tries on the next `push_graph`.
@@ -282,7 +282,7 @@ impl EngineBackend {
     /// left `None`, the producer is a live ring (its consumer parked until the
     /// first successful start), and control commands still validate.
     pub fn new() -> Self {
-        let registry = Self::build_registry();
+        let registry = Arc::new(RwLock::new(Self::build_registry()));
         // Event-driven OS device-change listener (macOS; None elsewhere) feeds this
         // mailbox; drained alongside the host's err_fn faults + the polling watcher.
         let (listener_tx, listener_rx) = device_fault_channel(8);
@@ -306,8 +306,10 @@ impl EngineBackend {
         // Justified panic (Phase-4 scoped panic guard): the precondition is a
         // compile-time invariant, not runtime input — an `Err` here is unreachable.
         #[allow(clippy::expect_used)]
-        let program =
-            compile(&Self::starter_graph(stream), &registry).expect("starter graph compiles");
+        let program = {
+            let registry = registry.read().unwrap_or_else(|error| error.into_inner());
+            compile(&Self::starter_graph(stream), &registry).expect("starter graph compiles")
+        };
         let mut engine = Engine::new(program);
         // Attach the control-side meter ring up front. The same `Arc` clone is
         // kept on the control side so `drain_meters` reads what the audio thread
@@ -632,7 +634,11 @@ impl EngineBackend {
         // the blob is the base and current params win, re-applied on every compile.
         let program = {
             let states = PendingStates(&self.pending_restores);
-            compile_resilient_with_state(&g, &self.registry, &self.catalog, &states)
+            let registry = self
+                .registry
+                .read()
+                .unwrap_or_else(|error| error.into_inner());
+            compile_resilient_with_state(&g, &registry, &self.catalog, &states)
                 .map_err(BackendError::Compile)?
         };
 
@@ -1109,6 +1115,8 @@ impl EngineBackend {
         let manifest: PluginManifest =
             serde_json::from_str(manifest_json).map_err(|e| format!("bad manifest json: {e}"))?;
         self.registry
+            .write()
+            .unwrap_or_else(|error| error.into_inner())
             .register(Box::new(WasmHostLoader::new_native(manifest, dll_path)));
         // Recompile the live graph so the loader resolves + instantiates: the node
         // may already be present (re-author), else the next `push_graph` uses it.
@@ -1234,6 +1242,19 @@ impl EngineBackend {
         self.store
             .write_wav_file(path, &pcm)
             .map_err(BackendError::Asset)
+    }
+
+    /// Deep-copy the off-RT PCM catalog for a background arrangement bounce.
+    /// The copy keeps the backend mutex out of the render/encode loop while
+    /// preserving every sampler/convolution asset referenced by the graph.
+    pub fn asset_catalog_snapshot(&self) -> AssetCatalog {
+        self.catalog.clone()
+    }
+
+    /// Share the loader table with a background bounce. Plugin registrations
+    /// briefly take the write side; export compilation holds the read side.
+    pub fn plugin_registry(&self) -> Arc<RwLock<PluginRegistry>> {
+        Arc::clone(&self.registry)
     }
 
     /// Set a speaker node's master volume / mute. The SpeakerOut sink now carries
@@ -1414,7 +1435,13 @@ impl EngineBackend {
             found = found.len(),
             "plugin scan"
         );
-        register_scanned(&mut self.registry, &found);
+        register_scanned(
+            &mut self
+                .registry
+                .write()
+                .unwrap_or_else(|error| error.into_inner()),
+            &found,
+        );
         Ok(found)
     }
 

@@ -483,7 +483,7 @@ fn map_cpal(err: cpal::Error, fallback: impl FnOnce(String) -> HostError) -> Hos
 /// A cheap, shared "the output stream faulted" flag. The cpal `err_fn` runs on
 /// cpal's OWN error thread (NOT the audio render thread) when a running stream
 /// errors — a yanked/disabled/reconfigured device hands us a
-/// [`cpal::StreamError`] here. The contract for that callback is strict: it does
+/// cpal stream error here. The contract for that callback is strict: it does
 /// a SINGLE atomic store and nothing else — no allocation, no lock, no blocking
 /// I/O, no stream teardown. The control thread (which already ticks
 /// `drain_events`/`poll_meters`) polls [`StreamFault::take`] each tick and does

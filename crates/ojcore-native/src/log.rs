@@ -35,8 +35,8 @@ use tracing_subscriber::{fmt, EnvFilter};
 /// Layers, in order:
 /// 1. an [`EnvFilter`] read from the `OJ_LOG` env var (falling back to `info`),
 ///    so verbosity is tunable without a rebuild;
-/// 2. a human-readable [`fmt`] layer to **stderr**;
-/// 3. a non-blocking JSON [`fmt`] layer writing **`openjammer.ndjson`** under
+/// 2. a human-readable [`formatting`](mod@tracing_subscriber::fmt) layer to **stderr**;
+/// 3. a non-blocking JSON [`formatting`](mod@tracing_subscriber::fmt) layer writing **`openjammer.ndjson`** under
 ///    `log_dir`, rolled daily by [`tracing_appender::rolling::daily`].
 ///
 /// The returned [`WorkerGuard`] MUST be held for the process lifetime: dropping
