@@ -23,6 +23,24 @@ describe('conduct', () => {
         expect(result.seconds).toBeGreaterThan(0.5);
     });
 
+    it('builds sample-addressed Timeline events and attaches authored ranges', () => {
+        const result = conduct({
+            ...base,
+            locations: [
+                { id: 'loop', name: 'Loop', kind: 'loop', startTick: 480, endTick: 960 },
+                { id: 'punch', name: 'Punch', kind: 'punch', startTick: 240, endTick: 720 },
+            ],
+        });
+        expect(result.tempoMap.sample_rate).toBe(48_000);
+        expect(result.timeline.events).toEqual([
+            { at: 0, node: result.trackIndex.keys, kind: 2, a: 60, b: 100, value: 0 },
+            { at: 24_000, node: result.trackIndex.keys, kind: 1, a: 60, b: 0, value: 0 },
+        ]);
+        expect(result.timeline.loop_range).toEqual([12_000, 24_000]);
+        expect(result.timeline.punch_range).toEqual([6_000, 18_000]);
+        expect(result.timeline.end).toBe(Math.round(result.seconds * 48_000));
+    });
+
     it('clips a note straddling the clip end', () => {
         const result = conduct(song([{ tick: 720, durTick: 960, pitch: 64 }], { lengthTick: 960 }));
         expect(result.events.map((event) => event.at)).toEqual([0.375, 0.5]);

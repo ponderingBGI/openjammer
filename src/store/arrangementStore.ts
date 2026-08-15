@@ -6,25 +6,23 @@
 //
 // Invariant: `arrangement` is ALWAYS normalized (every track/clip/note/lane/section
 // has a stable id), so selection and the command-log can name any entity. Transport
-// is anchored to AudioContext.currentTime so the playhead is sample-accurate and
-// FREEZES (never jumps) on stop — the Live Performance Rule at the timeline surface.
+// mirrors EngineFrame::Transport. User intent is optimistic for controls, while the
+// visible playhead waits for the engine's confirming sample position.
 
 import { create } from 'zustand';
-import { getAudioContext } from '../audio/audioContext';
 import { getExecutor } from '../audio/executor';
+import type { TransportFrame } from '../audio/executor/timelinePlayback';
 import { conduct } from '../song/conduct';
 import { normalizeArrangement } from '../song/normalize';
+import { buildTempoMap, sampleToTick, tickToSample } from '../song/tempoMap';
 import { applyVerbs, type Verb } from '../song/verbs';
-import { arrangementLengthTicks, secondsPerTick } from '../song/time';
+import { arrangementLengthTicks } from '../song/time';
 import type { Arrangement } from '../song/types';
 import { logger } from '../utils/log';
 
 const log = logger('song');
 
-/** Read AudioContext.currentTime, or 0 when there is no context (tests / pre-audio). */
-function clockNow(): number {
-    return getAudioContext()?.currentTime ?? 0;
-}
+const visualNow = (): number => globalThis.performance?.now() ?? Date.now();
 
 /** The auto-stop timer: fires `stop()` when playback reaches the song's end (incl. the
  *  conduct release tail), so isPlaying never lies and the canvas graph is restored. */
@@ -43,26 +41,61 @@ function clearEndTimer(): void {
  * breaks the transport — the playhead still moves; a held note beats a glitch. The
  * browser tier plays; the native tier logs + no-ops. `onEnd` is the store's `stop`.
  */
+let transportUnsubscribe: (() => void) | null = null;
+
+function ensureTransportSubscription(): void {
+    if (transportUnsubscribe) return;
+    transportUnsubscribe = getExecutor().subscribeTransport((frame) => {
+        useArrangementStore.getState().receiveTransportFrame(frame);
+    });
+}
+
+function lowerPreview(arr: Arrangement) {
+    const executor = getExecutor();
+    const result = conduct(arr, executor.getTimelineBackend(), { lenient: true });
+    return { executor, result };
+}
+
 function startPreview(arr: Arrangement, playheadTick: number, onEnd: () => void): void {
     clearEndTimer();
     try {
-        const startSec = playheadTick * secondsPerTick(arr);
-        // LENIENT: a track with an unresolved ref is skipped (the rest of the song still
-        // plays) — a held note beats a glitch. The headless bounce stays strict.
-        const { graph, events, seconds, skipped } = conduct(arr, 'wasm', { lenient: true });
+        const { executor, result } = lowerPreview(arr);
+        const { graph, tempoMap, timeline, seconds, skipped } = result;
         if (skipped.length > 0) {
             log.warn('timeline preview skipped tracks with unresolved refs (the rest plays)', {
                 detail: skipped.join(', '),
             });
         }
-        getExecutor().startArrangementPreview(graph, events, startSec);
+        ensureTransportSubscription();
+        const startSample = tickToSample(tempoMap, playheadTick);
+        executor.startArrangementPreview({ graph, tempoMap, timeline }, startSample);
         // Auto-stop at the end of the song (conduct.seconds includes the release tail),
         // so the UI never claims to be playing a finished song and the canvas graph is
         // restored. A small slop keeps a final note/tail from being clipped.
-        const remainSec = Math.max(0, seconds - startSec);
+        const remainSec = Math.max(0, seconds - startSample / tempoMap.sample_rate);
         endTimer = setTimeout(onEnd, remainSec * 1000 + 80);
     } catch (err) {
         log.warn('timeline preview could not start; the transport still runs (visual only)', {
+            detail: err instanceof Error ? err.message : String(err),
+        });
+    }
+}
+
+function republishPreview(arr: Arrangement, playheadTick: number, onEnd: () => void): void {
+    clearEndTimer();
+    try {
+        const { executor, result } = lowerPreview(arr);
+        const { graph, tempoMap, timeline, seconds, skipped } = result;
+        if (skipped.length > 0) {
+            log.warn('timeline preview skipped tracks with unresolved refs (the rest plays)', {
+                detail: skipped.join(', '),
+            });
+        }
+        executor.updateArrangementPreview({ graph, tempoMap, timeline });
+        const remainSec = Math.max(0, seconds - tickToSample(tempoMap, playheadTick) / tempoMap.sample_rate);
+        endTimer = setTimeout(onEnd, remainSec * 1000 + 80);
+    } catch (err) {
+        log.warn('timeline edit could not be published; the last good snapshot keeps playing', {
             detail: err instanceof Error ? err.message : String(err),
         });
     }
@@ -122,11 +155,15 @@ export interface ArrangementStore {
 
     // ── transport ──
     isPlaying: boolean;
-    /** Playhead tick anchor: the frozen position when stopped, or the position at
-     * `playAnchorSec` when playing. */
+    /** Latest engine-confirmed musical position. */
     playheadTick: number;
-    /** AudioContext.currentTime when playback started (null when stopped). */
-    playAnchorSec: number | null;
+    transportSample: number;
+    transportMotion: number;
+    transportFrameAtMs: number | null;
+    transportPending: 'play' | 'stop' | 'seek' | null;
+    pendingSeekSample: number | null;
+    loopOn: boolean;
+    loopEnabled: boolean;
 
     // ── actions ──
     /** Load a song (normalized on entry); resets the command-log + transport. */
@@ -148,7 +185,9 @@ export interface ArrangementStore {
     stop: () => void;
     /** Move the playhead to a tick (keeps playing if it was playing). */
     seek: (tick: number) => void;
-    /** The live playhead tick RIGHT NOW (derived from the clock while playing). */
+    setLoopEnabled: (on: boolean) => void;
+    receiveTransportFrame: (frame: TransportFrame) => void;
+    /** Visual interpolation from the last complete engine snapshot. */
     currentTick: () => number;
 }
 
@@ -156,18 +195,6 @@ let idCounter = 1;
 
 export const useArrangementStore = create<ArrangementStore>((set, get) => {
     let previewBase: Arrangement | null = null;
-    /**
-     * (Re)anchor BOTH clocks to `fromTick` and (re)start the audio preview from there.
-     * The ONE path that keeps the playhead, the audio, and isPlaying in lockstep — used
-     * on play, on seek-while-playing, and on edit-while-playing — so a seek never strands
-     * a note and an edit is always HEARD (the agent-first-class promise). Only ever
-     * called while playing.
-     */
-    const reanchor = (arr: Arrangement, fromTick: number): void => {
-        set({ playheadTick: fromTick, playAnchorSec: clockNow() });
-        startPreview(arr, fromTick, () => get().stop());
-    };
-
     return {
         arrangement: null,
         undoStack: [],
@@ -177,7 +204,13 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
         selectedNoteIds: [],
         isPlaying: false,
         playheadTick: 0,
-        playAnchorSec: null,
+        transportSample: 0,
+        transportMotion: 0,
+        transportFrameAtMs: null,
+        transportPending: null,
+        pendingSeekSample: null,
+        loopOn: false,
+        loopEnabled: false,
 
         setArrangement: (arr) => {
             // Loading a new song stops any preview of the old one (release + restore).
@@ -193,7 +226,13 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 selectedNoteIds: [],
                 isPlaying: false,
                 playheadTick: 0,
-                playAnchorSec: null,
+                transportSample: 0,
+                transportMotion: 0,
+                transportFrameAtMs: null,
+                transportPending: null,
+                pendingSeekSample: null,
+                loopOn: false,
+                loopEnabled: false,
             });
         },
 
@@ -218,9 +257,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 redoStack: [],
                 docVersion: get().docVersion + 1,
             });
-            // Edit-while-playing: re-conduct + restart from the live position so the
-            // edit is HEARD and audio/playhead stay in sync.
-            if (get().isPlaying) reanchor(next, Math.floor(get().currentTick()));
+            if (get().isPlaying) republishPreview(next, get().currentTick(), () => get().stop());
         },
 
         undo: () => {
@@ -236,7 +273,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 redoStack: [...get().redoStack, inverse], // inverse-of-inverse = the redo
                 docVersion: get().docVersion + 1,
             });
-            if (get().isPlaying) reanchor(next, Math.floor(get().currentTick()));
+            if (get().isPlaying) republishPreview(next, get().currentTick(), () => get().stop());
         },
 
         redo: () => {
@@ -252,7 +289,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 undoStack: [...get().undoStack, inverse],
                 docVersion: get().docVersion + 1,
             });
-            if (get().isPlaying) reanchor(next, Math.floor(get().currentTick()));
+            if (get().isPlaying) republishPreview(next, get().currentTick(), () => get().stop());
         },
 
         canUndo: () => get().undoStack.length > 0,
@@ -271,14 +308,13 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
         play: () => {
             if (get().isPlaying) return;
             const arr = get().arrangement;
-            set({ isPlaying: true, playAnchorSec: clockNow() });
-            if (arr) reanchor(arr, get().playheadTick);
+            set({ isPlaying: true, transportPending: 'play' });
+            if (arr) startPreview(arr, get().playheadTick, () => get().stop());
         },
 
         stop: () => {
             if (!get().isPlaying) return;
-            // Freeze the playhead exactly where it is (never snap back to 0).
-            set({ isPlaying: false, playheadTick: get().currentTick(), playAnchorSec: null });
+            set({ isPlaying: false, transportPending: 'stop', pendingSeekSample: null });
             stopPreview();
         },
 
@@ -286,22 +322,57 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             const arr = get().arrangement;
             const max = arr ? arrangementLengthTicks(arr) : 0;
             const clamped = Math.max(0, Math.min(tick, max));
-            if (get().isPlaying && arr) {
-                // Re-anchor BOTH clocks + restart the audio from the new spot, releasing
-                // any note that was sounding (no stranded voice while the playhead moves).
-                reanchor(arr, clamped);
-            } else {
-                set({ playheadTick: clamped, playAnchorSec: null });
+            if (!arr) return;
+            const map = buildTempoMap(arr);
+            const samples = tickToSample(map, clamped);
+            set({ transportPending: 'seek', pendingSeekSample: samples });
+            ensureTransportSubscription();
+            getExecutor().seekArrangement(samples);
+        },
+
+        setLoopEnabled: (on) => {
+            set({ loopEnabled: on });
+            getExecutor().setArrangementLoop(on);
+        },
+
+        receiveTransportFrame: (frame) => {
+            const state = get();
+            const pending = state.transportPending;
+            if (pending === 'play' && frame.motion !== 1) return;
+            if (pending === 'stop' && frame.motion !== 0) return;
+            if (!pending && !state.isPlaying) return;
+            if (pending === 'seek' && state.pendingSeekSample !== null &&
+                Math.abs(frame.sample - state.pendingSeekSample) > 1) {
+                return;
             }
+            const arr = state.arrangement;
+            if (!arr) return;
+            const map = buildTempoMap(arr);
+            const tick = Math.max(0, Math.min(sampleToTick(map, frame.sample), arrangementLengthTicks(arr)));
+            set({
+                playheadTick: tick,
+                transportSample: frame.sample,
+                transportMotion: frame.motion,
+                transportFrameAtMs: visualNow(),
+                transportPending: null,
+                pendingSeekSample: null,
+                isPlaying: pending === 'stop' || frame.motion === 0 ? false : state.isPlaying,
+                loopOn: frame.loop_on,
+                loopEnabled: frame.loop_on,
+            });
         },
 
         currentTick: () => {
-            const { arrangement, isPlaying, playheadTick, playAnchorSec } = get();
-            if (!isPlaying || playAnchorSec === null || !arrangement) return playheadTick;
-            const elapsedSec = clockNow() - playAnchorSec;
-            const tick = playheadTick + elapsedSec / secondsPerTick(arrangement);
-            // The playhead stops at the song end (it does not run off the ruler).
-            return Math.min(tick, arrangementLengthTicks(arrangement));
+            const state = get();
+            const { arrangement, playheadTick, transportFrameAtMs } = state;
+            if (!arrangement || transportFrameAtMs === null || !state.isPlaying ||
+                state.transportPending === 'play' || state.transportMotion !== 1) return playheadTick;
+            const map = buildTempoMap(arrangement);
+            const elapsedSamples = Math.max(0, visualNow() - transportFrameAtMs) * map.sample_rate / 1000;
+            return Math.min(
+                sampleToTick(map, state.transportSample + elapsedSamples),
+                arrangementLengthTicks(arrangement),
+            );
         },
     };
 });

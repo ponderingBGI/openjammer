@@ -118,6 +118,16 @@ export function tickToSeconds(map: TempoMap, tick: number): number {
         omega / map.sample_rate;
 }
 
+/** Resolve an authored tick to the integer sample coordinate published to ojcore. */
+export function tickToSample(map: TempoMap, tick: number): number {
+    return Math.max(0, Math.round(tickToSeconds(map, tick) * map.sample_rate));
+}
+
+/** Resolve an engine timeline sample back through the same authored map. */
+export function sampleToTick(map: TempoMap, sample: number): number {
+    return secondsToTick(map, sample / map.sample_rate);
+}
+
 /** Convert seconds through a complete tempo map to a fractional musical tick. */
 export function secondsToTick(map: TempoMap, seconds: number): number {
     const sample = seconds * map.sample_rate;

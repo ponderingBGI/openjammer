@@ -10,8 +10,16 @@ import { emitWithIndex } from '../audio/ojgraph/emit';
 import { remapForBackend } from '../audio/ojgraph';
 import { clampMidi } from '../music/note';
 import { specToGraph } from './spec';
+import { buildTempoMap, tickToSample } from './tempoMap';
 import type { Arrangement, CodeNode, ScheduleEvent } from './types';
-import type { IrNode, OjGraph } from '../../packages/oj-protocol-ts/src/index';
+import {
+    SchedEventKind,
+    type IrNode,
+    type OjGraph,
+    type SchedEvent,
+    type TempoMap,
+    type Timeline,
+} from '../../packages/oj-protocol-ts/src/index';
 
 /** Which engine backend the conduct graph is remapped for. The SCHEDULE (events +
  * trackIndex) is identical across backends — only the graph's per-node manifest/kind
@@ -26,6 +34,10 @@ export interface ConductResult {
     graph: OjGraph;
     /** The note/param schedule in seconds — exactly the render bin's SchedEvent shape. */
     events: ScheduleEvent[];
+    /** The normalized musical clock snapshot published beside the timeline. */
+    tempoMap: TempoMap;
+    /** The sample-addressed immutable schedule consumed by both live executors. */
+    timeline: Timeline;
     /** Total render length in seconds (last event + a release tail). */
     seconds: number;
     /** Surviving track ref -> IR NodeIdx (the agent's read surface / debugging). */
@@ -86,7 +98,8 @@ export function conduct(
     const { graph, index } = emitWithIndex(nodes, connections, { sampleRate, blockSize });
     const remapped = remapForBackend(graph, backend);
 
-    const ppq = arr.ppq ?? DEFAULTS.ppq;
+    const tempoMap = buildTempoMap({ ...arr, sampleRate });
+    const ppq = tempoMap.ppq;
     const secPerTick = 60 / (arr.tempoBpm * ppq);
     const tickToSec = (tick: number) => tick * secPerTick;
 
@@ -109,7 +122,7 @@ export function conduct(
     // Build events carrying their INTEGER tick, so we can sort on a total integer
     // order (not the post-conversion float `at`) — the bit-identical bounce must hold
     // by construction, never by V8 stable-sort accident.
-    const timed: { tick: number; ev: ScheduleEvent }[] = [];
+    const timed: { tick: number; ev: ScheduleEvent; sched?: SchedEvent }[] = [];
     const trackIndex: Record<string, number> = {};
     let lastTick = 0;
     let nextTimelineNode = remapped.nodes.reduce((max, item) => Math.max(max, item.id), -1) + 1;
@@ -134,8 +147,9 @@ export function conduct(
                     if (offTick <= onTick) continue;
                     lastTick = Math.max(lastTick, offTick);
                     const note = clampMidi(n.pitch);
-                    timed.push({ tick: onTick, ev: { at: tickToSec(onTick), cmd: 'noteOn', node, note, vel: clampVel(n.vel) } });
-                    timed.push({ tick: offTick, ev: { at: tickToSec(offTick), cmd: 'noteOff', node, note } });
+                    const vel = clampVel(n.vel);
+                    timed.push({ tick: onTick, ev: { at: tickToSec(onTick), cmd: 'noteOn', node, note, vel }, sched: { at: tickToSample(tempoMap, onTick), node, kind: SchedEventKind.NOTE_ON, a: note, b: vel, value: 0 } });
+                    timed.push({ tick: offTick, ev: { at: tickToSec(offTick), cmd: 'noteOff', node, note }, sched: { at: tickToSample(tempoMap, offTick), node, kind: SchedEventKind.NOTE_OFF, a: note, b: 0, value: 0 } });
                 } else {
                     // One bound Sampler per audio clip. The current sampler contract can
                     // trigger the immutable asset but cannot yet seek sourceStart or stop
@@ -157,8 +171,14 @@ export function conduct(
                     const onTick = clip.startTick;
                     const offTick = clip.startTick + clip.lengthTick;
                     lastTick = Math.max(lastTick, offTick);
-                    timed.push({ tick: onTick, ev: { at: tickToSec(onTick), cmd: 'noteOn', node: samplerNode, note: 60, vel: 127 } });
-                    timed.push({ tick: offTick, ev: { at: tickToSec(offTick), cmd: 'noteOff', node: samplerNode, note: 60 } });
+                    const sourceOffset = Math.max(0, Math.floor(sourceStart));
+                    timed.push({ tick: onTick, ev: { at: tickToSec(onTick), cmd: 'noteOn', node: samplerNode, note: 60, vel: 127 }, sched: {
+                        at: tickToSample(tempoMap, onTick), node: samplerNode,
+                        kind: SchedEventKind.SAMPLER_START,
+                        a: sourceOffset & 0xff,
+                        b: (sourceOffset >>> 8) & 0xff,
+                        value: Math.floor(sourceOffset / 65_536),
+                    } });
                 }
             }
         }
@@ -168,7 +188,13 @@ export function conduct(
             if (anode === null) continue; // lenient: skip an automation lane with a bad ref
             for (const pt of lane.points) {
                 lastTick = Math.max(lastTick, pt.tick);
-                timed.push({ tick: pt.tick, ev: { at: tickToSec(pt.tick), cmd: 'setParam', node: anode, param: lane.param, value: pt.value } });
+                timed.push({ tick: pt.tick, ev: { at: tickToSec(pt.tick), cmd: 'setParam', node: anode, param: lane.param, value: pt.value }, sched: {
+                    at: tickToSample(tempoMap, pt.tick), node: anode,
+                    kind: SchedEventKind.SET_PARAM,
+                    a: lane.param & 0xff,
+                    b: Math.floor(lane.param / 256) & 0xff,
+                    value: pt.value,
+                } });
             }
         }
     }
@@ -253,5 +279,18 @@ export function conduct(
     const tailSec = Math.max(1, ppq * beatsPerBar * secPerTick);
     const seconds = tickToSec(lastTick) + tailSec;
 
-    return { graph: remapped, events, seconds, trackIndex, codeNodes, skipped };
+    const range = (kind: 'loop' | 'punch'): [number, number] | null => {
+        const location = (arr.locations ?? []).find((item) => item.kind === kind);
+        if (!location || location.endTick === undefined) return null;
+        return [tickToSample(tempoMap, location.startTick), tickToSample(tempoMap, location.endTick)];
+    };
+    const timeline: Timeline = {
+        sample_rate: sampleRate,
+        events: timed.flatMap((item) => item.sched ? [item.sched] : []),
+        loop_range: range('loop'),
+        punch_range: range('punch'),
+        end: Math.max(0, Math.round(seconds * sampleRate)),
+    };
+
+    return { graph: remapped, events, tempoMap, timeline, seconds, trackIndex, codeNodes, skipped };
 }

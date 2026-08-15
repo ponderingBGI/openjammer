@@ -13,8 +13,8 @@
 
 import type { Connection, GraphNode } from '../../engine/types';
 import type { EngineCapabilities } from '../../engine/capabilities';
-import type { OjGraph } from '@openjammer/oj-protocol';
-import type { ScheduledCommand } from './arrangementScheduler';
+import type { RtCommand } from '@openjammer/oj-protocol';
+import type { ArrangementPlayback, TransportFrameCallback } from './timelinePlayback';
 import type { LatencyReport } from './latency';
 import type {
     LooperHandle,
@@ -97,6 +97,9 @@ export interface Executor {
      * reports the desktop row, the wasm executor the browser row.
      */
     getCapabilities(): EngineCapabilities;
+
+    /** Backend graph lowering required by authored timeline preview. */
+    getTimelineBackend(): 'native' | 'wasm';
 
     /**
      * The latency of THIS executor's audio backend — the one number the UI shows.
@@ -189,25 +192,27 @@ export interface Executor {
     // --- Timeline preview (the on-canvas timeline's transport) ------------
 
     /**
-     * Begin LIVE PREVIEW of a conducted timeline: load `graph` (the wasm-remapped
-     * `conduct()` IR, which REPLACES the live canvas graph until
-     * {@link stopArrangementPreview}) and dispatch `events` — offsets in seconds from
-     * tick 0 — through a main-thread look-ahead scheduler, starting playback at
-     * `startSec`. Browser-tier timing is honestly ~15–25 ms; the bit-identical
-     * guarantee belongs to the OFFLINE bounce (`oj render`), not this live preview, and
-     * the playhead (AudioContext.currentTime) stays the visual source of truth. A
-     * second call cleanly restarts. NEVER throws (a conduct/engine hiccup must not
-     * break the transport — a held note beats a glitch).
-     *
-     * Tiers: the BROWSER (wasm) tier plays; the NATIVE tier logs and no-ops for now —
-     * its bit-identical path is `oj render`, and native live preview is a follow-up.
+     * Begin live playback by publishing the conducted graph, TempoMap, and immutable
+     * sample-addressed Timeline, then sending TransportPlay. Both executors use this
+     * path; engine Transport frames, not a UI clock, confirm visible motion.
      */
-    startArrangementPreview(
-        graph: OjGraph,
-        events: readonly ScheduledCommand[],
-        startSec: number,
-    ): void;
+    startArrangementPreview(playback: ArrangementPlayback, startSample: number): void;
 
-    /** End live preview: release any sounding notes and restore the canvas graph. */
+    /** Swap edited authored documents whole without restarting transport. */
+    updateArrangementPreview(playback: ArrangementPlayback): void;
+
+    /** End live preview. The engine owns held-note release and transport declick. */
     stopArrangementPreview(): void;
+
+    /** Schedule a live command at an absolute engine sample (`0` = immediate). */
+    sendTimed(at: number, cmd: RtCommand): void;
+
+    /** Subscribe to authoritative engine transport snapshots. */
+    subscribeTransport(callback: TransportFrameCallback): Unsubscribe;
+
+    /** Locate without moving the UI playhead until a confirming frame arrives. */
+    seekArrangement(samples: number): void;
+
+    /** Toggle an engine transport boolean (ranges remain in Timeline). */
+    setArrangementLoop(on: boolean): void;
 }

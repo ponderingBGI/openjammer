@@ -41,6 +41,11 @@ import type {
     SamplerHandle,
     SignalLevelsCallback,
 } from './Executor';
+import {
+    routeTransportFrames,
+    type ArrangementPlayback,
+    type TransportFrameCallback,
+} from './timelinePlayback';
 import { emitWithIndex, remapForBackend, type NodeIdxMap } from '../ojgraph';
 import { resolveKeyboardNotes } from '../ojgraph';
 import {
@@ -62,7 +67,6 @@ import {
 } from './ojcoreHandles';
 import { classifyLatency, type LatencyReport } from './latency';
 import { logger } from '../../utils/log';
-import type { ScheduledCommand } from './arrangementScheduler';
 import { setEngineHealth, useEngineHealthStore } from '../../store/engineHealthStore';
 import {
     ingestEngineEvents,
@@ -141,6 +145,7 @@ export function isTauri(): boolean {
  * recorder / sampler / metering UI works on the native path.
  */
 export class OjcoreNativeExecutor implements Executor {
+    getTimelineBackend(): 'native' { return 'native'; }
     private invoke = getInvoke();
     private getNodes: (() => Map<string, GraphNode>) | null = null;
     private getConnections: (() => Map<string, Connection>) | null = null;
@@ -156,6 +161,8 @@ export class OjcoreNativeExecutor implements Executor {
      *  so the picker selection re-binds but a plain re-push does not. */
     private boundVoiceKey = new Map<string, string>();
     private signalCallbacks = new Set<SignalLevelsCallback>();
+    private transportCallbacks = new Set<TransportFrameCallback>();
+    private previewGeneration = 0;
     /** Latest per-node levels, keyed by visual node id (for meter delivery). */
     private levels = new Map<string, number>();
     /** Interval id for the meter poll loop (engine -> UI level stream). */
@@ -275,6 +282,7 @@ export class OjcoreNativeExecutor implements Executor {
             this.eventPollId = null;
         }
         this.signalCallbacks.clear();
+        this.transportCallbacks.clear();
         this.levels.clear();
         this.looperLoopLen.clear();
         this.caps.clear();
@@ -321,6 +329,7 @@ export class OjcoreNativeExecutor implements Executor {
             return; // transient; next tick retries
         }
         if (!Array.isArray(frames) || frames.length === 0) return;
+        routeTransportFrames(frames, this.transportCallbacks);
         const haveSignalSubs = this.signalCallbacks.size > 0;
         let changed = false;
         for (const frame of frames) {
@@ -918,35 +927,71 @@ export class OjcoreNativeExecutor implements Executor {
         }
     }
 
-    // --- Timeline preview (browser-tier today; native bounces via `oj render`) ---
+    // --- Timeline preview --------------------------------------------------
 
-    /** Logged once so a developer sees WHY native Play is silent — by design, not a
-     *  defect: the native tier's bit-identical path is the offline bounce. */
-    private previewDeferralLogged = false;
+    startArrangementPreview(playback: ArrangementPlayback, startSample: number): void {
+        const generation = ++this.previewGeneration;
+        void this.publishArrangement(playback, generation, startSample, true);
+    }
 
-    /**
-     * Native live preview is deferred. The browser (wasm) tier plays the timeline
-     * live; the native tier's strength is the BIT-IDENTICAL offline bounce (`oj
-     * render` / `oj song`), and native live preview (push the conduct graph + schedule
-     * over the cpal-owned engine) is a follow-up the founder can verify on the box.
-     * Honest no-op, logged once — never a silent pretence of playing.
-     */
-    startArrangementPreview(
-        _graph: OjGraph,
-        _events: readonly ScheduledCommand[],
-        _startSec: number,
-    ): void {
-        if (!this.previewDeferralLogged) {
-            this.previewDeferralLogged = true;
-            log.info(
-                'Timeline live-preview is browser-tier today; the native tier renders a ' +
-                    'bit-identical bounce via `oj render`. Native live preview is a follow-up.',
-            );
+    updateArrangementPreview(playback: ArrangementPlayback): void {
+        const generation = ++this.previewGeneration;
+        void this.publishArrangement(playback, generation, null, false);
+    }
+
+    private async publishArrangement(
+        playback: ArrangementPlayback,
+        generation: number,
+        startSample: number | null,
+        play: boolean,
+    ): Promise<void> {
+        if (!this.invoke) return;
+        try {
+            await this.invoke('push_graph', { graph: playback.graph });
+            await this.invoke('push_tempo_map', { tempoMap: playback.tempoMap });
+            await this.invoke('push_timeline', { timeline: playback.timeline });
+            if (generation !== this.previewGeneration) return;
+            if (startSample !== null && startSample > 0) {
+                await this.invoke('send_command', { cmd: { Seek: { samples: startSample } } });
+            }
+            if (play) await this.invoke('send_command', { cmd: 'TransportPlay' });
+        } catch (err) {
+            log.warn('timeline publication failed; keeping the last good engine snapshot', {
+                detail: String(err),
+            });
         }
     }
 
-    /** No native preview runs, so there is nothing to stop. */
-    stopArrangementPreview(): void {}
+    stopArrangementPreview(): void {
+        const generation = ++this.previewGeneration;
+        if (!this.invoke) return;
+        void this.invoke('send_command', { cmd: 'TransportPause' })
+            .then(() => {
+                if (generation === this.previewGeneration) this.resync();
+            })
+            .catch((err: unknown) => log.error('TransportPause failed', { detail: String(err) }));
+    }
+
+    sendTimed(at: number, cmd: RtCommand): void {
+        if (!this.invoke) return;
+        void this.invoke('send_timed_command', { timed: { at, cmd } }).catch((err: unknown) => {
+            log.error('send_timed_command failed', { detail: String(err) });
+        });
+    }
+
+    subscribeTransport(callback: TransportFrameCallback): Unsubscribe {
+        this.transportCallbacks.add(callback);
+        this.startMeterStream();
+        return () => this.transportCallbacks.delete(callback);
+    }
+
+    seekArrangement(samples: number): void {
+        this.send({ Seek: { samples: Math.max(0, Math.round(samples)) } });
+    }
+
+    setArrangementLoop(on: boolean): void {
+        this.send({ TransportSet: { flag: 0, on } });
+    }
 
     // --- Native command backings for the capability bridge -----------------
 

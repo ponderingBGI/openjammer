@@ -262,6 +262,39 @@ describe('OjcoreWasmExecutor sampler live-load (mocked worklet)', () => {
         ex.dispose();
     });
 
+    it('publishes graph + tempo + whole timeline and frames timed commands without TS scheduling', async () => {
+        const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
+        const ex = new OjcoreWasmExecutor();
+        const { port } = await bringUp(ex, samplerGraph());
+        port.posted.length = 0;
+        const graph: OjGraph = { ir_version: 1, sample_rate: 48_000, block_size: 128, nodes: [], edges: [], schedule: [] };
+        const tempoMap = {
+            ppq: 960, sample_rate: 48_000,
+            tempos: [{ tick: 0, sample: 0, bpm_start: 120, bpm_end: 120, continuing: false }],
+            meters: [{ tick: 0, sample: 0, bar: 1, divisions_per_bar: 4, note_value: 4 }],
+        };
+        const timeline = { sample_rate: 48_000, events: [], loop_range: [12_000, 24_000] as [number, number], punch_range: null, end: 96_000 };
+
+        ex.startArrangementPreview({ graph, tempoMap, timeline }, 0);
+        expect(port.posted.map((message) => message.type)).toEqual([
+            'graph', 'load_tempo_map', 'load_timeline', 'command',
+        ]);
+        const play = JSON.parse(new TextDecoder().decode(port.posted[3]!.bytes as Uint8Array));
+        expect(play).toBe('TransportPlay');
+
+        ex.sendTimed(22_000, { NoteOff: { node: 3, note: 60 } });
+        const timed = JSON.parse(new TextDecoder().decode(port.posted.at(-1)!.bytes as Uint8Array));
+        expect(timed).toEqual({ at: 22_000, cmd: { NoteOff: { node: 3, note: 60 } } });
+
+        port.posted.length = 0;
+        ex.stopArrangementPreview();
+        const stopCommands = port.posted
+            .filter((message) => message.type === 'command')
+            .map((message) => JSON.parse(new TextDecoder().decode(message.bytes as Uint8Array)));
+        expect(stopCommands).toEqual(['TransportPause']);
+        ex.dispose();
+    });
+
     it('a sample-stored reply binds the AssetRef onto the node and re-pushes the graph', async () => {
         const { OjcoreWasmExecutor } = await import('../OjcoreWasmExecutor');
         const ex = new OjcoreWasmExecutor();

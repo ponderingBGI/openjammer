@@ -6,6 +6,7 @@ import { timebase } from '../../song/time';
 export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
     const arrangement = useArrangementStore((state) => state.arrangement);
     const isPlaying = useArrangementStore((state) => state.isPlaying);
+    const loopEnabled = useArrangementStore((state) => state.loopEnabled);
     const undoCount = useArrangementStore((state) => state.undoStack.length);
     const redoCount = useArrangementStore((state) => state.redoStack.length);
     const pxPerTick = useEditingContextStore((state) => state.viewports.arrangement.pxPerTick);
@@ -20,7 +21,11 @@ export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
                     if (store.isPlaying) store.stop(); else store.play();
                 }}>{isPlaying ? '■' : '▶'}</Button>
                 <Button title="Return to start" onClick={() => useArrangementStore.getState().seek(0)}>↤</Button>
-                <Button aria-pressed={false} title="Loop (visual state only)">↻</Button>
+                <Button
+                    aria-pressed={loopEnabled}
+                    title={loopEnabled ? 'Disable loop' : 'Enable loop'}
+                    onClick={() => useArrangementStore.getState().setLoopEnabled(!loopEnabled)}
+                >↻</Button>
             </div>
             <div className="arrangement-transport__title">{arrangement.name}</div>
             <div className="arrangement-transport__cluster arrangement-transport__cluster--right">

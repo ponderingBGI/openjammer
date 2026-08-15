@@ -1,13 +1,9 @@
 import { test, expect } from '@playwright/test';
 
-// Timeline live-preview proof (WF5 / Wave 3a). The arrangement surface's transport
-// must actually DRIVE the audio engine, not merely move a playhead: pressing Play
-// loads the conducted arrangement graph into the AudioWorklet and dispatches real
-// NoteOn commands; pressing Stop releases them. We cannot "hear" in headless CI, so
-// we instrument the worklet port and assert the exact messages the engine receives —
-// the audible chain is then closed by the kernels (the headless WAV grades them) plus
-// these commands reaching the engine. A silent transport (the half-wired state the
-// covenant forbids) fails this gate.
+// ENGINE W3 proof: the worklet receives immutable tempo/timeline documents and one
+// transport verb. The harness mirrors the EngineFrame::Transport snapshots a real W3
+// worklet returns so the UI is tested against engine-confirmed motion, never its own
+// AudioContext clock.
 
 const WARN_ALLOWLIST: RegExp[] = [
     /cross-origin isolated/i,
@@ -19,7 +15,7 @@ const WARN_ALLOWLIST: RegExp[] = [
 const ERROR_ALLOWLIST: RegExp[] = [/Web MIDI API/i];
 
 test.describe('Timeline live preview', () => {
-    test('Play loads the arrangement graph + dispatches NoteOn; Stop releases', async ({ page }) => {
+    test('Play publishes the engine timeline; Stop sends only TransportPause', async ({ page }) => {
         const consoleErrors: string[] = [];
         const consoleWarnings: string[] = [];
         page.on('console', (msg) => {
@@ -55,15 +51,47 @@ test.describe('Timeline live preview', () => {
                     port.start();
                     // Record everything the app posts TO the worklet.
                     const origPost = port.postMessage.bind(port);
+                    let engineSample = 0;
+                    let transportTimer: number | null = null;
+                    const emitTransport = (motion: number) => {
+                        port.dispatchEvent(new MessageEvent('message', { data: {
+                            type: 'transport',
+                            frame: {
+                                sample: engineSample,
+                                tick: engineSample / 25,
+                                bar: 1,
+                                beat: 1,
+                                phase: 0,
+                                motion,
+                                rec: false,
+                                loop_on: false,
+                            },
+                        } }));
+                    };
                     (port as MessagePort).postMessage = (msg: unknown, transfer?: unknown) => {
                         try {
                             const m = msg as { type?: string; bytes?: Uint8Array };
                             if (m?.type === 'graph') {
                                 w.__ojPosted!.push({ type: 'graph' });
+                            } else if (m?.type === 'load_tempo_map' || m?.type === 'load_timeline') {
+                                w.__ojPosted!.push({ type: m.type });
                             } else if (m?.type === 'command' && m.bytes) {
                                 const cmd = JSON.parse(new TextDecoder().decode(m.bytes));
                                 const kind = typeof cmd === 'string' ? cmd : Object.keys(cmd)[0];
                                 w.__ojPosted!.push({ type: 'command', kind });
+                                if (kind === 'Seek') engineSample = cmd.Seek.samples;
+                                if (kind === 'TransportPlay') {
+                                    if (transportTimer !== null) window.clearInterval(transportTimer);
+                                    queueMicrotask(() => emitTransport(1));
+                                    transportTimer = window.setInterval(() => {
+                                        engineSample += 960;
+                                        emitTransport(1);
+                                    }, 20);
+                                } else if (kind === 'TransportPause') {
+                                    if (transportTimer !== null) window.clearInterval(transportTimer);
+                                    transportTimer = null;
+                                    queueMicrotask(() => emitTransport(0));
+                                }
                             }
                         } catch {
                             // best-effort probe; never break the real post
@@ -124,45 +152,35 @@ test.describe('Timeline live preview', () => {
             (window as { __ojPosted?: unknown[] }).__ojPosted!.length = 0;
         });
 
-        // PLAY: the transport must load the arrangement graph and dispatch NoteOn.
+        // PLAY: whole authored documents + one transport verb, then engine frames
+        // (simulated above) move the playhead.
         const playheadBefore = await page.locator('.arrangement-playhead').evaluate((element) => (element as HTMLElement).style.transform);
         await page.getByTitle('Play').click();
         await expect.poll(() => page.locator('.arrangement-playhead').evaluate((element) => (element as HTMLElement).style.transform)).not.toBe(playheadBefore);
-        await expect
-            .poll(
-                () =>
-                    page.evaluate(
-                        () =>
-                            ((window as { __ojPosted?: Array<{ type: string; kind?: string }> }).__ojPosted ?? []).filter(
-                                (m) => m.type === 'command' && m.kind === 'NoteOn',
-                            ).length,
-                    ),
-                { message: 'pressing Play must dispatch NoteOn to the engine', timeout: 8000 },
-            )
-            .toBeGreaterThan(0);
+        await expect.poll(() => page.evaluate(() =>
+            ((window as { __ojPosted?: Array<{ type: string; kind?: string }> }).__ojPosted ?? [])
+                .some((m) => m.kind === 'TransportPlay'),
+        )).toBe(true);
 
         const posted = await page.evaluate(
             () => (window as { __ojPosted?: Array<{ type: string; kind?: string }> }).__ojPosted ?? [],
         );
-        // The arrangement graph was loaded into the worklet …
         expect(posted.some((m) => m.type === 'graph'), 'Play must load the arrangement graph').toBe(true);
-        // … and a SetParam rode in too (Paper Sketch automates the filter sweep).
-        expect(posted.some((m) => m.kind === 'SetParam')).toBe(true);
+        expect(posted.some((m) => m.type === 'load_tempo_map')).toBe(true);
+        expect(posted.some((m) => m.type === 'load_timeline')).toBe(true);
+        expect(posted.some((m) => m.kind === 'NoteOn')).toBe(false);
+        expect(posted.some((m) => m.kind === 'SetParam')).toBe(false);
 
-        // STOP: must release sounding notes (no stuck voices) — a held note beats a glitch.
+        // STOP: held-note masks are engine-owned. TS sends one pause and no NoteOff flood.
         await page.getByTitle('Stop').click();
-        await expect
-            .poll(
-                () =>
-                    page.evaluate(
-                        () =>
-                            ((window as { __ojPosted?: Array<{ type: string; kind?: string }> }).__ojPosted ?? []).filter(
-                                (m) => m.kind === 'NoteOff',
-                            ).length,
-                    ),
-                { message: 'pressing Stop must release notes (NoteOff)', timeout: 5000 },
-            )
-            .toBeGreaterThan(0);
+        await expect.poll(() => page.evaluate(() =>
+            ((window as { __ojPosted?: Array<{ type: string; kind?: string }> }).__ojPosted ?? [])
+                .filter((m) => m.kind === 'TransportPause').length,
+        )).toBe(1);
+        const stoppedPosted = await page.evaluate(
+            () => (window as { __ojPosted?: Array<{ type: string; kind?: string }> }).__ojPosted ?? [],
+        );
+        expect(stoppedPosted.some((m) => m.kind === 'NoteOff')).toBe(false);
 
         // No uncaught exceptions, no unexpected console noise while previewing audio.
         expect(pageErrors, 'no uncaught exceptions during timeline preview').toEqual([]);

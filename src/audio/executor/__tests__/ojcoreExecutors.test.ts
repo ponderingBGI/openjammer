@@ -20,7 +20,7 @@
 
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { LooperAction } from '../../../../packages/oj-protocol-ts/src/index';
-import type { RtCommand, EngineFrame } from '../../../../packages/oj-protocol-ts/src/index';
+import type { RtCommand, EngineFrame, OjGraph } from '../../../../packages/oj-protocol-ts/src/index';
 import {
     OjcoreLooperHandle,
     OjcoreSamplerHandle,
@@ -347,6 +347,37 @@ describe('OjcoreNativeExecutor over a mocked Tauri invoke', () => {
         const ex = new OjcoreNativeExecutor();
         initWith(ex, looperGraph());
         expect(calls.some((c) => c.cmd === 'push_graph')).toBe(true);
+        ex.dispose();
+    });
+
+    it('publishes tempo + timeline before Play and sends native timed commands', async () => {
+        const calls = installMockTauri();
+        const ex = new OjcoreNativeExecutor();
+        const graph = {
+            ir_version: 1, sample_rate: 48_000, block_size: 128,
+            nodes: [], edges: [], schedule: [],
+        } as const;
+        const tempoMap = {
+            ppq: 960, sample_rate: 48_000,
+            tempos: [{ tick: 0, sample: 0, bpm_start: 120, bpm_end: 120, continuing: false }],
+            meters: [{ tick: 0, sample: 0, bar: 1, divisions_per_bar: 4, note_value: 4 }],
+        };
+        const timeline = { sample_rate: 48_000, events: [], loop_range: null, punch_range: null, end: 96_000 };
+
+        ex.startArrangementPreview({ graph: graph as unknown as OjGraph, tempoMap, timeline }, 12_000);
+        await vi.waitFor(() => expect(calls.some((call) => call.cmd === 'send_command' && call.args?.cmd === 'TransportPlay')).toBe(true));
+        expect(calls.map((call) => call.cmd)).toEqual([
+            'push_graph', 'push_tempo_map', 'push_timeline', 'send_command', 'send_command',
+        ]);
+        expect(calls[1]!.args).toEqual({ tempoMap });
+        expect(calls[2]!.args).toEqual({ timeline });
+        expect(calls[3]!.args).toEqual({ cmd: { Seek: { samples: 12_000 } } });
+
+        ex.sendTimed(12_345, { NoteOn: { node: 7, note: 64, vel: 99 } });
+        expect(calls.at(-1)).toEqual({
+            cmd: 'send_timed_command',
+            args: { timed: { at: 12_345, cmd: { NoteOn: { node: 7, note: 64, vel: 99 } } } },
+        });
         ex.dispose();
     });
 
