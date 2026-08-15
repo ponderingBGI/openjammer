@@ -63,9 +63,7 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                     <span className="arrangement-instrument-chip">{typeof instrument === 'string' ? instrument : track.ref}</span>
                 </div>
             </div>
-            <div className={`arrangement-lane${track.mute ? ' is-muted' : ''}${expandedClipId ? ' has-piano-roll' : ''}`} style={{ height: laneHeight }} role="list" onClick={(event) => {
-                if (!(event.target as HTMLElement).closest('.arrangement-clip')) useEditingContextStore.getState().clearSelection('arrangement');
-            }}>
+            <div className={`arrangement-lane${track.mute ? ' is-muted' : ''}${expandedClipId ? ' has-piano-roll' : ''}`} style={{ height: laneHeight }} role="list" onPointerEnter={() => useEditingContextStore.setState({ enteredTrackId: trackId })}>
                 {expandedClipId ? <PianoRollLane trackId={trackId} clipId={expandedClipId} pxPerTick={pxPerTick} leftTick={visibleStartTick} height={220} onClose={() => useTrackLaneViewStore.getState().closePianoRoll(trackId)} onOpenSurface={() => {
                     const arrangementViewport = useEditingContextStore.getState().viewports.arrangement;
                     useEditingContextStore.getState().setViewport('pianoroll', { pxPerTick: arrangementViewport.pxPerTick, leftTick: arrangementViewport.leftTick });
@@ -76,6 +74,7 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                     return source && clip.id ? <ClipView key={clip.id} clip={clip} source={source} trackName={track.name ?? track.ref} trackId={trackId} range={range} pxPerTick={pxPerTick} laneHeight={laneHeight} selected={selectedClipIds.includes(clip.id)} onDoubleClick={source.kind === 'midi' ? () => useTrackLaneViewStore.getState().togglePianoRoll(trackId, clip.id!) : undefined} onSelect={(event, phase) => {
                         event.stopPropagation();
                         const context = useEditingContextStore.getState();
+                        if (phase === 'press') context.beginSelectionOp('arrangement');
                         const current = context.viewports.arrangement.selection.clipIds;
                         const primary = (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey;
                         const extend = event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey;
@@ -90,6 +89,7 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                         } else if (!primary && !extend && ((phase === 'press' && !current.includes(clip.id!)) || phase === 'release')) {
                             context.setSelection('arrangement', { clipIds: [clip.id!] });
                         }
+                        if (phase === 'release') context.commitSelectionOp('arrangement');
                     }} /> : null;
                 })}
                 {!expandedClipId && track.clips.length === 0 && <div className="arrangement-lane__hint">drag audio here, or press D and draw.</div>}

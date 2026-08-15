@@ -5,6 +5,7 @@ import { copyNotes, drawNotes, eraseNotes, moveNotes, noteDragFloor, resizeNotes
 import { InstrumentLoader } from '../../audio/instrumentCatalog';
 import { gridTicks } from '../../store/editingContextStore';
 import { useEditingContextStore } from '../../store/editingContextStore';
+import { copySelection, cutSelection, paste } from '../../song/editingActions';
 import { useArrangementStore } from '../../store/arrangementStore';
 import { growPitchRange, initialPitchRange, useTrackLaneViewStore, type PitchRange } from '../../store/trackLaneViewStore';
 import {
@@ -320,6 +321,9 @@ export function PianoRoll(props: PianoRollProps) {
             useArrangementStore.getState().selectNotes(noteIds);
             return;
         }
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') { event.preventDefault(); copySelection('pianoroll'); return; }
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'x') { event.preventDefault(); cutSelection('pianoroll'); return; }
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') { event.preventDefault(); paste({ surface: 'pianoroll' }); return; }
         if (!selectedNoteIds.length) return;
         const selected = midiSource.notes.filter((note) => note.id && selectedNoteIds.includes(note.id));
         let verbs: Verb[] | null = null;

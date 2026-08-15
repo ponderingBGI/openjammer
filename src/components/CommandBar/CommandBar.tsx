@@ -370,8 +370,11 @@ export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null })
                                             ]}
                                             className="command-bar-item"
                                             onSelect={() => runAction(item)}
+                                            disabled={Boolean(item.action.disabledReason)}
+                                            title={item.action.disabledReason}
                                         >
                                             {item.action.title}
+                                            {item.action.disabledReason && <span className="command-bar-item__hint">{item.action.disabledReason}</span>}
                                         </Command.Item>
                                     ))}
                                 </Command.Group>

@@ -34,10 +34,7 @@ import type { Action, ActionCtx, Command } from "../../store/commandRegistry";
 import { seedPaletteLearning } from "../../store/paletteLearningSeed";
 import { useAiLearningStore } from "../../store/aiLearningStore";
 import { getInvoke } from "../../ai/tauri";
-import { useArrangementStore } from "../../store/arrangementStore";
-import { useEditingContextStore, gridTicks } from "../../store/editingContextStore";
-import { deleteTime, insertTime } from "../../song/ops";
-import { timebase } from "../../song/time";
+import { useEditingContextStore } from "../../store/editingContextStore";
 import { applyPianoRollQuantize } from "../PianoRoll";
 import { useUiViewStore } from "../../store/uiViewStore";
 
@@ -133,7 +130,7 @@ function buildNodeActions(): Action[] {
  * `surfaces: ['palette']`, so they appear ONLY in the Ctrl+K palette (the strict
  * SUPERSET) and never clutter the curated right-click menu.
  */
-function buildAppCommands(): Command[] {
+function buildAppCommands(): Array<Command | Action> {
   return [
     {
       id: "pianoroll.quantize",
@@ -151,16 +148,7 @@ function buildAppCommands(): Command[] {
       group: "Arrangement",
       keywords: ["delete", "time", "ripple", "close gap"],
       run: () => {
-        const store = useArrangementStore.getState();
-        const arrangement = store.arrangement;
-        if (!arrangement) return;
-        const selection = useEditingContextStore.getState().viewports.arrangement.selection;
-        const clips = arrangement.tracks.flatMap((track) => track.clips).filter((clip) => clip.id !== undefined && selection.clipIds.includes(clip.id));
-        if (!clips.length) return;
-        const from = Math.min(...clips.map((clip) => clip.startTick));
-        const to = Math.max(...clips.map((clip) => clip.startTick + clip.lengthTick));
-        const trackIds = selection.trackIds.length ? selection.trackIds : arrangement.tracks.map((track) => track.id!).filter(Boolean);
-        store.apply(deleteTime(arrangement, from, to, trackIds).verbs);
+        window.dispatchEvent(new CustomEvent("openjammer:time-prompt", { detail: { mode: "delete" } }));
       },
     },
     {
@@ -169,15 +157,25 @@ function buildAppCommands(): Command[] {
       group: "Arrangement",
       keywords: ["insert", "time", "ripple", "open gap"],
       run: () => {
-        const store = useArrangementStore.getState();
-        const arrangement = store.arrangement;
-        if (!arrangement) return;
-        const context = useEditingContextStore.getState();
-        const tb = timebase(arrangement);
-        const duration = gridTicks(context.gridUnit, tb.ticksPerBeat, tb.ticksPerBar, context.viewports.arrangement.pxPerTick, true) ?? tb.ticksPerBeat;
-        const trackIds = context.viewports.arrangement.selection.trackIds.length ? context.viewports.arrangement.selection.trackIds : arrangement.tracks.map((track) => track.id!).filter(Boolean);
-        store.apply(insertTime(arrangement, store.playheadTick, duration, trackIds).verbs);
+        window.dispatchEvent(new CustomEvent("openjammer:time-prompt", { detail: { mode: "insert" } }));
       },
+    },
+    {
+      id: "arrangement.loop-from-selection",
+      title: "Loop from time selection",
+      group: "Arrangement",
+      keywords: ["loop", "range", "selection"],
+      run: () => window.dispatchEvent(new CustomEvent("openjammer:loop-from-selection")),
+    },
+    {
+      id: "arrangement.bounce-range",
+      title: "Bounce selected range",
+      group: "Arrangement",
+      keywords: ["bounce", "render", "range", "export", "disabled"],
+      targets: ["global"],
+      surfaces: ["palette"],
+      disabledReason: "Available with export polish",
+      run: () => {},
     },
     {
       id: "app.settings.toggle",

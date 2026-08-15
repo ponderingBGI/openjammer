@@ -1,11 +1,13 @@
 import type { Arrangement, ArrangementClip, ArrangementNote, AutomationPoint, MidiSource } from './types';
 import type { Verb } from './verbs';
 import { descriptorForLane, evaluateAutomation, thinAutomationPoints } from './automation';
+import type { CutBuffer } from '../store/clipboardStore';
 
 export interface OpResult { verbs: Verb[]; selectedClipIds?: string[]; selectedNoteIds?: string[]; skipped?: string[]; rejected?: string }
 
 export const EDIT_OPS = [
     'moveClips', 'trimClip', 'splitAt', 'duplicateClips', 'deleteClips', 'setGrid', 'nudge', 'deleteTime', 'insertTime',
+    'cutSelection', 'copySelection', 'paste', 'pasteRepeat', 'selectRange', 'deleteRange', 'slipClip', 'splitRange', 'duplicateRange',
     'drawNote', 'moveNotes', 'copyNotes', 'resizeNotes', 'eraseNotes', 'setVelocity', 'transposeNotes', 'quantizeNotes',
     'setAutomationPoints', 'moveAutomationPoints', 'setAutomationRange', 'thinAutomation',
     'setTrackGain', 'setTrackPan', 'addAutomationPoint', 'addAutomationPoints', 'setLaneState',
@@ -21,6 +23,15 @@ export type TimelineOp =
     | { op: 'nudge'; clipIds: string[]; amount: number; direction: -1 | 1 }
     | { op: 'deleteTime'; fromTick: number; toTick: number; trackIds: string[] }
     | { op: 'insertTime'; atTick: number; durationTick: number; trackIds: string[] }
+    | { op: 'cutSelection' }
+    | { op: 'copySelection' }
+    | { op: 'paste'; atTick?: number; times?: number; toTrackIds?: string[] }
+    | { op: 'pasteRepeat'; times?: number }
+    | { op: 'selectRange'; fromTick: number; toTick: number; trackIds: string[] }
+    | { op: 'deleteRange'; fromTick: number; toTick: number; trackIds: string[] }
+    | { op: 'slipClip'; clipIds: string[]; deltaTick: number }
+    | { op: 'splitRange'; fromTick: number; toTick: number; trackIds: string[] }
+    | { op: 'duplicateRange'; fromTick: number; toTick: number; trackIds: string[] }
     | { op: 'drawNote'; clipId: string; note: NoteInput; overlap?: NoteOverlapPolicy }
     | { op: 'moveNotes'; noteIds: string[]; deltaTick?: number; deltaPitch?: number }
     | { op: 'copyNotes'; noteIds: string[]; deltaTick?: number; deltaPitch?: number }
@@ -82,6 +93,135 @@ const findClip = (arrangement: Arrangement, clipId: string) => {
     }
     return undefined;
 };
+
+/** BC-19: move source contents beneath an unchanged timeline window. */
+export function slipClips(arrangement: Arrangement, clipIds: readonly string[], deltaTick: number): OpResult {
+    const verbs: Verb[] = [];
+    const skipped: string[] = [];
+    for (const id of clipIds) {
+        const found = findClip(arrangement, id);
+        if (!found || found.clip.locked) { skipped.push(id); continue; }
+        verbs.push({ kind: 'setClipWindow', clipId: id, sourceStart: Math.max(0, (found.clip.sourceStart ?? 0) + deltaTick) });
+    }
+    return { verbs, skipped };
+}
+
+/** BC-25 range delete: remove only the selected spans, preserving both outside pieces. */
+export function deleteRange(arrangement: Arrangement, fromTick: number, toTick: number, trackIds: readonly string[], mint: (prefix: string) => string): OpResult {
+    const from = Math.max(0, Math.min(fromTick, toTick));
+    const to = Math.max(from, Math.max(fromTick, toTick));
+    if (to <= from) return { verbs: [] };
+    const scope = new Set(trackIds);
+    const verbs: Verb[] = [];
+    for (const track of arrangement.tracks) {
+        const trackId = track.id ?? track.ref;
+        if (!scope.has(trackId)) continue;
+        for (const clip of track.clips) {
+            if (!clip.id) continue;
+            const end = clip.startTick + clip.lengthTick;
+            if (end <= from || clip.startTick >= to) continue;
+            verbs.push({ kind: 'removeClip', clipId: clip.id });
+            if (clip.startTick < from) verbs.push({ kind: 'addClip', trackId, clip: { ...clip, id: mint('clip'), lengthTick: from - clip.startTick } });
+            if (end > to) verbs.push({ kind: 'addClip', trackId, clip: { ...clip, id: mint('clip'), startTick: to, lengthTick: end - to, sourceStart: (clip.sourceStart ?? 0) + (to - clip.startTick) } });
+        }
+        for (const lane of track.automation ?? []) if (lane.id) for (const point of lane.points) if (point.tick >= from && point.tick < to) verbs.push({ kind: 'removeAutomationPoint', laneId: lane.id, tick: point.tick });
+    }
+    return { verbs };
+}
+
+/** BC-20: partition clips at both range edges without removing the middle. */
+export function splitRange(arrangement: Arrangement, fromTick: number, toTick: number, trackIds: readonly string[], mint: (prefix: string) => string): OpResult {
+    const from = Math.max(0, Math.min(fromTick, toTick));
+    const to = Math.max(from, Math.max(fromTick, toTick));
+    const scope = new Set(trackIds);
+    const verbs: Verb[] = [];
+    const selectedClipIds: string[] = [];
+    for (const track of arrangement.tracks) {
+        const trackId = track.id ?? track.ref;
+        if (!scope.has(trackId)) continue;
+        for (const clip of track.clips) {
+            if (!clip.id) continue;
+            const end = clip.startTick + clip.lengthTick;
+            const edges = [from, to].filter((edge) => edge > clip.startTick && edge < end);
+            if (!edges.length) continue;
+            verbs.push({ kind: 'removeClip', clipId: clip.id });
+            const boundaries = [clip.startTick, ...edges, end];
+            for (let index = 0; index < boundaries.length - 1; index++) {
+                const startTick = boundaries[index]!;
+                const id = mint('clip');
+                verbs.push({ kind: 'addClip', trackId, clip: { ...clip, id, startTick, lengthTick: boundaries[index + 1]! - startTick, sourceStart: (clip.sourceStart ?? 0) + startTick - clip.startTick } });
+                selectedClipIds.push(id);
+            }
+        }
+    }
+    return { verbs, selectedClipIds };
+}
+
+export interface PasteOptions {
+    atTick: number;
+    targetTrackIds: readonly string[];
+    focusedClipId?: string | null;
+    times?: number;
+    repeatOffset?: number;
+    spacingTick?: number;
+    consume?: 'all' | 'clips' | 'notes';
+    mint: (prefix: string) => string;
+}
+
+/** BC-28/29: typed, per-destination clipboard consumption with uniform iteration spacing. */
+export function pasteCutBuffer(arrangement: Arrangement, buffer: CutBuffer, options: PasteOptions): OpResult {
+    const times = Math.max(1, Math.floor(options.times ?? 1));
+    const repeatOffset = options.repeatOffset ?? 0;
+    const duration = Math.max(1, options.spacingTick ?? buffer.durationTick);
+    const consume = options.consume ?? 'all';
+    const verbs: Verb[] = [];
+    const selectedClipIds: string[] = [];
+    const selectedNoteIds: string[] = [];
+    const targets = options.targetTrackIds.map((id) => arrangement.tracks.find((track) => (track.id ?? track.ref) === id)).filter((track): track is NonNullable<typeof track> => Boolean(track));
+
+    if (consume !== 'clips' && options.focusedClipId) {
+        const focused = findClip(arrangement, options.focusedClipId);
+        const source = focused && arrangement.sources?.[focused.clip.sourceId];
+        if (focused && source?.kind === 'midi') {
+            const focusedTrackId = focused.track.id ?? focused.track.ref;
+            const notes = buffer.buckets.filter((bucket) => bucket.sourceTrackId === focusedTrackId).flatMap((bucket) => bucket.notes);
+            for (let iteration = 0; iteration < times; iteration++) for (const note of notes) {
+                const id = options.mint('note');
+                const tick = options.atTick + repeatOffset + iteration * duration + note.offsetTick - focused.clip.startTick + (focused.clip.sourceStart ?? 0);
+                if (tick < 0) continue;
+                verbs.push({ kind: 'addNote', sourceId: source.id, index: source.notes.length + selectedNoteIds.length, note: { id, tick, durTick: note.durTick, pitch: note.pitch, vel: note.vel } });
+                selectedNoteIds.push(id);
+            }
+        }
+        if (consume === 'notes') return { verbs, selectedNoteIds };
+    }
+
+    const clipBuckets = buffer.buckets.filter((bucket) => bucket.clips.length);
+    const automationBuckets = buffer.buckets.filter((bucket) => bucket.automationPoints.length);
+    let clipIndex = 0;
+    let automationIndex = 0;
+    targets.forEach((target) => {
+        const trackId = target.id ?? target.ref;
+        const clipBucket = clipBuckets[clipIndex];
+        if (consume !== 'notes' && clipBucket) for (let iteration = 0; iteration < times; iteration++) for (const item of clipBucket.clips) {
+            const id = options.mint('clip');
+            const { offsetTick, ...clip } = item;
+            verbs.push({ kind: 'addClip', trackId, clip: { ...structuredClone(clip), id, startTick: options.atTick + repeatOffset + iteration * duration + offsetTick } });
+            selectedClipIds.push(id);
+        }
+        if (clipBucket && consume !== 'notes') clipIndex++;
+        if (consume === 'clips') return;
+        const lanes = target.automation ?? [];
+        const automationBucket = lanes.length ? automationBuckets[automationIndex] : undefined;
+        automationBucket?.automationPoints.forEach((point, pointIndex) => {
+            const lane = lanes[pointIndex] ?? lanes[0];
+            if (!lane?.id) return;
+            for (let iteration = 0; iteration < times; iteration++) verbs.push({ kind: 'setAutomationPoint', laneId: lane.id, point: { tick: options.atTick + repeatOffset + iteration * duration + point.offsetTick, value: point.value } });
+        });
+        if (automationBucket) automationIndex++;
+    });
+    return { verbs, selectedClipIds, selectedNoteIds };
+}
 
 export function moveClips(arrangement: Arrangement, clipIds: readonly string[], deltaTick: number, options: { toTrackId?: string; ripple?: boolean } = {}): OpResult {
     const found = clipIds.map((id) => findClip(arrangement, id)).filter((item): item is NonNullable<typeof item> => Boolean(item));

@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { Verb } from '../song/verbs';
 import type { GraphVerb } from './graphVerbs';
+import { useEditingContextStore } from './editingContextStore';
+import { useClipboardStore } from './clipboardStore';
 
 export type HistoryScope = 'graph' | 'arrangement' | 'mixed';
 export type EditVerb = { domain: 'graph'; verb: GraphVerb } | { domain: 'arrangement'; verb: Verb };
@@ -74,6 +76,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
         const state = get();
         const entry: HistoryEntry = { verbs, inverse, label, scope };
         set({ entries: [...state.entries.slice(0, state.cursor), entry], cursor: state.cursor + 1 });
+        useEditingContextStore.getState().beginSelectionOpHistory();
     },
     commit: () => {
         const open = get().open;
@@ -87,6 +90,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
         const state = get();
         const entry: HistoryEntry = { verbs: open.verbs, inverse: open.inverse, label: open.label, scope: open.scope };
         set({ entries: [...state.entries.slice(0, state.cursor), entry], cursor: state.cursor + 1 });
+        useEditingContextStore.getState().beginSelectionOpHistory();
     },
     abort: () => {
         const open = get().open;
@@ -100,12 +104,16 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
         const entry = state.entries[state.cursor - 1]!;
         dispatch(entry.inverse);
         set({ cursor: state.cursor - 1 });
+        useEditingContextStore.getState().beginSelectionOpHistory();
+        useClipboardStore.getState().resetPasteContext();
     },
     redo: () => {
         const state = get();
         if (state.open || state.cursor >= state.entries.length) return;
         dispatch(state.entries[state.cursor]!.verbs);
         set({ cursor: state.cursor + 1 });
+        useEditingContextStore.getState().beginSelectionOpHistory();
+        useClipboardStore.getState().resetPasteContext();
     },
     clear: () => set({ entries: [], cursor: 0, cleanCursor: 0, open: null }),
     markClean: () => set({ cleanCursor: get().cursor }),

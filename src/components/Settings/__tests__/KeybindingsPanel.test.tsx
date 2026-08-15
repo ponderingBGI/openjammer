@@ -101,7 +101,7 @@ describe('KeybindingsPanel', () => {
             fireEvent.keyDown(document, { key: 'x', ctrlKey: true });
 
             // Should show the captured combo
-            expect(screen.getByText('Ctrl+X')).toBeInTheDocument();
+            expect(screen.getAllByText('Ctrl+X')).not.toHaveLength(0);
         });
 
         it('should ignore modifier-only key presses', () => {

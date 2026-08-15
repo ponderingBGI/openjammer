@@ -213,7 +213,7 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'moveLocation/setLoopRange/setPunchRange; rippleTracks/insertTime/removeTime; ' +
             'stretchClip; compound; addAutomationLane/removeAutomationLane; setAutomationPoint/' +
             'removeAutomationPoint/setAutomationRange/setAutomationLaneState/setAutomationLaneInterp. Ids for ADDED entities are minted for you (omit them). ' +
-            'Operation names: moveClips, trimClip, splitAt, duplicateClips, deleteClips, setGrid, nudge, deleteTime, insertTime, drawNote, moveNotes, copyNotes, resizeNotes, eraseNotes, setVelocity, transposeNotes, quantizeNotes, setTrackGain, setTrackPan, addAutomationPoint, addAutomationPoints, setAutomationPoints, moveAutomationPoints, setAutomationRange, thinAutomation, setLaneState. Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
+            'Operation names: moveClips, trimClip, splitAt, duplicateClips, deleteClips, setGrid, nudge, cutSelection, copySelection, paste, pasteRepeat, selectRange, deleteRange, slipClip, splitRange, duplicateRange, deleteTime, insertTime, drawNote, moveNotes, copyNotes, resizeNotes, eraseNotes, setVelocity, transposeNotes, quantizeNotes, setTrackGain, setTrackPan, addAutomationPoint, addAutomationPoints, setAutomationPoints, moveAutomationPoints, setAutomationRange, thinAutomation, setLaneState. Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
     },
 ];
 
@@ -490,7 +490,7 @@ export interface AgentEnvPort {
  */
 export interface ArrangementToolPort {
     /** A readable summary of the current song (describeArrangement), or null when none. */
-    describe(): { text: string; selection?: unknown; grid?: string; editMode?: string } | null;
+    describe(): { text: string; selection?: unknown; grid?: string; editMode?: string; clipboard?: unknown } | null;
     /**
      * Apply an ordered list of reversible timeline verbs, minting ids for ADDED
      * entities, through the shared command-log. Returns whether it applied, a

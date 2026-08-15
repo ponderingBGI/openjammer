@@ -87,3 +87,49 @@ test.describe('Wave 4a arrangement editing', () => {
         await expect.poll(() => later.evaluate((element) => (element as HTMLElement).style.left)).not.toBe(before);
     });
 });
+
+test.describe('Wave 4b clipboard and range editing', () => {
+    test('copy clip and paste twice advances by the clipboard extent', async ({ page }) => {
+        await openPaperSketch(page);
+        const originalCount = await page.locator('.arrangement-clip').count();
+        await page.locator('.arrangement-clip').first().click({ position: { x: 24, y: 35 } });
+        await page.keyboard.press('Control+c');
+        await page.keyboard.press('Control+v');
+        const firstPaste = page.locator('.arrangement-clip.is-selected').first();
+        const firstLeft = Number.parseFloat(await firstPaste.evaluate((element) => (element as HTMLElement).style.left));
+        await page.keyboard.press('Control+v');
+        await expect(page.locator('.arrangement-clip')).toHaveCount(originalCount + 2);
+        const secondLeft = Number.parseFloat(await page.locator('.arrangement-clip.is-selected').first().evaluate((element) => (element as HTMLElement).style.left));
+        expect(secondLeft).toBeGreaterThan(firstLeft);
+    });
+
+    test('range delete removes the middle and leaves two clip pieces', async ({ page }) => {
+        await openPaperSketch(page);
+        const clip = page.locator('.arrangement-clip').first();
+        const clipBox = (await clip.boundingBox())!;
+        const firstLaneBox = (await page.locator('.arrangement-lane').first().boundingBox())!;
+        const emptyLaneBox = (await page.locator('.arrangement-lane').nth(2).boundingBox())!;
+        await page.mouse.move(clipBox.x + clipBox.width * 0.3, emptyLaneBox.y + emptyLaneBox.height * 0.25);
+        await page.mouse.down();
+        await page.mouse.move(clipBox.x + clipBox.width * 0.7, firstLaneBox.y + firstLaneBox.height * 0.25, { steps: 6 });
+        await page.mouse.up();
+        await expect(page.locator('.arrangement-range-selection')).toBeVisible();
+        const before = await page.locator('.arrangement-clip').count();
+        await page.keyboard.press('Delete');
+        await expect(page.locator('.arrangement-track').first().locator('.arrangement-clip')).toHaveCount(2);
+        await expect.poll(() => page.locator('.arrangement-clip').count()).toBeGreaterThan(before);
+    });
+
+    test('selection undo is separate from object undo', async ({ page }) => {
+        await openPaperSketch(page);
+        const clips = page.locator('.arrangement-clip');
+        await clips.nth(0).click({ position: { x: 24, y: 35 } });
+        const firstId = await clips.nth(0).getAttribute('data-clip-id');
+        await clips.nth(1).click({ position: { x: 24, y: 35 } });
+        await page.keyboard.press('Control+Alt+z');
+        await expect(page.locator(`.arrangement-clip[data-clip-id="${firstId}"]`)).toHaveClass(/is-selected/);
+        const count = await clips.count();
+        await page.keyboard.press('Control+z');
+        await expect(clips).toHaveCount(count);
+    });
+});

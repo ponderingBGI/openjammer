@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ArrangementClip } from '../../song/types';
-import { deleteClips, duplicateClips, moveClips, trimClip } from '../../song/ops';
+import { deleteClips, duplicateClips, moveClips, slipClips, trimClip } from '../../song/ops';
 import type { Verb } from '../../song/verbs';
 import { gridTicks, snapTick, useEditingContextStore } from '../../store/editingContextStore';
 import { useArrangementStore } from '../../store/arrangementStore';
@@ -15,6 +15,7 @@ interface Gesture {
     lastY: number;
     originalScrollLeft: number;
     copy: boolean;
+    slip: boolean;
     edge: 'start' | 'end' | null;
     axis: DragAxis | null;
     active: boolean;
@@ -83,7 +84,9 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
         const snapInvert = event.altKey && !g.copy;
         const snapped = snapTick(relative ? grabbedRaw - g.relativeOffset : grabbedRaw, g.candidates, pxPerTick, context.snapMode, snapInvert);
         rawDelta = (relative ? snapped + g.relativeOffset : snapped) - clip.startTick;
-        if (g.edge) {
+        if (g.slip) {
+            useArrangementStore.getState().previewGesture(slipClips(arrangement, g.selectedIds, rawDelta).verbs);
+        } else if (g.edge) {
             const at = g.edge === 'start' ? clip.startTick + rawDelta : clip.startTick + clip.lengthTick + rawDelta;
             useArrangementStore.getState().previewGesture(trimClip(arrangement, g.selectedIds, g.edge, at).verbs);
         } else if (g.copy) {
@@ -127,6 +130,8 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
             const x = event.nativeEvent.offsetX;
             const edge = x <= zone + 4 ? 'start' : x >= width - zone - 4 ? 'end' : null;
             const context = useEditingContextStore.getState();
+            const slip = (event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey;
+            if (slip && context.editMode === 'lock') return;
             const tb = timebase(arrangement);
             const step = gridTicks(context.gridUnit, tb.ticksPerBeat, tb.ticksPerBar, pxPerTick) ?? 1;
             const candidates: number[] = [];
@@ -138,7 +143,7 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
             }
             const nearest = candidates.length ? candidates.reduce((best, value) => Math.abs(value - clip.startTick) < Math.abs(best - clip.startTick) ? value : best) : clip.startTick;
             const scroll = event.currentTarget.closest('.arrangement-scroll') as HTMLElement | null;
-            gesture.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, lastX: event.clientX, lastY: event.clientY, originalScrollLeft: scroll?.scrollLeft ?? 0, copy: event.altKey, edge, axis: null, active: false, selectedIds, relativeOffset: clip.startTick - nearest, candidates, scroll, frame: null, followPlayheadBefore: context.followPlayhead };
+            gesture.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, lastX: event.clientX, lastY: event.clientY, originalScrollLeft: scroll?.scrollLeft ?? 0, copy: event.altKey && !slip, slip, edge: slip ? null : edge, axis: null, active: false, selectedIds, relativeOffset: clip.startTick - nearest, candidates, scroll, frame: null, followPlayheadBefore: context.followPlayhead };
             useEditingContextStore.setState({ followPlayhead: false });
             const move = (nativeEvent: PointerEvent) => { if (gesture.current) preview(nativeEvent); };
             const up = () => { if (gesture.current) finish(true); };
@@ -158,7 +163,7 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
             window.addEventListener('mousemove', mouseMove);
             window.addEventListener('mouseup', mouseUp);
             event.currentTarget.setPointerCapture(event.pointerId);
-            useArrangementStore.getState().beginGesture(edge ? `Trim clip ${edge}` : event.altKey ? 'Duplicate clips' : 'Move clips');
+            useArrangementStore.getState().beginGesture(slip ? 'Slip clip contents' : edge ? `Trim clip ${edge}` : event.altKey ? 'Duplicate clips' : 'Move clips');
             startAutoScroll();
         },
         onPointerCancel: () => finish(false),

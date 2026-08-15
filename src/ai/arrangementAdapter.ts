@@ -18,6 +18,7 @@ import {
     copyNotes,
     deleteClips,
     deleteTime,
+    deleteRange,
     drawNotes,
     duplicateClips,
     eraseNotes,
@@ -32,6 +33,8 @@ import {
     setAutomationRange,
     setVelocity,
     splitAt,
+    splitRange,
+    slipClips,
     transposeNotes,
     trimClip,
     thinAutomation,
@@ -39,6 +42,9 @@ import {
     type TimelineOp,
 } from '../song/ops';
 import { useEditingContextStore, type GridUnit } from '../store/editingContextStore';
+import { copySelection, cutSelection, duplicateSelectedRange, paste } from '../song/editingActions';
+import { useClipboardStore } from '../store/clipboardStore';
+import { timebase } from '../song/time';
 
 /** Fill any missing stable id on a verb's ADDED entity (and nested notes), so the
  *  reversible inverse can address exactly what this edit created. */
@@ -88,7 +94,9 @@ export function createArrangementPort(): ArrangementToolPort {
             const arr = useArrangementStore.getState().arrangement;
             if (!arr) return null;
             const editing = useEditingContextStore.getState();
-            return { text: describeArrangement(arr), selection: editing.viewports.arrangement.selection, grid: editing.gridUnit, editMode: editing.editMode };
+            const clipboard = useClipboardStore.getState().summary();
+            const ticksPerBar = timebase(arr).ticksPerBar;
+            return { text: describeArrangement(arr), selection: editing.viewports.arrangement.selection, grid: editing.gridUnit, editMode: editing.editMode, clipboard: { ...clipboard, durationBars: clipboard.durationTick / ticksPerBar } };
         },
         applyOps(ops: TimelineOp[]) {
             const store = useArrangementStore.getState();
@@ -100,7 +108,7 @@ export function createArrangementPort(): ArrangementToolPort {
             let selectedNoteIds: string[] | undefined;
             try {
                 for (const operation of ops) {
-                    let result: OpResult;
+                    let result: OpResult = { verbs: [] };
                     switch (operation.op) {
                         case 'moveClips': result = moveClips(projected, operation.clipIds, operation.deltaTick, operation); break;
                         case 'trimClip': result = trimClip(projected, operation.clipIds, operation.edge, operation.atTick); break;
@@ -110,6 +118,25 @@ export function createArrangementPort(): ArrangementToolPort {
                         case 'nudge': result = nudge(projected, operation.clipIds, operation.amount, operation.direction); break;
                         case 'deleteTime': result = deleteTime(projected, operation.fromTick, operation.toTick, operation.trackIds); break;
                         case 'insertTime': result = insertTime(projected, operation.atTick, operation.durationTick, operation.trackIds); break;
+                        case 'deleteRange': result = deleteRange(projected, operation.fromTick, operation.toTick, operation.trackIds, store.mintId); break;
+                        case 'slipClip': result = slipClips(projected, operation.clipIds, operation.deltaTick); break;
+                        case 'splitRange': result = splitRange(projected, operation.fromTick, operation.toTick, operation.trackIds, store.mintId); break;
+                        case 'selectRange': {
+                            const context = useEditingContextStore.getState();
+                            context.beginSelectionOp('arrangement');
+                            context.setSelection('arrangement', { timeRange: { fromTick: operation.fromTick, toTick: operation.toTick, trackIds: operation.trackIds } });
+                            context.commitSelectionOp('arrangement');
+                            continue;
+                        }
+                        case 'copySelection': copySelection('arrangement'); continue;
+                        case 'cutSelection': cutSelection('arrangement'); continue;
+                        case 'paste': paste({ atTick: operation.atTick, times: operation.times, toTrackIds: operation.toTrackIds, surface: 'arrangement' }); continue;
+                        case 'pasteRepeat': paste({ times: operation.times, surface: 'arrangement' }); continue;
+                        case 'duplicateRange': {
+                            useEditingContextStore.getState().setSelection('arrangement', { timeRange: { fromTick: operation.fromTick, toTick: operation.toTick, trackIds: operation.trackIds } });
+                            duplicateSelectedRange();
+                            continue;
+                        }
                         case 'setGrid': useEditingContextStore.getState().setGridUnit(operation.grid as GridUnit); continue;
                         case 'drawNote': result = drawNotes(projected, operation.clipId, [operation.note], store.mintId, operation.overlap); break;
                         case 'moveNotes': result = moveNotes(projected, operation.noteIds, operation.deltaTick, operation.deltaPitch); break;

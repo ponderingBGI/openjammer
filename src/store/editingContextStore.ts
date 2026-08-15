@@ -29,7 +29,16 @@ export interface ObjectSelection {
     trackIds: string[];
     sectionIds: string[];
     automationPointIds: string[];
+    timeRange: TimeRangeSelection | null;
 }
+
+export interface TimeRangeSelection {
+    fromTick: number;
+    toTick: number;
+    trackIds: string[];
+}
+
+export type SelectionSnapshot = ObjectSelection;
 
 export interface SurfaceViewport {
     pxPerTick: number;
@@ -41,7 +50,7 @@ export interface SurfaceViewport {
 }
 
 const DEFAULT_PX_PER_TICK = 38.75 / (960 * 4);
-const emptySelection = (): ObjectSelection => ({ clipIds: [], noteIds: [], trackIds: [], sectionIds: [], automationPointIds: [] });
+export const emptySelection = (): ObjectSelection => ({ clipIds: [], noteIds: [], trackIds: [], sectionIds: [], automationPointIds: [], timeRange: null });
 const makeViewport = (): SurfaceViewport => ({
     pxPerTick: DEFAULT_PX_PER_TICK,
     leftTick: 0,
@@ -110,7 +119,15 @@ interface EditingContextState {
     stepEntry: StepEntryState;
     nudgeAmount: GridUnit;
     timeDomain: 'beats' | 'samples';
-    clipboard: unknown[];
+    /** Clipboard contents live in clipboardStore; this field remains only as a migration seam. */
+    clipboard: never[];
+    enteredTrackId: string | null;
+    enteredClipId: string | null;
+    lastPointerTick: number | null;
+    selectionHistory: SelectionSnapshot[];
+    selectionHistoryIndex: number;
+    selectionOpDepth: number;
+    selectionOpBefore: SelectionSnapshot | null;
     dragActive: boolean;
     followPlayhead: boolean;
     followEdits: boolean;
@@ -123,6 +140,11 @@ interface EditingContextState {
     setDragActive: (active: boolean) => void;
     setSelection: (surface: SurfaceId, selection: Partial<ObjectSelection>) => void;
     clearSelection: (surface: SurfaceId) => void;
+    beginSelectionOp: (surface: SurfaceId) => void;
+    commitSelectionOp: (surface: SurfaceId) => void;
+    beginSelectionOpHistory: (surface?: SurfaceId) => void;
+    undoSelection: (surface: SurfaceId) => void;
+    redoSelection: (surface: SurfaceId) => void;
     setViewport: (surface: SurfaceId, patch: Partial<SurfaceViewport>) => void;
     zoomAt: (surface: SurfaceId, pointerPx: number, factor: number, ticksPerBar: number) => void;
     setQuantize: (patch: Partial<Pick<EditingContextState, 'quantizeGrid' | 'quantizeStrength' | 'quantizeSwing' | 'quantizeThreshold' | 'quantizeSnapStart' | 'quantizeSnapEnd'>>) => void;
@@ -153,6 +175,13 @@ export const useEditingContextStore = create<EditingContextState>((set) => ({
     nudgeAmount: '1/16',
     timeDomain: 'beats',
     clipboard: [],
+    enteredTrackId: null,
+    enteredClipId: null,
+    lastPointerTick: null,
+    selectionHistory: [emptySelection()],
+    selectionHistoryIndex: 0,
+    selectionOpDepth: 0,
+    selectionOpBefore: null,
     dragActive: false,
     followPlayhead: false,
     followEdits: false,
@@ -163,8 +192,48 @@ export const useEditingContextStore = create<EditingContextState>((set) => ({
     setSnapTarget: (snapTarget) => set({ snapTarget }),
     setEditMode: (editMode) => set({ editMode }),
     setDragActive: (dragActive) => set({ dragActive }),
-    setSelection: (surface, patch) => set((state) => ({ viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], selection: { ...state.viewports[surface].selection, ...patch } } } })),
+    setSelection: (surface, patch) => set((state) => {
+        const current = state.viewports[surface].selection;
+        const hasObjects = Boolean((patch.clipIds?.length ?? 0) || (patch.noteIds?.length ?? 0) || (patch.automationPointIds?.length ?? 0));
+        const selection = { ...current, ...patch };
+        if (patch.timeRange) {
+            selection.clipIds = [];
+            selection.noteIds = [];
+            selection.automationPointIds = [];
+            selection.sectionIds = [];
+        } else if (hasObjects) selection.timeRange = null;
+        return { viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], selection } } };
+    }),
     clearSelection: (surface) => set((state) => ({ viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], selection: emptySelection() } } })),
+    beginSelectionOp: (surface) => set((state) => ({
+        selectionOpDepth: state.selectionOpDepth + 1,
+        selectionOpBefore: state.selectionOpDepth === 0 ? structuredClone(state.viewports[surface].selection) : state.selectionOpBefore,
+    })),
+    commitSelectionOp: (surface) => set((state) => {
+        if (state.selectionOpDepth === 0) return {};
+        if (state.selectionOpDepth > 1) return { selectionOpDepth: state.selectionOpDepth - 1 };
+        const current = structuredClone(state.viewports[surface].selection);
+        const top = state.selectionHistory[state.selectionHistoryIndex];
+        if (top && JSON.stringify(top) === JSON.stringify(current)) return { selectionOpDepth: 0, selectionOpBefore: null };
+        const kept = state.selectionHistory.slice(state.selectionHistoryIndex);
+        return { selectionOpDepth: 0, selectionOpBefore: null, selectionHistory: [current, ...kept].slice(0, 100), selectionHistoryIndex: 0 };
+    }),
+    beginSelectionOpHistory: (surface = 'arrangement') => set((state) => ({
+        selectionHistory: [structuredClone(state.viewports[surface].selection)],
+        selectionHistoryIndex: 0,
+        selectionOpDepth: 0,
+        selectionOpBefore: null,
+    })),
+    undoSelection: (surface) => set((state) => {
+        const index = Math.min(state.selectionHistory.length - 1, state.selectionHistoryIndex + 1);
+        const selection = state.selectionHistory[index];
+        return selection ? { selectionHistoryIndex: index, viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], selection: structuredClone(selection) } } } : {};
+    }),
+    redoSelection: (surface) => set((state) => {
+        const index = Math.max(0, state.selectionHistoryIndex - 1);
+        const selection = state.selectionHistory[index];
+        return selection ? { selectionHistoryIndex: index, viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], selection: structuredClone(selection) } } } : {};
+    }),
     setViewport: (surface, patch) => set((state) => ({ viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], ...patch } } })),
     zoomAt: (surface, pointerPx, factor, ticksPerBar) => set((state) => ({ viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], ...zoomAroundPointer(state.viewports[surface], pointerPx, factor, ticksPerBar) } } })),
     setQuantize: (patch) => set(patch),

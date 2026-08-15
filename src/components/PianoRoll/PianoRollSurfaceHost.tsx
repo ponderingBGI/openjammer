@@ -22,7 +22,12 @@ export function PianoRollSurfaceHost({ active, visible = active, transition }: {
     const source = clip && arrangement?.sources?.[clip.sourceId];
     const width = typeof window === 'undefined' ? 1000 : window.innerWidth;
 
-    useEffect(() => { if (active) rootRef.current?.focus({ preventScroll: true }); }, [active]);
+    useEffect(() => {
+        if (!active) return;
+        rootRef.current?.focus({ preventScroll: true });
+        useEditingContextStore.setState({ enteredTrackId: track?.id ?? track?.ref ?? null, enteredClipId: clipId });
+        return () => useEditingContextStore.setState({ enteredClipId: null });
+    }, [active, clipId, track?.id, track?.ref]);
     if (!arrangement || !track || !clip || source?.kind !== 'midi' || !clipId) return null;
     const tb = timebase(arrangement);
     const fieldWidth = Math.max(1, width - HEADER_WIDTH);
