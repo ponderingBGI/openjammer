@@ -792,6 +792,14 @@ export class OjcoreNativeExecutor implements Executor {
         }
     }
 
+    auditionNote(targetNodeId: string | number, pitch: number, velocity: number, on: boolean): void {
+        const node = typeof targetNodeId === 'number' ? targetNodeId : this.index.get(targetNodeId);
+        if (node === undefined) return;
+        const note = Math.max(0, Math.min(127, Math.round(pitch)));
+        if (on) this.send({ NoteOn: { node, note, vel: Math.max(1, Math.min(127, Math.round(velocity))) } });
+        else this.send({ NoteOff: { node, note } });
+    }
+
     // Control-signal VISUALIZATION is a UI affordance; the native path drives no
     // Web Audio analyser, so flashes are emitted as 1/0 levels to subscribers.
     activateControlSignal(connectionId: string): void {

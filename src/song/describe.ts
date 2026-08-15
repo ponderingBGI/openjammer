@@ -14,6 +14,26 @@ function clipNotes(arr: Arrangement, sourceId: string): ArrangementNote[] {
     return source?.kind === 'midi' ? source.notes : [];
 }
 
+/** Keep the grounding summary bounded even for generated/dense MIDI clips. */
+export const DESCRIBE_NOTE_CAP = 24;
+
+function visibleClipNotes(arr: Arrangement, sourceId: string, sourceStart: number, lengthTick: number): ArrangementNote[] {
+    const sourceEnd = sourceStart + lengthTick;
+    return clipNotes(arr, sourceId).filter((note) => {
+        const noteEnd = note.tick + Math.max(1, note.durTick);
+        return noteEnd > sourceStart && note.tick < sourceEnd;
+    });
+}
+
+function describeClipNotes(notes: ArrangementNote[]): string {
+    if (notes.length === 0) return '';
+    const shown = notes.slice(0, DESCRIBE_NOTE_CAP).map((note) =>
+        `{id ${note.id ?? '(unassigned)'}, pitch ${note.pitch}, tick ${note.tick}, durTick ${note.durTick}, vel ${note.vel ?? 64}}`,
+    );
+    const omitted = notes.length - shown.length;
+    return `\n        notes (first ${shown.length} of ${notes.length}): ${shown.join('; ')}${omitted > 0 ? `; +${omitted} more` : ''}`;
+}
+
 /** Pitch + tick span of a track's notes (absolute ticks), or null when it has none. */
 function trackExtent(arr: Arrangement, track: ArrangementTrack): { lo: number; hi: number; first: number; last: number; count: number } | null {
     let lo = Infinity;
@@ -48,10 +68,10 @@ function describeTrack(arr: Arrangement, tb: Timebase, track: ArrangementTrack, 
         : `${track.clips.length} ${clipWord}, empty`;
     const clips = track.clips
         .map((c) => {
-            const notes = clipNotes(arr, c.sourceId).length;
+            const notes = visibleClipNotes(arr, c.sourceId, c.sourceStart ?? 0, c.lengthTick);
             const gain = c.gain === undefined ? '' : `, gain ${c.gain}`;
             const fades = c.fadeIn || c.fadeOut ? `, fades ${c.fadeIn?.lengthTick ?? 0}/${c.fadeOut?.lengthTick ?? 0}` : '';
-            return `      • clip ${c.id} at ${formatBarBeat(tb, c.startTick)}, length ${c.lengthTick}, source ${c.sourceId} (${notes} notes${gain}${fades})`;
+            return `      • clip ${c.id} at ${formatBarBeat(tb, c.startTick)}, length ${c.lengthTick}, source ${c.sourceId} (${notes.length} notes${gain}${fades})${describeClipNotes(notes)}`;
         })
         .join('\n');
     const automation = (track.automation ?? [])

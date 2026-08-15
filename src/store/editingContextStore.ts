@@ -7,6 +7,21 @@ export type SnapTarget = 'grid' | 'other' | 'both';
 export type EditMode = 'slide' | 'ripple' | 'lock';
 export type RippleScope = 'selected' | 'all' | 'interview';
 export type ZoomFocus = 'mouse' | 'playhead' | 'center';
+export type NoteOverlapPolicy = 'relax' | 'reject' | 'replace' | 'truncate-existing' | 'truncate-addition' | 'extend';
+
+export interface StepEntryState {
+    trackId: string | null;
+    positionTick: number;
+    length: GridUnit;
+    velocity: number;
+    channel: number;
+    octave: number;
+    chordMode: boolean;
+    triplet: boolean;
+    dotted: boolean;
+    sustain: boolean;
+    pitch: number;
+}
 
 export interface ObjectSelection {
     clipIds: string[];
@@ -84,6 +99,15 @@ interface EditingContextState {
     drawVelocity: number;
     drawChannel: number;
     quantizeGrid: GridUnit;
+    quantizeStrength: number;
+    quantizeSwing: number;
+    quantizeThreshold: number;
+    quantizeSnapStart: boolean;
+    quantizeSnapEnd: boolean;
+    overlapPolicy: NoteOverlapPolicy;
+    scrollVelocityEditing: boolean;
+    selectLastDrawnNoteOnly: boolean;
+    stepEntry: StepEntryState;
     nudgeAmount: GridUnit;
     timeDomain: 'beats' | 'samples';
     clipboard: unknown[];
@@ -101,6 +125,8 @@ interface EditingContextState {
     clearSelection: (surface: SurfaceId) => void;
     setViewport: (surface: SurfaceId, patch: Partial<SurfaceViewport>) => void;
     zoomAt: (surface: SurfaceId, pointerPx: number, factor: number, ticksPerBar: number) => void;
+    setQuantize: (patch: Partial<Pick<EditingContextState, 'quantizeGrid' | 'quantizeStrength' | 'quantizeSwing' | 'quantizeThreshold' | 'quantizeSnapStart' | 'quantizeSnapEnd'>>) => void;
+    setStepEntry: (patch: Partial<StepEntryState>) => void;
 }
 
 export const useEditingContextStore = create<EditingContextState>((set) => ({
@@ -115,6 +141,15 @@ export const useEditingContextStore = create<EditingContextState>((set) => ({
     drawVelocity: 96,
     drawChannel: 1,
     quantizeGrid: '1/16',
+    quantizeStrength: 100,
+    quantizeSwing: 0,
+    quantizeThreshold: 0,
+    quantizeSnapStart: true,
+    quantizeSnapEnd: false,
+    overlapPolicy: 'truncate-existing',
+    scrollVelocityEditing: true,
+    selectLastDrawnNoteOnly: true,
+    stepEntry: { trackId: null, positionTick: 0, length: '1/16', velocity: 96, channel: 1, octave: 4, chordMode: false, triplet: false, dotted: false, sustain: false, pitch: 60 },
     nudgeAmount: '1/16',
     timeDomain: 'beats',
     clipboard: [],
@@ -122,7 +157,7 @@ export const useEditingContextStore = create<EditingContextState>((set) => ({
     followPlayhead: false,
     followEdits: false,
     moveAutomationWithClips: true,
-    viewports: { canvas: makeViewport(), arrangement: makeViewport() },
+    viewports: { canvas: makeViewport(), arrangement: makeViewport(), pianoroll: makeViewport() },
     setGridUnit: (gridUnit) => set({ gridUnit }),
     toggleSnap: () => set((state) => ({ snapMode: state.snapMode === 'magnetic' ? 'off' : 'magnetic' })),
     setSnapTarget: (snapTarget) => set({ snapTarget }),
@@ -132,4 +167,6 @@ export const useEditingContextStore = create<EditingContextState>((set) => ({
     clearSelection: (surface) => set((state) => ({ viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], selection: emptySelection() } } })),
     setViewport: (surface, patch) => set((state) => ({ viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], ...patch } } })),
     zoomAt: (surface, pointerPx, factor, ticksPerBar) => set((state) => ({ viewports: { ...state.viewports, [surface]: { ...state.viewports[surface], ...zoomAroundPointer(state.viewports[surface], pointerPx, factor, ticksPerBar) } } })),
+    setQuantize: (patch) => set(patch),
+    setStepEntry: (patch) => set((state) => ({ stepEntry: { ...state.stepEntry, ...patch } })),
 }));

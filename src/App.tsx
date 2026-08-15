@@ -57,6 +57,7 @@ import { useUiViewStore, type SurfaceId } from './store/uiViewStore';
 import { useBindingSet, useKeymapArbiter, useModalKeymap } from './keymap/useKeymap';
 import { ArrangementSurface } from './components/Arrangement/ArrangementSurface';
 import { SharedSurfaceChrome } from './components/Arrangement/SharedSurfaceChrome';
+import { PianoRollSurfaceHost } from './components/PianoRoll';
 import { logger } from './utils/log';
 import './styles/global.css';
 
@@ -439,8 +440,10 @@ function App() {
       {
         actionId: 'view.toggleArrangement',
         run: () => {
-          const next = useUiViewStore.getState().surface === 'canvas' ? 'arrangement' : 'canvas';
-          useUiViewStore.getState().toggle();
+          const current = useUiViewStore.getState().surface;
+          const next = current === 'canvas' ? 'arrangement' : current === 'pianoroll' ? 'arrangement' : 'canvas';
+          if (current === 'pianoroll') useUiViewStore.getState().closePianoRoll();
+          else useUiViewStore.getState().toggle();
           requestAnimationFrame(() => {
             document.querySelector<HTMLElement>(`[data-surface-root="${next}"]`)?.focus({ preventScroll: true });
           });
@@ -655,9 +658,14 @@ function App() {
         transition={surface === 'arrangement' ? 'in' : exitingSurface === 'arrangement' ? 'out' : undefined}
         songNodeId={songNodeId}
       />
+      <PianoRollSurfaceHost
+        active={surface === 'pianoroll'}
+        visible={surface === 'pianoroll' || exitingSurface === 'pianoroll'}
+        transition={surface === 'pianoroll' ? 'in' : exitingSurface === 'pianoroll' ? 'out' : undefined}
+      />
 
       <div className="sr-only" aria-live="polite">
-        {surface === 'canvas' ? 'Canvas surface active' : 'Arrangement surface active'}
+        {surface === 'canvas' ? 'Canvas surface active' : surface === 'pianoroll' ? 'Piano roll surface active' : 'Arrangement surface active'}
       </div>
 
       {/* Toolbar + Breadcrumbs */}

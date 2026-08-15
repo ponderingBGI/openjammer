@@ -351,8 +351,9 @@ export interface SettingsPatch {
 
 /**
  * Arguments for the READ tool `describe_arrangement`: none. Returns a readable
- * summary of the current SONG TIMELINE — tracks (by stable id), clips, notes (count +
- * pitch range), sections, tempo, and automation, all at bar.beat. SIDE-EFFECT-FREE.
+ * summary of the current SONG TIMELINE — tracks (by stable id), clips, capped
+ * addressable note details, sections, tempo, and automation, all at bar.beat.
+ * SIDE-EFFECT-FREE.
  * The agent calls it to GROUND itself in the arrangement before editing it (the same
  * "read the canvas first" discipline `get_graph` serves for the node graph).
  */

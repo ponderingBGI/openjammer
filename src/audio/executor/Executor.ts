@@ -119,6 +119,9 @@ export interface Executor {
     /** Release a previously triggered keyboard note. */
     noteOff(keyboardId: string, row: number, keyIndex: number): void;
 
+    /** Low-velocity editor audition addressed directly to an instrument node. */
+    auditionNote(targetNodeId: string | number, pitch: number, velocity: number, on: boolean): void;
+
     /** Flash a control connection's signal-level visualization on. */
     activateControlSignal(connectionId: string): void;
 

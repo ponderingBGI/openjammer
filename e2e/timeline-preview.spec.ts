@@ -182,6 +182,31 @@ test.describe('Timeline live preview', () => {
         );
         expect(stoppedPosted.some((m) => m.kind === 'NoteOff')).toBe(false);
 
+        // W5 piano roll: inline expansion keeps the arrangement axis, drawing
+        // auditions through the worklet command seam, palette quantize is atomic,
+        // and one undo restores the pre-quantized onset.
+        await page.locator('.arrangement-clip').first().dblclick({ position: { x: 28, y: 34 } });
+        const roll = page.locator('.piano-roll--inline');
+        await expect(roll).toBeVisible();
+        await page.getByRole('button', { name: 'Snap to grid' }).click();
+        const noteCount = await roll.locator('.piano-roll-note:not(.piano-roll-note--elsewhere):not(.piano-roll-note--draw)').count();
+        await roll.locator('.piano-roll__field').evaluate((element) => {
+            const rect = element.getBoundingClientRect();
+            element.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, clientX: rect.left + 137, clientY: rect.top + 9 }));
+        });
+        await expect(roll.locator('.piano-roll-note:not(.piano-roll-note--elsewhere):not(.piano-roll-note--draw)')).toHaveCount(noteCount + 1);
+        await expect.poll(() => page.evaluate(() =>
+            ((window as { __ojPosted?: Array<{ type: string; kind?: string }> }).__ojPosted ?? []).some((m) => m.kind === 'NoteOn'),
+        )).toBe(true);
+        const selectedNote = roll.locator('.piano-roll-note.is-selected').last();
+        const beforeQuantize = await selectedNote.evaluate((element) => (element as HTMLElement).style.left);
+        await page.keyboard.press('Control+k');
+        await page.getByRole('combobox').fill('Quantize selected notes');
+        await page.getByText('Quantize selected notes', { exact: true }).click();
+        await expect.poll(() => selectedNote.evaluate((element) => (element as HTMLElement).style.left)).not.toBe(beforeQuantize);
+        await page.keyboard.press('Control+z');
+        await expect.poll(() => selectedNote.evaluate((element) => (element as HTMLElement).style.left)).toBe(beforeQuantize);
+
         // No uncaught exceptions, no unexpected console noise while previewing audio.
         expect(pageErrors, 'no uncaught exceptions during timeline preview').toEqual([]);
         const unexpectedErrors = consoleErrors.filter((l) => !ERROR_ALLOWLIST.some((re) => re.test(l)));

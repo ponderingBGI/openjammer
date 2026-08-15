@@ -5,6 +5,8 @@ import { growPitchRange, initialPitchRange, useTrackLaneViewStore } from '../../
 import { ClipView } from './ClipView';
 import { LaneButton } from '@openjammer/oj-ui';
 import { useEditingContextStore } from '../../store/editingContextStore';
+import { useUiViewStore } from '../../store/uiViewStore';
+import { PianoRollLane, applyPianoRollQuantize, auditionPianoRollNote } from '../PianoRoll';
 
 export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick, visibleEndTick }: {
     track: ArrangementTrack;
@@ -18,6 +20,7 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
     const rememberedRange = useTrackLaneViewStore((state) => state.pitchRanges[trackId]);
     const rememberPitchRange = useTrackLaneViewStore((state) => state.rememberPitchRange);
     const selectedClipIds = useEditingContextStore((state) => state.viewports.arrangement.selection.clipIds);
+    const expandedClipId = useTrackLaneViewStore((state) => state.expandedPianoRolls[trackId]);
     const [soloed, setSoloed] = useState(false);
     const sourceNotes = useMemo(() => track.clips.flatMap((clip) => {
         const source = arrangement.sources?.[clip.sourceId];
@@ -40,12 +43,17 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                     <span className="arrangement-instrument-chip">{typeof instrument === 'string' ? instrument : track.ref}</span>
                 </div>
             </div>
-            <div className={`arrangement-lane${track.mute ? ' is-muted' : ''}`} role="list" onClick={(event) => {
+            <div className={`arrangement-lane${track.mute ? ' is-muted' : ''}${expandedClipId ? ' has-piano-roll' : ''}`} role="list" onClick={(event) => {
                 if (!(event.target as HTMLElement).closest('.arrangement-clip')) useEditingContextStore.getState().clearSelection('arrangement');
             }}>
-                {clips.map((clip) => {
+                {expandedClipId ? <PianoRollLane trackId={trackId} clipId={expandedClipId} pxPerTick={pxPerTick} leftTick={visibleStartTick} height={220} onClose={() => useTrackLaneViewStore.getState().closePianoRoll(trackId)} onOpenSurface={() => {
+                    const arrangementViewport = useEditingContextStore.getState().viewports.arrangement;
+                    useEditingContextStore.getState().setViewport('pianoroll', { pxPerTick: arrangementViewport.pxPerTick, leftTick: arrangementViewport.leftTick });
+                    useEditingContextStore.getState().setSelection('pianoroll', { clipIds: [expandedClipId] });
+                    useUiViewStore.getState().openPianoRoll(expandedClipId);
+                }} onQuantize={applyPianoRollQuantize} onAudition={(pitch, velocity, phase) => auditionPianoRollNote(track.ref, pitch, velocity, phase)} /> : clips.map((clip) => {
                     const source = arrangement.sources?.[clip.sourceId];
-                    return source && clip.id ? <ClipView key={clip.id} clip={clip} source={source} trackName={track.name ?? track.ref} trackId={trackId} range={range} pxPerTick={pxPerTick} laneHeight={laneHeight} selected={selectedClipIds.includes(clip.id)} onSelect={(event, phase) => {
+                    return source && clip.id ? <ClipView key={clip.id} clip={clip} source={source} trackName={track.name ?? track.ref} trackId={trackId} range={range} pxPerTick={pxPerTick} laneHeight={laneHeight} selected={selectedClipIds.includes(clip.id)} onDoubleClick={source.kind === 'midi' ? () => useTrackLaneViewStore.getState().togglePianoRoll(trackId, clip.id!) : undefined} onSelect={(event, phase) => {
                         event.stopPropagation();
                         const context = useEditingContextStore.getState();
                         const current = context.viewports.arrangement.selection.clipIds;
@@ -64,7 +72,7 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                         }
                     }} /> : null;
                 })}
-                {track.clips.length === 0 && <div className="arrangement-lane__hint">drag audio here, or press D and draw.</div>}
+                {!expandedClipId && track.clips.length === 0 && <div className="arrangement-lane__hint">drag audio here, or press D and draw.</div>}
             </div>
         </div>
     );

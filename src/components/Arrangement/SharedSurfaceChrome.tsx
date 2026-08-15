@@ -22,7 +22,7 @@ export function SharedSurfaceChrome({ surface, setSurface }: { surface: SurfaceI
             <span ref={readoutRef} className="shared-bar-beat" aria-label="Playhead position">1.1</span>
             <div className="surface-switcher" role="group" aria-label="Editing surface">
                 <button aria-pressed={surface === 'canvas'} onClick={() => setSurface('canvas')}>Canvas</button>
-                <button aria-pressed={surface === 'arrangement'} onClick={() => setSurface('arrangement')}>Arrangement</button>
+                <button aria-pressed={surface === 'arrangement' || surface === 'pianoroll'} onClick={() => setSurface('arrangement')}>Arrangement</button>
             </div>
         </div>
     );

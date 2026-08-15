@@ -6,6 +6,7 @@ describe('editingContextStore zoom', () => {
         viewports: {
             canvas: useEditingContextStore.getInitialState().viewports.canvas,
             arrangement: { ...useEditingContextStore.getInitialState().viewports.arrangement },
+            pianoroll: { ...useEditingContextStore.getInitialState().viewports.pianoroll },
         },
     }));
 

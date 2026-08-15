@@ -38,6 +38,8 @@ import { useArrangementStore } from "../../store/arrangementStore";
 import { useEditingContextStore, gridTicks } from "../../store/editingContextStore";
 import { deleteTime, insertTime } from "../../song/ops";
 import { timebase } from "../../song/time";
+import { applyPianoRollQuantize } from "../PianoRoll";
+import { useUiViewStore } from "../../store/uiViewStore";
 
 // Human-readable group label per category (matches the menu's casing).
 const CATEGORY_LABEL: Record<NodeCategory, string> = {
@@ -133,6 +135,16 @@ function buildNodeActions(): Action[] {
  */
 function buildAppCommands(): Command[] {
   return [
+    {
+      id: "pianoroll.quantize",
+      title: "Quantize selected notes",
+      group: "Piano Roll",
+      keywords: ["quantize", "notes", "grid", "swing", "strength"],
+      run: () => {
+        const surface = useUiViewStore.getState().surface === "pianoroll" ? "pianoroll" : "arrangement";
+        applyPianoRollQuantize(useEditingContextStore.getState().viewports[surface].selection.noteIds);
+      },
+    },
     {
       id: "arrangement.delete-time",
       title: "Delete selected time",

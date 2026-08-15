@@ -38,4 +38,11 @@ describe('Pi extension ↔ host tool parity', () => {
         const missing = EDIT_OPS.filter((op) => !src.includes(`'${op}'`));
         expect(missing).toEqual([]);
     });
+
+    it('declares the BC-30..37 note-op payloads, not only their names', () => {
+        for (const field of ['clipId', 'note', 'noteIds', 'semitones', 'targets', 'grid', 'strength', 'swing', 'threshold']) {
+            expect(src, `edit_timeline schema is missing note-op field ${field}`).toContain(`${field}: Type.`);
+        }
+        for (const mode of ['delta', 'set', 'ramp']) expect(src).toContain(`Type.Literal('${mode}')`);
+    });
 });

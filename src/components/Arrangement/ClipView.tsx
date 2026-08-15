@@ -54,6 +54,7 @@ export function ClipView({
     selected,
     onSelect,
     trackId,
+    onDoubleClick,
 }: {
     clip: ArrangementClip;
     source: Source;
@@ -64,6 +65,7 @@ export function ClipView({
     selected: boolean;
     onSelect: (event: React.PointerEvent, phase: 'press' | 'release') => void;
     trackId: string;
+    onDoubleClick?: () => void;
 }) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [peaks, setPeaks] = useState<Float32Array | null>(null);
@@ -99,6 +101,7 @@ export function ClipView({
             onPointerDown={gesture.onPointerDown}
             onPointerCancel={gesture.onPointerCancel}
             onClick={(event) => onSelect(event as unknown as React.PointerEvent, 'release')}
+            onDoubleClick={(event) => { event.stopPropagation(); onDoubleClick?.(); }}
             role="listitem"
             data-clip-id={clip.id}
             aria-label={`${trackName} — bars ${startBar} to ${endBar}, ${noteCount} notes${clip.mute ? ', muted' : ''}`}

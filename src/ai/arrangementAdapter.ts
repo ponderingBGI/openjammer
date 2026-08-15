@@ -14,7 +14,25 @@ import { useArrangementStore } from '../store/arrangementStore';
 import { describeArrangement } from '../song/describe';
 import { applyVerbs, type Verb } from '../song/verbs';
 import type { ArrangementToolPort } from './tools';
-import { deleteClips, deleteTime, duplicateClips, insertTime, moveClips, nudge, splitAt, trimClip, type TimelineOp } from '../song/ops';
+import {
+    copyNotes,
+    deleteClips,
+    deleteTime,
+    drawNotes,
+    duplicateClips,
+    eraseNotes,
+    insertTime,
+    moveClips,
+    moveNotes,
+    nudge,
+    quantizeNotes,
+    resizeNotes,
+    setVelocity,
+    splitAt,
+    transposeNotes,
+    trimClip,
+    type TimelineOp,
+} from '../song/ops';
 import { useEditingContextStore, type GridUnit } from '../store/editingContextStore';
 
 /** Fill any missing stable id on a verb's ADDED entity (and nested notes), so the
@@ -74,6 +92,7 @@ export function createArrangementPort(): ArrangementToolPort {
             const verbs: Verb[] = [];
             let projected = arrangement;
             let selectedClipIds: string[] | undefined;
+            let selectedNoteIds: string[] | undefined;
             try {
                 for (const operation of ops) {
                     let result;
@@ -87,16 +106,27 @@ export function createArrangementPort(): ArrangementToolPort {
                         case 'deleteTime': result = deleteTime(projected, operation.fromTick, operation.toTick, operation.trackIds); break;
                         case 'insertTime': result = insertTime(projected, operation.atTick, operation.durationTick, operation.trackIds); break;
                         case 'setGrid': useEditingContextStore.getState().setGridUnit(operation.grid as GridUnit); continue;
+                        case 'drawNote': result = drawNotes(projected, operation.clipId, [operation.note], store.mintId, operation.overlap); break;
+                        case 'moveNotes': result = moveNotes(projected, operation.noteIds, operation.deltaTick, operation.deltaPitch); break;
+                        case 'copyNotes': result = copyNotes(projected, operation.noteIds, operation.deltaTick ?? 0, operation.deltaPitch ?? 0, store.mintId); break;
+                        case 'resizeNotes': result = resizeNotes(projected, operation.noteIds, operation.edge, operation); break;
+                        case 'eraseNotes': result = eraseNotes(projected, operation); break;
+                        case 'setVelocity': result = setVelocity(projected, operation.noteIds, operation); break;
+                        case 'transposeNotes': result = transposeNotes(projected, operation.noteIds, operation.semitones); break;
+                        case 'quantizeNotes': result = quantizeNotes(projected, operation.targets, { ...operation, startGrid: operation.grid }); break;
                     }
+                    if (result.rejected) throw new Error(result.rejected);
                     projected = applyVerbs(projected, result.verbs).next;
                     verbs.push(...result.verbs);
                     selectedClipIds = result.selectedClipIds ?? selectedClipIds;
+                    selectedNoteIds = result.selectedNoteIds ?? selectedNoteIds;
                 }
             } catch (error) {
                 return { ok: false, summary: `edit_timeline failed: ${error instanceof Error ? error.message : String(error)}`, undo: () => {} };
             }
             if (verbs.length) store.apply(verbs);
             if (selectedClipIds) useEditingContextStore.getState().setSelection('arrangement', { clipIds: selectedClipIds });
+            if (selectedNoteIds) useEditingContextStore.getState().setSelection('arrangement', { noteIds: selectedNoteIds });
             return { ok: true, summary: `Applied ${ops.length} timeline operation(s).`, undo: () => useArrangementStore.getState().undo() };
         },
         apply(verbs) {

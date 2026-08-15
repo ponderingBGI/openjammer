@@ -15,6 +15,7 @@ import { PlayheadLayer } from './PlayheadLayer';
 import { deleteClips, duplicateClips, nudge, splitAt } from '../../song/ops';
 import { gridTicks } from '../../store/editingContextStore';
 import { useHistoryStore } from '../../store/historyStore';
+import { useUiViewStore } from '../../store/uiViewStore';
 import './ArrangementSurface.css';
 
 const HEADER_WIDTH = 200;
@@ -46,6 +47,21 @@ export function ArrangementSurface({ active, visible = active, transition, songN
             { actionId: 'arrangement.split', run: () => { const store = useArrangementStore.getState(); const arr = store.arrangement; const context = useEditingContextStore.getState(); if (!arr) return true; const editTick = store.transportPending === 'seek' && store.pendingSeekSample != null ? sampleToTick(buildTempoMap(arr), store.pendingSeekSample) : store.playheadTick; const result = splitAt(arr, context.viewports.arrangement.selection.clipIds, editTick, store.mintId); store.apply(result.verbs); context.setSelection('arrangement', { clipIds: result.selectedClipIds ?? [] }); return true; } },
             { actionId: 'arrangement.toggleRipple', run: () => { const context = useEditingContextStore.getState(); context.setEditMode(context.editMode === 'ripple' ? 'slide' : 'ripple'); return true; } },
             { actionId: 'arrangement.escape', guard: () => !useEditingContextStore.getState().dragActive, run: () => { useEditingContextStore.getState().clearSelection('arrangement'); return true; } },
+            { actionId: 'arrangement.openPianoRoll', run: () => {
+                const store = useArrangementStore.getState();
+                const arr = store.arrangement;
+                const context = useEditingContextStore.getState();
+                const clipId = context.viewports.arrangement.selection.clipIds[0];
+                if (!arr || !clipId) return true;
+                const clip = arr.tracks.flatMap((track) => track.clips).find((item) => item.id === clipId);
+                if (!clip || arr.sources?.[clip.sourceId]?.kind !== 'midi') return true;
+                const source = context.viewports.arrangement;
+                context.setViewport('pianoroll', { pxPerTick: source.pxPerTick, leftTick: source.leftTick });
+                context.setSelection('pianoroll', { clipIds: [clipId], noteIds: [] });
+                useUiViewStore.getState().openPianoRoll(clipId);
+                requestAnimationFrame(() => document.querySelector<HTMLElement>('[data-surface-root="pianoroll"]')?.focus({ preventScroll: true }));
+                return true;
+            } },
         ],
     }), []));
 

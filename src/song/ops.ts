@@ -1,9 +1,12 @@
-import type { Arrangement, ArrangementClip } from './types';
+import type { Arrangement, ArrangementClip, ArrangementNote, MidiSource } from './types';
 import type { Verb } from './verbs';
 
-export interface OpResult { verbs: Verb[]; selectedClipIds?: string[]; skipped?: string[] }
+export interface OpResult { verbs: Verb[]; selectedClipIds?: string[]; selectedNoteIds?: string[]; skipped?: string[]; rejected?: string }
 
-export const EDIT_OPS = ['moveClips', 'trimClip', 'splitAt', 'duplicateClips', 'deleteClips', 'setGrid', 'nudge', 'deleteTime', 'insertTime'] as const;
+export const EDIT_OPS = [
+    'moveClips', 'trimClip', 'splitAt', 'duplicateClips', 'deleteClips', 'setGrid', 'nudge', 'deleteTime', 'insertTime',
+    'drawNote', 'moveNotes', 'copyNotes', 'resizeNotes', 'eraseNotes', 'setVelocity', 'transposeNotes', 'quantizeNotes',
+] as const;
 export type EditOpName = typeof EDIT_OPS[number];
 export type TimelineOp =
     | { op: 'moveClips'; clipIds: string[]; deltaTick: number; toTrackId?: string; ripple?: boolean }
@@ -14,7 +17,51 @@ export type TimelineOp =
     | { op: 'setGrid'; grid: string }
     | { op: 'nudge'; clipIds: string[]; amount: number; direction: -1 | 1 }
     | { op: 'deleteTime'; fromTick: number; toTick: number; trackIds: string[] }
-    | { op: 'insertTime'; atTick: number; durationTick: number; trackIds: string[] };
+    | { op: 'insertTime'; atTick: number; durationTick: number; trackIds: string[] }
+    | { op: 'drawNote'; clipId: string; note: NoteInput; overlap?: NoteOverlapPolicy }
+    | { op: 'moveNotes'; noteIds: string[]; deltaTick?: number; deltaPitch?: number }
+    | { op: 'copyNotes'; noteIds: string[]; deltaTick?: number; deltaPitch?: number }
+    | { op: 'resizeNotes'; noteIds: string[]; edge: 'start' | 'end'; deltaTick?: number; at?: number; mode?: 'relative' | 'absolute' }
+    | { op: 'eraseNotes'; noteIds?: string[]; range?: NoteRange }
+    | { op: 'setVelocity'; noteIds: string[]; mode: 'delta' | 'set' | 'ramp'; amount?: number; from?: number; to?: number; smush?: boolean }
+    | { op: 'transposeNotes'; noteIds: string[]; semitones: number }
+    | { op: 'quantizeNotes'; targets: string[]; grid: number; endGrid?: number; snapStart?: boolean; snapEnd?: boolean; strength?: number; swing?: number; threshold?: number; position?: number };
+
+export interface NoteInput { tick: number; durTick: number; pitch: number; vel?: number; id?: string }
+export type NoteOverlapPolicy = 'relax' | 'reject' | 'replace' | 'truncate-existing' | 'truncate-addition' | 'extend';
+export interface NoteRange { fromTick: number; toTick: number; minPitch?: number; maxPitch?: number; sourceId?: string }
+
+interface LocatedNote { sourceId: string; source: MidiSource; note: ArrangementNote; index: number }
+
+function findNote(arrangement: Arrangement, noteId: string): LocatedNote | undefined {
+    for (const [sourceId, source] of Object.entries(arrangement.sources ?? {})) {
+        if (source.kind !== 'midi') continue;
+        const index = source.notes.findIndex((note) => note.id === noteId);
+        if (index >= 0) return { sourceId, source, note: source.notes[index]!, index };
+    }
+    return undefined;
+}
+
+function sourceForClip(arrangement: Arrangement, clipId: string): { clip: ArrangementClip; source: MidiSource } | undefined {
+    const found = findClip(arrangement, clipId);
+    if (!found) return undefined;
+    const source = arrangement.sources?.[found.clip.sourceId];
+    return source?.kind === 'midi' ? { clip: found.clip, source } : undefined;
+}
+
+const overlaps = (a: Pick<ArrangementNote, 'tick' | 'durTick'>, b: Pick<ArrangementNote, 'tick' | 'durTick'>) =>
+    a.tick < b.tick + b.durTick && b.tick < a.tick + a.durTick;
+
+/** BC-30 rule B: the pointer gesture floor; not a model validation rule. */
+export const noteDragFloor = (ppq: number) => Math.max(1, Math.ceil(ppq / 128));
+
+function validNote(note: NoteInput): string | undefined {
+    if (!Number.isFinite(note.tick) || note.tick < 0) return 'note tick must be zero or greater';
+    if (!Number.isFinite(note.durTick) || note.durTick < 1) return 'note duration must be at least one tick';
+    if (!Number.isInteger(note.pitch) || note.pitch < 0 || note.pitch > 127) return 'note pitch must be an integer from 0 to 127';
+    if (note.vel !== undefined && (!Number.isInteger(note.vel) || note.vel < 0 || note.vel > 127)) return 'note velocity must be an integer from 0 to 127';
+    return undefined;
+}
 
 const findClip = (arrangement: Arrangement, clipId: string) => {
     for (const track of arrangement.tracks) {
@@ -135,4 +182,275 @@ export function deleteTime(_arrangement: Arrangement, fromTick: number, toTick: 
 export function insertTime(_arrangement: Arrangement, atTick: number, durationTick: number, trackIds: readonly string[]): OpResult {
     if (!(durationTick > 0)) return { verbs: [] };
     return { verbs: [{ kind: 'insertTime', atTick, durationTick, trackIds: [...trackIds], splitIntersected: true, moveLocations: true }] };
+}
+
+function automaticVelocity(notes: readonly ArrangementNote[], tick: number): number {
+    if (!notes.length) return 64;
+    const ordered = [...notes].sort((a, b) => a.tick - b.tick);
+    const after = ordered.find((note) => note.tick >= tick);
+    const before = [...ordered].reverse().find((note) => note.tick <= tick);
+    if (!before) return after?.vel ?? 64;
+    if (!after) return before.vel ?? 64;
+    if (after.tick === before.tick) return before.vel ?? after.vel ?? 64;
+    const mix = (tick - before.tick) / (after.tick - before.tick);
+    return Math.round((before.vel ?? 64) + ((after.vel ?? 64) - (before.vel ?? 64)) * mix);
+}
+
+/** BC-30/34. Draw is one atomic batch, including overlap side effects. */
+export function drawNotes(
+    arrangement: Arrangement,
+    clipId: string,
+    inputs: readonly NoteInput[],
+    mintId: (prefix: string) => string,
+    overlapPolicy: NoteOverlapPolicy = 'truncate-existing',
+): OpResult {
+    const target = sourceForClip(arrangement, clipId);
+    if (!target) return { verbs: [], rejected: `clip "${clipId}" is not a MIDI clip` };
+    const invalid = inputs.map(validNote).find(Boolean);
+    if (invalid) return { verbs: [], rejected: invalid };
+
+    const working = target.source.notes.map((note) => ({ ...note }));
+    const verbs: Verb[] = [];
+    const selectedNoteIds: string[] = [];
+    for (const value of inputs) {
+        if (working.some((note) => note.tick === value.tick && note.pitch === value.pitch)) continue;
+        let addition: ArrangementNote = { ...value, id: value.id ?? mintId('note'), vel: value.vel ?? automaticVelocity(working, value.tick) };
+        let conflicts = working.filter((note) => note.pitch === addition.pitch && overlaps(note, addition));
+        if (overlapPolicy === 'reject' && conflicts.length) return { verbs: [], rejected: 'note overlaps an existing note' };
+        if (overlapPolicy === 'truncate-addition') {
+            for (const note of conflicts.sort((a, b) => a.tick - b.tick)) {
+                const end = addition.tick + addition.durTick;
+                const noteEnd = note.tick + note.durTick;
+                if (note.tick <= addition.tick) addition = { ...addition, tick: noteEnd, durTick: end - noteEnd };
+                else addition = { ...addition, durTick: note.tick - addition.tick };
+                if (addition.durTick < 1) break;
+            }
+            if (addition.durTick < 1) continue;
+            conflicts = working.filter((note) => note.pitch === addition.pitch && overlaps(note, addition));
+        }
+        if (overlapPolicy === 'extend' && conflicts.length) {
+            const keeper = conflicts[0]!;
+            const start = Math.min(keeper.tick, addition.tick);
+            const end = Math.max(addition.tick + addition.durTick, ...conflicts.map((note) => note.tick + note.durTick));
+            const patch = { tick: start, durTick: end - start };
+            verbs.push({ kind: 'editNote', noteId: keeper.id!, patch });
+            Object.assign(keeper, patch);
+            for (const conflict of conflicts.slice(1)) {
+                verbs.push({ kind: 'removeNote', noteId: conflict.id! });
+                working.splice(working.indexOf(conflict), 1);
+            }
+            selectedNoteIds.push(keeper.id!);
+            continue;
+        }
+        if (overlapPolicy === 'replace') {
+            for (const conflict of conflicts) {
+                verbs.push({ kind: 'removeNote', noteId: conflict.id! });
+                working.splice(working.indexOf(conflict), 1);
+            }
+        } else if (overlapPolicy === 'truncate-existing') {
+            for (const conflict of conflicts) {
+                const conflictEnd = conflict.tick + conflict.durTick;
+                const additionEnd = addition.tick + addition.durTick;
+                if (conflict.tick < addition.tick) {
+                    const durTick = addition.tick - conflict.tick;
+                    verbs.push({ kind: 'editNote', noteId: conflict.id!, patch: { durTick } });
+                    conflict.durTick = durTick;
+                } else if (conflictEnd > additionEnd) {
+                    const patch = { tick: additionEnd, durTick: conflictEnd - additionEnd };
+                    verbs.push({ kind: 'editNote', noteId: conflict.id!, patch });
+                    Object.assign(conflict, patch);
+                } else {
+                    verbs.push({ kind: 'removeNote', noteId: conflict.id! });
+                    working.splice(working.indexOf(conflict), 1);
+                }
+            }
+        }
+        const index = working.length;
+        verbs.push({ kind: 'addNote', sourceId: target.source.id, index, note: addition });
+        working.push(addition);
+        selectedNoteIds.push(addition.id!);
+    }
+    return { verbs, selectedNoteIds };
+}
+
+function clipsForSource(arrangement: Arrangement, sourceId: string): ArrangementClip[] {
+    return arrangement.tracks.flatMap((track) => track.clips).filter((clip) => clip.sourceId === sourceId);
+}
+
+/** BC-31. A shared clamped delta preserves the selection's relative geometry. */
+export function moveNotes(arrangement: Arrangement, noteIds: readonly string[], deltaTick = 0, deltaPitch = 0): OpResult {
+    const found = noteIds.map((id) => findNote(arrangement, id)).filter((item): item is LocatedNote => Boolean(item));
+    if (!found.length) return { verbs: [], skipped: [...noteIds] };
+    const sourceStarts = found.map(({ sourceId }) => {
+        const starts = clipsForSource(arrangement, sourceId).map((clip) => clip.sourceStart ?? 0);
+        return starts.length ? Math.min(...starts) : 0;
+    });
+    const tickDelta = Math.max(deltaTick, ...found.map(({ note }, index) => sourceStarts[index]! - note.tick));
+    const pitchDelta = Math.max(-Math.min(...found.map(({ note }) => note.pitch)), Math.min(deltaPitch, 127 - Math.max(...found.map(({ note }) => note.pitch))));
+    const verbs: Verb[] = found.map(({ note }) => ({ kind: 'editNote', noteId: note.id!, patch: { tick: note.tick + tickDelta, pitch: note.pitch + pitchDelta } }));
+    for (const sourceId of new Set(found.map((item) => item.sourceId))) {
+        const sourceNotes = found.filter((item) => item.sourceId === sourceId);
+        const newEnd = Math.max(...sourceNotes.map(({ note }) => note.tick + tickDelta + note.durTick));
+        for (const clip of clipsForSource(arrangement, sourceId)) {
+            const needed = newEnd - (clip.sourceStart ?? 0);
+            if (needed > clip.lengthTick) verbs.push({ kind: 'setClipWindow', clipId: clip.id!, lengthTick: needed });
+        }
+    }
+    return { verbs, skipped: noteIds.filter((id) => !found.some(({ note }) => note.id === id)) };
+}
+
+export function copyNotes(
+    arrangement: Arrangement,
+    noteIds: readonly string[],
+    deltaTick: number,
+    deltaPitch: number,
+    mintId: (prefix: string) => string,
+): OpResult {
+    const found = noteIds.map((id) => findNote(arrangement, id)).filter((item): item is LocatedNote => Boolean(item));
+    if (!found.length) return { verbs: [], skipped: [...noteIds] };
+    const tickDelta = Math.max(deltaTick, -Math.min(...found.map(({ note }) => note.tick)));
+    const pitchDelta = Math.max(-Math.min(...found.map(({ note }) => note.pitch)), Math.min(deltaPitch, 127 - Math.max(...found.map(({ note }) => note.pitch))));
+    const selectedNoteIds: string[] = [];
+    const perSourceCount = new Map<string, number>();
+    const verbs = found.map(({ sourceId, source, note }): Verb => {
+        const copy = { ...note, id: mintId('note'), tick: note.tick + tickDelta, pitch: note.pitch + pitchDelta };
+        selectedNoteIds.push(copy.id!);
+        const index = source.notes.length + (perSourceCount.get(sourceId) ?? 0);
+        perSourceCount.set(sourceId, (perSourceCount.get(sourceId) ?? 0) + 1);
+        return { kind: 'addNote', sourceId, index, note: copy };
+    });
+    return { verbs, selectedNoteIds, skipped: noteIds.filter((id) => !found.some(({ note }) => note.id === id)) };
+}
+
+/** BC-32. Hit-zone choice is UI geometry; this function implements its atomic resize. */
+export function resizeNotes(
+    arrangement: Arrangement,
+    noteIds: readonly string[],
+    edge: 'start' | 'end',
+    value: { deltaTick?: number; at?: number; mode?: 'relative' | 'absolute' },
+): OpResult {
+    const found = noteIds.map((id) => findNote(arrangement, id)).filter((item): item is LocatedNote => Boolean(item));
+    if (!found.length) return { verbs: [], skipped: [...noteIds] };
+    const mode = value.mode ?? 'relative';
+    const primaryEdge = edge === 'start' ? found[0]!.note.tick : found[0]!.note.tick + found[0]!.note.durTick;
+    const delta = value.deltaTick ?? ((value.at ?? primaryEdge) - primaryEdge);
+    const verbs: Verb[] = [];
+    for (const { note, source } of found) {
+        const oldEnd = note.tick + note.durTick;
+        const requested = mode === 'absolute' ? (value.at ?? primaryEdge + delta) : (edge === 'start' ? note.tick : oldEnd) + delta;
+        if (edge === 'start') {
+            const tick = Math.max(0, Math.min(oldEnd - 1, requested));
+            verbs.push({ kind: 'editNote', noteId: note.id!, patch: { tick, durTick: oldEnd - tick } });
+        } else {
+            const end = Math.max(note.tick + 1, Math.min(source.lengthTick, requested));
+            verbs.push({ kind: 'editNote', noteId: note.id!, patch: { durTick: end - note.tick } });
+        }
+    }
+    return { verbs };
+}
+
+/** BC-32's exact pointer hit-zone geometry. */
+export function noteResizeZone(widthPx: number, xPx: number): 'start' | 'end' | undefined {
+    if (!(widthPx > 10)) return undefined;
+    const edgeWidth = Math.min(8, widthPx / 2 - 1);
+    if (xPx <= edgeWidth) return 'start';
+    if (xPx >= widthPx - edgeWidth) return 'end';
+    return undefined;
+}
+
+/** BC-32 generic-body fallback when no explicit edge handle was identified. */
+export const noteBodyResizeEdge = (xFraction: number): 'start' | 'end' => xFraction <= 0.25 ? 'start' : 'end';
+
+export function eraseNotes(arrangement: Arrangement, request: { noteIds?: readonly string[]; range?: NoteRange }): OpResult {
+    const ids = request.noteIds ? [...request.noteIds] : Object.entries(arrangement.sources ?? {}).flatMap(([sourceId, source]) => {
+        if (source.kind !== 'midi' || request.range?.sourceId && request.range.sourceId !== sourceId) return [];
+        const range = request.range;
+        if (!range) return [];
+        return source.notes.filter((note) => note.tick < range.toTick && note.tick + note.durTick > range.fromTick && note.pitch >= (range.minPitch ?? 0) && note.pitch <= (range.maxPitch ?? 127)).map((note) => note.id!);
+    });
+    const existing = ids.filter((id) => findNote(arrangement, id));
+    return { verbs: existing.map((noteId) => ({ kind: 'removeNote', noteId })), skipped: ids.filter((id) => !existing.includes(id)) };
+}
+
+/** BC-33. Without smush, one out-of-range value rejects the entire stroke. */
+export function setVelocity(
+    arrangement: Arrangement,
+    noteIds: readonly string[],
+    request: { mode: 'delta' | 'set' | 'ramp'; amount?: number; from?: number; to?: number; smush?: boolean },
+): OpResult {
+    const found = noteIds.map((id) => findNote(arrangement, id)).filter((item): item is LocatedNote => Boolean(item));
+    const ordered = [...found].sort((a, b) => a.note.tick - b.note.tick || a.index - b.index);
+    const values = new Map<string, number>();
+    ordered.forEach(({ note }, index) => {
+        let value: number;
+        if (request.mode === 'delta') value = (note.vel ?? 64) + (request.amount ?? 0);
+        else if (request.mode === 'set') value = request.amount ?? note.vel ?? 64;
+        else {
+            const mix = ordered.length <= 1 ? 0 : index / (ordered.length - 1);
+            value = Math.round((request.from ?? 64) + ((request.to ?? request.from ?? 64) - (request.from ?? 64)) * mix);
+        }
+        values.set(note.id!, value);
+    });
+    if (!request.smush && [...values.values()].some((value) => value < 0 || value > 127)) return { verbs: [], rejected: 'velocity step would leave the 0–127 range' };
+    return { verbs: found.map(({ note }) => ({ kind: 'editNote', noteId: note.id!, patch: { vel: Math.max(0, Math.min(127, values.get(note.id!)!)) } })) };
+}
+
+/** BC-35. Transposition follows the same whole-selection rejection law as velocity. */
+export function transposeNotes(arrangement: Arrangement, noteIds: readonly string[], semitones: number): OpResult {
+    const found = noteIds.map((id) => findNote(arrangement, id)).filter((item): item is LocatedNote => Boolean(item));
+    if (found.some(({ note }) => note.pitch + semitones < 0 || note.pitch + semitones > 127)) return { verbs: [], rejected: 'transpose would leave the 0–127 pitch range' };
+    return { verbs: found.map(({ note }) => ({ kind: 'editNote', noteId: note.id!, patch: { pitch: note.pitch + semitones } })) };
+}
+
+function quantizeCandidate(tick: number, grid: number, offset: number, swing: number): number {
+    const position = tick - offset;
+    const index = Math.round(position / grid);
+    if (swing === 0) return index * grid + offset;
+    const displacement = grid * swing / 300;
+    const swung = (point: number) => point * grid + (Math.abs(point) % 2 === 1 ? displacement : 0) + offset;
+    const current = swung(index);
+    const previous = swung(index - 1);
+    return Math.abs(tick - previous) < Math.abs(tick - current) ? previous : current;
+}
+
+/** BC-37, re-derived from Ardour: length uses fully quantized edges, never strength. */
+export function quantizeNotes(
+    arrangement: Arrangement,
+    noteIds: readonly string[],
+    request: { startGrid: number; endGrid?: number; snapStart?: boolean; snapEnd?: boolean; strength?: number; swing?: number; threshold?: number; position?: number },
+): OpResult {
+    const snapStart = request.snapStart ?? true;
+    const snapEnd = request.snapEnd ?? false;
+    if (!snapStart && !snapEnd) return { verbs: [] };
+    if (!(request.startGrid > 0) || !((request.endGrid ?? request.startGrid) > 0)) return { verbs: [], rejected: 'quantize grids must be greater than zero' };
+    const endGrid = request.endGrid ?? request.startGrid;
+    const strength = (request.strength ?? 100) / 100;
+    const swing = request.swing ?? 0;
+    const threshold = request.threshold ?? 0;
+    const position = request.position ?? 0;
+    const roundPos = Math.round(position / request.startGrid) * request.startGrid;
+    const offset = roundPos - position;
+    const verbs: Verb[] = [];
+    for (const id of noteIds) {
+        const found = findNote(arrangement, id);
+        if (!found) continue;
+        const note = found.note;
+        const candidateStart = quantizeCandidate(note.tick, request.startGrid, offset, swing);
+        const startDelta = candidateStart - note.tick;
+        const movedStart = snapStart && Math.abs(startDelta) >= threshold ? note.tick + Math.round(startDelta * strength) : note.tick;
+        const patch: { tick?: number; durTick?: number } = {};
+        if (snapStart && movedStart !== note.tick) patch.tick = movedStart;
+        if (snapEnd) {
+            const oldEnd = note.tick + note.durTick;
+            const candidateEnd = quantizeCandidate(oldEnd, endGrid, offset, swing);
+            const endDelta = candidateEnd - oldEnd;
+            if (Math.abs(endDelta) >= threshold) {
+                let duration = candidateEnd - candidateStart;
+                if (duration === 0) duration = endGrid;
+                patch.durTick = duration;
+            }
+        }
+        if (Object.keys(patch).length) verbs.push({ kind: 'editNote', noteId: note.id!, patch });
+    }
+    return { verbs };
 }

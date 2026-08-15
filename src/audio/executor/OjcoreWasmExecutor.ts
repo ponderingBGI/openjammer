@@ -866,6 +866,14 @@ export class OjcoreWasmExecutor implements Executor {
         }
     }
 
+    auditionNote(targetNodeId: string | number, pitch: number, velocity: number, on: boolean): void {
+        const node = typeof targetNodeId === 'number' ? targetNodeId : this.index.get(targetNodeId);
+        if (node === undefined) return;
+        const note = Math.max(0, Math.min(127, Math.round(pitch)));
+        if (on) this.send({ NoteOn: { node, note, vel: Math.max(1, Math.min(127, Math.round(velocity))) } });
+        else this.send({ NoteOff: { node, note } });
+    }
+
     activateControlSignal(connectionId: string): void {
         this.emitSignal(connectionId, 1);
     }

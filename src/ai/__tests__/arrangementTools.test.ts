@@ -117,6 +117,32 @@ describe('createArrangementPort — live binding to the arrangement store', () =
         expect(useArrangementStore.getState().arrangement).toEqual(before);
     });
 
+    it('BC-30..37 dispatches the public piano-note ops through the shared lowering layer', () => {
+        const port = createArrangementPort();
+        const before = structuredClone(useArrangementStore.getState().arrangement!);
+        const clip = before.tracks[0]!.clips[0]!;
+        const source = before.sources![clip.sourceId]!;
+        if (source.kind !== 'midi') throw new Error('fixture clip must be MIDI');
+        const target = source.notes[0]!;
+
+        const result = port.applyOps!([
+            { op: 'drawNote', clipId: clip.id!, note: { tick: 123, durTick: 61, pitch: 73, vel: 55 } },
+            { op: 'setVelocity', noteIds: [target.id!], mode: 'set', amount: 77 },
+            { op: 'transposeNotes', noteIds: [target.id!], semitones: 1 },
+            { op: 'quantizeNotes', targets: [target.id!], grid: 240, strength: 100 },
+        ]);
+
+        expect(result.ok).toBe(true);
+        const nextSource = useArrangementStore.getState().arrangement!.sources![clip.sourceId]!;
+        if (nextSource.kind !== 'midi') throw new Error('edited source must remain MIDI');
+        expect(nextSource.notes).toContainEqual(expect.objectContaining({ tick: 123, durTick: 61, pitch: 73, vel: 55 }));
+        expect(nextSource.notes.find((note) => note.id === target.id)).toEqual(expect.objectContaining({ vel: 77, pitch: target.pitch + 1 }));
+        result.undo();
+        const undone = useArrangementStore.getState().arrangement!;
+        // Id minting is deliberately monotonic across undo; the song content is exact.
+        expect({ ...undone, idCounter: before.idCounter }).toEqual(before);
+    });
+
     it('a bad verb fails the call atomically (no partial apply)', () => {
         const port = createArrangementPort();
         const before = useArrangementStore.getState().arrangement!.tempoBpm;

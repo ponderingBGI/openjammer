@@ -23,14 +23,18 @@ export function growPitchRange(range: PitchRange, min: number, max: number): Pit
 interface TrackLaneViewStore {
     pitchRanges: Record<string, PitchRange>;
     laneHeights: Record<string, number>;
+    expandedPianoRolls: Record<string, string>;
     rememberPitchRange: (trackId: string, range: PitchRange) => void;
     setLaneHeight: (trackId: string, height: number) => void;
     resetPitchRanges: () => void;
+    togglePianoRoll: (trackId: string, clipId: string) => void;
+    closePianoRoll: (trackId: string) => void;
 }
 
 export const useTrackLaneViewStore = create<TrackLaneViewStore>((set) => ({
     pitchRanges: {},
     laneHeights: {},
+    expandedPianoRolls: {},
     rememberPitchRange: (trackId, range) => {
         set((state) => {
             const current = state.pitchRanges[trackId];
@@ -42,4 +46,19 @@ export const useTrackLaneViewStore = create<TrackLaneViewStore>((set) => ({
         laneHeights: { ...state.laneHeights, [trackId]: Math.max(28, Math.min(480, height)) },
     })),
     resetPitchRanges: () => set({ pitchRanges: {} }),
+    togglePianoRoll: (trackId, clipId) => set((state) => {
+        const open = state.expandedPianoRolls[trackId] === clipId;
+        const expandedPianoRolls = { ...state.expandedPianoRolls };
+        if (open) delete expandedPianoRolls[trackId];
+        else expandedPianoRolls[trackId] = clipId;
+        return {
+            expandedPianoRolls,
+            laneHeights: { ...state.laneHeights, [trackId]: open ? 72 : Math.max(220, state.laneHeights[trackId] ?? 72) },
+        };
+    }),
+    closePianoRoll: (trackId) => set((state) => {
+        const expandedPianoRolls = { ...state.expandedPianoRolls };
+        delete expandedPianoRolls[trackId];
+        return { expandedPianoRolls, laneHeights: { ...state.laneHeights, [trackId]: 72 } };
+    }),
 }));

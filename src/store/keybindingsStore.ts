@@ -158,6 +158,7 @@ export const keybindingActions: KeybindingAction[] = [
     { id: 'arrangement.split', label: 'Split Clips at Edit Point', category: 'Arrangement', defaultBinding: { key: 's' }, scope: 'surface', surface: 'arrangement' },
     { id: 'arrangement.toggleRipple', label: 'Toggle Ripple Mode', category: 'Arrangement', defaultBinding: { key: 'r' }, scope: 'surface', surface: 'arrangement' },
     { id: 'arrangement.escape', label: 'Clear Arrangement Selection', category: 'Arrangement', defaultBinding: { key: 'Escape' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.openPianoRoll', label: 'Open Selected MIDI Clip in Piano Roll', category: 'Arrangement', defaultBinding: { key: 'Enter' }, scope: 'surface', surface: 'arrangement' },
     ...Array.from({ length: 9 }, (_, index): KeybindingAction => ({
         id: `mode.${index + 1}`,
         label: `Switch to Mode ${index + 1}`,
