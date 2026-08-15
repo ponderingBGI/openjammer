@@ -37,7 +37,8 @@ use ojcore::meter::{event_frame, return_frame};
 use ojcore::{
     compile, compile_resilient_with_state, master_param, CommandConsumer, CommandProducer,
     CommandQueue, CompileError, Engine, EventRing, MeterRing, PluginManifest, PluginRegistry,
-    ProgramSwap, StateResolver,
+    ProgramSwap, RtCell, StateResolver, TempoMapRt, TimedCommandProducer, TimedCommandQueue,
+    TimelineRt,
 };
 use ojcore_native::{
     device_fault_channel, install_device_listener, probe_default_output, AssetCatalog, AssetError,
@@ -48,7 +49,7 @@ use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescrip
 use ojinstrument::{register_all, RegisterOpts};
 use ojproto::{
     AssetId, AssetRef, EngineFrame, Event, EventKind, NodeIdx, OjGraph, RtCommand, RtEvent,
-    Severity, Source,
+    Severity, Source, TempoMap, TimedCommand, Timeline,
 };
 use ojwasm::WasmHostLoader;
 
@@ -147,9 +148,14 @@ pub struct EngineBackend {
     /// Re-created whenever the host (re)starts, since the consumer half moves
     /// into the new audio callback.
     producer: CommandProducer,
+    /// Control end of the independent timestamped command ring.
+    timed_producer: TimedCommandProducer,
     /// The graph hot-swap mailbox. `push_graph` publishes a freshly compiled
     /// program here per the unit's contract; see [`EngineBackend::push_graph`].
     swap: ProgramSwap,
+    /// Swap-whole tempo and timeline publications retained across graph swaps.
+    tempo_map: RtCell<TempoMapRt>,
+    timeline: RtCell<TimelineRt>,
     /// The stream request the host (re)starts with.
     stream: StreamRequest,
     /// Control-side clone of the engine's RT -> control meter return ring. The
@@ -289,6 +295,8 @@ impl EngineBackend {
             stream.sample_rate = rate;
         }
         let swap = ProgramSwap::new();
+        let tempo_map = RtCell::new(TempoMapRt::one_point(stream.sample_rate, 120.0, 4, 4));
+        let timeline = RtCell::new(TimelineRt::empty(stream.sample_rate));
         let meter_ring = Arc::new(MeterRing::new());
         let event_ring = Arc::new(EventRing::new());
 
@@ -306,6 +314,8 @@ impl EngineBackend {
         // publishes.
         engine.attach_meter_ring(Some(Arc::clone(&meter_ring)));
         engine.attach_event_ring(Some(Arc::clone(&event_ring)));
+        engine.attach_tempo_map(Some(tempo_map.rx()));
+        engine.attach_timeline(Some(timeline.rx()));
         // Metering is enabled for the engine's whole life. With publish-only graph
         // swaps the engine INSTANCE persists inside the audio callback, so we can
         // no longer flip its flag from the control thread on the next push (the
@@ -317,12 +327,21 @@ impl EngineBackend {
 
         // Split a fresh command ring; the consumer moves into the audio host.
         let (producer, consumer) = CommandQueue::split(COMMAND_RING_CAP);
+        let (timed_producer, timed_consumer) = TimedCommandQueue::split(COMMAND_RING_CAP);
 
         // Try to start audio. No device => keep the backend alive without a host
         // (the expected sandbox path); any other host error is also non-fatal
         // here — the next `push_graph` re-attempts the start. The host adopts
         // UI graph edits in-callback via the swap mailbox (no stream restart).
-        let host = match AudioHost::start_with_swap(stream, engine, consumer, swap.rx()) {
+        let host = match AudioHost::start_with_swap_timing_on_device(
+            stream,
+            engine,
+            consumer,
+            timed_consumer,
+            swap.rx(),
+            None,
+            None,
+        ) {
             Ok(h) => Some(h),
             Err(HostError::NoOutputDevice) => {
                 eprintln!(
@@ -340,7 +359,10 @@ impl EngineBackend {
             registry,
             host,
             producer,
+            timed_producer,
             swap,
+            tempo_map,
+            timeline,
             stream,
             meter_ring,
             event_ring,
@@ -666,17 +688,21 @@ impl EngineBackend {
         let mut engine = Engine::new(program);
         engine.attach_meter_ring(Some(Arc::clone(&self.meter_ring)));
         engine.attach_event_ring(Some(Arc::clone(&self.event_ring)));
+        engine.attach_tempo_map(Some(self.tempo_map.rx()));
+        engine.attach_timeline(Some(self.timeline.rx()));
         engine.set_metering(true); // always-on; see `new()`.
         let (producer, consumer) = CommandQueue::split(COMMAND_RING_CAP);
+        let (timed_producer, timed_consumer) = TimedCommandQueue::split(COMMAND_RING_CAP);
 
         // ANY start failure is NON-FATAL (matching [`EngineBackend::new`]): the
         // producer is live so commands still validate, and the next `push_graph`
         // re-attempts the start. Covers a device-less sandbox AND a present-but-
         // incompatible default output.
-        match self.open_host(engine, consumer) {
+        match self.open_host(engine, consumer, timed_consumer) {
             Ok(h) => {
                 self.host = Some(h);
                 self.producer = producer;
+                self.timed_producer = timed_producer;
             }
             Err(e) => {
                 // Device-less or incompatible default output: the start failed.
@@ -696,6 +722,7 @@ impl EngineBackend {
                     self.emit_lifecycle(Severity::Warn, format!("audio host failed to start: {e}"));
                 }
                 self.producer = producer;
+                self.timed_producer = timed_producer;
             }
         }
         Ok(())
@@ -831,6 +858,30 @@ impl EngineBackend {
     /// ring drops the command rather than blocking the control thread.
     pub fn send_command(&mut self, cmd: RtCommand) -> Result<(), BackendError> {
         self.producer.push(cmd).map_err(|_| BackendError::RingFull)
+    }
+
+    /// Enqueue a sample-addressed live command on the dedicated second ring.
+    pub fn send_timed_command(&mut self, cmd: TimedCommand) -> Result<(), BackendError> {
+        self.timed_producer
+            .push(cmd)
+            .map_err(|_| BackendError::RingFull)
+    }
+
+    /// Compile and atomically publish a complete tempo map.
+    pub fn push_tempo_map(&mut self, map: &TempoMap) -> Result<(), BackendError> {
+        self.tempo_map.publish(TempoMapRt::from_wire(map));
+        self.tempo_map.collect();
+        Ok(())
+    }
+
+    /// Compile and atomically publish a complete authored timeline. Musical
+    /// positions have already been resolved by conduct; this validates/sorts
+    /// the absolute frame form against the currently published tempo snapshot.
+    pub fn push_timeline(&mut self, timeline: &Timeline) -> Result<(), BackendError> {
+        let map = self.tempo_map.load_full();
+        self.timeline.publish(TimelineRt::from_wire(timeline, &map));
+        self.timeline.collect();
+        Ok(())
     }
 
     // --- U-EXEC-PARITY capability seam (control-rate) ----------------------
@@ -1219,14 +1270,16 @@ impl EngineBackend {
         &mut self,
         engine: Engine,
         consumer: CommandConsumer,
+        timed_consumer: ojcore::TimedCommandConsumer,
     ) -> Result<AudioHost, HostError> {
         let mut req = self.stream;
         // The duplex input is opened iff mic capture is wired to a live node.
         req.duplex_input = self.mic_node.is_some();
-        AudioHost::start_with_swap_on_device(
+        AudioHost::start_with_swap_timing_on_device(
             req,
             engine,
             consumer,
+            timed_consumer,
             self.swap.rx(),
             self.selected_output_device.clone(),
             self.mic_node,

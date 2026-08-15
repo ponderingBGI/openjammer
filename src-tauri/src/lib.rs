@@ -26,7 +26,7 @@ use std::sync::Mutex;
 
 use engine::BackendState;
 use ojhost::{PluginDescriptor, PluginEditor};
-use ojproto::{EngineFrame, Event, NodeIdx, OjGraph, RtCommand};
+use ojproto::{EngineFrame, Event, NodeIdx, OjGraph, RtCommand, TempoMap, TimedCommand, Timeline};
 use tauri::Manager;
 
 /// Push a full graph from the UI: recompile it against the plugin registry and
@@ -54,6 +54,42 @@ fn send_command(cmd: RtCommand, state: tauri::State<'_, BackendState>) -> Result
         .lock()
         .map_err(|_| "engine backend mutex poisoned".to_string())?
         .send_command(cmd)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn push_timeline(timeline: Timeline, state: tauri::State<'_, BackendState>) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .push_timeline(&timeline)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn push_tempo_map(
+    tempo_map: TempoMap,
+    state: tauri::State<'_, BackendState>,
+) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .push_tempo_map(&tempo_map)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn send_timed_command(
+    timed: TimedCommand,
+    state: tauri::State<'_, BackendState>,
+) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .send_timed_command(timed)
         .map_err(|e| e.to_string())
 }
 
@@ -772,6 +808,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             push_graph,
             send_command,
+            push_timeline,
+            push_tempo_map,
+            send_timed_command,
             query_stream,
             engine_running,
             scan_plugins,

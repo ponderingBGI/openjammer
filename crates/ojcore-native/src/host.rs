@@ -29,7 +29,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, DeviceId, SampleFormat, Stream, StreamConfig};
 use rtrb::{Consumer, Producer, RingBuffer};
 
-use ojcore::{CommandConsumer, Engine, ProgramSwapRx};
+use ojcore::{CommandConsumer, Engine, ProgramSwapRx, TimedCommandConsumer};
 use ojproto::NodeIdx;
 
 use crate::asset::Pcm;
@@ -43,6 +43,8 @@ use crate::recorder::{Recorder, RecorderSink};
 pub trait BlockProcessor: Send {
     /// Drain every pending command from the UI->RT ring (block start).
     fn drain_commands(&mut self, rx: &mut CommandConsumer);
+    /// Drain the independent timestamped command ring at block start.
+    fn drain_timed_commands(&mut self, _rx: &mut TimedCommandConsumer) {}
     /// Render `nframes` of mono audio into `out`.
     fn render(&mut self, out: &mut [f32], nframes: usize);
     /// Render `nframes` into each of `outs.len()` PLANAR device channels. Default:
@@ -75,6 +77,10 @@ impl BlockProcessor for Engine {
     #[inline]
     fn drain_commands(&mut self, rx: &mut CommandConsumer) {
         self.drain(rx);
+    }
+    #[inline]
+    fn drain_timed_commands(&mut self, rx: &mut TimedCommandConsumer) {
+        self.drain_timed(rx);
     }
     #[inline]
     fn render(&mut self, out: &mut [f32], nframes: usize) {
@@ -126,6 +132,10 @@ impl BlockProcessor for MicFedEngine<'_> {
         self.engine.drain(rx);
     }
     #[inline]
+    fn drain_timed_commands(&mut self, rx: &mut TimedCommandConsumer) {
+        self.engine.drain_timed(rx);
+    }
+    #[inline]
     fn render(&mut self, out: &mut [f32], nframes: usize) {
         if let Some(buf) = self.engine.input_mut(self.mic_node, 0) {
             let n = nframes.min(buf.len());
@@ -165,10 +175,38 @@ pub fn render_block<P: BlockProcessor>(
     data: &mut [f32],
     channels: usize,
     scratch: &mut [f32],
+    capture: Option<&mut RecorderSink>,
+    looper_capture: Option<&mut LooperCaptureSink>,
+) {
+    render_block_timed(
+        proc,
+        rx,
+        None,
+        data,
+        channels,
+        scratch,
+        capture,
+        looper_capture,
+    );
+}
+
+/// Timestamp-aware sibling of [`render_block`]. Existing immediate-command
+/// callers keep the original API; the live DAW host supplies the second ring.
+#[allow(clippy::too_many_arguments)]
+pub fn render_block_timed<P: BlockProcessor>(
+    proc: &mut P,
+    rx: &mut CommandConsumer,
+    mut timed_rx: Option<&mut TimedCommandConsumer>,
+    data: &mut [f32],
+    channels: usize,
+    scratch: &mut [f32],
     mut capture: Option<&mut RecorderSink>,
     mut looper_capture: Option<&mut LooperCaptureSink>,
 ) {
     proc.drain_commands(rx);
+    if let Some(rx) = timed_rx.as_mut() {
+        proc.drain_timed_commands(rx);
+    }
 
     if channels == 0 {
         data.fill(0.0);
@@ -623,6 +661,8 @@ struct StartOptions {
     /// The lock-free graph hot-swap mailbox the callback adopts at each block
     /// boundary (the live UI-edit path).
     swap_rx: Option<ProgramSwapRx>,
+    /// Dedicated timestamped command-ring consumer.
+    timed_rx: Option<TimedCommandConsumer>,
     /// The cpal [`DeviceId`] string to open the OUTPUT stream on; `None` (or an
     /// unknown id) falls back to the system default output device.
     device_id: Option<String>,
@@ -804,6 +844,31 @@ impl AudioHost {
         )
     }
 
+    /// Live DAW path with graph swap plus the independent timestamped command
+    /// ring. Immediate [`ojproto::RtCommand`] behavior remains unchanged.
+    pub fn start_with_swap_timing_on_device(
+        req: StreamRequest,
+        engine: Engine,
+        rx: CommandConsumer,
+        timed_rx: TimedCommandConsumer,
+        swap_rx: ProgramSwapRx,
+        device_id: Option<String>,
+        mic_node: Option<NodeIdx>,
+    ) -> Result<Self, HostError> {
+        Self::start_inner(
+            req,
+            engine,
+            rx,
+            StartOptions {
+                swap_rx: Some(swap_rx),
+                timed_rx: Some(timed_rx),
+                device_id,
+                mic_node,
+                ..StartOptions::default()
+            },
+        )
+    }
+
     /// Like [`start`](Self::start) but the duplex input is captured into
     /// `capture` (a [`RecorderSink`]) on the RT thread — the seam the loopback
     /// latency harness uses to record the round-trip impulse on real hardware.
@@ -863,6 +928,7 @@ impl AudioHost {
         let StartOptions {
             input_capture,
             swap_rx,
+            mut timed_rx,
             device_id,
             mic_node,
         } = opts;
@@ -1046,9 +1112,10 @@ impl AudioHost {
                                 mic,
                                 mic_node: node,
                             };
-                            render_block(
+                            render_block_timed(
                                 &mut fed,
                                 &mut rx,
+                                timed_rx.as_mut(),
                                 data,
                                 ch,
                                 &mut scratch,
@@ -1056,9 +1123,10 @@ impl AudioHost {
                                 Some(&mut looper_sink),
                             );
                         }
-                        _ => render_block(
+                        _ => render_block_timed(
                             &mut engine,
                             &mut rx,
+                            timed_rx.as_mut(),
                             data,
                             ch,
                             &mut scratch,

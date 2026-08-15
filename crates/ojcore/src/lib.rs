@@ -85,6 +85,7 @@ pub mod exec;
 pub mod meter;
 pub mod resilience;
 pub mod tempo;
+pub mod timeline;
 pub mod transport;
 
 #[cfg(feature = "std")]
@@ -136,10 +137,14 @@ pub use structural::{
 pub use meter::{Meter, MeterBank};
 pub use resilience::{sanitize, CommandCoalescer, NodeBudget};
 pub use tempo::{MetricCursor, MetricPosition, TempoMapRt};
+pub use timeline::TimelineRt;
 pub use transport::{DeclickAmp, Disposition, Motion, Transport, TransportFsm, TransportPos};
 
 #[cfg(feature = "std")]
-pub use command::{CommandConsumer, CommandProducer, CommandQueue};
+pub use command::{
+    CommandConsumer, CommandProducer, CommandQueue, TimedCommandConsumer, TimedCommandProducer,
+    TimedCommandQueue,
+};
 #[cfg(feature = "std")]
 pub use meter::{EventRing, MeterRing};
 #[cfg(feature = "std")]

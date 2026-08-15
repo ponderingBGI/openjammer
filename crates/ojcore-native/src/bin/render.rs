@@ -25,13 +25,13 @@
 use ojcore::effects::{biquad_param, delay_param};
 use ojcore::{
     compile, compile_with_assets, pan_param, AssetPcm, AssetResolver, Engine, PluginRegistry,
-    BIQUAD_ID, DELAY_ID, PAN_ID, SPEAKER_OUT_ID,
+    TempoMapRt, TimelineRt, BIQUAD_ID, DELAY_ID, PAN_ID, SPEAKER_OUT_ID,
 };
 use ojcore_native::{analyze_stereo, AssetStore, AudioReport, OfflineDriver, Pcm};
 use ojinstrument::{param as ip, register_all, RegisterOpts, OSC_ID};
 use ojproto::{
     AssetId, AssetRef, ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, Param, PrimitiveKind,
-    RtCommand,
+    RtCommand, TempoMap, Timeline,
 };
 use serde::Deserialize;
 
@@ -317,6 +317,8 @@ impl AssetResolver for CliAssets {
 fn render_graph(
     path: &str,
     schedule: Option<&str>,
+    timeline_path: Option<&str>,
+    tempo_map_path: Option<&str>,
     seconds: f32,
     assets: &[(u32, String)],
     code_nodes: &[(String, String)],
@@ -356,6 +358,39 @@ fn render_graph(
     let engine = Engine::new(program);
     let mut driver = OfflineDriver::new(engine, block);
 
+    if let Some(path) = tempo_map_path {
+        let bytes =
+            std::fs::read(path).unwrap_or_else(|e| fail(&format!("read tempo map {path}: {e}")));
+        let map: TempoMap = serde_json::from_slice(&bytes)
+            .unwrap_or_else(|e| fail(&format!("parse tempo map {path}: {e}")));
+        driver
+            .engine_mut()
+            .install_tempo_map(TempoMapRt::from_wire(&map));
+    }
+    if let Some(path) = timeline_path {
+        let bytes =
+            std::fs::read(path).unwrap_or_else(|e| fail(&format!("read timeline {path}: {e}")));
+        let timeline: Timeline = serde_json::from_slice(&bytes)
+            .unwrap_or_else(|e| fail(&format!("parse timeline {path}: {e}")));
+        // The timeline is already in absolute frames. A one-point map is enough
+        // when no explicit map was supplied; with a map, the engine has already
+        // installed the matching publication above.
+        let compile_map = tempo_map_path.map_or_else(
+            || TempoMapRt::one_point(sample_rate, 120.0, 4, 4),
+            |map_path| {
+                let bytes = std::fs::read(map_path)
+                    .unwrap_or_else(|e| fail(&format!("read tempo map {map_path}: {e}")));
+                let map: TempoMap = serde_json::from_slice(&bytes)
+                    .unwrap_or_else(|e| fail(&format!("parse tempo map {map_path}: {e}")));
+                TempoMapRt::from_wire(&map)
+            },
+        );
+        driver
+            .engine_mut()
+            .install_timeline(TimelineRt::from_wire(&timeline, &compile_map));
+        driver.engine_mut().apply(RtCommand::TransportPlay);
+    }
+
     let events = load_schedule(schedule, sample_rate);
     let frames = (seconds.max(0.0) * sample_rate as f32) as usize;
     let mut idx = 0usize;
@@ -378,6 +413,8 @@ struct Opts {
     secs: Option<f32>,
     graph: Option<String>,
     schedule: Option<String>,
+    timeline: Option<String>,
+    tempo_map: Option<String>,
     report: Option<String>,
     dump_graph: Option<String>,
     asserts: Vec<String>,
@@ -394,6 +431,8 @@ fn parse_args() -> Opts {
         secs: None,
         graph: None,
         schedule: None,
+        timeline: None,
+        tempo_map: None,
         report: None,
         dump_graph: None,
         asserts: Vec::new(),
@@ -407,6 +446,8 @@ fn parse_args() -> Opts {
         match a.as_str() {
             "--graph" => o.graph = it.next(),
             "--schedule" => o.schedule = it.next(),
+            "--timeline" => o.timeline = it.next(),
+            "--tempo-map" => o.tempo_map = it.next(),
             "--out" => o.out = it.next(),
             "--report" => o.report = it.next(),
             "--dump-graph" => o.dump_graph = it.next(),
@@ -640,6 +681,8 @@ fn main() {
         let (l, r, sr) = render_graph(
             &gp,
             opts.schedule.as_deref(),
+            opts.timeline.as_deref(),
+            opts.tempo_map.as_deref(),
             opts.secs.unwrap_or(2.0),
             &opts.assets,
             &opts.code_nodes,

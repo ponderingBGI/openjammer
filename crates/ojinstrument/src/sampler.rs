@@ -160,6 +160,9 @@ pub struct SamplerInstrument {
     root_override: Option<u8>,
     sample: Option<Arc<SamplerSample>>,
     voices: [SamplerVoice; MAX_VOICES],
+    /// Source-frame offset consumed by the next `note_on`. Timeline audio clips
+    /// set this through the protocol's two reserved internal parameters.
+    next_source_offset: u64,
     alloc: VoiceAlloc,
 }
 
@@ -182,6 +185,7 @@ impl SamplerInstrument {
                 lp_r: 0.0,
                 lp_coef: 1.0,
             }; MAX_VOICES],
+            next_source_offset: 0,
             alloc: VoiceAlloc::new(),
         }
     }
@@ -283,14 +287,20 @@ impl DspInstance for SamplerInstrument {
         // Pitch ratio: 2^((note-root)/12), corrected for any sample/engine SR
         // mismatch so the recorded pitch lands at unity at the root note.
         let root = self.effective_root(sample);
-        let semis = note as f32 - root;
+        // 255 is the engine-internal timeline-window trigger: play at the
+        // configured root (unity pitch) while keying the voice as note 127 so
+        // the engine's u128 held-note mask can release it on stop/locate.
+        let voice_note = if note == u8::MAX { 127 } else { note };
+        let pitch_note = if note == u8::MAX { root } else { note as f32 };
+        let semis = pitch_note - root;
         let pitch = libm::powf(2.0, semis / 12.0);
         let sr_correction = sample.sample_rate / self.sample_rate;
         let inc = pitch * sr_correction;
 
-        let (slot, _stolen) = self.alloc.allocate(note);
+        let (slot, _stolen) = self.alloc.allocate(voice_note);
         let v = &mut self.voices[slot];
-        v.pos = 0.0;
+        v.pos = self.next_source_offset as f32;
+        self.next_source_offset = 0;
         v.inc = inc;
         v.amp = velocity_to_amp(vel).max(0.0);
         // Velocity → brightness: soft notes get a lower low-pass cutoff.
@@ -323,6 +333,14 @@ impl DspInstance for SamplerInstrument {
                 } else {
                     Some(value.clamp(0.0, 127.0) as u8)
                 };
+            }
+            ojproto::sched_param::SAMPLER_OFFSET_LOW => {
+                let low = value.max(0.0) as u64 & 0x00ff_ffff;
+                self.next_source_offset = (self.next_source_offset & 0x0000_ffff_ff00_0000) | low;
+            }
+            ojproto::sched_param::SAMPLER_OFFSET_HIGH => {
+                let high = value.max(0.0) as u64 & 0x00ff_ffff;
+                self.next_source_offset = (high << 24) | (self.next_source_offset & 0x00ff_ffff);
             }
             _ => {}
         }

@@ -9,23 +9,30 @@
 //! `no_std`: this module is `alloc`-only (it never names `std`), so it compiles
 //! unchanged for the `wasm32` AudioWorklet.
 
+use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use ojproto::{NodeIdx, PrimitiveKind, RtCommand};
+use ojproto::{
+    sched_event_kind, sched_param, NodeIdx, PrimitiveKind, RtCommand, SchedEvent, TimedCommand,
+};
 
 use crate::compile::CompiledProgram;
 use crate::dsp::ProcessCtx;
 use crate::meter::MeterBank;
 use crate::resilience::{sanitize, NodeBudget};
 use crate::tempo::{MetricCursor, TempoMapRt};
+use crate::timeline::TimelineRt;
 use crate::transport::{Transport, TransportPos};
 
 /// Hard cap on channels materialized on the stack per node, so the render step
 /// allocates nothing. Real nodes are mono/stereo; this is comfortably above any
 /// node's port count and extra channels degrade gracefully (are ignored).
 const MAX_CH: usize = 32;
+/// Maximum event/transport subdivisions performed in one caller block.
+pub const MAX_SPLITS: usize = 32;
+const TIMED_CAPACITY: usize = 1024;
 
 /// A runnable engine: a compiled program plus the RT-thread-local channel
 /// pointer scratch its `process_block` re-points each block.
@@ -45,6 +52,19 @@ pub struct Engine {
     /// Native swap-whole tempo publication handle. Loaded once per process block.
     #[cfg(feature = "std")]
     tempo_map_rx: Option<crate::swap::RtCellRx<TempoMapRt>>,
+    /// Current immutable authored timeline snapshot and engine-local cursor.
+    timeline: Arc<TimelineRt>,
+    #[cfg(feature = "std")]
+    timeline_rx: Option<crate::swap::RtCellRx<TimelineRt>>,
+    timeline_cursor: usize,
+    timeline_cursor_pos: u64,
+    timeline_controls_ranges: bool,
+    /// Live timestamped commands drained from the second host ring. Capacity is
+    /// reserved at construction; the RT path never grows it.
+    timed: VecDeque<TimedCommand>,
+    last_timed_at: u64,
+    /// Exactly the currently sounding MIDI notes for each program slot.
+    held: Vec<u128>,
     metric_cursor: MetricCursor,
     /// U15: per-node + master RMS/peak meters, behind a cheap enable toggle.
     /// Sized to the program's node count; the render loop only accumulates.
@@ -88,6 +108,15 @@ impl Engine {
             tempo_map: Arc::new(TempoMapRt::one_point(sample_rate, 120.0, 4, 4)),
             #[cfg(feature = "std")]
             tempo_map_rx: None,
+            timeline: Arc::new(TimelineRt::empty(sample_rate)),
+            #[cfg(feature = "std")]
+            timeline_rx: None,
+            timeline_cursor: 0,
+            timeline_cursor_pos: 0,
+            timeline_controls_ranges: false,
+            timed: VecDeque::with_capacity(TIMED_CAPACITY),
+            last_timed_at: 0,
+            held: vec![0; n],
             metric_cursor: MetricCursor::default(),
             meters: MeterBank::with_nodes(n),
             budget: NodeBudget::with_nodes(n),
@@ -159,6 +188,62 @@ impl Engine {
     pub fn attach_tempo_map(&mut self, rx: Option<crate::swap::RtCellRx<TempoMapRt>>) {
         self.tempo_map_rx = rx;
         self.metric_cursor = MetricCursor::default();
+    }
+
+    /// Install a compiled timeline directly (offline and wasm hosts).
+    pub fn install_timeline(&mut self, timeline: TimelineRt) {
+        self.timeline = Arc::new(timeline);
+        self.timeline_controls_ranges = true;
+        self.sync_timeline_cursor();
+    }
+
+    /// Attach the native swap-whole timeline reader.
+    #[cfg(feature = "std")]
+    pub fn attach_timeline(&mut self, rx: Option<crate::swap::RtCellRx<TimelineRt>>) {
+        self.timeline_controls_ranges = rx.is_some();
+        self.timeline_rx = rx;
+        self.sync_timeline_snapshot();
+    }
+
+    /// Queue one live timestamped command without allocating. Returns `false`
+    /// when the fixed pending capacity is exhausted.
+    pub fn enqueue_timed(&mut self, timed: TimedCommand) -> bool {
+        if timed.at == 0 {
+            self.apply_rt(timed.cmd);
+            return true;
+        }
+        debug_assert!(self.timed.is_empty() || timed.at >= self.last_timed_at);
+        if self.timed.len() >= TIMED_CAPACITY {
+            return false;
+        }
+        self.last_timed_at = timed.at;
+        self.timed.push_back(timed);
+        true
+    }
+
+    fn sync_timeline_snapshot(&mut self) {
+        #[cfg(feature = "std")]
+        if let Some(rx) = self.timeline_rx.as_ref() {
+            let next = rx.load_full();
+            if !Arc::ptr_eq(&next, &self.timeline) {
+                self.timeline = next;
+                self.sync_timeline_cursor();
+                return;
+            }
+        }
+        if self.timeline_cursor_pos != self.transport.sample_pos() {
+            self.sync_timeline_cursor();
+        }
+    }
+
+    fn sync_timeline_cursor(&mut self) {
+        let at = self.transport.sample_pos();
+        self.timeline_cursor = self.timeline.seek(at);
+        self.timeline_cursor_pos = at;
+        if self.timeline_controls_ranges {
+            self.transport
+                .set_ranges(self.timeline.loop_range(), self.timeline.punch_range());
+        }
     }
 
     /// Install loop and punch ranges from the current timeline document.
@@ -399,11 +484,17 @@ impl Engine {
             RtCommand::NoteOn { node, note, vel } => {
                 if let Some(slot) = self.program.slot_of_id(node) {
                     self.program.instances[slot].note_on(note, vel);
+                    if note < 128 {
+                        self.held[slot] |= 1u128 << note;
+                    }
                 }
             }
             RtCommand::NoteOff { node, note } => {
                 if let Some(slot) = self.program.slot_of_id(node) {
                     self.program.instances[slot].note_off(note);
+                    if note < 128 {
+                        self.held[slot] &= !(1u128 << note);
+                    }
                 }
             }
             RtCommand::Bypass { node, on } => {
@@ -412,14 +503,71 @@ impl Engine {
                 }
             }
             RtCommand::TransportPlay => self.transport.play(),
-            RtCommand::TransportPause => self.transport.pause(),
-            RtCommand::Seek { samples } => self.transport.locate(samples),
+            RtCommand::TransportPause => {
+                self.release_held();
+                self.transport.pause();
+            }
+            RtCommand::Seek { samples } => {
+                self.release_held();
+                self.transport.locate(samples);
+                self.sync_timeline_cursor();
+            }
             RtCommand::TransportSet { flag, on } => self.transport.set_flag(flag, on),
             RtCommand::Looper { node, action, arg } => {
                 if let Some(slot) = self.program.slot_of_id(node) {
                     self.program.instances[slot].looper_action(action, arg);
                 }
             }
+        }
+    }
+
+    /// Release exactly the notes recorded as sounding, bounded by
+    /// `program.len() * 128` and allocation-free.
+    fn release_held(&mut self) {
+        for slot in 0..self.held.len() {
+            let mut mask = self.held[slot];
+            while mask != 0 {
+                let note = mask.trailing_zeros() as u8;
+                self.program.instances[slot].note_off(note);
+                mask &= mask - 1;
+            }
+            self.held[slot] = 0;
+        }
+    }
+
+    fn apply_sched_event(&mut self, event: SchedEvent) {
+        match event.kind {
+            sched_event_kind::SET_PARAM => self.apply_rt(RtCommand::SetParam {
+                node: event.node,
+                param: u16::from_le_bytes([event.a, event.b]),
+                value: event.value,
+            }),
+            sched_event_kind::NOTE_OFF => self.apply_rt(RtCommand::NoteOff {
+                node: event.node,
+                note: event.a,
+            }),
+            sched_event_kind::NOTE_ON => self.apply_rt(RtCommand::NoteOn {
+                node: event.node,
+                note: event.a,
+                vel: event.b,
+            }),
+            sched_event_kind::SAMPLER_START => {
+                let offset = ((event.value.max(0.0) as u64 & 0x00ff_ffff) << 16)
+                    | u16::from_le_bytes([event.a, event.b]) as u64;
+                if let Some(slot) = self.program.slot_of_id(event.node) {
+                    self.program.instances[slot].set_param(
+                        sched_param::SAMPLER_OFFSET_LOW,
+                        (offset & 0x00ff_ffff) as f32,
+                    );
+                    self.program.instances[slot].set_param(
+                        sched_param::SAMPLER_OFFSET_HIGH,
+                        ((offset >> 24) & 0x00ff_ffff) as f32,
+                    );
+                    self.program.instances[slot].note_on(u8::MAX, 127);
+                    self.held[slot] |= 1u128 << 127;
+                }
+            }
+            _ => {}
         }
     }
 
@@ -454,6 +602,8 @@ impl Engine {
         let n = program.len();
         self.meters.resize(n);
         self.budget.resize(n);
+        self.held.clear();
+        self.held.resize(n, 0);
         core::mem::replace(&mut self.program, program)
     }
 
@@ -483,28 +633,86 @@ impl Engine {
         #[cfg(feature = "std")]
         let map = self.tempo_snapshot();
 
+        self.sync_timeline_snapshot();
+
         let mut offset = 0;
+        let mut splits = 0;
         while offset < nframes {
             let remaining = nframes - offset;
-            let edge = self.transport.frames_until_edge(remaining);
+            let now = self.transport.sample_pos();
+
+            // Apply every overdue/current event before rendering the sample at
+            // `now`. Timeline events advance only with a rolling transport;
+            // live timed commands share the same absolute playhead.
+            let mut applied = false;
+            if self.transport.is_playing() {
+                while let Some(event) = self.timeline.events().get(self.timeline_cursor).copied() {
+                    if event.at > now {
+                        break;
+                    }
+                    self.timeline_cursor += 1;
+                    self.apply_sched_event(event);
+                    applied = true;
+                }
+            }
+            while self.timed.front().is_some_and(|event| event.at <= now) {
+                if let Some(event) = self.timed.pop_front() {
+                    self.apply_rt(event.cmd);
+                    applied = true;
+                }
+            }
+            if self.timed.is_empty() {
+                self.last_timed_at = 0;
+            }
+            if self.transport.sample_pos() != now {
+                self.sync_timeline_cursor();
+                splits += 1;
+                continue;
+            }
+
+            if splits >= MAX_SPLITS {
+                self.render_audio_span(outs, offset, remaining);
+                self.apply_declick(outs, offset, remaining);
+                self.transport.advance(remaining);
+                break;
+            }
+
+            let mut edge = self.transport.frames_until_edge(remaining);
+            if self.transport.is_playing() {
+                if let Some(event) = self.timeline.events().get(self.timeline_cursor) {
+                    edge = edge.min(event.at.saturating_sub(now) as usize);
+                }
+            }
+            if let Some(event) = self.timed.front() {
+                edge = edge.min(event.at.saturating_sub(now) as usize);
+            }
+
             if edge == 0 {
                 let before = self.transport.sample_pos();
                 self.transport.finish_edge();
-                if self.transport.sample_pos() == before {
+                if self.transport.sample_pos() != before {
+                    self.sync_timeline_cursor();
+                } else if !applied {
                     // Invalid/stale edge state must never spin the audio thread.
-                    self.render_audio_span(outs, offset, remaining);
-                    self.apply_declick(outs, offset, remaining);
-                    self.transport.advance(remaining);
-                    offset = nframes;
+                    edge = remaining;
+                } else {
+                    splits += 1;
+                    continue;
                 }
-                continue;
             }
 
             self.render_audio_span(outs, offset, edge);
             self.apply_declick(outs, offset, edge);
             self.transport.advance(edge);
             offset += edge;
+            let before_edge = self.transport.sample_pos();
             self.transport.finish_edge();
+            if self.transport.sample_pos() != before_edge {
+                self.sync_timeline_cursor();
+            } else {
+                self.timeline_cursor_pos = self.transport.sample_pos();
+            }
+            splits += 1;
         }
 
         for out in outs.iter_mut() {
@@ -883,8 +1091,9 @@ mod apply_rt_tests {
     use crate::dsp::{DspInstance, ProcessCtx};
     use alloc::boxed::Box;
     use alloc::rc::Rc;
-    use core::cell::Cell;
-    use ojproto::{looper_action, NodeIdx, PrimitiveKind, RtCommand};
+    use core::cell::{Cell, RefCell};
+    use ojproto::{looper_action, NodeIdx, PrimitiveKind, RtCommand, SchedEvent, Timeline};
+    use proptest::prelude::*;
 
     /// Shared sink the test keeps a handle to while the same handle lives inside
     /// the boxed mock instance — so a test can read back which RT method
@@ -897,6 +1106,9 @@ mod apply_rt_tests {
         last_note_off: Cell<Option<u8>>,
         last_set_param: Cell<Option<(u16, f32)>>,
         last_looper: Cell<Option<(u8, u32)>>,
+        note_on_count: Cell<u32>,
+        value: Cell<f32>,
+        spans: RefCell<Vec<usize>>,
     }
 
     /// A mock node that records every RT call it receives into a shared
@@ -911,12 +1123,21 @@ mod apply_rt_tests {
 
     impl DspInstance for ProbeNode {
         fn activate(&mut self, _sample_rate: f32, _max_block: usize) {}
-        fn process(&mut self, _ctx: &mut ProcessCtx<'_, '_>) {}
+        fn process(&mut self, ctx: &mut ProcessCtx<'_, '_>) {
+            self.state.spans.borrow_mut().push(ctx.nframes);
+            for out in ctx.outputs.iter_mut() {
+                out[..ctx.nframes].fill(self.state.value.get());
+            }
+        }
         fn set_param(&mut self, id: u16, value: f32) {
             self.state.last_set_param.set(Some((id, value)));
+            self.state.value.set(value);
         }
         fn note_on(&mut self, note: u8, vel: u8) {
             self.state.last_note_on.set(Some((note, vel)));
+            self.state
+                .note_on_count
+                .set(self.state.note_on_count.get() + 1);
         }
         fn note_off(&mut self, note: u8) {
             self.state.last_note_off.set(Some(note));
@@ -932,6 +1153,10 @@ mod apply_rt_tests {
     /// routed. Enough for `apply_rt` to resolve a slot, route
     /// notes/params/looper, and toggle bypass.
     fn probe_engine() -> (Engine, Rc<ProbeState>) {
+        probe_engine_with_block(4)
+    }
+
+    fn probe_engine_with_block(block: usize) -> (Engine, Rc<ProbeState>) {
         let state = Rc::new(ProbeState::default());
         // Slots: 0 = ProbeNode (id 7), 1 = SpeakerOut master (id 0).
         let instances: Vec<Box<dyn DspInstance>> = vec![
@@ -948,8 +1173,13 @@ mod apply_rt_tests {
         let program = CompiledProgram {
             sample_rate: 48_000,
             instances,
-            routing: vec![NodeRouting::default(), NodeRouting::default()],
-            out_bufs: vec![vec![vec![0.0; 4]], vec![]],
+            routing: vec![
+                NodeRouting::default(),
+                NodeRouting {
+                    inputs: vec![vec![crate::compile::Source { node: 0, port: 0 }]],
+                },
+            ],
+            out_bufs: vec![vec![vec![0.0; block]], vec![]],
             out_channels: vec![1, 1],
             in_channels: vec![1, 1],
             bypassed: vec![false, false],
@@ -957,13 +1187,163 @@ mod apply_rt_tests {
             ids,
             id_index,
             master_out: 1,
-            block_size: 4,
-            in_scratch: vec![vec![0.0; 4]],
+            block_size: block,
+            in_scratch: vec![vec![0.0; block]],
             max_in: 1,
             max_out: 1,
             schedule: vec![0, 1],
         };
         (Engine::new(program), state)
+    }
+
+    fn timeline(events: Vec<SchedEvent>, loop_range: Option<(u64, u64)>) -> TimelineRt {
+        let wire = Timeline {
+            sample_rate: 48_000,
+            events,
+            loop_range,
+            punch_range: None,
+            end: 64,
+        };
+        TimelineRt::from_wire(&wire, &TempoMapRt::one_point(48_000, 120.0, 4, 4))
+    }
+
+    #[test]
+    fn timeline_event_splits_at_exact_frame() {
+        let (mut engine, probe) = probe_engine();
+        engine.install_timeline(timeline(
+            vec![SchedEvent {
+                at: 2,
+                node: NodeIdx(7),
+                kind: sched_event_kind::NOTE_ON,
+                a: 64,
+                b: 100,
+                value: 0.0,
+            }],
+            None,
+        ));
+        engine.apply_rt(RtCommand::TransportPlay);
+        engine.process_block(&mut [0.0; 4], 4);
+        assert_eq!(&*probe.spans.borrow(), &[2, 2]);
+        assert_eq!(probe.note_on_count.get(), 1);
+    }
+
+    #[test]
+    fn timed_command_applies_at_exact_frame() {
+        let (mut engine, probe) = probe_engine();
+        let (mut tx, mut rx) = crate::TimedCommandQueue::split(4);
+        tx.push(TimedCommand {
+            at: 3,
+            cmd: RtCommand::NoteOn {
+                node: NodeIdx(7),
+                note: 61,
+                vel: 90,
+            },
+        })
+        .expect("timed ring has capacity");
+        engine.drain_timed(&mut rx);
+        engine.apply_rt(RtCommand::TransportPlay);
+        engine.process_block(&mut [0.0; 4], 4);
+        assert_eq!(&*probe.spans.borrow(), &[3, 1]);
+        assert_eq!(probe.last_note_on.get(), Some((61, 90)));
+    }
+
+    #[test]
+    fn loop_wrap_repeats_loop_start_event() {
+        let (mut engine, probe) = probe_engine();
+        engine.install_timeline(timeline(
+            vec![SchedEvent {
+                at: 1,
+                node: NodeIdx(7),
+                kind: sched_event_kind::NOTE_ON,
+                a: 60,
+                b: 100,
+                value: 0.0,
+            }],
+            Some((1, 3)),
+        ));
+        engine.apply_rt(RtCommand::TransportSet {
+            flag: ojproto::transport_flag::LOOP_ENABLE,
+            on: true,
+        });
+        engine.apply_rt(RtCommand::TransportPlay);
+        engine.process_block(&mut [0.0; 4], 4);
+        assert_eq!(probe.note_on_count.get(), 2);
+        assert_eq!(engine.sample_pos(), 2);
+    }
+
+    #[test]
+    fn stop_and_locate_release_only_held_notes() {
+        let (mut engine, probe) = probe_engine();
+        engine.apply_rt(RtCommand::NoteOn {
+            node: NodeIdx(7),
+            note: 60,
+            vel: 100,
+        });
+        engine.apply_rt(RtCommand::NoteOn {
+            node: NodeIdx(7),
+            note: 64,
+            vel: 100,
+        });
+        engine.apply_rt(RtCommand::NoteOff {
+            node: NodeIdx(7),
+            note: 60,
+        });
+        assert_eq!(engine.held[0], 1u128 << 64);
+        engine.apply_rt(RtCommand::TransportPause);
+        assert_eq!(probe.last_note_off.get(), Some(64));
+        assert_eq!(engine.held[0], 0);
+
+        engine.apply_rt(RtCommand::NoteOn {
+            node: NodeIdx(7),
+            note: 67,
+            vel: 100,
+        });
+        engine.apply_rt(RtCommand::Seek { samples: 12 });
+        assert_eq!(probe.last_note_off.get(), Some(67));
+        assert_eq!(engine.held[0], 0);
+    }
+
+    proptest! {
+        /// Named W3 gate: one timeline-driven block is bit-identical to the same
+        /// state changes rendered as explicit spans at every event boundary.
+        #[test]
+        fn split_determinism(
+            raw in prop::collection::vec((0u8..64, -0.5f32..0.5), 0..20)
+        ) {
+            let mut changes = raw;
+            changes.sort_by_key(|(at, _)| *at);
+            changes.dedup_by_key(|(at, _)| *at);
+
+            let (mut scheduled, _) = probe_engine_with_block(64);
+            let events = changes.iter().map(|&(at, value)| SchedEvent {
+                at: at as u64,
+                node: NodeIdx(7),
+                kind: sched_event_kind::SET_PARAM,
+                a: 0,
+                b: 0,
+                value,
+            }).collect();
+            scheduled.install_timeline(timeline(events, None));
+            scheduled.apply_rt(RtCommand::TransportPlay);
+            let mut whole = [0.0f32; 64];
+            scheduled.process_block(&mut whole, 64);
+
+            let (mut explicit, _) = probe_engine_with_block(64);
+            let mut split = [0.0f32; 64];
+            let mut cursor = 0usize;
+            for &(at, value) in &changes {
+                let at = at as usize;
+                if at > cursor {
+                    explicit.process_block(&mut split[cursor..at], at - cursor);
+                }
+                explicit.apply_rt(RtCommand::SetParam { node: NodeIdx(7), param: 0, value });
+                cursor = at;
+            }
+            if cursor < 64 {
+                explicit.process_block(&mut split[cursor..], 64 - cursor);
+            }
+            prop_assert_eq!(whole, split);
+        }
     }
 
     #[test]

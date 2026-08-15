@@ -240,6 +240,7 @@ fn scheduled_event_kind_codes() {
     assert_eq!(sched_event_kind::SET_PARAM, 0);
     assert_eq!(sched_event_kind::NOTE_OFF, 1);
     assert_eq!(sched_event_kind::NOTE_ON, 2);
+    assert_eq!(sched_event_kind::SAMPLER_START, 3);
 }
 
 #[test]

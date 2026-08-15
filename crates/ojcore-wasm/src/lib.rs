@@ -49,13 +49,14 @@ use alloc::vec::Vec;
 
 use ojcore::{
     compile_resilient, compile_with_assets, AssetPcm, AssetResolver, Engine, PluginRegistry,
-    SPEAKER_OUT_ID,
+    TempoMapRt, TimelineRt, SPEAKER_OUT_ID,
 };
 use ojcore_midiring::{header_offsets, CmdRing, MidiRing};
 use ojinstrument::{register_all, RegisterOpts};
 use ojproto::{
-    AssetId, EngineFrame, Event, EventKind, FaultKind, IrNode, NodeIdx, OjGraph, PrimitiveKind,
-    RtCommand, Severity, Source, SCHEMA_VERSION,
+    AssetId, EngineFrame, Event, EventKind, FaultKind, IrNode, MeterPoint, NodeIdx, OjGraph,
+    PrimitiveKind, RtCommand, Severity, Source, TempoMap, TempoPoint, TimedCommand, Timeline, PPQ,
+    SCHEMA_VERSION,
 };
 
 use wasm_bindgen::prelude::*;
@@ -64,7 +65,7 @@ use wasm_bindgen::prelude::*;
 /// flat enum; its longest serde-JSON form (`{"SetParam":{"node":4294967295,
 /// "param":65535,"value":-1.0000000}}` ~ 60 B) fits comfortably. Sized with
 /// generous headroom so the drain scratch never needs to grow on the RT path.
-const CMD_FRAME_MAX: usize = 128;
+const CMD_FRAME_MAX: usize = 256;
 
 /// FNV-1a 64-bit offset basis / prime — the same content-address fingerprint the
 /// native `ojcore-native::AssetCatalog` uses, ported here so the wasm store
@@ -193,6 +194,9 @@ struct Host {
     block_size: usize,
     /// Sample rate the engine compiles graphs against.
     sample_rate: u32,
+    /// Last published wire map, retained so timeline compilation resolves
+    /// against exactly the same control snapshot as the engine.
+    tempo_map: TempoMap,
     /// Monotonic sequence stamped on each drained fault [`Event`] (wire parity
     /// with the native backend's `event_seq`). Bumped per surfaced fault.
     event_seq: u32,
@@ -262,6 +266,27 @@ fn bootstrap_graph(sample_rate: u32, block_size: u32) -> OjGraph {
     }
 }
 
+fn default_tempo_map(sample_rate: u32) -> TempoMap {
+    TempoMap {
+        ppq: PPQ,
+        sample_rate,
+        tempos: vec![TempoPoint {
+            tick: 0,
+            sample: 0,
+            bpm_start: 120.0,
+            bpm_end: 120.0,
+            continuing: false,
+        }],
+        meters: vec![MeterPoint {
+            tick: 0,
+            sample: 0,
+            bar: 1,
+            divisions_per_bar: 4,
+            note_value: 4,
+        }],
+    }
+}
+
 /// Initialize the engine host. Call ONCE from the AudioWorklet constructor,
 /// before any [`process`] call.
 ///
@@ -303,6 +328,7 @@ pub fn init(sample_rate: u32, block_size: u32) {
         assets,
         block_size,
         sample_rate,
+        tempo_map: default_tempo_map(sample_rate),
         event_seq: 0,
         last_load_degraded: 0,
         last_degraded_ids: Vec::new(),
@@ -363,6 +389,34 @@ pub fn load_graph(bytes: &[u8]) -> bool {
     // allocation/free-free.
     let _old = host.engine.install(program);
     host.crashed_seen = vec![false; n_instances];
+    true
+}
+
+/// Install a serialized [`TempoMap`] beside [`load_graph`].
+#[wasm_bindgen]
+pub fn load_tempo_map(bytes: &[u8]) -> bool {
+    let Some(host) = host_mut() else { return false };
+    let map: TempoMap = match serde_json::from_slice(bytes) {
+        Ok(map) => map,
+        Err(_) => return false,
+    };
+    let compiled = TempoMapRt::from_wire(&map);
+    host.engine.install_tempo_map(compiled);
+    host.tempo_map = map;
+    true
+}
+
+/// Install a serialized authored [`Timeline`] beside [`load_graph`].
+#[wasm_bindgen]
+pub fn load_timeline(bytes: &[u8]) -> bool {
+    let Some(host) = host_mut() else { return false };
+    let timeline: Timeline = match serde_json::from_slice(bytes) {
+        Ok(timeline) => timeline,
+        Err(_) => return false,
+    };
+    let map = TempoMapRt::from_wire(&host.tempo_map);
+    host.engine
+        .install_timeline(TimelineRt::from_wire(&timeline, &map));
     true
 }
 
@@ -507,7 +561,9 @@ fn drain_commands(host: &mut Host) {
                     // the ring left it queued. Skipping the rest avoids spinning.
                     break;
                 }
-                if let Ok(cmd) = serde_json::from_slice::<RtCommand>(&cmd_scratch[..len]) {
+                if let Ok(timed) = serde_json::from_slice::<TimedCommand>(&cmd_scratch[..len]) {
+                    let _ = engine.enqueue_timed(timed);
+                } else if let Ok(cmd) = serde_json::from_slice::<RtCommand>(&cmd_scratch[..len]) {
                     apply_command(engine, cmd);
                 }
             }
@@ -1080,6 +1136,27 @@ mod tests {
                 value: -0.25
             }
         );
+    }
+
+    #[test]
+    fn cmd_ring_carries_timed_command_frames() {
+        let ring = CmdRing::new();
+        let timed = TimedCommand {
+            at: 12_345,
+            cmd: RtCommand::NoteOn {
+                node: NodeIdx(7),
+                note: 64,
+                vel: 99,
+            },
+        };
+        let frame = serde_json::to_vec(&timed).expect("encode timed command");
+        assert!(frame.len() <= CMD_FRAME_MAX);
+        assert!(ring.push(&frame));
+        let mut scratch = [0u8; CMD_FRAME_MAX];
+        let len = ring.pop(&mut scratch).expect("frame present");
+        let decoded: TimedCommand =
+            serde_json::from_slice(&scratch[..len]).expect("decode timed command");
+        assert_eq!(decoded, timed);
     }
 
     /// Every variant's JSON frame fits the fixed RT-path scratch, so the drain

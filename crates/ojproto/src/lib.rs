@@ -289,6 +289,21 @@ pub mod sched_event_kind {
     pub const NOTE_OFF: u8 = 1;
     /// Start a note.
     pub const NOTE_ON: u8 = 2;
+    /// Start a sampler window at an exact source-frame offset. `a` and `b` are
+    /// the little-endian low 16 bits; `value` is an integer carrying the high
+    /// 24 bits. This JSON-safe 40-bit convention is exact for every supported
+    /// source length. The sampler starts at unity pitch at its configured root.
+    pub const SAMPLER_START: u8 = 3;
+}
+
+/// Reserved parameter ids used internally to lower [`sched_event_kind::SAMPLER_START`]
+/// through the frozen [`ojcore::DspInstance`] `set_param`/`note_on` surface.
+/// They are not user-facing automatable parameters.
+pub mod sched_param {
+    /// Low 24 bits of the next sampler voice's source-frame offset.
+    pub const SAMPLER_OFFSET_LOW: u16 = u16::MAX - 1;
+    /// High 24 bits of the next sampler voice's source-frame offset.
+    pub const SAMPLER_OFFSET_HIGH: u16 = u16::MAX;
 }
 
 /// An immutable, authored timeline document published as a whole.
