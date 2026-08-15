@@ -22,12 +22,15 @@ export function growPitchRange(range: PitchRange, min: number, max: number): Pit
 
 interface TrackLaneViewStore {
     pitchRanges: Record<string, PitchRange>;
+    laneHeights: Record<string, number>;
     rememberPitchRange: (trackId: string, range: PitchRange) => void;
+    setLaneHeight: (trackId: string, height: number) => void;
     resetPitchRanges: () => void;
 }
 
 export const useTrackLaneViewStore = create<TrackLaneViewStore>((set) => ({
     pitchRanges: {},
+    laneHeights: {},
     rememberPitchRange: (trackId, range) => {
         set((state) => {
             const current = state.pitchRanges[trackId];
@@ -35,5 +38,8 @@ export const useTrackLaneViewStore = create<TrackLaneViewStore>((set) => ({
             return { pitchRanges: { ...state.pitchRanges, [trackId]: range } };
         });
     },
+    setLaneHeight: (trackId, height) => set((state) => ({
+        laneHeights: { ...state.laneHeights, [trackId]: Math.max(28, Math.min(480, height)) },
+    })),
     resetPitchRanges: () => set({ pitchRanges: {} }),
 }));

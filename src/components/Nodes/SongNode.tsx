@@ -2,7 +2,7 @@
  * Song Node — the on-canvas handle for the ONE timeline (the arrangementStore's
  * Arrangement). Collapsed, it is a warm little record sleeve: the song title, a
  * one-line summary (tracks · bars · tempo), and the invitation to press E. Entered
- * (E), the canvas swaps the node layer for the hand-drawn `SongInterior` timeline.
+ * (E), the canvas swaps the node layer for the peer Arrangement surface.
  *
  * It owns no audio — the instruments it plays are ordinary graph nodes referenced by
  * the arrangement — so it carries no ports. Living Sketchbook: paper, ink, Caveat, a

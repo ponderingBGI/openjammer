@@ -1,0 +1,5 @@
+.oj-time-ruler { position: relative; height: 100%; color: var(--text-secondary); font: 500 14px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.oj-time-ruler__mark { position: absolute; bottom: 3px; border-left: 1px solid var(--timeline-grid-sub); }
+.oj-time-ruler__mark.is-bar { padding-left: 4px; border-left-color: var(--timeline-grid-bar); }
+.oj-time-ruler__mark.is-beat { height: 3px; border-left-color: var(--timeline-grid-beat); }
+.oj-time-ruler__mark.is-sub { height: 1px; }

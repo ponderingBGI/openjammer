@@ -101,8 +101,8 @@ test.describe('Timeline live preview', () => {
             }
         }
 
-        // Add a Song node (Utility → Add Song), open its peer arrangement surface,
-        // then seed Paper Sketch.
+        // Add a Song node (Utility → Add Song), use the global Tab gesture to open
+        // its peer arrangement surface, then seed Paper Sketch.
         const canvas = page.locator('.node-canvas').first();
         const box = (await canvas.boundingBox())!;
         // Open the menu centred-but-high: clear of the top-left first-run toast and
@@ -111,12 +111,13 @@ test.describe('Timeline live preview', () => {
         await page.getByText('Utility', { exact: false }).last().click();
         await page.getByRole('menuitem', { name: /Add Song/i }).click();
         await expect(page.locator('.song-node')).toHaveCount(1);
-        await page.getByRole('button', { name: /Open arrangement/i }).click();
+        await page.keyboard.press('Tab');
         await expect(page.locator('[data-surface-root="canvas"]')).toBeHidden();
         await expect(page.locator('[data-surface-root="arrangement"]')).toBeVisible();
-        await expect(page.locator('.song-interior')).toBeVisible();
+        await expect(page.getByRole('heading', { name: 'An empty page.' })).toBeVisible();
         await page.getByRole('button', { name: /Start from/i }).click();
-        await expect(page.locator('.song-track')).toHaveCount(3);
+        await expect(page.locator('.arrangement-track')).toHaveCount(3);
+        await expect(page.locator('.arrangement-clip')).toHaveCount(3);
 
         // Isolate the messages caused by pressing Play.
         await page.evaluate(() => {
@@ -124,7 +125,9 @@ test.describe('Timeline live preview', () => {
         });
 
         // PLAY: the transport must load the arrangement graph and dispatch NoteOn.
+        const playheadBefore = await page.locator('.arrangement-playhead').evaluate((element) => (element as HTMLElement).style.transform);
         await page.getByTitle('Play').click();
+        await expect.poll(() => page.locator('.arrangement-playhead').evaluate((element) => (element as HTMLElement).style.transform)).not.toBe(playheadBefore);
         await expect
             .poll(
                 () =>

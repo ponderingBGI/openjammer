@@ -39,7 +39,25 @@ export const generatedThemes: Theme[] = [
             "controlConnection": "#808080",
             "controlConnected": "#909090",
             "universalPort": "#9B59B6",
-            "universalConnection": "#9B59B6"
+            "universalConnection": "#9B59B6",
+            "timelineBg": "#F5F0E8",
+            "timelineChromeBg": "#EDE8E0",
+            "timelineLaneBg": "#FAF7F1",
+            "timelineLaneAltBg": "#EFEAE1",
+            "timelineGridBar": "rgba(26,26,26,0.24)",
+            "timelineGridBeat": "rgba(26,26,26,0.11)",
+            "timelineGridSub": "rgba(26,26,26,0.055)",
+            "timelineLaneDivider": "#D4CFC6",
+            "timelineClipBg": "#FFFFFF",
+            "timelineClipBorder": "#4A4A4A",
+            "timelineClipMutedBg": "#E8E3DA",
+            "timelineNoteFill": "#4A90C2",
+            "timelineWaveformFill": "#2C5F88",
+            "timelineAutomationLine": "#6B5B4F",
+            "timelinePlayhead": "#A65353",
+            "timelineSectionMarker": "#1A1A1A",
+            "timelineLoopRange": "rgba(26,26,26,0.07)",
+            "timelineSelection": "#C68B3F"
         }
     },
     {
@@ -77,7 +95,25 @@ export const generatedThemes: Theme[] = [
             "controlConnection": "#8B6BB0",
             "controlConnected": "#A88BD6",
             "universalPort": "#FF0090",
-            "universalConnection": "#FF0090"
+            "universalConnection": "#FF0090",
+            "timelineBg": "#08070D",
+            "timelineChromeBg": "#0F0E16",
+            "timelineLaneBg": "#14121D",
+            "timelineLaneAltBg": "#0D0C13",
+            "timelineGridBar": "rgba(224,244,255,0.22)",
+            "timelineGridBeat": "rgba(224,244,255,0.10)",
+            "timelineGridSub": "rgba(224,244,255,0.05)",
+            "timelineLaneDivider": "#2A2538",
+            "timelineClipBg": "#14121D",
+            "timelineClipBorder": "#D896FF",
+            "timelineClipMutedBg": "#1C1826",
+            "timelineNoteFill": "#00B8FF",
+            "timelineWaveformFill": "#0088FF",
+            "timelineAutomationLine": "#00F0FF",
+            "timelinePlayhead": "#FF0050",
+            "timelineSectionMarker": "#E0F4FF",
+            "timelineLoopRange": "rgba(224,244,255,0.06)",
+            "timelineSelection": "#FFD600"
         }
     },
     {
@@ -115,7 +151,25 @@ export const generatedThemes: Theme[] = [
             "controlConnection": "#5F6B7C",
             "controlConnected": "#758195",
             "universalPort": "#8B7FE8",
-            "universalConnection": "#8B7FE8"
+            "universalConnection": "#8B7FE8",
+            "timelineBg": "#0B0F19",
+            "timelineChromeBg": "#131824",
+            "timelineLaneBg": "#121926",
+            "timelineLaneAltBg": "#0E141F",
+            "timelineGridBar": "rgba(232,240,255,0.22)",
+            "timelineGridBeat": "rgba(232,240,255,0.10)",
+            "timelineGridSub": "rgba(232,240,255,0.05)",
+            "timelineLaneDivider": "#2A3547",
+            "timelineClipBg": "#1A2332",
+            "timelineClipBorder": "#8FA3C0",
+            "timelineClipMutedBg": "#151C28",
+            "timelineNoteFill": "#6DB4FF",
+            "timelineWaveformFill": "#4A8FE7",
+            "timelineAutomationLine": "#8B7FE8",
+            "timelinePlayhead": "#FF6B6B",
+            "timelineSectionMarker": "#E8F0FF",
+            "timelineLoopRange": "rgba(232,240,255,0.06)",
+            "timelineSelection": "#FFA94D"
         }
     }
 ];

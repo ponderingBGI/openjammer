@@ -2,7 +2,7 @@
  * OpenJammer - Node-based music generation tool
  */
 
-import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { Toaster, toast } from 'sonner';
 import { NodeCanvas } from './components/Canvas/NodeCanvas';
 import { Toolbar } from './components/Toolbar/Toolbar';
@@ -53,9 +53,10 @@ import { writeEmergencyBackup } from './persistence/recovery';
 import { collectSaveData } from './persistence/collectSaveData';
 import { useArrangementStore } from './store/arrangementStore';
 import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens';
-import { useUiViewStore } from './store/uiViewStore';
+import { useUiViewStore, type SurfaceId } from './store/uiViewStore';
 import { useBindingSet, useKeymapArbiter, useModalKeymap } from './keymap/useKeymap';
 import { ArrangementSurface } from './components/Arrangement/ArrangementSurface';
+import { SharedSurfaceChrome } from './components/Arrangement/SharedSurfaceChrome';
 import { logger } from './utils/log';
 import './styles/global.css';
 
@@ -115,6 +116,21 @@ function App() {
   const surface = useUiViewStore((s) => s.surface);
   const songNodeId = useUiViewStore((s) => s.songNodeId);
   const setSurface = useUiViewStore((s) => s.setSurface);
+  const previousSurface = useRef<SurfaceId>(surface);
+  const [exitingSurface, setExitingSurface] = useState<SurfaceId | null>(null);
+
+  useLayoutEffect(() => {
+    if (previousSurface.current === surface) return;
+    const outgoing = previousSurface.current;
+    previousSurface.current = surface;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setExitingSurface(null);
+      return;
+    }
+    setExitingSurface(outgoing);
+    const timer = window.setTimeout(() => setExitingSurface(null), 120);
+    return () => window.clearTimeout(timer);
+  }, [surface]);
 
   // Calm, deduped engine-dead toast (Phase 2). The ONLY toast the health store
   // raises — DEGRADED stays ambient; a fault storm yields one signal, not many.
@@ -458,6 +474,7 @@ function App() {
         if (!localStorage.getItem('oj-first-run-done')) {
           localStorage.setItem('oj-first-run-done', '1');
           toast('🎹 Make your first sound', {
+            id: 'first-sound-hint',
             description:
               'Right-click the canvas → add a Keyboard and an Instrument, connect them to a Speaker, then press the Q–P keys. Press ? for help, or Ctrl/Cmd+K to ask the AI to build it for you.',
             duration: 12000,
@@ -486,6 +503,10 @@ function App() {
       });
     }
   }, [setAudioContextReady, audioConfig]);
+
+  useEffect(() => {
+    if (surface === 'arrangement') toast.dismiss('first-sound-hint');
+  }, [surface]);
 
   // Native (Tauri) auto-start: no autoplay gate. Run the same activation sequence
   // on mount so the Rust engine wires up (the App-init effect keyed on
@@ -618,30 +639,32 @@ function App() {
       )}
 
       <div
+        className={`surface-layer ${surface === 'canvas' ? 'surface-transition-in' : exitingSurface === 'canvas' ? 'surface-transition-out' : ''}`}
         data-surface-root="canvas"
         tabIndex={-1}
-        hidden={surface !== 'canvas'}
+        hidden={surface !== 'canvas' && exitingSurface !== 'canvas'}
         inert={surface !== 'canvas' ? true : undefined}
         aria-hidden={surface !== 'canvas'}
       >
         <NodeCanvas />
       </div>
 
-      <ArrangementSurface active={surface === 'arrangement'} songNodeId={songNodeId} />
-
-      <div className="surface-switcher" role="group" aria-label="Editing surface">
-        <button aria-pressed={surface === 'canvas'} onClick={() => setSurface('canvas')}>Canvas</button>
-        <button aria-pressed={surface === 'arrangement'} onClick={() => setSurface('arrangement')}>Arrangement</button>
-      </div>
+      <ArrangementSurface
+        active={surface === 'arrangement'}
+        visible={surface === 'arrangement' || exitingSurface === 'arrangement'}
+        transition={surface === 'arrangement' ? 'in' : exitingSurface === 'arrangement' ? 'out' : undefined}
+        songNodeId={songNodeId}
+      />
 
       <div className="sr-only" aria-live="polite">
         {surface === 'canvas' ? 'Canvas surface active' : 'Arrangement surface active'}
       </div>
 
       {/* Toolbar + Breadcrumbs */}
-      <div className="toolbar-wrapper" hidden={surface !== 'canvas'}>
+      <div className="toolbar-wrapper">
         <Toolbar />
         <Breadcrumbs />
+        <SharedSurfaceChrome surface={surface} setSurface={setSurface} />
       </div>
 
       {/* Settings Panel */}
@@ -678,7 +701,7 @@ function App() {
       <CollabControl />
 
       {/* Help Panel */}
-      <HelpPanel />
+      {surface === 'canvas' && <HelpPanel />}
 
       {/* MIDI Integration - device detection, browser, and node creation */}
       <MIDIIntegration />

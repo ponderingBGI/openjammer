@@ -149,6 +149,7 @@ export const keybindingActions: KeybindingAction[] = [
     { id: 'arrangement.redo', label: 'Redo Arrangement Edit', category: 'Arrangement', defaultBinding: { key: 'z', ctrl: true, shift: true }, scope: 'surface', surface: 'arrangement' },
     { id: 'arrangement.delete', label: 'Delete Arrangement Selection', category: 'Arrangement', defaultBinding: { key: 'Delete' }, scope: 'surface', surface: 'arrangement' },
     { id: 'arrangement.deleteBackspace', label: 'Delete Arrangement Selection (Backspace)', category: 'Arrangement', defaultBinding: { key: 'Backspace' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.zoomToSelection', label: 'Zoom to Arrangement Selection', category: 'Arrangement', defaultBinding: { key: 'z', shift: true }, scope: 'surface', surface: 'arrangement' },
     ...Array.from({ length: 9 }, (_, index): KeybindingAction => ({
         id: `mode.${index + 1}`,
         label: `Switch to Mode ${index + 1}`,

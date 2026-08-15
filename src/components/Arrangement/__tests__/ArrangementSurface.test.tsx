@@ -1,7 +1,17 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import { cleanup, render } from '@testing-library/react';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
 import { ArrangementSurface } from '../ArrangementSurface';
 import { useArrangementStore } from '../../../store/arrangementStore';
+import { buildPaperSketch } from '../../../song/songs/paperSketch';
+
+beforeAll(() => {
+    class TestResizeObserver {
+        observe() {}
+        disconnect() {}
+    }
+    vi.stubGlobal('ResizeObserver', TestResizeObserver);
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(null);
+});
 
 afterEach(cleanup);
 
@@ -14,6 +24,22 @@ describe('ArrangementSurface', () => {
         expect(surface).toHaveAttribute('hidden');
         expect(surface).toHaveAttribute('inert');
         expect(surface).toHaveAttribute('aria-hidden', 'true');
-        expect(surface?.querySelector('.song-interior')).not.toBeNull();
+        expect(surface).toHaveClass('song-interior');
+    });
+
+    it('renders the ruled empty invitation with the Paper Sketch action', () => {
+        useArrangementStore.getState().setArrangement(null);
+        render(<ArrangementSurface active songNodeId="song-1" />);
+        expect(screen.getByRole('heading', { name: 'An empty page.' })).toBeVisible();
+        expect(screen.getByRole('button', { name: /Paper Sketch/i })).toBeVisible();
+        expect(document.querySelectorAll('.arrangement-empty-lane')).toHaveLength(3);
+    });
+
+    it('renders populated tracks and source-window clips', () => {
+        useArrangementStore.getState().setArrangement(buildPaperSketch());
+        const { container } = render(<ArrangementSurface active songNodeId="song-1" />);
+        expect(container.querySelectorAll('.arrangement-track')).toHaveLength(3);
+        expect(container.querySelectorAll('.arrangement-clip').length).toBeGreaterThan(0);
+        expect(screen.queryByText('An empty page.')).not.toBeInTheDocument();
     });
 });
