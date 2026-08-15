@@ -27,10 +27,17 @@ const goodGraph = {
     edges: [{ id: 'c1', sourceNodeId: 'n1', targetNodeId: 'n1' }],
 };
 
+const goodArrangement = {
+    name: 'Recovered timeline',
+    tempoBpm: 120,
+    graph: { nodes: [], connections: [] },
+    tracks: [],
+};
+
 describe('validateRecoveredGraph (fail-closed)', () => {
     it('accepts arrays of id-bearing nodes and edges', () => {
-        const b: EmergencyBackup = { timestamp: 1, ...goodGraph };
-        expect(validateRecoveredGraph(b)).not.toBeNull();
+        const b: EmergencyBackup = { timestamp: 1, ...goodGraph, arrangement: goodArrangement };
+        expect(validateRecoveredGraph(b)?.arrangement).toEqual(goodArrangement);
     });
     it('rejects nodes without string ids', () => {
         const b: EmergencyBackup = { timestamp: 1, nodes: [{ type: 'x' }], edges: [] };

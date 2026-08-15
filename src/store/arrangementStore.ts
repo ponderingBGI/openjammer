@@ -111,6 +111,8 @@ export interface ArrangementStore {
     /** Stacks of inverse/forward verb batches (LIFO). Not for direct UI reads. */
     undoStack: Verb[][];
     redoStack: Verb[][];
+    /** Monotonic authoring-document revision. Transport, selection, and previews do not bump it. */
+    docVersion: number;
 
     // ── selection (UI) ──
     selectedClipId: string | null;
@@ -127,8 +129,9 @@ export interface ArrangementStore {
     // ── actions ──
     /** Load a song (normalized on entry); resets the command-log + transport. */
     setArrangement: (arr: Arrangement | null) => void;
-    /** Apply one verb or an atomic batch, logging the inverse for undo. */
-    apply: (verb: Verb | Verb[]) => void;
+    /** Apply one verb or an atomic batch. Preview applications are transient; the
+     * next non-preview application commits one history entry and re-anchors once. */
+    apply: (verb: Verb | Verb[], options?: { preview?: boolean }) => void;
     undo: () => void;
     redo: () => void;
     canUndo: () => boolean;
@@ -150,6 +153,7 @@ export interface ArrangementStore {
 let idCounter = 1;
 
 export const useArrangementStore = create<ArrangementStore>((set, get) => {
+    let previewBase: Arrangement | null = null;
     /**
      * (Re)anchor BOTH clocks to `fromTick` and (re)start the audio preview from there.
      * The ONE path that keeps the playhead, the audio, and isPlaying in lockstep — used
@@ -166,6 +170,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
         arrangement: null,
         undoStack: [],
         redoStack: [],
+        docVersion: 0,
         selectedClipId: null,
         selectedNoteIds: [],
         isPlaying: false,
@@ -176,6 +181,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             // Loading a new song stops any preview of the old one (release + restore).
             stopPreview();
             const normalized = arr ? normalizeArrangement(arr) : null;
+            previewBase = null;
             idCounter = normalized ? seedCounter(normalized) : 1;
             set({
                 arrangement: normalized,
@@ -189,43 +195,60 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             });
         },
 
-        apply: (verb) => {
-            const arr = get().arrangement;
+        apply: (verb, options) => {
+            const current = get().arrangement;
+            const isPreview = options?.preview === true;
+            const arr = previewBase ?? current;
             if (!arr) return;
             const verbs = Array.isArray(verb) ? verb : [verb];
             if (verbs.length === 0) return;
             const { next, inverse } = applyVerbs(arr, verbs);
+            if (isPreview) {
+                previewBase ??= arr;
+                set({ arrangement: next });
+                return;
+            }
+            previewBase = null;
             // A new edit clears the redo branch (standard linear-history semantics).
-            set({ arrangement: next, undoStack: [...get().undoStack, inverse], redoStack: [] });
+            set({
+                arrangement: next,
+                undoStack: [...get().undoStack, inverse],
+                redoStack: [],
+                docVersion: get().docVersion + 1,
+            });
             // Edit-while-playing: re-conduct + restart from the live position so the
             // edit is HEARD and audio/playhead stay in sync.
             if (get().isPlaying) reanchor(next, Math.floor(get().currentTick()));
         },
 
         undo: () => {
-            const arr = get().arrangement;
+            const arr = previewBase ?? get().arrangement;
             const undoStack = get().undoStack;
             if (!arr || undoStack.length === 0) return;
+            previewBase = null;
             const inverseBatch = undoStack[undoStack.length - 1]!;
             const { next, inverse } = applyVerbs(arr, inverseBatch);
             set({
                 arrangement: next,
                 undoStack: undoStack.slice(0, -1),
                 redoStack: [...get().redoStack, inverse], // inverse-of-inverse = the redo
+                docVersion: get().docVersion + 1,
             });
             if (get().isPlaying) reanchor(next, Math.floor(get().currentTick()));
         },
 
         redo: () => {
-            const arr = get().arrangement;
+            const arr = previewBase ?? get().arrangement;
             const redoStack = get().redoStack;
             if (!arr || redoStack.length === 0) return;
+            previewBase = null;
             const forwardBatch = redoStack[redoStack.length - 1]!;
             const { next, inverse } = applyVerbs(arr, forwardBatch);
             set({
                 arrangement: next,
                 redoStack: redoStack.slice(0, -1),
                 undoStack: [...get().undoStack, inverse],
+                docVersion: get().docVersion + 1,
             });
             if (get().isPlaying) reanchor(next, Math.floor(get().currentTick()));
         },

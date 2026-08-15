@@ -45,17 +45,22 @@ import { initMidiVoiceRouting, disposeMidiVoiceRouting } from './midi';
 import { useAudioStore } from './store/audioStore';
 import { useGraphStore } from './store/graphStore';
 import { useProjectStore } from './store/projectStore';
-import { useCanvasStore } from './store/canvasStore';
 import { useKeybindingsStore } from './store/keybindingsStore';
 import { useEngineHealthStore, setEngineLive } from './store/engineHealthStore';
 import { useCrashRecovery } from './persistence/recovery/useCrashRecovery';
 import { useUsbLowLatencyDefault } from './hooks/useUsbLowLatencyDefault';
 import { useAutoDetectedSampleRate } from './hooks/useAutoDetectedSampleRate';
 import { writeEmergencyBackup } from './persistence/recovery';
+import { collectSaveData } from './persistence/collectSaveData';
+import { useArrangementStore } from './store/arrangementStore';
 import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens';
 import { isEditableTarget } from './utils/editableTarget';
 import { logger } from './utils/log';
 import './styles/global.css';
+
+function getDocumentVersion(): string {
+  return `${useGraphStore.getState().version}:${useArrangementStore.getState().docVersion}`;
+}
 
 /**
  * Keep native plugin discovery out of the browser's first-paint bundle. The host
@@ -229,7 +234,7 @@ function App() {
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Initialize to null to defer initialization until after hydration (inside useEffect)
-  const lastVersionRef = useRef<number | null>(null);
+  const lastVersionRef = useRef<string | null>(null);
   const isSavingRef = useRef(false);
 
   // Autosave when graph changes (debounced) - using version counter for efficient change detection
@@ -239,13 +244,13 @@ function App() {
 
     // Initialize version ref with current state (after hydration is complete)
     if (lastVersionRef.current === null) {
-      lastVersionRef.current = useGraphStore.getState().version;
+      lastVersionRef.current = getDocumentVersion();
     }
 
     // Subscribe to graph changes
-    const unsubscribe = useGraphStore.subscribe((state) => {
+    const scheduleSave = () => {
       // Skip if version hasn't changed (efficient O(1) check vs O(n) JSON.stringify)
-      if (state.version === lastVersionRef.current) return;
+      if (getDocumentVersion() === lastVersionRef.current) return;
 
       // Clear existing timeout
       if (saveTimeoutRef.current) {
@@ -256,21 +261,12 @@ function App() {
       saveTimeoutRef.current = setTimeout(async () => {
         if (isSavingRef.current) return;
 
-        const currentVersion = useGraphStore.getState().version;
+        const currentVersion = getDocumentVersion();
         if (currentVersion === lastVersionRef.current) return;
 
         isSavingRef.current = true;
         try {
-          const graphData = {
-            nodes: Array.from(useGraphStore.getState().nodes.values()),
-            edges: Array.from(useGraphStore.getState().connections.values()),
-            viewport: {
-              x: useCanvasStore.getState().pan.x,
-              y: useCanvasStore.getState().pan.y,
-              zoom: useCanvasStore.getState().zoom,
-            },
-          };
-          await saveProject(graphData);
+          await saveProject(collectSaveData());
           lastVersionRef.current = currentVersion;
         } catch (err) {
           console.error('[Autosave] Failed:', err);
@@ -278,10 +274,13 @@ function App() {
           isSavingRef.current = false;
         }
       }, 3000);
-    });
+    };
+    const unsubscribeGraph = useGraphStore.subscribe(scheduleSave);
+    const unsubscribeArrangement = useArrangementStore.subscribe(scheduleSave);
 
     return () => {
-      unsubscribe();
+      unsubscribeGraph();
+      unsubscribeArrangement();
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
@@ -295,23 +294,14 @@ function App() {
     const interval = setInterval(async () => {
       if (isSavingRef.current) return;
 
-      const currentVersion = useGraphStore.getState().version;
+      const currentVersion = getDocumentVersion();
 
       // Skip if nothing changed since last save
       if (currentVersion === lastVersionRef.current) return;
 
       isSavingRef.current = true;
       try {
-        const graphData = {
-          nodes: Array.from(useGraphStore.getState().nodes.values()),
-          edges: Array.from(useGraphStore.getState().connections.values()),
-          viewport: {
-            x: useCanvasStore.getState().pan.x,
-            y: useCanvasStore.getState().pan.y,
-            zoom: useCanvasStore.getState().zoom,
-          },
-        };
-        await saveProject(graphData);
+        await saveProject(collectSaveData());
         lastVersionRef.current = currentVersion;
       } catch (err) {
         console.error('[Autosave] Periodic backup failed:', err);
@@ -332,7 +322,7 @@ function App() {
         // Set flag immediately to prevent race conditions
         isSavingRef.current = true;
 
-        const currentVersion = useGraphStore.getState().version;
+        const currentVersion = getDocumentVersion();
 
         // Skip if nothing changed since last save
         if (currentVersion === lastVersionRef.current) {
@@ -342,16 +332,7 @@ function App() {
 
         // Save immediately when tab is hidden
         try {
-          const graphData = {
-            nodes: Array.from(useGraphStore.getState().nodes.values()),
-            edges: Array.from(useGraphStore.getState().connections.values()),
-            viewport: {
-              x: useCanvasStore.getState().pan.x,
-              y: useCanvasStore.getState().pan.y,
-              zoom: useCanvasStore.getState().zoom,
-            },
-          };
-          await saveProject(graphData);
+          await saveProject(collectSaveData());
           lastVersionRef.current = currentVersion;
         } catch (err) {
           console.error('[Autosave] Failed on tab switch:', err);
@@ -374,25 +355,27 @@ function App() {
   // when a folder was connected AND never read it back on boot.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    let lastBackupVersion = useGraphStore.getState().version;
+    let lastBackupVersion = getDocumentVersion();
 
     const flush = () => {
-      const s = useGraphStore.getState();
+      const saveData = collectSaveData();
       // Nothing meaningful to back up — don't clobber a good backup with empty.
-      if (s.nodes.size === 0 && s.connections.size === 0) return;
+      if (saveData.nodes.length === 0 && saveData.edges.length === 0 && !saveData.arrangement) return;
       writeEmergencyBackup({
-        nodes: Array.from(s.nodes.values()),
-        edges: Array.from(s.connections.values()),
+        ...saveData,
         projectName: useProjectStore.getState().name,
       });
     };
 
-    const unsubscribe = useGraphStore.subscribe((state) => {
-      if (state.version === lastBackupVersion) return;
-      lastBackupVersion = state.version;
+    const scheduleBackup = () => {
+      const currentVersion = getDocumentVersion();
+      if (currentVersion === lastBackupVersion) return;
+      lastBackupVersion = currentVersion;
       if (timer) clearTimeout(timer);
       timer = setTimeout(flush, 2000);
-    });
+    };
+    const unsubscribeGraph = useGraphStore.subscribe(scheduleBackup);
+    const unsubscribeArrangement = useArrangementStore.subscribe(scheduleBackup);
 
     // Final flush on page hide (the hook marks the clean exit separately). No
     // "leave site?" prompt: with durable autosave the work is recoverable, so we
@@ -401,7 +384,8 @@ function App() {
     window.addEventListener('pagehide', onPageHide);
 
     return () => {
-      unsubscribe();
+      unsubscribeGraph();
+      unsubscribeArrangement();
       window.removeEventListener('pagehide', onPageHide);
       if (timer) clearTimeout(timer);
     };
@@ -430,16 +414,7 @@ function App() {
         if (useProjectStore.getState().isSaving) return;
 
         try {
-          const graphData = {
-            nodes: Array.from(useGraphStore.getState().nodes.values()),
-            edges: Array.from(useGraphStore.getState().connections.values()),
-            viewport: {
-              x: useCanvasStore.getState().pan.x,
-              y: useCanvasStore.getState().pan.y,
-              zoom: useCanvasStore.getState().zoom,
-            },
-          };
-          await saveProject(graphData);
+          await saveProject(collectSaveData());
           toast.success('Project saved');
         } catch (err) {
           console.error('[Save] Failed:', err);

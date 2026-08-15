@@ -5,8 +5,13 @@
  * their lane). Mute toggles through the reversible verb, so one Ctrl+Z undoes it.
  */
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useArrangementStore } from '../../store/arrangementStore';
+import {
+    growPitchRange,
+    initialPitchRange,
+    useTrackLaneViewStore,
+} from '../../store/trackLaneViewStore';
 import { midiToNote } from '../../music/note';
 import type { ArrangementTrack } from '../../song/types';
 
@@ -28,9 +33,10 @@ export function TrackLane({ track, pxPerTick, gutterPx, laneHeight, fieldWidth }
     const selectNotes = useArrangementStore((s) => s.selectNotes);
     const selectedNoteIds = useArrangementStore((s) => s.selectedNoteIds);
 
-    // Pitch range across this track's notes, for vertical mapping (with a margin so a
-    // single-pitch track sits centred rather than on an edge).
-    const { lo, hi } = useMemo(() => {
+    const trackViewId = track.id ?? track.ref;
+    const rememberedRange = useTrackLaneViewStore((s) => s.pitchRanges[trackViewId]);
+    const rememberPitchRange = useTrackLaneViewStore((s) => s.rememberPitchRange);
+    const { minPitch, maxPitch } = useMemo(() => {
         let min = Infinity;
         let max = -Infinity;
         for (const clip of track.clips) {
@@ -39,10 +45,17 @@ export function TrackLane({ track, pxPerTick, gutterPx, laneHeight, fieldWidth }
                 max = Math.max(max, n.pitch);
             }
         }
-        if (!Number.isFinite(min)) return { lo: 48, hi: 72 };
-        if (min === max) return { lo: min - 6, hi: max + 6 };
-        return { lo: min - 1, hi: max + 1 };
+        return { minPitch: min, maxPitch: max };
     }, [track.clips]);
+    const range = rememberedRange
+        ? growPitchRange(rememberedRange, minPitch, maxPitch)
+        : initialPitchRange(minPitch, maxPitch);
+
+    useEffect(() => {
+        rememberPitchRange(trackViewId, range);
+    }, [rememberPitchRange, trackViewId, range]);
+
+    const { lo, hi } = range;
 
     const yFor = (pitch: number) => {
         const span = hi - lo || 1;

@@ -18,6 +18,8 @@
  */
 
 import type { GraphNode, Connection } from '../../engine/types';
+import type { Arrangement } from '../../song/types';
+import { readArrangement } from '../../song/project';
 import { logWarn } from '../../utils/log';
 import type { PayloadSource, RecoverablePayload } from './recover';
 
@@ -32,12 +34,14 @@ export interface EmergencyBackup {
     projectName?: string | null;
     nodes: unknown[];
     edges: unknown[];
+    arrangement?: unknown;
 }
 
 /** A validated graph ready for `graphStore.loadGraph(nodes, connections)`. */
 export interface RecoveredGraph {
     nodes: GraphNode[];
     connections: Connection[];
+    arrangement: Arrangement | null;
 }
 
 function safeGet(key: string): string | null {
@@ -125,7 +129,11 @@ export function validateRecoveredGraph(b: EmergencyBackup): RecoveredGraph | nul
     const edgesOk =
         b.edges.every((e) => typeof e === 'object' && e !== null && typeof (e as { id?: unknown }).id === 'string');
     if (!nodesOk || !edgesOk) return null;
-    return { nodes: b.nodes as GraphNode[], connections: b.edges as Connection[] };
+    return {
+        nodes: b.nodes as GraphNode[],
+        connections: b.edges as Connection[],
+        arrangement: readArrangement(b.arrangement) ?? null,
+    };
 }
 
 /** The browser boot-recovery payload source. */
@@ -170,6 +178,7 @@ export function writeEmergencyBackup(graph: {
     nodes: unknown[];
     edges: unknown[];
     projectName?: string | null;
+    arrangement?: Arrangement | null;
     now?: number;
 }): void {
     const payload: EmergencyBackup = {
@@ -178,6 +187,7 @@ export function writeEmergencyBackup(graph: {
         projectName: graph.projectName ?? null,
         nodes: graph.nodes,
         edges: graph.edges,
+        arrangement: graph.arrangement ?? null,
     };
     safeSet(EMERGENCY_KEY, JSON.stringify(payload));
 }

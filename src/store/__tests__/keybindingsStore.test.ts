@@ -205,6 +205,50 @@ describe('keybindingsStore', () => {
         });
 
         describe('getConflictingActions', () => {
+            it('only conflicts across equal scopes or a global scope', () => {
+                const scoped = [
+                    {
+                        id: 'test.canvas',
+                        label: 'Canvas action',
+                        category: 'Test',
+                        scope: 'canvas',
+                        defaultBinding: { key: 'F9' },
+                    },
+                    {
+                        id: 'test.arrangement',
+                        label: 'Arrangement action',
+                        category: 'Test',
+                        scope: 'arrangement',
+                        defaultBinding: { key: 'F9' },
+                    },
+                    {
+                        id: 'test.canvas-peer',
+                        label: 'Canvas peer',
+                        category: 'Test',
+                        scope: 'canvas',
+                        defaultBinding: { key: 'F9' },
+                    },
+                    {
+                        id: 'test.global',
+                        label: 'Global action',
+                        category: 'Test',
+                        defaultBinding: { key: 'F9' },
+                    },
+                ];
+                keybindingActions.push(...scoped);
+                try {
+                    const conflicts = useKeybindingsStore.getState().getConflictingActions(
+                        'test.canvas',
+                        { key: 'F9' },
+                    );
+                    expect(conflicts.map((action) => action.id)).toContain('test.canvas-peer');
+                    expect(conflicts.map((action) => action.id)).toContain('test.global');
+                    expect(conflicts.map((action) => action.id)).not.toContain('test.arrangement');
+                } finally {
+                    keybindingActions.splice(-scoped.length);
+                }
+            });
+
             it('should return empty array when no conflicts', () => {
                 const conflicts = useKeybindingsStore.getState().getConflictingActions(
                     'edit.delete',

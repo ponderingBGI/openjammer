@@ -29,6 +29,8 @@ export interface KeybindingAction {
     label: string;         // Display name
     category: string;      // For grouping in UI
     defaultBinding: KeyCombo;
+    /** Surface where the shortcut is active. Global shortcuts overlap every scope. */
+    scope?: string;
 }
 
 // ============================================================================
@@ -331,10 +333,17 @@ export const useKeybindingsStore = create<KeybindingsStore>()(
 
             getConflictingActions: (actionId: string, combo: KeyCombo) => {
                 const conflicting: KeybindingAction[] = [];
+                const target = keybindingActions.find((action) => action.id === actionId);
+                const targetScope = target?.scope ?? 'global';
 
                 for (const action of keybindingActions) {
                     // Skip the action we're setting
                     if (action.id === actionId) continue;
+
+                    const actionScope = action.scope ?? 'global';
+                    const scopesOverlap =
+                        targetScope === actionScope || targetScope === 'global' || actionScope === 'global';
+                    if (!scopesOverlap) continue;
 
                     const binding = get().getBinding(action.id);
                     if (binding && keyComboEquals(binding, combo)) {
