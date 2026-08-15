@@ -87,6 +87,6 @@ describe('projectStore arrangement persistence', () => {
 
         await useProjectStore.getState().saveProject({ nodes: [], edges: [] });
 
-        expect(readArrangement(project.read().arrangement)).toEqual(arrangement);
+        expect(readArrangement(project.read().arrangement)).toEqual(readArrangement(arrangement));
     });
 });

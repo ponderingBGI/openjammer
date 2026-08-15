@@ -18,18 +18,36 @@ import type { ArrangementToolPort } from './tools';
 /** Fill any missing stable id on a verb's ADDED entity (and nested notes), so the
  *  reversible inverse can address exactly what this edit created. */
 function withMintedIds(verb: Verb, mint: (prefix: string) => string): Verb {
+    const midiSourceId = () => mint('src:midi:m').replace(/m-(\d+)$/, 'm$1');
+    const sourceWithIds = <T extends Extract<Verb, { kind: 'addSource' }>['source']>(source: T): T => {
+        if (source.kind === 'audio') return { ...source, id: `src:audio:${source.assetId.toLowerCase()}` };
+        return {
+            ...source,
+            id: source.id || midiSourceId(),
+            notes: source.notes.map((note) => note.id ? note : { ...note, id: mint('note') }),
+        } as T;
+    };
+    const clipWithId = <T extends Extract<Verb, { kind: 'addClip' }>['clip']>(clip: T): T =>
+        (clip.id ? clip : { ...clip, id: mint('clip') }) as T;
     switch (verb.kind) {
         case 'addTrack':
             return verb.track.id ? verb : { ...verb, track: { ...verb.track, id: mint('track') } };
-        case 'addClip': {
-            const id = verb.clip.id ?? mint('clip');
-            const notes = verb.clip.notes.map((n) => (n.id ? n : { ...n, id: mint('note') }));
-            return { ...verb, clip: { ...verb.clip, id, notes } };
-        }
+        case 'addSource':
+            return { ...verb, source: sourceWithIds(verb.source) };
+        case 'addClip':
+            return { ...verb, clip: clipWithId(verb.clip) };
+        case 'splitClip':
+            return { ...verb, left: clipWithId(verb.left), right: clipWithId(verb.right) };
+        case 'duplicateClip':
+            return { ...verb, clip: clipWithId(verb.clip), source: verb.source ? sourceWithIds(verb.source) : undefined };
+        case 'stretchClip':
+            return { ...verb, newSource: sourceWithIds(verb.newSource), newClip: clipWithId(verb.newClip) };
+        case 'bounceClips':
+            return { ...verb, newSource: sourceWithIds(verb.newSource), newClip: clipWithId(verb.newClip) };
         case 'addNote':
             return verb.note.id ? verb : { ...verb, note: { ...verb.note, id: mint('note') } };
-        case 'addSection':
-            return verb.section.id ? verb : { ...verb, section: { ...verb.section, id: mint('section') } };
+        case 'addLocation':
+            return verb.location.id ? verb : { ...verb, location: { ...verb.location, id: mint('location') } };
         case 'addAutomationLane':
             return verb.lane.id ? verb : { ...verb, lane: { ...verb.lane, id: mint('lane') } };
         default:

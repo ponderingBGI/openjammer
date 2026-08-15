@@ -22,8 +22,9 @@ const seed: Arrangement = {
         ],
         connections: [{ from: 'keys', to: 'spk' }],
     },
+    sources: { midi: { id: 'midi', kind: 'midi', name: 'MIDI', lengthTick: 3840, notes: [{ tick: 0, durTick: 480, pitch: 60 }] } },
     tracks: [
-        { ref: 'keys', name: 'Keys', clips: [{ startTick: 0, notes: [{ tick: 0, durTick: 480, pitch: 60 }] }] },
+        { ref: 'keys', name: 'Keys', clips: [{ sourceId: 'midi', startTick: 0, lengthTick: 3840 }] },
     ],
 };
 
@@ -40,7 +41,8 @@ describe('arrangementStore — the timeline SSOT + command-log', () => {
         const arr = store().arrangement!;
         expect(arr.tracks[0]!.id).toBeTruthy();
         expect(arr.tracks[0]!.clips[0]!.id).toBeTruthy();
-        expect(arr.tracks[0]!.clips[0]!.notes[0]!.id).toBeTruthy();
+        const source = arr.sources!.midi!;
+        expect(source.kind === 'midi' && source.notes[0]!.id).toBeTruthy();
     });
 
     it('apply → undo → redo restores exactly (one shared history)', () => {
@@ -62,7 +64,8 @@ describe('arrangementStore — the timeline SSOT + command-log', () => {
         const trackId = store().arrangement!.tracks[0]!.id!;
 
         store().selectClip(store().arrangement!.tracks[0]!.clips[0]!.id!);
-        store().selectNotes([store().arrangement!.tracks[0]!.clips[0]!.notes[0]!.id!]);
+        const source = store().arrangement!.sources!.midi!;
+        store().selectNotes([source.kind === 'midi' ? source.notes[0]!.id! : '']);
         store().seek(120);
         store().play();
         store().stop();
@@ -112,12 +115,10 @@ describe('arrangementStore — the timeline SSOT + command-log', () => {
     it('apply with a fresh clip via mintId round-trips through undo', () => {
         const trackId = store().arrangement!.tracks[0]!.id!;
         const clipId = store().mintId('clip');
-        const noteId = store().mintId('note');
         store().apply({
             kind: 'addClip',
             trackId,
-            index: 1,
-            clip: { id: clipId, startTick: 1920, notes: [{ id: noteId, tick: 0, durTick: 240, pitch: 67 }] },
+            clip: { id: clipId, sourceId: 'midi', startTick: 1920, lengthTick: 240 },
         });
         expect(store().arrangement!.tracks[0]!.clips).toHaveLength(2);
         store().undo();

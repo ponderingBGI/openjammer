@@ -14,7 +14,7 @@
 
 import { useRef } from 'react';
 import { useArrangementStore } from '../../store/arrangementStore';
-import { arrangementLengthTicks, barToTick, timebase } from '../../song/time';
+import { arrangementLengthTicks, timebase } from '../../song/time';
 import { buildPaperSketch } from '../../song/songs/paperSketch';
 import { Ruler } from './Ruler';
 import { TrackLane } from './TrackLane';
@@ -84,8 +84,7 @@ export function SongInterior({ songNodeId }: { songNodeId: string }) {
                         bars={bars}
                         pxPerBar={PX_PER_BAR}
                         gutterPx={GUTTER_PX}
-                        sections={arrangement.sections ?? []}
-                        sectionTick={(startBar) => barToTick(tb, startBar)}
+                        sections={(arrangement.locations ?? []).filter((location) => location.kind === 'section')}
                         pxPerTick={pxPerTick}
                         onSeek={seekFromClientX}
                     />
@@ -94,6 +93,7 @@ export function SongInterior({ songNodeId }: { songNodeId: string }) {
                             <TrackLane
                                 key={track.id}
                                 track={track}
+                                sources={arrangement.sources}
                                 pxPerTick={pxPerTick}
                                 gutterPx={GUTTER_PX}
                                 laneHeight={LANE_PX}

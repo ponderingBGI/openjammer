@@ -1,37 +1,22 @@
-// src/song/normalize.ts — stamp a stable identity onto every addressable entity of
-// an Arrangement (tracks, clips, notes, automation lanes, sections). The timeline
-// GUI's selection, drag, and the agent's reversible verbs all name an entity by id;
-// the command-log undo replays a verb against the same id after other edits. So an
-// id must (1) be present on every entity, (2) survive edits to that entity's content
-// (you can move a clip without its id changing), and (3) round-trip through a saved
-// project. `normalizeArrangement` provides (1) by stamping wherever an id is absent;
-// the verb layer provides fresh ids for new entities so (2) holds across edits.
-//
-// CRUCIAL INVARIANT: `conduct` keys off `ref`/`tick`/`param`/`pitch` and NEVER reads
-// an id, so `conduct(arr)` is byte-identical to `conduct(normalizeArrangement(arr))`.
-// Ids are a Tier-4 authoring/UI concern that the lowering is blind to (proven by a
-// conduct-equality test). Stamping is deterministic and idempotent: a second
-// normalize is a no-op, and the same structure always yields the same ids — so a
-// golden arrangement (paperSketch) gets the same ids every run.
+// Deterministic, idempotent v2 identity stamping.
 
 import type {
     Arrangement,
     ArrangementClip,
     ArrangementNote,
-    ArrangementSection,
     ArrangementTrack,
     AutomationLane,
+    Location,
+    Source,
 } from './types';
 
-/**
- * A deterministic, collision-free id allocator. Prefers an entity's EXISTING id (so
- * normalize is idempotent and stable across edits); falls back to a readable,
- * structure-derived id where absent. If two entities would collide (a hand-authored
- * duplicate, or a fallback that clashes with a pre-existing explicit id), the later
- * one is de-collided deterministically with a `#n` suffix — never silently merged.
- */
-class IdMint {
+export class IdMint {
     private readonly seen = new Set<string>();
+    private counter: number;
+
+    constructor(counter = 0) {
+        this.counter = Math.max(0, Math.floor(counter));
+    }
 
     take(existing: string | undefined, fallback: string): string {
         let id = existing && existing.length > 0 ? existing : fallback;
@@ -43,55 +28,103 @@ class IdMint {
         this.seen.add(id);
         return id;
     }
+
+    midiSourceId(): string {
+        let id: string;
+        do id = `src:midi:m${this.counter++}`;
+        while (this.seen.has(id));
+        this.seen.add(id);
+        return id;
+    }
+
+    get nextCounter(): number {
+        return this.counter;
+    }
 }
 
-function normalizeNote(note: ArrangementNote, mint: IdMint, clipId: string, i: number): ArrangementNote {
-    return { ...note, id: mint.take(note.id, `${clipId}.n${i}`) };
+function stableClips(clips: ArrangementClip[]): ArrangementClip[] {
+    return clips
+        .map((clip, index) => ({ clip, index }))
+        .sort((a, b) => a.clip.startTick - b.clip.startTick || a.index - b.index)
+        .map(({ clip }) => clip);
 }
 
-function normalizeClip(clip: ArrangementClip, mint: IdMint, trackId: string, i: number): ArrangementClip {
-    const id = mint.take(clip.id, `${trackId}.c${i}`);
-    // A second, INNER mint per clip keeps note fallbacks unique within the clip while
-    // staying stable regardless of how many notes other clips hold (a note's id is
-    // derived from its OWN clip's id, never a global counter).
-    const noteMint = new IdMint();
-    return { ...clip, id, notes: clip.notes.map((n, ni) => normalizeNote(n, noteMint, id, ni)) };
+function normalizeLane(lane: AutomationLane, mint: IdMint, trackId: string, index: number): AutomationLane {
+    return { ...lane, id: mint.take(lane.id, `${trackId}.a${index}`) };
 }
 
-function normalizeLane(lane: AutomationLane, mint: IdMint, trackId: string, i: number): AutomationLane {
-    return { ...lane, id: mint.take(lane.id, `${trackId}.a${i}`) };
-}
-
-function normalizeTrack(track: ArrangementTrack, mint: IdMint, i: number): ArrangementTrack {
-    const id = mint.take(track.id, `t${i}`);
-    const clipMint = new IdMint();
-    const clips = track.clips.map((c, ci) => normalizeClip(c, clipMint, id, ci));
+function normalizeTrack(track: ArrangementTrack, mint: IdMint, index: number): ArrangementTrack {
+    const id = mint.take(track.id, `t${index}`);
+    const clips = stableClips(track.clips).map((clip, clipIndex) => ({
+        ...clip,
+        id: mint.take(clip.id, `${id}.c${clipIndex}`),
+    }));
     const out: ArrangementTrack = { ...track, id, clips };
-    if (track.automation) {
-        const laneMint = new IdMint();
-        out.automation = track.automation.map((l, li) => normalizeLane(l, laneMint, id, li));
-    }
+    if (track.automation) out.automation = track.automation.map((lane, i) => normalizeLane(lane, mint, id, i));
     return out;
 }
 
-function normalizeSection(section: ArrangementSection, mint: IdMint, i: number): ArrangementSection {
-    return { ...section, id: mint.take(section.id, `s${i}`) };
+function normalizeLocation(location: Location, mint: IdMint, index: number): Location {
+    return { ...location, id: mint.take(location.id, `l${index}`) };
 }
 
-/**
- * Return a structurally-identical Arrangement in which every track, clip, note,
- * automation lane, and section carries a stable `id`. Pure: the input is not
- * mutated, existing ids are preserved verbatim, and the result deep-equals the input
- * everywhere except the added/filled `id` fields. Idempotent:
- * `normalizeArrangement(normalizeArrangement(a))` deep-equals `normalizeArrangement(a)`.
- */
+function normalizeNote(note: ArrangementNote, mint: IdMint, sourceId: string, index: number): ArrangementNote {
+    return { ...note, id: mint.take(note.id, `${sourceId}.n${index}`) };
+}
+
+/** Stamp every entity id, position-sort clips, and persist the next source counter. */
 export function normalizeArrangement(arr: Arrangement): Arrangement {
-    const trackMint = new IdMint();
-    const tracks = arr.tracks.map((t, i) => normalizeTrack(t, trackMint, i));
-    const out: Arrangement = { ...arr, tracks };
-    if (arr.sections) {
-        const sectionMint = new IdMint();
-        out.sections = arr.sections.map((s, i) => normalizeSection(s, sectionMint, i));
+    const mint = new IdMint(arr.idCounter ?? 0);
+    const sourceAliases = new Map<string, string>();
+    const normalizedSources: Record<string, Source> = {};
+    for (const [key, source] of Object.entries(arr.sources ?? {}).sort(([a], [b]) => a.localeCompare(b))) {
+        const audioContentId = source.kind === 'audio' ? `src:audio:${source.assetId.toLowerCase()}` : undefined;
+        if (audioContentId && normalizedSources[audioContentId]) {
+            sourceAliases.set(key, audioContentId);
+            sourceAliases.set(source.id, audioContentId);
+            continue;
+        }
+        const preferred =
+            source.kind === 'audio'
+                ? audioContentId
+                : source.id || (key.length > 0 ? key : undefined);
+        const id = source.kind === 'midi' && !preferred ? mint.midiSourceId() : mint.take(preferred, `s${Object.keys(normalizedSources).length}`);
+        sourceAliases.set(key, id);
+        sourceAliases.set(source.id, id);
+        normalizedSources[id] =
+            source.kind === 'midi'
+                ? { ...source, id, notes: source.notes.map((note, i) => normalizeNote(note, mint, id, i)) }
+                : { ...source, id };
     }
+
+    const tracks = arr.tracks.map((track, i) => normalizeTrack(track, mint, i)).map((track) => ({
+        ...track,
+        clips: track.clips.map((clip) => ({ ...clip, sourceId: sourceAliases.get(clip.sourceId) ?? clip.sourceId })),
+    }));
+    const out: Arrangement = { ...arr, tracks, idCounter: mint.nextCounter };
+    if (Object.keys(normalizedSources).length > 0) {
+        out.sources = Object.fromEntries(Object.entries(normalizedSources).sort(([a], [b]) => a.localeCompare(b)));
+    } else {
+        delete out.sources;
+    }
+    if (arr.locations) out.locations = arr.locations.map((location, i) => normalizeLocation(location, mint, i));
     return out;
+}
+
+/** Regenerate addressable ids for paste/import. Audio content ids remain immutable. */
+export function regenerateIds<T>(subtree: T, mint = new IdMint()): T {
+    const visit = (value: unknown): unknown => {
+        if (Array.isArray(value)) return value.map(visit);
+        if (value === null || typeof value !== 'object') return value;
+        const input = value as Record<string, unknown>;
+        const out: Record<string, unknown> = {};
+        for (const [key, child] of Object.entries(input)) out[key] = visit(child);
+        if (typeof input.id === 'string') {
+            if (input.kind === 'audio' && typeof input.assetId === 'string') out.id = `src:audio:${input.assetId.toLowerCase()}`;
+            else if (input.kind === 'midi') out.id = mint.midiSourceId();
+            else out.id = mint.take(undefined, 'pasted');
+        }
+        return out;
+    };
+    return visit(subtree) as T;
 }

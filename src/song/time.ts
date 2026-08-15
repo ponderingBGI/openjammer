@@ -87,9 +87,7 @@ export function arrangementLengthTicks(arr: Arrangement): number {
     let last = 0;
     for (const track of arr.tracks) {
         for (const clip of track.clips) {
-            for (const n of clip.notes) {
-                last = Math.max(last, clip.startTick + n.tick + Math.max(1, n.durTick));
-            }
+            last = Math.max(last, clip.startTick + Math.max(0, clip.lengthTick));
         }
         for (const lane of track.automation ?? []) {
             for (const p of lane.points) last = Math.max(last, p.tick);

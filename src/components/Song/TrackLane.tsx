@@ -13,10 +13,11 @@ import {
     useTrackLaneViewStore,
 } from '../../store/trackLaneViewStore';
 import { midiToNote } from '../../music/note';
-import type { ArrangementTrack } from '../../song/types';
+import type { Arrangement, ArrangementNote, ArrangementTrack } from '../../song/types';
 
 interface TrackLaneProps {
     track: ArrangementTrack;
+    sources: Arrangement['sources'];
     pxPerTick: number;
     gutterPx: number;
     laneHeight: number;
@@ -26,7 +27,7 @@ interface TrackLaneProps {
 /** Vertical inset so notes never touch the lane edges. */
 const PAD_Y = 8;
 
-export function TrackLane({ track, pxPerTick, gutterPx, laneHeight, fieldWidth }: TrackLaneProps) {
+export function TrackLane({ track, sources, pxPerTick, gutterPx, laneHeight, fieldWidth }: TrackLaneProps) {
     const apply = useArrangementStore((s) => s.apply);
     const selectClip = useArrangementStore((s) => s.selectClip);
     const selectedClipId = useArrangementStore((s) => s.selectedClipId);
@@ -40,13 +41,15 @@ export function TrackLane({ track, pxPerTick, gutterPx, laneHeight, fieldWidth }
         let min = Infinity;
         let max = -Infinity;
         for (const clip of track.clips) {
-            for (const n of clip.notes) {
+            const source = sources?.[clip.sourceId];
+            if (source?.kind !== 'midi') continue;
+            for (const n of source.notes) {
                 min = Math.min(min, n.pitch);
                 max = Math.max(max, n.pitch);
             }
         }
         return { minPitch: min, maxPitch: max };
-    }, [track.clips]);
+    }, [sources, track.clips]);
     const range = rememberedRange
         ? growPitchRange(rememberedRange, minPitch, maxPitch)
         : initialPitchRange(minPitch, maxPitch);
@@ -82,11 +85,13 @@ export function TrackLane({ track, pxPerTick, gutterPx, laneHeight, fieldWidth }
             <div className={`song-lane ${muted ? 'is-muted' : ''}`} style={{ width: fieldWidth }}>
                 {track.clips.map((clip) => {
                     const start = clip.startTick * pxPerTick;
-                    let end = start;
-                    for (const n of clip.notes) {
-                        end = Math.max(end, (clip.startTick + n.tick + Math.max(1, n.durTick)) * pxPerTick);
-                    }
+                    const end = (clip.startTick + clip.lengthTick) * pxPerTick;
                     const width = Math.max(6, end - start);
+                    const source = sources?.[clip.sourceId];
+                    const sourceStart = clip.sourceStart ?? 0;
+                    const notes: ArrangementNote[] = source?.kind === 'midi'
+                        ? source.notes.filter((note) => note.tick + Math.max(1, note.durTick) > sourceStart && note.tick < sourceStart + clip.lengthTick)
+                        : [];
                     return (
                         <div
                             key={clip.id}
@@ -97,13 +102,13 @@ export function TrackLane({ track, pxPerTick, gutterPx, laneHeight, fieldWidth }
                                 selectClip(clip.id!);
                             }}
                         >
-                            {clip.notes.map((n) => (
+                            {notes.map((n) => (
                                 <span
                                     key={n.id}
                                     className={`song-note ${selectedNoteIds.includes(n.id!) ? 'selected' : ''}`}
                                     style={{
-                                        left: (clip.startTick + n.tick) * pxPerTick - start,
-                                        width: Math.max(3, Math.max(1, n.durTick) * pxPerTick - 1),
+                                        left: Math.max(0, n.tick - sourceStart) * pxPerTick,
+                                        width: Math.max(3, Math.min(clip.lengthTick - Math.max(0, n.tick - sourceStart), Math.max(1, n.durTick)) * pxPerTick - 1),
                                         top: yFor(n.pitch),
                                     }}
                                     title={midiToNote(n.pitch)}

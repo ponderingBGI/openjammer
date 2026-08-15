@@ -207,8 +207,10 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'Author the SONG TIMELINE with an ordered list of reversible `verbs` — the ' +
             'SAME vocabulary a human GUI drag emits — applied live and undoable with ' +
             'Ctrl+Z. Verb kinds: setTempo; setTrackMute/setTrackName; addTrack/removeTrack; ' +
-            'addClip/removeClip/moveClip; addNote/removeNote/editNote; addSection/' +
-            'removeSection; addAutomationLane/removeAutomationLane; setAutomationPoint/' +
+            'addSource/removeSource; addClip/removeClip/moveClip/setClipWindow/splitClip; ' +
+            'setClipGain/setClipFades; addNote/removeNote/editNote; addLocation/removeLocation/' +
+            'moveLocation/setLoopRange/setPunchRange; rippleTracks/insertTime/removeTime; ' +
+            'stretchClip; compound; addAutomationLane/removeAutomationLane; setAutomationPoint/' +
             'removeAutomationPoint. Ids for ADDED entities are minted for you (omit them). ' +
             'Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
     },

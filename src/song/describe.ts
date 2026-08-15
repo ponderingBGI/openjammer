@@ -7,31 +7,39 @@
 
 import { midiToNote } from '../music/note';
 import { arrangementLengthTicks, formatBarBeat, timebase, type Timebase } from './time';
-import type { Arrangement, ArrangementTrack } from './types';
+import type { Arrangement, ArrangementNote, ArrangementTrack } from './types';
+
+function clipNotes(arr: Arrangement, sourceId: string): ArrangementNote[] {
+    const source = arr.sources?.[sourceId];
+    return source?.kind === 'midi' ? source.notes : [];
+}
 
 /** Pitch + tick span of a track's notes (absolute ticks), or null when it has none. */
-function trackExtent(track: ArrangementTrack): { lo: number; hi: number; first: number; last: number; count: number } | null {
+function trackExtent(arr: Arrangement, track: ArrangementTrack): { lo: number; hi: number; first: number; last: number; count: number } | null {
     let lo = Infinity;
     let hi = -Infinity;
     let first = Infinity;
     let last = 0;
     let count = 0;
     for (const clip of track.clips) {
-        for (const n of clip.notes) {
+        const sourceStart = clip.sourceStart ?? 0;
+        for (const n of clipNotes(arr, clip.sourceId)) {
+            const noteEnd = n.tick + Math.max(1, n.durTick);
+            if (noteEnd <= sourceStart || n.tick >= sourceStart + clip.lengthTick) continue;
             count++;
             lo = Math.min(lo, n.pitch);
             hi = Math.max(hi, n.pitch);
-            const onset = clip.startTick + n.tick;
+            const onset = clip.startTick + Math.max(0, n.tick - sourceStart);
             first = Math.min(first, onset);
-            last = Math.max(last, onset + Math.max(1, n.durTick));
+            last = Math.max(last, clip.startTick + Math.min(clip.lengthTick, noteEnd - sourceStart));
         }
     }
     return count === 0 ? null : { lo, hi, first, last, count };
 }
 
-function describeTrack(tb: Timebase, track: ArrangementTrack, index: number): string {
+function describeTrack(arr: Arrangement, tb: Timebase, track: ArrangementTrack, index: number): string {
     const head = `  ${index + 1}. "${track.name ?? track.ref}" (id ${track.id}, ref ${track.ref})${track.mute ? ' — MUTED' : ''}`;
-    const ext = trackExtent(track);
+    const ext = trackExtent(arr, track);
     const clipWord = track.clips.length === 1 ? 'clip' : 'clips';
     const body = ext
         ? `${track.clips.length} ${clipWord}, ${ext.count} notes, ` +
@@ -39,7 +47,12 @@ function describeTrack(tb: Timebase, track: ArrangementTrack, index: number): st
           `bars ${formatBarBeat(tb, ext.first)}–${formatBarBeat(tb, ext.last)}`
         : `${track.clips.length} ${clipWord}, empty`;
     const clips = track.clips
-        .map((c) => `      • clip ${c.id} at ${formatBarBeat(tb, c.startTick)} (${c.notes.length} notes)`)
+        .map((c) => {
+            const notes = clipNotes(arr, c.sourceId).length;
+            const gain = c.gain === undefined ? '' : `, gain ${c.gain}`;
+            const fades = c.fadeIn || c.fadeOut ? `, fades ${c.fadeIn?.lengthTick ?? 0}/${c.fadeOut?.lengthTick ?? 0}` : '';
+            return `      • clip ${c.id} at ${formatBarBeat(tb, c.startTick)}, length ${c.lengthTick}, source ${c.sourceId} (${notes} notes${gain}${fades})`;
+        })
         .join('\n');
     const automation = (track.automation ?? [])
         .map((l) => `      ~ automation ${l.id}: ref ${l.ref} param ${l.param} (${l.points.length} points)`)
@@ -58,21 +71,23 @@ export function describeArrangement(arr: Arrangement): string {
     const [bpb, unit] = arr.timeSignature ?? [4, 4];
     const bars = Math.round(arrangementLengthTicks(arr) / tb.ticksPerBar);
     const lines: string[] = [];
-    lines.push(`"${arr.name}" — ${arr.tempoBpm} BPM, ${bpb}/${unit}, ${bars} bars`);
+    lines.push(`"${arr.name}" — ${arr.tempoBpm} BPM, ${bpb}/${unit}, ${bars} bars (ppq ${tb.ppq}, ticksPerBar ${tb.ticksPerBar})`);
 
-    const sections = arr.sections ?? [];
+    const sections = (arr.locations ?? []).filter((location) => location.kind === 'section');
     if (sections.length > 0) {
         lines.push(
             'Sections: ' +
-                sections.map((s) => `${s.name} (${formatBarBeat(tb, (s.startBar - 1) * tb.ticksPerBar)})`).join(', '),
+                sections.map((s) => `${s.name} (${formatBarBeat(tb, s.startTick)})`).join(', '),
         );
     }
+    const otherLocations = (arr.locations ?? []).filter((location) => location.kind !== 'section');
+    if (otherLocations.length > 0) lines.push('Locations: ' + otherLocations.map((location) => `${location.kind} ${location.name} (${formatBarBeat(tb, location.startTick)}${location.endTick === undefined ? '' : `–${formatBarBeat(tb, location.endTick)}`})`).join(', '));
 
     if (arr.tracks.length === 0) {
         lines.push('No tracks yet — an empty page.');
     } else {
         lines.push('Tracks:');
-        arr.tracks.forEach((t, i) => lines.push(describeTrack(tb, t, i)));
+        arr.tracks.forEach((t, i) => lines.push(describeTrack(arr, tb, t, i)));
     }
 
     return lines.join('\n');

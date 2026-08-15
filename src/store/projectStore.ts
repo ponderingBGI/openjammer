@@ -36,13 +36,6 @@ export interface ProjectManifest {
   engineVersion: string;
   created: string;
   modified: string;
-  transport?: {
-    bpm: number;
-    timeSignature: [number, number];
-    loop: boolean;
-    loopStart: number;
-    loopEnd: number;
-  };
   audioFiles?: Record<string, {
     path: string;
     duration?: number;
@@ -335,13 +328,6 @@ async function createProjectStructure(
     engineVersion: ENGINE_VERSION,
     created: new Date().toISOString(),
     modified: new Date().toISOString(),
-    transport: {
-      bpm: 120,
-      timeSignature: [4, 4],
-      loop: false,
-      loopStart: 0,
-      loopEnd: 16,
-    },
     audioFiles: {},
     graph: {
       nodes: [],
@@ -432,6 +418,35 @@ async function writeProjectManifest(
   manifest: ProjectManifest
 ): Promise<void> {
   const fileHandle = await handle.getFileHandle(PROJECT_FILE_NAME, { create: true });
+  // Preserve the prior complete document before replacement. File System Access
+  // writable streams commit on close; the explicit backup also gives migration a
+  // durable copy of the last v1 payload.
+  const previousText = await (await fileHandle.getFile()).text();
+  if (previousText.length > 0) {
+    const writeBackup = async (name: string) => {
+      const backup = await handle.getFileHandle(name, { create: true });
+      const stream = await backup.createWritable();
+      try {
+        await stream.write(previousText);
+        await stream.close();
+      } catch (err) {
+        await stream.abort().catch(() => {});
+        throw err;
+      }
+    };
+    await writeBackup(`${PROJECT_FILE_NAME}.bak`);
+    try {
+      const previous = JSON.parse(previousText) as ProjectManifest;
+      const previousVersion = (previous.arrangement as { schemaVersion?: number } | undefined)?.schemaVersion ?? 1;
+      const nextVersion = (manifest.arrangement as { schemaVersion?: number } | undefined)?.schemaVersion ?? 1;
+      if (previous.arrangement !== undefined && previousVersion < 2 && nextVersion >= 2) {
+        await writeBackup(`${PROJECT_FILE_NAME}.v1.bak`);
+      }
+    } catch {
+      // An unreadable previous manifest is still retained in the general .bak;
+      // parsing it must never prevent the valid replacement from being written.
+    }
+  }
   const writable = await fileHandle.createWritable();
   try {
     await writable.write(JSON.stringify(manifest, null, 2));

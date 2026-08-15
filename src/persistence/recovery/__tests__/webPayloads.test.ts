@@ -17,6 +17,7 @@ import { WebMarkerStore } from '../markerStore';
 import { serializeMarker } from '../breaker';
 import { runRecovery } from '../recover';
 import type { Marker } from '../types';
+import { readArrangement } from '../../../song/project';
 
 beforeEach(() => {
     localStorage.clear();
@@ -37,7 +38,7 @@ const goodArrangement = {
 describe('validateRecoveredGraph (fail-closed)', () => {
     it('accepts arrays of id-bearing nodes and edges', () => {
         const b: EmergencyBackup = { timestamp: 1, ...goodGraph, arrangement: goodArrangement };
-        expect(validateRecoveredGraph(b)?.arrangement).toEqual(goodArrangement);
+        expect(validateRecoveredGraph(b)?.arrangement).toEqual(readArrangement(goodArrangement));
     });
     it('rejects nodes without string ids', () => {
         const b: EmergencyBackup = { timestamp: 1, nodes: [{ type: 'x' }], edges: [] };

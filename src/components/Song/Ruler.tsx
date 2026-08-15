@@ -5,19 +5,18 @@
  * the playhead (a hand aiming, never an auto-snap).
  */
 
-import type { ArrangementSection } from '../../song/types';
+import type { Location } from '../../song/types';
 
 interface RulerProps {
     bars: number;
     pxPerBar: number;
     gutterPx: number;
     pxPerTick: number;
-    sections: ArrangementSection[];
-    sectionTick: (startBar: number) => number;
+    sections: Location[];
     onSeek: (clientX: number) => void;
 }
 
-export function Ruler({ bars, pxPerBar, gutterPx, pxPerTick, sections, sectionTick, onSeek }: RulerProps) {
+export function Ruler({ bars, pxPerBar, gutterPx, pxPerTick, sections, onSeek }: RulerProps) {
     return (
         <div className="song-ruler-row">
             {/* sticky corner over the gutter */}
@@ -38,8 +37,8 @@ export function Ruler({ bars, pxPerBar, gutterPx, pxPerTick, sections, sectionTi
                     <div
                         key={s.id ?? s.name}
                         className="song-section-marker"
-                        style={{ left: sectionTick(s.startBar) * pxPerTick }}
-                        title={`Section: ${s.name} (bar ${s.startBar})`}
+                        style={{ left: s.startTick * pxPerTick }}
+                        title={`Section: ${s.name}`}
                     >
                         <span className="song-section-label">{s.name}</span>
                     </div>

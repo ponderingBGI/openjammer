@@ -112,6 +112,7 @@ export function conduct(
     const timed: { tick: number; ev: ScheduleEvent }[] = [];
     const trackIndex: Record<string, number> = {};
     let lastTick = 0;
+    let nextTimelineNode = remapped.nodes.reduce((max, item) => Math.max(max, item.id), -1) + 1;
 
     for (const track of arr.tracks) {
         const node = idxOf(track.ref);
@@ -120,13 +121,44 @@ export function conduct(
 
         if (!track.mute) {
             for (const clip of track.clips) {
-                for (const n of clip.notes) {
-                    const onTick = clip.startTick + n.tick;
-                    const offTick = onTick + Math.max(1, n.durTick);
+                if (clip.mute || !(clip.lengthTick > 0)) continue;
+                const source = arr.sources?.[clip.sourceId];
+                if (!source) continue; // unresolved media is a silent placeholder
+                const sourceStart = clip.sourceStart ?? 0;
+                if (source.kind === 'midi') for (const n of source.notes) {
+                    const noteEnd = n.tick + Math.max(1, n.durTick);
+                    const windowEnd = sourceStart + clip.lengthTick;
+                    if (noteEnd <= sourceStart || n.tick >= windowEnd) continue;
+                    const onTick = clip.startTick + Math.max(0, n.tick - sourceStart);
+                    const offTick = clip.startTick + Math.min(clip.lengthTick, noteEnd - sourceStart);
+                    if (offTick <= onTick) continue;
                     lastTick = Math.max(lastTick, offTick);
                     const note = clampMidi(n.pitch);
                     timed.push({ tick: onTick, ev: { at: tickToSec(onTick), cmd: 'noteOn', node, note, vel: clampVel(n.vel) } });
                     timed.push({ tick: offTick, ev: { at: tickToSec(offTick), cmd: 'noteOff', node, note } });
+                } else {
+                    // One bound Sampler per audio clip. The current sampler contract can
+                    // trigger the immutable asset but cannot yet seek sourceStart or stop
+                    // an unpitched one-shot sample-accurately; those executor controls are
+                    // the explicit seam retained by Wave 1.
+                    const samplerNode = nextTimelineNode++;
+                    const consumers = remapped.edges.filter((edge) => edge.from_node === node);
+                    const asset = Number.parseInt(source.assetId.replace(/^0x/i, ''), 16);
+                    remapped.nodes.push({
+                        id: samplerNode,
+                        manifest_id: 'builtin.sampler',
+                        kind: 'Sampler',
+                        params: [{ id: 16, value: 60 }, { id: 0, value: clip.gain ?? 1 }],
+                        assets: Number.isFinite(asset) ? [{ slot: 0, asset }] : [],
+                        n_in: 0,
+                        n_out: 1,
+                    });
+                    for (const edge of consumers) remapped.edges.push({ ...edge, from_node: samplerNode, from_port: 0 });
+                    const onTick = clip.startTick;
+                    const offTick = clip.startTick + clip.lengthTick;
+                    lastTick = Math.max(lastTick, offTick);
+                    timed.push({ tick: onTick, ev: { at: tickToSec(onTick), cmd: 'noteOn', node: samplerNode, note: 60, vel: 127 } });
+                    timed.push({ tick: offTick, ev: { at: tickToSec(offTick), cmd: 'noteOff', node: samplerNode, note: 60 } });
                 }
             }
         }

@@ -8,7 +8,7 @@
 import { degreeToMidi } from '../../music/scale';
 import { diatonicChord } from '../../music/chord';
 import { arpeggiate } from '../../music/euclid';
-import type { Arrangement, ArrangementClip, ArrangementNote, ArrangementTrack } from '../types';
+import type { Arrangement, ArrangementClip, ArrangementNote, ArrangementTrack, MidiSource } from '../types';
 
 const PPQ = 960;
 const BAR = PPQ * 4; // 4/4
@@ -57,8 +57,14 @@ export function buildPaperSketch(): Arrangement {
         }
     }
 
-    const clip = (start: number, notes: ArrangementNote[]): ArrangementClip[] =>
-        notes.length ? [{ startTick: start, notes: notes.map((n) => ({ ...n, tick: n.tick - start })) }] : [];
+    const sources: Record<string, MidiSource> = {};
+    const clip = (sourceId: string, name: string, start: number, notes: ArrangementNote[]): ArrangementClip[] => {
+        if (notes.length === 0) return [];
+        const sourceNotes = notes.map((note) => ({ ...note, tick: note.tick - start }));
+        const lengthTick = sourceNotes.reduce((end, note) => Math.max(end, note.tick + note.durTick), 0);
+        sources[sourceId] = { id: sourceId, kind: 'midi', name, notes: sourceNotes, lengthTick };
+        return [{ sourceId, startTick: start, lengthTick }];
+    };
 
     // The "lift": a stepped sweep that opens the lowpass on the chords through the
     // lift section and settles it back for the outro — automation on the Biquad
@@ -76,11 +82,11 @@ export function buildPaperSketch(): Arrangement {
         {
             name: 'Nylon Chords',
             ref: 'chords',
-            clips: clip(0, chordNotes),
+            clips: clip('src:midi:m0', 'Nylon Chords', 0, chordNotes),
             automation: [{ ref: 'lpfChords', param: 1, points: filterSweep }],
         },
-        { name: 'Bass', ref: 'bass', clips: clip(2 * BAR, bassNotes) },
-        { name: 'Lead', ref: 'lead', clips: clip(8 * BAR, leadNotes) },
+        { name: 'Bass', ref: 'bass', clips: clip('src:midi:m1', 'Bass', 2 * BAR, bassNotes) },
+        { name: 'Lead', ref: 'lead', clips: clip('src:midi:m2', 'Lead', 8 * BAR, leadNotes) },
     ];
 
     return {
@@ -90,11 +96,13 @@ export function buildPaperSketch(): Arrangement {
         timeSignature: [4, 4],
         sampleRate: 48_000,
         blockSize: 256,
-        sections: [
-            { name: 'Intro', startBar: 1 },
-            { name: 'Groove', startBar: 3 },
-            { name: 'Lift', startBar: 9 },
-            { name: 'Outro', startBar: 15 },
+        idCounter: 3,
+        sources,
+        locations: [
+            { name: 'Intro', kind: 'section', startTick: 0 },
+            { name: 'Groove', kind: 'section', startTick: 2 * BAR },
+            { name: 'Lift', kind: 'section', startTick: 8 * BAR },
+            { name: 'Outro', kind: 'section', startTick: 14 * BAR },
         ],
         graph: {
             nodes: [

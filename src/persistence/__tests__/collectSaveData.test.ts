@@ -29,7 +29,7 @@ describe('collectSaveData', () => {
         expect(saveData.viewport).toEqual({ x: 30, y: 40, zoom: 1.25 });
         expect(saveData.arrangement).toMatchObject({
             name: 'Autosave song',
-            schemaVersion: 1,
+            schemaVersion: 2,
         });
     });
 
@@ -41,7 +41,7 @@ describe('collectSaveData', () => {
         };
         expect(backup.arrangement).toMatchObject({
             name: 'Autosave song',
-            schemaVersion: 1,
+            schemaVersion: 2,
         });
     });
 });

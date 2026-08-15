@@ -1,0 +1,30 @@
+{
+  "name": "V1 Fixture",
+  "tempoBpm": 120,
+  "ppq": 960,
+  "timeSignature": [4, 4],
+  "sections": [
+    { "id": "s0", "name": "Intro", "startBar": 1 },
+    { "id": "s1", "name": "Verse", "startBar": 3 }
+  ],
+  "graph": {
+    "nodes": [
+      { "ref": "keys", "type": "keys" },
+      { "ref": "spk", "type": "speaker" }
+    ],
+    "connections": [{ "from": "keys", "to": "spk" }]
+  },
+  "tracks": [{
+    "id": "track-old",
+    "name": "Keys",
+    "ref": "keys",
+    "clips": [{
+      "id": "clip-old",
+      "startTick": 960,
+      "notes": [
+        { "id": "note-old", "tick": 0, "durTick": 480, "pitch": 60, "vel": 88 },
+        { "tick": 1440, "durTick": 960, "pitch": 64 }
+      ]
+    }]
+  }]
+}

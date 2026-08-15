@@ -79,12 +79,11 @@ function stopPreview(): void {
 }
 
 /**
- * Seed a monotonic id counter ABOVE any `${prefix}-<n>` already present in the
- * arrangement, so ids minted this session never collide with ones a prior session
- * (reloaded from disk) already used. Structural normalize ids (`t0`, `t0.c1`) use a
- * different shape and are left alone.
+ * Restore the in-band counter. Legacy regex scanning remains only as a defensive
+ * fallback for documents that reached the store without going through migration.
  */
 function seedCounter(arr: Arrangement): number {
+    if (arr.idCounter !== undefined) return arr.idCounter;
     let max = 0;
     const scan = (id: string | undefined) => {
         if (!id) return;
@@ -95,11 +94,14 @@ function seedCounter(arr: Arrangement): number {
         scan(t.id);
         for (const c of t.clips) {
             scan(c.id);
-            for (const n of c.notes) scan(n.id);
         }
         for (const l of t.automation ?? []) scan(l.id);
     }
-    for (const s of arr.sections ?? []) scan(s.id);
+    for (const source of Object.values(arr.sources ?? {})) {
+        scan(source.id);
+        if (source.kind === 'midi') for (const note of source.notes) scan(note.id);
+    }
+    for (const location of arr.locations ?? []) scan(location.id);
     return max + 1;
 }
 
@@ -256,7 +258,12 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
         canUndo: () => get().undoStack.length > 0,
         canRedo: () => get().redoStack.length > 0,
 
-        mintId: (prefix) => `${prefix}-${idCounter++}`,
+        mintId: (prefix) => {
+            const id = `${prefix}-${idCounter++}`;
+            const arrangement = get().arrangement;
+            if (arrangement) set({ arrangement: { ...arrangement, idCounter } });
+            return id;
+        },
 
         selectClip: (clipId) => set({ selectedClipId: clipId, selectedNoteIds: [] }),
         selectNotes: (noteIds) => set({ selectedNoteIds: noteIds }),
