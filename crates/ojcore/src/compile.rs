@@ -162,6 +162,8 @@ pub struct NodeRouting {
 /// handed across the graph-swap seam. Building one may allocate; running one
 /// (see `exec.rs`) must not.
 pub struct CompiledProgram {
+    /// Graph sample rate used to activate nodes and seed the default tempo map.
+    pub sample_rate: u32,
     /// One live DSP instance per node, indexed by compiled slot.
     pub instances: Vec<Box<dyn DspInstance>>,
     /// Per-node routing plan (same indexing as `instances`).
@@ -528,6 +530,7 @@ fn compile_inner(
     // No reorder of the by-slot tables is needed: the RT loop walks `schedule`
     // (the computed, cycle-free order) and indexes the by-slot tables by slot.
     Ok(CompiledProgram {
+        sample_rate: graph.sample_rate,
         instances,
         routing,
         out_bufs,

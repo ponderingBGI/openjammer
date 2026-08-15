@@ -136,7 +136,7 @@ pub use structural::{
 pub use meter::{Meter, MeterBank};
 pub use resilience::{sanitize, CommandCoalescer, NodeBudget};
 pub use tempo::{MetricCursor, MetricPosition, TempoMapRt};
-pub use transport::{Transport, TransportPos};
+pub use transport::{DeclickAmp, Disposition, Motion, Transport, TransportFsm, TransportPos};
 
 #[cfg(feature = "std")]
 pub use command::{CommandConsumer, CommandProducer, CommandQueue};

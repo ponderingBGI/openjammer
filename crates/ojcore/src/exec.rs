@@ -9,6 +9,7 @@
 //! `no_std`: this module is `alloc`-only (it never names `std`), so it compiles
 //! unchanged for the `wasm32` AudioWorklet.
 
+use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -18,6 +19,7 @@ use crate::compile::CompiledProgram;
 use crate::dsp::ProcessCtx;
 use crate::meter::MeterBank;
 use crate::resilience::{sanitize, NodeBudget};
+use crate::tempo::{MetricCursor, TempoMapRt};
 use crate::transport::{Transport, TransportPos};
 
 /// Hard cap on channels materialized on the stack per node, so the render step
@@ -36,17 +38,14 @@ pub struct Engine {
     in_ptrs: Vec<*const f32>,
     /// Reusable output channel-pointer scratch (len >= `program.max_out`).
     out_ptrs: Vec<*mut f32>,
-    /// Minimal transport clock: sample position + play/pause. Full transport
-    /// (bars/beats/tempo) is a later unit; this is enough to honour
-    /// `TransportPlay/Pause/Seek` commands. `pub(crate)` so the std-gated
-    /// `command.rs` can drive it.
-    pub(crate) playing: bool,
-    pub(crate) sample_pos: u64,
-    /// U12: musical interpretation (tempo/time-signature -> bar/beat/phase) laid
-    /// over the same sample playhead above. Kept in lockstep with `playing` /
-    /// `sample_pos`; tempo + time signature are configured via the additive
-    /// `set_tempo` / `set_time_signature` methods.
+    /// Authoritative transport FSM, sample clock, and loop/punch state.
     pub(crate) transport: Transport,
+    /// Immutable tempo/meter snapshot used when no native RCU receiver is attached.
+    tempo_map: Arc<TempoMapRt>,
+    /// Native swap-whole tempo publication handle. Loaded once per process block.
+    #[cfg(feature = "std")]
+    tempo_map_rx: Option<crate::swap::RtCellRx<TempoMapRt>>,
+    metric_cursor: MetricCursor,
     /// U15: per-node + master RMS/peak meters, behind a cheap enable toggle.
     /// Sized to the program's node count; the render loop only accumulates.
     pub(crate) meters: MeterBank,
@@ -80,13 +79,16 @@ impl Engine {
         let in_ptrs = vec![core::ptr::null(); program.max_in];
         let out_ptrs = vec![core::ptr::null_mut(); program.max_out];
         let n = program.len();
+        let sample_rate = program.sample_rate.max(1);
         Self {
             program,
             in_ptrs,
             out_ptrs,
-            playing: false,
-            sample_pos: 0,
-            transport: Transport::default(),
+            transport: Transport::new(sample_rate as f32),
+            tempo_map: Arc::new(TempoMapRt::one_point(sample_rate, 120.0, 4, 4)),
+            #[cfg(feature = "std")]
+            tempo_map_rx: None,
+            metric_cursor: MetricCursor::default(),
             meters: MeterBank::with_nodes(n),
             budget: NodeBudget::with_nodes(n),
             #[cfg(feature = "std")]
@@ -100,12 +102,12 @@ impl Engine {
 
     /// Whether the transport clock is running.
     pub fn is_playing(&self) -> bool {
-        self.playing
+        self.transport.is_playing()
     }
 
     /// Current transport sample position.
     pub fn sample_pos(&self) -> u64 {
-        self.sample_pos
+        self.transport.sample_pos()
     }
 
     // --- U12 musical transport (additive) ----------------------------------
@@ -113,38 +115,85 @@ impl Engine {
     /// Set the musical tempo in BPM. Off-RT or RT-safe (a single field write);
     /// takes effect on the next position read. Non-positive values are ignored.
     pub fn set_tempo(&mut self, bpm: f32) {
-        self.transport.set_tempo(bpm);
+        if bpm.is_finite() && bpm > 0.0 {
+            self.tempo_map = Arc::new(TempoMapRt::one_point(
+                self.transport.sample_rate() as u32,
+                bpm,
+                4,
+                4,
+            ));
+        }
     }
 
     /// Set the time signature `numerator/denominator` (e.g. `4, 4`). RT-safe.
     pub fn set_time_signature(&mut self, numerator: u32, denominator: u32) {
-        self.transport.set_time_signature(numerator, denominator);
+        self.tempo_map = Arc::new(TempoMapRt::one_point(
+            self.transport.sample_rate() as u32,
+            120.0,
+            numerator.clamp(1, u8::MAX as u32) as u8,
+            denominator.clamp(1, u8::MAX as u32) as u8,
+        ));
     }
 
     /// Set the transport sample rate (Hz) used to convert the sample playhead
     /// into musical time. Call once after compiling for a given graph.
     pub fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.transport.sample_rate = sample_rate;
+        self.transport.set_sample_rate(sample_rate);
+        self.tempo_map = Arc::new(TempoMapRt::one_point(
+            self.transport.sample_rate() as u32,
+            120.0,
+            4,
+            4,
+        ));
+    }
+
+    /// Install an immutable tempo map directly (wasm and single-threaded hosts).
+    pub fn install_tempo_map(&mut self, map: TempoMapRt) {
+        self.transport.set_sample_rate(map.sample_rate() as f32);
+        self.tempo_map = Arc::new(map);
+        self.metric_cursor = MetricCursor::default();
+    }
+
+    /// Attach the native swap-whole tempo-map reader.
+    #[cfg(feature = "std")]
+    pub fn attach_tempo_map(&mut self, rx: Option<crate::swap::RtCellRx<TempoMapRt>>) {
+        self.tempo_map_rx = rx;
+        self.metric_cursor = MetricCursor::default();
+    }
+
+    /// Install loop and punch ranges from the current timeline document.
+    pub fn set_transport_ranges(
+        &mut self,
+        loop_range: Option<(u64, u64)>,
+        punch_range: Option<(u64, u64)>,
+    ) {
+        self.transport.set_ranges(loop_range, punch_range);
+    }
+
+    /// Install the transport-owned ranges from a published timeline document.
+    pub fn set_timeline_transport(&mut self, timeline: &ojproto::Timeline) {
+        self.set_transport_ranges(timeline.loop_range, timeline.punch_range);
     }
 
     /// The current musical position (bar / beat / phase) derived from the live
     /// sample playhead — enough to emit an [`ojproto::EngineFrame::Beat`].
     /// RT-safe: pure arithmetic, no allocation.
     pub fn transport_pos(&self) -> TransportPos {
-        // Mirror the authoritative minimal clock into the musical transport so
-        // the derived position always tracks `sample_pos` / `playing`.
-        let mut t = self.transport;
-        t.sample_pos = self.sample_pos;
-        t.playing = self.playing;
-        t.position()
+        let map = self.tempo_snapshot();
+        self.transport.position(&map, &mut MetricCursor::default())
     }
 
     /// Borrow the musical transport snapshot (tempo / time signature / playhead).
     pub fn transport(&self) -> Transport {
-        let mut t = self.transport;
-        t.sample_pos = self.sample_pos;
-        t.playing = self.playing;
-        t
+        self.transport
+    }
+
+    fn tempo_snapshot(&self) -> Arc<TempoMapRt> {
+        #[cfg(feature = "std")]
+        if let Some(rx) = self.tempo_map_rx.as_ref() {
+            return rx.load_full();
+        }
+        Arc::clone(&self.tempo_map)
     }
 
     // --- U15 metering (additive) -------------------------------------------
@@ -219,7 +268,7 @@ impl Engine {
     /// into a stack buffer and `push`es into the pre-allocated ring, dropping
     /// frames rather than blocking when the ring is full.
     #[cfg(feature = "std")]
-    fn publish_levels(&mut self) {
+    fn publish_levels(&mut self, map: &TempoMapRt) {
         let Some(ring) = self.meter_ring.as_ref() else {
             return;
         };
@@ -241,8 +290,20 @@ impl Engine {
         }
 
         // Transport beat.
-        let pos = self.transport_pos();
+        let pos = self.transport.position(map, &mut self.metric_cursor);
         let n = return_frame::encode_beat(pos.bar, pos.beat, pos.phase, &mut buf);
+        let _ = ring.push(&buf[..n]);
+        let n = return_frame::encode_transport(
+            pos.sample,
+            pos.tick,
+            pos.bar,
+            pos.beat.min(u16::MAX as u32) as u16,
+            pos.phase,
+            self.transport.motion() as u8,
+            self.transport.record_armed(),
+            self.transport.loop_on(),
+            &mut buf,
+        );
         let _ = ring.push(&buf[..n]);
     }
 
@@ -350,12 +411,10 @@ impl Engine {
                     self.program.bypassed[slot] = on;
                 }
             }
-            RtCommand::TransportPlay => self.playing = true,
-            RtCommand::TransportPause => self.playing = false,
-            RtCommand::Seek { samples } => self.sample_pos = samples,
-            // W0 reserved the compact flag command; W2's transport FSM gives
-            // it semantics. It is deliberately inert in W1.
-            RtCommand::TransportSet { .. } => {}
+            RtCommand::TransportPlay => self.transport.play(),
+            RtCommand::TransportPause => self.transport.pause(),
+            RtCommand::Seek { samples } => self.transport.locate(samples),
+            RtCommand::TransportSet { flag, on } => self.transport.set_flag(flag, on),
             RtCommand::Looper { node, action, arg } => {
                 if let Some(slot) = self.program.slot_of_id(node) {
                     self.program.instances[slot].looper_action(action, arg);
@@ -421,7 +480,55 @@ impl Engine {
         debug_assert!(nframes <= self.program.block_size, "block overrun");
         let dev_len = outs.iter().map(|o| o.len()).min().unwrap_or(0);
         let nframes = nframes.min(self.program.block_size).min(dev_len);
+        #[cfg(feature = "std")]
+        let map = self.tempo_snapshot();
 
+        let mut offset = 0;
+        while offset < nframes {
+            let remaining = nframes - offset;
+            let edge = self.transport.frames_until_edge(remaining);
+            if edge == 0 {
+                let before = self.transport.sample_pos();
+                self.transport.finish_edge();
+                if self.transport.sample_pos() == before {
+                    // Invalid/stale edge state must never spin the audio thread.
+                    self.render_audio_span(outs, offset, remaining);
+                    self.apply_declick(outs, offset, remaining);
+                    self.transport.advance(remaining);
+                    offset = nframes;
+                }
+                continue;
+            }
+
+            self.render_audio_span(outs, offset, edge);
+            self.apply_declick(outs, offset, edge);
+            self.transport.advance(edge);
+            offset += edge;
+            self.transport.finish_edge();
+        }
+
+        for out in outs.iter_mut() {
+            for sample in out.iter_mut().skip(nframes) {
+                *sample = 0.0;
+            }
+        }
+
+        // Control-rate publishing happens once per caller block, from the same
+        // position/map read for both Beat and Transport.
+        #[cfg(feature = "std")]
+        if self.meters.enabled {
+            self.publish_levels(&map);
+        }
+        #[cfg(feature = "std")]
+        self.publish_looper();
+        #[cfg(feature = "std")]
+        self.publish_faults();
+    }
+
+    /// Render one event-free span into caller output starting at `output_offset`.
+    /// Internal DSP scratch intentionally starts at zero for each span; only
+    /// external source buffers use the caller offset.
+    fn render_audio_span(&mut self, outs: &mut [&mut [f32]], output_offset: usize, nframes: usize) {
         for si in 0..self.program.schedule.len() {
             let node = self.program.schedule[si];
 
@@ -439,7 +546,7 @@ impl Engine {
             if self.program.bypassed[node] {
                 // Passthrough: bypassed nodes copy input 0 -> output 0 so signal
                 // still reaches downstream nodes.
-                self.passthrough(node, nframes);
+                self.passthrough(node, output_offset, nframes);
                 self.meter_node(node, nframes);
                 continue;
             }
@@ -455,7 +562,7 @@ impl Engine {
                 }
             };
 
-            self.render_node(node, nframes);
+            self.render_node(node, output_offset, nframes);
 
             #[cfg(feature = "std")]
             if timed {
@@ -498,7 +605,8 @@ impl Engine {
         let mg = self.program.instances[master].master_gain();
         let mut master_dirty = false;
         for (ch, out) in outs.iter_mut().enumerate() {
-            for o in out.iter_mut().take(nframes) {
+            let out = &mut out[output_offset..output_offset + nframes];
+            for o in out.iter_mut() {
                 *o = 0.0;
             }
             if let Some(port0) = self
@@ -521,20 +629,24 @@ impl Engine {
                     let src_oc = self.program.out_channels[src.node].max(1) as usize;
                     let lane = src.port as usize * src_oc + ch.min(src_oc - 1);
                     if let Some(src_buf) = self.program.out_bufs[src.node].get(lane) {
-                        for (o, &s) in out.iter_mut().zip(src_buf.iter()).take(nframes) {
+                        let source_offset = if matches!(
+                            self.program.kinds[src.node],
+                            PrimitiveKind::GraphIn | PrimitiveKind::MicIn
+                        ) {
+                            output_offset
+                        } else {
+                            0
+                        };
+                        for (o, &s) in out.iter_mut().zip(src_buf.iter().skip(source_offset)) {
                             *o += s;
                         }
                     }
                 }
             }
             if mg != 1.0 {
-                for o in out.iter_mut().take(nframes) {
+                for o in out.iter_mut() {
                     *o *= mg;
                 }
-            }
-            // Zero any trailing frames beyond our valid range.
-            for o in out.iter_mut().skip(nframes) {
-                *o = 0.0;
             }
             // U16: guard the master output (a non-finite source would otherwise reach
             // the device). Flag if ANY channel produced non-finite.
@@ -546,13 +658,13 @@ impl Engine {
             // what is heard). Reuses the shared `ojcore-dsp` soft knee; its linear
             // region passes through untouched, so quiet/normal graphs stay
             // bit-identical (the committed golden fingerprints hold).
-            for o in out.iter_mut().take(nframes) {
+            for o in out.iter_mut() {
                 *o = ojcore_dsp::guards::soft_limit(*o);
             }
             // U15 metering: only the FIRST device channel folds into the single master
             // meter, so a mono graph is byte-identical to the pre-stereo path.
             if ch == 0 && self.meters.enabled {
-                self.meters.master.accumulate(&out[..nframes]);
+                self.meters.master.accumulate(out);
             }
         }
         if master_dirty {
@@ -561,32 +673,17 @@ impl Engine {
             #[cfg(feature = "std")]
             self.emit_node_fault(self.program.master_out, ojproto::FaultKind::NonFinite);
         }
+    }
 
-        // Advance the minimal transport clock once per block while playing.
-        if self.playing {
-            self.sample_pos = self.sample_pos.wrapping_add(nframes as u64);
+    fn apply_declick(&mut self, outs: &mut [&mut [f32]], offset: usize, nframes: usize) {
+        for frame in 0..nframes {
+            let gain = self.transport.next_master_gain();
+            if gain != 1.0 {
+                for out in outs.iter_mut() {
+                    out[offset + frame] *= gain;
+                }
+            }
         }
-        // Keep the musical transport's playhead in lockstep with the minimal
-        // clock so `transport_pos` reflects the just-rendered block.
-        self.transport.sample_pos = self.sample_pos;
-        self.transport.playing = self.playing;
-
-        // U15: non-blocking publish of the meter snapshot + beat at block end.
-        // Levels are gated by the metering toggle; alloc-free.
-        #[cfg(feature = "std")]
-        if self.meters.enabled {
-            self.publish_levels();
-        }
-        // Looper telemetry is UNGATED: the loop row + playhead must surface even
-        // with level metering off. Pushes Looper frames + drains transition
-        // edges onto the loss-proof event ring. Alloc-free; skips non-loopers.
-        #[cfg(feature = "std")]
-        self.publish_looper();
-        // Runtime-degrade telemetry: a node that latched to a dry passthrough at
-        // runtime (a crashed hosted plugin / trapped code node) surfaces a
-        // NodeFault{Crashed} so the UI badges it. Alloc-free; skips healthy nodes.
-        #[cfg(feature = "std")]
-        self.publish_faults();
     }
 
     /// Emit a [`ojproto::FaultKind::Crashed`] node fault for every node that has
@@ -616,7 +713,7 @@ impl Engine {
     /// read during the mix step and the node's own output buffers written
     /// during the render step are ALWAYS disjoint allocations — which is what
     /// makes the raw-pointer read/write borrow split below sound (no aliasing).
-    fn render_node(&mut self, node: usize, nframes: usize) {
+    fn render_node(&mut self, node: usize, source_offset: usize, nframes: usize) {
         let n_in = self.program.routing[node].inputs.len();
         let n_out = self.program.out_bufs[node].len();
 
@@ -629,7 +726,7 @@ impl Engine {
         for port in 0..n_in {
             for c in 0..in_ch {
                 let lane = port * in_ch + c;
-                self.mix_input_lane(node, port, c, in_ch, nframes);
+                self.mix_input_lane(node, port, c, in_ch, source_offset, nframes);
                 if lane < self.in_ptrs.len() {
                     self.in_ptrs[lane] = self.program.in_scratch[lane].as_ptr();
                 }
@@ -665,9 +762,9 @@ impl Engine {
     /// Sum every source feeding `(node, port)` channel 0 into the port's first
     /// input lane — the mono / bypass-passthrough path. Thin wrapper over
     /// [`Engine::mix_input_lane`] so there is one mix implementation.
-    fn mix_input(&mut self, node: usize, port: usize, nframes: usize) {
+    fn mix_input(&mut self, node: usize, port: usize, source_offset: usize, nframes: usize) {
         let in_ch = self.program.in_channels[node].max(1) as usize;
-        self.mix_input_lane(node, port, 0, in_ch, nframes);
+        self.mix_input_lane(node, port, 0, in_ch, source_offset, nframes);
     }
 
     /// Sum every source feeding `(node, port)` CHANNEL `channel` into the input
@@ -687,6 +784,7 @@ impl Engine {
         port: usize,
         channel: usize,
         in_ch: usize,
+        source_offset: usize,
         nframes: usize,
     ) {
         let dest_lane = port * in_ch + channel;
@@ -702,7 +800,15 @@ impl Engine {
             let src_oc = prog.out_channels[src.node].max(1) as usize;
             let src_lane = src.port as usize * src_oc + channel.min(src_oc - 1);
             if let Some(src_buf) = prog.out_bufs[src.node].get(src_lane) {
-                for (d, &s) in dst.iter_mut().zip(src_buf.iter()).take(nframes) {
+                let offset = if matches!(
+                    prog.kinds[src.node],
+                    PrimitiveKind::GraphIn | PrimitiveKind::MicIn
+                ) {
+                    source_offset
+                } else {
+                    0
+                };
+                for (d, &s) in dst.iter_mut().zip(src_buf.iter().skip(offset)) {
                     *d += s;
                 }
             }
@@ -711,13 +817,13 @@ impl Engine {
 
     /// Bypass passthrough: copy `node`'s first resolved input into its first
     /// output buffer. Allocation-free; no-op if the node has no output port.
-    fn passthrough(&mut self, node: usize, nframes: usize) {
+    fn passthrough(&mut self, node: usize, source_offset: usize, nframes: usize) {
         if self.program.out_bufs[node].is_empty() {
             return;
         }
         let has_in = !self.program.routing[node].inputs.is_empty();
         if has_in {
-            self.mix_input(node, 0, nframes);
+            self.mix_input(node, 0, source_offset, nframes);
             // `in_scratch` and `out_bufs` are distinct fields -> safe split.
             let prog = &mut self.program;
             let (src, _) = prog.in_scratch.split_at(1);
@@ -840,6 +946,7 @@ mod apply_rt_tests {
         // Sorted-by-id index used by `slot_of_id`'s binary search.
         let id_index = vec![(NodeIdx(0), 1), (NodeIdx(7), 0)];
         let program = CompiledProgram {
+            sample_rate: 48_000,
             instances,
             routing: vec![NodeRouting::default(), NodeRouting::default()],
             out_bufs: vec![vec![vec![0.0; 4]], vec![]],
@@ -908,6 +1015,7 @@ mod apply_rt_tests {
             Box::new(DegradedNode { degraded: false }),
         ];
         let program = CompiledProgram {
+            sample_rate: 48_000,
             instances,
             routing: vec![NodeRouting::default(), NodeRouting::default()],
             out_bufs: vec![vec![vec![0.0; 4]], vec![]],
@@ -1012,6 +1120,11 @@ mod apply_rt_tests {
         engine.apply_rt(RtCommand::TransportPlay);
         assert!(engine.is_playing());
         engine.apply_rt(RtCommand::TransportPause);
+        assert_eq!(engine.transport().motion(), crate::Motion::DeclickToStop);
+        let mut out = vec![0.0; 4];
+        for _ in 0..(crate::DeclickAmp::length(48_000.0) / 4) {
+            engine.process_block(&mut out, 4);
+        }
         assert!(!engine.is_playing());
     }
 
@@ -1050,6 +1163,7 @@ mod apply_rt_tests {
             }),
         ];
         let program = CompiledProgram {
+            sample_rate: 48_000,
             instances,
             // Master (slot 1) input port 0 is fed by the source (slot 0).
             routing: vec![
@@ -1095,6 +1209,57 @@ mod apply_rt_tests {
         assert!(mono.iter().all(|&x| (x - 0.1).abs() < 1e-6));
     }
 
+    #[test]
+    fn loop_wrap_splits_at_the_exact_output_sample() {
+        use crate::compile::{CompiledProgram, NodeRouting, Source};
+        let instances: Vec<Box<dyn DspInstance>> = vec![
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }),
+            Box::new(ProbeNode {
+                state: Rc::new(ProbeState::default()),
+            }),
+        ];
+        let fixture = vec![0.0, 0.1, 0.0, 0.2, 0.0, 0.3];
+        let program = CompiledProgram {
+            sample_rate: 48_000,
+            instances,
+            routing: vec![
+                NodeRouting::default(),
+                NodeRouting {
+                    inputs: vec![vec![Source { node: 0, port: 0 }]],
+                },
+            ],
+            out_bufs: vec![vec![fixture.clone()], vec![]],
+            out_channels: vec![1, 1],
+            in_channels: vec![1, 1],
+            bypassed: vec![false, false],
+            kinds: vec![PrimitiveKind::GraphIn, PrimitiveKind::SpeakerOut],
+            ids: vec![NodeIdx(1), NodeIdx(2)],
+            id_index: vec![(NodeIdx(1), 0), (NodeIdx(2), 1)],
+            master_out: 1,
+            block_size: 6,
+            in_scratch: vec![vec![0.0; 6]],
+            max_in: 1,
+            max_out: 1,
+            schedule: vec![0, 1],
+        };
+        let mut engine = Engine::new(program);
+        engine.set_transport_ranges(Some((10, 14)), None);
+        engine.apply_rt(RtCommand::Seek { samples: 12 });
+        engine.apply_rt(RtCommand::TransportSet {
+            flag: ojproto::transport_flag::LOOP_ENABLE,
+            on: true,
+        });
+        engine.apply_rt(RtCommand::TransportPlay);
+
+        let mut out = [0.0; 6];
+        engine.process_block(&mut out, 6);
+
+        assert_eq!(out.as_slice(), fixture.as_slice());
+        assert_eq!(engine.sample_pos(), 10);
+    }
+
     /// A STEREO source (one output port, two channels) maps lane->channel: its left
     /// lane reaches device channel 0, its right lane device channel 1. (The §4
     /// adaptation — true stereo, not an upmix.)
@@ -1110,6 +1275,7 @@ mod apply_rt_tests {
             }),
         ];
         let program = CompiledProgram {
+            sample_rate: 48_000,
             instances,
             routing: vec![
                 NodeRouting::default(),
@@ -1195,6 +1361,7 @@ mod apply_rt_tests {
             }), // slot 2: SpeakerOut master
         ];
         let program = CompiledProgram {
+            sample_rate: 48_000,
             instances,
             routing: vec![
                 NodeRouting::default(),

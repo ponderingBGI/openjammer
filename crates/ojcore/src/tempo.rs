@@ -49,6 +49,29 @@ pub struct TempoMapRt {
 }
 
 impl TempoMapRt {
+    /// Construct the default single-tempo/single-meter map used by an engine
+    /// until the control plane publishes an authored map. Allocates once off-RT.
+    pub fn one_point(sample_rate: u32, bpm: f32, divisions_per_bar: u8, note_value: u8) -> Self {
+        Self::from_wire(&TempoMap {
+            ppq: ojproto::PPQ,
+            sample_rate: sample_rate.max(1),
+            tempos: alloc::vec![TempoPoint {
+                tick: 0,
+                sample: 0,
+                bpm_start: bpm,
+                bpm_end: bpm,
+                continuing: false,
+            }],
+            meters: alloc::vec![MeterPoint {
+                tick: 0,
+                sample: 0,
+                bar: 1,
+                divisions_per_bar: divisions_per_bar.max(1),
+                note_value: note_value.max(1),
+            }],
+        })
+    }
+
     /// Validate and precompute a wire map. This allocates and must run off-RT.
     pub fn from_wire(map: &TempoMap) -> Self {
         assert!(map.ppq > 0, "tempo map PPQ must be positive");
@@ -194,30 +217,6 @@ impl TempoMapRt {
         );
         cursor.meter_i = meter_i as u32;
         meter_position(self.meters[meter_i], self.ppq, tick)
-    }
-
-    /// Stack-only one-point map lookup used while [`crate::Transport`] still
-    /// stores scalar tempo/meter fields during migration wave W1.
-    pub(crate) fn one_point_position(
-        sample: u64,
-        sample_rate: f64,
-        bpm: f64,
-        divisions_per_bar: u32,
-    ) -> MetricPosition {
-        let tempo = TempoRt {
-            tick: 0,
-            sample: 0,
-            spq0: sample_rate * 60.0 / bpm,
-            omega: 0.0,
-        };
-        let meter = MeterRt {
-            tick: 0,
-            bar: 1,
-            divisions_per_bar: divisions_per_bar.min(u8::MAX as u32) as u8,
-            note_value: 4,
-        };
-        let tick = tick_f64_in_segment(tempo, ojproto::PPQ, sample);
-        meter_position(meter, ojproto::PPQ, tick)
     }
 }
 

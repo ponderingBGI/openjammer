@@ -326,7 +326,10 @@ fn command_drain_and_process_are_alloc_free() {
     });
 
     assert!(engine.is_playing());
-    assert_eq!(engine.sample_pos(), 4096 + BLOCK as u64);
+    // Seek while rolling is a deferred locate: this block advances through the
+    // declick and must not jump directly to the target.
+    assert_eq!(engine.sample_pos(), BLOCK as u64);
+    assert_eq!(engine.transport().motion(), ojcore::Motion::DeclickToLocate);
     let amp_slot = engine.program().slot_of_id(NodeIdx(2)).unwrap();
     assert!(
         engine.program().bypassed[amp_slot],
@@ -440,19 +443,18 @@ fn engine_transport_advances_bar_and_beat() {
     engine.set_tempo(120.0);
     engine.set_time_signature(4, 4);
 
-    // Start playing and process blocks until ~one bar + one beat has elapsed.
-    let (mut tx, mut rx) = CommandQueue::split(4);
-    tx.push(RtCommand::TransportPlay).unwrap();
-    engine.drain(&mut rx);
-
-    // Seek directly to exactly beat 1 of bar 1 (96000 + 24000 = 120000 samples).
+    // Locate while stopped is immediate.
     let (mut tx2, mut rx2) = CommandQueue::split(4);
     tx2.push(RtCommand::Seek { samples: 120_000 }).unwrap();
     engine.drain(&mut rx2);
 
+    let (mut tx, mut rx) = CommandQueue::split(4);
+    tx.push(RtCommand::TransportPlay).unwrap();
+    engine.drain(&mut rx);
+
     let pos = engine.transport_pos();
-    assert_eq!(pos.bar, 1, "after 120000 samples => bar 1");
-    assert_eq!(pos.beat, 1, "=> beat 1 of bar 1");
+    assert_eq!(pos.bar, 2, "after 120000 samples => one-based bar 2");
+    assert_eq!(pos.beat, 2, "=> one-based beat 2 of bar 2");
     assert!(
         pos.phase < 1e-3,
         "on the beat boundary, phase ~0 (got {})",
@@ -470,8 +472,8 @@ fn engine_transport_advances_bar_and_beat() {
         produced += BLOCK as u64;
     }
     let pos = engine.transport_pos();
-    assert_eq!(pos.bar, 1);
-    assert_eq!(pos.beat, 1);
+    assert_eq!(pos.bar, 2);
+    assert_eq!(pos.beat, 2);
     assert!(
         pos.phase > 0.3 && pos.phase < 0.7,
         "mid-beat phase (got {})",
@@ -545,6 +547,7 @@ fn engine_publishes_meter_and_beat_frames() {
     let mut buf = [0u8; return_frame::MAX_LEN];
     let mut meters = 0;
     let mut beats = 0;
+    let mut transports = 0;
     let mut saw_master_level = false;
     while let Some(n) = ring.pop(&mut buf) {
         match return_frame::decode(&buf[..n]) {
@@ -555,11 +558,17 @@ fn engine_publishes_meter_and_beat_frames() {
                 }
             }
             Some(EngineFrame::Beat { .. }) => beats += 1,
+            Some(EngineFrame::Transport { sample, motion, .. }) => {
+                transports += 1;
+                assert_eq!(sample, 0);
+                assert_eq!(motion, ojcore::Motion::Stopped as u8);
+            }
             other => panic!("unexpected frame: {other:?}"),
         }
     }
     assert!(meters >= 1, "expected meter frames, got {meters}");
     assert_eq!(beats, 1, "exactly one beat frame per block");
+    assert_eq!(transports, 1, "exactly one transport frame per publish");
     assert!(
         saw_master_level,
         "a meter frame carried the 0.5 RMS master level"
