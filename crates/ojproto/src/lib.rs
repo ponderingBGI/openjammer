@@ -17,6 +17,9 @@ use serde::{Deserialize, Serialize};
 /// Bumped on any breaking change to the IR / protocol shapes.
 pub const SCHEMA_VERSION: u16 = 1;
 
+/// Musical timeline resolution in quarter-note ticks.
+pub const PPQ: u32 = 960;
+
 /// Stable index for a node within a compiled [`OjGraph`] (interned from the
 /// UI's string node id at `NodeAdd`, so the hot path never touches strings).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -26,6 +29,78 @@ pub struct NodeIdx(pub u32);
 /// response, Faust factory, ...). Blobs are NEVER inlined in the IR.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AssetId(pub u32);
+
+/// The unit domain carried by a timeline position or duration.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum TimeDomain {
+    /// Absolute audio samples.
+    Audio = 0,
+    /// Musical quarter-note ticks at [`PPQ`].
+    Beat = 1,
+}
+
+/// A timeline position that retains the domain of its numeric value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TimePos {
+    /// Whether `value` is expressed in samples or quarter-note ticks.
+    pub domain: TimeDomain,
+    /// Samples for [`TimeDomain::Audio`], or ticks at [`PPQ`] for
+    /// [`TimeDomain::Beat`].
+    pub value: i64,
+}
+
+/// A duration in one time domain; its origin is the owning position.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TimeSpan {
+    /// Whether `len` is expressed in samples or quarter-note ticks.
+    pub domain: TimeDomain,
+    /// Duration in the selected domain.
+    pub len: i64,
+}
+
+/// A synchronized tempo-map point in musical and audio coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TempoPoint {
+    /// Musical position in quarter-note ticks at [`PPQ`].
+    pub tick: u64,
+    /// Corresponding absolute audio-sample position.
+    pub sample: u64,
+    /// Tempo in beats per minute at the start of this segment.
+    pub bpm_start: f32,
+    /// Tempo in beats per minute at the end of this segment.
+    pub bpm_end: f32,
+    /// Whether the segment's ending tempo comes from the next tempo point.
+    pub continuing: bool,
+}
+
+/// A synchronized meter-map point in musical, audio, and bar coordinates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MeterPoint {
+    /// Musical position in quarter-note ticks at [`PPQ`].
+    pub tick: u64,
+    /// Corresponding absolute audio-sample position.
+    pub sample: u64,
+    /// One-based bar number at this point.
+    pub bar: u32,
+    /// Number of meter beats in each bar.
+    pub divisions_per_bar: u8,
+    /// Note value that represents one meter beat.
+    pub note_value: u8,
+}
+
+/// A complete tempo and meter document published independently of [`OjGraph`].
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TempoMap {
+    /// Musical resolution used by this map; normally [`PPQ`].
+    pub ppq: u32,
+    /// Audio sample rate used by the synchronized sample coordinates.
+    pub sample_rate: u32,
+    /// Tempo points in strictly increasing musical order.
+    pub tempos: Vec<TempoPoint>,
+    /// Meter points in strictly increasing musical order.
+    pub meters: Vec<MeterPoint>,
+}
 
 /// The CLOSED primitive instruction set the real-time kernel matches on.
 ///
@@ -185,6 +260,52 @@ pub struct OjGraph {
     pub schedule: Vec<Vec<NodeIdx>>,
 }
 
+/// A compact, sample-addressed event stored in a published [`Timeline`].
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct SchedEvent {
+    /// Absolute timeline sample at which the event is applied.
+    pub at: u64,
+    /// Target node.
+    pub node: NodeIdx,
+    /// Numeric event kind: note-on, note-off, or parameter change.
+    pub kind: u8,
+    /// First kind-specific byte payload.
+    pub a: u8,
+    /// Second kind-specific byte payload.
+    pub b: u8,
+    /// Kind-specific floating-point payload.
+    pub value: f32,
+}
+
+/// Event-kind codes carried by [`SchedEvent::kind`].
+///
+/// The numeric order is also the deterministic same-sample ordering rank:
+/// parameter changes, note-offs, then note-ons.
+pub mod sched_event_kind {
+    /// Change a node parameter; kind-specific fields identify the parameter and
+    /// [`SchedEvent::value`](crate::SchedEvent::value) carries its new value.
+    pub const SET_PARAM: u8 = 0;
+    /// Release a note.
+    pub const NOTE_OFF: u8 = 1;
+    /// Start a note.
+    pub const NOTE_ON: u8 = 2;
+}
+
+/// An immutable, authored timeline document published as a whole.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Timeline {
+    /// Audio sample rate used by all sample positions in this document.
+    pub sample_rate: u32,
+    /// Events sorted by sample and then by their event-kind rank.
+    pub events: Vec<SchedEvent>,
+    /// Optional half-open loop range `(start, end)` in timeline samples.
+    pub loop_range: Option<(u64, u64)>,
+    /// Optional half-open punch range `(start, end)` in timeline samples.
+    pub punch_range: Option<(u64, u64)>,
+    /// End of the authored timeline in samples.
+    pub end: u64,
+}
+
 impl OjGraph {
     pub fn empty(sample_rate: u32, block_size: u32) -> Self {
         Self {
@@ -196,6 +317,21 @@ impl OjGraph {
             schedule: Vec::new(),
         }
     }
+}
+
+/// Boolean transport settings carried by [`RtCommand::TransportSet`].
+///
+/// These are bare `u8` values rather than a serde enum so the command remains a
+/// flat numeric wire object and stays within its fixed-size bound.
+pub mod transport_flag {
+    /// Enable or disable looping over the timeline's loop range.
+    pub const LOOP_ENABLE: u8 = 0;
+    /// Enable or disable punching over the timeline's punch range.
+    pub const PUNCH_ENABLE: u8 = 1;
+    /// Arm or disarm recording.
+    pub const RECORD_ARM: u8 = 2;
+    /// Enable or disable the metronome click.
+    pub const CLICK: u8 = 3;
 }
 
 /// Fixed-size, `Copy`, heap-free commands for the wait-free SPSC queue.
@@ -225,6 +361,14 @@ pub enum RtCommand {
     Seek {
         samples: u64,
     },
+    /// Set one boolean transport option. `flag` is one of the
+    /// [`transport_flag`] constants.
+    TransportSet {
+        /// Setting identifier from [`transport_flag`].
+        flag: u8,
+        /// New enabled state.
+        on: bool,
+    },
     /// Drive a looper node's state machine. `action` is one of the
     /// [`looper_action`] consts (arm / record / play / stop / clear / overdub /
     /// undo_last / set_mute / delete_layer). `arg` addresses a layer for the
@@ -244,6 +388,19 @@ pub enum RtCommand {
 // audio payload would push this past the bound and FAIL the build — this is
 // the mechanical enforcement of "nothing heap/audio crosses the RT seam".
 const _: () = assert!(core::mem::size_of::<RtCommand>() <= 16);
+
+/// A live command scheduled at an absolute timeline sample.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct TimedCommand {
+    /// Absolute timeline sample at which `cmd` is applied.
+    pub at: u64,
+    /// Fixed-size command to apply.
+    pub cmd: RtCommand,
+}
+
+// Timed commands ride their own fixed-size event ring. Keep the timestamped
+// wrapper bounded without widening the frozen `RtCommand` shape.
+const _: () = assert!(core::mem::size_of::<TimedCommand>() <= 24);
 
 /// Hot parameter patch: a hand-packed 7-byte frame (interned node id + param
 /// id + value) for the highest-rate UI->RT path.
@@ -295,6 +452,25 @@ pub enum EngineFrame {
         bar: u32,
         beat: u32,
         phase: f32,
+    },
+    /// Authoritative control-rate transport position and state.
+    Transport {
+        /// Timeline sample position, with any engine preroll removed.
+        sample: u64,
+        /// Musical position in quarter-note ticks at [`PPQ`].
+        tick: u64,
+        /// One-based bar number.
+        bar: u32,
+        /// One-based meter beat within the bar.
+        beat: u16,
+        /// Fractional progress through the current beat.
+        phase: f32,
+        /// Numeric transport motion-state code.
+        motion: u8,
+        /// Whether recording is armed.
+        rec: bool,
+        /// Whether timeline looping is enabled.
+        loop_on: bool,
     },
     /// Control-rate looper telemetry for one looper node, published every block
     /// from the (ungated) looper-publish path. Carries NO audio buffer — only
