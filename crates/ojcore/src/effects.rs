@@ -453,8 +453,8 @@ impl PluginLoader for DelayLoader {
     }
 }
 
-/// A feedback delay reusing [`DelayLine`]. The buffer is sized for
-/// [`DELAY_MAX_SECONDS`] at `activate`; the read tap is the delay-time param in
+/// A feedback delay reusing [`DelayLine`]. The buffer is sized for the internal
+/// maximum delay at `activate`; the read tap is the delay-time param in
 /// samples, clamped into the line.
 pub struct DelayNode {
     line: DelayLine,

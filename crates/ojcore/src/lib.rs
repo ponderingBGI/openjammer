@@ -84,6 +84,7 @@ pub mod exec;
 // the only `std`-gated pieces (they need `Instant` / host atomics).
 pub mod meter;
 pub mod resilience;
+pub mod tempo;
 pub mod transport;
 
 #[cfg(feature = "std")]
@@ -134,6 +135,7 @@ pub use structural::{
 // --- U12/U15/U16 additive surface ---
 pub use meter::{Meter, MeterBank};
 pub use resilience::{sanitize, CommandCoalescer, NodeBudget};
+pub use tempo::{MetricCursor, MetricPosition, TempoMapRt};
 pub use transport::{Transport, TransportPos};
 
 #[cfg(feature = "std")]
@@ -143,7 +145,7 @@ pub use meter::{EventRing, MeterRing};
 #[cfg(feature = "std")]
 pub use resilience::Watchdog;
 #[cfg(feature = "std")]
-pub use swap::{ProgramSwap, ProgramSwapRx};
+pub use swap::{ProgramSwap, ProgramSwapRx, RtCell, RtCellRx};
 
 #[cfg(test)]
 mod tests {

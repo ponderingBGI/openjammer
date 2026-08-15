@@ -117,21 +117,30 @@ impl Transport {
     /// `bar`/`beat` are zero-based; `phase` is the fractional progress through
     /// the current beat in `[0, 1)`. Pure arithmetic — RT-safe.
     pub fn position(&self) -> TransportPos {
-        let spb = self.samples_per_beat();
-        let beats_total = (self.sample_pos as f64) / spb;
-        // `libm::floor` keeps this `no_std` (the std `f64::floor` is unavailable
-        // without `std`).
-        let beat_index = libm::floor(beats_total);
-        let phase = (beats_total - beat_index) as f32;
-        let beat_index = beat_index as u64;
-        let per_bar = self.beats_per_bar.max(1) as u64;
-        let bar = (beat_index / per_bar) as u32;
-        let beat = (beat_index % per_bar) as u32;
+        // W1 compatibility bridge: interpret the still-authoritative scalar
+        // fields as an immutable one-tempo/one-meter map. Its precomputed
+        // points live on the stack, so this remains allocation-free.
+        let bpm = if self.tempo_bpm > 0.0 {
+            self.tempo_bpm
+        } else {
+            120.0
+        };
+        let sr = if self.sample_rate > 0.0 {
+            self.sample_rate
+        } else {
+            48_000.0
+        };
+        let metric = crate::tempo::TempoMapRt::one_point_position(
+            self.sample_pos,
+            f64::from(sr),
+            f64::from(bpm),
+            self.beats_per_bar.max(1),
+        );
         TransportPos {
-            bar,
-            beat,
-            // Clamp away any float fuzz so `phase` is always a clean `[0, 1)`.
-            phase: phase.clamp(0.0, 0.999_999_9),
+            // Map BBT is one-based; this existing API stays zero-based.
+            bar: metric.bar.saturating_sub(1),
+            beat: metric.beat.saturating_sub(1),
+            phase: metric.phase,
             sample: self.sample_pos,
         }
     }

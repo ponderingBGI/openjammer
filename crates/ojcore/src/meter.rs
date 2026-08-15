@@ -8,7 +8,7 @@
 //!    for the `wasm32` worklet.
 //!
 //! 2. [`MeterRing`] / [`return_frame`] — a SECOND wait-free SPSC ring carrying
-//!    [`EngineFrame::Meter`] / [`EngineFrame::Beat`] from the audio thread back
+//!    [`ojproto::EngineFrame::Meter`] / [`ojproto::EngineFrame::Beat`] from the audio thread back
 //!    to the control thread. It reuses the zero-dep [`ojcore_midiring::ByteRing`]
 //!    with a compact fixed-size wire format, and a non-blocking publish at block
 //!    end. This half is `std`-gated (it is a host-side return path; the worklet

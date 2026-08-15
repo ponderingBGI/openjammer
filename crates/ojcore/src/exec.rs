@@ -74,7 +74,7 @@ pub struct Engine {
 unsafe impl Send for Engine {}
 
 impl Engine {
-    /// Wrap a freshly [`crate::compile`]d program. Sizes the pointer scratch to
+    /// Wrap a freshly [`crate::compile()`]d program. Sizes the pointer scratch to
     /// the program's widest port counts (one allocation, off the hot path).
     pub fn new(program: CompiledProgram) -> Self {
         let in_ptrs = vec![core::ptr::null(); program.max_in];
@@ -353,6 +353,9 @@ impl Engine {
             RtCommand::TransportPlay => self.playing = true,
             RtCommand::TransportPause => self.playing = false,
             RtCommand::Seek { samples } => self.sample_pos = samples,
+            // W0 reserved the compact flag command; W2's transport FSM gives
+            // it semantics. It is deliberately inert in W1.
+            RtCommand::TransportSet { .. } => {}
             RtCommand::Looper { node, action, arg } => {
                 if let Some(slot) = self.program.slot_of_id(node) {
                     self.program.instances[slot].looper_action(action, arg);

@@ -192,7 +192,7 @@ pub trait DspInstance: Send {
 
     /// OFF-RT asset-resolution seam (the U6 sample / IR loading point).
     ///
-    /// Called by [`crate::compile`] (or any host that resolves an
+    /// Called by [`crate::compile()`] (or any host that resolves an
     /// [`ojproto::AssetRef`]) AFTER `activate` + the baked-in `set_param`s, with
     /// the already-decoded PCM behind the node's asset slot. `slot` is the
     /// [`ojproto::AssetRef::slot`]; `pcm` is INTERLEAVED `f32` in `[-1, 1]` with

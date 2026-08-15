@@ -5,6 +5,12 @@
 // owns the lowering to the render schedule; this is the authoring/display layer.
 
 import type { Arrangement } from './types';
+import { PPQ } from '@openjammer/oj-protocol';
+import {
+    buildTempoMap,
+    secondsToTick as mapSecondsToTick,
+    tickToSeconds as mapTickToSeconds,
+} from './tempoMap';
 
 /** Resolved timing constants for an arrangement (defaults applied). */
 export interface Timebase {
@@ -17,12 +23,12 @@ export interface Timebase {
     tempoBpm: number;
 }
 
-export const DEFAULT_PPQ = 960;
+export { PPQ as DEFAULT_PPQ };
 export const DEFAULT_TIME_SIGNATURE: [number, number] = [4, 4];
 
 /** Resolve an arrangement's timebase (PPQ + time signature → ticks per beat/bar). */
 export function timebase(arr: Pick<Arrangement, 'ppq' | 'timeSignature' | 'tempoBpm'>): Timebase {
-    const ppq = arr.ppq ?? DEFAULT_PPQ;
+    const ppq = arr.ppq ?? PPQ;
     const [beatsPerBar, beatUnit] = arr.timeSignature ?? DEFAULT_TIME_SIGNATURE;
     // PPQ counts quarter notes; a beat of 1/beatUnit is (4/beatUnit) quarter notes.
     const ticksPerBeat = Math.round((ppq * 4) / beatUnit);
@@ -31,18 +37,17 @@ export function timebase(arr: Pick<Arrangement, 'ppq' | 'timeSignature' | 'tempo
 
 /** Seconds per tick at the arrangement's tempo (the same constant `conduct` uses). */
 export function secondsPerTick(arr: Pick<Arrangement, 'ppq' | 'tempoBpm'>): number {
-    const ppq = arr.ppq ?? DEFAULT_PPQ;
-    return 60 / (arr.tempoBpm * ppq);
+    return mapTickToSeconds(buildTempoMap(arr), 1);
 }
 
 /** Convert a tick to seconds at the arrangement's tempo. */
 export function tickToSeconds(arr: Pick<Arrangement, 'ppq' | 'tempoBpm'>, tick: number): number {
-    return tick * secondsPerTick(arr);
+    return mapTickToSeconds(buildTempoMap(arr), tick);
 }
 
 /** Convert seconds to a (possibly fractional) tick at the arrangement's tempo. */
 export function secondsToTick(arr: Pick<Arrangement, 'ppq' | 'tempoBpm'>, seconds: number): number {
-    return seconds / secondsPerTick(arr);
+    return mapSecondsToTick(buildTempoMap(arr), seconds);
 }
 
 /** A musical position: 1-based bar and beat plus the leftover ticks inside the beat. */

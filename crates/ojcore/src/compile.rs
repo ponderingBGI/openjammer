@@ -114,7 +114,7 @@ impl AssetResolver for NoAssets {
 }
 
 /// Resolves a node's saved opaque STATE blob (the `oj.state` RESTORE half) — the
-/// state analogue of [`AssetResolver`]. [`compile_inner`] applies it via
+/// state analogue of [`AssetResolver`]. Compilation applies it via
 /// [`DspInstance::restore_state`] right after `activate` and BEFORE the baked-in
 /// `set_param`s, so the blob is the BASE state and the IR's CURRENT param values
 /// always win (a post-load param edit is never overridden by a stale blob). It is
