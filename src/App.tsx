@@ -2,7 +2,7 @@
  * OpenJammer - Node-based music generation tool
  */
 
-import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { Toaster, toast } from 'sonner';
 import { NodeCanvas } from './components/Canvas/NodeCanvas';
 import { Toolbar } from './components/Toolbar/Toolbar';
@@ -45,7 +45,6 @@ import { initMidiVoiceRouting, disposeMidiVoiceRouting } from './midi';
 import { useAudioStore } from './store/audioStore';
 import { useGraphStore } from './store/graphStore';
 import { useProjectStore } from './store/projectStore';
-import { useKeybindingsStore } from './store/keybindingsStore';
 import { useEngineHealthStore, setEngineLive } from './store/engineHealthStore';
 import { useCrashRecovery } from './persistence/recovery/useCrashRecovery';
 import { useUsbLowLatencyDefault } from './hooks/useUsbLowLatencyDefault';
@@ -54,7 +53,9 @@ import { writeEmergencyBackup } from './persistence/recovery';
 import { collectSaveData } from './persistence/collectSaveData';
 import { useArrangementStore } from './store/arrangementStore';
 import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens';
-import { isEditableTarget } from './utils/editableTarget';
+import { useUiViewStore } from './store/uiViewStore';
+import { useBindingSet, useKeymapArbiter, useModalKeymap } from './keymap/useKeymap';
+import { ArrangementSurface } from './components/Arrangement/ArrangementSurface';
 import { logger } from './utils/log';
 import './styles/global.css';
 
@@ -71,22 +72,24 @@ function getDocumentVersion(): string {
 function PluginsPanelHost() {
   const [requested, setRequested] = useState(false);
 
+  useBindingSet(useMemo(() => ({
+    id: 'plugins-panel-toggle',
+    scope: 'global' as const,
+    entries: [{
+      actionId: 'panel.plugins',
+      run: () => {
+        if (requested) window.dispatchEvent(new CustomEvent('openjammer:toggle-plugins'));
+        else setRequested(true);
+        return true;
+      },
+    }],
+  }), [requested]));
+
   useEffect(() => {
     if (requested) return;
     const request = () => setRequested(true);
-    const onKey = (event: KeyboardEvent) => {
-      const hit =
-        (event.ctrlKey || event.metaKey) &&
-        event.shiftKey &&
-        event.key.toLowerCase() === 'p';
-      if (!hit) return;
-      event.preventDefault();
-      request();
-    };
-    window.addEventListener('keydown', onKey);
     window.addEventListener('openjammer:toggle-plugins', request);
     return () => {
-      window.removeEventListener('keydown', onKey);
       window.removeEventListener('openjammer:toggle-plugins', request);
     };
   }, [requested]);
@@ -100,6 +103,7 @@ function PluginsPanelHost() {
 }
 
 function App() {
+  useKeymapArbiter();
   // Native (Tauri) boots straight into a live canvas — no autoplay gate exists
   // there because sound comes from the Rust/cpal engine over IPC, not Web Audio.
   // The browser tier still shows the welcome screen (its gesture resumes Web Audio).
@@ -108,6 +112,9 @@ function App() {
   const setAudioContextReady = useAudioStore((s) => s.setAudioContextReady);
   const audioConfig = useAudioStore((s) => s.audioConfig);
   const updateAudioMetrics = useAudioStore((s) => s.updateAudioMetrics);
+  const surface = useUiViewStore((s) => s.surface);
+  const songNodeId = useUiViewStore((s) => s.songNodeId);
+  const setSurface = useUiViewStore((s) => s.setSurface);
 
   // Calm, deduped engine-dead toast (Phase 2). The ONLY toast the health store
   // raises — DEGRADED stays ambient; a fault storm yields one signal, not many.
@@ -125,6 +132,7 @@ function App() {
   // shutdown — or, after repeated crashes, drop to Safe Mode rather than reopening
   // into a deadly crash cycle. Runs once, before the autosave effects engage.
   const recovery = useCrashRecovery();
+  useModalKeymap('welcome', Boolean(showActivation || recovery.safeMode));
 
   // Initialize theme
   useEffect(() => {
@@ -391,41 +399,47 @@ function App() {
     };
   }, []);
 
-  // Global keyboard shortcut for save (Ctrl+S / Cmd+S)
-  useEffect(() => {
-    const { matchesAction } = useKeybindingsStore.getState();
-
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      // Skip if typing in an editable control.
-      if (isEditableTarget(e.target)) return;
-
-      // Handle Ctrl+S / Cmd+S - Save project
-      if (matchesAction(e, 'file.save')) {
-        e.preventDefault();
-
-        // Only save if a project is open
-        if (!projectName || !projectHandleKey) {
-          // Dispatch event to trigger new project creation in Toolbar
-          window.dispatchEvent(new CustomEvent('openjammer:new-project'));
-          return;
-        }
-
-        // Check if already saving
-        if (useProjectStore.getState().isSaving) return;
-
-        try {
-          await saveProject(collectSaveData());
-          toast.success('Project saved');
-        } catch (err) {
-          console.error('[Save] Failed:', err);
-          toast.error(`Failed to save project: ${(err as Error).message}`);
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [projectName, projectHandleKey, saveProject]);
+  useBindingSet(useMemo(() => ({
+    id: 'app-global',
+    scope: 'global' as const,
+    entries: [
+      {
+        actionId: 'file.save',
+        run: () => {
+          if (!projectName || !projectHandleKey) {
+            window.dispatchEvent(new CustomEvent('openjammer:new-project'));
+            return true;
+          }
+          if (useProjectStore.getState().isSaving) return true;
+          void saveProject(collectSaveData())
+            .then(() => toast.success('Project saved'))
+            .catch((err: Error) => {
+              console.error('[Save] Failed:', err);
+              toast.error(`Failed to save project: ${err.message}`);
+            });
+          return true;
+        },
+      },
+      {
+        actionId: 'view.toggleArrangement',
+        run: () => {
+          const next = useUiViewStore.getState().surface === 'canvas' ? 'arrangement' : 'canvas';
+          useUiViewStore.getState().toggle();
+          requestAnimationFrame(() => {
+            document.querySelector<HTMLElement>(`[data-surface-root="${next}"]`)?.focus({ preventScroll: true });
+          });
+          return true;
+        },
+      },
+      ...Array.from({ length: 9 }, (_, index) => ({
+        actionId: `mode.${index + 1}`,
+        run: () => {
+          useAudioStore.getState().setCurrentMode(index + 1);
+          return true;
+        },
+      })),
+    ],
+  }), [projectName, projectHandleKey, saveProject]));
 
   // Initialize audio context on user gesture
   const handleActivate = useCallback(async () => {
@@ -603,11 +617,29 @@ function App() {
         </div>
       )}
 
-      {/* Main Canvas */}
-      <NodeCanvas />
+      <div
+        data-surface-root="canvas"
+        tabIndex={-1}
+        hidden={surface !== 'canvas'}
+        inert={surface !== 'canvas' ? true : undefined}
+        aria-hidden={surface !== 'canvas'}
+      >
+        <NodeCanvas />
+      </div>
+
+      <ArrangementSurface active={surface === 'arrangement'} songNodeId={songNodeId} />
+
+      <div className="surface-switcher" role="group" aria-label="Editing surface">
+        <button aria-pressed={surface === 'canvas'} onClick={() => setSurface('canvas')}>Canvas</button>
+        <button aria-pressed={surface === 'arrangement'} onClick={() => setSurface('arrangement')}>Arrangement</button>
+      </div>
+
+      <div className="sr-only" aria-live="polite">
+        {surface === 'canvas' ? 'Canvas surface active' : 'Arrangement surface active'}
+      </div>
 
       {/* Toolbar + Breadcrumbs */}
-      <div className="toolbar-wrapper">
+      <div className="toolbar-wrapper" hidden={surface !== 'canvas'}>
         <Toolbar />
         <Breadcrumbs />
       </div>

@@ -23,6 +23,47 @@ body,
     overflow: hidden;
 }
 
+.surface-switcher {
+    position: fixed;
+    right: var(--space-md);
+    top: var(--space-md);
+    z-index: 110;
+    display: flex;
+    padding: 3px;
+    gap: 2px;
+    background: var(--bg-node);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sketch);
+}
+
+[data-surface-root="canvas"] {
+    width: 100%;
+    height: 100%;
+}
+
+.surface-switcher button {
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-sm);
+}
+
+.surface-switcher button[aria-pressed="true"] {
+    color: var(--bg-node);
+    background: var(--sketch-black);
+}
+
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 body {
     font-family: var(--font-sketch);
     font-size: var(--text-md);

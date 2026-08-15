@@ -3,9 +3,15 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, fireEvent, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
 import { KeybindingsPanel } from '../KeybindingsPanel';
 import { useKeybindingsStore, keybindingActions } from '../../../store/keybindingsStore';
+
+function deleteShortcutButton(): HTMLElement {
+    const row = screen.getByText('Delete Selected').closest('.keybindings-row');
+    if (!row) throw new Error('Delete Selected row not found');
+    return within(row as HTMLElement).getByRole('button', { name: 'Del' });
+}
 
 describe('KeybindingsPanel', () => {
     beforeEach(() => {
@@ -38,7 +44,7 @@ describe('KeybindingsPanel', () => {
 
             // Check for "Delete Selected" which should show "Del"
             const deleteRow = screen.getByText('Delete Selected').closest('.keybindings-row');
-            expect(deleteRow).toContainElement(screen.getByText('Del'));
+            expect(deleteRow).toContainElement(deleteShortcutButton());
         });
 
         it('should disable Reset All button when no custom bindings', () => {
@@ -62,7 +68,7 @@ describe('KeybindingsPanel', () => {
             render(<KeybindingsPanel />);
 
             // Find and click the Delete shortcut button
-            const deleteButton = screen.getByRole('button', { name: 'Del' });
+            const deleteButton = deleteShortcutButton();
             fireEvent.click(deleteButton);
 
             // Should show "Press keys..." text
@@ -73,12 +79,12 @@ describe('KeybindingsPanel', () => {
             render(<KeybindingsPanel />);
 
             // Enter editing mode
-            const deleteButton = screen.getByRole('button', { name: 'Del' });
+            const deleteButton = deleteShortcutButton();
             fireEvent.click(deleteButton);
             expect(screen.getByText('Press keys...')).toBeInTheDocument();
 
             // Press Escape
-            fireEvent.keyDown(window, { key: 'Escape' });
+            fireEvent.keyDown(document, { key: 'Escape' });
 
             // Should exit editing mode
             expect(screen.queryByText('Press keys...')).not.toBeInTheDocument();
@@ -88,11 +94,11 @@ describe('KeybindingsPanel', () => {
             render(<KeybindingsPanel />);
 
             // Enter editing mode
-            const deleteButton = screen.getByRole('button', { name: 'Del' });
+            const deleteButton = deleteShortcutButton();
             fireEvent.click(deleteButton);
 
             // Press Ctrl+X
-            fireEvent.keyDown(window, { key: 'x', ctrlKey: true });
+            fireEvent.keyDown(document, { key: 'x', ctrlKey: true });
 
             // Should show the captured combo
             expect(screen.getByText('Ctrl+X')).toBeInTheDocument();
@@ -102,11 +108,11 @@ describe('KeybindingsPanel', () => {
             render(<KeybindingsPanel />);
 
             // Enter editing mode
-            const deleteButton = screen.getByRole('button', { name: 'Del' });
+            const deleteButton = deleteShortcutButton();
             fireEvent.click(deleteButton);
 
             // Press only Control
-            fireEvent.keyDown(window, { key: 'Control' });
+            fireEvent.keyDown(document, { key: 'Control' });
 
             // Should still show "Press keys..."
             expect(screen.getByText('Press keys...')).toBeInTheDocument();
@@ -118,26 +124,26 @@ describe('KeybindingsPanel', () => {
             render(<KeybindingsPanel />);
 
             // Enter editing mode
-            const deleteButton = screen.getByRole('button', { name: 'Del' });
+            const deleteButton = deleteShortcutButton();
             fireEvent.click(deleteButton);
 
             // Press and release a key
-            fireEvent.keyDown(window, { key: 'x' });
-            fireEvent.keyUp(window, { key: 'x' });
+            fireEvent.keyDown(document, { key: 'F10' });
+            fireEvent.keyUp(document, { key: 'F10' });
 
             // Binding should be saved
             const binding = useKeybindingsStore.getState().getBinding('edit.delete');
-            expect(binding?.key).toBe('x');
+            expect(binding?.key).toBe('F10');
         });
 
         it('should show reset button after customizing a binding', () => {
             render(<KeybindingsPanel />);
 
             // Customize a binding
-            const deleteButton = screen.getByRole('button', { name: 'Del' });
+            const deleteButton = deleteShortcutButton();
             fireEvent.click(deleteButton);
-            fireEvent.keyDown(window, { key: 'x' });
-            fireEvent.keyUp(window, { key: 'x' });
+            fireEvent.keyDown(document, { key: 'F10' });
+            fireEvent.keyUp(document, { key: 'F10' });
 
             // Should show reset button (↺)
             const resetButton = screen.getByTitle('Reset to default');
@@ -150,10 +156,10 @@ describe('KeybindingsPanel', () => {
             render(<KeybindingsPanel />);
 
             // Try to assign Ctrl+Z (already used by undo) to Delete
-            const deleteButton = screen.getByRole('button', { name: 'Del' });
+            const deleteButton = deleteShortcutButton();
             fireEvent.click(deleteButton);
-            fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
-            fireEvent.keyUp(window, { key: 'z' });
+            fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+            fireEvent.keyUp(document, { key: 'z' });
 
             // Should show conflict dialog
             expect(screen.getByText('Shortcut Conflict')).toBeInTheDocument();
@@ -166,10 +172,10 @@ describe('KeybindingsPanel', () => {
             render(<KeybindingsPanel />);
 
             // Create a conflict
-            const deleteButton = screen.getByRole('button', { name: 'Del' });
+            const deleteButton = deleteShortcutButton();
             fireEvent.click(deleteButton);
-            fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
-            fireEvent.keyUp(window, { key: 'z' });
+            fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+            fireEvent.keyUp(document, { key: 'z' });
 
             // Click cancel
             fireEvent.click(screen.getByText('Cancel'));
@@ -184,10 +190,10 @@ describe('KeybindingsPanel', () => {
             render(<KeybindingsPanel />);
 
             // Create a conflict
-            const deleteButton = screen.getByRole('button', { name: 'Del' });
+            const deleteButton = deleteShortcutButton();
             fireEvent.click(deleteButton);
-            fireEvent.keyDown(window, { key: 'z', ctrlKey: true });
-            fireEvent.keyUp(window, { key: 'z' });
+            fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+            fireEvent.keyUp(document, { key: 'z' });
 
             // Click replace
             fireEvent.click(screen.getByText('Replace'));

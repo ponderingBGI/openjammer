@@ -99,6 +99,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     const connectingFrom = useCanvasStore((s) => s.connectingFrom);
     const hoverTarget = useCanvasStore((s) => s.hoverTarget);
     const setHoverTarget = useCanvasStore((s) => s.setHoverTarget);
+    const setCanvasDragging = useCanvasStore((s) => s.setDragging);
 
     const isSelected = selectedNodeIds.has(node.id);
     // Highlighted while the AI agent's live run has just added this node.
@@ -149,6 +150,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
 
         selectNode(node.id, e.shiftKey);
         setIsDragging(true);
+        setCanvasDragging(true);
         dragStart.current = { x: e.clientX, y: e.clientY };
         nodeStart.current = { ...node.position };
 
@@ -164,6 +166,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
 
         const cleanup = () => {
             setIsDragging(false);
+            setCanvasDragging(false);
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
             dragCleanupRef.current = null;
@@ -178,7 +181,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
 
         window.addEventListener('mousemove', handleMouseMove);
         window.addEventListener('mouseup', handleMouseUp);
-    }, [node.id, node.position, zoom, selectNode, updateNodePosition]);
+    }, [node.id, node.position, zoom, selectNode, setCanvasDragging, updateNodePosition]);
 
     // Handle port mouse down - start connection dragging (with pending disconnect)
     const handlePortMouseDown = useCallback((portId: string, e: React.MouseEvent) => {

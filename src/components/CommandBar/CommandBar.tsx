@@ -41,6 +41,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Command } from 'cmdk';
+import { useModalKeymap } from '../../keymap/useKeymap';
 import {
     queryActions,
     subscribe,
@@ -107,6 +108,11 @@ function searchableText(action: Action): string {
 
 export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null }) {
     const [open, setOpen] = useState(() => intent?.kind === 'toggle');
+    const modalEntries = useMemo(() => [{
+        actionId: 'commandBar.toggle',
+        run: () => { setOpen(false); return true; },
+    }], []);
+    useModalKeymap('command-bar', open, modalEntries);
     const [search, setSearch] = useState('');
     // The mode is PERSISTED (commandBarStore): close the bar in AI mode, press
     // Ctrl+K again, and you're back in the chat (conversation restored by the

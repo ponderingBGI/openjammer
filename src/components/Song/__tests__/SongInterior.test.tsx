@@ -8,7 +8,7 @@ const store = () => useArrangementStore.getState();
 
 afterEach(cleanup);
 
-describe('SongInterior — the on-canvas timeline', () => {
+describe('SongInterior — arrangement timeline body', () => {
     describe('empty state', () => {
         beforeEach(() => store().setArrangement(null));
 

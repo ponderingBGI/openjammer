@@ -13,7 +13,7 @@
  * the header, actions, notes and tags are oj-ui primitives.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Modal, PanelHeader, Button, Callout, Chip, Spinner, List, ListRow } from '@openjammer/oj-ui';
 import { getInvoke, isTauri } from '../../ai/tauri';
@@ -22,6 +22,7 @@ import { hostedPluginIdFor, makeHostedPluginDefinition, registerDynamicPlugin } 
 import { register as registerCommand } from '../../store/commandRegistry';
 import { useGraphStore } from '../../store/graphStore';
 import './PluginsPanel.css';
+import { useBindingSet, useModalKeymap } from '../../keymap/useKeymap';
 
 /** One scanned plugin (mirrors `ojhost::PluginDescriptor`). */
 interface PluginDescriptor {
@@ -60,23 +61,24 @@ type ScanState =
 
 export function PluginsPanel({ initiallyOpen = false }: { initiallyOpen?: boolean }) {
     const [open, setOpen] = useState(initiallyOpen);
+    const modalEntries = useMemo(() => [{
+        actionId: 'panel.plugins', run: () => { setOpen(false); return true; },
+    }], []);
+    useModalKeymap('plugins', open, modalEntries);
+    useBindingSet(useMemo(() => ({
+        id: 'plugins-toggle-mounted',
+        scope: 'global' as const,
+        entries: [{ actionId: 'panel.plugins', run: () => { setOpen((value) => !value); return true; } }],
+    }), []));
     const [state, setState] = useState<ScanState>({ kind: 'idle' });
     const addNode = useGraphStore((s) => s.addNode);
     const setNodePluginId = useGraphStore((s) => s.setNodePluginId);
     const updateNodePorts = useGraphStore((s) => s.updateNodePorts);
 
     useEffect(() => {
-        const onKey = (e: KeyboardEvent) => {
-            const hit = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'p';
-            if (!hit) return;
-            e.preventDefault();
-            setOpen((v) => !v);
-        };
         const onCmd = () => setOpen((v) => !v);
-        window.addEventListener('keydown', onKey);
         window.addEventListener('openjammer:toggle-plugins', onCmd);
         return () => {
-            window.removeEventListener('keydown', onKey);
             window.removeEventListener('openjammer:toggle-plugins', onCmd);
         };
     }, []);

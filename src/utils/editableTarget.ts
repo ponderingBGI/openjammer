@@ -16,6 +16,16 @@ export function isEditableTarget(target: EventTarget | null): boolean {
     );
 }
 
+export function isFocusableInOpenDialog(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) return false;
+    const dialog = target.closest('[role="dialog"], dialog');
+    if (!dialog) return false;
+    if (dialog instanceof HTMLDialogElement && !dialog.open) return false;
+    return target.matches(
+        'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"]), [contenteditable]:not([contenteditable="false"])',
+    );
+}
+
 /**
  * True when the browser currently owns a real text selection.
  *

@@ -7,6 +7,7 @@ import {
     keybindingActions,
     UNBOUND_KEY,
     type KeyCombo,
+    type KeybindingAction,
 } from '../keybindingsStore';
 
 describe('keybindingsStore', () => {
@@ -206,32 +207,36 @@ describe('keybindingsStore', () => {
 
         describe('getConflictingActions', () => {
             it('only conflicts across equal scopes or a global scope', () => {
-                const scoped = [
+                const scoped: KeybindingAction[] = [
                     {
                         id: 'test.canvas',
                         label: 'Canvas action',
                         category: 'Test',
-                        scope: 'canvas',
+                        scope: 'surface',
+                        surface: 'canvas',
                         defaultBinding: { key: 'F9' },
                     },
                     {
                         id: 'test.arrangement',
                         label: 'Arrangement action',
                         category: 'Test',
-                        scope: 'arrangement',
+                        scope: 'surface',
+                        surface: 'arrangement',
                         defaultBinding: { key: 'F9' },
                     },
                     {
                         id: 'test.canvas-peer',
                         label: 'Canvas peer',
                         category: 'Test',
-                        scope: 'canvas',
+                        scope: 'surface',
+                        surface: 'canvas',
                         defaultBinding: { key: 'F9' },
                     },
                     {
                         id: 'test.global',
                         label: 'Global action',
                         category: 'Test',
+                        scope: 'global',
                         defaultBinding: { key: 'F9' },
                     },
                 ];

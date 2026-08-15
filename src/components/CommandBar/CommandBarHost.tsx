@@ -1,7 +1,8 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { startBridgeListener } from '../../ai/bridgeListener';
 import { useCommandSources } from './useCommandSources';
 import type { CommandBarOpenIntent } from './CommandBar';
+import { useBindingSet } from '../../keymap/useKeymap';
 
 const CommandBar = lazy(() =>
     import('./CommandBar').then((m) => ({ default: m.CommandBar })),
@@ -23,6 +24,19 @@ export function CommandBarHost() {
 
     // Register palette actions at boot so the first lazy-opened palette is populated.
     useCommandSources();
+
+    useBindingSet(useMemo(() => ({
+        id: 'command-bar-toggle',
+        scope: 'global' as const,
+        entries: [{
+            actionId: 'commandBar.toggle',
+            run: () => {
+                setLoaded(true);
+                setIntent(nextIntent('toggle'));
+                return true;
+            },
+        }],
+    }), []));
 
     // Keep the native AI tool bridge eager even though the palette UI is lazy.
     useEffect(() => {
@@ -49,23 +63,15 @@ export function CommandBarHost() {
             setIntent(next);
         };
 
-        const onKeyDown = (e: KeyboardEvent) => {
-            const isToggle = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k';
-            if (!isToggle) return;
-            e.preventDefault();
-            open(nextIntent('toggle'));
-        };
         const onConfigure = () => open(nextIntent('configure-ai'));
         const onAsk = (e: Event) => {
             const detail = (e as CustomEvent<{ prompt?: string }>).detail;
             open(nextIntent('ask-ai', detail));
         };
 
-        window.addEventListener('keydown', onKeyDown);
         window.addEventListener('openjammer:configure-ai', onConfigure);
         window.addEventListener('openjammer:ask-ai', onAsk);
         return () => {
-            window.removeEventListener('keydown', onKeyDown);
             window.removeEventListener('openjammer:configure-ai', onConfigure);
             window.removeEventListener('openjammer:ask-ai', onAsk);
         };

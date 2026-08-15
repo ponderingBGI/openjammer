@@ -1,6 +1,6 @@
 /**
- * SongInterior — the hand-drawn DAW timeline you see when you press E on a Song
- * node. It is a VIEW over the arrangementStore (the ONE Arrangement); a human drag
+ * SongInterior — the timeline body rendered by the peer arrangement surface.
+ * It is a VIEW over the arrangementStore (the ONE Arrangement); a human drag
  * and an agent verb both flow through the same store + command-log, so the timeline
  * a human edits and the one an agent edits are the same surface (the meeting ground).
  *

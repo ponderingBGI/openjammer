@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-// Timeline live-preview proof (WF5 / slice 5c). The on-canvas timeline's transport
+// Timeline live-preview proof (WF5 / Wave 3a). The arrangement surface's transport
 // must actually DRIVE the audio engine, not merely move a playhead: pressing Play
 // loads the conducted arrangement graph into the AudioWorklet and dispatches real
 // NoteOn commands; pressing Stop releases them. We cannot "hear" in headless CI, so
@@ -101,7 +101,8 @@ test.describe('Timeline live preview', () => {
             }
         }
 
-        // Add a Song node (Utility → Add Song), enter its timeline, seed Paper Sketch.
+        // Add a Song node (Utility → Add Song), open its peer arrangement surface,
+        // then seed Paper Sketch.
         const canvas = page.locator('.node-canvas').first();
         const box = (await canvas.boundingBox())!;
         // Open the menu centred-but-high: clear of the top-left first-run toast and
@@ -110,8 +111,9 @@ test.describe('Timeline live preview', () => {
         await page.getByText('Utility', { exact: false }).last().click();
         await page.getByRole('menuitem', { name: /Add Song/i }).click();
         await expect(page.locator('.song-node')).toHaveCount(1);
-        await page.locator('.song-node-header').first().click();
-        await page.keyboard.press('e');
+        await page.getByRole('button', { name: /Open arrangement/i }).click();
+        await expect(page.locator('[data-surface-root="canvas"]')).toBeHidden();
+        await expect(page.locator('[data-surface-root="arrangement"]')).toBeVisible();
         await expect(page.locator('.song-interior')).toBeVisible();
         await page.getByRole('button', { name: /Start from/i }).click();
         await expect(page.locator('.song-track')).toHaveCount(3);
