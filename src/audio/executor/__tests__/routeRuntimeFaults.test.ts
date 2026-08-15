@@ -18,6 +18,7 @@ import { useGraphStore } from '../../../store/graphStore';
 import { routeRuntimeFaults } from '../faultPipe';
 import type { NodeData } from '../../../engine/types';
 import type { Event as EngineEvent, FaultKind } from '../../../../packages/oj-protocol-ts/src/index';
+import { useHistoryStore } from '../../../store/historyStore';
 
 const STORAGE_KEY = 'openjammer-graph-v2';
 
@@ -31,10 +32,9 @@ function reset(): void {
         selectedNodeIds: new Set(),
         selectedConnectionIds: new Set(),
         clipboard: null,
-        history: [],
-        historyIndex: -1,
         version: 0,
     });
+    useHistoryStore.getState().clear();
 }
 
 function addEffect(): string {

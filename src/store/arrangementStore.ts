@@ -19,6 +19,7 @@ import { applyVerbs, type Verb } from '../song/verbs';
 import { arrangementLengthTicks } from '../song/time';
 import type { Arrangement } from '../song/types';
 import { logger } from '../utils/log';
+import { registerHistoryDriver, useHistoryStore, type EditVerb } from './historyStore';
 
 const log = logger('song');
 
@@ -142,10 +143,6 @@ export interface ArrangementStore {
     /** The current song (always normalized), or null when no song is open. */
     arrangement: Arrangement | null;
 
-    // ── command-log: one shared undo for human + agent ──
-    /** Stacks of inverse/forward verb batches (LIFO). Not for direct UI reads. */
-    undoStack: Verb[][];
-    redoStack: Verb[][];
     /** Monotonic authoring-document revision. Transport, selection, and previews do not bump it. */
     docVersion: number;
 
@@ -175,6 +172,10 @@ export interface ArrangementStore {
     redo: () => void;
     canUndo: () => boolean;
     canRedo: () => boolean;
+    beginGesture: (label: string) => void;
+    previewGesture: (verbs: Verb | Verb[]) => void;
+    commitGesture: () => void;
+    abortGesture: () => void;
     /** Mint a fresh, collision-free entity id (e.g. `mintId('clip')` → `clip-7`). */
     mintId: (prefix: string) => string;
 
@@ -195,10 +196,9 @@ let idCounter = 1;
 
 export const useArrangementStore = create<ArrangementStore>((set, get) => {
     let previewBase: Arrangement | null = null;
+    let previewVerbs: Verb[] = [];
     return {
         arrangement: null,
-        undoStack: [],
-        redoStack: [],
         docVersion: 0,
         selectedClipId: null,
         selectedNoteIds: [],
@@ -220,8 +220,6 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             idCounter = normalized ? seedCounter(normalized) : 1;
             set({
                 arrangement: normalized,
-                undoStack: [],
-                redoStack: [],
                 selectedClipId: null,
                 selectedNoteIds: [],
                 isPlaying: false,
@@ -234,6 +232,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 loopOn: false,
                 loopEnabled: false,
             });
+            useHistoryStore.getState().clear();
         },
 
         apply: (verb, options) => {
@@ -246,54 +245,76 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             const { next, inverse } = applyVerbs(arr, verbs);
             if (isPreview) {
                 previewBase ??= arr;
+                previewVerbs = verbs;
                 set({ arrangement: next });
                 return;
             }
             previewBase = null;
-            // A new edit clears the redo branch (standard linear-history semantics).
             set({
                 arrangement: next,
-                undoStack: [...get().undoStack, inverse],
-                redoStack: [],
                 docVersion: get().docVersion + 1,
             });
+            useHistoryStore.getState().record(
+                verbs.map((item): EditVerb => ({ domain: 'arrangement', verb: item })),
+                inverse.map((item): EditVerb => ({ domain: 'arrangement', verb: item })),
+                verbs.length === 1 ? verbs[0]!.kind : 'Edit timeline',
+                'arrangement',
+            );
             if (get().isPlaying) republishPreview(next, get().currentTick(), () => get().stop());
         },
 
-        undo: () => {
-            const arr = previewBase ?? get().arrangement;
-            const undoStack = get().undoStack;
-            if (!arr || undoStack.length === 0) return;
+        undo: () => useHistoryStore.getState().undo(),
+        redo: () => useHistoryStore.getState().redo(),
+        canUndo: () => useHistoryStore.getState().canUndo(),
+        canRedo: () => useHistoryStore.getState().canRedo(),
+        beginGesture: (label) => {
+            if (previewBase) return;
+            previewBase = get().arrangement;
+            previewVerbs = [];
+            useHistoryStore.getState().begin(label, 'arrangement');
+        },
+        previewGesture: (verb) => {
+            if (!previewBase) return;
+            const verbs = Array.isArray(verb) ? verb : [verb];
+            previewVerbs = verbs;
+            const { next } = applyVerbs(previewBase, verbs);
+            set({ arrangement: next });
+        },
+        commitGesture: () => {
+            if (!previewBase) return;
+            const base = previewBase;
+            const verbs = previewVerbs;
             previewBase = null;
-            const inverseBatch = undoStack[undoStack.length - 1]!;
-            const { next, inverse } = applyVerbs(arr, inverseBatch);
-            set({
-                arrangement: next,
-                undoStack: undoStack.slice(0, -1),
-                redoStack: [...get().redoStack, inverse], // inverse-of-inverse = the redo
-                docVersion: get().docVersion + 1,
-            });
+            previewVerbs = [];
+            if (!verbs.length) {
+                set({ arrangement: base });
+                useHistoryStore.getState().commit();
+                return;
+            }
+            const { next, inverse } = applyVerbs(base, verbs);
+            // Returning a gesture to its exact origin is not an edit. Keep the
+            // document version and unified history cursor unchanged.
+            if (JSON.stringify(next) === JSON.stringify(base)) {
+                set({ arrangement: base });
+                useHistoryStore.getState().commit();
+                return;
+            }
+            set({ arrangement: next, docVersion: get().docVersion + 1 });
+            useHistoryStore.getState().record(
+                verbs.map((item): EditVerb => ({ domain: 'arrangement', verb: item })),
+                inverse.map((item): EditVerb => ({ domain: 'arrangement', verb: item })),
+                undefined,
+                'arrangement',
+            );
+            useHistoryStore.getState().commit();
             if (get().isPlaying) republishPreview(next, get().currentTick(), () => get().stop());
         },
-
-        redo: () => {
-            const arr = previewBase ?? get().arrangement;
-            const redoStack = get().redoStack;
-            if (!arr || redoStack.length === 0) return;
+        abortGesture: () => {
+            if (previewBase) set({ arrangement: previewBase });
             previewBase = null;
-            const forwardBatch = redoStack[redoStack.length - 1]!;
-            const { next, inverse } = applyVerbs(arr, forwardBatch);
-            set({
-                arrangement: next,
-                redoStack: redoStack.slice(0, -1),
-                undoStack: [...get().undoStack, inverse],
-                docVersion: get().docVersion + 1,
-            });
-            if (get().isPlaying) republishPreview(next, get().currentTick(), () => get().stop());
+            previewVerbs = [];
+            useHistoryStore.getState().abort();
         },
-
-        canUndo: () => get().undoStack.length > 0,
-        canRedo: () => get().redoStack.length > 0,
 
         mintId: (prefix) => {
             const id = `${prefix}-${idCounter++}`;
@@ -375,4 +396,16 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             );
         },
     };
+});
+
+registerHistoryDriver((verbs) => {
+    const arrangementVerbs = verbs
+        .filter((item): item is Extract<EditVerb, { domain: 'arrangement' }> => item.domain === 'arrangement')
+        .map((item) => item.verb);
+    if (!arrangementVerbs.length) return;
+    const store = useArrangementStore.getState();
+    if (!store.arrangement) return;
+    const { next } = applyVerbs(store.arrangement, arrangementVerbs);
+    useArrangementStore.setState({ arrangement: next, docVersion: store.docVersion + 1 });
+    if (store.isPlaying) republishPreview(next, store.currentTick(), () => useArrangementStore.getState().stop());
 });

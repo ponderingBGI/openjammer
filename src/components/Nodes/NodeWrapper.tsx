@@ -89,6 +89,8 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     const selectedNodeIds = useGraphStore((s) => s.selectedNodeIds);
     const selectNode = useGraphStore((s) => s.selectNode);
     const updateNodePosition = useGraphStore((s) => s.updateNodePosition);
+    const beginGesture = useGraphStore((s) => s.beginGesture);
+    const endGesture = useGraphStore((s) => s.endGesture);
     const connections = useGraphStore((s) => s.connections);
     const addConnection = useGraphStore((s) => s.addConnection);
 
@@ -153,6 +155,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
         setCanvasDragging(true);
         dragStart.current = { x: e.clientX, y: e.clientY };
         nodeStart.current = { ...node.position };
+        beginGesture();
 
         const handleMouseMove = (e: MouseEvent) => {
             const dx = (e.clientX - dragStart.current.x) / zoom;
@@ -170,6 +173,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
             dragCleanupRef.current = null;
+            endGesture();
         };
 
         const handleMouseUp = () => {
@@ -181,7 +185,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
 
         window.addEventListener('mousemove', handleMouseMove);
         window.addEventListener('mouseup', handleMouseUp);
-    }, [node.id, node.position, zoom, selectNode, setCanvasDragging, updateNodePosition]);
+    }, [beginGesture, endGesture, node.id, node.position, zoom, selectNode, setCanvasDragging, updateNodePosition]);
 
     // Handle port mouse down - start connection dragging (with pending disconnect)
     const handlePortMouseDown = useCallback((portId: string, e: React.MouseEvent) => {

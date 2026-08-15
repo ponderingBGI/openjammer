@@ -3,6 +3,7 @@ import type { Arrangement } from '../song/types';
 import { useArrangementStore } from '../store/arrangementStore';
 import { useCanvasStore } from '../store/canvasStore';
 import { useGraphStore } from '../store/graphStore';
+import { useHistoryStore } from '../store/historyStore';
 
 export interface SaveData {
     nodes: unknown[];
@@ -17,7 +18,7 @@ export function collectSaveData(): SaveData {
     const canvas = useCanvasStore.getState();
     const arrangement = useArrangementStore.getState().arrangement;
 
-    return {
+    const data = {
         nodes: Array.from(graph.nodes.values()),
         edges: Array.from(graph.connections.values()),
         viewport: {
@@ -27,4 +28,6 @@ export function collectSaveData(): SaveData {
         },
         arrangement: arrangement ? arrangementForExport(arrangement) : null,
     };
+    useHistoryStore.getState().markClean();
+    return data;
 }

@@ -12,8 +12,10 @@
 
 import { useArrangementStore } from '../store/arrangementStore';
 import { describeArrangement } from '../song/describe';
-import type { Verb } from '../song/verbs';
+import { applyVerbs, type Verb } from '../song/verbs';
 import type { ArrangementToolPort } from './tools';
+import { deleteClips, deleteTime, duplicateClips, insertTime, moveClips, nudge, splitAt, trimClip, type TimelineOp } from '../song/ops';
+import { useEditingContextStore, type GridUnit } from '../store/editingContextStore';
 
 /** Fill any missing stable id on a verb's ADDED entity (and nested notes), so the
  *  reversible inverse can address exactly what this edit created. */
@@ -61,7 +63,41 @@ export function createArrangementPort(): ArrangementToolPort {
     return {
         describe() {
             const arr = useArrangementStore.getState().arrangement;
-            return arr ? { text: describeArrangement(arr) } : null;
+            if (!arr) return null;
+            const editing = useEditingContextStore.getState();
+            return { text: describeArrangement(arr), selection: editing.viewports.arrangement.selection, grid: editing.gridUnit, editMode: editing.editMode };
+        },
+        applyOps(ops: TimelineOp[]) {
+            const store = useArrangementStore.getState();
+            const arrangement = store.arrangement;
+            if (!arrangement) return { ok: false, summary: 'No song is open on the timeline to edit.', undo: () => {} };
+            const verbs: Verb[] = [];
+            let projected = arrangement;
+            let selectedClipIds: string[] | undefined;
+            try {
+                for (const operation of ops) {
+                    let result;
+                    switch (operation.op) {
+                        case 'moveClips': result = moveClips(projected, operation.clipIds, operation.deltaTick, operation); break;
+                        case 'trimClip': result = trimClip(projected, operation.clipIds, operation.edge, operation.atTick); break;
+                        case 'splitAt': result = splitAt(projected, operation.clipIds, operation.atTick, store.mintId); break;
+                        case 'duplicateClips': result = duplicateClips(projected, operation.clipIds, operation.deltaTick, store.mintId); break;
+                        case 'deleteClips': result = deleteClips(projected, operation.clipIds, operation.ripple); break;
+                        case 'nudge': result = nudge(projected, operation.clipIds, operation.amount, operation.direction); break;
+                        case 'deleteTime': result = deleteTime(projected, operation.fromTick, operation.toTick, operation.trackIds); break;
+                        case 'insertTime': result = insertTime(projected, operation.atTick, operation.durationTick, operation.trackIds); break;
+                        case 'setGrid': useEditingContextStore.getState().setGridUnit(operation.grid as GridUnit); continue;
+                    }
+                    projected = applyVerbs(projected, result.verbs).next;
+                    verbs.push(...result.verbs);
+                    selectedClipIds = result.selectedClipIds ?? selectedClipIds;
+                }
+            } catch (error) {
+                return { ok: false, summary: `edit_timeline failed: ${error instanceof Error ? error.message : String(error)}`, undo: () => {} };
+            }
+            if (verbs.length) store.apply(verbs);
+            if (selectedClipIds) useEditingContextStore.getState().setSelection('arrangement', { clipIds: selectedClipIds });
+            return { ok: true, summary: `Applied ${ops.length} timeline operation(s).`, undo: () => useArrangementStore.getState().undo() };
         },
         apply(verbs) {
             const s = useArrangementStore.getState();

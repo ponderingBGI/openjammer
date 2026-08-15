@@ -49,6 +49,18 @@ describe('agent timeline tools — dispatch through applyToolCall', () => {
         expect(seen).toEqual([{ kind: 'setTempo', tempoBpm: 100 }]);
     });
 
+    it('edit_timeline forwards shared operation names to the op layer', () => {
+        let seen = '';
+        const port: ArrangementToolPort = {
+            describe: () => null,
+            apply: () => ({ ok: true, summary: '', undo: () => {} }),
+            applyOps: (ops) => { seen = ops[0]!.op; return { ok: true, summary: '', undo: () => {} }; },
+        };
+        const result = applyToolCall({ name: 'edit_timeline', args: { ops: [{ op: 'nudge', clipIds: ['c'], amount: 240, direction: 1 }] } }, dummyStore, dummyReg, undefined, undefined, port);
+        expect(result.ok).toBe(true);
+        expect(seen).toBe('nudge');
+    });
+
     it('both tools degrade cleanly when no timeline port is wired', () => {
         const d = applyToolCall({ name: 'describe_arrangement', args: {} }, dummyStore, dummyReg);
         expect(d.ok).toBe(true);
@@ -93,6 +105,16 @@ describe('createArrangementPort — live binding to the arrangement store', () =
         useArrangementStore.getState().setArrangement(null);
         const res = createArrangementPort().apply([{ kind: 'setTempo', tempoBpm: 100 }]);
         expect(res.ok).toBe(false);
+    });
+
+    it('shared moveClips op matches the hand op and is one undo step', () => {
+        const clip = useArrangementStore.getState().arrangement!.tracks[0]!.clips[0]!;
+        const before = structuredClone(useArrangementStore.getState().arrangement!);
+        const result = createArrangementPort().applyOps!([{ op: 'moveClips', clipIds: [clip.id!], deltaTick: 240 }]);
+        expect(result.ok).toBe(true);
+        expect(useArrangementStore.getState().arrangement!.tracks[0]!.clips[0]!.startTick).toBe(240);
+        result.undo();
+        expect(useArrangementStore.getState().arrangement).toEqual(before);
     });
 
     it('a bad verb fails the call atomically (no partial apply)', () => {

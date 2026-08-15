@@ -24,6 +24,7 @@ import type { NodeType, PortDefinition, Position } from '../engine/types';
 import type { ParamDecl } from '../engine/manifest';
 import type { WorkflowPlan } from './plan';
 import type { Verb } from '../song/verbs';
+import type { TimelineOp } from '../song/ops';
 import type { Severity } from '@openjammer/oj-protocol';
 
 // ============================================================================
@@ -366,7 +367,9 @@ export type DescribeArrangementArgs = Record<string, never>;
  */
 export interface EditTimelineArgs {
     /** The reversible timeline edits to apply, in order, as one undoable step. */
-    verbs: Verb[];
+    verbs?: Verb[];
+    /** Higher-level operations shared byte-for-byte with the arrangement surface. */
+    ops?: TimelineOp[];
 }
 
 /** Discriminated union of every concrete tool call an agent may emit. */

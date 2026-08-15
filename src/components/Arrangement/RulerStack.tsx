@@ -15,6 +15,7 @@ interface RulerStackProps {
     sections: Location[];
     loop?: Location;
     onSeek: (x: number) => void;
+    onToggleSnap: () => void;
 }
 
 export function RulerStack(props: RulerStackProps) {
@@ -31,7 +32,7 @@ export function RulerStack(props: RulerStackProps) {
         <div className="arrangement-ruler-shell">
             <div className="arrangement-corner">
                 <span className="arrangement-grid-chip">{props.gridUnit}</span>
-                <button className="arrangement-magnet" aria-label="Snap to grid" aria-pressed={props.snapOn}>∩</button>
+                <button className="arrangement-magnet" type="button" aria-label="Snap to grid" aria-pressed={props.snapOn} onClick={props.onToggleSnap}>∩</button>
             </div>
             <div className="arrangement-ruler-viewport" onPointerDown={(event) => props.onSeek(event.clientX)} aria-hidden="true">
                 <div className="arrangement-ruler-content" style={{ width: props.contentWidth, transform: `translateX(${-props.scrollLeft}px)` }}>

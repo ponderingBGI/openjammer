@@ -5,6 +5,7 @@ import { base64ToPeaks } from '../../utils/audioMetadata';
 import type { PitchRange } from '../../store/trackLaneViewStore';
 import { clipGeometry } from './geometry';
 import { WaveformCanvas } from '@openjammer/oj-ui';
+import { useClipGesture } from './useClipGesture';
 
 function paintCanvas(
     canvas: HTMLCanvasElement,
@@ -52,6 +53,7 @@ export function ClipView({
     laneHeight,
     selected,
     onSelect,
+    trackId,
 }: {
     clip: ArrangementClip;
     source: Source;
@@ -60,12 +62,14 @@ export function ClipView({
     pxPerTick: number;
     laneHeight: number;
     selected: boolean;
-    onSelect: () => void;
+    onSelect: (event: React.PointerEvent, phase: 'press' | 'release') => void;
+    trackId: string;
 }) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [peaks, setPeaks] = useState<Float32Array | null>(null);
     const geometry = clipGeometry(clip.startTick, clip.lengthTick, 0, pxPerTick);
     const height = laneHeight - 8;
+    const gesture = useClipGesture(clip, trackId, pxPerTick, geometry.width, onSelect);
     useEffect(() => {
         let live = true;
         if (source.kind === 'audio') {
@@ -90,10 +94,13 @@ export function ClipView({
     return (
         <button
             type="button"
-            className={`arrangement-clip${selected ? ' is-selected' : ''}${clip.mute ? ' is-muted' : ''}`}
+            className={`arrangement-clip${selected ? ' is-selected' : ''}${clip.mute ? ' is-muted' : ''}${gesture.dragging ? ' is-dragging' : ''}`}
             style={{ left: geometry.left, width: geometry.width, height }}
-            onClick={(event) => { event.stopPropagation(); onSelect(); }}
+            onPointerDown={gesture.onPointerDown}
+            onPointerCancel={gesture.onPointerCancel}
+            onClick={(event) => onSelect(event as unknown as React.PointerEvent, 'release')}
             role="listitem"
+            data-clip-id={clip.id}
             aria-label={`${trackName} — bars ${startBar} to ${endBar}, ${noteCount} notes${clip.mute ? ', muted' : ''}`}
         >
             {geometry.width >= 36 && laneHeight >= 30 && <span className="arrangement-clip__name">{clip.name ?? source.name}</span>}

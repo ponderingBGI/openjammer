@@ -198,21 +198,21 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
         description:
             'Read the current SONG TIMELINE as a readable summary — tracks (by stable ' +
             'id), clips, notes (count + pitch range), sections, tempo, and automation, ' +
-            'all at bar.beat. Side-effect-free. GROUND yourself with this before editing ' +
+            'selection, grid, and edit mode, all at bar.beat. Side-effect-free. GROUND yourself with this before editing ' +
             'the timeline (the "read the song first" twin of get_graph for the node graph).',
     },
     {
         name: 'edit_timeline',
         description:
-            'Author the SONG TIMELINE with an ordered list of reversible `verbs` — the ' +
-            'SAME vocabulary a human GUI drag emits — applied live and undoable with ' +
+            'Author the SONG TIMELINE with reversible primitive `verbs` or shared high-level `ops` — ' +
+            'the SAME operation layer a human GUI drag emits — applied live and undoable with ' +
             'Ctrl+Z. Verb kinds: setTempo; setTrackMute/setTrackName; addTrack/removeTrack; ' +
             'addSource/removeSource; addClip/removeClip/moveClip/setClipWindow/splitClip; ' +
             'setClipGain/setClipFades; addNote/removeNote/editNote; addLocation/removeLocation/' +
             'moveLocation/setLoopRange/setPunchRange; rippleTracks/insertTime/removeTime; ' +
             'stretchClip; compound; addAutomationLane/removeAutomationLane; setAutomationPoint/' +
             'removeAutomationPoint. Ids for ADDED entities are minted for you (omit them). ' +
-            'Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
+            'Operation names: moveClips, trimClip, splitAt, duplicateClips, deleteClips, setGrid, nudge, deleteTime, insertTime. Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
     },
 ];
 
@@ -489,13 +489,14 @@ export interface AgentEnvPort {
  */
 export interface ArrangementToolPort {
     /** A readable summary of the current song (describeArrangement), or null when none. */
-    describe(): { text: string } | null;
+    describe(): { text: string; selection?: unknown; grid?: string; editMode?: string } | null;
     /**
      * Apply an ordered list of reversible timeline verbs, minting ids for ADDED
      * entities, through the shared command-log. Returns whether it applied, a
      * one-line summary, and a reversible `undo` (a single Ctrl+Z's worth).
      */
     apply(verbs: Verb[]): { ok: boolean; summary: string; undo: () => void };
+    applyOps?: (ops: import('../song/ops').TimelineOp[]) => { ok: boolean; summary: string; undo: () => void };
 }
 
 /**
@@ -1181,10 +1182,11 @@ function applyEditTimeline(args: EditTimelineArgs, arrangement?: ArrangementTool
         return { ok: false, summary: `edit_timeline failed: ${ARRANGEMENT_MISSING}.`, undo: NO_OP };
     }
     const verbs = args.verbs ?? [];
-    if (verbs.length === 0) {
+    const ops = args.ops ?? [];
+    if (verbs.length === 0 && ops.length === 0) {
         return { ok: true, summary: 'edit_timeline: no verbs to apply (no-op).', undo: NO_OP };
     }
-    const res = arrangement.apply(verbs);
+    const res = ops.length && arrangement.applyOps ? arrangement.applyOps(ops) : arrangement.apply(verbs);
     return { ok: res.ok, summary: res.summary, undo: once(res.undo) };
 }
 

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useArrangementStore } from '../arrangementStore';
+import { useHistoryStore } from '../historyStore';
 import type { Arrangement } from '../../song/types';
 
 const executorSpies = vi.hoisted(() => ({
@@ -99,7 +100,7 @@ describe('arrangementStore — the timeline SSOT + command-log', () => {
         store().play();
         executorSpies.updateArrangementPreview.mockClear();
         const initialVersion = store().docVersion;
-        const initialUndoDepth = store().undoStack.length;
+        const initialUndoDepth = useHistoryStore.getState().cursor;
         const trackId = store().arrangement!.tracks[0]!.id!;
         const verb = { kind: 'setTrackMute', trackId, mute: true } as const;
 
@@ -107,12 +108,12 @@ describe('arrangementStore — the timeline SSOT + command-log', () => {
         store().apply(verb, { preview: true });
         expect(executorSpies.updateArrangementPreview).not.toHaveBeenCalled();
         expect(store().docVersion).toBe(initialVersion);
-        expect(store().undoStack).toHaveLength(initialUndoDepth);
+        expect(useHistoryStore.getState().cursor).toBe(initialUndoDepth);
 
         store().apply(verb);
         expect(executorSpies.updateArrangementPreview).toHaveBeenCalledTimes(1);
         expect(store().docVersion).toBe(initialVersion + 1);
-        expect(store().undoStack).toHaveLength(initialUndoDepth + 1);
+        expect(useHistoryStore.getState().cursor).toBe(initialUndoDepth + 1);
 
         store().undo();
         expect(store().arrangement!.tracks[0]!.mute).toBeUndefined();

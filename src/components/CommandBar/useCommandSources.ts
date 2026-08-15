@@ -34,6 +34,10 @@ import type { Action, ActionCtx, Command } from "../../store/commandRegistry";
 import { seedPaletteLearning } from "../../store/paletteLearningSeed";
 import { useAiLearningStore } from "../../store/aiLearningStore";
 import { getInvoke } from "../../ai/tauri";
+import { useArrangementStore } from "../../store/arrangementStore";
+import { useEditingContextStore, gridTicks } from "../../store/editingContextStore";
+import { deleteTime, insertTime } from "../../song/ops";
+import { timebase } from "../../song/time";
 
 // Human-readable group label per category (matches the menu's casing).
 const CATEGORY_LABEL: Record<NodeCategory, string> = {
@@ -129,6 +133,40 @@ function buildNodeActions(): Action[] {
  */
 function buildAppCommands(): Command[] {
   return [
+    {
+      id: "arrangement.delete-time",
+      title: "Delete selected time",
+      group: "Arrangement",
+      keywords: ["delete", "time", "ripple", "close gap"],
+      run: () => {
+        const store = useArrangementStore.getState();
+        const arrangement = store.arrangement;
+        if (!arrangement) return;
+        const selection = useEditingContextStore.getState().viewports.arrangement.selection;
+        const clips = arrangement.tracks.flatMap((track) => track.clips).filter((clip) => clip.id !== undefined && selection.clipIds.includes(clip.id));
+        if (!clips.length) return;
+        const from = Math.min(...clips.map((clip) => clip.startTick));
+        const to = Math.max(...clips.map((clip) => clip.startTick + clip.lengthTick));
+        const trackIds = selection.trackIds.length ? selection.trackIds : arrangement.tracks.map((track) => track.id!).filter(Boolean);
+        store.apply(deleteTime(arrangement, from, to, trackIds).verbs);
+      },
+    },
+    {
+      id: "arrangement.insert-time",
+      title: "Insert time at playhead",
+      group: "Arrangement",
+      keywords: ["insert", "time", "ripple", "open gap"],
+      run: () => {
+        const store = useArrangementStore.getState();
+        const arrangement = store.arrangement;
+        if (!arrangement) return;
+        const context = useEditingContextStore.getState();
+        const tb = timebase(arrangement);
+        const duration = gridTicks(context.gridUnit, tb.ticksPerBeat, tb.ticksPerBar, context.viewports.arrangement.pxPerTick, true) ?? tb.ticksPerBeat;
+        const trackIds = context.viewports.arrangement.selection.trackIds.length ? context.viewports.arrangement.selection.trackIds : arrangement.tracks.map((track) => track.id!).filter(Boolean);
+        store.apply(insertTime(arrangement, store.playheadTick, duration, trackIds).verbs);
+      },
+    },
     {
       id: "app.settings.toggle",
       title: "Open Settings",

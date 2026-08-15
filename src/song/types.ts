@@ -67,6 +67,7 @@ export interface ArrangementClip {
     opaque?: boolean;
     layerIndex?: number;
     mute?: boolean;
+    locked?: boolean;
     gain?: number;
     envelope?: ClipEnvelopePoint[];
     fadeIn?: ClipFade;

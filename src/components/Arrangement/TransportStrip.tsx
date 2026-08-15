@@ -2,14 +2,16 @@ import { Button, ValueScrubber } from '@openjammer/oj-ui';
 import { useArrangementStore } from '../../store/arrangementStore';
 import { useEditingContextStore } from '../../store/editingContextStore';
 import { timebase } from '../../song/time';
+import { useHistoryStore } from '../../store/historyStore';
 
 export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
     const arrangement = useArrangementStore((state) => state.arrangement);
     const isPlaying = useArrangementStore((state) => state.isPlaying);
     const loopEnabled = useArrangementStore((state) => state.loopEnabled);
-    const undoCount = useArrangementStore((state) => state.undoStack.length);
-    const redoCount = useArrangementStore((state) => state.redoStack.length);
+    const canUndo = useHistoryStore((state) => state.cursor > 0);
+    const canRedo = useHistoryStore((state) => state.cursor < state.entries.length);
     const pxPerTick = useEditingContextStore((state) => state.viewports.arrangement.pxPerTick);
+    const editMode = useEditingContextStore((state) => state.editMode);
     if (!arrangement) return <div className="arrangement-transport" aria-hidden="true" />;
     const tb = timebase(arrangement);
     const visibleBars = Math.max(1, fieldWidth / (pxPerTick * tb.ticksPerBar));
@@ -29,6 +31,10 @@ export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
             </div>
             <div className="arrangement-transport__title">{arrangement.name}</div>
             <div className="arrangement-transport__cluster arrangement-transport__cluster--right">
+                <div className="arrangement-edit-mode" role="group" aria-label="Edit mode">
+                    <button type="button" aria-pressed={editMode === 'slide'} onClick={() => useEditingContextStore.getState().setEditMode('slide')}>Slide</button>
+                    <button type="button" aria-pressed={editMode === 'ripple'} onClick={() => useEditingContextStore.getState().setEditMode('ripple')}>Ripple</button>
+                </div>
                 <ValueScrubber
                     value={arrangement.tempoBpm}
                     display={`${arrangement.tempoBpm} BPM`}
@@ -47,8 +53,8 @@ export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
                         });
                     }}
                 />
-                <Button title="Undo" disabled={!undoCount} onClick={() => useArrangementStore.getState().undo()}>↶</Button>
-                <Button title="Redo" disabled={!redoCount} onClick={() => useArrangementStore.getState().redo()}>↷</Button>
+                <Button title="Undo" disabled={!canUndo} onClick={() => useHistoryStore.getState().undo()}>↶</Button>
+                <Button title="Redo" disabled={!canRedo} onClick={() => useHistoryStore.getState().redo()}>↷</Button>
             </div>
         </div>
     );

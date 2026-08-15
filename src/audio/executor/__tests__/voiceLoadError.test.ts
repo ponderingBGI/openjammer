@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { useGraphStore } from '../../../store/graphStore';
 import { setNodeVoiceLoadError } from '../voiceLoadError';
 import type { InstrumentNodeData } from '../../../engine/types';
+import { useHistoryStore } from '../../../store/historyStore';
 
 const STORAGE_KEY = 'openjammer-graph-v2';
 
@@ -28,10 +29,9 @@ function reset(): void {
         selectedNodeIds: new Set(),
         selectedConnectionIds: new Set(),
         clipboard: null,
-        history: [],
-        historyIndex: -1,
         version: 0,
     });
+    useHistoryStore.getState().clear();
 }
 
 /** Add a `keys` instrument node and return its root id. */
@@ -59,14 +59,14 @@ describe('setNodeVoiceLoadError', () => {
         expect(data.voiceLoadError).toBe(false);
     });
 
-    it('does NOT create an undo-history entry (called outside any gesture)', () => {
+    it('records graph mutations in the unified history', () => {
         const id = addKeys();
-        const before = useGraphStore.getState().history.length;
+        const before = useHistoryStore.getState().entries.length;
 
         setNodeVoiceLoadError(id, true);
         setNodeVoiceLoadError(id, false);
 
-        expect(useGraphStore.getState().history.length).toBe(before);
+        expect(useHistoryStore.getState().entries.length).toBe(before + 2);
     });
 
     it('is a no-op when the value is unchanged (no version bump)', () => {

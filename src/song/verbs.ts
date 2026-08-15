@@ -30,8 +30,9 @@ export type Verb =
     | { kind: 'setTrackName'; trackId: string; name?: string }
     | { kind: 'addClip'; trackId: string; clip: ArrangementClip }
     | { kind: 'removeClip'; clipId: string }
-    | { kind: 'moveClip'; clipId: string; startTick: number; trackId?: string }
+    | { kind: 'moveClip'; clipId: string; startTick: number; trackId?: string; index?: number }
     | { kind: 'setClipWindow'; clipId: string; startTick?: number; lengthTick?: number; sourceStart?: number }
+    | { kind: 'setClipLocked'; clipId: string; locked: boolean }
     | { kind: 'trimClipStart'; clipId: string; startTick: number }
     | { kind: 'trimClipEnd'; clipId: string; endTick: number }
     | { kind: 'slipClip'; clipId: string; sourceStart: number }
@@ -61,6 +62,7 @@ export type Verb =
     | { kind: 'stretchClip'; clipId: string; timeRatio: number; pitchRatio: number; anchor: 'start' | 'end'; newSource: Source; newClip: ArrangementClip }
     | { kind: 'bounceClips'; trackId: string; fromTick: number; toTick: number; newSource: Source; newClip: ArrangementClip }
     | { kind: 'setTempo'; tempoBpm: number }
+    | { kind: 'setTimeSignature'; timeSignature: [number, number] }
     | { kind: 'addAutomationLane'; trackId: string; index: number; lane: AutomationLane }
     | { kind: 'removeAutomationLane'; laneId: string }
     | { kind: 'setAutomationPoint'; laneId: string; point: AutomationPoint }
@@ -216,8 +218,12 @@ export function applyVerb(arr: Arrangement, verb: Verb): { next: Arrangement; in
             const targetId = verb.trackId ?? found.track.id!;
             locateTrack(arr, targetId);
             let next = mapTrack(arr, found.ti, (track) => ({ ...track, clips: removeAt(track.clips, found.ci) }));
-            next = addClip(next, targetId, { ...found.clip, startTick: verb.startTick });
-            return { next, inverse: { kind: 'moveClip', clipId: verb.clipId, startTick: found.clip.startTick, trackId: found.track.id } };
+            if (verb.index === undefined) next = addClip(next, targetId, { ...found.clip, startTick: verb.startTick });
+            else {
+                const target = locateTrack(next, targetId);
+                next = mapTrack(next, target.ti, (track) => ({ ...track, clips: insertAt(track.clips, verb.index!, { ...found.clip, startTick: verb.startTick }) }));
+            }
+            return { next, inverse: { kind: 'moveClip', clipId: verb.clipId, startTick: found.clip.startTick, trackId: found.track.id, index: found.ci } };
         }
         case 'setClipWindow': {
             const { clip } = locateClip(arr, verb.clipId);
@@ -227,6 +233,10 @@ export function applyVerb(arr: Arrangement, verb: Verb): { next: Arrangement; in
             if ('lengthTick' in verb) { inverse.lengthTick = clip.lengthTick; changed.lengthTick = verb.lengthTick!; }
             if ('sourceStart' in verb) { inverse.sourceStart = clip.sourceStart; changed = withOptional(changed, 'sourceStart', verb.sourceStart, (value) => value !== 0); }
             return { next: updateClip(arr, verb.clipId, () => changed), inverse };
+        }
+        case 'setClipLocked': {
+            const { clip } = locateClip(arr, verb.clipId);
+            return { next: updateClip(arr, verb.clipId, (item) => withOptional(item, 'locked', verb.locked || undefined)), inverse: { kind: 'setClipLocked', clipId: verb.clipId, locked: clip.locked === true } };
         }
         case 'trimClipStart': {
             const { clip } = locateClip(arr, verb.clipId);
@@ -520,6 +530,10 @@ export function applyVerb(arr: Arrangement, verb: Verb): { next: Arrangement; in
         }
         case 'setTempo':
             return { next: { ...arr, tempoBpm: verb.tempoBpm }, inverse: { kind: 'setTempo', tempoBpm: arr.tempoBpm } };
+        case 'setTimeSignature': {
+            const previous = arr.timeSignature ?? [4, 4];
+            return { next: { ...arr, timeSignature: verb.timeSignature }, inverse: { kind: 'setTimeSignature', timeSignature: previous } };
+        }
         case 'addAutomationLane': {
             if (!verb.lane.id) fail('addAutomationLane needs an id');
             const { ti } = locateTrack(arr, verb.trackId);

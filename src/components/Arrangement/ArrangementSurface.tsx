@@ -5,12 +5,16 @@ import { useEditingContextStore } from '../../store/editingContextStore';
 import { useTrackLaneViewStore } from '../../store/trackLaneViewStore';
 import { useBindingSet } from '../../keymap/useKeymap';
 import { arrangementLengthTicks, timebase } from '../../song/time';
+import { buildTempoMap, sampleToTick } from '../../song/tempoMap';
 import { buildPaperSketch } from '../../song/songs/paperSketch';
 import { TransportStrip } from './TransportStrip';
 import { RulerStack } from './RulerStack';
 import { GridLayer } from './GridLayer';
 import { TrackLaneView } from './TrackLaneView';
 import { PlayheadLayer } from './PlayheadLayer';
+import { deleteClips, duplicateClips, nudge, splitAt } from '../../song/ops';
+import { gridTicks } from '../../store/editingContextStore';
+import { useHistoryStore } from '../../store/historyStore';
 import './ArrangementSurface.css';
 
 const HEADER_WIDTH = 200;
@@ -24,6 +28,8 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     const laneHeights = useTrackLaneViewStore((state) => state.laneHeights);
     const scrollRef = useRef<HTMLDivElement>(null);
     const [view, setView] = useState({ width: 1000, height: 600, left: 0, top: 0 });
+    const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+    const marqueeStart = useRef<{ x: number; y: number; clientX: number; clientY: number; pointerId: number; add: boolean; toggle: boolean } | null>(null);
 
     useBindingSet(useMemo(() => ({
         id: 'arrangement-surface',
@@ -31,11 +37,15 @@ export function ArrangementSurface({ active, visible = active, transition, songN
         surface: 'arrangement' as const,
         entries: [
             { actionId: 'arrangement.transport', guard: (event: KeyboardEvent) => !event.repeat, run: () => { const store = useArrangementStore.getState(); if (store.isPlaying) store.stop(); else store.play(); return true; } },
-            { actionId: 'arrangement.undo', run: () => { useArrangementStore.getState().undo(); return true; } },
-            { actionId: 'arrangement.redo', run: () => { useArrangementStore.getState().redo(); return true; } },
+            { actionId: 'arrangement.undo', run: () => { useHistoryStore.getState().undo(); return true; } },
+            { actionId: 'arrangement.redo', run: () => { useHistoryStore.getState().redo(); return true; } },
             { actionId: 'arrangement.zoomToSelection', run: () => false },
-            { actionId: 'arrangement.delete', run: () => { const store = useArrangementStore.getState(); if (store.selectedClipId) { store.apply({ kind: 'removeClip', clipId: store.selectedClipId }); store.selectClip(null); } return true; } },
-            { actionId: 'arrangement.deleteBackspace', run: () => { const store = useArrangementStore.getState(); if (store.selectedClipId) { store.apply({ kind: 'removeClip', clipId: store.selectedClipId }); store.selectClip(null); } return true; } },
+            ...['arrangement.delete', 'arrangement.deleteBackspace'].map((actionId) => ({ actionId, run: () => { const store = useArrangementStore.getState(); const arr = store.arrangement; const context = useEditingContextStore.getState(); if (arr) store.apply(deleteClips(arr, context.viewports.arrangement.selection.clipIds, context.editMode === 'ripple').verbs); context.clearSelection('arrangement'); return true; } })),
+            { actionId: 'arrangement.duplicate', run: () => { const store = useArrangementStore.getState(); const arr = store.arrangement; const context = useEditingContextStore.getState(); if (!arr) return true; const tb = timebase(arr); const amount = gridTicks(context.gridUnit, tb.ticksPerBeat, tb.ticksPerBar, context.viewports.arrangement.pxPerTick, true) ?? 1; const result = duplicateClips(arr, context.viewports.arrangement.selection.clipIds, amount, store.mintId); store.apply(result.verbs); context.setSelection('arrangement', { clipIds: result.selectedClipIds ?? [] }); return true; } },
+            ...([['arrangement.nudgeLeft', -1, false], ['arrangement.nudgeRight', 1, false], ['arrangement.nudgeLeftFine', -1, true], ['arrangement.nudgeRightFine', 1, true]] as const).map(([actionId, direction, fine]) => ({ actionId, run: () => { const store = useArrangementStore.getState(); const arr = store.arrangement; const context = useEditingContextStore.getState(); if (!arr) return true; const tb = timebase(arr); const grid = gridTicks(context.gridUnit, tb.ticksPerBeat, tb.ticksPerBar, context.viewports.arrangement.pxPerTick, true) ?? 1; store.apply(nudge(arr, context.viewports.arrangement.selection.clipIds, fine ? Math.max(1, Math.round(grid / 16)) : grid, direction).verbs); return true; } })),
+            { actionId: 'arrangement.split', run: () => { const store = useArrangementStore.getState(); const arr = store.arrangement; const context = useEditingContextStore.getState(); if (!arr) return true; const editTick = store.transportPending === 'seek' && store.pendingSeekSample != null ? sampleToTick(buildTempoMap(arr), store.pendingSeekSample) : store.playheadTick; const result = splitAt(arr, context.viewports.arrangement.selection.clipIds, editTick, store.mintId); store.apply(result.verbs); context.setSelection('arrangement', { clipIds: result.selectedClipIds ?? [] }); return true; } },
+            { actionId: 'arrangement.toggleRipple', run: () => { const context = useEditingContextStore.getState(); context.setEditMode(context.editMode === 'ripple' ? 'slide' : 'ripple'); return true; } },
+            { actionId: 'arrangement.escape', guard: () => !useEditingContextStore.getState().dragActive, run: () => { useEditingContextStore.getState().clearSelection('arrangement'); return true; } },
         ],
     }), []));
 
@@ -117,8 +127,43 @@ export function ArrangementSurface({ active, visible = active, transition, songN
                     });
                 }}
             >
-                <div className="arrangement-timeline-content" style={{ width: HEADER_WIDTH + contentWidth, minHeight: RULER_HEIGHT + offsets.at(-1)! + view.height * 0.4 }}>
-                    <RulerStack fieldWidth={fieldViewportWidth} contentWidth={contentWidth} scrollLeft={view.left} pxPerTick={viewport.pxPerTick} ticksPerBar={tb.ticksPerBar} beatsPerBar={tb.beatsPerBar} gridUnit={gridUnit} snapOn={snapMode === 'grid'} sections={sections} loop={loop} onSeek={seekFromClientX} />
+                <div
+                    className="arrangement-timeline-content"
+                    style={{ width: HEADER_WIDTH + contentWidth, minHeight: RULER_HEIGHT + offsets.at(-1)! + view.height * 0.4 }}
+                    onPointerDown={(event) => {
+                        if (event.button !== 0 || !(event.target as HTMLElement).closest('.arrangement-lane') || (event.target as HTMLElement).closest('.arrangement-clip')) return;
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        marqueeStart.current = { x: event.clientX - rect.left, y: event.clientY - rect.top, clientX: event.clientX, clientY: event.clientY, pointerId: event.pointerId, add: event.shiftKey && !event.ctrlKey && !event.metaKey, toggle: (event.ctrlKey || event.metaKey) && !event.shiftKey };
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                    }}
+                    onPointerMove={(event) => {
+                        const start = marqueeStart.current;
+                        if (!start || start.pointerId !== event.pointerId) return;
+                        const dx = event.clientX - start.clientX;
+                        const dy = event.clientY - start.clientY;
+                        if (!marquee && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+                        setMarquee({ x: Math.min(start.x, start.x + dx), y: Math.min(start.y, start.y + dy), width: Math.abs(dx), height: Math.abs(dy) });
+                    }}
+                    onPointerUp={(event) => {
+                        const start = marqueeStart.current;
+                        if (!start || start.pointerId !== event.pointerId) return;
+                        if (marquee) {
+                            const bounds = event.currentTarget.getBoundingClientRect();
+                            const left = bounds.left + marquee.x;
+                            const top = bounds.top + marquee.y;
+                            const right = left + marquee.width;
+                            const bottom = top + marquee.height;
+                            const hits = [...event.currentTarget.querySelectorAll<HTMLElement>('[data-clip-id]')].filter((element) => { const rect = element.getBoundingClientRect(); return rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top; }).map((element) => element.dataset.clipId!);
+                            const context = useEditingContextStore.getState();
+                            const current = context.viewports.arrangement.selection.clipIds;
+                            const clipIds = start.toggle ? [...new Set([...current.filter((id) => !hits.includes(id)), ...hits.filter((id) => !current.includes(id))])] : start.add ? [...new Set([...current, ...hits])] : hits;
+                            context.setSelection('arrangement', { clipIds });
+                        } else if (!start.add) useEditingContextStore.getState().clearSelection('arrangement');
+                        marqueeStart.current = null;
+                        setMarquee(null);
+                    }}
+                >
+                    <RulerStack fieldWidth={fieldViewportWidth} contentWidth={contentWidth} scrollLeft={view.left} pxPerTick={viewport.pxPerTick} ticksPerBar={tb.ticksPerBar} beatsPerBar={tb.beatsPerBar} gridUnit={gridUnit} snapOn={snapMode === 'magnetic'} sections={sections} loop={loop} onSeek={seekFromClientX} onToggleSnap={() => useEditingContextStore.getState().toggleSnap()} />
                     <div className="arrangement-grid-anchor" style={{ transform: `translate3d(${view.left}px,${view.top}px,0)` }}>
                         <GridLayer width={fieldViewportWidth} height={Math.max(1, Math.min(view.height - RULER_HEIGHT, offsets.at(-1)! - laneTop))} scrollLeft={view.left} pxPerTick={viewport.pxPerTick} ticksPerBar={tb.ticksPerBar} beatsPerBar={tb.beatsPerBar} gridUnit={gridUnit} sections={sections} />
                     </div>
@@ -127,6 +172,7 @@ export function ArrangementSurface({ active, visible = active, transition, songN
                     </div>
                     {loop?.endTick != null && <div className="arrangement-loop-wash" aria-hidden="true" style={{ left: HEADER_WIDTH + loop.startTick * viewport.pxPerTick, width: (loop.endTick - loop.startTick) * viewport.pxPerTick, height: offsets.at(-1) }} />}
                     <PlayheadLayer pxPerTick={viewport.pxPerTick} scrollRef={scrollRef} />
+                    {marquee && <div className="arrangement-marquee" aria-hidden="true" style={marquee} />}
                 </div>
             </div>
         </div>
