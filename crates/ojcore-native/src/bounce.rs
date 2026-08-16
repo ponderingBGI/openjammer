@@ -518,7 +518,15 @@ fn write_flac(path: &Path, samples: &[f32], spec: BounceSpec) -> Result<(), Boun
         .iter()
         .map(|&sample| quantize(sample, bits))
         .collect();
-    let config = flacenc::config::Encoder::default()
+    let mut config = flacenc::config::Encoder::default();
+    // flacenc 0.5.1's predictive paths can select a catastrophically large
+    // Rice-coded subframe for otherwise ordinary 24-bit program material. A
+    // single 4,096-frame block can then occupy hundreds of megabytes even
+    // though it decodes to the right samples. Constant and verbatim subframes
+    // remain lossless and put a strict linear bound on the encoded size.
+    config.subframe_coding.use_fixed = false;
+    config.subframe_coding.use_lpc = false;
+    let config = config
         .into_verified()
         .map_err(|(_, error)| BounceError::Encode(error.to_string()))?;
     let source = flacenc::source::MemSource::from_samples(
@@ -910,5 +918,62 @@ mod tests {
         let expected: Vec<i32> = samples.iter().map(|&sample| quantize(sample, 24)).collect();
         assert_eq!(decoded, expected);
         std::fs::remove_file(path).expect("remove flac");
+    }
+
+    #[test]
+    fn multi_block_flac_is_smaller_than_wav_and_sample_exact() {
+        const FLAC_BLOCK_SIZE: u64 = 4_096;
+        let (graph, mut timeline, tempo) = fixture(false);
+        timeline.end = FLAC_BLOCK_SIZE * 9 + 123;
+        let wav_path = temp_file("wav");
+        let flac_path = temp_file("flac");
+        let wav_spec = spec(
+            BitDepth::Pcm24,
+            ExportFormat::Wav,
+            TailSpec::Fixed { seconds: 0.0 },
+        );
+        let flac_spec = BounceSpec {
+            format: ExportFormat::Flac,
+            ..wav_spec
+        };
+
+        let wav_stats = bounce_to_file(
+            graph.clone(),
+            timeline.clone(),
+            tempo.clone(),
+            wav_spec,
+            &wav_path,
+            |_| {},
+        )
+        .expect("bounce multi-block wav");
+        let flac_stats = bounce_to_file(graph, timeline, tempo, flac_spec, &flac_path, |_| {})
+            .expect("bounce multi-block flac");
+        assert_eq!(wav_stats.frames, FLAC_BLOCK_SIZE * 9 + 123);
+        assert_eq!(flac_stats.frames, wav_stats.frames);
+        assert!(
+            std::fs::metadata(&flac_path).expect("flac metadata").len()
+                < std::fs::metadata(&wav_path).expect("wav metadata").len(),
+            "multi-block FLAC must be smaller than its raw PCM WAV"
+        );
+
+        let wav_samples: Vec<i32> = hound::WavReader::open(&wav_path)
+            .expect("open wav")
+            .samples::<i32>()
+            .map(|sample| sample.expect("decode wav sample"))
+            .collect();
+        let mut flac_reader = claxon::FlacReader::open(&flac_path).expect("open flac");
+        let streaminfo = flac_reader.streaminfo();
+        let channels = usize::try_from(streaminfo.channels).expect("channel count");
+        let total_samples = streaminfo.samples.expect("STREAMINFO total_samples");
+        let flac_samples: Vec<i32> = flac_reader
+            .samples()
+            .map(|sample| sample.expect("decode flac sample"))
+            .collect();
+        let decoded_frames = flac_samples.len() / channels;
+        assert_eq!(decoded_frames as u64, total_samples);
+        assert_eq!(flac_samples, wav_samples);
+
+        std::fs::remove_file(wav_path).expect("remove wav");
+        std::fs::remove_file(flac_path).expect("remove flac");
     }
 }
