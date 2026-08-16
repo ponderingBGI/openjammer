@@ -37,7 +37,6 @@ const PluginsPanel = lazy(() =>
 );
 import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
-import { LatencyWarningBanner } from './components/LatencyWarningBanner';
 import { initAudioContext, isAudioReady } from './audio/audioContext';
 import { getExecutor, isTauri } from './audio/executor';
 import type { GraphNode, Connection } from './engine/types';
@@ -658,6 +657,7 @@ function App() {
         visible={surface === 'arrangement' || exitingSurface === 'arrangement'}
         transition={surface === 'arrangement' ? 'in' : exitingSurface === 'arrangement' ? 'out' : undefined}
         songNodeId={songNodeId}
+        onOpenSettings={() => setShowSettings(true)}
       />
       <PianoRollSurfaceHost
         active={surface === 'pianoroll'}
@@ -717,9 +717,6 @@ function App() {
 
       {/* MIDI Integration - device detection, browser, and node creation */}
       <MIDIIntegration />
-
-      {/* Latency Warning Banner - shows when latency is too high */}
-      <LatencyWarningBanner onOpenSettings={() => setShowSettings(true)} />
 
       {/* Toast Notifications */}
       <Toaster

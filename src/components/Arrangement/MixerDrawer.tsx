@@ -7,7 +7,7 @@ import { useArrangementStore } from '../../store/arrangementStore';
 const EMPTY_LEVELS = new Map<string, number>();
 
 function Meter({ value }: { value: number }) {
-    return <span className="mixer-meter" aria-hidden="true"><span style={{ transform: `scaleY(${Math.max(0, Math.min(1, value))})` }} /></span>;
+    return <span className={`mixer-meter${value >= 1 ? ' is-clipping' : ''}`} aria-hidden="true"><span style={{ transform: `scaleY(${Math.max(0, Math.min(1, value))})` }} /></span>;
 }
 
 function TrackStrip({ track, peak }: { track: ArrangementTrack; peak: number }) {
@@ -52,10 +52,10 @@ function TrackStrip({ track, peak }: { track: ArrangementTrack; peak: number }) 
                         onKeyDown={onFaderKey}
                         onChange={(gainDb) => preview({ kind: 'setTrackGain', trackId, gainDb })}
                     />
-                    <span className="mixer-strip__readout">{(track.gainDb ?? 0).toFixed(1)} dB</span>
                 </div>
                 <Meter value={peak} />
             </div>
+            <span className="mixer-strip__readout">{(track.gainDb ?? 0).toFixed(1)} dB</span>
             <ValueScrubber
                 className="mixer-strip__pan"
                 value={track.pan ?? 0}

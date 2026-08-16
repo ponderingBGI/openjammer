@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Button, Callout, Field, Input, Modal, PanelHeader, ProgressBar, Select } from '@openjammer/oj-ui';
+import { Button, Callout, Field, Input, Modal, PanelHeader, ProgressBar, SegmentedControl, Select } from '@openjammer/oj-ui';
 import { toast } from 'sonner';
 import { isTauri } from '../../ai/tauri';
 import { useModalKeymap } from '../../keymap/useKeymap';
@@ -9,6 +9,7 @@ import { assembleExportArgs, clipWarning, joinExportPath, peakWarning, safeExpor
 import { exportBrowser } from './browserExport';
 import { exportNative, revealExport } from './nativeExport';
 import type { BounceSpec, ExportProgress, ExportSampleRate, ExportStats } from './types';
+import { arrangementLengthTicks, tickToSeconds, timebase } from '../../song/time';
 import './ExportDialog.css';
 
 type FormatChoice = 'wav24' | 'wav16' | 'wav32f' | 'flac24' | 'flac16';
@@ -35,6 +36,11 @@ function formatDuration(frames: number, sampleRate: number): string {
 
 function displayPeak(value: number): string {
     return Number.isFinite(value) ? `${value.toFixed(2)} dBFS` : '−∞ dBFS';
+}
+
+function formatPreflightDuration(seconds: number): string {
+    const rounded = Math.max(0, Math.round(seconds));
+    return `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, '0')}`;
 }
 
 async function pickNativeDirectory(): Promise<string | null> {
@@ -74,6 +80,13 @@ export function ExportDialog({ open, arrangement, onClose }: Props) {
         ...CHOICES[choice],
         tail: tailMode === 'auto' ? { mode: 'auto' } : { mode: 'fixed', seconds: Math.max(0, tailSeconds) },
     }), [choice, sampleRate, tailMode, tailSeconds]);
+    const preflight = useMemo(() => {
+        const lengthTicks = arrangementLengthTicks(arrangement);
+        const seconds = tickToSeconds(arrangement, lengthTicks) + (tailMode === 'fixed' ? Math.max(0, tailSeconds) : 0);
+        const bytesPerSample = spec.bitDepth === '16' ? 2 : 3;
+        const megabytes = Math.max(1, Math.round(seconds * sampleRate * 2 * bytesPerSample / 1_000_000));
+        return `${Math.ceil(lengthTicks / timebase(arrangement).ticksPerBar)} bars · ${formatPreflightDuration(seconds)} · ≈${megabytes} MB`;
+    }, [arrangement, sampleRate, spec.bitDepth, tailMode, tailSeconds]);
 
     const close = () => {
         if (status !== 'exporting') onClose();
@@ -137,7 +150,7 @@ export function ExportDialog({ open, arrangement, onClose }: Props) {
             <div className="export-dialog">
                 <p className="export-dialog__intro">Make a finished audio file from this arrangement.</p>
                 <div className="export-dialog__form">
-                    <Field label="Filename" htmlFor="export-filename">
+                    <Field className="export-dialog__filename" label="Filename" htmlFor="export-filename">
                         <Input id="export-filename" value={filename} onChange={(event) => setFilename(event.target.value)} disabled={status === 'exporting'} />
                     </Field>
                     <Field label="Format" htmlFor="export-format">
@@ -159,8 +172,7 @@ export function ExportDialog({ open, arrangement, onClose }: Props) {
                     </Field>
                     <fieldset className="export-dialog__tail" disabled={status === 'exporting'}>
                         <legend>Tail</legend>
-                        <label><input type="radio" name="export-tail" checked={tailMode === 'auto'} onChange={() => setTailMode('auto')} /> Auto — listen for the ring-out</label>
-                        <label><input type="radio" name="export-tail" checked={tailMode === 'fixed'} onChange={() => setTailMode('fixed')} /> Fixed</label>
+                        <SegmentedControl aria-label="Export tail" className="export-dialog__tail-options" value={tailMode} disabled={status === 'exporting'} onChange={setTailMode} options={[{ value: 'auto', label: 'Auto — listen for the ring-out' }, { value: 'fixed', label: 'Fixed' }]} />
                         {tailMode === 'fixed' && <Input aria-label="Tail seconds" type="number" min={0} step={0.1} value={tailSeconds} onChange={(event) => setTailSeconds(Number(event.target.value))} />}
                         {tailMode === 'fixed' && <span className="export-dialog__unit">seconds</span>}
                     </fieldset>
@@ -174,6 +186,7 @@ export function ExportDialog({ open, arrangement, onClose }: Props) {
                     ) : <p className="export-dialog__destination-note">Destination: your browser’s Downloads folder.</p>}
                 </div>
 
+                <p className="export-dialog__preflight" aria-label="Estimated export size">{preflight}</p>
                 <p className="export-dialog__advice">24-bit WAV or FLAC at 44.1/48 kHz is what streaming services want.</p>
                 {!native && <Callout variant="info">Browser export steps the wasm engine faster than real time and writes 24-bit WAV. FLAC and 16-bit dither are desktop-only.</Callout>}
 
@@ -199,7 +212,7 @@ export function ExportDialog({ open, arrangement, onClose }: Props) {
                 )}
                 <div className="export-dialog__actions">
                     <Button variant="ghost" onClick={close} disabled={status === 'exporting'}>{stats ? 'Close' : 'Not now'}</Button>
-                    <Button onClick={() => void start()} disabled={status === 'exporting' || !filename.trim()}>{status === 'exporting' ? 'Exporting…' : 'Export song'}</Button>
+                    <Button variant="primary" onClick={() => void start()} disabled={status === 'exporting' || !filename.trim()}>{status === 'exporting' ? 'Exporting…' : 'Export song'}</Button>
                 </div>
             </div>
         </Modal>

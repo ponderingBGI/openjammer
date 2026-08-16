@@ -7,6 +7,7 @@ import { gridTicks } from '../../store/editingContextStore';
 import { useEditingContextStore } from '../../store/editingContextStore';
 import { copySelection, cutSelection, paste } from '../../song/editingActions';
 import { useArrangementStore } from '../../store/arrangementStore';
+import { getGridLadder } from '../../song/rulerMarks';
 import { growPitchRange, initialPitchRange, useTrackLaneViewStore, type PitchRange } from '../../store/trackLaneViewStore';
 import {
     clippedNoteGeometry,
@@ -397,7 +398,7 @@ export function PianoRoll(props: PianoRollProps) {
                 <label className="piano-roll__quantize-field">Grid<select aria-label="Quantize grid" value={quantizeGrid} onChange={(event) => useEditingContextStore.getState().setQuantize({ quantizeGrid: event.target.value as typeof quantizeGrid })}><option value="1/4">1/4</option><option value="1/8">1/8</option><option value="1/16">1/16</option><option value="1/32">1/32</option><option value="1/8t">1/8T</option></select></label>
                 <label className="piano-roll__quantize-field">Strength<input aria-label="Quantize strength" type="number" min="0" max="100" value={quantizeStrength} onChange={(event) => useEditingContextStore.getState().setQuantize({ quantizeStrength: Number(event.target.value) })} /></label>
                 <label className="piano-roll__quantize-field">Swing<input aria-label="Quantize swing" type="number" min="-150" max="150" value={quantizeSwing} onChange={(event) => useEditingContextStore.getState().setQuantize({ quantizeSwing: Number(event.target.value) })} /></label>
-                <button type="button" className="piano-roll__tool" onClick={() => props.onQuantize?.(selectedNoteIds)} disabled={!selectedNoteIds.length}>Quantize</button>
+                <button type="button" className="piano-roll__tool" onClick={() => { if (selectedNoteIds.length) props.onQuantize?.(selectedNoteIds); }}>{selectedNoteIds.length ? 'Quantize' : 'select notes to quantize'}</button>
                 <button type="button" className="piano-roll__tool" aria-pressed={stepEntry.trackId === props.trackId} onClick={() => useEditingContextStore.getState().setStepEntry({ trackId: stepEntry.trackId === props.trackId ? null : props.trackId, positionTick: clip.startTick })}>Step</button>
                 {props.onClose && <button type="button" className="piano-roll__close" aria-label="Close piano roll" onClick={props.onClose}>⌃</button>}
             </header>
@@ -408,7 +409,7 @@ export function PianoRoll(props: PianoRollProps) {
                 </div>
                 <div ref={fieldRef} className="piano-roll__field" onPointerMove={onFieldPointerMove} onPointerLeave={() => { if (!drawRef.current) setGhost(null); }} onPointerDown={onFieldPointerDown} onPointerUp={onFieldPointerUp} onPointerCancel={() => { drawRef.current = null; marqueeRef.current = null; setMarquee(null); setGhost(null); }}>
                     <div className="piano-roll__content" style={{ width: contentWidth, height: contentHeight, transform: `translateX(${-leftTick * props.pxPerTick}px)` }}>
-                        <TimeGrid width={contentWidth} height={contentHeight} pxPerTick={props.pxPerTick} ticksPerBar={ticksPerBar} ppq={ppq} grid={grid} />
+                        <TimeGrid width={contentWidth} height={contentHeight} pxPerTick={props.pxPerTick} ticksPerBar={ticksPerBar} beatsPerBar={beatsPerBar} gridUnit={gridUnit} />
                         {pitches.map((pitch, index) => <div key={pitch} className={`piano-roll__row${isBlackPitch(pitch) ? ' is-black' : ''}${pitch % 12 === 0 ? ' is-c' : ''}`} style={{ top: index * rowHeight, height: rowHeight }} />)}
                         {otherClipNotes.map(({ note, clip: other }, index) => {
                             const geometry = clippedNoteGeometry(note, other.startTick, other.sourceStart ?? 0, other.lengthTick, props.pxPerTick);
@@ -434,10 +435,18 @@ export function PianoRoll(props: PianoRollProps) {
     );
 }
 
-function TimeGrid({ width, height, pxPerTick, ticksPerBar, ppq, grid }: { width: number; height: number; pxPerTick: number; ticksPerBar: number; ppq: number; grid: number | null }) {
+function TimeGrid({ width, height, pxPerTick, ticksPerBar, beatsPerBar, gridUnit }: { width: number; height: number; pxPerTick: number; ticksPerBar: number; beatsPerBar: number; gridUnit: ReturnType<typeof useEditingContextStore.getState>['gridUnit'] }) {
     const marks: { tick: number; kind: 'bar' | 'beat' | 'sub' }[] = [];
-    const step = grid ?? ticksPerBar;
-    for (let tick = 0; tick * pxPerTick <= width; tick += step) marks.push({ tick, kind: tick % ticksPerBar === 0 ? 'bar' : tick % ppq === 0 ? 'beat' : 'sub' });
+    const ladder = getGridLadder(pxPerTick * ticksPerBar, beatsPerBar, gridUnit);
+    const divisions = gridUnit === '1/8t' ? 12 : gridUnit === '1/16' || gridUnit === 'adaptive' ? 16 : gridUnit === '1/8' ? 8 : 4;
+    for (let bar = 0; bar * ticksPerBar * pxPerTick <= width; bar++) {
+        const start = bar * ticksPerBar;
+        if (bar % ladder.barStride === 0) marks.push({ tick: start, kind: 'bar' });
+        if (ladder.drawBeats) for (let beat = 1; beat < beatsPerBar; beat++) marks.push({ tick: start + beat * ticksPerBar / beatsPerBar, kind: 'beat' });
+        if (ladder.drawSubdivisions) for (let sub = 1; sub < divisions; sub++) {
+            if (sub % (divisions / beatsPerBar) !== 0) marks.push({ tick: start + sub * ticksPerBar / divisions, kind: 'sub' });
+        }
+    }
     return <div className="piano-roll__time-grid" aria-hidden="true" style={{ height }}>{marks.map((mark) => <i key={mark.tick} className={`is-${mark.kind}`} style={{ left: mark.tick * pxPerTick }} />)}</div>;
 }
 
@@ -477,7 +486,7 @@ function VelocityLane({ notes, clip, pxPerTick, leftTick, selectedIds, onSelect 
         if (base) useArrangementStore.getState().previewGesture(lowerVelocity(base, [note.id], { mode: 'set', amount: vel }).verbs);
     };
     return <div ref={laneRef} className="piano-roll__velocity" aria-label="Velocity lane">
-        <span className="piano-roll__velocity-label">Velocity</span><i className="is-guide is-96" /><i className="is-guide is-64" /><i className="is-guide is-32" />
+        <i className="is-guide is-96" /><i className="is-guide is-64" /><i className="is-guide is-32" />
         {notes.map((note) => note.id && <button key={note.id} type="button" className={`piano-roll__lollipop${selectedIds.has(note.id) ? ' is-selected' : ''}`} style={{ left: (clip.startTick + note.tick - (clip.sourceStart ?? 0) - leftTick) * pxPerTick, height: `${(note.vel ?? 96) / 127 * 100}%` }} aria-label={`${pitchName(note.pitch)} velocity ${note.vel ?? 96}`} onPointerDown={(event) => { const base = useArrangementStore.getState().arrangement; if (!base) return; onSelect(note.id!); drag.current = { pointerId: event.pointerId, noteId: note.id!, base }; event.currentTarget.setPointerCapture(event.pointerId); useArrangementStore.getState().beginGesture('Set note velocity'); previewVelocity(event, note); }} onPointerMove={(event) => { if (drag.current?.pointerId === event.pointerId) previewVelocity(event, note); }} onPointerUp={(event) => { if (drag.current?.pointerId !== event.pointerId) return; drag.current = null; useArrangementStore.getState().commitGesture(); }} onPointerCancel={() => { drag.current = null; useArrangementStore.getState().abortGesture(); }} />)}
     </div>;
 }

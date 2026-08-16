@@ -154,7 +154,7 @@ export const generatedThemes: Theme[] = [
             "universalConnection": "#8B7FE8",
             "timelineBg": "#0B0F19",
             "timelineChromeBg": "#131824",
-            "timelineLaneBg": "#121926",
+            "timelineLaneBg": "#151D2C",
             "timelineLaneAltBg": "#0E141F",
             "timelineGridBar": "rgba(232,240,255,0.22)",
             "timelineGridBeat": "rgba(232,240,255,0.10)",

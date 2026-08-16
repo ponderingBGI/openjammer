@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { useArrangementStore } from '../../store/arrangementStore';
 
-export function PlayheadLayer({ pxPerTick, scrollRef }: { pxPerTick: number; scrollRef: RefObject<HTMLDivElement | null> }) {
+export function PlayheadLayer({ pxPerTick, scrollRef, height }: { pxPerTick: number; scrollRef: RefObject<HTMLDivElement | null>; height: number }) {
     const ref = useRef<HTMLDivElement>(null);
     const isPlaying = useArrangementStore((state) => state.isPlaying);
     const playheadTick = useArrangementStore((state) => state.playheadTick);
@@ -21,5 +21,5 @@ export function PlayheadLayer({ pxPerTick, scrollRef }: { pxPerTick: number; scr
         let frame = requestAnimationFrame(function loop() { write(); frame = requestAnimationFrame(loop); });
         return () => cancelAnimationFrame(frame);
     }, [isPlaying, playheadTick, pxPerTick, scrollRef]);
-    return <div ref={ref} className="arrangement-playhead" aria-hidden="true" />;
+    return <div ref={ref} className="arrangement-playhead" style={{ height }} aria-hidden="true" />;
 }

@@ -4,9 +4,10 @@ import { useEditingContextStore } from '../../store/editingContextStore';
 import { timebase } from '../../song/time';
 import { useHistoryStore } from '../../store/historyStore';
 import { useTrackLaneViewStore } from '../../store/trackLaneViewStore';
+import { LatencyWarningBanner } from '../LatencyWarningBanner';
 import { punchRecordState } from '../../song/recording';
 
-export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
+export function TransportStrip({ fieldWidth, onOpenSettings }: { fieldWidth: number; onOpenSettings?: () => void }) {
     const arrangement = useArrangementStore((state) => state.arrangement);
     const isPlaying = useArrangementStore((state) => state.isPlaying);
     const loopEnabled = useArrangementStore((state) => state.loopEnabled);
@@ -47,6 +48,7 @@ export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
             </div>
             <div className="arrangement-transport__title">{arrangement.name}</div>
             <div className="arrangement-transport__cluster arrangement-transport__cluster--right">
+                <div className="arrangement-transport__latency"><LatencyWarningBanner onOpenSettings={onOpenSettings} /></div>
                 <div className="arrangement-edit-mode" role="group" aria-label="Edit mode">
                     <button type="button" aria-pressed={editMode === 'slide'} onClick={() => useEditingContextStore.getState().setEditMode('slide')}>Slide</button>
                     <button type="button" aria-pressed={editMode === 'ripple'} onClick={() => useEditingContextStore.getState().setEditMode('ripple')}>Ripple</button>

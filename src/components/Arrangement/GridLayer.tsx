@@ -31,10 +31,10 @@ export function GridLayer(props: GridLayerProps) {
         const ladder = getGridLadder(pxPerBar, props.beatsPerBar, props.gridUnit);
         const firstBar = Math.max(0, Math.floor(props.scrollLeft / pxPerBar));
         const lastBar = Math.ceil((props.scrollLeft + props.width) / pxPerBar);
-        const line = (x: number, color: string) => {
+        const line = (x: number, color: string, width = 1) => {
             context.beginPath();
             context.strokeStyle = color;
-            context.lineWidth = 1;
+            context.lineWidth = width;
             context.moveTo(crispLineX(x), 0);
             context.lineTo(crispLineX(x), props.height);
             context.stroke();
@@ -61,7 +61,7 @@ export function GridLayer(props: GridLayerProps) {
         }
         context.setLineDash([4, 4]);
         context.globalAlpha = 0.45;
-        for (const section of props.sections) line(section.startTick * props.pxPerTick - props.scrollLeft, styles.getPropertyValue('--timeline-section-marker'));
+        for (const section of props.sections) line(section.startTick * props.pxPerTick - props.scrollLeft, styles.getPropertyValue('--timeline-section-marker'), 2);
         context.globalAlpha = 1;
         context.setLineDash([]);
     }, [props]);

@@ -32,8 +32,11 @@ function parseMusicalDuration(value: string, ticksPerBeat: number, ticksPerBar: 
 
 const HEADER_WIDTH = 200;
 const RULER_HEIGHT = 46;
+const EMPTY_GHOST_BARS = 32;
+const EMPTY_GHOST_TRACKS = buildPaperSketch().tracks.map((track, index) => ({ ...track, id: `empty-ghost-${index}`, name: `Track ${index + 1}`, clips: [], automation: undefined }));
+const EMPTY_TRACK_ARRANGEMENT = { name: 'Untitled song', tempoBpm: 120, ppq: 960, timeSignature: [4, 4] as [number, number], graph: { nodes: [], connections: [] }, tracks: [{ id: 'track-1', name: 'Track 1', ref: 'track-1', clips: [] }] };
 
-export function ArrangementSurface({ active, visible = active, transition, songNodeId }: { active: boolean; visible?: boolean; transition?: 'in' | 'out'; songNodeId: string | null }) {
+export function ArrangementSurface({ active, visible = active, transition, songNodeId, onOpenSettings }: { active: boolean; visible?: boolean; transition?: 'in' | 'out'; songNodeId: string | null; onOpenSettings?: () => void }) {
     const arrangement = useArrangementStore((state) => state.arrangement);
     const viewport = useEditingContextStore((state) => state.viewports.arrangement);
     const gridUnit = useEditingContextStore((state) => state.gridUnit);
@@ -49,6 +52,7 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     const [timeScope, setTimeScope] = useState<'selected-tracks' | 'all'>('selected-tracks');
     const [timeError, setTimeError] = useState('');
     const marqueeStart = useRef<{ x: number; y: number; clientX: number; clientY: number; pointerId: number; add: boolean; toggle: boolean; mode: 'object' | 'range'; tick: number; trackId: string } | null>(null);
+    const scrollbarFade = useRef<number | null>(null);
 
     useBindingSet(useMemo(() => ({
         id: 'arrangement-surface',
@@ -106,21 +110,29 @@ export function ArrangementSurface({ active, visible = active, transition, songN
         return () => { window.removeEventListener('openjammer:time-prompt', prompt); window.removeEventListener('openjammer:loop-from-selection', loopSelection); };
     }, []);
 
+    useEffect(() => () => {
+        if (scrollbarFade.current !== null) window.clearTimeout(scrollbarFade.current);
+    }, []);
+
     if (!arrangement) {
         return (
             <div className={`arrangement-surface song-interior ${transition ? `surface-transition-${transition}` : ''}`} data-surface-root="arrangement" data-song-node={songNodeId ?? 'song'} tabIndex={-1} role="region" aria-label="Arrangement" hidden={!visible} inert={!active ? true : undefined} aria-hidden={!active}>
-                <TransportStrip fieldWidth={view.width - HEADER_WIDTH} />
+                <TransportStrip fieldWidth={view.width - HEADER_WIDTH} onOpenSettings={onOpenSettings} />
                 <div className="arrangement-empty-stage">
-                    <div className="arrangement-empty-ruler" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span></div>
-                    {[0, 1, 2].map((index) => <div className="arrangement-empty-lane" key={index}><span>Track {index + 1}</span></div>)}
+                    <div className="arrangement-empty-ghost" aria-hidden="true" inert>
+                        <RulerStack fieldWidth={Math.max(1, view.width - HEADER_WIDTH)} contentWidth={Math.max(1, view.width - HEADER_WIDTH)} scrollLeft={0} pxPerTick={(Math.max(1, view.width - HEADER_WIDTH)) / (EMPTY_GHOST_BARS * 960 * 4)} ticksPerBar={960 * 4} beatsPerBar={4} gridUnit="adaptive" snapOn sections={[]} songEnd={EMPTY_GHOST_BARS * 960 * 4} onSeek={() => undefined} onToggleSnap={() => undefined} />
+                        <div className="arrangement-lanes" role="list" aria-label="Tracks">
+                            {EMPTY_GHOST_TRACKS.map((track) => <TrackLaneView key={track.id} track={track} arrangement={{ ...EMPTY_TRACK_ARRANGEMENT, tracks: EMPTY_GHOST_TRACKS }} pxPerTick={1} visibleStartTick={0} visibleEndTick={0} shell />)}
+                        </div>
+                    </div>
                     <div className="arrangement-empty-card">
                         <h1>An empty page.</h1>
                         <p>Start a sketch, or ask the agent to dream one up. Ctrl+Z undoes anything.</p>
                         <div className="arrangement-empty-starters">
-                            <Button onClick={() => useArrangementStore.getState().setArrangement({ ...buildPaperSketch(), codeNodes: undefined })}>Start from 'Paper Sketch'</Button>
+                            <Button variant="primary" onClick={() => useArrangementStore.getState().setArrangement({ ...buildPaperSketch(), codeNodes: undefined })}>Start from 'Paper Sketch'</Button>
                             <Button onClick={() => useArrangementStore.getState().setArrangement(buildFirstLight())}>Start from 'First Light'</Button>
                         </div>
-                        <button className="arrangement-empty-secondary" type="button">Add an empty track</button>
+                        <button className="arrangement-empty-secondary" type="button" onClick={() => useArrangementStore.getState().setArrangement(EMPTY_TRACK_ARRANGEMENT)}>Add an empty track</button>
                         <div className="arrangement-empty-footer"><Kbd>Tab</Kbd><span>back to the canvas</span></div>
                     </div>
                 </div>
@@ -153,12 +165,15 @@ export function ArrangementSurface({ active, visible = active, transition, songN
 
     return (
         <div className={`arrangement-surface song-interior ${transition ? `surface-transition-${transition}` : ''}`} data-surface-root="arrangement" data-song-node={songNodeId ?? 'song'} tabIndex={-1} role="region" aria-label="Arrangement" hidden={!visible} inert={!active ? true : undefined} aria-hidden={!active}>
-            <TransportStrip fieldWidth={fieldViewportWidth} />
+            <TransportStrip fieldWidth={fieldViewportWidth} onOpenSettings={onOpenSettings} />
             <div
                 className="arrangement-scroll"
                 ref={scrollRef}
                 onScroll={(event) => {
                     const target = event.currentTarget;
+                    target.classList.add('is-scrolling');
+                    if (scrollbarFade.current !== null) window.clearTimeout(scrollbarFade.current);
+                    scrollbarFade.current = window.setTimeout(() => target.classList.remove('is-scrolling'), 200);
                     requestAnimationFrame(() => {
                         setView((current) => ({ ...current, left: target.scrollLeft, top: target.scrollTop }));
                         useEditingContextStore.getState().setViewport('arrangement', { leftTick: target.scrollLeft / viewport.pxPerTick, yOrigin: target.scrollTop });
@@ -235,7 +250,9 @@ export function ArrangementSurface({ active, visible = active, transition, songN
                         setMarquee(null);
                     }}
                 >
-                    <RulerStack fieldWidth={fieldViewportWidth} contentWidth={contentWidth} scrollLeft={view.left} pxPerTick={viewport.pxPerTick} ticksPerBar={tb.ticksPerBar} beatsPerBar={tb.beatsPerBar} gridUnit={gridUnit} snapOn={snapMode === 'magnetic'} sections={sections} loop={loop} onSeek={seekFromClientX} onToggleSnap={() => useEditingContextStore.getState().toggleSnap()} />
+                    <RulerStack fieldWidth={fieldViewportWidth} contentWidth={contentWidth} scrollLeft={view.left} pxPerTick={viewport.pxPerTick} ticksPerBar={tb.ticksPerBar} beatsPerBar={tb.beatsPerBar} gridUnit={gridUnit} snapOn={snapMode === 'magnetic'} sections={sections} songEnd={lengthTicks} loop={loop} onSeek={seekFromClientX} onToggleSnap={() => useEditingContextStore.getState().toggleSnap()} />
+                    <div className="arrangement-field-ground" aria-hidden="true" style={{ width: contentWidth, height: offsets.at(-1) }} />
+                    <div className="arrangement-song-end" aria-hidden="true" style={{ left: HEADER_WIDTH + lengthTicks * viewport.pxPerTick, width: Math.max(0, contentWidth - lengthTicks * viewport.pxPerTick), height: offsets.at(-1) }} />
                     <div className="arrangement-grid-anchor" style={{ transform: `translate3d(${view.left}px,${view.top}px,0)` }}>
                         <GridLayer width={fieldViewportWidth} height={Math.max(1, Math.min(view.height - RULER_HEIGHT, offsets.at(-1)! - laneTop))} scrollLeft={view.left} pxPerTick={viewport.pxPerTick} ticksPerBar={tb.ticksPerBar} beatsPerBar={tb.beatsPerBar} gridUnit={gridUnit} sections={sections} />
                     </div>
@@ -244,7 +261,7 @@ export function ArrangementSurface({ active, visible = active, transition, songN
                     </div>
                     {loop?.endTick != null && <div className="arrangement-loop-wash" aria-hidden="true" style={{ left: HEADER_WIDTH + loop.startTick * viewport.pxPerTick, width: (loop.endTick - loop.startTick) * viewport.pxPerTick, height: offsets.at(-1) }} />}
                     {viewport.selection.timeRange && <div className="arrangement-range-selection" aria-label={`Time selection ${Math.round(viewport.selection.timeRange.fromTick)} to ${Math.round(viewport.selection.timeRange.toTick)}`} style={{ left: HEADER_WIDTH + viewport.selection.timeRange.fromTick * viewport.pxPerTick, width: (viewport.selection.timeRange.toTick - viewport.selection.timeRange.fromTick) * viewport.pxPerTick, height: offsets.at(-1) }} />}
-                    <PlayheadLayer pxPerTick={viewport.pxPerTick} scrollRef={scrollRef} />
+                    <PlayheadLayer pxPerTick={viewport.pxPerTick} scrollRef={scrollRef} height={offsets.at(-1)!} />
                     {marquee && <div className={`arrangement-marquee${marquee.mode === 'range' ? ' is-range' : ''}`} aria-hidden="true" style={{ left: marquee.x, top: marquee.y, width: marquee.width, height: marquee.height }} />}
                 </div>
             </div>

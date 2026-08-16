@@ -6,7 +6,7 @@
 import { useState, useEffect } from 'react';
 import { useAudioStore } from '../store/audioStore';
 import { diagnoseLatency, shouldShowLatencyWarning } from '../utils/latencyDiagnostics';
-import { Banner, Button, IconWarning } from '@openjammer/oj-ui';
+import { Button, Callout, IconWarning } from '@openjammer/oj-ui';
 import './LatencyWarningBanner.css';
 
 // Local storage key for dismissed timestamp
@@ -109,13 +109,13 @@ export function LatencyWarningBanner({ onOpenSettings }: LatencyWarningBannerPro
 
     return (
         <div className="latency-warning-banner">
-            <Banner
-                tone="warning"
+            <Callout
+                variant="warning"
                 icon={<IconWarning />}
                 title="High Audio Latency Detected"
-                message={primaryIssue?.issue || 'Your audio latency may affect live playing experience.'}
-                actions={
-                    <>
+            >
+                <span>{primaryIssue?.issue || 'Your audio latency may affect live playing experience.'}</span>
+                <span className="latency-warning-banner__actions">
                         <Button variant="primary" onClick={handleFixNow}>
                             Fix Now
                         </Button>
@@ -125,9 +125,8 @@ export function LatencyWarningBanner({ onOpenSettings }: LatencyWarningBannerPro
                         <Button variant="secondary" onClick={handleDismiss}>
                             Dismiss
                         </Button>
-                    </>
-                }
-            />
+                </span>
+            </Callout>
         </div>
     );
 }

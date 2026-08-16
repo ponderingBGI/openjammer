@@ -217,8 +217,8 @@ export interface Timeline {
   events: SchedEvent[];
   loop_range: [number, number] | null;
   punch_range: [number, number] | null;
-  armed_tracks?: CaptureArm[];
-  count_in_beats?: number;
+  armed_tracks: CaptureArm[];
+  count_in_beats: number;
   end: number;
 }
 

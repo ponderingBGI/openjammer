@@ -31,6 +31,17 @@ async function dragHorizontally(page: Page, clipIndex: number, delta: number) {
 }
 
 test.describe('Wave 4a arrangement editing', () => {
+    test('surface swap tears down the outgoing arrangement after 300ms', async ({ page }) => {
+        await openPaperSketch(page);
+        const arrangement = page.locator('[data-surface-root="arrangement"]');
+        await page.getByRole('button', { name: 'Canvas', exact: true }).click();
+        await page.waitForTimeout(300);
+        await expect(arrangement).toBeHidden();
+        await expect(arrangement).toHaveAttribute('inert');
+        await expect(page.locator('[data-surface-root="canvas"]')).toBeVisible();
+        await expect(page.locator('[data-surface-root="canvas"]')).not.toHaveAttribute('inert');
+    });
+
     test('mixer fader drag is one undoable gesture', async ({ page }) => {
         await openPaperSketch(page);
         await page.getByTitle('Open mixer').click();

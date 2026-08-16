@@ -98,6 +98,8 @@ export interface ArrangementTrack {
     id?: string;
     name?: string;
     ref: string;
+    /** Optional authored identity tint; timeline headers fall back to the paper palette. */
+    color?: string;
     /** Position-sorted; ties retain their existing order. */
     clips: ArrangementClip[];
     automation?: AutomationLane[];

@@ -24,13 +24,14 @@
 .piano-roll__close { min-height: 22px; padding: 0 7px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--timeline-lane-bg); color: var(--text-primary); box-shadow: var(--shadow-sketch); font: 600 14px/1 var(--font-sketch); }
 .piano-roll__tool:active,
 .piano-roll__close:active { box-shadow: none; transform: translateY(1px); }
-.piano-roll__tool[aria-pressed="true"] { background: var(--sketch-black); color: var(--canvas-bg); }
+.piano-roll__tool[aria-pressed="true"] { background: var(--sketch-black); color: var(--text-on-accent); }
 .piano-roll__tool:disabled { opacity: .45; }
 .piano-roll__quantize-field { display: inline-flex; align-items: center; gap: 3px; color: var(--text-muted); font: 500 11px/1 var(--font-sans); }
 .piano-roll__quantize-field select,
 .piano-roll__quantize-field input { width: 48px; height: 22px; padding: 0 3px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--timeline-lane-bg); color: var(--text-primary); font: 500 11px/1 var(--font-mono); }
 .piano-roll__quantize-field input { width: 42px; }
 .piano-roll--inline .piano-roll__quantize-field { display: none; }
+.piano-roll--inline .piano-roll__toolbar { display: none; }
 .piano-roll__close { width: 25px; padding: 0; font-family: var(--font-sans); }
 
 .piano-roll__body { position: relative; display: grid; min-height: 0; flex: 1; grid-template-columns: var(--piano-roll-scroomer-width) var(--piano-roll-key-width) 1fr; overflow: hidden; }
@@ -79,7 +80,6 @@
 .piano-roll__marquee { position: absolute; z-index: 7; border: 1px solid var(--sketch-black); background: color-mix(in srgb, var(--timeline-selection) 22%, transparent); pointer-events: none; }
 
 .piano-roll__velocity { position: relative; flex: 0 0 56px; height: 56px; margin-left: calc(var(--piano-roll-scroomer-width) + var(--piano-roll-key-width)); overflow: hidden; border-top: 1px solid color-mix(in srgb, var(--timeline-lane-divider) 50%, transparent); background: var(--timeline-lane-bg); }
-.piano-roll__velocity-label { position: absolute; z-index: 2; top: 3px; left: 6px; color: var(--text-muted); font: 500 12px/1 var(--font-sans); }
 .piano-roll__velocity .is-guide { position: absolute; right: 0; left: 0; height: 1px; background: var(--timeline-grid-sub); pointer-events: none; }
 .piano-roll__velocity .is-96 { top: 25%; }
 .piano-roll__velocity .is-64 { top: 50%; background: var(--timeline-grid-beat); }

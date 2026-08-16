@@ -15,8 +15,7 @@
 }
 
 .export-dialog__intro {
-    font-family: var(--font-sketch);
-    font-size: var(--text-lg);
+    font: 400 16px/1.5 var(--font-sans);
 }
 
 .export-dialog__form {
@@ -33,15 +32,13 @@
     min-width: 0;
     margin: 0;
     padding: var(--space-sm);
-    border: 1px solid var(--border-subtle);
+    border: 2px solid var(--sketch-black);
     border-radius: var(--radius-sm);
 }
 
-.export-dialog__tail legend,
-.export-dialog__tail label {
-    font-family: var(--font-sketch);
-    font-size: var(--text-sm);
-}
+.export-dialog__tail legend { font: 500 14px/1 var(--font-sans); }
+.export-dialog__tail-options { border-radius: var(--radius-sm); }
+.export-dialog__tail-options .oj-seg__btn { padding: var(--space-xs) var(--space-sm); font: 500 14px/1 var(--font-sans); }
 
 .export-dialog__tail .oj-input {
     width: 5rem;
@@ -54,6 +51,9 @@
     color: var(--text-secondary);
     font-size: var(--text-sm);
 }
+
+.export-dialog__filename .oj-input { font-family: var(--font-sans); }
+.export-dialog__preflight { margin: 0; color: var(--text-secondary); font: 500 13px/1.4 var(--font-mono); }
 
 .export-dialog__destination {
     display: flex;

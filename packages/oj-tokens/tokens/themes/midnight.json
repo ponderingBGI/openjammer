@@ -34,7 +34,7 @@
     "universalConnection": { "$value": "#8B7FE8", "$type": "color" },
     "timelineBg": { "$value": "#0B0F19", "$type": "color" },
     "timelineChromeBg": { "$value": "#131824", "$type": "color" },
-    "timelineLaneBg": { "$value": "#121926", "$type": "color" },
+    "timelineLaneBg": { "$value": "#151D2C", "$type": "color" },
     "timelineLaneAltBg": { "$value": "#0E141F", "$type": "color" },
     "timelineGridBar": { "$value": "rgba(232,240,255,0.22)", "$type": "color" },
     "timelineGridBeat": { "$value": "rgba(232,240,255,0.10)", "$type": "color" },

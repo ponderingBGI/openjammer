@@ -13,6 +13,7 @@ interface RulerStackProps {
     gridUnit: GridUnit;
     snapOn: boolean;
     sections: Location[];
+    songEnd: number;
     loop?: Location;
     onSeek: (x: number) => void;
     onToggleSnap: () => void;
@@ -39,11 +40,12 @@ export function RulerStack(props: RulerStackProps) {
                     <div className="arrangement-sections-row">
                         {props.sections.map((section, index) => {
                             const next = props.sections[index + 1];
-                            const width = next ? (next.startTick - section.startTick) * props.pxPerTick : undefined;
+                            const width = ((section.endTick ?? next?.startTick ?? props.songEnd) - section.startTick) * props.pxPerTick;
                             return <span key={section.id ?? section.name} className="arrangement-section-chip" style={{ left: section.startTick * props.pxPerTick, width }}>{section.name}</span>;
                         })}
                         {props.loop?.endTick != null && <div className="arrangement-loop-bracket" style={{ left: props.loop.startTick * props.pxPerTick, width: (props.loop.endTick - props.loop.startTick) * props.pxPerTick }}><span>[</span><span>]</span></div>}
                     </div>
+                    {/* taste-review #16: sections intentionally stay above bars so the exact bar scale remains adjacent to the field. */}
                     <div className="arrangement-bars-row"><TimeRuler marks={bars} width={props.contentWidth} /></div>
                 </div>
             </div>
