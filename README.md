@@ -58,10 +58,24 @@ What you get:
 - 🎛️ **Bring your own sound** — samples, SoundFonts, Faust/code-node DSP, and your
   installed CLAP/VST3 plugins.
 - 🔁 **Layer-based looping** — stack loops as layers, with per-layer mute/delete/effects.
+- 🎼 **A real on-canvas DAW** — arrange clips, edit MIDI in the piano roll, mix and
+  automate tracks, record, and export 24-bit WAV or FLAC from the same Song document.
 - 📴 **Offline-capable PWA** — works after first visit, no external API calls.
 
 For who plays this and why, see **[PRODUCT.md](PRODUCT.md)**; for the visual system, the
 "Living Sketchbook," see **[DESIGN.md](DESIGN.md)**.
+
+## The DAW
+
+Add a **Song** node, press **E** to enter its timeline, and press **Tab** to move back to
+the patch canvas. The arrangement surface includes clip and range editing, a shared-clock
+piano roll, track mixer and playback automation, MIDI/native-audio recording, section and
+loop markers, live preview, project persistence, and finished-file export. Humans and the
+Ctrl/Cmd+K agent use the same reversible song verbs, so every change is visible and one
+Ctrl+Z away. Start with the compact **Paper Sketch** or the 24-bar **First Light** demo.
+
+See **[docs/timeline.md](docs/timeline.md)** for the full editing contracts, export paths,
+agent parity, and the honest remaining gaps (comping UI, Write/Touch capture, and PDC).
 
 ---
 

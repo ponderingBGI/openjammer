@@ -232,4 +232,19 @@ test.describe('PWA shell', () => {
         expect(bytes.subarray(36, 40).toString('ascii')).toBe('data');
         expect(bytes.length).toBeGreaterThan(44);
     });
+
+    test('First Light starter exports in-browser @slow', async ({ page }) => {
+        test.setTimeout(180_000);
+        await page.goto('/');
+        await page.getByRole('button', { name: /play here in your browser/i }).click();
+        await page.keyboard.press('Tab');
+        await page.getByRole('button', { name: /start from 'first light'/i }).click();
+        await expect(page.locator('.arrangement-track')).toHaveCount(5);
+        await page.getByRole('button', { name: 'Export', exact: true }).click();
+        const dialog = page.getByRole('dialog', { name: 'Export song' });
+        const downloadPromise = page.waitForEvent('download', { timeout: 150_000 });
+        await dialog.getByRole('button', { name: 'Export song' }).click();
+        const download = await downloadPromise;
+        expect(download.suggestedFilename()).toMatch(/first[ -]light.*\.wav$/i);
+    });
 });

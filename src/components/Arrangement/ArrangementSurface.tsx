@@ -7,6 +7,7 @@ import { useBindingSet } from '../../keymap/useKeymap';
 import { arrangementLengthTicks, timebase } from '../../song/time';
 import { buildTempoMap, sampleToTick } from '../../song/tempoMap';
 import { buildPaperSketch } from '../../song/songs/paperSketch';
+import { buildFirstLight } from '../../song/songs/firstLight';
 import { TransportStrip } from './TransportStrip';
 import { RulerStack } from './RulerStack';
 import { GridLayer } from './GridLayer';
@@ -115,7 +116,10 @@ export function ArrangementSurface({ active, visible = active, transition, songN
                     <div className="arrangement-empty-card">
                         <h1>An empty page.</h1>
                         <p>Start a sketch, or ask the agent to dream one up. Ctrl+Z undoes anything.</p>
-                        <Button onClick={() => useArrangementStore.getState().setArrangement({ ...buildPaperSketch(), codeNodes: undefined })}>Start from 'Paper Sketch'</Button>
+                        <div className="arrangement-empty-starters">
+                            <Button onClick={() => useArrangementStore.getState().setArrangement({ ...buildPaperSketch(), codeNodes: undefined })}>Start from 'Paper Sketch'</Button>
+                            <Button onClick={() => useArrangementStore.getState().setArrangement(buildFirstLight())}>Start from 'First Light'</Button>
+                        </div>
                         <button className="arrangement-empty-secondary" type="button">Add an empty track</button>
                         <div className="arrangement-empty-footer"><Kbd>Tab</Kbd><span>back to the canvas</span></div>
                     </div>

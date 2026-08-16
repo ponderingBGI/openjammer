@@ -27,11 +27,12 @@ describe('ArrangementSurface', () => {
         expect(surface).toHaveClass('song-interior');
     });
 
-    it('renders the ruled empty invitation with the Paper Sketch action', () => {
+    it('renders the ruled empty invitation with both song starters', () => {
         useArrangementStore.getState().setArrangement(null);
         render(<ArrangementSurface active songNodeId="song-1" />);
         expect(screen.getByRole('heading', { name: 'An empty page.' })).toBeVisible();
         expect(screen.getByRole('button', { name: /Paper Sketch/i })).toBeVisible();
+        expect(screen.getByRole('button', { name: /First Light/i })).toBeVisible();
         expect(document.querySelectorAll('.arrangement-empty-lane')).toHaveLength(3);
     });
 

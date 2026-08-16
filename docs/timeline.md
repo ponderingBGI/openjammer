@@ -1,147 +1,147 @@
-# The timeline — OpenJammer's on-canvas DAW
+# The timeline — OpenJammer's DAW
 
-OpenJammer is also a DAW, and the timeline is where a song is arranged. It is built so
-that **a human and an AI agent author the same song as first-class citizens**: a human
-drags clips and notes; an agent emits the same reversible verbs; both land on one shared
-document, undone with one plain **Ctrl+Z**.
+OpenJammer's `Song` node opens into a complete arrangement surface: tracks and clips,
+MIDI editing, mixer and automation, recording, and finished-file export. It follows the
+same architectural rule as the canvas: the human interface and the agent edit one shared
+document with one reversible vocabulary. There is no agent-only song model and no second
+audio engine.
 
-This doc is the map of the feature — what it is, how to drive it (by hand and by agent),
-and the **honest roadmap** of everything still ahead. For *why* the architecture is shaped
-this way, read [BOUNDARY.md §9 — One core, two clocks](BOUNDARY.md#9-one-core-two-clocks--offline-render-is-not-a-third-executor)
-first; this doc is where that trajectory landed.
+For the architectural boundary, see [BOUNDARY.md §9](BOUNDARY.md#9-one-core-two-clocks--offline-render-is-not-a-third-executor).
+For the agent's callable contract, see [agent-tools.md](agent-tools.md).
 
-## What it is
+## Entering and leaving the DAW
 
-- **A `Song` node on the canvas.** Add it from the right-click menu (Utility → Song).
-  Press **`E`** to enter it — its interior is not a sub-graph but a hand-drawn timeline
-  (the [Living Sketchbook](../DESIGN.md): warm paper, Caveat, sticky ruler + track gutter,
-  blue-ink notes, sections, a clock-anchored playhead). One discriminator on the node
-  definition (`interior: 'graph' | 'timeline'`) chooses which interior you enter.
-- **One shared `Arrangement`.** Tracks reference instrument nodes by ref; clips hold notes
-  at PPQN ticks; automation lanes target node params; sections name the song's structure.
-  It is the same document a headless agent writes in code and `oj song` renders to a WAV.
-- **It plays.** Pressing Play conducts the arrangement to the live wasm engine and a
-  look-ahead scheduler dispatches the notes; the playhead tracks `AudioContext.currentTime`
-  and **freezes on stop** (the Live Performance Rule), follow-scrolls to stay in view, and
-  the transport **auto-stops at the end** so the UI never claims to be playing a finished song.
-- **It persists.** The arrangement rides along in a saved project / exported workflow as an
-  opaque blob ([STABILITY.md FROZEN-1](STABILITY.md) — "a saved project always opens"); a
-  reopened song keeps its whole timeline.
+Add **Utility → Song** from the canvas, select it, then press **E** or use the node's
+interior action. The arrangement replaces the canvas without unmounting it. Press **Tab**
+to move between the Song interior and its parent canvas; focus, selection, and transport
+shortcuts follow the active surface. An empty Song offers two real starters: the compact
+**Paper Sketch** and the full 24-bar **First Light** production.
 
-## The shape (one core, two clocks)
+The upper transport strip owns play/stop, record, the bar.beat position, tempo, loop and
+punch state, undo/redo, mixer visibility, and export. The ruler below it carries section
+chips, markers, ranges, and the playhead. Track headers stay fixed while the ruled song
+field scrolls. Section chips are document locations, not decorative labels.
 
-The timeline adds **zero lines to `ojcore`**. It is Tier-4 TypeScript that compiles *down*
-to the flat `OjGraph` + an off-RT event stream — exactly as `emitOjGraph` lowers the visual
-graph (see [BOUNDARY.md §9](BOUNDARY.md#9-one-core-two-clocks--offline-render-is-not-a-third-executor)).
+## The song document and playback
 
-- **`conduct(arrangement, backend)`** (`src/song/conduct.ts`) is the one pure lowering — the
-  temporal sibling of `emitOjGraph`. It returns `{ graph, events, seconds, trackIndex }`.
-  The *schedule* is backend-independent (a live browser preview and a headless native bounce
-  play the same notes at the same ticks); only the graph's per-node mapping differs. A
-  headless bounce is therefore **bit-identical to a live take by construction**.
-- **Reversible verbs** (`src/song/verbs.ts`) are the one authoring vocabulary — a discriminated
-  union of serializable edits, each with an exact structural inverse. `applyVerb` returns
-  `{ next, inverse }`; the [`arrangementStore`](../src/store/arrangementStore.ts) command-log
-  holds the inverses so human and agent share one undo history.
-- **Live preview** lowers `conduct(arr, 'wasm')` into the running engine and a main-thread
-  look-ahead scheduler (`src/audio/executor/arrangementScheduler.ts`) dispatches RtCommands
-  by the audio clock. The audio thread never allocates or blocks for it; browser-tier timing
-  is honestly ~15–25 ms — the bit-identical guarantee belongs to the offline bounce, not the
-  preview.
+`Arrangement` in `src/song/types.ts` is the persisted source of truth. MIDI and audio
+sources own media; clips are windows onto those sources; tracks bind clips to graph refs;
+locations describe sections, marks, loop/punch and song ranges; automation lanes target
+addressable graph or mixer parameters.
 
-## Driving it by hand
+`conduct(arrangement, backend)` is the single pure lowering. It emits the same native or
+wasm `OjGraph`, normalized `TempoMap`, and immutable sample-addressed `Timeline` used by
+preview and offline bounce. Backend remapping changes engine manifest ids, not musical
+time. Playback publishes those documents to the active executor; the transport freezes
+honestly on stop and auto-stops after the authored release tail. Loop range is absent
+unless the document contains a `loop` location.
 
-Inside a Song interior the DAW muscle-memory keys drive the **arrangement** (not the node
-graph): **Space** = play/stop, **Ctrl+Z / Ctrl+Y** = undo/redo the song, **Delete** = remove
-the selected note(s) or clip. Click the ruler to drop the playhead; click a clip or a note
-to select it; the transport bar carries play/stop, a live bar.beat readout, the tempo, and
-undo/redo.
+Saved projects carry the normalized arrangement alongside the visual graph. Entity ids
+are deterministic and `normalizeArrangement` is idempotent, so reopening and conducting
+a song preserves its result.
 
-## Driving it by agent
+## Arrangement editing contracts
 
-The agent grounds itself, then authors — the same reuse-first, untrusted-generator workflow
-as the node-graph tools ([agent-tools.md](agent-tools.md)):
+Every committed edit is a serializable `Verb` from `src/song/verbs.ts`. `applyVerb` returns
+an exact inverse and `applyVerbs` makes a batch one undo step. Pointer previews may be
+transient, but drop/commit always enters this command log. The same laws are pinned by the
+BC contract tests:
 
-- **`describe_arrangement`** (read) — a readable summary: tracks by stable id, clips, notes
-  (count + pitch range), sections, tempo, automation, all at **bar.beat**. The agent reads
-  this *before* editing, exactly as `get_graph` grounds it before a node edit.
-- **`edit_timeline`** (write) — an ordered list of reversible `Verb`s, applied live and
-  undoable with Ctrl+Z. Ids for added entities are minted for the agent. A bad verb fails the
-  call atomically (no partial apply).
+- Grid units and magnetic snap are BC-05/06. A drag begins only after BC-12's movement
+  threshold and dominant axis is established.
+- Move is Slide by default (BC-09); Ripple is explicit (BC-10). Trim and split preserve
+  source-window meaning (BC-17/20); slip moves content under the clip (BC-19).
+- Nudge is grid-aware (BC-21). Object and range selection are exclusive (BC-23), and
+  range delete/split preserve material outside the range (BC-25).
+- Selection, cut, copy-drag, paste and repeat-paste remain atomic and clipboard-safe
+  (BC-14, BC-26–29). Delete does not unexpectedly replace the clipboard.
 
-The verb vocabulary (the same one a GUI drag emits): `setTempo`, `setTrackMute`/`setTrackName`,
-`addTrack`/`removeTrack`, `addClip`/`removeClip`/`moveClip`, `addNote`/`removeNote`/`editNote`,
-`addSection`/`removeSection`, `addAutomationLane`/`removeAutomationLane`,
-`setAutomationPoint`/`removeAutomationPoint`.
+The editing context owns grid, snap, tools, selection, focused viewport, and clipboard.
+That keeps arrangement commands deterministic whether invoked by mouse, keyboard,
+command bar, or agent.
 
-> A host tool only reaches the model once the Pi extension declares it; the
-> `piToolParity` test gates that every advertised tool is registered, so "the agent can't
-> call a tool we built" cannot recur.
+## Piano roll
 
-## Roadmap — what is still ahead
+Double-click a MIDI clip to open its piano roll. It shares the song clock and source-note
+ids, so note edits immediately update the arrangement and remain undoable with the parent
+song. The shipped tools cover draw, select/move/copy, resize, velocity, erase, step entry,
+transpose and quantize.
 
-The *core* loop is done and verified (author → display → play → persist, by human **and**
-agent). What remains, honestly, grouped by intent:
+The note laws are BC-30–37: drawing is one overlap-aware batch; a multi-note move uses one
+clamped delta; edge handles follow the shared hit-zone rule; velocity and transpose reject
+an invalid whole gesture instead of partially corrupting it; step entry lowers to ordinary
+note verbs; quantize uses fully quantized edges for duration. Piano-roll audition conducts
+through the active executor rather than introducing a preview synth.
 
-### 1. Pro-parity — the studio a professional won't leave
+## Mixer and automation
 
-- **Comping** — Wave 7b records MIDI on both tiers and native audio into stacked clips.
-  Loop passes carry ascending `layerIndex` values and the highest layer is the current take;
-  the small `×N` badge is the intentionally narrow seam for a future take-lane/comp editor.
-  That editor must author the same clip/layer verbs—never create a parallel playlist model.
-- **Stems + 24-bit export** — bounce per-track stems and a higher-bit-depth master, not just
-  the demo render.
-- **The mixer as a Tier-4 view** — faders / pan / sends as a *view over the same graph*, not a
-  second engine (extend the pillars, never fork).
-- **Plugin delay compensation (PDC)** — align tracks through latent plugins, via the additive
-  `ExtId::Latency` hook (no FROZEN-3 hot-path change — [STABILITY.md §4](STABILITY.md)).
-- **The at-frame ring** — sample-accurate automation/notes (CLAP-precedented `at_frame`
-  scheduling), gated behind a split-determinism proptest. Today automation is block-quantized,
-  which is honest and good enough; this is the quality upgrade, not a prerequisite.
-- **Freeze** — bounce a track to audio to reclaim CPU on a heavy session, reversibly.
-- **An honest ear** — BS.1770 LUFS / true-peak / dropped-voice metering + a stereo master
-  meter, so the loudness numbers the player (and the agent's `oj render` report) trust are real.
+The mixer is a view over each track's conducted output stage. Gain is stored in dB and pan
+as `-1…+1`; mute and solo affect the same stage. Conduct inserts a Gain and Pan between a
+track's reachable signal chain and its consumer, preserving shared downstream buses.
+Meters address those exact output stages plus the master output.
 
-### 2. Reach every tier
+Automation lanes target a graph ref and numeric parameter. `Play` and `Off` are the editing
+states exposed today. Discrete points play directly; Linear segments are deterministically
+densified at conduct time and ride engine smoothers. Point movement and guarded range
+replacement follow BC-39/40, including collision stops and commit-time thinning. Mixer
+gain automation stores dB and is converted to linear gain only during lowering.
 
-- **Native live preview** — today Play sounds on the browser tier; the native tier's strength
-  is the bit-identical **offline bounce** (`oj render` / `oj song`), and native live preview
-  (push the conduct graph + schedule over the cpal-owned engine) is the follow-up. Until it
-  lands, a calm on-timeline notice should say so rather than move a silent playhead.
-- **Browser WAV export** — an in-browser offline render so a song can be exported from the GUI,
-  not only headless.
+**Write and Touch automation recording are not shipped.** Their document enum values are
+reserved and protected on save/open, but the UI does not claim to capture them yet.
 
-### 3. Deeper authoring
+## Recording
 
-- **Clip drag / resize** and **automation editing in the GUI** (lanes render today; editing
-  their points is next).
-- **More verbs** the model and a power user will reach for: reorder tracks, split/merge clips,
-  quantize, transpose, set time signature, duplicate.
-- **Drag-coalescing** — a drag gesture collapses to one undo step (the GUI emits one verb on
-  drop; the store's command-log already supports atomic batches).
-- **Richer `describe_arrangement`** — surface ppq / ticks-per-bar and automation param *names*
-  so the agent never has to guess a tick or a param id.
+Tracks can be armed for MIDI on both executors and for audio on native. Count-in and click
+belong to the transport timeline. A recording pass commits clips and sources through the
+same reversible arrangement verbs as manual editing. Loop recording stacks takes with
+increasing `layerIndex`; the highest layer is the current take.
 
-### 4. The live AI DJ
+The compact `×N` layer badge is not a comp editor. **Take-lane expansion and comping UI are
+still pending**; the stored layers and clip verbs are the seam that future UI will use.
 
-The agent as a **reactive improviser / conductor**: it schedules events ahead and improvises
-within them, so nothing ever waits on the agent's latency — including a "play DJ with my own
-library" mode that builds transitions live. See the AI vision in
-[CTRL-K-AND-AI-PLAN.md](CTRL-K-AND-AI-PLAN.md).
+## Export
 
-### 5. Smaller polish
+**Export** opens the finished-file dialog. Native export supports WAV or FLAC, 16/24-bit or
+32-bit float where applicable, 44.1–96 kHz, and fixed or automatic release tails. Browser
+export renders faster than real time through the wasm engine and downloads stereo 24-bit
+WAV. Both paths assemble the same conducted graph, `TempoMap`, and `Timeline`, and report
+duration, peak and clipping instead of hiding a bad bounce.
 
-- A non-focus-stealing **"preview is browser-tier" / "couldn't preview" whisper** for the
-  native no-op and the all-tracks-skipped case.
-- A **zoom control** (the bars-per-pixel scale is a constant today).
-- A **`prefers-reduced-motion`** block for any future non-essential motion (the playhead's
-  follow-scroll is essential tracking, not decoration).
-- A **GUI round-trip persistence test** driving the Toolbar save→open path (the unit round-trip
-  already proves `export → import → readArrangement → conduct`-equality).
+The device-free native CLI accepts those same documents:
 
----
+```bash
+cargo run -p ojcore-native --features demo --bin render -- \
+  --graph song.graph.json --timeline song.timeline.json \
+  --tempo-map song.tempo-map.json --rate 48000 --bits 24 \
+  --format wav --tail auto --out song.wav
+```
 
-Related reading: [BOUNDARY.md §9](BOUNDARY.md#9-one-core-two-clocks--offline-render-is-not-a-third-executor)
-(why the timeline is Tier-4), [STABILITY.md](STABILITY.md) (the frozen surfaces it rides on),
-[agent-tools.md](agent-tools.md) (the agent's full tool surface), [DESIGN.md](../DESIGN.md)
-(the visual system), and [ARCHITECTURE.md](ARCHITECTURE.md) (the crate map).
+Export does not yet provide a stem batch or track freeze. **Plugin delay compensation
+(PDC) is also pending**, so tracks through latent hosted plugins are not time-aligned by a
+DAW compensation layer.
+
+## Agent parity
+
+The agent first calls `describe_arrangement`, which reports stable ids, ppq, bar positions,
+tracks, clips, note detail, sections and automation targets. It changes the song with
+`edit_timeline`, an ordered batch of the same operations used by the UI: track and clip
+edits, grid/nudge, range editing, piano-roll notes, mixer/automation, loop/punch, and
+recording controls. Validation and application are atomic; one bad operation lands none of
+the batch, and a successful batch is one Ctrl+Z step.
+
+`export_song` uses the native export contract rather than a special agent renderer. Tool
+registration, advertised schemas, and this documentation are guarded by the agent parity
+and documentation drift tests.
+
+## Honest gaps
+
+The DAW is usable end to end today: arrange, edit notes, mix and automate playback, record,
+preview, save/reopen, and export. The remaining named gaps are deliberately narrow:
+
+- take-lane expansion and comping UI;
+- Write/Touch automation capture;
+- plugin delay compensation;
+- stems and reversible track freeze.
+
+These extend the shared `Arrangement`/Verb/Timeline path; none requires a parallel DAW
+model or changes the real-time core boundary.

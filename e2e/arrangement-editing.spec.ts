@@ -12,7 +12,7 @@ async function openPaperSketch(page: Page) {
     await page.getByText('Utility', { exact: false }).last().click();
     await page.getByRole('menuitem', { name: /Add Song/i }).click();
     await page.keyboard.press('Tab');
-    await page.getByRole('button', { name: /Start from/i }).click();
+    await page.getByRole('button', { name: /Start from 'Paper Sketch'/i }).click();
     await expect(page.locator('.arrangement-clip')).toHaveCount(3);
     // The asynchronous headless-audio latency toast can cover the first lane.
     // Dismiss it after engine startup so pointer tests hit the ruled field itself.

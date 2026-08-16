@@ -119,8 +119,8 @@ panel can do.
 
 **Authoring the timeline.** `describe_arrangement` + `edit_timeline` drive the on-canvas
 DAW — the same shared `Arrangement` a human drags by hand, with one shared Ctrl+Z. Read the
-song first, then author it. See **[timeline.md](timeline.md)** for the feature, the full verb
-vocabulary, and the roadmap of what the timeline will grow into.
+song first, then author it. See **[timeline.md](timeline.md)** for the shipped DAW surfaces,
+editing contracts, export paths, and explicitly named remaining gaps.
 
 **A worked "get sound back" loop.** When a player says *"I hear nothing"*: call
 `get_diagnostics` (is the AudioContext even running? is the round-trip latency

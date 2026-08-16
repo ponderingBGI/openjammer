@@ -149,7 +149,7 @@ test.describe('Timeline live preview', () => {
         await expect(page.locator('[data-surface-root="canvas"]')).toBeHidden();
         await expect(page.locator('[data-surface-root="arrangement"]')).toBeVisible();
         await expect(page.getByRole('heading', { name: 'An empty page.' })).toBeVisible();
-        await page.getByRole('button', { name: /Start from/i }).click();
+        await page.getByRole('button', { name: /Start from 'Paper Sketch'/i }).click();
         await expect(page.locator('.arrangement-track')).toHaveCount(3);
         await expect(page.locator('.arrangement-clip')).toHaveCount(3);
 

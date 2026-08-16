@@ -325,6 +325,7 @@
 .arrangement-empty-card { position: absolute; top: 50%; left: 50%; width: min(420px, calc(100% - 32px)); padding: 28px 32px; border: 2px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-node); box-shadow: var(--shadow-menu); text-align: center; transform: translate(-50%, -50%); }
 .arrangement-empty-card h1 { font: 700 28px/1.1 var(--font-sketch); }
 .arrangement-empty-card p { margin: 10px 0 18px; color: var(--text-secondary); font: 400 16px/1.45 var(--font-sans); }
+.arrangement-empty-starters { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .arrangement-empty-secondary { display: block; margin: 12px auto 0; font: 400 16px/1 var(--font-sketch); text-decoration: underline; }
 .arrangement-empty-footer { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 18px; color: var(--text-muted); font: 400 14px/1 var(--font-sans); }
 
