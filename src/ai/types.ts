@@ -95,6 +95,7 @@ export const AGENT_TOOL_NAMES = [
     'update_settings',
     'describe_arrangement',
     'edit_timeline',
+    'export_song',
 ] as const;
 
 export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
@@ -373,6 +374,15 @@ export interface EditTimelineArgs {
     ops?: TimelineOp[];
 }
 
+/** Native-only arrangement bounce. Its fields mirror the Tauri BounceSpec contract. */
+export interface ExportSongArgs {
+    outPath: string;
+    sampleRate: 44_100 | 48_000 | 88_200 | 96_000;
+    bitDepth: '16' | '24' | '32f';
+    format: 'wav' | 'flac';
+    tail: { mode: 'auto' } | { mode: 'fixed'; seconds: number };
+}
+
 /** Discriminated union of every concrete tool call an agent may emit. */
 export type AgentToolCall =
     | { name: 'add_node'; args: AddNodeArgs }
@@ -394,7 +404,8 @@ export type AgentToolCall =
     | { name: 'get_settings'; args: GetSettingsArgs }
     | { name: 'update_settings'; args: UpdateSettingsArgs }
     | { name: 'describe_arrangement'; args: DescribeArrangementArgs }
-    | { name: 'edit_timeline'; args: EditTimelineArgs };
+    | { name: 'edit_timeline'; args: EditTimelineArgs }
+    | { name: 'export_song'; args: ExportSongArgs };
 
 // ============================================================================
 // Streamed transcript events

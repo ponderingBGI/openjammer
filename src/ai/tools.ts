@@ -215,6 +215,14 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'removeAutomationPoint/setAutomationRange/setAutomationLaneState/setAutomationLaneInterp. Ids for ADDED entities are minted for you (omit them). ' +
             'Operation names: moveClips, trimClip, splitAt, duplicateClips, deleteClips, setGrid, nudge, cutSelection, copySelection, paste, pasteRepeat, selectRange, deleteRange, slipClip, splitRange, duplicateRange, deleteTime, insertTime, drawNote, moveNotes, copyNotes, resizeNotes, eraseNotes, setVelocity, transposeNotes, quantizeNotes, setTrackGain, setTrackPan, addAutomationPoint, addAutomationPoints, setAutomationPoints, moveAutomationPoints, setAutomationRange, thinAutomation, setLaneState. Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
     },
+    {
+        name: 'export_song',
+        description:
+            'Export the current arrangement in the desktop app. Pass `outPath` plus the ' +
+            'native BounceSpec fields: sampleRate (44100/48000/88200/96000), bitDepth ' +
+            '(16/24/32f), format (wav/flac), and an auto or fixed-seconds tail. Native-only; ' +
+            'returns path, peak/clipping stats, frames, sample rate, and channels.',
+    },
 ];
 
 /**
@@ -554,6 +562,12 @@ export function applyToolCall(
             return applyDescribeArrangement(arrangement);
         case 'edit_timeline':
             return applyEditTimeline(call.args, arrangement);
+        case 'export_song':
+            return {
+                ok: true,
+                summary: 'export_song is executed by the native host bridge.',
+                undo: NO_OP,
+            };
         // DIAGNOSTICS & SETTINGS: read logs/env/settings; write allowlisted settings.
         case 'get_logs':
             return applyGetLogs(call.args, env);

@@ -65,9 +65,9 @@ export const keybindingActions: KeybindingAction[] = [
     },
     {
         id: 'file.export',
-        label: 'Export Workflow',
+        label: 'Export Song',
         category: 'File',
-        defaultBinding: { key: 's', ctrl: true, shift: true },
+        defaultBinding: { key: 'e', ctrl: true, shift: true },
         scope: 'global',
     },
 

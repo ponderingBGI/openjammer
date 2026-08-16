@@ -38,6 +38,7 @@ export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
                     <button type="button" aria-pressed={editMode === 'ripple'} onClick={() => useEditingContextStore.getState().setEditMode('ripple')}>Ripple</button>
                 </div>
                 <Button aria-pressed={mixerOpen} title={mixerOpen ? 'Close mixer' : 'Open mixer'} onClick={() => useTrackLaneViewStore.getState().toggleMixer()}>Mix</Button>
+                <Button title="Export song" disabled={isPlaying} onClick={() => window.dispatchEvent(new CustomEvent('openjammer:export-song'))}>Export</Button>
                 <ValueScrubber
                     value={arrangement.tempoBpm}
                     display={`${arrangement.tempoBpm} BPM`}

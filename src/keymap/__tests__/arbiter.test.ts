@@ -93,7 +93,7 @@ describe('keymap arbiter', () => {
 
     it('resolves every migrated shortcut through its action id', () => {
         const actionIds = [
-            'file.save', 'commandBar.toggle', 'panel.devLog', 'panel.audioHealth', 'panel.plugins',
+            'file.save', 'file.export', 'commandBar.toggle', 'panel.devLog', 'panel.audioHealth', 'panel.plugins',
             'view.toggleArrangement', ...Array.from({ length: 9 }, (_, index) => `mode.${index + 1}`),
             'canvas.escape', 'edit.delete', 'canvas.deleteBackspace', 'canvas.exitLevel',
             'canvas.enterNode', 'canvas.transport', 'view.ghostMode', 'edit.undo', 'edit.redo',

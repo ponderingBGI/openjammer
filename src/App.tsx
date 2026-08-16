@@ -57,6 +57,7 @@ import { useUiViewStore, type SurfaceId } from './store/uiViewStore';
 import { useBindingSet, useKeymapArbiter, useModalKeymap } from './keymap/useKeymap';
 import { ArrangementSurface } from './components/Arrangement/ArrangementSurface';
 import { SharedSurfaceChrome } from './components/Arrangement/SharedSurfaceChrome';
+import { ExportHost } from './components/Export';
 import { PianoRollSurfaceHost } from './components/PianoRoll';
 import { logger } from './utils/log';
 import './styles/global.css';
@@ -684,6 +685,9 @@ function App() {
 
       {/* Command Bar (Ctrl/Cmd+K) - host stays eager; heavy palette UI loads on demand. */}
       <CommandBarHost />
+
+      {/* One export surface shared by transport, Ctrl/Cmd+Shift+E, palette, and agent. */}
+      <ExportHost />
 
       {/* DevLog panel (L4) — the on-device structured-log surface; the AI agent
           reads the same store. Toggled via the command palette / openjammer:toggle-devlog. */}

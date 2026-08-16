@@ -168,14 +168,13 @@ function buildAppCommands(): Array<Command | Action> {
       run: () => window.dispatchEvent(new CustomEvent("openjammer:loop-from-selection")),
     },
     {
-      id: "arrangement.bounce-range",
-      title: "Bounce selected range",
+      id: "arrangement.export-song",
+      title: "Export song…",
       group: "Arrangement",
-      keywords: ["bounce", "render", "range", "export", "disabled"],
+      keywords: ["bounce", "render", "master", "wav", "flac", "export"],
       targets: ["global"],
       surfaces: ["palette"],
-      disabledReason: "Available with export polish",
-      run: () => {},
+      run: () => window.dispatchEvent(new CustomEvent("openjammer:export-song")),
     },
     {
       id: "app.settings.toggle",
