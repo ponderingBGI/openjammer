@@ -44,7 +44,10 @@ import { getAudioContext } from '../audioContext';
 import {
     encodeTimedCommand,
     encodeTimelineDocuments,
+    type ArrangementCaptureResult,
     type ArrangementPlayback,
+    type ArrangementStartOptions,
+    type LiveNoteCallback,
     type TransportFrame,
     type TransportFrameCallback,
 } from './timelinePlayback';
@@ -152,6 +155,7 @@ export class OjcoreWasmExecutor implements Executor {
     private encoder = new TextEncoder();
 
     private transportCallbacks = new Set<TransportFrameCallback>();
+    private liveNoteCallbacks = new Set<LiveNoteCallback>();
     /** Pending recorder-capture resolvers, keyed by NodeIdx, for the worklet's
      *  `recorder-data` reply. */
     private captureResolvers = new Map<number, (blob: Blob | null) => void>();
@@ -426,6 +430,7 @@ export class OjcoreWasmExecutor implements Executor {
         this.ready = false;
         this.pendingGraph = null;
         this.transportCallbacks.clear();
+        this.liveNoteCallbacks.clear();
         this.signalCallbacks.clear();
         this.levels.clear();
         this.caps.clear();
@@ -798,10 +803,13 @@ export class OjcoreWasmExecutor implements Executor {
         this.node.port.postMessage({ type: 'load_timeline', bytes: bytes.timeline }, [bytes.timeline.buffer]);
     }
 
-    startArrangementPreview(playback: ArrangementPlayback, startSample: number): void {
+    startArrangementPreview(playback: ArrangementPlayback, startSample: number, options: ArrangementStartOptions = {}): void {
         this.publishArrangement(playback);
         if (!this.node || !this.ready) return;
         if (startSample > 0) this.send({ Seek: { samples: Math.round(startSample) } });
+        for (const [flag, on] of [[0, options.loop], [1, options.punch], [3, options.click], [4, options.countIn], [2, options.record]] as const) {
+            if (on !== undefined) this.send({ TransportSet: { flag, on } });
+        }
         this.send('TransportPlay');
     }
 
@@ -812,6 +820,16 @@ export class OjcoreWasmExecutor implements Executor {
     stopArrangementPreview(): void {
         this.send('TransportPause');
         if (this.ready && this.node) this.resync();
+    }
+
+    async stopArrangementRecording(): Promise<ArrangementCaptureResult | null> {
+        this.stopArrangementPreview();
+        return null;
+    }
+
+    subscribeLiveNotes(callback: LiveNoteCallback): Unsubscribe {
+        this.liveNoteCallbacks.add(callback);
+        return () => this.liveNoteCallbacks.delete(callback);
     }
 
     sendTimed(at: number, cmd: RtCommand): void {
@@ -833,6 +851,10 @@ export class OjcoreWasmExecutor implements Executor {
         this.send({ TransportSet: { flag: 0, on } });
     }
 
+    setArrangementPunch(on: boolean): void { this.send({ TransportSet: { flag: 1, on } }); }
+    setArrangementClick(on: boolean): void { this.send({ TransportSet: { flag: 3, on } }); }
+    setArrangementCountIn(on: boolean): void { this.send({ TransportSet: { flag: 4, on } }); }
+
     // --- Note / control input ---------------------------------------------
 
     noteOn(keyboardId: string, row: number, keyIndex: number, velocity: number = 0.8): void {
@@ -848,7 +870,9 @@ export class OjcoreWasmExecutor implements Executor {
         for (const n of notes) {
             const idx = this.index.get(n.targetNodeId);
             if (idx === undefined) continue;
-            this.send({ NoteOn: { node: idx, note: n.midiNote, vel: Math.round(n.velocity * 127) } });
+            const vel = Math.round(n.velocity * 127);
+            this.send({ NoteOn: { node: idx, note: n.midiNote, vel } });
+            this.emitLiveNote(idx, n.midiNote, vel, true);
         }
     }
 
@@ -866,6 +890,7 @@ export class OjcoreWasmExecutor implements Executor {
             const idx = this.index.get(n.targetNodeId);
             if (idx === undefined) continue;
             this.send({ NoteOff: { node: idx, note: n.midiNote } });
+            this.emitLiveNote(idx, n.midiNote, 0, false);
         }
     }
 
@@ -873,8 +898,15 @@ export class OjcoreWasmExecutor implements Executor {
         const node = typeof targetNodeId === 'number' ? targetNodeId : this.index.get(targetNodeId);
         if (node === undefined) return;
         const note = Math.max(0, Math.min(127, Math.round(pitch)));
-        if (on) this.send({ NoteOn: { node, note, vel: Math.max(1, Math.min(127, Math.round(velocity))) } });
+        const vel = Math.max(1, Math.min(127, Math.round(velocity)));
+        if (on) this.send({ NoteOn: { node, note, vel } });
         else this.send({ NoteOff: { node, note } });
+        this.emitLiveNote(node, note, on ? vel : 0, on);
+    }
+
+    private emitLiveNote(node: number, note: number, velocity: number, on: boolean): void {
+        const event = { node, note, velocity, on, atMs: globalThis.performance?.now() ?? Date.now() };
+        for (const callback of this.liveNoteCallbacks) callback(event);
     }
 
     activateControlSignal(connectionId: string): void {

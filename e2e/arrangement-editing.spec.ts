@@ -133,3 +133,19 @@ test.describe('Wave 4b clipboard and range editing', () => {
         await expect(clips).toHaveCount(count);
     });
 });
+
+test.describe('Wave 7b record flow', () => {
+    test('arms an instrument, records routed MIDI, and one undo removes the take', async ({ page }) => {
+        await openPaperSketch(page);
+        const before = await page.locator('.arrangement-clip').count();
+        await page.getByRole('button', { name: /Arm .* for MIDI recording/i }).first().click();
+        await page.getByTitle('Record').click();
+        await page.evaluate(() => window.dispatchEvent(new CustomEvent('openjammer:test-live-note', { detail: { note: 60, velocity: 104, on: true, tick: 120 } })));
+        await page.evaluate(() => window.dispatchEvent(new CustomEvent('openjammer:test-live-note', { detail: { note: 60, velocity: 0, on: false, tick: 480 } })));
+        await page.getByTitle('Stop recording').click();
+        await expect(page.locator('.arrangement-clip')).toHaveCount(before + 1);
+        await expect(page.locator('.arrangement-track').first().locator('.arrangement-clip[aria-label*="1 notes"]')).toHaveCount(1);
+        await page.keyboard.press('Control+z');
+        await expect(page.locator('.arrangement-clip')).toHaveCount(before);
+    });
+});

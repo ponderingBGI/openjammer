@@ -14,7 +14,7 @@
 import type { Connection, GraphNode } from '../../engine/types';
 import type { EngineCapabilities } from '../../engine/capabilities';
 import type { RtCommand } from '@openjammer/oj-protocol';
-import type { ArrangementPlayback, TransportFrameCallback } from './timelinePlayback';
+import type { ArrangementCaptureResult, ArrangementPlayback, ArrangementStartOptions, LiveNoteCallback, TransportFrameCallback } from './timelinePlayback';
 import type { LatencyReport } from './latency';
 import type {
     LooperHandle,
@@ -199,13 +199,17 @@ export interface Executor {
      * sample-addressed Timeline, then sending TransportPlay. Both executors use this
      * path; engine Transport frames, not a UI clock, confirm visible motion.
      */
-    startArrangementPreview(playback: ArrangementPlayback, startSample: number): void;
+    startArrangementPreview(playback: ArrangementPlayback, startSample: number, options?: ArrangementStartOptions): void;
 
     /** Swap edited authored documents whole without restarting transport. */
     updateArrangementPreview(playback: ArrangementPlayback): void;
 
     /** End live preview. The engine owns held-note release and transport declick. */
     stopArrangementPreview(): void;
+
+    stopArrangementRecording(): Promise<ArrangementCaptureResult | null>;
+
+    subscribeLiveNotes(callback: LiveNoteCallback): Unsubscribe;
 
     /** Schedule a live command at an absolute engine sample (`0` = immediate). */
     sendTimed(at: number, cmd: RtCommand): void;
@@ -218,4 +222,7 @@ export interface Executor {
 
     /** Toggle an engine transport boolean (ranges remain in Timeline). */
     setArrangementLoop(on: boolean): void;
+    setArrangementPunch(on: boolean): void;
+    setArrangementClick(on: boolean): void;
+    setArrangementCountIn(on: boolean): void;
 }

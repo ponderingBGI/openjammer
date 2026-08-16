@@ -1,4 +1,5 @@
 import type {
+    CaptureResult,
     EngineFrame,
     OjGraph,
     RtCommand,
@@ -17,6 +18,25 @@ export interface ArrangementPlayback {
     /** Stable arrangement address -> IR node for routing EngineFrame::Meter. */
     meterIndex?: Record<string, number>;
 }
+
+export interface ArrangementStartOptions {
+    loop?: boolean;
+    punch?: boolean;
+    click?: boolean;
+    countIn?: boolean;
+    record?: boolean;
+}
+
+export interface LiveNoteEvent {
+    node: number;
+    note: number;
+    velocity: number;
+    on: boolean;
+    atMs: number;
+}
+
+export type LiveNoteCallback = (event: LiveNoteEvent) => void;
+export type ArrangementCaptureResult = CaptureResult;
 
 export interface TimelineBytes {
     tempoMap: Uint8Array;

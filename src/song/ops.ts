@@ -11,6 +11,7 @@ export const EDIT_OPS = [
     'drawNote', 'moveNotes', 'copyNotes', 'resizeNotes', 'eraseNotes', 'setVelocity', 'transposeNotes', 'quantizeNotes',
     'setAutomationPoints', 'moveAutomationPoints', 'setAutomationRange', 'thinAutomation',
     'setTrackGain', 'setTrackPan', 'addAutomationPoint', 'addAutomationPoints', 'setLaneState',
+    'armTrack', 'setClick', 'setCountIn', 'record',
 ] as const;
 export type EditOpName = typeof EDIT_OPS[number];
 export type TimelineOp =
@@ -48,7 +49,11 @@ export type TimelineOp =
     | { op: 'setTrackPan'; trackId: string; pan: number }
     | { op: 'addAutomationPoint'; laneId: string; point: AutomationPoint }
     | { op: 'addAutomationPoints'; laneId: string; points: AutomationPoint[] }
-    | { op: 'setLaneState'; laneId: string; state: 'Off' | 'Play' };
+    | { op: 'setLaneState'; laneId: string; state: 'Off' | 'Play' }
+    | { op: 'armTrack'; trackId: string; armed: boolean }
+    | { op: 'setClick'; on: boolean }
+    | { op: 'setCountIn'; bars: 0 | 1 | 2 }
+    | { op: 'record'; action: 'start' | 'stop' };
 
 export interface NoteInput { tick: number; durTick: number; pitch: number; vel?: number; id?: string }
 export type NoteOverlapPolicy = 'relax' | 'reject' | 'replace' | 'truncate-existing' | 'truncate-addition' | 'extend';

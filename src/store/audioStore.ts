@@ -21,6 +21,8 @@ export interface AudioConfig {
     sampleRate: number; // User-requested or auto-detected engine/device rate in Hz.
     latencyHint: AudioContextLatencyCategory | number;
     lowLatencyMode: boolean; // Disables echo cancellation, noise suppression, AGC
+    /** Engine click level (0..1). */
+    clickGain?: number;
 }
 
 export interface AudioMetrics {
@@ -132,7 +134,8 @@ export const useAudioStore = create<AudioStore>((set, get) => ({
     audioConfig: {
         sampleRate: 48000,
         latencyHint: 'interactive',
-        lowLatencyMode: false
+        lowLatencyMode: false,
+        clickGain: 0.2,
     },
     setAudioConfig: (config) => set((state) => ({
         audioConfig: { ...state.audioConfig, ...config }

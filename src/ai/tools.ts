@@ -199,7 +199,7 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'Read the current SONG TIMELINE as a readable summary — tracks (by stable ' +
             'id), clips, addressable note details (id/pitch/tick/duration/velocity, capped ' +
             'per clip), sections, tempo, and automation, ' +
-            'selection, grid, and edit mode, all at bar.beat. Side-effect-free. GROUND yourself with this before editing ' +
+            'selection, grid, edit mode, armed tracks, click, count-in, punch and record state, all at bar.beat. Side-effect-free. GROUND yourself with this before editing ' +
             'the timeline (the "read the song first" twin of get_graph for the node graph).',
     },
     {
@@ -213,7 +213,7 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'moveLocation/setLoopRange/setPunchRange; rippleTracks/insertTime/removeTime; ' +
             'stretchClip; compound; addAutomationLane/removeAutomationLane; setAutomationPoint/' +
             'removeAutomationPoint/setAutomationRange/setAutomationLaneState/setAutomationLaneInterp. Ids for ADDED entities are minted for you (omit them). ' +
-            'Operation names: moveClips, trimClip, splitAt, duplicateClips, deleteClips, setGrid, nudge, cutSelection, copySelection, paste, pasteRepeat, selectRange, deleteRange, slipClip, splitRange, duplicateRange, deleteTime, insertTime, drawNote, moveNotes, copyNotes, resizeNotes, eraseNotes, setVelocity, transposeNotes, quantizeNotes, setTrackGain, setTrackPan, addAutomationPoint, addAutomationPoints, setAutomationPoints, moveAutomationPoints, setAutomationRange, thinAutomation, setLaneState. Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
+            'Record operations: armTrack, setClick, setCountIn, record (start/stop). Timeline operations include moveClips, trimClip, splitAt, duplicateClips, deleteClips, setGrid, nudge, drawNote, note edits, automation edits, and range edits. Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
     },
     {
         name: 'export_song',

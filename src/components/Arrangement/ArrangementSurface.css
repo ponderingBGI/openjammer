@@ -57,6 +57,14 @@
 }
 .arrangement-transport .oj-button { width: 32px; height: 32px; min-height: 32px; padding: 0; }
 .arrangement-transport .arrangement-transport__play { width: 36px; }
+.arrangement-transport .arrangement-record { position: relative; width: auto; min-width: 32px; padding-inline: 8px; gap: 5px; }
+.arrangement-record__dot { width: 10px; height: 10px; border: 2px solid var(--timeline-playhead); border-radius: var(--radius-pill); background: transparent; }
+.arrangement-record.is-recording .arrangement-record__dot { background: var(--timeline-playhead); animation: arrangement-record-pulse 1200ms ease-in-out infinite; }
+.arrangement-record.is-outside-punch { opacity: .48; }
+.arrangement-record__label { color: var(--timeline-playhead); font: 700 13px/1 var(--font-sans); }
+.arrangement-record-error { position: absolute; z-index: 12; top: 46px; left: 14px; max-width: 42ch; padding: 5px 8px; border: 1px solid var(--accent-danger); border-radius: var(--radius-sm); background: var(--timeline-chrome-bg); color: var(--text-primary); font: 500 13px/1.3 var(--font-sans); }
+.arrangement-record-live { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+@keyframes arrangement-record-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
 .arrangement-transport .oj-value-scrubber__value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .arrangement-zoom-scrubber .oj-value-scrubber__value { min-width: 76px; font-size: 14px; text-align: center; }
 
@@ -165,6 +173,9 @@
 .arrangement-track__grab { width: 12px; opacity: .35; cursor: grab; }
 .arrangement-track__name { overflow: hidden; font: 600 18px/24px var(--font-sketch); text-overflow: ellipsis; white-space: nowrap; }
 .arrangement-instrument-chip { min-width: 0; height: 20px; padding: 0 5px; overflow: hidden; border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--timeline-lane-alt-bg); font: 500 13px/18px var(--font-sans); text-overflow: ellipsis; white-space: nowrap; }
+.arrangement-arm[aria-pressed="true"] { color: var(--accent-success); box-shadow: inset 0 0 0 1px var(--accent-success), var(--shadow-sketch); }
+.arrangement-arm[aria-pressed="true"] span { font-size: 16px; line-height: 1; }
+.arrangement-arm.is-recording { color: var(--timeline-playhead); }
 .arrangement-lane {
     position: relative;
     min-width: 0;
@@ -262,6 +273,8 @@
 .arrangement-track:has(.arrangement-clip:focus-visible) .arrangement-lane { outline: 2px solid var(--accent-primary); outline-offset: -2px; }
 .arrangement-lane.is-muted { background: var(--timeline-lane-alt-bg); }
 .arrangement-lane__hint { position: absolute; top: 8px; left: 16px; width: min(420px, calc(100% - 32px)); height: calc(100% - 16px); display: grid; place-items: center; border: 1px dashed color-mix(in srgb, var(--sketch-black) 18%, transparent); border-radius: var(--radius-sm); color: color-mix(in srgb, var(--text-primary) 50%, transparent); font: 400 15px/1 var(--font-sketch); }
+.arrangement-record-ghost { position: absolute; z-index: 3; top: 4px; min-width: 1px; overflow: hidden; border: 2px dashed var(--timeline-playhead); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--timeline-playhead) 7%, transparent); pointer-events: none; }
+.arrangement-record-ghost > span { position: absolute; width: 8px; height: 3px; border-radius: 1px; background: var(--timeline-note-fill); opacity: .78; }
 
 .arrangement-clip {
     position: absolute;
@@ -294,6 +307,7 @@
 .arrangement-clip__handle { position: absolute; z-index: 4; top: 50%; width: 6px; height: 6px; background: var(--sketch-black); transform: translateY(-50%); }
 .arrangement-clip__handle.is-left { left: 1px; }
 .arrangement-clip__handle.is-right { right: 1px; }
+.arrangement-clip__take { position: absolute; z-index: 5; right: 4px; bottom: 4px; min-width: 22px; height: 18px; padding: 0 5px; border: 1px solid var(--timeline-clip-border); border-radius: var(--radius-pill); background: var(--timeline-lane-bg); color: var(--text-secondary); font: 600 11px/16px var(--font-mono); text-align: center; }
 .arrangement-playhead { position: absolute; z-index: 7; top: 46px; bottom: 0; left: 200px; width: 1.5px; background: var(--timeline-playhead); pointer-events: none; will-change: transform; }
 .arrangement-loop-wash { position: absolute; z-index: 4; top: 46px; background: var(--timeline-loop-range); pointer-events: none; }
 .arrangement-time-prompt { position: absolute; z-index: 30; top: 68px; left: 50%; translate: -50% 0; display: flex; align-items: end; gap: 10px; padding: 10px 12px; color: var(--text-primary); background: var(--timeline-chrome-bg); border: 2px solid var(--border-strong); border-radius: var(--radius-md); box-shadow: 3px 4px 0 color-mix(in srgb, var(--sketch-black) 20%, transparent); font-family: var(--font-work); }
@@ -332,4 +346,5 @@
     .arrangement-magnet,
     .arrangement-transport .oj-button { transition: color 0s, border-color 0s, background-color 0s; transform: none; }
     .mixer-meter > span { transition: none; }
+    .arrangement-record.is-recording .arrangement-record__dot { animation: none; box-shadow: 0 0 0 2px var(--sketch-black); }
 }

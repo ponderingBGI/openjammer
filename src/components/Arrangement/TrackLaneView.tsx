@@ -9,6 +9,8 @@ import { useUiViewStore } from '../../store/uiViewStore';
 import { PianoRollLane, applyPianoRollQuantize, auditionPianoRollNote } from '../PianoRoll';
 import { AutomationLaneView, AUTOMATION_LANE_HEIGHT } from './AutomationLaneView';
 import { outputStageRefs } from '../../song/automation';
+import { trackRecordInput, trackRecordKind } from '../../song/recording';
+import { RecordGhost } from './RecordGhost';
 
 export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick, visibleEndTick }: {
     track: ArrangementTrack;
@@ -25,6 +27,11 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
     const expandedClipId = useTrackLaneViewStore((state) => state.expandedPianoRolls[trackId]);
     const visibleAutomationId = useTrackLaneViewStore((state) => state.automationLaneByTrack[trackId]);
     const visibleAutomation = (track.automation ?? []).find((lane) => lane.id === visibleAutomationId);
+    const armed = useArrangementStore((state) => state.armedTrackIds.includes(trackId));
+    const isRecording = useArrangementStore((state) => state.isRecording);
+    const recordStartTick = useArrangementStore((state) => state.recordStartTick);
+    const ghostNotes = useArrangementStore((state) => state.ghostNotes);
+    const binding = useArrangementStore((state) => state.recordingBindings.find((item) => item.trackId === trackId));
     const sourceNotes = useMemo(() => track.clips.flatMap((clip) => {
         const source = arrangement.sources?.[clip.sourceId];
         return source?.kind === 'midi' ? source.notes : [];
@@ -35,6 +42,11 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
     useEffect(() => rememberPitchRange(trackId, range), [rememberPitchRange, trackId, range]);
     const instrument = arrangement.graph.nodes.find((node) => node.ref === track.ref)?.data?.instrumentId;
     const clips = track.clips.filter((clip) => clip.startTick + clip.lengthTick >= visibleStartTick && clip.startTick <= visibleEndTick);
+    const inputLabel = trackRecordInput(arrangement, track);
+    const recordKind = trackRecordKind(arrangement, track);
+    const punch = arrangement.locations?.find((location) => location.kind === 'punch' && location.endTick !== undefined);
+    const ghostStart = Math.max(recordStartTick ?? 0, punch?.startTick ?? 0);
+    const ghostEnd = punch?.endTick ?? Number.POSITIVE_INFINITY;
     return (
         <div className={`arrangement-track${visibleAutomation ? ' has-automation' : ''}`} data-track-id={trackId} role="listitem" aria-label={track.name ?? track.ref} style={{ height: laneHeight + (visibleAutomation ? AUTOMATION_LANE_HEIGHT : 0), gridTemplateRows: visibleAutomation ? `${laneHeight}px ${AUTOMATION_LANE_HEIGHT}px` : `${laneHeight}px` }}>
             <div className="arrangement-track__header">
@@ -43,24 +55,18 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                 <div className="arrangement-track__controls">
                     <LaneButton tone="mute" aria-label={`Mute ${track.name ?? track.ref}`} aria-pressed={track.mute === true} onClick={() => useArrangementStore.getState().apply({ kind: 'setTrackMute', trackId, mute: !track.mute })}>M</LaneButton>
                     <LaneButton tone="solo" aria-label={`Solo ${track.name ?? track.ref}`} aria-pressed={track.solo === true} onClick={() => useArrangementStore.getState().apply({ kind: 'setTrackSolo', trackId, solo: !track.solo })}>S</LaneButton>
+                    <LaneButton className={`arrangement-arm${isRecording && armed ? ' is-recording' : ''}`} aria-label={`${armed ? 'Disarm' : 'Arm'} ${track.name ?? track.ref} for ${recordKind === 'audio' ? 'audio' : 'MIDI'} recording`} aria-pressed={armed} title={`${recordKind === 'audio' ? 'Audio input' : 'MIDI input'}: ${inputLabel}`} onClick={() => useArrangementStore.getState().armTrack(trackId, !armed)}><span aria-hidden="true">●</span></LaneButton>
                     <LaneButton aria-label={`${visibleAutomation ? 'Hide' : 'Show'} automation for ${track.name ?? track.ref}`} aria-pressed={Boolean(visibleAutomation)} onClick={() => {
                         const view = useTrackLaneViewStore.getState();
-                        if (visibleAutomation) {
-                            view.showAutomationLane(trackId, null);
-                            return;
-                        }
+                        if (visibleAutomation) return view.showAutomationLane(trackId, null);
                         const existing = track.automation?.[0];
-                        if (existing?.id) {
-                            view.showAutomationLane(trackId, existing.id);
-                            return;
-                        }
+                        if (existing?.id) return view.showAutomationLane(trackId, existing.id);
                         const store = useArrangementStore.getState();
                         const laneId = store.mintId('lane');
-                        const ref = outputStageRefs(track).gain;
-                        store.apply({ kind: 'addAutomationLane', trackId, index: 0, lane: { id: laneId, ref, param: 0, points: [] } });
+                        store.apply({ kind: 'addAutomationLane', trackId, index: 0, lane: { id: laneId, ref: outputStageRefs(track).gain, param: 0, points: [] } });
                         view.showAutomationLane(trackId, laneId);
                     }}>A</LaneButton>
-                    <span className="arrangement-instrument-chip">{typeof instrument === 'string' ? instrument : track.ref}</span>
+                    <span className="arrangement-instrument-chip" title={`${typeof instrument === 'string' ? instrument : track.ref} · ${inputLabel}`}>{inputLabel}</span>
                 </div>
             </div>
             <div className={`arrangement-lane${track.mute ? ' is-muted' : ''}${expandedClipId ? ' has-piano-roll' : ''}`} style={{ height: laneHeight }} role="list" onPointerEnter={() => useEditingContextStore.setState({ enteredTrackId: trackId })}>
@@ -71,7 +77,8 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                     useUiViewStore.getState().openPianoRoll(expandedClipId);
                 }} onQuantize={applyPianoRollQuantize} onAudition={(pitch, velocity, phase) => auditionPianoRollNote(track.ref, pitch, velocity, phase)} /> : clips.map((clip) => {
                     const source = arrangement.sources?.[clip.sourceId];
-                    return source && clip.id ? <ClipView key={clip.id} clip={clip} source={source} trackName={track.name ?? track.ref} trackId={trackId} range={range} pxPerTick={pxPerTick} laneHeight={laneHeight} selected={selectedClipIds.includes(clip.id)} onDoubleClick={source.kind === 'midi' ? () => useTrackLaneViewStore.getState().togglePianoRoll(trackId, clip.id!) : undefined} onSelect={(event, phase) => {
+                    const takeCount = track.clips.filter((item) => item.startTick < clip.startTick + clip.lengthTick && clip.startTick < item.startTick + item.lengthTick && (item.layerIndex !== undefined || clip.layerIndex !== undefined)).length;
+                    return source && clip.id ? <ClipView key={clip.id} clip={clip} source={source} trackName={track.name ?? track.ref} trackId={trackId} range={range} pxPerTick={pxPerTick} laneHeight={laneHeight} selected={selectedClipIds.includes(clip.id)} takeCount={takeCount} onDoubleClick={source.kind === 'midi' ? () => useTrackLaneViewStore.getState().togglePianoRoll(trackId, clip.id!) : undefined} onSelect={(event, phase) => {
                         event.stopPropagation();
                         const context = useEditingContextStore.getState();
                         if (phase === 'press') context.beginSelectionOp('arrangement');
@@ -93,6 +100,7 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                     }} /> : null;
                 })}
                 {!expandedClipId && track.clips.length === 0 && <div className="arrangement-lane__hint">drag audio here, or press D and draw.</div>}
+                {!expandedClipId && isRecording && armed && binding && recordStartTick !== null && <RecordGhost node={binding.node} startTick={ghostStart} endTick={ghostEnd} pxPerTick={pxPerTick} laneHeight={laneHeight} notes={ghostNotes} pitchRange={range} />}
             </div>
             {visibleAutomation && <AutomationLaneView arrangement={arrangement} track={track} lane={visibleAutomation} pxPerTick={pxPerTick} />}
         </div>

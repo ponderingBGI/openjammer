@@ -52,6 +52,7 @@ export function ClipView({
     pxPerTick,
     laneHeight,
     selected,
+    takeCount = 1,
     onSelect,
     trackId,
     onDoubleClick,
@@ -63,6 +64,7 @@ export function ClipView({
     pxPerTick: number;
     laneHeight: number;
     selected: boolean;
+    takeCount?: number;
     onSelect: (event: React.PointerEvent, phase: 'press' | 'release') => void;
     trackId: string;
     onDoubleClick?: () => void;
@@ -107,6 +109,7 @@ export function ClipView({
             aria-label={`${trackName} — bars ${startBar} to ${endBar}, ${noteCount} notes${clip.mute ? ', muted' : ''}`}
         >
             {geometry.width >= 36 && laneHeight >= 30 && <span className="arrangement-clip__name">{clip.name ?? source.name}</span>}
+            {takeCount > 1 && <span className="arrangement-clip__take" aria-label={`${takeCount} stacked takes`}>×{takeCount}</span>}
             {source.kind === 'midi' ? <canvas ref={canvasRef} className="arrangement-clip__canvas" role="img" aria-label={`midi content for ${clip.name ?? source.name}`} /> : <WaveformCanvas peaks={peaks} width={geometry.width} height={Math.max(1, height - (geometry.width >= 36 && laneHeight >= 30 ? 18 : 0))} gain={clip.gain} className="arrangement-clip__waveform" label={`audio content for ${clip.name ?? source.name}`} />}
             {selected && <><span className="arrangement-clip__handle is-left" /><span className="arrangement-clip__handle is-right" /></>}
         </button>

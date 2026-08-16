@@ -85,7 +85,10 @@ agent). What remains, honestly, grouped by intent:
 
 ### 1. Pro-parity — the studio a professional won't leave
 
-- **Recording & comping** — capture live input into clips; take lanes + comp the best take.
+- **Comping** — Wave 7b records MIDI on both tiers and native audio into stacked clips.
+  Loop passes carry ascending `layerIndex` values and the highest layer is the current take;
+  the small `×N` badge is the intentionally narrow seam for a future take-lane/comp editor.
+  That editor must author the same clip/layer verbs—never create a parallel playlist model.
 - **Stems + 24-bit export** — bounce per-track stems and a higher-bit-depth master, not just
   the demo render.
 - **The mixer as a Tier-4 view** — faders / pan / sends as a *view over the same graph*, not a

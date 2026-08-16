@@ -4,11 +4,19 @@ import { useEditingContextStore } from '../../store/editingContextStore';
 import { timebase } from '../../song/time';
 import { useHistoryStore } from '../../store/historyStore';
 import { useTrackLaneViewStore } from '../../store/trackLaneViewStore';
+import { punchRecordState } from '../../song/recording';
 
 export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
     const arrangement = useArrangementStore((state) => state.arrangement);
     const isPlaying = useArrangementStore((state) => state.isPlaying);
     const loopEnabled = useArrangementStore((state) => state.loopEnabled);
+    const punchEnabled = useArrangementStore((state) => state.punchEnabled);
+    const clickEnabled = useArrangementStore((state) => state.clickEnabled);
+    const countInBars = useArrangementStore((state) => state.countInBars);
+    const isRecording = useArrangementStore((state) => state.isRecording);
+    const armedCount = useArrangementStore((state) => state.armedTrackIds.length);
+    const recordError = useArrangementStore((state) => state.recordError);
+    const playheadTick = useArrangementStore((state) => state.playheadTick);
     const canUndo = useHistoryStore((state) => state.cursor > 0);
     const canRedo = useHistoryStore((state) => state.cursor < state.entries.length);
     const pxPerTick = useEditingContextStore((state) => state.viewports.arrangement.pxPerTick);
@@ -17,6 +25,8 @@ export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
     if (!arrangement) return <div className="arrangement-transport" aria-hidden="true" />;
     const tb = timebase(arrangement);
     const visibleBars = Math.max(1, fieldWidth / (pxPerTick * tb.ticksPerBar));
+    const punch = arrangement.locations?.find((location) => location.kind === 'punch' && location.endTick !== undefined);
+    const insidePunch = punchRecordState(punchEnabled, punch, playheadTick) !== 'outside';
     return (
         <div className="arrangement-transport" aria-label="Arrangement transport">
             <div className="arrangement-transport__cluster">
@@ -30,6 +40,10 @@ export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
                     title={loopEnabled ? 'Disable loop' : 'Enable loop'}
                     onClick={() => useArrangementStore.getState().setLoopEnabled(!loopEnabled)}
                 >↻</Button>
+                <Button aria-pressed={punchEnabled} title={punch ? `${punchEnabled ? 'Disable' : 'Enable'} punch range` : 'Punch range is not set'} onClick={() => useArrangementStore.getState().setPunchEnabled(!punchEnabled)}>P</Button>
+                <Button className={`arrangement-record${isRecording ? ' is-recording' : ''}${armedCount > 0 && !insidePunch ? ' is-outside-punch' : ''}`} aria-pressed={isRecording} title={isRecording ? 'Stop recording' : 'Record'} onClick={() => void useArrangementStore.getState().record()}><span aria-hidden="true" className="arrangement-record__dot" />{isRecording && <span className="arrangement-record__label">REC</span>}</Button>
+                <Button aria-pressed={clickEnabled} title={`${clickEnabled ? 'Disable' : 'Enable'} click`} onClick={() => useArrangementStore.getState().setClick(!clickEnabled)}>♩</Button>
+                <Button aria-pressed={countInBars > 0} title="Count-in: off, 1 bar, or 2 bars" onClick={() => useArrangementStore.getState().setCountIn(countInBars === 0 ? 1 : countInBars === 1 ? 2 : 0)}>C{countInBars || ''}</Button>
             </div>
             <div className="arrangement-transport__title">{arrangement.name}</div>
             <div className="arrangement-transport__cluster arrangement-transport__cluster--right">
@@ -60,6 +74,8 @@ export function TransportStrip({ fieldWidth }: { fieldWidth: number }) {
                 <Button title="Undo" disabled={!canUndo} onClick={() => useHistoryStore.getState().undo()}>↶</Button>
                 <Button title="Redo" disabled={!canRedo} onClick={() => useHistoryStore.getState().redo()}>↷</Button>
             </div>
+            {recordError && <div className="arrangement-record-error" role="status">{recordError}</div>}
+            <div className="arrangement-record-live" aria-live="assertive" aria-atomic="true">{isRecording ? 'Recording started' : 'Recording stopped'}{recordError ? `. ${recordError}` : ''}</div>
         </div>
     );
 }

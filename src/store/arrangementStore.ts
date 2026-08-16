@@ -18,6 +18,8 @@ import { buildTempoMap, sampleToTick, tickToSample } from '../song/tempoMap';
 import { applyVerbs, type Verb } from '../song/verbs';
 import { arrangementLengthTicks } from '../song/time';
 import type { Arrangement } from '../song/types';
+import type { CapturedNote } from '@openjammer/oj-protocol';
+import { captureResultToVerbs, recordBindings, trackRecordKind, wasmTapToCapturedNote, type RecordTrackBinding } from '../song/recording';
 import { logger } from '../utils/log';
 import { registerHistoryDriver, useHistoryStore, type EditVerb } from './historyStore';
 
@@ -52,16 +54,22 @@ function ensureTransportSubscription(): void {
     });
 }
 
-function lowerPreview(arr: Arrangement) {
+function lowerPreview(arr: Arrangement, capture?: { armedTrackIds: readonly string[]; countInBars: 0 | 1 | 2 }) {
     const executor = getExecutor();
     const result = conduct(arr, executor.getTimelineBackend(), { lenient: true });
+    if (capture) {
+        const bindings = recordBindings(arr, capture.armedTrackIds, result.trackIndex);
+        result.timeline.armed_tracks = bindings.map((binding) => ({ node: binding.node, align: 0 }));
+        result.timeline.count_in_beats = capture.countInBars * (arr.timeSignature?.[0] ?? 4);
+    }
     return { executor, result };
 }
 
-function startPreview(arr: Arrangement, playheadTick: number, onEnd: () => void): void {
+function startPreview(arr: Arrangement, playheadTick: number, onEnd: () => void, recording = false): RecordTrackBinding[] {
     clearEndTimer();
     try {
-        const { executor, result } = lowerPreview(arr);
+        const state = useArrangementStore.getState();
+        const { executor, result } = lowerPreview(arr, { armedTrackIds: state.armedTrackIds, countInBars: state.countInBars });
         const { graph, tempoMap, timeline, meterIndex, seconds, skipped } = result;
         if (skipped.length > 0) {
             log.warn('timeline preview skipped tracks with unresolved refs (the rest plays)', {
@@ -70,23 +78,32 @@ function startPreview(arr: Arrangement, playheadTick: number, onEnd: () => void)
         }
         ensureTransportSubscription();
         const startSample = tickToSample(tempoMap, playheadTick);
-        executor.startArrangementPreview({ graph, tempoMap, timeline, meterIndex }, startSample);
+        executor.startArrangementPreview({ graph, tempoMap, timeline, meterIndex }, startSample, {
+            loop: state.loopEnabled,
+            punch: state.punchEnabled,
+            click: state.clickEnabled,
+            countIn: state.countInBars > 0,
+            record: recording,
+        });
         // Auto-stop at the end of the song (conduct.seconds includes the release tail),
         // so the UI never claims to be playing a finished song and the canvas graph is
         // restored. A small slop keeps a final note/tail from being clipped.
         const remainSec = Math.max(0, seconds - startSample / tempoMap.sample_rate);
         endTimer = setTimeout(onEnd, remainSec * 1000 + 80);
+        return recordBindings(arr, state.armedTrackIds, result.trackIndex);
     } catch (err) {
         log.warn('timeline preview could not start; the transport still runs (visual only)', {
             detail: err instanceof Error ? err.message : String(err),
         });
     }
+    return [];
 }
 
 function republishPreview(arr: Arrangement, playheadTick: number, onEnd: () => void): void {
     clearEndTimer();
     try {
-        const { executor, result } = lowerPreview(arr);
+        const state = useArrangementStore.getState();
+        const { executor, result } = lowerPreview(arr, { armedTrackIds: state.armedTrackIds, countInBars: state.countInBars });
         const { graph, tempoMap, timeline, meterIndex, seconds, skipped } = result;
         if (skipped.length > 0) {
             log.warn('timeline preview skipped tracks with unresolved refs (the rest plays)', {
@@ -166,6 +183,15 @@ export interface ArrangementStore {
     pendingSeekSample: number | null;
     loopOn: boolean;
     loopEnabled: boolean;
+    armedTrackIds: string[];
+    clickEnabled: boolean;
+    countInBars: 0 | 1 | 2;
+    punchEnabled: boolean;
+    isRecording: boolean;
+    recordStartTick: number | null;
+    ghostNotes: CapturedNote[];
+    recordingBindings: RecordTrackBinding[];
+    recordError: string | null;
 
     // ── actions ──
     /** Load a song (normalized on entry); resets the command-log + transport. */
@@ -192,16 +218,54 @@ export interface ArrangementStore {
     /** Move the playhead to a tick (keeps playing if it was playing). */
     seek: (tick: number) => void;
     setLoopEnabled: (on: boolean) => void;
+    setPunchEnabled: (on: boolean) => void;
+    setClick: (on: boolean) => void;
+    setCountIn: (bars: 0 | 1 | 2) => void;
+    armTrack: (trackId: string, on: boolean) => { ok: boolean; message?: string };
+    record: () => Promise<void>;
     receiveTransportFrame: (frame: TransportFrame) => void;
     /** Visual interpolation from the last complete engine snapshot. */
     currentTick: () => number;
 }
 
 let idCounter = 1;
+let liveNoteUnsubscribe: (() => void) | null = null;
+let activeRecordBindings: RecordTrackBinding[] = [];
 
 export const useArrangementStore = create<ArrangementStore>((set, get) => {
     let previewBase: Arrangement | null = null;
     let previewVerbs: Verb[] = [];
+
+    const finishRecording = async (): Promise<void> => {
+        const state = get();
+        if (!state.isRecording || !state.arrangement || state.recordStartTick === null) return;
+        const endTick = Math.max(state.recordStartTick, state.currentTick());
+        const punch = state.punchEnabled
+            ? state.arrangement.locations?.find((location) => location.kind === 'punch' && location.endTick !== undefined)
+            : undefined;
+        const span = {
+            startTick: Math.max(state.recordStartTick, punch?.startTick ?? state.recordStartTick),
+            endTick: Math.min(endTick, punch?.endTick ?? endTick),
+        };
+        const wasmNotes = state.ghostNotes;
+        set({ isRecording: false, isPlaying: false, transportPending: 'stop', pendingSeekSample: null });
+        clearEndTimer();
+        liveNoteUnsubscribe?.();
+        liveNoteUnsubscribe = null;
+        const native = getExecutor().getTimelineBackend() === 'native';
+        const result = await getExecutor().stopArrangementRecording();
+        const capture = native ? result : {
+            take_id: Date.now(), segments: [], notes: wasmNotes, recovered: false,
+        };
+        const latest = get().arrangement;
+        if (capture && latest && span.endTick > span.startTick) {
+            const verbs = captureResultToVerbs({ arrangement: latest, result: capture, bindings: activeRecordBindings, span, mint: get().mintId });
+            if (verbs.length) get().apply(verbs);
+        }
+        activeRecordBindings = [];
+        set({ recordStartTick: null, ghostNotes: [], recordingBindings: [] });
+    };
+
     return {
         arrangement: null,
         docVersion: 0,
@@ -216,6 +280,15 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
         pendingSeekSample: null,
         loopOn: false,
         loopEnabled: false,
+        armedTrackIds: [],
+        clickEnabled: false,
+        countInBars: 0,
+        punchEnabled: false,
+        isRecording: false,
+        recordStartTick: null,
+        ghostNotes: [],
+        recordingBindings: [],
+        recordError: null,
 
         setArrangement: (arr) => {
             // Loading a new song stops any preview of the old one (release + restore).
@@ -236,6 +309,13 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 pendingSeekSample: null,
                 loopOn: false,
                 loopEnabled: false,
+                armedTrackIds: [],
+                punchEnabled: false,
+                isRecording: false,
+                recordStartTick: null,
+                ghostNotes: [],
+                recordingBindings: [],
+                recordError: null,
             });
             useHistoryStore.getState().clear();
         },
@@ -358,6 +438,10 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
 
         stop: () => {
             if (!get().isPlaying) return;
+            if (get().isRecording) {
+                void finishRecording();
+                return;
+            }
             set({ isPlaying: false, transportPending: 'stop', pendingSeekSample: null });
             stopPreview();
         },
@@ -375,8 +459,69 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
         },
 
         setLoopEnabled: (on) => {
-            set({ loopEnabled: on });
+            set({ loopEnabled: on, punchEnabled: on ? false : get().punchEnabled });
+            if (on) getExecutor().setArrangementPunch(false);
             getExecutor().setArrangementLoop(on);
+        },
+
+        setPunchEnabled: (on) => {
+            set({ punchEnabled: on, loopEnabled: on ? false : get().loopEnabled });
+            if (on) getExecutor().setArrangementLoop(false);
+            getExecutor().setArrangementPunch(on);
+            const arr = get().arrangement;
+            if (arr && get().isPlaying) republishPreview(arr, get().currentTick(), () => get().stop());
+        },
+
+        setClick: (on) => {
+            set({ clickEnabled: on });
+            getExecutor().setArrangementClick(on);
+        },
+
+        setCountIn: (bars) => {
+            const safe = bars === 1 || bars === 2 ? bars : 0;
+            set({ countInBars: safe });
+            getExecutor().setArrangementCountIn(safe > 0);
+            const arr = get().arrangement;
+            if (arr && get().isPlaying) republishPreview(arr, get().currentTick(), () => get().stop());
+        },
+
+        armTrack: (trackId, on) => {
+            const arr = get().arrangement;
+            const track = arr?.tracks.find((item) => (item.id ?? item.ref) === trackId);
+            if (!arr || !track) return { ok: false, message: `Track ${trackId} was not found.` };
+            if (on && trackRecordKind(arr, track) === 'audio' && getExecutor().getTimelineBackend() === 'wasm') {
+                const message = 'Audio recording is native-only for now. MIDI recording remains available in the browser.';
+                set({ recordError: message });
+                return { ok: false, message };
+            }
+            const armed = new Set(get().armedTrackIds);
+            if (on) armed.add(trackId); else armed.delete(trackId);
+            set({ armedTrackIds: [...armed], recordError: null });
+            if (get().isPlaying) republishPreview(arr, get().currentTick(), () => get().stop());
+            return { ok: true };
+        },
+
+        record: async () => {
+            if (get().isRecording) {
+                await finishRecording();
+                return;
+            }
+            const state = get();
+            if (!state.arrangement || state.armedTrackIds.length === 0) {
+                set({ recordError: 'Arm at least one track before recording.' });
+                return;
+            }
+            const startTick = state.currentTick();
+            set({ isPlaying: true, isRecording: true, recordStartTick: startTick, ghostNotes: [], recordError: null, transportPending: 'play' });
+            activeRecordBindings = startPreview(state.arrangement, startTick, () => void finishRecording(), true);
+            set({ recordingBindings: activeRecordBindings });
+            const armedNodes = new Set(activeRecordBindings.filter((binding) => binding.kind === 'midi').map((binding) => binding.node));
+            liveNoteUnsubscribe?.();
+            liveNoteUnsubscribe = getExecutor().subscribeLiveNotes((event) => {
+                const current = get();
+                if (!current.isRecording || !armedNodes.has(event.node)) return;
+                set({ ghostNotes: [...current.ghostNotes, wasmTapToCapturedNote(event, current.currentTick())] });
+            });
         },
 
         receiveTransportFrame: (frame) => {
@@ -432,3 +577,22 @@ registerHistoryDriver((verbs) => {
     useArrangementStore.setState({ arrangement: next, docVersion: store.docVersion + 1 });
     if (store.isPlaying) republishPreview(next, store.currentTick(), () => useArrangementStore.getState().stop());
 });
+
+// Playwright's production-bundle gate cannot instantiate a physical MIDI device.
+// Under browser automation only, expose the same block-quantized tap shape the
+// executor emits so the end-to-end test still crosses the real record/store/history/UI
+// path. This listener is inert for every human session.
+if (typeof window !== 'undefined' && navigator.webdriver) {
+    window.addEventListener('openjammer:test-live-note', ((event: CustomEvent<{ note: number; velocity: number; on: boolean; tick: number }>) => {
+        const state = useArrangementStore.getState();
+        if (!state.isRecording) return;
+        const binding = state.recordingBindings.find((item) => item.kind === 'midi');
+        if (!binding) return;
+        const tick = Math.max(0, Math.round(event.detail.tick));
+        useArrangementStore.setState({
+            playheadTick: Math.max(state.playheadTick, tick),
+            transportFrameAtMs: null,
+            ghostNotes: [...state.ghostNotes, { node: binding.node, note: event.detail.note, velocity: event.detail.velocity, on: event.detail.on, tick }],
+        });
+    }) as EventListener);
+}

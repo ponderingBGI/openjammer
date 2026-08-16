@@ -96,7 +96,9 @@ export function createArrangementPort(): ArrangementToolPort {
             const editing = useEditingContextStore.getState();
             const clipboard = useClipboardStore.getState().summary();
             const ticksPerBar = timebase(arr).ticksPerBar;
-            return { text: describeArrangement(arr), selection: editing.viewports.arrangement.selection, grid: editing.gridUnit, editMode: editing.editMode, clipboard: { ...clipboard, durationBars: clipboard.durationTick / ticksPerBar } };
+            const record = useArrangementStore.getState();
+            const recordingState = `Recording: ${record.isRecording ? 'RECORDING' : 'stopped'}; armed [${record.armedTrackIds.join(', ') || 'none'}]; click ${record.clickEnabled ? 'on' : 'off'}; count-in ${record.countInBars} bar(s); punch ${record.punchEnabled ? 'on' : 'off'}.`;
+            return { text: `${describeArrangement(arr)}\n${recordingState}`, selection: editing.viewports.arrangement.selection, grid: editing.gridUnit, editMode: editing.editMode, clipboard: { ...clipboard, durationBars: clipboard.durationTick / ticksPerBar } };
         },
         applyOps(ops: TimelineOp[]) {
             const store = useArrangementStore.getState();
@@ -155,6 +157,17 @@ export function createArrangementPort(): ArrangementToolPort {
                         case 'addAutomationPoint': result = setAutomationPoints(projected, operation.laneId, [operation.point]); break;
                         case 'addAutomationPoints': result = setAutomationPoints(projected, operation.laneId, operation.points); break;
                         case 'setLaneState': result = { verbs: [{ kind: 'setAutomationLaneState', laneId: operation.laneId, state: operation.state }] }; break;
+                        case 'armTrack': {
+                            const armed = store.armTrack(operation.trackId, operation.armed);
+                            if (!armed.ok) throw new Error(armed.message ?? 'track could not be armed');
+                            continue;
+                        }
+                        case 'setClick': store.setClick(operation.on); continue;
+                        case 'setCountIn': store.setCountIn(operation.bars); continue;
+                        case 'record': {
+                            if ((operation.action === 'start') !== store.isRecording) void store.record();
+                            continue;
+                        }
                     }
                     if (result.rejected) throw new Error(result.rejected);
                     projected = applyVerbs(projected, result.verbs).next;
