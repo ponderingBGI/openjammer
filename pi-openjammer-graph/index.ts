@@ -72,7 +72,7 @@ async function forward(name: string, args: JsonObject): Promise<unknown> {
 
         timeout = setTimeout(() => {
             fail(new Error(`tool "${name}" timed out waiting for OpenJammer host bridge`));
-        }, 10_000);
+        }, name === 'export_song' ? 3_600_000 : 10_000);
 
         sock.setEncoding('utf8');
         let buf = '';
@@ -379,7 +379,8 @@ export default function register(pi: ExtensionAPI): void {
         label: 'Read OpenJammer Song Timeline',
         description:
             'Read the OpenJammer SONG TIMELINE (the on-canvas DAW arrangement) as a ' +
-            'readable summary — tracks (by stable id), clips, notes (count + pitch range), ' +
+            'readable summary — tracks (by stable id), clips, addressable note details ' +
+            '(id/pitch/tick/duration/velocity, capped per clip), ' +
             'sections, tempo, and automation, all at bar.beat. Side-effect-free. ALWAYS ' +
             'read this before editing the timeline so you target real ids + know the ppq.',
         promptSnippet: 'Read the OpenJammer song timeline before authoring it',
@@ -387,11 +388,31 @@ export default function register(pi: ExtensionAPI): void {
     });
 
     registerGraphTool(pi, {
+        name: 'export_song',
+        label: 'Export OpenJammer Song',
+        description:
+            'Native-only: export the current arrangement with the same BounceSpec as the ' +
+            'Export dialog. Returns the final path, peak/clipping stats, frames, sample rate, and channels.',
+        promptSnippet: 'Export the current OpenJammer song to a native WAV or FLAC file',
+        parameters: Type.Object({
+            outPath: Type.String({ description: 'Absolute destination file path, including extension.' }),
+            sampleRate: Type.Union([Type.Literal(44100), Type.Literal(48000), Type.Literal(88200), Type.Literal(96000)]),
+            bitDepth: Type.Union([Type.Literal('16'), Type.Literal('24'), Type.Literal('32f')]),
+            format: Type.Union([Type.Literal('wav'), Type.Literal('flac')]),
+            tail: Type.Union([
+                Type.Object({ mode: Type.Literal('auto') }),
+                Type.Object({ mode: Type.Literal('fixed'), seconds: Type.Number({ minimum: 0 }) }),
+            ]),
+        }),
+    });
+
+    registerGraphTool(pi, {
         name: 'edit_timeline',
         label: 'Author OpenJammer Song Timeline',
         description:
             'Author the OpenJammer SONG TIMELINE with an ordered list of reversible ' +
-            '`verbs`, applied live and undoable with Ctrl+Z. Each verb is `{kind, ...}`. ' +
+            '`verbs` or shared higher-level `ops`, applied live and undoable with Ctrl+Z. ' +
+            'Operation names include armTrack, setClick, setCountIn, and record (start/stop), plus the timeline edit operations. Each verb is `{kind, ...}`. ' +
             'Times are PPQN ticks (read ppq + bar positions from describe_arrangement ' +
             'FIRST). Common verbs: {kind:"setTempo", tempoBpm}; {kind:"setTrackMute", ' +
             'trackId, mute}; {kind:"addClip", trackId, index, clip:{startTick, notes:' +
@@ -401,11 +422,81 @@ export default function register(pi: ExtensionAPI): void {
             '{kind:"removeClip"|"removeNote"|"removeTrack", ...Id}; {kind:"addSection", ' +
             'index, section:{name, startBar}}; {kind:"addAutomationLane", trackId, index, ' +
             'lane:{ref, param, points:[{tick,value}]}}; {kind:"setAutomationPoint", ' +
-            'laneId, point:{tick,value}}. Ids for ADDED entities are minted for you — omit them.',
+            'laneId, point:{tick,value}}; {kind:"setTrackGain",trackId,gainDb}; ' +
+            '{kind:"setTrackPan",trackId,pan}; {kind:"setAutomationLaneState",laneId,state:"Off"|"Play"}. Ids for ADDED entities are minted for you — omit them.',
         promptSnippet:
             'Author the OpenJammer song timeline with reversible verbs (read describe_arrangement first)',
         parameters: Type.Object({
-            verbs: Type.Array(Type.Object({ kind: Type.String() }, { additionalProperties: true })),
+            verbs: Type.Optional(Type.Array(Type.Object({ kind: Type.String() }, { additionalProperties: true }))),
+            ops: Type.Optional(Type.Array(Type.Union([
+                Type.Object({ op: Type.Union([
+                    Type.Literal('moveClips'), Type.Literal('trimClip'), Type.Literal('splitAt'),
+                    Type.Literal('duplicateClips'), Type.Literal('deleteClips'), Type.Literal('setGrid'),
+                    Type.Literal('nudge'), Type.Literal('cutSelection'), Type.Literal('copySelection'),
+                    Type.Literal('paste'), Type.Literal('pasteRepeat'), Type.Literal('selectRange'),
+                    Type.Literal('deleteRange'), Type.Literal('slipClip'), Type.Literal('splitRange'),
+                    Type.Literal('duplicateRange'), Type.Literal('deleteTime'), Type.Literal('insertTime'),
+                    Type.Literal('moveNotes'), Type.Literal('copyNotes'), Type.Literal('resizeNotes'),
+                    Type.Literal('eraseNotes'),
+                ]) }, { additionalProperties: true }),
+                Type.Object({
+                    op: Type.Literal('drawNote'),
+                    clipId: Type.String(),
+                    note: Type.Object({
+                        tick: Type.Number(), durTick: Type.Number(), pitch: Type.Number(),
+                        vel: Type.Optional(Type.Number()),
+                    }),
+                    overlap: Type.Optional(Type.Union([
+                        Type.Literal('relax'), Type.Literal('reject'), Type.Literal('replace'),
+                        Type.Literal('truncate-existing'), Type.Literal('truncate-addition'), Type.Literal('extend'),
+                    ])),
+                }),
+                Type.Object({
+                    op: Type.Literal('setVelocity'),
+                    noteIds: Type.Array(Type.String()),
+                    mode: Type.Union([Type.Literal('delta'), Type.Literal('set'), Type.Literal('ramp')]),
+                    amount: Type.Optional(Type.Number()), from: Type.Optional(Type.Number()),
+                    to: Type.Optional(Type.Number()), smush: Type.Optional(Type.Boolean()),
+                }),
+                Type.Object({
+                    op: Type.Literal('transposeNotes'), noteIds: Type.Array(Type.String()),
+                    semitones: Type.Number(),
+                }),
+                Type.Object({
+                    op: Type.Literal('quantizeNotes'), targets: Type.Array(Type.String()), grid: Type.Number(),
+                    endGrid: Type.Optional(Type.Number()), snapStart: Type.Optional(Type.Boolean()),
+                    snapEnd: Type.Optional(Type.Boolean()), strength: Type.Optional(Type.Number()),
+                    swing: Type.Optional(Type.Number()), threshold: Type.Optional(Type.Number()),
+                    position: Type.Optional(Type.Number()),
+                }),
+                Type.Object({
+                    op: Type.Literal('setAutomationPoints'), laneId: Type.String(),
+                    points: Type.Array(Type.Object({ tick: Type.Number(), value: Type.Number() })),
+                }),
+                Type.Object({
+                    op: Type.Literal('moveAutomationPoints'), laneId: Type.String(),
+                    ticks: Type.Array(Type.Number()), deltaTick: Type.Optional(Type.Number()),
+                    deltaValue: Type.Optional(Type.Number()), push: Type.Optional(Type.Boolean()),
+                }),
+                Type.Object({
+                    op: Type.Literal('setAutomationRange'), laneId: Type.String(),
+                    fromTick: Type.Number(), toTick: Type.Number(),
+                    points: Type.Array(Type.Object({ tick: Type.Number(), value: Type.Number() })),
+                    factor: Type.Optional(Type.Number()),
+                }),
+                Type.Object({
+                    op: Type.Literal('thinAutomation'), laneId: Type.String(), factor: Type.Optional(Type.Number()),
+                }),
+                Type.Object({ op: Type.Literal('setTrackGain'), trackId: Type.String(), gainDb: Type.Number() }),
+                Type.Object({ op: Type.Literal('setTrackPan'), trackId: Type.String(), pan: Type.Number() }),
+                Type.Object({ op: Type.Literal('addAutomationPoint'), laneId: Type.String(), point: Type.Object({ tick: Type.Number(), value: Type.Number() }) }),
+                Type.Object({ op: Type.Literal('addAutomationPoints'), laneId: Type.String(), points: Type.Array(Type.Object({ tick: Type.Number(), value: Type.Number() })) }),
+                Type.Object({ op: Type.Literal('setLaneState'), laneId: Type.String(), state: Type.Union([Type.Literal('Off'), Type.Literal('Play')]) }),
+                Type.Object({ op: Type.Literal('armTrack'), trackId: Type.String(), armed: Type.Boolean() }),
+                Type.Object({ op: Type.Literal('setClick'), on: Type.Boolean() }),
+                Type.Object({ op: Type.Literal('setCountIn'), bars: Type.Union([Type.Literal(0), Type.Literal(1), Type.Literal(2)]) }),
+                Type.Object({ op: Type.Literal('record'), action: Type.Union([Type.Literal('start'), Type.Literal('stop')]) }),
+            ]))),
         }),
     });
 
