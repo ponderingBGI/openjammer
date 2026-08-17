@@ -120,16 +120,39 @@ describe.skipIf(!enabled)('tauri-driver native journeys', () => {
         await clickXpath('//button[@title="Stop"]');
 
         await clickXpath('//button[@title="Export song"]');
-        const destination = await browser.waitFor('css selector', '#export-destination');
-        await browser.clear(destination);
-        await browser.type(destination, outputDir);
-        const filename = await browser.find('css selector', '#export-filename');
-        await browser.clear(filename);
-        await browser.type(filename, 'native-first-light');
+        // VERIFY the dialog fields actually hold what was typed before
+        // exporting: WebDriver clear+type into controlled inputs raced once in
+        // CI (run 32045968018: everything through Stop passed, yet no WAV ever
+        // appeared in 180 s — a wrong destination writes the bounce somewhere
+        // we never poll). Bounded retype until the DOM value matches.
+        const fillField = async (selector: string, value: string): Promise<void> => {
+            const element = await browser.waitFor('css selector', selector);
+            for (let attempt = 0; ; attempt++) {
+                await browser.clear(element);
+                await browser.type(element, value);
+                const current = await browser.execute<string>(`return document.querySelector('${selector}')?.value ?? ''`);
+                if (current === value) return;
+                if (attempt >= 2) throw new Error(`${selector} kept "${current}" after typing "${value}"`);
+            }
+        };
+        await fillField('#export-destination', outputDir);
+        await fillField('#export-filename', 'native-first-light');
         await clickXpath('//div[contains(@class,"export-dialog__actions")]//button[normalize-space(.)="Export song"]');
         const output = resolve(outputDir, 'native-first-light.wav');
         const deadline = Date.now() + 180_000;
         while (!existsSync(output) && Date.now() < deadline) await Bun.sleep(250);
+        if (!existsSync(output)) {
+            // Surface WHY before failing: the dialog's live state names a wrong
+            // path or a surfaced export error far better than a bare boolean.
+            const dialogState = await browser.execute<string>(`
+                return JSON.stringify({
+                    destination: document.querySelector('#export-destination')?.value ?? null,
+                    filename: document.querySelector('#export-filename')?.value ?? null,
+                    dialogText: document.querySelector('[class*="export-dialog"]')?.textContent?.slice(0, 400) ?? null,
+                });
+            `).catch((error: Error) => `dialog state unavailable: ${error.message}`);
+            throw new Error(`export never produced ${output} within 180s; dialog: ${dialogState}`);
+        }
         expect(existsSync(output)).toBe(true);
 
         const bytes = await readFile(output);
