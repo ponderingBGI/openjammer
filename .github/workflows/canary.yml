@@ -127,7 +127,10 @@ jobs:
         # plain compiler error; the shared rust-cache keeps the duplicate work
         # near-free on warm runs.
         shell: bash
-        run: cargo check -p ojhost --features juce
+        # --target matches the installer's actual Rust target (the macOS entries
+        # cross-compile), so the check can't silently verify the host triple
+        # while the installer builds a different one.
+        run: cargo check -p ojhost --features juce --target "${{ matrix.piTarget }}"
 
       - name: Canari build config (version stamp + updater artifacts)
         shell: bash
