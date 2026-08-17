@@ -299,30 +299,113 @@ fn reveal_path(path: String) -> Result<(), String> {
 struct PluginEditorState(Mutex<HashMap<String, PluginEditor>>);
 
 #[derive(Clone, serde::Serialize)]
-struct PluginWindowShellInfo { label: String, plugin_name: String, owner: String, has_gui: bool, bypassed: bool, dirty: bool }
+struct PluginWindowShellInfo {
+    label: String,
+    plugin_name: String,
+    owner: String,
+    has_gui: bool,
+    bypassed: bool,
+    dirty: bool,
+}
 #[derive(Default)]
 struct PluginWindowShellState(Mutex<HashMap<String, PluginWindowShellInfo>>);
 
 #[tauri::command]
-fn plugin_window_shell_open(app: tauri::AppHandle, node_id: String, project_id: String, plugin_name: String, owner: String, has_gui: bool, state: tauri::State<'_, PluginWindowShellState>) -> Result<(), String> {
-    let safe = node_id.chars().map(|character| if character.is_ascii_alphanumeric() { character } else { '-' }).collect::<String>();
+fn plugin_window_shell_open(
+    app: tauri::AppHandle,
+    node_id: String,
+    project_id: String,
+    plugin_name: String,
+    owner: String,
+    has_gui: bool,
+    state: tauri::State<'_, PluginWindowShellState>,
+) -> Result<(), String> {
+    let safe = node_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
     let label = format!("plugin-{safe}");
-    if let Some(window) = app.get_webview_window(&label) { window.set_focus().map_err(|error| error.to_string())?; return Ok(()); }
-    state.0.lock().map_err(|_| "plugin window mutex poisoned".to_string())?.insert(label.clone(), PluginWindowShellInfo { label: label.clone(), plugin_name: plugin_name.clone(), owner: owner.clone(), has_gui, bypassed: false, dirty: false });
-    let main = app.get_webview_window("main").ok_or_else(|| "main window is unavailable".to_string())?;
+    if let Some(window) = app.get_webview_window(&label) {
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    state
+        .0
+        .lock()
+        .map_err(|_| "plugin window mutex poisoned".to_string())?
+        .insert(
+            label.clone(),
+            PluginWindowShellInfo {
+                label: label.clone(),
+                plugin_name: plugin_name.clone(),
+                owner: owner.clone(),
+                has_gui,
+                bypassed: false,
+                dirty: false,
+            },
+        );
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is unavailable".to_string())?;
     let geometry_key = format!("{project_id}:{node_id}");
-    WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(format!("index.html?plugin-window={label}&geometry={geometry_key}").into()))
-        .title(format!("{plugin_name} — {owner} — OpenJammer")).inner_size(720.0, 520.0).decorations(true).parent(&main).map_err(|error| error.to_string())?.build().map_err(|error| error.to_string())?;
+    WebviewWindowBuilder::new(
+        &app,
+        &label,
+        WebviewUrl::App(format!("index.html?plugin-window={label}&geometry={geometry_key}").into()),
+    )
+    .title(format!("{plugin_name} — {owner} — OpenJammer"))
+    .inner_size(720.0, 520.0)
+    .decorations(true)
+    .parent(&main)
+    .map_err(|error| error.to_string())?
+    .build()
+    .map_err(|error| error.to_string())?;
     Ok(())
 }
 #[tauri::command]
-fn plugin_window_shell_info(label: String, state: tauri::State<'_, PluginWindowShellState>) -> Result<PluginWindowShellInfo, String> { state.0.lock().map_err(|_| "plugin window mutex poisoned".to_string())?.get(&label).cloned().ok_or_else(|| "plugin window metadata is unavailable".to_string()) }
+fn plugin_window_shell_info(
+    label: String,
+    state: tauri::State<'_, PluginWindowShellState>,
+) -> Result<PluginWindowShellInfo, String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "plugin window mutex poisoned".to_string())?
+        .get(&label)
+        .cloned()
+        .ok_or_else(|| "plugin window metadata is unavailable".to_string())
+}
 #[tauri::command]
-fn plugin_window_shell_close(app: tauri::AppHandle, label: String) -> Result<(), String> { app.get_webview_window(&label).ok_or_else(|| "plugin window is unavailable".to_string())?.close().map_err(|error| error.to_string()) }
+fn plugin_window_shell_close(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    app.get_webview_window(&label)
+        .ok_or_else(|| "plugin window is unavailable".to_string())?
+        .close()
+        .map_err(|error| error.to_string())
+}
 #[tauri::command]
-fn plugin_window_always_on_top(app: tauri::AppHandle, label: String, always_on_top: bool) -> Result<(), String> { app.get_webview_window(&label).ok_or_else(|| "plugin window is unavailable".to_string())?.set_always_on_top(always_on_top).map_err(|error| error.to_string()) }
+fn plugin_window_always_on_top(
+    app: tauri::AppHandle,
+    label: String,
+    always_on_top: bool,
+) -> Result<(), String> {
+    app.get_webview_window(&label)
+        .ok_or_else(|| "plugin window is unavailable".to_string())?
+        .set_always_on_top(always_on_top)
+        .map_err(|error| error.to_string())
+}
 #[tauri::command]
-fn plugin_window_focus_host(app: tauri::AppHandle) -> Result<(), String> { app.get_webview_window("main").ok_or_else(|| "main window is unavailable".to_string())?.set_focus().map_err(|error| error.to_string()) }
+fn plugin_window_focus_host(app: tauri::AppHandle) -> Result<(), String> {
+    app.get_webview_window("main")
+        .ok_or_else(|| "main window is unavailable".to_string())?
+        .set_focus()
+        .map_err(|error| error.to_string())
+}
 
 #[derive(serde::Serialize)]
 struct PluginQuarantineView {
@@ -334,15 +417,23 @@ struct PluginQuarantineView {
 
 #[tauri::command]
 fn plugin_quarantine_list() -> Vec<PluginQuarantineView> {
-    let blacklist = ojhost::Blacklist::load(ojhost::default_reliability_dir().join("quarantine.tsv"));
-    blacklist.entries().map(|entry| PluginQuarantineView {
-        path: entry.path.clone(), reason: entry.reason.clone(), crash_count: entry.crash_count, benched: entry.benched(),
-    }).collect()
+    let blacklist =
+        ojhost::Blacklist::load(ojhost::default_reliability_dir().join("quarantine.tsv"));
+    blacklist
+        .entries()
+        .map(|entry| PluginQuarantineView {
+            path: entry.path.clone(),
+            reason: entry.reason.clone(),
+            crash_count: entry.crash_count,
+            benched: entry.benched(),
+        })
+        .collect()
 }
 
 #[tauri::command]
 fn plugin_quarantine_pardon(path: String) -> Result<(), String> {
-    let mut blacklist = ojhost::Blacklist::load(ojhost::default_reliability_dir().join("quarantine.tsv"));
+    let mut blacklist =
+        ojhost::Blacklist::load(ojhost::default_reliability_dir().join("quarantine.tsv"));
     blacklist.pardon(&path).map_err(|error| error.to_string())
 }
 
