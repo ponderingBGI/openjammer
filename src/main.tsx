@@ -10,6 +10,7 @@ import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens
 import { installConsoleCapture, installGlobalErrorHandlers } from './utils/log'
 import { recoverFromStaleBundle } from './utils/staleBundleGuard'
 import './components/AppErrorBoundary.css'
+import { installE2EBridge } from './test/e2eBridge'
 
 // Route every console.* line into the DevLog ring (and thereby the AI agent's
 // get_logs tool) before anything else logs. Idempotent + StrictMode-safe.
@@ -33,6 +34,7 @@ if (initialTheme) applyTheme(initialTheme)
 // new version (no manual hard refresh). Fire-and-forget — never blocks first
 // paint; a no-op in the browser (which has its own service-worker update path).
 void recoverFromStaleBundle()
+installE2EBridge()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

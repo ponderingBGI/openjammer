@@ -1,4 +1,4 @@
-import { SchedEventKind, type RtCommand, type SchedEvent, type TimedCommand } from '@openjammer/oj-protocol';
+import { SchedEventKind, type RtCommand, type SchedEvent } from '@openjammer/oj-protocol';
 import type { Arrangement } from '../../song/types';
 import { assembleExportArgs } from './exportSpec';
 import type { BounceSpec, ExportProgress, ExportStats } from './types';
@@ -44,7 +44,7 @@ function pushFrame(exports: WasmExports, payload: Uint8Array): boolean {
     return true;
 }
 
-function pushJson(exports: WasmExports, value: RtCommand | TimedCommand): void {
+function pushJson(exports: WasmExports, value: RtCommand): void {
     if (!pushFrame(exports, encoder.encode(JSON.stringify(value)))) throw new Error('Browser engine command queue filled during export.');
 }
 
@@ -82,7 +82,9 @@ export async function exportBrowser(
         const frames = Math.min(BLOCK, targetMax - rendered);
         while (eventIndex < args.timeline.events.length && args.timeline.events[eventIndex]!.at < rendered + frames) {
             const event = args.timeline.events[eventIndex++]!;
-            pushJson(exports, { at: event.at, cmd: commandFor(event) });
+            // This loop is the scheduler: commands are due in the block we are
+            // about to render, so the wasm ring must receive the RtCommand itself.
+            pushJson(exports, commandFor(event));
         }
         wasm.process(frames);
         const ptr = wasm.output_ptr() as number;

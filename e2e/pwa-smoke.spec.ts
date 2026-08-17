@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { assertAudiblePeak, decodeWav } from './helpers/audio';
 
 // Render-smoke for the browser PWA target (plan §4.2 / §3). Proves the production
 // bundle loads, comes up cross-origin isolated (so the SharedArrayBuffer fast
@@ -231,6 +232,7 @@ test.describe('PWA shell', () => {
         expect(bytes.readUInt16LE(34)).toBe(24);
         expect(bytes.subarray(36, 40).toString('ascii')).toBe('data');
         expect(bytes.length).toBeGreaterThan(44);
+        assertAudiblePeak(decodeWav(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)));
     });
 
     test('First Light starter exports in-browser @slow', async ({ page }) => {

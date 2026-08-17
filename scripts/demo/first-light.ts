@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { buildFirstLight } from '../../src/song/songs/firstLight';
+import { buildFirstLight } from '../../src/song/fixtures/firstLight';
 
 export { buildFirstLight };
 export const firstLight = buildFirstLight();

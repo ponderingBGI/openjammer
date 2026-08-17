@@ -111,6 +111,7 @@ function parseEmergency(raw: string | null): EmergencyBackup | null {
             projectName: typeof b.projectName === 'string' ? b.projectName : null,
             nodes: b.nodes,
             edges: b.edges,
+            arrangement: b.arrangement,
         };
     } catch {
         return null;
