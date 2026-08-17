@@ -17,10 +17,13 @@ concurrency:
 jobs:
   journeys:
     name: Journeys (${{ matrix.engine }}, shard ${{ matrix.shard }}/3)
-    # GitHub's hosted Ubuntu network can leave headless Firefox with zero ICE
-    # candidates. Keep J7 as a real WebRTC test by running Firefox on a hosted
-    # macOS VM instead of skipping or mocking the collaboration transport.
-    runs-on: ${{ matrix.engine == 'firefox' && 'macos-15-intel' || 'ubuntu-latest' }}
+    runs-on: ubuntu-latest
+    # Match the Playwright package exactly and give every engine the supported,
+    # reproducible Linux network/runtime environment. In particular, Firefox
+    # needs the container's ordinary eth0 interface to gather real host ICE
+    # candidates; GitHub's hosted VM interfaces yielded none on Linux or macOS.
+    container:
+      image: mcr.microsoft.com/playwright:v1.61.0-noble
     strategy:
       fail-fast: false
       matrix:
@@ -32,11 +35,6 @@ jobs:
           persist-credentials: false
       - name: Setup web (Bun + install)
         uses: ./.github/actions/setup-web
-      - name: Install WebKit host libraries
-        if: matrix.engine == 'webkit'
-        run: bunx playwright install-deps webkit
-      - name: Install browser engine
-        run: bunx playwright install ${{ matrix.engine }}
       - name: Run journey shard
         # Measured locally on 2026-08-17 before sharding (production build
         # included): Chromium 36.0s and Firefox 36.5s. WebKit is CI-measured
