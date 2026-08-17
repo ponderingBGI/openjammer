@@ -30,6 +30,7 @@ export interface ManualWebRTCTransportOptions {
     iceGatheringTimeoutMs?: number;
 }
 
+/** Actionable failure (or degraded-success warning) from non-trickle ICE gathering. */
 export class IceGatheringError extends Error {
     readonly code: 'ICE_GATHERING_ABORTED' | 'ICE_GATHERING_NO_CANDIDATES' | 'ICE_GATHERING_TIMEOUT';
     readonly candidateErrorCount: number;
@@ -180,6 +181,7 @@ export class ManualWebRTCTransport implements Transport {
     private makePeerConnection(): RTCPeerConnection {
         const pc = new RTCPeerConnection({ iceServers: this.iceServers });
         pc.onconnectionstatechange = () => {
+            if (pc !== this.pc) return;
             if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
                 this.rejectReadyWaiters(new Error(`WebRTC peer connection ${pc.connectionState} before the data channel became ready`));
                 if (this.connected) {
@@ -195,11 +197,13 @@ export class ManualWebRTCTransport implements Transport {
         channel.binaryType = 'arraybuffer';
         this.channel = channel;
         channel.onopen = () => {
+            if (channel !== this.channel) return;
             this.connected = true;
             this.resolveReadyWaiters();
             this.events?.onPeerConnect?.('remote');
         };
         channel.onclose = () => {
+            if (channel !== this.channel) return;
             this.rejectReadyWaiters(new Error('WebRTC data channel closed before becoming ready'));
             if (this.connected) {
                 this.connected = false;
@@ -207,9 +211,11 @@ export class ManualWebRTCTransport implements Transport {
             }
         };
         channel.onerror = () => {
+            if (channel !== this.channel) return;
             this.rejectReadyWaiters(new Error('WebRTC data channel failed before becoming ready'));
         };
         channel.onmessage = (e: MessageEvent<ArrayBuffer>) => {
+            if (channel !== this.channel) return;
             const frame = decodeFrame(new Uint8Array(e.data));
             if (frame) this.events?.onFrame?.(frame);
         };
@@ -223,6 +229,43 @@ export class ManualWebRTCTransport implements Transport {
     private rejectReadyWaiters(error: Error): void {
         for (const waiter of this.readyWaiters) waiter.reject(error);
         this.readyWaiters.clear();
+    }
+
+    /** Release one handshake before starting another, including stale callbacks. */
+    private resetPeer(reason: string): void {
+        this.iceGatherAbort?.abort();
+        this.iceGatherAbort = null;
+        this.rejectReadyWaiters(new Error(reason));
+
+        const channel = this.channel;
+        const pc = this.pc;
+        const wasConnected = this.connected;
+        this.channel = null;
+        this.pc = null;
+        this.connected = false;
+
+        if (channel) {
+            channel.onopen = null;
+            channel.onclose = null;
+            channel.onerror = null;
+            channel.onmessage = null;
+            channel.close();
+        }
+        if (pc) {
+            pc.onconnectionstatechange = null;
+            pc.ondatachannel = null;
+            pc.close();
+        }
+        if (wasConnected) this.events?.onPeerDisconnect?.('remote');
+    }
+
+    private assertCurrentPeer(pc: RTCPeerConnection): void {
+        if (pc !== this.pc) {
+            throw new IceGatheringError(
+                'ICE_GATHERING_ABORTED',
+                'The WebRTC handshake was replaced by a newer attempt.',
+            );
+        }
     }
 
     private async finishIceGathering(pc: RTCPeerConnection): Promise<RTCSessionDescription> {
@@ -270,12 +313,16 @@ export class ManualWebRTCTransport implements Transport {
 
     /** HOST step 1: create the offer code to share with the guest. */
     async createOffer(): Promise<string> {
-        this.pc = this.makePeerConnection();
-        const channel = this.pc.createDataChannel(`oj-${this.selfId}`, { ordered: true });
+        this.resetPeer('WebRTC handshake restarted before the data channel became ready');
+        const pc = this.makePeerConnection();
+        this.pc = pc;
+        const channel = pc.createDataChannel(`oj-${this.selfId}`, { ordered: true });
         this.wireChannel(channel);
-        const offer = await this.pc.createOffer();
-        await this.pc.setLocalDescription(offer);
-        return encodeSignal(await this.finishIceGathering(this.pc));
+        const offer = await pc.createOffer();
+        this.assertCurrentPeer(pc);
+        await pc.setLocalDescription(offer);
+        this.assertCurrentPeer(pc);
+        return encodeSignal(await this.finishIceGathering(pc));
     }
 
     /** HOST step 2: paste the guest's answer code to finish connecting. */
@@ -290,12 +337,17 @@ export class ManualWebRTCTransport implements Transport {
 
     /** GUEST: paste the host's offer code and return the answer code to share back. */
     async acceptOffer(offerCode: string): Promise<string> {
-        this.pc = this.makePeerConnection();
-        this.pc.ondatachannel = (e) => this.wireChannel(e.channel);
-        await this.pc.setRemoteDescription(decodeSignal(offerCode));
-        const answer = await this.pc.createAnswer();
-        await this.pc.setLocalDescription(answer);
-        return encodeSignal(await this.finishIceGathering(this.pc));
+        this.resetPeer('WebRTC handshake restarted before the data channel became ready');
+        const pc = this.makePeerConnection();
+        this.pc = pc;
+        pc.ondatachannel = (e) => this.wireChannel(e.channel);
+        await pc.setRemoteDescription(decodeSignal(offerCode));
+        this.assertCurrentPeer(pc);
+        const answer = await pc.createAnswer();
+        this.assertCurrentPeer(pc);
+        await pc.setLocalDescription(answer);
+        this.assertCurrentPeer(pc);
+        return encodeSignal(await this.finishIceGathering(pc));
     }
 
     /** Wait for the data channel itself, not merely SDP exchange, to be usable. */
@@ -347,14 +399,7 @@ export class ManualWebRTCTransport implements Transport {
     }
 
     close(): void {
-        this.iceGatherAbort?.abort();
-        this.iceGatherAbort = null;
-        this.rejectReadyWaiters(new Error('WebRTC transport closed before the data channel became ready'));
-        this.channel?.close();
-        this.pc?.close();
-        this.channel = null;
-        this.pc = null;
-        this.connected = false;
+        this.resetPeer('WebRTC transport closed before the data channel became ready');
         this.events = null;
     }
 }

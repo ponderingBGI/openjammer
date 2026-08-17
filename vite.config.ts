@@ -94,6 +94,7 @@ const STUN_BINDING_SUCCESS = 0x0101
 const STUN_MAGIC_COOKIE = 0x2112a442
 const STUN_XOR_MAPPED_ADDRESS = 0x0020
 
+/** Build the minimal RFC 5389 IPv4 Binding Success response used by E2E. */
 function stunBindingResponse(request: Buffer, remote: RemoteInfo): Buffer | null {
   if (request.length < 20) return null
   if (request.readUInt16BE(0) !== STUN_BINDING_REQUEST) return null
@@ -117,24 +118,27 @@ function stunBindingResponse(request: Buffer, remote: RemoteInfo): Buffer | null
   return response
 }
 
-// A loopback STUN responder gives every engine a routable, non-mDNS candidate
-// without depending on public UDP egress. In particular, Firefox can suppress
-// host candidates on hosted runners and WebKit isolates mDNS names by context.
-function serveE2ELoopbackStun(): Plugin {
+/**
+ * Give every E2E browser a routable, non-mDNS candidate without public UDP.
+ * Firefox can suppress host candidates on hosted runners, while WebKit isolates
+ * mDNS names by browser context.
+ */
+function serveE2ELocalStun(): Plugin {
   return {
-    name: 'oj-e2e-loopback-stun',
+    name: 'oj-e2e-local-stun',
     configurePreviewServer(server) {
+      const host = process.env.OJ_E2E_STUN_HOST
       const port = Number(process.env.OJ_E2E_STUN_PORT)
-      if (!Number.isInteger(port) || port <= 0 || port > 65_535) return
+      if (!host || !Number.isInteger(port) || port <= 0 || port > 65_535) return
       const socket = createSocket('udp4')
       socket.on('message', (request, remote) => {
         const response = stunBindingResponse(request, remote)
         if (response) socket.send(response, remote.port, remote.address)
       })
       socket.on('error', (error) => {
-        server.config.logger.error(`E2E loopback STUN failed: ${error.message}`)
+        server.config.logger.error(`E2E local STUN failed: ${error.message}`)
       })
-      socket.bind(port, '127.0.0.1')
+      socket.bind(port, host)
       server.httpServer?.once('close', () => socket.close())
     },
   }
@@ -145,7 +149,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(pkgVersion),
   },
   plugins: [
-    serveE2ELoopbackStun(),
+    serveE2ELocalStun(),
     simulateE2EOriginOutage(),
     serveDownloadPage(),
     wasm(),

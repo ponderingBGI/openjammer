@@ -1,10 +1,14 @@
 import { defineConfig, devices } from '@playwright/test';
+import { networkInterfaces } from 'node:os';
 
 // PWA smoke / E2E (plan §4.2). Builds the production PWA and serves it through
 // `vite preview`, which emits the COOP/COEP headers the engine's
 // SharedArrayBuffer path needs — so the suite asserts `crossOriginIsolated ===
 // true` against the REAL built bundle, not just the dev server.
 const PORT = 4173;
+const E2E_STUN_HOST = Object.values(networkInterfaces())
+    .flat()
+    .find((address) => address?.family === 'IPv4' && !address.internal)?.address ?? '127.0.0.1';
 
 // Which browser engines to drive. The dead-worklet bug was browser-independent
 // (a bundling defect, not a Chromium quirk), so the resurrection is best proven
@@ -51,10 +55,13 @@ export default defineConfig({
         url: `http://localhost:${PORT}`,
         env: {
             OJ_E2E_ORIGIN_OUTAGE: '1',
+            OJ_E2E_STUN_HOST: E2E_STUN_HOST,
             OJ_E2E_STUN_PORT: '3478',
-            VITE_OJ_E2E_STUN_URL: 'stun:127.0.0.1:3478',
+            VITE_OJ_E2E_STUN_URL: `stun:${E2E_STUN_HOST}:3478`,
         },
-        reuseExistingServer: !process.env.CI,
+        // These journeys depend on preview-only outage and local-STUN
+        // fixtures. Reusing an arbitrary local server would silently omit them.
+        reuseExistingServer: false,
         timeout: 180_000,
     },
 });

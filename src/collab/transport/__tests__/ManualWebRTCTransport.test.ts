@@ -40,6 +40,7 @@ class FakePeerConnection {
     ondatachannel: ((event: RTCDataChannelEvent) => void) | null = null;
     readonly channel = new FakeDataChannel();
     readonly configuration: RTCConfiguration;
+    closed = false;
     private readonly listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
 
     constructor(configuration: RTCConfiguration) {
@@ -104,6 +105,7 @@ class FakePeerConnection {
     async setRemoteDescription(): Promise<void> {}
 
     close(): void {
+        this.closed = true;
         this.signalingState = 'closed';
         this.connectionState = 'closed';
         this.dispatchEvent(new Event('signalingstatechange'));
@@ -185,6 +187,40 @@ describe('ManualWebRTCTransport ICE gathering', () => {
 
     it('rejects invalid timeout configuration', () => {
         expect(() => new ManualWebRTCTransport('host', { iceGatheringTimeoutMs: 0 })).toThrow(RangeError);
+    });
+
+    it('closes a failed host peer before retrying the handshake', async () => {
+        FakePeerConnection.scenario = 'hang-empty';
+        const transport = new ManualWebRTCTransport('host', { iceGatheringTimeoutMs: 5 });
+        await expect(transport.createOffer()).rejects.toMatchObject({ code: 'ICE_GATHERING_TIMEOUT' });
+        const failedPeer = FakePeerConnection.instances[0]!;
+
+        FakePeerConnection.scenario = 'complete';
+        await expect(transport.createOffer()).resolves.toBeTypeOf('string');
+
+        expect(failedPeer.closed).toBe(true);
+        expect(failedPeer.channel.readyState).toBe('closed');
+        expect(failedPeer.onconnectionstatechange).toBeNull();
+        expect(failedPeer.channel.onopen).toBeNull();
+        expect(FakePeerConnection.instances).toHaveLength(2);
+    });
+
+    it('closes a guest peer and rejects its readiness waiter before retrying', async () => {
+        const transport = new ManualWebRTCTransport('guest', {
+            iceServers: [],
+            iceGatheringTimeoutMs: 100,
+        });
+        const offer = btoa(JSON.stringify({ type: 'offer', sdp: 'v=0\r\n' }));
+        await transport.acceptOffer(offer);
+        const firstPeer = FakePeerConnection.instances[0]!;
+        const readiness = expect(transport.waitUntilReady(100)).rejects.toThrow('restarted');
+
+        await transport.acceptOffer(offer);
+        await readiness;
+
+        expect(firstPeer.closed).toBe(true);
+        expect(firstPeer.ondatachannel).toBeNull();
+        expect(FakePeerConnection.instances).toHaveLength(2);
     });
 
     it('waits through late guest data-channel creation until the channel opens', async () => {
