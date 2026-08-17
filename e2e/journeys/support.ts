@@ -57,5 +57,12 @@ export async function exportSong(page: Page, timeout = 150_000): Promise<ArrayBu
 }
 
 export async function snapshot(page: Page): Promise<unknown> {
+    // `page.reload()` resolves at the document load event, which may precede
+    // evaluation of a production ESM graph containing async WASM chunks. Wait
+    // for the automation boundary itself instead of racing module startup.
+    await page.waitForFunction(() => (
+        typeof (window as unknown as { __openjammerE2E?: { snapshot?: unknown } })
+            .__openjammerE2E?.snapshot === 'function'
+    ));
     return page.evaluate(() => (window as unknown as { __openjammerE2E: { snapshot(): unknown } }).__openjammerE2E.snapshot());
 }

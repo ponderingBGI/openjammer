@@ -93,8 +93,10 @@ test('@journey J3 Editor\'s Hour — every edit family converges with verb repla
     const selectedId = await clips.first().getAttribute('data-clip-id');
     await clips.nth(1).click({ position: { x: 30, y: 34 } });
     await page.keyboard.press('Control+Alt+z');
-    const selection = await page.evaluate(() => (window as unknown as { __openjammerE2E: Bridge }).__openjammerE2E.selection());
-    expect(selection.clipIds).toContain(selectedId);
+    await expect.poll(async () => {
+        const selection = await page.evaluate(() => (window as unknown as { __openjammerE2E: Bridge }).__openjammerE2E.selection());
+        return selection.clipIds;
+    }).toContain(selectedId);
     const beforeObjectUndo = await snapshot(page);
     await page.keyboard.press('Control+z');
     expect(await snapshot(page)).not.toEqual(beforeObjectUndo);

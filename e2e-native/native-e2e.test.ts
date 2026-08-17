@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { assertAudiblePeak, assertMusicalDuration, assertSectionsDiffer, barWindowRms, decodeWav, energyFingerprint } from '../e2e/helpers/audio';
@@ -14,6 +14,7 @@ let stateDir = '';
 let outputDir = '';
 let driverProcess: ReturnType<typeof Bun.spawn> | null = null;
 let browser: TauriWebDriver;
+let sessionNumber = 0;
 
 async function clickXpath(xpath: string, timeout = 15_000): Promise<void> {
     await browser.click(await browser.waitFor('xpath', xpath, timeout));
@@ -31,8 +32,11 @@ async function snapshot(): Promise<Arrangement> {
 }
 
 async function startSession(): Promise<void> {
+    await browser?.quit();
     browser = new TauriWebDriver();
-    await browser.start(binary);
+    const webviewProfile = resolve(stateDir, `webview-profile-${sessionNumber++}`);
+    await mkdir(webviewProfile, { recursive: true });
+    await browser.start(binary, process.platform === 'win32' ? webviewProfile : undefined);
     await browser.waitFor('css selector', '#root', 30_000);
 }
 
@@ -64,6 +68,13 @@ afterAll(async () => {
     await Promise.all([rm(stateDir, { recursive: true, force: true }), rm(outputDir, { recursive: true, force: true })]);
 });
 
+afterEach(async () => {
+    if (!enabled) return;
+    // A failed assertion must not strand WebKitWebDriver's one allowed session
+    // and turn every later journey into "Maximum number of active sessions".
+    await browser?.quit();
+});
+
 describe.skipIf(!enabled)('tauri-driver native journeys', () => {
     test('N1 — First Light plays in the native engine and exports analyzed audio', async () => {
         await startSession();
@@ -76,8 +87,12 @@ describe.skipIf(!enabled)('tauri-driver native journeys', () => {
         const beforePlayhead = await browser.execute<string>('return document.querySelector(".arrangement-playhead")?.style.transform || ""');
         await clickXpath('//button[@title="Play"]');
         await browser.waitFor('xpath', '//button[@title="Stop"]');
-        await Bun.sleep(2_000);
-        const afterPlayhead = await browser.execute<string>('return document.querySelector(".arrangement-playhead")?.style.transform || ""');
+        const playheadDeadline = Date.now() + 10_000;
+        let afterPlayhead = beforePlayhead;
+        while (afterPlayhead === beforePlayhead && Date.now() < playheadDeadline) {
+            await Bun.sleep(100);
+            afterPlayhead = await browser.execute<string>('return document.querySelector(".arrangement-playhead")?.style.transform || ""');
+        }
         expect(afterPlayhead).not.toBe(beforePlayhead); // only authoritative engine Transport frames move it
         await clickXpath('//button[@title="Stop"]');
 

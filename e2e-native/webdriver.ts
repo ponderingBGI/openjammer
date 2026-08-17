@@ -19,9 +19,19 @@ export class TauriWebDriver {
         return payload.value;
     }
 
-    async start(application: string): Promise<void> {
+    async start(application: string, webviewUserDataFolder?: string): Promise<void> {
         const reply = await this.request<{ sessionId?: string } & Record<string, unknown>>('POST', '/session', {
-            capabilities: { alwaysMatch: { browserName: 'wry', 'tauri:options': { application } } },
+            capabilities: {
+                alwaysMatch: {
+                    browserName: 'wry',
+                    'tauri:options': {
+                        application,
+                        ...(webviewUserDataFolder
+                            ? { webviewOptions: { userDataFolder: webviewUserDataFolder } }
+                            : {}),
+                    },
+                },
+            },
         });
         this.sessionId = reply.sessionId ?? (reply as { session_id?: string }).session_id ?? null;
         if (!this.sessionId) throw new Error('tauri-driver did not return a session id');

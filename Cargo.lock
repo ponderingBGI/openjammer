@@ -752,31 +752,13 @@ dependencies = [
 
 [[package]]
 name = "codspeed"
-version = "4.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57af92d1db7f6871b7e82c79cd87f2501db66f36b0eab924be6ea83dd6b2f3f3"
-dependencies = [
- "anyhow",
- "cc",
- "colored 2.2.0",
- "getrandom 0.2.17",
- "glob",
- "libc",
- "nix",
- "serde",
- "serde_json",
- "statrs",
-]
-
-[[package]]
-name = "codspeed"
 version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7083f253260bcb4aaa3b4aa4c52973703dabc1a85c2f193997e2689aafa8a919"
 dependencies = [
  "anyhow",
  "cc",
- "colored 3.1.1",
+ "colored",
  "getrandom 0.4.3",
  "glob",
  "libc",
@@ -788,55 +770,15 @@ dependencies = [
 
 [[package]]
 name = "codspeed-criterion-compat"
-version = "4.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d31ae2e9ab23c29fa13bdfa06d012524176f5c0f4e25ec262cd829d947ebc5e"
-dependencies = [
- "clap",
- "codspeed 4.7.0",
- "codspeed-criterion-compat-walltime 4.7.0",
- "colored 2.2.0",
- "regex",
-]
-
-[[package]]
-name = "codspeed-criterion-compat"
 version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9f24251445188c69d50f10179d795424bd71b533b7e3f84fc03f26893b01af0"
 dependencies = [
  "clap",
- "codspeed 5.0.1",
- "codspeed-criterion-compat-walltime 5.0.1",
- "colored 3.1.1",
+ "codspeed",
+ "codspeed-criterion-compat-walltime",
+ "colored",
  "regex",
-]
-
-[[package]]
-name = "codspeed-criterion-compat-walltime"
-version = "4.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc8605e40bab5114dcb0f76268e18880082b5798dec10757b5b58d2c3bbc7a1c"
-dependencies = [
- "anes",
- "cast",
- "ciborium",
- "clap",
- "codspeed 4.7.0",
- "criterion-plot",
- "is-terminal",
- "itertools 0.10.5",
- "num-traits",
- "once_cell",
- "oorandom",
- "plotters",
- "rayon",
- "regex",
- "serde",
- "serde_derive",
- "serde_json",
- "tinytemplate",
- "walkdir",
 ]
 
 [[package]]
@@ -849,7 +791,7 @@ dependencies = [
  "cast",
  "ciborium",
  "clap",
- "codspeed 5.0.1",
+ "codspeed",
  "criterion-plot",
  "is-terminal",
  "itertools 0.10.5",
@@ -868,21 +810,11 @@ dependencies = [
 
 [[package]]
 name = "colored"
-version = "2.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
-dependencies = [
- "lazy_static",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "colored"
 version = "3.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "faf9468729b8cbcea668e36183cb69d317348c2e08e994829fb56ebfdfbaac34"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1416,7 +1348,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1620,7 +1552,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1992,7 +1924,7 @@ dependencies = [
  "libc",
  "log",
  "rustversion",
- "windows-link 0.2.1",
+ "windows-link 0.1.3",
  "windows-result 0.4.1",
 ]
 
@@ -2605,7 +2537,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3077,7 +3009,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3134,7 +3066,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3498,7 +3430,7 @@ dependencies = [
  "arc-swap",
  "assert_no_alloc",
  "basedrop",
- "codspeed-criterion-compat 5.0.1",
+ "codspeed-criterion-compat",
  "libm",
  "ojcore-dsp",
  "ojcore-midiring",
@@ -3513,7 +3445,7 @@ dependencies = [
 name = "ojcore-dsp"
 version = "0.0.0"
 dependencies = [
- "codspeed-criterion-compat 5.0.1",
+ "codspeed-criterion-compat",
  "libm",
 ]
 
@@ -3530,7 +3462,7 @@ version = "0.0.0"
 dependencies = [
  "audio_thread_priority",
  "claxon",
- "codspeed-criterion-compat 4.7.0",
+ "codspeed-criterion-compat",
  "cpal",
  "flacenc",
  "hound",
@@ -3578,7 +3510,7 @@ dependencies = [
  "clack-host",
  "clack-plugin",
  "cmake",
- "codspeed-criterion-compat 5.0.1",
+ "codspeed-criterion-compat",
  "libloading 0.8.9",
  "ojcore",
  "ojproto",
@@ -3600,7 +3532,7 @@ dependencies = [
 name = "ojinstrument"
 version = "0.0.0"
 dependencies = [
- "codspeed-criterion-compat 5.0.1",
+ "codspeed-criterion-compat",
  "libm",
  "ojcore",
  "ojcore-dsp",
@@ -3612,7 +3544,7 @@ dependencies = [
 name = "ojproto"
 version = "0.0.0"
 dependencies = [
- "codspeed-criterion-compat 5.0.1",
+ "codspeed-criterion-compat",
  "proptest",
  "serde",
  "serde_json",
@@ -4447,7 +4379,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4505,7 +4437,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4933,7 +4865,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5560,7 +5492,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6022,7 +5954,7 @@ dependencies = [
  "png 0.18.1",
  "serde",
  "thiserror 2.0.18",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6051,7 +5983,7 @@ checksum = "f2f6fb2847f6742cd76af783a2a2c49e9375d0a111c7bef6f71cd9e738c72d6e"
 dependencies = [
  "memoffset",
  "tempfile",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6703,7 +6635,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

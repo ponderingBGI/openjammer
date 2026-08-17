@@ -65,6 +65,11 @@ jobs:
           cache-target: release
           bins: cargo-codspeed
 
+      - name: Install native audio build prerequisites
+        # ojcore-native benchmarks compile cpal's Linux ALSA backend even though
+        # the benchmark itself opens no device.
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
       - name: Build the benchmark target(s) for both instruments
         run: cargo codspeed build -m simulation -m memory -p ojcore -p ojcore-native -p ojcore-dsp -p ojproto -p ojinstrument -p ojhost --features ojhost/clap-host
 
@@ -138,6 +143,10 @@ jobs:
   # trends are comparable. The job is intentionally never a merge gate.
   codspeed-walltime:
     name: Long Set experience trend (Ring 3)
+    # CodSpeed MACRO walltime runners are unavailable to personal GitHub
+    # accounts. Keep this trend-only lane neutral here; an organization fork
+    # can opt in after provisioning a runner by setting this repository variable.
+    if: ${{ vars.CODSPEED_MACRO_ENABLED == 'true' }}
     runs-on: codspeed-macro
     continue-on-error: true
     timeout-minutes: 20

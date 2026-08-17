@@ -186,11 +186,11 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      // Loro's default browser entry performs a synchronous XHR for its wasm.
-      // Browsers cannot reliably satisfy that cold request from a service worker
-      // while offline, so use Loro's official self-contained base64 entry. The
-      // CRDT remains byte-identical; only its loading transport changes.
-      'loro-crdt': fileURLToPath(new URL('./node_modules/loro-crdt/base64/index.js', import.meta.url)),
+      // Use Loro's bundler entry so its 3 MB WASM is emitted as a real asset
+      // instead of a 4.3 MB minified base64 JavaScript module. Collaboration is
+      // imported on first host/join (see collabStore), and the PWA glob below
+      // precaches `.wasm`, so that first use still works when fully offline.
+      'loro-crdt': fileURLToPath(new URL('./node_modules/loro-crdt/bundler/index.js', import.meta.url)),
       '@': '/src',
       // The shared TS protocol package (the wire/event SSOT). Aliased so both the
       // bare workspace specifier and app code resolve to the single source file
