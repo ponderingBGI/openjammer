@@ -2,6 +2,7 @@ const ELEMENT_KEY = 'element-6066-11e4-a52e-4f735466cecf';
 
 interface WebDriverReply<T> { value: T }
 type ElementRef = Record<typeof ELEMENT_KEY, string>;
+type WebDriverError = { error?: string; message?: string; stacktrace?: string };
 
 export class TauriWebDriver {
     private sessionId: string | null = null;
@@ -14,8 +15,13 @@ export class TauriWebDriver {
             headers: { 'content-type': 'application/json' },
             body: body === undefined ? undefined : JSON.stringify(body),
         });
-        const payload = await response.json() as WebDriverReply<T> & { value?: { message?: string } };
-        if (!response.ok) throw new Error(`WebDriver ${method} ${path}: ${payload.value?.message ?? response.status}`);
+        const payload = await response.json() as WebDriverReply<T> & { value?: WebDriverError | string };
+        if (!response.ok) {
+            const detail = typeof payload.value === 'string'
+                ? payload.value
+                : payload.value?.message || payload.value?.error || response.status;
+            throw new Error(`WebDriver ${method} ${path}: ${detail}`);
+        }
         return payload.value;
     }
 
@@ -65,7 +71,29 @@ export class TauriWebDriver {
     }
 
     async click(element: string): Promise<void> {
-        await this.request('POST', this.path(`/element/${element}/click`), {});
+        try {
+            await this.request('POST', this.path(`/element/${element}/click`), {});
+        } catch (nativeClickError) {
+            // Ubuntu 24.04's WebKitWebDriver can resolve a visible button and then
+            // reject its element-click command with an empty `unknown error` after
+            // the xvfb webview finishes booting. PR #72 run 32039122597 reproduced
+            // that exact sequence in N1, N2, and N5; script execution remained the
+            // working automation channel. Dispatch the element's standard DOM click
+            // as the narrow fallback, preserving the native pointer path everywhere
+            // WebKit implements it. Passing the WebDriver element reference avoids a
+            // selector re-query or stale-node ambiguity.
+            if (!(nativeClickError instanceof Error) || !nativeClickError.message.includes('unknown error')) {
+                throw nativeClickError;
+            }
+            try {
+                await this.execute('arguments[0].click()', [{ [ELEMENT_KEY]: element }]);
+            } catch (domClickError) {
+                throw new AggregateError(
+                    [nativeClickError, domClickError],
+                    'WebDriver native and DOM click paths both failed',
+                );
+            }
+        }
     }
 
     async clear(element: string): Promise<void> {

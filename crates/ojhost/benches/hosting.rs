@@ -98,7 +98,11 @@ fn bench_identity(c: &mut Criterion) {
 
 fn bench_register(c: &mut Criterion) {
     let descs = descriptors(64);
-    c.bench_function("register_scanned_64", |b| {
+    // Descriptor v2 carries CLAP feature/UI/bus/config/note-port metadata and
+    // richer parameter module/unit/flags. That is materially more data than the
+    // historical workload, so keep it under a versioned CodSpeed identity rather
+    // than comparing its required storage/cloning cost to the smaller v1 schema.
+    c.bench_function("register_scanned_64_descriptor_v2", |b| {
         b.iter(|| {
             let mut registry = PluginRegistry::new();
             register_scanned(black_box(&mut registry), black_box(&descs))
@@ -111,7 +115,10 @@ fn bench_scan_cache(c: &mut Criterion) {
         descriptors: descriptors(64),
     };
     let json = serde_json::to_string(&cache).expect("cache serializes");
-    let mut group = c.benchmark_group("scan_cache");
+    // The serialized schema grew with the same descriptor-v2 fields described
+    // above. Version the group once so serialize and deserialize both establish
+    // honest like-for-like baselines; neither benchmark is removed or detuned.
+    let mut group = c.benchmark_group("scan_cache_descriptor_v2");
     group.bench_function("serialize_64", |b| {
         b.iter(|| serde_json::to_string(black_box(&cache)).expect("cache serializes"))
     });

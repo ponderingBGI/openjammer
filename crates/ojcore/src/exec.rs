@@ -1301,7 +1301,11 @@ impl Engine {
                 // identical to the historical mono path.
                 for k in 0..port0.len() {
                     let src = self.program.routing[master].inputs[0][k];
-                    let delay = self.program.delay_routing[master][0][k];
+                    let delay = self
+                        .program
+                        .delay_routing
+                        .as_ref()
+                        .and_then(|routing| routing[master][0][k]);
                     let src_oc = self.program.out_channels[src.node].max(1) as usize;
                     let lane = src.port as usize * src_oc + ch.min(src_oc - 1);
                     let delayed = delay
@@ -1358,6 +1362,9 @@ impl Engine {
 
     fn advance_node_delays(&mut self, node: usize, source_offset: usize, nframes: usize) {
         let program = &mut self.program;
+        if program.delay_routing.is_none() {
+            return;
+        }
         program.delay_bank.advance_from(
             node,
             source_offset,
@@ -1489,7 +1496,10 @@ impl Engine {
             *d = 0.0;
         }
         for (source_index, src) in prog.routing[node].inputs[port].iter().enumerate() {
-            let delay = prog.delay_routing[node][port][source_index];
+            let delay = prog
+                .delay_routing
+                .as_ref()
+                .and_then(|routing| routing[node][port][source_index]);
             let src_oc = prog.out_channels[src.node].max(1) as usize;
             let src_lane = src.port as usize * src_oc + channel.min(src_oc - 1);
             let delayed =
@@ -1767,7 +1777,7 @@ mod apply_rt_tests {
             edge_delay: vec![0].into_boxed_slice(),
             preroll: 0,
             delay_bank: crate::compile::DelayBank::with_nodes(2),
-            delay_routing: vec![vec![], vec![vec![None]]],
+            delay_routing: Some(vec![vec![], vec![vec![None]]]),
         };
         (Engine::new(program), state)
     }
@@ -2051,7 +2061,7 @@ mod apply_rt_tests {
             edge_delay: Box::new([]),
             preroll: 0,
             delay_bank: crate::compile::DelayBank::with_nodes(2),
-            delay_routing: vec![vec![], vec![]],
+            delay_routing: Some(vec![vec![], vec![]]),
         };
         let mut engine = Engine::new(program);
         let ring = Arc::new(EventRing::new());
@@ -2213,7 +2223,7 @@ mod apply_rt_tests {
             edge_delay: vec![0].into_boxed_slice(),
             preroll: 0,
             delay_bank: crate::compile::DelayBank::with_nodes(2),
-            delay_routing: vec![vec![], vec![vec![None]]],
+            delay_routing: Some(vec![vec![], vec![vec![None]]]),
         };
         let mut engine = Engine::new(program);
 
@@ -2277,7 +2287,7 @@ mod apply_rt_tests {
             edge_delay: vec![0].into_boxed_slice(),
             preroll: 0,
             delay_bank: crate::compile::DelayBank::with_nodes(2),
-            delay_routing: vec![vec![], vec![vec![None]]],
+            delay_routing: Some(vec![vec![], vec![vec![None]]]),
         };
         let mut engine = Engine::new(program);
         engine.set_transport_ranges(Some((10, 14)), None);
@@ -2339,7 +2349,7 @@ mod apply_rt_tests {
             edge_delay: vec![0].into_boxed_slice(),
             preroll: 0,
             delay_bank: crate::compile::DelayBank::with_nodes(2),
-            delay_routing: vec![vec![], vec![vec![None]]],
+            delay_routing: Some(vec![vec![], vec![vec![None]]]),
         };
         let mut engine = Engine::new(program);
 
@@ -2444,7 +2454,7 @@ mod apply_rt_tests {
             edge_delay: vec![0, 0].into_boxed_slice(),
             preroll: 0,
             delay_bank: crate::compile::DelayBank::with_nodes(3),
-            delay_routing: vec![vec![], vec![vec![None]], vec![vec![None]]],
+            delay_routing: Some(vec![vec![], vec![vec![None]], vec![vec![None]]]),
         };
         let mut engine = Engine::new(program);
 

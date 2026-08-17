@@ -333,7 +333,9 @@ pub struct CompiledProgram {
     /// Materialized fixed delay lines for non-zero entries of `edge_delay`.
     pub delay_bank: DelayBank,
     /// Parallel to `routing[node].inputs[port][source]`: optional DelayBank edge.
-    pub(crate) delay_routing: Vec<Vec<Vec<Option<usize>>>>,
+    /// `None` is the zero-latency fast path: it avoids both the nested routing
+    /// allocation at compile time and delay lookups in every rendered block.
+    pub(crate) delay_routing: Option<Vec<Vec<Vec<Option<usize>>>>>,
 }
 
 impl CompiledProgram {
@@ -657,74 +659,103 @@ fn compile_inner(
         })
         .collect();
 
-    // Longest signal arrival at every node input (forward topological pass).
-    let mut arrival = vec![0u32; n];
-    for &node in &order {
-        let mut latest = 0u32;
-        for port in &routing[node].inputs {
-            for source in port {
-                latest = latest.max(arrival[source.node].saturating_add(latency[source.node]));
+    let audio_edge_count = graph
+        .edges
+        .iter()
+        .filter(|edge| edge.kind == ConnectionType::Audio)
+        .count();
+    let (arrival, to_master, edge_delay, preroll, delay_bank, delay_routing) = if latency
+        .iter()
+        .all(|samples| *samples == 0)
+    {
+        // Built-ins and the overwhelmingly common hosted-plugin graph report
+        // zero latency. Preserve the public PDC metadata, but skip the extra
+        // graph passes and nested per-port allocations entirely. The renderer
+        // recognizes `None` and stays on its historical no-delay hot path.
+        (
+            vec![0; n],
+            vec![0; n],
+            vec![0; audio_edge_count],
+            0,
+            DelayBank::default(),
+            None,
+        )
+    } else {
+        // Longest signal arrival at every node input (forward topological pass).
+        let mut arrival = vec![0u32; n];
+        for &node in &order {
+            let mut latest = 0u32;
+            for port in &routing[node].inputs {
+                for source in port {
+                    latest = latest.max(arrival[source.node].saturating_add(latency[source.node]));
+                }
+            }
+            arrival[node] = latest;
+        }
+
+        // Remaining processing latency through the master (reverse pass).
+        let mut consumers: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for edge in &graph.edges {
+            if edge.kind == ConnectionType::Audio {
+                let from = slot_of(edge.from_node).ok_or(CompileError::DanglingEdge)?;
+                let to = slot_of(edge.to_node).ok_or(CompileError::DanglingEdge)?;
+                consumers[from].push(to);
             }
         }
-        arrival[node] = latest;
-    }
+        let mut to_master = vec![0u32; n];
+        for &node in order.iter().rev() {
+            let downstream = consumers[node]
+                .iter()
+                .map(|&consumer| to_master[consumer])
+                .max()
+                .unwrap_or(0);
+            to_master[node] = latency[node].saturating_add(downstream);
+        }
+        let preroll = to_master.iter().copied().max().unwrap_or(0);
 
-    // Remaining processing latency from a node through its longest route to a
-    // consumer/master (reverse topological pass).
-    let mut consumers: Vec<Vec<usize>> = vec![Vec::new(); n];
-    for edge in &graph.edges {
-        if edge.kind == ConnectionType::Audio {
+        // One delay per audio edge. Graph order matches routing-source order.
+        let mut edge_delay = Vec::with_capacity(audio_edge_count);
+        let mut delay_bank = DelayBank::with_nodes(n);
+        let mut delay_routing: Vec<Vec<Vec<Option<usize>>>> = routing
+            .iter()
+            .map(|route| {
+                route
+                    .inputs
+                    .iter()
+                    .map(|sources| vec![None; sources.len()])
+                    .collect()
+            })
+            .collect();
+        let mut route_cursor: Vec<Vec<usize>> = routing
+            .iter()
+            .map(|route| vec![0; route.inputs.len()])
+            .collect();
+        for edge in &graph.edges {
+            if edge.kind != ConnectionType::Audio {
+                continue;
+            }
             let from = slot_of(edge.from_node).ok_or(CompileError::DanglingEdge)?;
             let to = slot_of(edge.to_node).ok_or(CompileError::DanglingEdge)?;
-            consumers[from].push(to);
+            let port = edge.to_port as usize;
+            let samples = arrival[to].saturating_sub(arrival[from].saturating_add(latency[from]));
+            edge_delay.push(samples);
+            let source_index = route_cursor[to][port];
+            route_cursor[to][port] += 1;
+            if samples != 0 {
+                let channels = out_channels[from].max(1) as usize;
+                let delay = delay_bank.add(from, edge.from_port, channels, samples, block_size);
+                delay_routing[to][port][source_index] = Some(delay);
+            }
         }
-    }
-    let mut to_master = vec![0u32; n];
-    for &node in order.iter().rev() {
-        let downstream = consumers[node]
-            .iter()
-            .map(|&consumer| to_master[consumer])
-            .max()
-            .unwrap_or(0);
-        to_master[node] = latency[node].saturating_add(downstream);
-    }
-    let preroll = to_master.iter().copied().max().unwrap_or(0);
-
-    // One delay per audio edge. The graph walk is in the same order used above
-    // to append routing sources, so per-port cursors identify the exact Source.
-    let mut edge_delay = Vec::new();
-    let mut delay_bank = DelayBank::with_nodes(n);
-    let mut delay_routing: Vec<Vec<Vec<Option<usize>>>> = routing
-        .iter()
-        .map(|route| {
-            route
-                .inputs
-                .iter()
-                .map(|sources| vec![None; sources.len()])
-                .collect()
-        })
-        .collect();
-    let mut route_cursor: Vec<Vec<usize>> = routing
-        .iter()
-        .map(|route| vec![0; route.inputs.len()])
-        .collect();
-    for edge in &graph.edges {
-        if edge.kind != ConnectionType::Audio {
-            continue;
-        }
-        let from = slot_of(edge.from_node).ok_or(CompileError::DanglingEdge)?;
-        let to = slot_of(edge.to_node).ok_or(CompileError::DanglingEdge)?;
-        let port = edge.to_port as usize;
-        let samples = arrival[to].saturating_sub(arrival[from].saturating_add(latency[from]));
-        edge_delay.push(samples);
-        let source_index = route_cursor[to][port];
-        route_cursor[to][port] += 1;
-        if samples != 0 {
-            let channels = out_channels[from].max(1) as usize;
-            let delay = delay_bank.add(from, edge.from_port, channels, samples, block_size);
-            delay_routing[to][port][source_index] = Some(delay);
-        }
-    }
+        (
+            arrival,
+            to_master,
+            edge_delay,
+            preroll,
+            delay_bank,
+            Some(delay_routing),
+        )
+    };
 
     // Pre-size the hot-path scratch: one mix row per input LANE (audio ports ×
     // channels) of the widest node, and channel-pointer arrays as wide as the
