@@ -75,6 +75,15 @@ describe('arrangementStore — the timeline SSOT + command-log', () => {
         expect(store().arrangement!.tracks[0]!.mute).toBe(true);
     });
 
+    it('bumps docVersion when a song is loaded (the crash backup must arm)', () => {
+        // The emergency crash backup schedules off getDocumentVersion(); loading
+        // a starter IS a document change, or a SIGKILL right after "Start from …"
+        // has nothing to restore (the N2 native journey reproduced that loss).
+        const initialVersion = store().docVersion;
+        store().setArrangement(seed);
+        expect(store().docVersion).toBe(initialVersion + 1);
+    });
+
     it('bumps docVersion on apply/undo/redo but not transport or selection', () => {
         const initialVersion = store().docVersion;
         const trackId = store().arrangement!.tracks[0]!.id!;

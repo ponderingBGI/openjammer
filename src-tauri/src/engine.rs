@@ -975,23 +975,28 @@ impl EngineBackend {
     /// the audio thread. Decodes the compact wire frames the audio thread pushed.
     ///
     /// SINGLE CONSUMER, ALL TAGS: the meter ring is one SPSC queue, so this is the
-    /// only place the wire frames are decoded. It surfaces both `Meter` frames
-    /// (the signal-level stream consumes their peaks) AND `Looper` frames (the
-    /// looper UI consumes their transport snapshot) — folding both into one drain
-    /// keeps a single ring consumer (a second drainer would race-steal frames).
-    /// `Beat` still rides the transport path and is filtered out here.
+    /// only place the wire frames are decoded. It surfaces `Meter` frames (the
+    /// signal-level stream consumes their peaks), `Looper` frames (the looper UI
+    /// consumes their transport snapshot), AND `Transport` frames (the
+    /// arrangement playhead's authoritative position — the frontend's
+    /// `routeTransportFrames` reads them from this very drain; on the browser
+    /// tier the worklet posts the same snapshot as a dedicated `frame` message).
+    /// Folding all three into one drain keeps a single ring consumer (a second
+    /// drainer would race-steal frames). `Beat` has no frontend consumer on this
+    /// tier and stays filtered.
     pub fn drain_meters(&mut self) -> Vec<EngineFrame> {
         self.poll_latency_rescan();
         let mut out = Vec::new();
         let mut buf = [0u8; return_frame::MAX_LEN];
         while let Some(n) = self.meter_ring.pop(&mut buf) {
             if let Some(frame) = return_frame::decode(&buf[..n]) {
-                // Surface Meter + Looper frames here (Beat goes via the transport
-                // path). One drain decodes every tag because there is exactly one
+                // One drain decodes every tag because there is exactly one
                 // consumer of the meter ring.
                 if matches!(
                     frame,
-                    EngineFrame::Meter { .. } | EngineFrame::Looper { .. }
+                    EngineFrame::Meter { .. }
+                        | EngineFrame::Looper { .. }
+                        | EngineFrame::Transport { .. }
                 ) {
                     out.push(frame);
                 }
@@ -1905,24 +1910,32 @@ mod tests {
         assert!(be.metering);
     }
 
-    /// `drain_meters` surfaces `Meter` AND `Looper` frames (one ring, one consumer,
-    /// all tags), and filters out `Beat` (it rides the transport path). With no
-    /// audio device the ring is otherwise empty, so the drain never panics.
+    /// `drain_meters` surfaces `Meter`, `Looper`, AND `Transport` frames (one
+    /// ring, one consumer, all tags) — the Transport snapshot is what moves the
+    /// arrangement playhead on the native tier — and filters out `Beat` (no
+    /// frontend consumer). With no audio device the ring is otherwise empty, so
+    /// the drain never panics.
     #[test]
     fn drain_meters_decodes_meter_and_looper_frames() {
         let mut be = EngineBackend::new();
-        // Drain any frames a live audio device (present in this sandbox) already
-        // published, so the assertions only see the frames we push below — the test
-        // must be deterministic with OR without a device.
+        // `host = None` so this is deterministic on a dev box that DOES have a
+        // device: the ring is SPSC and the live audio thread is its producer —
+        // this test pushing alongside it would be a second producer (torn
+        // frames, spurious failures). Dropping the host stops that thread; then
+        // drain whatever it already published so the assertions only see the
+        // frames pushed below.
+        be.host = None;
         let _ = be.drain_meters();
-        // Push one Meter, one Looper, and one Beat frame directly onto the ring
-        // (simulating the audio thread's publish), then drain.
+        // Push one Meter, one Looper, one Beat, and one Transport frame directly
+        // onto the ring (simulating the audio thread's publish), then drain.
         let mut buf = [0u8; return_frame::MAX_LEN];
         let n = return_frame::encode_meter(NodeIdx(5), 0.1, 0.8, &mut buf);
         assert!(be.meter_ring.push(&buf[..n]));
         let n = return_frame::encode_looper(NodeIdx(9), 3, 240, 480, 0.5, &mut buf);
         assert!(be.meter_ring.push(&buf[..n]));
         let n = return_frame::encode_beat(1, 2, 0.5, &mut buf);
+        assert!(be.meter_ring.push(&buf[..n]));
+        let n = return_frame::encode_transport(4_800, 960, 3, 4, 0.25, 1, true, true, &mut buf);
         assert!(be.meter_ring.push(&buf[..n]));
 
         let frames = be.drain_meters();
@@ -1953,6 +1966,32 @@ mod tests {
                 assert!((peak - 0.5).abs() < 1e-6);
             }
             other => panic!("expected the pushed Looper frame, got {other:?}"),
+        }
+
+        // The Transport frame survives — it is the playhead's only source on
+        // this tier. Assert on the SPECIFIC frame we pushed (sample=4_800), so a
+        // live device's own transport frames can't confuse the assertion.
+        let transport = frames
+            .iter()
+            .find(|f| matches!(f, EngineFrame::Transport { sample: 4_800, .. }));
+        match transport {
+            Some(EngineFrame::Transport {
+                tick,
+                bar,
+                beat,
+                motion,
+                rec,
+                loop_on,
+                ..
+            }) => {
+                assert_eq!(*tick, 960);
+                assert_eq!(*bar, 3);
+                assert_eq!(*beat, 4);
+                assert_eq!(*motion, 1);
+                assert!(*rec);
+                assert!(*loop_on);
+            }
+            other => panic!("expected the pushed Transport frame, got {other:?}"),
         }
 
         // No Beat frame from OUR push survives the filter (a device may still emit

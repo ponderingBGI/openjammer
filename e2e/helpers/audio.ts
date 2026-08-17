@@ -31,10 +31,19 @@ export function decodeWav(buffer: ArrayBuffer): DecodedWav {
         const length = view.getUint32(offset + 4, true);
         const body = offset + 8;
         if (body + length > view.byteLength) throw new Error(`WAV ${id} chunk extends past the file`);
-        if (id === 'fmt ') format = {
-            audioFormat: view.getUint16(body, true), channels: view.getUint16(body + 2, true),
-            sampleRate: view.getUint32(body + 4, true), bits: view.getUint16(body + 14, true),
-        };
+        if (id === 'fmt ') {
+            format = {
+                audioFormat: view.getUint16(body, true), channels: view.getUint16(body + 2, true),
+                sampleRate: view.getUint32(body + 4, true), bits: view.getUint16(body + 14, true),
+            };
+            // WAVE_FORMAT_EXTENSIBLE (0xfffe) wraps the real codec in a GUID
+            // SubFormat whose first two bytes are the classic format tag. hound
+            // (the native bounce's encoder) emits this container for 24-bit PCM,
+            // so honour it exactly like format 1 when the wrapped codec IS PCM.
+            if (format.audioFormat === 0xfffe && length >= 40) {
+                format.audioFormat = view.getUint16(body + 24, true);
+            }
+        }
         if (id === 'data') { dataOffset = body; dataLength = length; break; }
         offset = body + length + (length & 1);
     }

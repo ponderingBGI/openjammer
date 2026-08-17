@@ -299,6 +299,13 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             previewBase = null;
             idCounter = normalized ? seedCounter(normalized) : 1;
             set({
+                // Loading a song IS an authoring-document change: the emergency
+                // crash backup keys off `getDocumentVersion()`, and without this
+                // bump a freshly opened starter was never backed up at all — a
+                // SIGKILL right after "Start from …" lost the whole song (N2's
+                // recovery journey reproduced exactly that: crash detected, no
+                // payload to restore). Transport/selection resets still don't bump.
+                docVersion: get().docVersion + 1,
                 arrangement: normalized,
                 selectedClipId: null,
                 selectedNoteIds: [],
