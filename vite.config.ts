@@ -8,6 +8,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 // app boots in `tauri dev` / `vite dev`. They are build-safe too.
 import wasm from 'vite-plugin-wasm'
 import topLevelAwait from 'vite-plugin-top-level-await'
+import { createSocket, type RemoteInfo } from 'node:dgram'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
@@ -88,11 +89,63 @@ function simulateE2EOriginOutage(): Plugin {
   }
 }
 
+const STUN_BINDING_REQUEST = 0x0001
+const STUN_BINDING_SUCCESS = 0x0101
+const STUN_MAGIC_COOKIE = 0x2112a442
+const STUN_XOR_MAPPED_ADDRESS = 0x0020
+
+function stunBindingResponse(request: Buffer, remote: RemoteInfo): Buffer | null {
+  if (request.length < 20) return null
+  if (request.readUInt16BE(0) !== STUN_BINDING_REQUEST) return null
+  if (request.readUInt32BE(4) !== STUN_MAGIC_COOKIE) return null
+  const octets = remote.address.split('.').map(Number)
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return null
+
+  // RFC 5389 Binding Success with one IPv4 XOR-MAPPED-ADDRESS attribute.
+  const response = Buffer.alloc(32)
+  response.writeUInt16BE(STUN_BINDING_SUCCESS, 0)
+  response.writeUInt16BE(12, 2)
+  request.copy(response, 4, 4, 20) // magic cookie + transaction id
+  response.writeUInt16BE(STUN_XOR_MAPPED_ADDRESS, 20)
+  response.writeUInt16BE(8, 22)
+  response[24] = 0
+  response[25] = 0x01
+  response.writeUInt16BE(remote.port ^ (STUN_MAGIC_COOKIE >>> 16), 26)
+  for (let index = 0; index < 4; index += 1) {
+    response[28 + index] = octets[index]! ^ request[4 + index]!
+  }
+  return response
+}
+
+// A loopback STUN responder gives every engine a routable, non-mDNS candidate
+// without depending on public UDP egress. In particular, Firefox can suppress
+// host candidates on hosted runners and WebKit isolates mDNS names by context.
+function serveE2ELoopbackStun(): Plugin {
+  return {
+    name: 'oj-e2e-loopback-stun',
+    configurePreviewServer(server) {
+      const port = Number(process.env.OJ_E2E_STUN_PORT)
+      if (!Number.isInteger(port) || port <= 0 || port > 65_535) return
+      const socket = createSocket('udp4')
+      socket.on('message', (request, remote) => {
+        const response = stunBindingResponse(request, remote)
+        if (response) socket.send(response, remote.port, remote.address)
+      })
+      socket.on('error', (error) => {
+        server.config.logger.error(`E2E loopback STUN failed: ${error.message}`)
+      })
+      socket.bind(port, '127.0.0.1')
+      server.httpServer?.once('close', () => socket.close())
+    },
+  }
+}
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkgVersion),
   },
   plugins: [
+    serveE2ELoopbackStun(),
     simulateE2EOriginOutage(),
     serveDownloadPage(),
     wasm(),

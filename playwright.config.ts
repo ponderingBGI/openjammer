@@ -49,7 +49,11 @@ export default defineConfig({
     webServer: {
         command: `bun run build && bun run preview --port ${PORT} --strictPort`,
         url: `http://localhost:${PORT}`,
-        env: { OJ_E2E_ORIGIN_OUTAGE: '1' },
+        env: {
+            OJ_E2E_ORIGIN_OUTAGE: '1',
+            OJ_E2E_STUN_PORT: '3478',
+            VITE_OJ_E2E_STUN_URL: 'stun:127.0.0.1:3478',
+        },
         reuseExistingServer: !process.env.CI,
         timeout: 180_000,
     },

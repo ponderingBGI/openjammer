@@ -35,6 +35,8 @@ interface E2EBridge {
 }
 
 const clone = <T>(value: T): T => structuredClone(value);
+const e2eStunUrl = import.meta.env.VITE_OJ_E2E_STUN_URL as string | undefined;
+const e2eIceServers: RTCIceServer[] = e2eStunUrl ? [{ urls: e2eStunUrl }] : [];
 
 export function installE2EBridge(): void {
     if (typeof window === 'undefined' || !navigator.webdriver) return;
@@ -59,17 +61,18 @@ export function installE2EBridge(): void {
         },
         hostCollab: (name) => useCollabStore.getState().hostSession({ name, transport: 'broadcast-channel' }),
         joinCollab: (sessionCode, name) => useCollabStore.getState().joinSession(sessionCode, { name, transport: 'broadcast-channel' }),
-        // These contexts share one host, so host candidates are sufficient. Do
-        // not make a deterministic CRDT journey depend on public STUN egress.
+        // Use the preview process's loopback STUN responder. This preserves real
+        // ICE/DataChannel behavior without depending on public UDP egress or on
+        // browser-specific exposure/resolution of private host candidates.
         hostCollabWebRTC: (name) => useCollabStore.getState().hostSession({
             name,
             transport: 'webrtc-manual',
-            webrtcOptions: { iceServers: [] },
+            webrtcOptions: { iceServers: e2eIceServers },
         }),
         joinCollabWebRTC: (sessionCode, name) => useCollabStore.getState().joinSession(sessionCode, {
             name,
             transport: 'webrtc-manual',
-            webrtcOptions: { iceServers: [] },
+            webrtcOptions: { iceServers: e2eIceServers },
         }),
         createCollabOffer: async () => {
             const transport = useCollabStore.getState().webrtcTransport;
