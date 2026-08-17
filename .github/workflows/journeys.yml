@@ -18,10 +18,9 @@ jobs:
   journeys:
     name: Journeys (${{ matrix.engine }}, shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    # Match the Playwright package exactly and give every engine the supported,
-    # reproducible Linux network/runtime environment. In particular, Firefox
-    # needs the container's ordinary eth0 interface to gather real host ICE
-    # candidates; GitHub's hosted VM interfaces yielded none on Linux or macOS.
+    # Match the Playwright package exactly and give every engine its supported,
+    # reproducible Linux runtime. J7 also uses the container's ordinary eth0
+    # interface, exposed by the explicit preview host in playwright.config.ts.
     container:
       image: mcr.microsoft.com/playwright@sha256:57b65fdc9ceabe0ef613124c7bbe2babcf9362c4d85e382fe3b03604e84b428a # v1.61.0-noble
       options: --user pwuser

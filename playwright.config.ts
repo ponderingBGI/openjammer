@@ -59,7 +59,11 @@ export default defineConfig({
             : []),
     ],
     webServer: {
-        command: `bun run build && bun run preview --port ${PORT} --strictPort`,
+        // Firefox filters loopback ICE candidates. Binding preview only to
+        // localhost therefore leaves a data-channel-only peer connection in
+        // `new` forever in Linux containers; expose the container interface so
+        // Firefox can gather the routable host candidate used by J7.
+        command: `bun run build && bun run preview --host 0.0.0.0 --port ${PORT} --strictPort`,
         url: `http://localhost:${PORT}`,
         env: {
             OJ_E2E_ORIGIN_OUTAGE: '1',
