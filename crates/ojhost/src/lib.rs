@@ -51,8 +51,10 @@ pub use node::{
     PluginHostNode, PLUGIN_HOST_ID,
 };
 pub use scan::{
-    candidate_paths, clap_plugin_dirs, default_plugin_dirs, probe_candidate, scan, scan_with,
-    Blacklist, ProbeHelperResponse, ScanCache,
+    candidate_paths, clap_plugin_dirs, clear_crash_marker, default_plugin_dirs,
+    default_reliability_dir, probe_candidate, recover_crash_marker, scan, scan_with,
+    set_scan_helper_path, write_crash_marker, Blacklist, ProbeHelperResponse, QuarantineEntry,
+    ScanCache,
 };
 
 use ojcore::PluginRegistry;

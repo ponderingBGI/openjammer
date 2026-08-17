@@ -61,6 +61,7 @@ clack-host = { version = "0.1.0", optional = true }
 clack-extensions = { version = "0.1.0", optional = true, features = ["clack-host", "audio-ports", "audio-ports-config", "latency", "note-ports", "params", "state", "tail"] }
 
 [dev-dependencies]
+ojcore = { path = "../ojcore", features = ["std"] }
 # CodSpeed-compatible criterion: plain criterion locally, instruction-count +
 # allocation instrumented in CI. Benchmarks the hosted-plugin control plane that
 # must stay off-RT but still instant for live use (scan cache, ids, registration).

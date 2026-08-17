@@ -306,6 +306,13 @@ pub trait DspInstance: Send {
         false
     }
 
+    /// Latched output-boundary fault reported by a hosted node. This is a
+    /// single RT-safe field read; the engine transports it through the existing
+    /// `NodeFault` ring. Built-ins leave it empty.
+    fn runtime_fault(&self) -> Option<ojproto::FaultKind> {
+        None
+    }
+
     /// Clear internal state (filter memory, delay lines, phase). Default no-op.
     fn reset(&mut self) {}
 }

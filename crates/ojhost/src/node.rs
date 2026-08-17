@@ -12,6 +12,7 @@
 //! after [`DspInstance::activate`].
 
 use std::sync::Mutex;
+use std::time::Duration;
 
 use ojcore::{DspInstance, ParamDecl, PluginLoader, PluginManifest, PortDecl, ProcessCtx};
 use ojcore::{DspKind, ExtId, LatencyExt, StateSave, TailExt, UiKind};
@@ -50,6 +51,7 @@ fn fnv1a32_hex(bytes: &[u8]) -> String {
 pub struct HostedPlugin {
     backend: Box<dyn HostedBackend>,
     descriptor: PluginDescriptor,
+    output_faulted: bool,
 }
 
 /// Opaque plugin state paired with a deterministic content address.
@@ -82,6 +84,37 @@ impl PluginEditor {
 }
 
 impl HostedPlugin {
+    /// Load and activate on a disposable control worker, bounded by `timeout`.
+    /// The audio thread never waits for main-thread plugin work. Rust cannot
+    /// safely kill a thread stuck in foreign activation code, so a timed-out
+    /// worker is detached and its instance is discarded if it eventually
+    /// returns; process isolation is required to reclaim a permanently wedged
+    /// activation call.
+    pub fn load_with_activation_timeout(
+        desc: &PluginDescriptor,
+        sample_rate: f32,
+        max_block: usize,
+        timeout: Duration,
+    ) -> Result<Self, HostError> {
+        let descriptor = desc.clone();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("ojhost-activate".into())
+            .spawn(move || {
+                let result = Self::load(&descriptor, sample_rate, max_block).map(|mut plugin| {
+                    plugin.activate(sample_rate, max_block);
+                    plugin
+                });
+                let _ = tx.send(result);
+            })
+            .map_err(|error| HostError::Load {
+                message: format!("failed to spawn activation worker: {error}"),
+            })?;
+        rx.recv_timeout(timeout).map_err(|_| HostError::Load {
+            message: format!("plugin activation exceeded {} ms", timeout.as_millis()),
+        })?
+    }
+
     /// Instantiate the plugin described by `desc`, leaving it inactive so state
     /// can be restored before [`HostedPlugin::activate`]. Returns
     /// [`HostError::Unavailable`] in the scaffold build (no
@@ -95,6 +128,7 @@ impl HostedPlugin {
         Ok(Self {
             backend,
             descriptor: desc.clone(),
+            output_faulted: false,
         })
     }
 
@@ -127,6 +161,15 @@ impl HostedPlugin {
 
     pub fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], nframes: usize) {
         self.backend.process(inputs, outputs, nframes);
+        for output in outputs {
+            let n = nframes.min(output.len());
+            self.output_faulted |= ojcore::sanitize(&mut output[..n]);
+        }
+    }
+
+    /// Consume the OutputGuard fault latch.
+    pub fn take_output_fault(&mut self) -> bool {
+        core::mem::take(&mut self.output_faulted)
     }
 
     pub fn queue_event(&mut self, event: HostedEvent) {
@@ -172,6 +215,10 @@ impl HostedPlugin {
     pub fn restore_state(&mut self, bytes: &[u8]) {
         self.backend.restore_state(bytes);
     }
+
+    pub fn restore_state_checked(&mut self, bytes: &[u8]) -> bool {
+        self.backend.restore_state_checked(bytes)
+    }
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -200,6 +247,8 @@ pub struct PluginHostNode {
     /// the plugin — the crash latch (mirrors `ojwasm`'s `bypassed`). Cleared only by
     /// a fresh `instantiate` on the next off-RT graph swap.
     faulted: bool,
+    /// The host-boundary OutputGuard had to scrub or clamp foreign audio.
+    output_faulted: bool,
 }
 
 impl PluginHostNode {
@@ -212,6 +261,7 @@ impl PluginHostNode {
             latency,
             tail,
             faulted: false,
+            output_faulted: false,
         }
     }
 
@@ -262,6 +312,16 @@ impl DspInstance for PluginHostNode {
         if faulted {
             self.faulted = true;
             dry_passthrough(ctx);
+        } else {
+            // The guard lives here, at the last point foreign samples exist
+            // before joining the graph. NaN/Inf and denormals become zero;
+            // excessive finite output is hard-clamped to +/-4 headroom.
+            for output in ctx.outputs.iter_mut() {
+                let n = ctx.nframes.min(output.len());
+                if ojcore::sanitize(&mut output[..n]) {
+                    self.output_faulted = true;
+                }
+            }
         }
     }
 
@@ -279,6 +339,10 @@ impl DspInstance for PluginHostNode {
 
     fn runtime_degraded(&self) -> bool {
         self.faulted
+    }
+
+    fn runtime_fault(&self) -> Option<ojproto::FaultKind> {
+        self.output_faulted.then_some(ojproto::FaultKind::NonFinite)
     }
 
     /// Provide the `oj.state` capability (save half): a caller downcasts the
@@ -415,7 +479,12 @@ impl PluginLoader for PluginHostLoader {
     }
 
     fn instantiate(&self, sample_rate: f32, max_block: usize) -> Box<dyn DspInstance> {
-        match HostedPlugin::load(&self.descriptor, sample_rate, max_block) {
+        match HostedPlugin::load_with_activation_timeout(
+            &self.descriptor,
+            sample_rate,
+            max_block,
+            Duration::from_millis(500),
+        ) {
             Ok(plugin) => Box::new(PluginHostNode::new(plugin)),
             Err(e) => {
                 if let Ok(mut slot) = self.last_error.lock() {
@@ -644,6 +713,7 @@ mod tests {
                 fault_at: 2,
             }),
             descriptor: sample_desc(0),
+            output_faulted: false,
         };
         let mut node = PluginHostNode::new(plugin);
         node.activate(48_000.0, 64);
@@ -724,6 +794,7 @@ mod tests {
                 blob: vec![9, 8, 7],
             }),
             descriptor: sample_desc(0),
+            output_faulted: false,
         });
         let any = node
             .extension(ExtId::State)
@@ -743,6 +814,7 @@ mod tests {
         let mut fresh = PluginHostNode::new(HostedPlugin {
             backend: Box::new(StatefulBackend { blob: Vec::new() }),
             descriptor: sample_desc(0),
+            output_faulted: false,
         });
         fresh.restore_state(&[1, 2, 3]);
         let restored = fresh.extension(ExtId::State).unwrap();

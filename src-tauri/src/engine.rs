@@ -45,7 +45,9 @@ use ojcore_native::{
     AssetStore, AudioHost, DeviceFault, DeviceFaultRx, DeviceListener, DeviceSupervisor,
     DeviceWatcher, HostError, LogRecord, LogStore, Pcm, RecoveryAction, StreamRequest,
 };
-use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
+use ojhost::{
+    register_scanned, scan_with, Blacklist, HostError as PluginHostError, PluginDescriptor,
+};
 use ojinstrument::{register_all, RegisterOpts};
 use ojproto::{
     AssetId, AssetRef, EngineFrame, Event, EventKind, NodeIdx, OjGraph, RtCommand, RtEvent,
@@ -1513,7 +1515,19 @@ impl EngineBackend {
         // backend that sees the binaries but can't host them (vs. nothing
         // installed) — the only way to tell those apart after the fact.
         let candidates = ojhost::candidate_paths(dirs).len();
-        let found = scan(dirs).map_err(BackendError::PluginScan)?;
+        // The helper child owns all foreign scan code. Its crash/timeout reason
+        // and count survive app restarts; clean descriptors are cached beside it.
+        let reliability_dir = ojhost::default_reliability_dir();
+        if let Ok(executable) = std::env::current_exe() {
+            let _ = ojhost::set_scan_helper_path(executable);
+        }
+        let mut quarantine = Blacklist::load(reliability_dir.join("quarantine.tsv"));
+        let found = scan_with(
+            dirs,
+            &mut quarantine,
+            Some(&reliability_dir.join("scan-cache.json")),
+        )
+        .map_err(BackendError::PluginScan)?;
         tracing::info!(
             target: "engine",
             backend = ojhost::HostingBackend::current().slug(),

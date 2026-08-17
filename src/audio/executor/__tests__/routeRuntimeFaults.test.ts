@@ -6,8 +6,8 @@
  * SAME non-modal "(missing/crashed plugin)" badge the load-degraded path drives
  * (`setNodePluginLoadError`). Two invariants matter:
  *
- *  1. Only `NodeFault` with `fault === 'Crashed'` badges; transient NonFinite /
- *     OverBudget / watchdog AutoBypassed do NOT (they stay in the DevLog).
+ *  1. Terminal `Crashed` and watchdog `AutoBypassed` faults badge; transient
+ *     NonFinite / OverBudget stay in the DevLog.
  *  2. It is SET-ONLY — clearing is owned by the next clean `push_graph`, so a
  *     fresh instantiate on a graph swap auto-clears. (Verified by the executor
  *     degraded-id loop elsewhere; here we assert the tap only ever sets true.)
@@ -68,10 +68,16 @@ describe('routeRuntimeFaults', () => {
         expect(flag(id)).toBe(true);
     });
 
-    it('does NOT badge on transient faults (NonFinite / OverBudget / AutoBypassed)', () => {
+    it('badges the node on a NodeFault{AutoBypassed}', () => {
+        const id = addEffect();
+        routeRuntimeFaults([nodeFault(5, 'AutoBypassed')], (n) => (n === 5 ? id : undefined));
+        expect(flag(id)).toBe(true);
+    });
+
+    it('does NOT badge on transient faults (NonFinite / OverBudget)', () => {
         const id = addEffect();
         routeRuntimeFaults(
-            [nodeFault(5, 'NonFinite'), nodeFault(5, 'OverBudget'), nodeFault(5, 'AutoBypassed')],
+            [nodeFault(5, 'NonFinite'), nodeFault(5, 'OverBudget')],
             () => id,
         );
         expect(flag(id)).toBeUndefined();

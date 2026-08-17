@@ -299,12 +299,15 @@ struct PluginEditorState(Mutex<HashMap<String, PluginEditor>>);
 
 #[tauri::command]
 fn plugin_quarantine_reset() -> Result<(), String> {
-    let pedal = std::env::temp_dir().join("ojhost_dead_mans_pedal.txt");
-    match std::fs::remove_file(&pedal) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.to_string()),
+    let dir = ojhost::default_reliability_dir();
+    for name in ["quarantine.tsv", "scan-cache.json"] {
+        match std::fs::remove_file(dir.join(name)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
     }
+    Ok(())
 }
 
 #[tauri::command]

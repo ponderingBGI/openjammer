@@ -18,7 +18,7 @@
 //! mock engine and a real command ring — no audio device required.
 
 use std::mem::ManuallyDrop;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -568,6 +568,11 @@ pub struct AudioHost {
     /// take's true samples on its commit edge. The RT thread owns only the sink
     /// half (moved into the callback); this `Mutex` is contended off-RT only.
     looper_capture: Arc<Mutex<LooperCapture>>,
+    /// Monotonic completed-callback heartbeat. The control side compares
+    /// snapshots; if it stops advancing for multiple device periods, the RT
+    /// callback is wedged. This detects but cannot preempt foreign in-process
+    /// code—the recovery action is an off-RT graph/stream replacement.
+    heartbeat: Arc<AtomicU64>,
 }
 
 impl Drop for AudioHost {
@@ -672,6 +677,10 @@ struct StartOptions {
 }
 
 impl AudioHost {
+    /// Completed audio-callback count for off-RT liveness supervision.
+    pub fn heartbeat(&self) -> u64 {
+        self.heartbeat.load(Ordering::Acquire)
+    }
     /// The negotiated output [`StreamConfig`] (channels / sample rate / buffer).
     pub fn config(&self) -> &StreamConfig {
         &self.config
@@ -1039,6 +1048,8 @@ impl AudioHost {
             Recorder::with_default_ring(1, config.sample_rate);
         let capture_armed = Arc::new(AtomicBool::new(false));
         let cap_armed_cb = Arc::clone(&capture_armed);
+        let heartbeat = Arc::new(AtomicU64::new(0));
+        let heartbeat_cb = Arc::clone(&heartbeat);
         // Per-looper PCM capture (Stage 3): the SINK (RT producer) moves into the
         // callback and streams each recording looper's block; the demuxer is
         // drained off-RT by the same `drain_thread` below. Unlike the master
@@ -1135,6 +1146,7 @@ impl AudioHost {
                             None,
                         ),
                     }
+                    heartbeat_cb.fetch_add(1, Ordering::Release);
                 },
                 err_fn,
                 None,
@@ -1191,6 +1203,7 @@ impl AudioHost {
             drain_stop,
             drain_thread: Some(drain_thread),
             looper_capture,
+            heartbeat,
         })
     }
 

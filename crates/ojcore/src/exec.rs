@@ -75,6 +75,12 @@ pub struct Engine {
     /// wasm worklet never arms it).
     #[cfg(feature = "std")]
     pub(crate) watchdog: Option<crate::resilience::Watchdog>,
+    /// Consecutive watchdog overruns, and the latched automatic bypass state.
+    /// Sized off-RT and only mutated by the audio thread.
+    watchdog_streak: Vec<u8>,
+    auto_bypassed: Vec<bool>,
+    auto_bypass_fade: Vec<usize>,
+    auto_bypass_tail: Vec<f32>,
     /// U15: optional RT -> control return ring for `Meter` / `Beat` frames. The
     /// control thread holds the other handle and drains it. `None` => the engine
     /// computes meters but publishes nothing (host-side return path, std-only).
@@ -134,6 +140,10 @@ impl Engine {
             budget: NodeBudget::with_nodes(n),
             #[cfg(feature = "std")]
             watchdog: None,
+            watchdog_streak: vec![0; n],
+            auto_bypassed: vec![false; n],
+            auto_bypass_fade: vec![0; n],
+            auto_bypass_tail: vec![0.0; n],
             #[cfg(feature = "std")]
             meter_ring: None,
             #[cfg(feature = "std")]
@@ -410,6 +420,24 @@ impl Engine {
         &mut self.budget
     }
 
+    /// Whether `node` is latched into watchdog bypass for this program.
+    pub fn is_auto_bypassed(&self, node: ojproto::NodeIdx) -> bool {
+        self.program
+            .slot_of_id(node)
+            .and_then(|slot| self.auto_bypassed.get(slot))
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Off-RT diagnostic mask of notes currently owned by `node`.
+    pub fn held_notes_mask(&self, node: ojproto::NodeIdx) -> u128 {
+        self.program
+            .slot_of_id(node)
+            .and_then(|slot| self.held.get(slot))
+            .copied()
+            .unwrap_or(0)
+    }
+
     /// Arm the per-block CPU watchdog (std-only). Each node gets `budget_ns`
     /// nanoseconds per block; if `auto_bypass` is set, an over-budget node is
     /// flagged AND bypassed so a runaway node degrades to silence instead of
@@ -417,6 +445,7 @@ impl Engine {
     #[cfg(feature = "std")]
     pub fn set_watchdog(&mut self, watchdog: Option<crate::resilience::Watchdog>) {
         self.watchdog = watchdog;
+        self.watchdog_streak.fill(0);
     }
 
     /// Attach a RT -> control return ring so the engine publishes `Meter` /
@@ -769,6 +798,14 @@ impl Engine {
         self.budget.resize(n);
         self.held.clear();
         self.held.resize(n, 0);
+        self.watchdog_streak.clear();
+        self.watchdog_streak.resize(n, 0);
+        self.auto_bypassed.clear();
+        self.auto_bypassed.resize(n, false);
+        self.auto_bypass_fade.clear();
+        self.auto_bypass_fade.resize(n, 0);
+        self.auto_bypass_tail.clear();
+        self.auto_bypass_tail.resize(n, 0.0);
         self.timeline_cursors.clear();
         self.timeline_cursors.resize(n, 0);
         let old = core::mem::replace(&mut self.program, program);
@@ -1127,6 +1164,13 @@ impl Engine {
                 continue;
             }
 
+            if self.auto_bypassed[node] {
+                self.render_auto_bypass(node, output_offset, nframes);
+                self.meter_node(node, nframes);
+                self.advance_node_delays(node, 0, nframes);
+                continue;
+            }
+
             // U16 watchdog: time the render (std-only; disarmed => no timing).
             #[cfg(feature = "std")]
             let timed = {
@@ -1141,23 +1185,34 @@ impl Engine {
             self.render_node(node, output_offset, nframes);
 
             #[cfg(feature = "std")]
+            if let Some(fault) = self.program.instances[node].runtime_fault() {
+                self.emit_node_fault(node, fault);
+            }
+
+            #[cfg(feature = "std")]
             if timed {
                 // `as_mut` again to release the earlier borrow across `render_node`.
                 let over = self.watchdog.as_mut().map(|w| w.check()).unwrap_or(false);
                 if over {
                     self.budget.over_budget[node] = true;
                     self.emit_node_fault(node, ojproto::FaultKind::OverBudget);
-                    if self.watchdog.map(|w| w.auto_bypass).unwrap_or(false) {
-                        // Auto-bypass the offender: zero its output this block so a
-                        // runaway node degrades to silence rather than xrunning.
-                        self.program.bypassed[node] = true;
+                    self.watchdog_streak[node] = self.watchdog_streak[node].saturating_add(1);
+                    let should_bypass = self.watchdog.is_some_and(|w| {
+                        w.auto_bypass && self.watchdog_streak[node] >= w.consecutive_limit
+                    });
+                    if should_bypass {
+                        // Crossfade the foreign node's current output to its dry
+                        // continuity path over 12 ms. Source/instrument nodes have
+                        // no dry input, so this is exactly a fade to silence.
+                        self.auto_bypassed[node] = true;
+                        self.auto_bypass_fade[node] =
+                            ((self.transport.sample_rate() * 0.012 + 0.5) as usize).max(1);
+                        self.release_held_node(node);
                         self.emit_node_fault(node, ojproto::FaultKind::AutoBypassed);
-                        for buf in self.program.out_bufs[node].iter_mut() {
-                            for s in buf.iter_mut().take(nframes) {
-                                *s = 0.0;
-                            }
-                        }
+                        self.crossfade_to_bypass(node, output_offset, nframes);
                     }
+                } else {
+                    self.watchdog_streak[node] = 0;
                 }
             }
 
@@ -1436,6 +1491,66 @@ impl Engine {
                 *s = 0.0;
             }
         }
+    }
+
+    /// Fade the just-rendered wet output into the same dry path steady bypass
+    /// uses. The fade may span blocks; no allocation or graph mutation occurs.
+    #[cfg(feature = "std")]
+    fn crossfade_to_bypass(&mut self, node: usize, source_offset: usize, nframes: usize) {
+        if self.program.out_bufs[node].is_empty() {
+            return;
+        }
+        let total = ((self.transport.sample_rate() * 0.012 + 0.5) as usize).max(1);
+        let remaining = self.auto_bypass_fade[node];
+        let done = total.saturating_sub(remaining);
+        if !self.program.routing[node].inputs.is_empty() {
+            self.mix_input(node, 0, source_offset, nframes);
+        } else {
+            self.program.in_scratch[0][..nframes].fill(0.0);
+        }
+        let dry = &self.program.in_scratch[0][..nframes];
+        let wet = &mut self.program.out_bufs[node][0][..nframes];
+        self.auto_bypass_tail[node] = wet.last().copied().unwrap_or(0.0);
+        for (frame, (out, &input)) in wet.iter_mut().zip(dry).enumerate() {
+            let t = ((done + frame).min(total) as f32) / total as f32;
+            *out = *out * (1.0 - t) + input * t;
+        }
+        self.auto_bypass_fade[node] = remaining.saturating_sub(nframes);
+    }
+
+    /// Continue the 12 ms release after the faulting block without re-entering
+    /// foreign code. The last trustworthy wet sample supplies a bounded tail;
+    /// the dry continuity path rises over the same envelope.
+    fn render_auto_bypass(&mut self, node: usize, source_offset: usize, nframes: usize) {
+        self.passthrough(node, source_offset, nframes);
+        let remaining = self.auto_bypass_fade[node];
+        if remaining == 0 || self.program.out_bufs[node].is_empty() {
+            return;
+        }
+        let total = ((self.transport.sample_rate() * 0.012 + 0.5) as usize).max(1);
+        let done = total.saturating_sub(remaining);
+        let tail = self.auto_bypass_tail[node];
+        for (frame, out) in self.program.out_bufs[node][0][..nframes]
+            .iter_mut()
+            .enumerate()
+        {
+            let t = ((done + frame).min(total) as f32) / total as f32;
+            *out = tail * (1.0 - t) + *out * t;
+        }
+        self.auto_bypass_fade[node] = remaining.saturating_sub(nframes);
+    }
+
+    /// Release only notes owned by one failed node. Note-off is deliberate:
+    /// choke would truncate the instrument's own release stage.
+    #[cfg(feature = "std")]
+    fn release_held_node(&mut self, slot: usize) {
+        let mut mask = self.held[slot];
+        while mask != 0 {
+            let note = mask.trailing_zeros() as u8;
+            self.program.instances[slot].note_off(note);
+            mask &= mask - 1;
+        }
+        self.held[slot] = 0;
     }
 
     /// U16: flush any non-finite/denormal sample in every output buffer of

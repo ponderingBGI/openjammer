@@ -689,7 +689,23 @@ fn engine_watchdog_auto_bypasses_over_budget_node() {
         engine.budget().over_budget[gain_slot],
         "gain flagged over budget"
     );
-    assert!(engine.program().bypassed[gain_slot], "gain auto-bypassed");
+    assert!(engine.is_auto_bypassed(NodeIdx(2)), "gain auto-bypassed");
+}
+
+#[test]
+fn watchdog_requires_configured_consecutive_overruns() {
+    let reg = gain_registry();
+    let prog = compile(&graphin_gain_speaker(2.0), &reg).expect("compile");
+    let mut engine = Engine::new(prog);
+    engine.set_watchdog(Some(Watchdog::new(0, true).with_consecutive(2)));
+    let input = ramp();
+    let mut out = vec![0.0f32; NB];
+    inject(&mut engine, &input);
+    engine.process_block(&mut out, NB);
+    assert!(!engine.is_auto_bypassed(NodeIdx(2)));
+    inject(&mut engine, &input);
+    engine.process_block(&mut out, NB);
+    assert!(engine.is_auto_bypassed(NodeIdx(2)));
 }
 
 /// REQUIRED gate: `process_block` STILL allocates zero bytes with metering

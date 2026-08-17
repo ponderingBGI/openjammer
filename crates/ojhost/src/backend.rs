@@ -151,6 +151,13 @@ pub trait HostedBackend: Send {
     /// (before the instance goes live), so it runs off the audio thread; MAY allocate.
     fn restore_state(&mut self, _blob: &[u8]) {}
 
+    /// Checked restore used by conformance. Legacy backends that cannot report
+    /// rejection retain the previous best-effort behavior.
+    fn restore_state_checked(&mut self, blob: &[u8]) -> bool {
+        self.restore_state(blob);
+        true
+    }
+
     /// Off-RT: release activation-time resources. Default no-op.
     fn deactivate(&mut self) {}
 }

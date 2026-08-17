@@ -1034,6 +1034,10 @@ impl HostedBackend for ClapBackend {
     }
 
     fn restore_state(&mut self, blob: &[u8]) {
+        let _ = self.restore_state_checked(blob);
+    }
+
+    fn restore_state_checked(&mut self, blob: &[u8]) -> bool {
         self.service_main_thread_callback();
         // oj.state RESTORE: load a prior session's opaque blob via the CLAP state
         // extension's `[main-thread]` load. Off-RT, at compile time on the fresh
@@ -1041,17 +1045,17 @@ impl HostedBackend for ClapBackend {
         // a no-op; a load failure is swallowed (the plugin keeps its default state).
         use clack_extensions::state::PluginState;
         if blob.is_empty() {
-            return;
+            return true;
         }
         let mut guard = self.instance.borrow_mut();
         let Some(inst) = guard.as_mut() else {
-            return;
+            return false;
         };
         let Some(state) = inst.plugin_shared_handle().get_extension::<PluginState>() else {
-            return;
+            return false;
         };
         let mut reader = std::io::Cursor::new(blob);
-        let _ = state.load(&mut inst.plugin_handle(), &mut reader);
+        state.load(&mut inst.plugin_handle(), &mut reader).is_ok()
     }
 
     fn deactivate(&mut self) {

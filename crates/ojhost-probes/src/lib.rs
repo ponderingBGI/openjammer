@@ -1,5 +1,5 @@
 //! Deterministic, deliberately unusual CLAP plug-ins used only by ojhost's
-//! conformance suite. One real dynamic library exposes all seven descriptors;
+//! conformance and adversarial suites. One real dynamic library exposes every descriptor;
 //! this keeps CI fast while still exercising CLAP's scan/load ABI boundary.
 
 use std::ffi::CStr;
@@ -39,7 +39,7 @@ use clack_plugin::entry::prelude::*;
 use clack_plugin::prelude::*;
 use clack_plugin::stream::{InputStream, OutputStream};
 
-const IDS: [&str; 7] = [
+const IDS: [&str; 14] = [
     "org.openjammer.probe.gain",
     "org.openjammer.probe.latency-n",
     "org.openjammer.probe.tail",
@@ -47,8 +47,15 @@ const IDS: [&str; 7] = [
     "org.openjammer.probe.params-500",
     "org.openjammer.probe.notes",
     "org.openjammer.probe.ports-weird",
+    "org.openjammer.probe.slow-activate",
+    "org.openjammer.probe.block-hang",
+    "org.openjammer.probe.abort",
+    "org.openjammer.probe.nan",
+    "org.openjammer.probe.denormal",
+    "org.openjammer.probe.event-flood",
+    "org.openjammer.probe.state-liar",
 ];
-const NAMES: [&str; 7] = [
+const NAMES: [&str; 14] = [
     "probe-gain",
     "probe-latency-N",
     "probe-tail",
@@ -56,6 +63,13 @@ const NAMES: [&str; 7] = [
     "probe-params-500",
     "probe-notes",
     "probe-ports-weird",
+    "probe-slow-activate",
+    "probe-block-hang",
+    "probe-abort",
+    "probe-nan",
+    "probe-denormal",
+    "probe-event-flood",
+    "probe-state-liar",
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -67,6 +81,13 @@ enum Kind {
     Params500,
     Notes,
     PortsWeird,
+    SlowActivate,
+    BlockHang,
+    Abort,
+    Nan,
+    Denormal,
+    EventFlood,
+    StateLiar,
 }
 
 impl Kind {
@@ -79,6 +100,13 @@ impl Kind {
             Self::Params500,
             Self::Notes,
             Self::PortsWeird,
+            Self::SlowActivate,
+            Self::BlockHang,
+            Self::Abort,
+            Self::Nan,
+            Self::Denormal,
+            Self::EventFlood,
+            Self::StateLiar,
         ][index]
     }
 }
@@ -106,6 +134,7 @@ struct Audio<'a> {
     kind: Kind,
     shared: &'a Shared,
     active_note: bool,
+    blocks: u32,
 }
 
 struct Probe;
@@ -132,10 +161,14 @@ impl<'a> PluginAudioProcessor<'a, Shared, Main<'a>> for Audio<'a> {
         shared: &'a Shared,
         _config: PluginAudioConfiguration,
     ) -> Result<Self, PluginError> {
+        if main.kind == Kind::SlowActivate {
+            std::thread::sleep(std::time::Duration::from_secs(3));
+        }
         Ok(Self {
             kind: main.kind,
             shared,
             active_note: false,
+            blocks: 0,
         })
     }
 
@@ -149,6 +182,17 @@ impl<'a> PluginAudioProcessor<'a, Shared, Main<'a>> for Audio<'a> {
             NoteChokeEvent, NoteEndEvent, NoteOffEvent, NoteOnEvent, ParamGestureBeginEvent,
             ParamGestureEndEvent, ParamValueEvent,
         };
+        self.blocks = self.blocks.saturating_add(1);
+        if self.kind == Kind::BlockHang && self.blocks == 2 {
+            // A severe finite stall proves post-call budget containment. A truly
+            // infinite in-process call cannot be preempted safely; that limit is
+            // deliberately tested/documented at the host boundary instead of
+            // pretending a timer can unwind arbitrary foreign code.
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        if self.kind == Kind::Abort && self.blocks == 2 {
+            std::process::abort();
+        }
         let initial_gain = f64::from_bits(self.shared.gain.load(Ordering::Relaxed));
         let initial_note = self.active_note;
         for mut pair in &mut audio {
@@ -176,7 +220,15 @@ impl<'a> PluginAudioProcessor<'a, Shared, Main<'a>> for Audio<'a> {
                                     }
                                 }
                             }
-                            *dst = if self.kind == Kind::Notes {
+                            *dst = if self.kind == Kind::Nan {
+                                if frame % 2 == 0 {
+                                    f32::NAN
+                                } else {
+                                    f32::INFINITY
+                                }
+                            } else if self.kind == Kind::Denormal {
+                                f32::from_bits(1)
+                            } else if self.kind == Kind::Notes {
                                 if active {
                                     0.25
                                 } else {
@@ -254,6 +306,18 @@ impl<'a> PluginAudioProcessor<'a, Shared, Main<'a>> for Audio<'a> {
                 let _ = events
                     .output
                     .try_push(NoteEndEvent::new(event.header().time(), choke.pckn()));
+            }
+        }
+        if self.kind == Kind::EventFlood {
+            for i in 0..10_000u32 {
+                let id = ClapId::new(1);
+                let _ = events.output.try_push(ParamValueEvent::new(
+                    i % 64,
+                    id,
+                    clack_plugin::events::Pckn::match_all(),
+                    (i % 100) as f64 / 100.0,
+                    clack_plugin::utils::Cookie::empty(),
+                ));
             }
         }
         Ok(ProcessStatus::Continue)
@@ -343,6 +407,9 @@ impl PluginStateImpl for Main<'_> {
         Ok(())
     }
     fn load(&mut self, input: &mut InputStream) -> Result<(), PluginError> {
+        if self.kind == Kind::StateLiar {
+            return Err(PluginError::Message("rejects its own saved state"));
+        }
         self.state.clear();
         input.read_to_end(&mut self.state)?;
         if self.kind == Kind::Latency && self.state.len() == 4 {
@@ -487,7 +554,10 @@ struct ProbesEntry {
     factory: PluginFactoryWrapper<ProbesFactory>,
 }
 impl Entry for ProbesEntry {
-    fn new(_path: Option<&CStr>) -> Result<Self, EntryLoadError> {
+    fn new(path: Option<&CStr>) -> Result<Self, EntryLoadError> {
+        if path.is_some_and(|p| p.to_string_lossy().contains("crash-on-scan")) {
+            std::process::abort();
+        }
         Ok(Self {
             factory: PluginFactoryWrapper::new(ProbesFactory::new()),
         })

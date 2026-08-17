@@ -97,8 +97,8 @@ export function remapFaultNodes(
 }
 
 /**
- * Tap a drained event batch for RUNTIME CRASH faults (`NodeFault` with
- * `fault === 'Crashed'`) and badge the affected node — the runtime twin of the
+ * Tap a drained event batch for terminal runtime faults (`Crashed` or
+ * `AutoBypassed`) and badge the affected node — the runtime twin of the
  * load-degraded "(missing plugin)" badge, sharing the one `setNodePluginLoadError`
  * SSOT. A hosted plugin that crashed mid-set (the per-node fault latch) or a
  * trapped code node thus shows the same non-modal node badge.
@@ -109,8 +109,8 @@ export function remapFaultNodes(
  * badge — one clear-owner, no flicker. `resolve` maps the engine `NodeIdx` to its
  * visual node id (each tier owns its reverse index). Shared by BOTH executors so
  * there is one runtime-fault owner, not a fork (the same covenant as the rest of
- * this pipe). Other fault kinds (NonFinite/OverBudget/AutoBypassed) are NOT badged
- * here — those are transient/watchdog and stay in the DevLog via `ingestEngineEvents`.
+ * this pipe). NonFinite and OverBudget remain diagnostic warnings; AutoBypassed
+ * is terminal for this instance and therefore must never fail silently.
  */
 export function routeRuntimeFaults(
     events: readonly EngineEvent[],
@@ -119,7 +119,7 @@ export function routeRuntimeFaults(
     for (const ev of events) {
         const kind = ev.kind;
         if (typeof kind !== 'object' || !('NodeFault' in kind)) continue;
-        if (kind.NodeFault.fault !== 'Crashed') continue;
+        if (kind.NodeFault.fault !== 'Crashed' && kind.NodeFault.fault !== 'AutoBypassed') continue;
         const visual = resolve(kind.NodeFault.node);
         if (visual === undefined) continue;
         setNodePluginLoadError(visual, true);

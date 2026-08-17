@@ -40,6 +40,12 @@ pub fn sanitize(buf: &mut [f32]) -> bool {
         if flush {
             *s = 0.0;
             dirty = true;
+        } else if *s > 4.0 {
+            *s = 4.0;
+            dirty = true;
+        } else if *s < -4.0 {
+            *s = -4.0;
+            dirty = true;
         }
     }
     dirty
@@ -109,6 +115,9 @@ pub struct Watchdog {
     started: Option<std::time::Instant>,
     /// Whether an exceeded budget should auto-bypass the node.
     pub auto_bypass: bool,
+    /// Consecutive over-budget blocks required before auto-bypass. A clean
+    /// block resets the node's streak in the engine.
+    pub consecutive_limit: u8,
 }
 
 #[cfg(feature = "std")]
@@ -121,7 +130,15 @@ impl Watchdog {
             budget_ns,
             started: None,
             auto_bypass,
+            consecutive_limit: 1,
         }
+    }
+
+    /// Require `blocks` consecutive overruns before auto-bypass. Zero is
+    /// normalized to one so a watchdog can never be accidentally inert.
+    pub fn with_consecutive(mut self, blocks: u8) -> Self {
+        self.consecutive_limit = blocks.max(1);
+        self
     }
 
     /// Derive a per-node budget from the block duration and a CPU-fraction cap.
@@ -262,6 +279,13 @@ mod tests {
         assert_eq!(buf[0], 0.0);
         assert_eq!(buf[1], 0.0);
         assert_eq!(buf[2], 0.5);
+    }
+
+    #[test]
+    fn sanitize_hard_clamps_with_headroom() {
+        let mut buf = [3.5, 8.0, -9.0];
+        assert!(sanitize(&mut buf));
+        assert_eq!(buf, [3.5, 4.0, -4.0]);
     }
 
     #[test]

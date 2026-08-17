@@ -51,7 +51,7 @@ fn all_real_clap_probes_obey_the_host_contract() {
     let live: libloading::Symbol<unsafe extern "C" fn() -> usize> =
         unsafe { library.get(b"oj_probe_live_instances") }.expect("probe counter symbol");
     let descriptors = ojhost::scan(&[clap.parent().unwrap().to_owned()]).expect("scan probes");
-    assert_eq!(descriptors.len(), 7);
+    assert_eq!(descriptors.len(), 14);
 
     let by_name = |name: &str| descriptors.iter().find(|d| d.name == name).unwrap();
     assert_eq!(by_name("probe-params-500").param_count, 500);
@@ -66,7 +66,18 @@ fn all_real_clap_probes_obey_the_host_contract() {
     assert_eq!(weird.audio_ports.len(), 4);
     assert_eq!(weird.port_configs.len(), 2);
 
-    for descriptor in &descriptors {
+    for descriptor in descriptors.iter().filter(|d| {
+        !matches!(
+            d.name.as_str(),
+            "probe-slow-activate"
+                | "probe-block-hang"
+                | "probe-abort"
+                | "probe-nan"
+                | "probe-denormal"
+                | "probe-event-flood"
+                | "probe-state-liar"
+        )
+    }) {
         let mut plugin = HostedPlugin::load(descriptor, 48_000.0, 64).expect("instantiate");
         assert_eq!(unsafe { live() }, 1, "exactly one live probe instance");
 

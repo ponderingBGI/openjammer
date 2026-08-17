@@ -7,7 +7,12 @@
 use std::path::PathBuf;
 
 fn main() {
-    let Some(path) = std::env::args_os().nth(1).map(PathBuf::from) else {
+    let mut args = std::env::args_os().skip(1);
+    if args.next().as_deref() != Some(std::ffi::OsStr::new("--ojhost-scan-helper")) {
+        respond(false, Vec::new(), Some("missing scan-helper mode".into()));
+        std::process::exit(2);
+    }
+    let Some(path) = args.next().map(PathBuf::from) else {
         respond(false, Vec::new(), Some("missing plugin path".into()));
         std::process::exit(2);
     };
