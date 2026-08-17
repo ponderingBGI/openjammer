@@ -96,8 +96,6 @@ jobs:
             args: "--features plugin-host-juce"
             piTarget: "x86_64-pc-windows-msvc"
     runs-on: ${{ matrix.platform }}
-    outputs:
-      artifacts: ${{ steps.tauri.outputs.artifactPaths }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -141,7 +139,11 @@ jobs:
           jq '.bundle.createUpdaterArtifacts = true' src-tauri/tauri.conf.json > "$tmp" \
             && mv "$tmp" src-tauri/tauri.conf.json
 
-      - name: Build + CANARI-sign + publish (tauri-action)
+      # Build and sign in parallel, but do not let matrix jobs mutate the shared
+      # GitHub Release. Parallel create/update/latest.json calls race and can
+      # publish a partial release. The single publish job below owns all release
+      # writes after every immutable workflow artifact is present.
+      - name: Build + CANARI-sign (tauri-action)
         id: tauri
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
@@ -156,13 +158,9 @@ jobs:
           VST3_SDK_DIR: ${{ secrets.VST3_SDK_DIR }}
           VITE_OJ_CANARY: 'true'
         with:
-          tagName: ${{ needs.prepare.outputs.tag }}
-          releaseName: "OpenJammer Canari ${{ needs.prepare.outputs.tag }}"
-          releaseBody: "Canari build for the next stable line ${{ needs.prepare.outputs.base }}."
-          releaseDraft: false
-          prerelease: true
           projectPath: "."
           args: ${{ matrix.args }}
+          uploadUpdaterJson: false
 
       - name: Build provenance subject list
         id: subjects
@@ -183,37 +181,136 @@ jobs:
         with:
           subject-path: ${{ steps.subjects.outputs.paths }}
 
-  manifest-gate:
-    name: All-platform signature gate
+      - name: Preserve signed bundles for the single publisher
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: canari-${{ matrix.piTarget }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+          path: |
+            target/**/release/bundle/**/*.dmg
+            target/**/release/bundle/**/*.app.tar.gz
+            target/**/release/bundle/**/*.app.tar.gz.sig
+            target/**/release/bundle/**/*.deb
+            target/**/release/bundle/**/*.deb.sig
+            target/**/release/bundle/**/*.AppImage
+            target/**/release/bundle/**/*.AppImage.sig
+            target/**/release/bundle/**/*-setup.exe
+            target/**/release/bundle/**/*-setup.exe.sig
+
+  publish:
+    name: Publish complete canari release
     needs: [prepare, build]
     if: ${{ vars.CANARY_RELEASES_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Assert every platform key is present in latest.json
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - name: Download every signed platform bundle
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: canari-*
+          path: canari-artifacts
+
+      - name: Assemble and validate the release contract
         env:
-          GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
           TAG: ${{ needs.prepare.outputs.tag }}
+          BASE: ${{ needs.prepare.outputs.base }}
         shell: bash
         run: |
           set -euo pipefail
-          asset_url=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets \
-            --jq '.assets[] | select(.name=="latest.json") | .url' || true)
-          if [ -z "${asset_url:-}" ]; then
-            echo "::error::$TAG latest.json was not published"; exit 1
-          fi
-          curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" \
-            "$asset_url" -o latest.json
-          for plat in darwin-aarch64 darwin-x86_64 linux-x86_64 windows-x86_64; do
-            if ! jq -e ".platforms[\"$plat\"].signature | length > 0" latest.json >/dev/null; then
-              echo "::error::latest.json is missing a signature for $plat"; exit 1
+          bun scripts/oj/release-artifacts.ts assemble-canari \
+            --input canari-artifacts \
+            --output canari-publish \
+            --version "$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --tag "$TAG" \
+            --notes "Canari build for the next stable line $BASE."
+
+      - name: Upload atomically through one retrying publisher
+        env:
+          GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          BASE: ${{ needs.prepare.outputs.base }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          retry() {
+            local attempt=1
+            local max_attempts=5
+            until "$@"; do
+              if (( attempt >= max_attempts )); then
+                echo "::error::Command failed after $attempt attempts: $*" >&2
+                return 1
+              fi
+              local delay=$((attempt * attempt + RANDOM % 3))
+              echo "::warning::Transient GitHub operation failed (attempt $attempt/$max_attempts); retrying in ${delay}s: $*" >&2
+              sleep "$delay"
+              attempt=$((attempt + 1))
+            done
+          }
+
+          notes="Canari build for the next stable line $BASE."
+          ensure_draft() {
+            local draft
+            draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+            if [ "$draft" = true ]; then
+              return 0
             fi
-          done
-          echo "All four platform signatures present in the canari manifest."
+            if [ "$draft" = false ]; then
+              echo "::error::$TAG already exists as a published release" >&2
+              return 1
+            fi
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --verify-tag \
+              --draft \
+              --prerelease \
+              --title "OpenJammer Canari $TAG" \
+              --notes "$notes" >/dev/null
+          }
+          retry ensure_draft
+
+          # Upload one file per retry boundary. A transient error can only replay
+          # that idempotent asset, not every platform bundle or the whole build.
+          while IFS= read -r -d '' asset; do
+            retry gh release upload "$TAG" "$asset" \
+              --repo "$GITHUB_REPOSITORY" --clobber
+          done < <(find canari-publish -maxdepth 1 -type f ! -name latest.json -print0 | sort -z)
+          retry gh release upload "$TAG" canari-publish/latest.json \
+            --repo "$GITHUB_REPOSITORY" --clobber
+
+          find canari-publish -maxdepth 1 -type f -printf '%f\n' | sort > expected-assets.txt
+          retry gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[].name' | sort > uploaded-assets.txt
+          if ! diff -u expected-assets.txt uploaded-assets.txt; then
+            echo "::error::Draft release asset set differs from the locally validated contract"
+            exit 1
+          fi
+
+          # Publication is the commit point: users cannot discover a partial
+          # canari while the matrix builds or while transient uploads retry.
+          retry gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --draft=false --prerelease --title "OpenJammer Canari $TAG" --notes "$notes"
+          state="$(retry gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease --jq '[.isDraft, .isPrerelease] | @tsv')"
+          if [ "$state" != $'false\ttrue' ]; then
+            echo "::error::$TAG was not published as a prerelease (state: $state)"
+            exit 1
+          fi
+          echo "Complete canari release published."
 
   cleanup-reserved-tag:
     name: Cleanup reserved failed tag
-    needs: [prepare, build, manifest-gate]
-    if: ${{ failure() && needs.prepare.outputs.tag != '' }}
+    needs: [prepare, build, publish]
+    if: ${{ always() && needs.prepare.outputs.tag != '' && (needs.build.result != 'success' || needs.publish.result != 'success') }}
     runs-on: ubuntu-latest
     steps:
       - name: Delete reserved tag after failed canari publish
