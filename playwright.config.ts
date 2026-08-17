@@ -20,6 +20,9 @@ const ALL_BROWSERS = process.env.OJ_E2E_ALL_BROWSERS === '1';
 
 export default defineConfig({
     testDir: './e2e',
+    // J8 is deliberately isolated: wall-clock/frame measurements are noisy and
+    // run only through `bun run test:perf` on Chromium's CDP tracing backend.
+    testIgnore: ['**/perf/**'],
     fullyParallel: true,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,

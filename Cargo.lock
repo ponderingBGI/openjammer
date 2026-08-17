@@ -3406,6 +3406,7 @@ dependencies = [
  "proptest",
  "rtrb",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3429,6 +3430,7 @@ version = "0.0.0"
 dependencies = [
  "audio_thread_priority",
  "claxon",
+ "codspeed-criterion-compat",
  "cpal",
  "flacenc",
  "hound",

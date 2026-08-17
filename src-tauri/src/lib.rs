@@ -2,12 +2,12 @@
 //!
 //! HYBRID ARCHITECTURE. The frontend is the EXISTING Vite web app (loaded into
 //! the Tauri webview — `bun run dev` in development, the bundled `../dist` in a
-//! release build). The backend is the native, low-latency [`engine`] (the
+//! release build). The backend is the native, low-latency engine module (the
 //! `<5 ms` ojcore engine on a cpal stream). They talk over Tauri's `invoke`
 //! IPC, which is strictly CONTROL-RATE: `OjGraph` and `RtCommand` cross as JSON;
 //! no audio sample buffer ever does (governing principle #4).
 //!
-//! On `setup` we build the [`engine::EngineBackend`] (registers the built-in
+//! On `setup` we build the `EngineBackend` (registers the built-in
 //! gain + the Osc / Sampler / Karplus instrument loaders, compiles a minimal
 //! starter graph, and starts the [`AudioHost`](ojcore_native::AudioHost)) and
 //! `manage` it as Tauri state. The commands below are the UI->RT seam.

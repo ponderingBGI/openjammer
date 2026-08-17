@@ -217,6 +217,12 @@ pub struct EngineBackend {
     /// `saved_states` (the only time `getStateInformation` runs). Set by
     /// `save_plugin_states` around a forced re-adopt, cleared immediately after.
     capture_states: bool,
+    /// CLAP latency changes coalesce here until the retained graph can be
+    /// recompiled through the normal ProgramSwap path. Recompute is deferred
+    /// while record-arm is active, per the D9 recording invariant.
+    latency_rescan_pending: bool,
+    record_armed: bool,
+    transport_playing: bool,
     /// `true` while the engine is in the DEVICE-LOST state: the running output
     /// stream faulted (device yanked/disabled/reconfigured) and a rebuild has not
     /// yet succeeded. Set by [`tick`] on the first detected fault, cleared on a
@@ -382,6 +388,9 @@ impl EngineBackend {
             pending_restores: std::collections::HashMap::new(),
             saved_states: std::collections::HashMap::new(),
             capture_states: false,
+            latency_rescan_pending: false,
+            record_armed: false,
+            transport_playing: false,
             device_lost: false,
             log_store: None,
             // Up to 8 reopen attempts per loss event before a calm give-up.
@@ -644,6 +653,11 @@ impl EngineBackend {
             compile_resilient_with_state(&g, &registry, &self.catalog, &states)
                 .map_err(BackendError::Compile)?
         };
+        // A plugin may emit `latency.changed` from its activation callback. This
+        // compile queried the extension after activation, so that notification is
+        // already represented by `program`; consume it to avoid a redundant
+        // recompile loop. A later live notification remains pending for the poll.
+        let _ = ojhost::take_latency_rescan_request();
 
         // oj.state SAVE (off-RT, only when a project save asked for it): the
         // just-compiled hosted instances are reachable HERE on the control thread,
@@ -866,7 +880,43 @@ impl EngineBackend {
     /// path: note on/off, param patches, transport). Wait-free push; a full
     /// ring drops the command rather than blocking the control thread.
     pub fn send_command(&mut self, cmd: RtCommand) -> Result<(), BackendError> {
-        self.producer.push(cmd).map_err(|_| BackendError::RingFull)
+        self.producer
+            .push(cmd)
+            .map_err(|_| BackendError::RingFull)?;
+        match cmd {
+            RtCommand::TransportSet { flag, on } if flag == ojproto::transport_flag::RECORD_ARM => {
+                self.record_armed = on;
+                if !on {
+                    self.poll_latency_rescan();
+                }
+            }
+            RtCommand::TransportPause => {
+                self.transport_playing = false;
+                self.poll_latency_rescan();
+            }
+            RtCommand::TransportPlay => self.transport_playing = true,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Consume CLAP's coalesced `latency.changed` callback and rebuild the
+    /// retained graph through `adopt`/ProgramSwap. Called from existing UI
+    /// control polls; never from the audio callback.
+    fn poll_latency_rescan(&mut self) {
+        self.latency_rescan_pending |= ojhost::take_latency_rescan_request();
+        if !self.latency_rescan_pending || (self.record_armed && self.transport_playing) {
+            return;
+        }
+        let Some(graph) = self.last_graph.clone() else {
+            return;
+        };
+        match self.adopt(&graph) {
+            Ok(()) => self.latency_rescan_pending = false,
+            Err(error) => {
+                eprintln!("ojhost: latency-change graph recompile deferred: {error}");
+            }
+        }
     }
 
     /// Enqueue a sample-addressed live command on the dedicated second ring.
@@ -929,6 +979,7 @@ impl EngineBackend {
     /// keeps a single ring consumer (a second drainer would race-steal frames).
     /// `Beat` still rides the transport path and is filtered out here.
     pub fn drain_meters(&mut self) -> Vec<EngineFrame> {
+        self.poll_latency_rescan();
         let mut out = Vec::new();
         let mut buf = [0u8; return_frame::MAX_LEN];
         while let Some(n) = self.meter_ring.pop(&mut buf) {
@@ -1025,6 +1076,7 @@ impl EngineBackend {
     /// DevLog/diagnostics. Control-rate: called by the UI poll command, never on
     /// the audio thread.
     pub fn drain_events(&mut self) -> Vec<Event> {
+        self.poll_latency_rescan();
         // Drive device-loss recovery on the same control-poll tick the UI already
         // makes, so a mid-set unplug is held + reconnected without a separate loop.
         self.poll_device_recovery();
