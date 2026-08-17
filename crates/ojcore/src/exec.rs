@@ -102,6 +102,8 @@ pub struct Engine {
     click_remaining: u8,
     click_accent: bool,
     click_gain: f32,
+    #[cfg(test)]
+    unsplit_fast_path_hits: usize,
 }
 
 // The raw pointers in the scratch are only ever populated and consumed within a
@@ -160,6 +162,8 @@ impl Engine {
             click_remaining: 0,
             click_accent: false,
             click_gain: 0.2,
+            #[cfg(test)]
+            unsplit_fast_path_hits: 0,
         }
     }
 
@@ -438,8 +442,8 @@ impl Engine {
             .unwrap_or(0)
     }
 
-    /// Arm the per-block CPU watchdog (std-only). Each node gets `budget_ns`
-    /// nanoseconds per block; if `auto_bypass` is set, an over-budget node is
+    /// Arm the hosted-plugin CPU watchdog (std-only). Each PluginHost node gets
+    /// `budget_ns` per block; if `auto_bypass` is set, an over-budget node is
     /// flagged AND bypassed so a runaway node degrades to silence instead of
     /// xrunning the whole stream. Pass `None` to disarm.
     #[cfg(feature = "std")]
@@ -542,6 +546,9 @@ impl Engine {
     /// nodes inherit `looper_snapshot()/take_looper_edge() == None` and are skipped.
     #[cfg(feature = "std")]
     fn publish_looper(&mut self) {
+        if self.meter_ring.is_none() && self.event_ring.is_none() {
+            return;
+        }
         use crate::meter::{event_frame, return_frame};
         let n_slots = self.program.instances.len();
         for slot in 0..n_slots {
@@ -837,9 +844,35 @@ impl Engine {
         debug_assert!(nframes <= self.program.block_size, "block overrun");
         let dev_len = outs.iter().map(|o| o.len()).min().unwrap_or(0);
         let nframes = nframes.min(self.program.block_size).min(dev_len);
-        let map = self.tempo_snapshot();
-
         self.sync_timeline_snapshot();
+
+        // A stopped graph with no live commands cannot reach an event or FSM
+        // edge. Keep this common pre-DAW case to one render call: no tempo Arc
+        // clone, split loop, capture gate, timeline scan, or transport advance.
+        if self.transport.motion() == crate::transport::Motion::Stopped
+            && self.timed.is_empty()
+            && self.count_in_remaining == 0
+            && !self.transport.click_on()
+            && !self.meters.enabled
+        {
+            #[cfg(test)]
+            {
+                self.unsplit_fast_path_hits += 1;
+            }
+            self.render_audio_span(outs, 0, nframes);
+            Self::clear_output_tail(outs, nframes);
+            #[cfg(feature = "std")]
+            self.publish_looper();
+            #[cfg(feature = "std")]
+            self.publish_faults();
+            #[cfg(feature = "std")]
+            self.capture_looper_blocks();
+            return;
+        }
+
+        let map =
+            (self.transport.click_on() || self.count_in_remaining != 0 || self.meters.enabled)
+                .then(|| self.tempo_snapshot());
 
         let mut offset = 0;
         let mut splits = 0;
@@ -915,7 +948,9 @@ impl Engine {
             self.render_audio_span(outs, offset, edge);
             #[cfg(feature = "std")]
             self.capture_span(now, offset, edge);
-            self.mix_click(outs, offset, edge, &map);
+            if let Some(map) = map.as_deref() {
+                self.mix_click(outs, offset, edge, map);
+            }
             self.apply_declick(outs, offset, edge);
             self.transport.advance(edge);
             if self.count_in_remaining != 0 {
@@ -939,17 +974,13 @@ impl Engine {
             splits += 1;
         }
 
-        for out in outs.iter_mut() {
-            for sample in out.iter_mut().skip(nframes) {
-                *sample = 0.0;
-            }
-        }
+        Self::clear_output_tail(outs, nframes);
 
         // Control-rate publishing happens once per caller block, from the same
         // position/map read for both Beat and Transport.
         #[cfg(feature = "std")]
         if self.meters.enabled {
-            self.publish_levels(&map);
+            self.publish_levels(map.as_deref().expect("metering loads tempo snapshot"));
         }
         #[cfg(feature = "std")]
         self.publish_looper();
@@ -957,6 +988,15 @@ impl Engine {
         self.publish_faults();
         #[cfg(feature = "std")]
         self.capture_looper_blocks();
+    }
+
+    #[inline]
+    fn clear_output_tail(outs: &mut [&mut [f32]], nframes: usize) {
+        for out in outs.iter_mut() {
+            for sample in out.iter_mut().skip(nframes) {
+                *sample = 0.0;
+            }
+        }
     }
 
     fn mix_click(
@@ -1171,54 +1211,57 @@ impl Engine {
                 continue;
             }
 
-            // U16 watchdog: time the render (std-only; disarmed => no timing).
-            #[cfg(feature = "std")]
-            let timed = {
-                if let Some(w) = self.watchdog.as_mut() {
+            // Foreign-plugin resilience is confined to PluginHost nodes.
+            // Built-ins take the direct call below: no watchdog clock read,
+            // runtime-fault query, or output scan.
+            if self.program.kinds[node] == PrimitiveKind::PluginHost {
+                #[cfg(feature = "std")]
+                let timed = if let Some(w) = self.watchdog.as_mut() {
                     w.start();
                     true
                 } else {
                     false
-                }
-            };
+                };
 
-            self.render_node(node, output_offset, nframes);
+                self.render_node(node, output_offset, nframes);
 
-            #[cfg(feature = "std")]
-            if let Some(fault) = self.program.instances[node].runtime_fault() {
-                self.emit_node_fault(node, fault);
-            }
-
-            #[cfg(feature = "std")]
-            if timed {
-                // `as_mut` again to release the earlier borrow across `render_node`.
-                let over = self.watchdog.as_mut().map(|w| w.check()).unwrap_or(false);
-                if over {
-                    self.budget.over_budget[node] = true;
-                    self.emit_node_fault(node, ojproto::FaultKind::OverBudget);
-                    self.watchdog_streak[node] = self.watchdog_streak[node].saturating_add(1);
-                    let should_bypass = self.watchdog.is_some_and(|w| {
-                        w.auto_bypass && self.watchdog_streak[node] >= w.consecutive_limit
-                    });
-                    if should_bypass {
-                        // Crossfade the foreign node's current output to its dry
-                        // continuity path over 12 ms. Source/instrument nodes have
-                        // no dry input, so this is exactly a fade to silence.
-                        self.auto_bypassed[node] = true;
-                        self.auto_bypass_fade[node] =
-                            ((self.transport.sample_rate() * 0.012 + 0.5) as usize).max(1);
-                        self.release_held_node(node);
-                        self.emit_node_fault(node, ojproto::FaultKind::AutoBypassed);
-                        self.crossfade_to_bypass(node, output_offset, nframes);
+                #[cfg(feature = "std")]
+                if let Some(fault) = self.program.instances[node].runtime_fault() {
+                    if fault == ojproto::FaultKind::NonFinite {
+                        self.budget.non_finite[node] = true;
                     }
-                } else {
-                    self.watchdog_streak[node] = 0;
+                    self.emit_node_fault(node, fault);
                 }
-            }
 
-            // U16 NaN/denormal guard: flush any non-finite/denormal output to
-            // silence and flag the node so the control plane can surface it.
-            self.sanitize_node(node, nframes);
+                #[cfg(feature = "std")]
+                if timed {
+                    let over = self.watchdog.as_mut().map(|w| w.check()).unwrap_or(false);
+                    if over {
+                        self.budget.over_budget[node] = true;
+                        self.emit_node_fault(node, ojproto::FaultKind::OverBudget);
+                        self.watchdog_streak[node] = self.watchdog_streak[node].saturating_add(1);
+                        let should_bypass = self.watchdog.is_some_and(|w| {
+                            w.auto_bypass && self.watchdog_streak[node] >= w.consecutive_limit
+                        });
+                        if should_bypass {
+                            self.auto_bypassed[node] = true;
+                            self.auto_bypass_fade[node] =
+                                ((self.transport.sample_rate() * 0.012 + 0.5) as usize).max(1);
+                            self.release_held_node(node);
+                            self.emit_node_fault(node, ojproto::FaultKind::AutoBypassed);
+                            self.crossfade_to_bypass(node, output_offset, nframes);
+                        }
+                    } else {
+                        self.watchdog_streak[node] = 0;
+                    }
+                }
+
+                // The ojhost bridge already guards foreign output. This final
+                // hosted-only boundary also covers scaffold/test host nodes.
+                self.sanitize_node(node, nframes);
+            } else {
+                self.render_node(node, output_offset, nframes);
+            }
             // U15 metering: fold the node's output into its per-node meter.
             self.meter_node(node, nframes);
             self.advance_node_delays(node, 0, nframes);
@@ -1740,6 +1783,20 @@ mod apply_rt_tests {
             end: 64,
         };
         TimelineRt::from_wire(&wire, &TempoMapRt::one_point(48_000, 120.0, 4, 4))
+    }
+
+    #[test]
+    fn plain_stopped_graph_takes_unsplit_fast_path() {
+        let (mut engine, probe) = probe_engine_with_block(8);
+        engine.process_block(&mut [0.0; 8], 8);
+        assert_eq!(engine.unsplit_fast_path_hits, 1);
+        assert_eq!(&*probe.spans.borrow(), &[8], "exactly one DSP span");
+
+        // Metering needs the tempo publication path and must leave the guarded
+        // fast-path counter unchanged.
+        engine.set_metering(true);
+        engine.process_block(&mut [0.0; 8], 8);
+        assert_eq!(engine.unsplit_fast_path_hits, 1);
     }
 
     #[test]

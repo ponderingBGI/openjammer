@@ -1,14 +1,13 @@
 //! U16 — real-time resilience: NaN/denormal guard, a per-block CPU watchdog,
 //! and last-wins command coalescing.
 //!
-//! Three independent guards the engine layers around the render loop so one
-//! misbehaving node can never take down the audio thread:
+//! Three independent guards protect foreign-plugin and device boundaries so one
+//! misbehaving hosted node can never take down the audio thread:
 //!
-//! 1. [`sanitize`] — flush any non-finite (NaN/Inf) sample in a node's output to
-//!    silence and report whether it had to. The engine raises a per-node flag so
-//!    the control plane can surface a "node produced garbage" error. `no_std`.
-//! 2. [`Watchdog`] — measures each node's render wall-time and flags / auto-
-//!    bypasses a node that blows its per-block CPU budget. Wall-clock timing
+//! 1. [`sanitize`] — flush any non-finite (NaN/Inf) sample at a hosted-node or
+//!    master output boundary and report whether it had to. `no_std`.
+//! 2. [`Watchdog`] — measures hosted-node render wall-time and flags / auto-
+//!    bypasses a plugin that blows its per-block CPU budget. Wall-clock timing
 //!    needs `std::time::Instant`, so the watchdog itself is `std`-gated; the
 //!    *budget bookkeeping* ([`NodeBudget`]) is `no_std` so the flags survive on
 //!    the worklet (which simply never arms the timer).

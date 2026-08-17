@@ -129,6 +129,8 @@ fn bench_safe_empty_scan(c: &mut Criterion) {
 }
 
 fn bench_param_flush_500(c: &mut Criterion) {
+    #[cfg(not(feature = "clap-host"))]
+    let _ = c;
     #[cfg(feature = "clap-host")]
     {
         let descriptor = probe("probe-params-500");
@@ -150,6 +152,8 @@ fn bench_param_flush_500(c: &mut Criterion) {
 }
 
 fn bench_event_translate_flood(c: &mut Criterion) {
+    #[cfg(not(feature = "clap-host"))]
+    let _ = c;
     #[cfg(feature = "clap-host")]
     {
         let descriptor = probe("probe-gain");
@@ -172,6 +176,8 @@ fn bench_event_translate_flood(c: &mut Criterion) {
 }
 
 fn bench_state_roundtrip_1mb(c: &mut Criterion) {
+    #[cfg(not(feature = "clap-host"))]
+    let _ = c;
     #[cfg(feature = "clap-host")]
     {
         let descriptor = probe("probe-state-heavy");
@@ -189,6 +195,8 @@ fn bench_state_roundtrip_1mb(c: &mut Criterion) {
 }
 
 fn bench_conformance_lifecycle(c: &mut Criterion) {
+    #[cfg(not(feature = "clap-host"))]
+    let _ = c;
     #[cfg(feature = "clap-host")]
     {
         let descriptor = probe("probe-gain");

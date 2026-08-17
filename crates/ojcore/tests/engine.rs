@@ -590,7 +590,7 @@ impl NanLoader {
                 abi: None,
                 id: NAN_ID.into(),
                 name: "NaN".into(),
-                kind: PrimitiveKind::Gain, // any processor kind works here
+                kind: PrimitiveKind::PluginHost,
                 dsp: DspKind::Builtin,
                 ui: UiKind::Auto,
                 params: Vec::new(),
@@ -640,7 +640,8 @@ fn engine_silences_and_flags_nan_node() {
     // GraphIn(1) -> NaN(2) -> SpeakerOut(3).
     let mut g = OjGraph::empty(SR, BLOCK);
     g.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
-    g.nodes.push(node(2, NAN_ID, PrimitiveKind::Gain, 1, 1));
+    g.nodes
+        .push(node(2, NAN_ID, PrimitiveKind::PluginHost, 1, 1));
     g.nodes
         .push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
     g.edges.push(audio_edge(1, 0, 2, 0));
@@ -672,7 +673,9 @@ fn engine_silences_and_flags_nan_node() {
 #[test]
 fn engine_watchdog_auto_bypasses_over_budget_node() {
     let reg = gain_registry();
-    let prog = compile(&graphin_gain_speaker(2.0), &reg).expect("compile");
+    let mut graph = graphin_gain_speaker(2.0);
+    graph.nodes[1].kind = PrimitiveKind::PluginHost;
+    let prog = compile(&graph, &reg).expect("compile");
     let mut engine = Engine::new(prog);
 
     // Zero-ns budget: every node "overruns"; auto-bypass on.
@@ -695,7 +698,9 @@ fn engine_watchdog_auto_bypasses_over_budget_node() {
 #[test]
 fn watchdog_requires_configured_consecutive_overruns() {
     let reg = gain_registry();
-    let prog = compile(&graphin_gain_speaker(2.0), &reg).expect("compile");
+    let mut graph = graphin_gain_speaker(2.0);
+    graph.nodes[1].kind = PrimitiveKind::PluginHost;
+    let prog = compile(&graph, &reg).expect("compile");
     let mut engine = Engine::new(prog);
     engine.set_watchdog(Some(Watchdog::new(0, true).with_consecutive(2)));
     let input = ramp();

@@ -18,6 +18,10 @@
 //! All graphs use only Gain + structural nodes so the measurement tracks engine
 //! *mechanics* (schedule walk + per-node dispatch + mixing), not DSP kernel cost
 //! (the kernels have their own suite in `ojcore-dsp`).
+//!
+//! Fast-path regression invariant: these plain, stopped graphs render as one
+//! unsplit span with no timeline/tempo/capture/hosted-plugin work. The branch is
+//! asserted by `exec::apply_rt_tests::plain_stopped_graph_takes_unsplit_fast_path`.
 
 use std::time::Duration;
 
