@@ -123,22 +123,21 @@ function stunBindingResponse(request: Buffer, remote: RemoteInfo): Buffer | null
  * Firefox can suppress host candidates on hosted runners, while WebKit isolates
  * mDNS names by browser context.
  */
-function serveE2ELocalStun(): Plugin {
+function serveE2ELoopbackStun(): Plugin {
   return {
-    name: 'oj-e2e-local-stun',
+    name: 'oj-e2e-loopback-stun',
     configurePreviewServer(server) {
-      const host = process.env.OJ_E2E_STUN_HOST
       const port = Number(process.env.OJ_E2E_STUN_PORT)
-      if (!host || !Number.isInteger(port) || port <= 0 || port > 65_535) return
+      if (!Number.isInteger(port) || port <= 0 || port > 65_535) return
       const socket = createSocket('udp4')
       socket.on('message', (request, remote) => {
         const response = stunBindingResponse(request, remote)
         if (response) socket.send(response, remote.port, remote.address)
       })
       socket.on('error', (error) => {
-        server.config.logger.error(`E2E local STUN failed: ${error.message}`)
+        server.config.logger.error(`E2E loopback STUN failed: ${error.message}`)
       })
-      socket.bind(port, host)
+      socket.bind(port, '127.0.0.1')
       server.httpServer?.once('close', () => socket.close())
     },
   }
@@ -149,7 +148,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(pkgVersion),
   },
   plugins: [
-    serveE2ELocalStun(),
+    serveE2ELoopbackStun(),
     simulateE2EOriginOutage(),
     serveDownloadPage(),
     wasm(),

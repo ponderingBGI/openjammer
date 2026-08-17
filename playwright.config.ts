@@ -1,14 +1,10 @@
 import { defineConfig, devices } from '@playwright/test';
-import { networkInterfaces } from 'node:os';
 
 // PWA smoke / E2E (plan §4.2). Builds the production PWA and serves it through
 // `vite preview`, which emits the COOP/COEP headers the engine's
 // SharedArrayBuffer path needs — so the suite asserts `crossOriginIsolated ===
 // true` against the REAL built bundle, not just the dev server.
 const PORT = 4173;
-const E2E_STUN_HOST = Object.values(networkInterfaces())
-    .flat()
-    .find((address) => address?.family === 'IPv4' && !address.internal)?.address ?? '127.0.0.1';
 
 // Which browser engines to drive. The dead-worklet bug was browser-independent
 // (a bundling defect, not a Chromium quirk), so the resurrection is best proven
@@ -45,7 +41,20 @@ export default defineConfig({
         { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
         ...(ALL_BROWSERS
             ? [
-                  { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+                  {
+                      name: 'firefox',
+                      use: {
+                          ...devices['Desktop Firefox'],
+                          launchOptions: {
+                              // Mozilla disables loopback ICE by default and
+                              // explicitly reserves this pref for offline tests.
+                              firefoxUserPrefs: {
+                                  'media.peerconnection.ice.loopback': true,
+                                  'media.peerconnection.ice.obfuscate_host_addresses': false,
+                              },
+                          },
+                      },
+                  },
                   { name: 'webkit', use: { ...devices['Desktop Safari'] } },
               ]
             : []),
@@ -55,11 +64,10 @@ export default defineConfig({
         url: `http://localhost:${PORT}`,
         env: {
             OJ_E2E_ORIGIN_OUTAGE: '1',
-            OJ_E2E_STUN_HOST: E2E_STUN_HOST,
             OJ_E2E_STUN_PORT: '3478',
-            VITE_OJ_E2E_STUN_URL: `stun:${E2E_STUN_HOST}:3478`,
+            VITE_OJ_E2E_STUN_URL: 'stun:127.0.0.1:3478',
         },
-        // These journeys depend on preview-only outage and local-STUN
+        // These journeys depend on preview-only outage and loopback-STUN
         // fixtures. Reusing an arbitrary local server would silently omit them.
         reuseExistingServer: false,
         timeout: 180_000,
