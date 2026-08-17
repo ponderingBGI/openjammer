@@ -48,7 +48,10 @@ jobs:
         # because this workstation lacks libwoff2dec.so.1.0.2.
         env:
           OJ_E2E_ALL_BROWSERS: '1'
-        run: /tmp/openjammer-bun/bin/bun run test:e2e -- e2e/journeys --project=${{ matrix.engine }} --shard=${{ matrix.shard }}/3
+        run: |
+          env \
+            PATH="/tmp/openjammer-bun/bin:$PATH" \
+            /tmp/openjammer-bun/bin/bun run test:e2e -- e2e/journeys --project=${{ matrix.engine }} --shard=${{ matrix.shard }}/3
       - name: Upload traces on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
