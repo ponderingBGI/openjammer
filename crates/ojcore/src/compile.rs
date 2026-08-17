@@ -321,12 +321,17 @@ pub struct CompiledProgram {
     /// loop walks this and indexes the by-slot tables above.
     pub schedule: Vec<usize>,
     /// Plugin latency reported at compile time, by compiled node slot.
+    /// EMPTY on the zero-latency fast path (every entry is zero) — that case
+    /// allocates nothing; read through [`Self::to_master_at`]-style accessors
+    /// or treat a missing entry as `0`.
     pub latency: Box<[u32]>,
-    /// Longest upstream arrival at each node input.
+    /// Longest upstream arrival at each node input. Empty ⇒ all zero.
     pub arrival: Box<[u32]>,
     /// Remaining processing latency from each node through the master.
+    /// Empty ⇒ all zero; use [`Self::to_master_at`].
     pub to_master: Box<[u32]>,
     /// Compensation in samples for each audio edge, in graph audio-edge order.
+    /// Empty ⇒ all zero.
     pub edge_delay: Box<[u32]>,
     /// Maximum source-to-master latency; the engine/timeline clock offset.
     pub preroll: u32,
@@ -348,6 +353,14 @@ impl CompiledProgram {
     /// requires a master output, but kept for clippy's `len`/`is_empty` pair).
     pub fn is_empty(&self) -> bool {
         self.instances.is_empty()
+    }
+
+    /// Remaining processing latency from `slot` through the master. The
+    /// zero-latency fast path keeps `to_master` EMPTY (no allocation), so a
+    /// missing entry reads as `0` — exactly what every slot's value is there.
+    #[inline]
+    pub fn to_master_at(&self, slot: usize) -> u32 {
+        self.to_master.get(slot).copied().unwrap_or(0)
     }
 
     /// Resolve an IR [`NodeIdx`] to its compiled slot via binary search over
@@ -649,38 +662,42 @@ fn compile_inner(
     // --- D9 plugin-delay compensation, entirely off the RT thread ----------
     // Query the additive capability once. A node that does not expose the
     // extension is exactly zero latency and stays on the bit-identical fast path.
-    let latency: Vec<u32> = instances
+    let node_latency = |instance: &dyn DspInstance| {
+        instance
+            .extension(ExtId::Latency)
+            .and_then(|ext| ext.downcast_ref::<LatencyExt>())
+            .map_or(0, LatencyExt::latency_samples)
+    };
+    let (latency, arrival, to_master, edge_delay, preroll, delay_bank, delay_routing) = if instances
         .iter()
-        .map(|instance| {
-            instance
-                .extension(ExtId::Latency)
-                .and_then(|ext| ext.downcast_ref::<LatencyExt>())
-                .map_or(0, LatencyExt::latency_samples)
-        })
-        .collect();
-
-    let audio_edge_count = graph
-        .edges
-        .iter()
-        .filter(|edge| edge.kind == ConnectionType::Audio)
-        .count();
-    let (arrival, to_master, edge_delay, preroll, delay_bank, delay_routing) = if latency
-        .iter()
-        .all(|samples| *samples == 0)
+        .all(|instance| node_latency(instance.as_ref()) == 0)
     {
         // Built-ins and the overwhelmingly common hosted-plugin graph report
-        // zero latency. Preserve the public PDC metadata, but skip the extra
-        // graph passes and nested per-port allocations entirely. The renderer
-        // recognizes `None` and stays on its historical no-delay hot path.
+        // zero latency. Preserve the public PDC metadata contract (empty ⇒
+        // all zero, see the field docs) while allocating NOTHING here: empty
+        // boxed slices need no heap, and the renderer recognizes `None` to
+        // stay on its historical no-delay hot path. This keeps the fast-path
+        // compile cost identical to the pre-PDC compiler apart from the
+        // per-instance latency query itself.
         (
-            vec![0; n],
-            vec![0; n],
-            vec![0; audio_edge_count],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
             0,
             DelayBank::default(),
             None,
         )
     } else {
+        let latency: Vec<u32> = instances
+            .iter()
+            .map(|instance| node_latency(instance.as_ref()))
+            .collect();
+        let audio_edge_count = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == ConnectionType::Audio)
+            .count();
         // Longest signal arrival at every node input (forward topological pass).
         let mut arrival = vec![0u32; n];
         for &node in &order {
@@ -748,6 +765,7 @@ fn compile_inner(
             }
         }
         (
+            latency,
             arrival,
             to_master,
             edge_delay,

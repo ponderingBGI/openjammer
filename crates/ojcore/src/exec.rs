@@ -292,7 +292,7 @@ impl Engine {
             let shift = u64::from(
                 self.program
                     .preroll
-                    .saturating_sub(self.program.to_master[slot]),
+                    .saturating_sub(self.program.to_master_at(slot)),
             );
             let timeline_at = at.saturating_sub(shift);
             self.timeline_cursors[slot] =
@@ -321,7 +321,7 @@ impl Engine {
         event.at.saturating_add(u64::from(
             self.program
                 .preroll
-                .saturating_sub(self.program.to_master[slot]),
+                .saturating_sub(self.program.to_master_at(slot)),
         ))
     }
 

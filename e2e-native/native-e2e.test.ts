@@ -175,6 +175,16 @@ describe.skipIf(!enabled)('tauri-driver native journeys', () => {
             await browser.invoke('native_e2e_reclog_note', { note, velocity: 102, on: true });
             await browser.invoke('native_e2e_reclog_note', { note, velocity: 0, on: false });
         }
+        // The web MIDI journal is the localStorage durability tier: WebKit
+        // flushes it to its database asynchronously, and a hard kill inside
+        // that flush window drops the freshest appends (CI run 32044033249:
+        // restore + DevLog record landed but afterNotes === beforeNotes — the
+        // journal never reached disk). That last-instant hole is precisely what
+        // the Track B P1 native fsync journal will close; the fsynced-reclog
+        // half of this journey (count === 8 below) is that tier's mechanism
+        // proof. Let the journal settle to disk, then crash mid-record with the
+        // transport still rolling — the tier's honest guarantee.
+        await Bun.sleep(1_500);
         const pid = await browser.invoke<number>('native_e2e_process_id');
         // Kill the WHOLE process tree, children first: a real crash/power-cut
         // takes WebKit's web/network child processes down with the app. Killing
