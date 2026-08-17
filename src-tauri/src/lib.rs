@@ -29,6 +29,81 @@ use ojhost::{PluginDescriptor, PluginEditor};
 use ojproto::{EngineFrame, Event, NodeIdx, OjGraph, RtCommand, TempoMap, TimedCommand, Timeline};
 use tauri::{Emitter, Manager};
 
+/// Native E2E-only crash journal mirror. The production record path remains
+/// unchanged; this command is unavailable unless the harness supplies both
+/// `OJ_NATIVE_E2E=1` and an isolated `OJ_NATIVE_E2E_DIR`.
+fn native_e2e_dir() -> Result<PathBuf, String> {
+    if std::env::var("OJ_NATIVE_E2E").as_deref() != Ok("1") {
+        return Err("native e2e hooks are disabled".into());
+    }
+    let directory = std::env::var_os("OJ_NATIVE_E2E_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| "OJ_NATIVE_E2E_DIR is not set".to_string())?;
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory)
+}
+
+#[tauri::command]
+fn native_e2e_process_id() -> Result<u32, String> {
+    native_e2e_dir()?;
+    Ok(std::process::id())
+}
+
+#[tauri::command]
+fn native_e2e_reclog_begin() -> Result<String, String> {
+    use std::io::Write;
+
+    let path = native_e2e_dir()?.join("webdriver-take.reclog");
+    let mut file = std::fs::File::create(&path).map_err(|error| error.to_string())?;
+    // Butler's real journal wire format: M node kind at_frame payload. No stop
+    // mark is written in N2 because the whole point is to kill mid-segment.
+    writeln!(file, "M 0 {} 0 0", ojproto::capture_mark_kind::RECORD_START)
+        .map_err(|error| error.to_string())?;
+    file.sync_all().map_err(|error| error.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn native_e2e_reclog_note(note: u8, velocity: u8, on: bool) -> Result<(), String> {
+    use std::io::Write;
+
+    let path = native_e2e_dir()?.join("webdriver-take.reclog");
+    let prior = std::fs::read_to_string(&path).unwrap_or_default();
+    let frame = prior.lines().count().saturating_mul(256);
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| error.to_string())?;
+    let kind = if on {
+        ojproto::capture_mark_kind::NOTE_ON
+    } else {
+        ojproto::capture_mark_kind::NOTE_OFF
+    };
+    let payload = u32::from(note) | (u32::from(velocity) << 8);
+    writeln!(file, "M 0 {kind} {frame} {payload}").map_err(|error| error.to_string())?;
+    file.sync_data().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn native_e2e_reclog_note_count() -> Result<usize, String> {
+    let path = native_e2e_dir()?.join("webdriver-take.reclog");
+    let contents = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    Ok(contents
+        .lines()
+        .filter(|line| {
+            let mut fields = line.split_whitespace();
+            fields.next() == Some("M")
+                && fields.nth(1).is_some_and(|kind| {
+                    kind.parse::<u8>().is_ok_and(|kind| {
+                        kind == ojproto::capture_mark_kind::NOTE_ON
+                            || kind == ojproto::capture_mark_kind::NOTE_OFF
+                    })
+                })
+        })
+        .count())
+}
+
 /// Push a full graph from the UI: recompile it against the plugin registry and
 /// adopt it into the running engine (publish to the program-swap mailbox + run).
 /// `graph` is an [`OjGraph`] serialized as JSON across the IPC boundary. Returns
@@ -949,6 +1024,10 @@ pub fn run() {
             looper_discard_pcm,
             recorder_export,
             export_arrangement,
+            native_e2e_process_id,
+            native_e2e_reclog_begin,
+            native_e2e_reclog_note,
+            native_e2e_reclog_note_count,
             set_speaker_volume,
             set_speaker_device,
             set_mic,

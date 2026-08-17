@@ -21,6 +21,7 @@ import './ArrangementSurface.css';
 import { MixerDrawer } from './MixerDrawer';
 import { AUTOMATION_LANE_HEIGHT } from './AutomationLaneView';
 import { copySelection, cutSelection, deleteSelection, duplicateSelectedRange, loopFromSelection, paste, splitSelectedRange } from '../../song/editingActions';
+import { virtualizationWindow } from './geometry';
 
 function parseMusicalDuration(value: string, ticksPerBeat: number, ticksPerBar: number): number | null {
     const match = value.trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(bars?|beats?)?$/);
@@ -147,14 +148,9 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     const sections = (arrangement.locations ?? []).filter((location) => location.kind === 'section');
     const loop = (arrangement.locations ?? []).find((location) => location.kind === 'loop');
     const heights = arrangement.tracks.map((track) => (laneHeights[track.id ?? track.ref] ?? 72) + (automationLaneByTrack[track.id ?? track.ref] ? AUTOMATION_LANE_HEIGHT : 0));
-    const offsets = heights.reduce<number[]>((all, height) => [...all, (all.at(-1) ?? 0) + height], [0]);
-    const laneTop = Math.max(0, view.top - RULER_HEIGHT);
-    const laneBottom = laneTop + view.height - RULER_HEIGHT;
-    const firstLane = Math.max(0, offsets.findIndex((_offset, index) => index < heights.length && offsets[index + 1]! >= laneTop) - 1);
-    const computedLastLane = offsets.findIndex((offset) => offset > laneBottom) + 1 || arrangement.tracks.length;
-    const lastLane = Math.min(arrangement.tracks.length, Math.max(firstLane + 3, computedLastLane));
-    const visibleStartTick = Math.max(0, view.left / viewport.pxPerTick);
-    const visibleEndTick = (view.left + fieldViewportWidth) / viewport.pxPerTick;
+    const { offsets, laneTop, firstLane, lastLane, visibleStartTick, visibleEndTick } = virtualizationWindow(
+        heights, view, viewport.pxPerTick, HEADER_WIDTH, RULER_HEIGHT,
+    );
 
     const seekFromClientX = (clientX: number) => {
         const rect = scrollRef.current?.getBoundingClientRect();

@@ -80,6 +80,28 @@ jobs:
           mode: memory
           run: cargo codspeed run -m memory
 
+  # Ring 2: deterministic TypeScript control-plane hot paths. The CodSpeed Vitest
+  # plugin instruments these in CI and falls back to plain Vitest timing locally.
+  web-benchmarks:
+    name: Run control-plane benchmarks (Ring 2)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - name: Install web dependencies
+        # Benchmarks do not need the repository's git-hook postinstall. Skipping
+        # lifecycle scripts also avoids the package preinstall's npm_execpath guard.
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Run the control-plane benchmarks (CPU simulation)
+        uses: CodSpeedHQ/action@63f3e98b61959fe67f146a3ff022e4136fe9bb9c # v4
+        with:
+          mode: simulation
+          run: bun run bench:web
+
   # Wall-clock CPU time for the end-to-end latency bench — an absolute-µs reading
   # of the per-block render cost against the real-time deadline. Separate job so
   # its noisier instrument never gates the deterministic simulation/memory run.

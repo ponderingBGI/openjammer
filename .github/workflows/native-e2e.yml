@@ -1,0 +1,100 @@
+name: Native end-to-end
+
+on:
+  push:
+    branches: [main, canari]
+  pull_request:
+    branches: [main, canari]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-e2e-${{ github.event.pull_request.head.sha || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  OJ_DEV_SKIP_PI: '1'
+
+jobs:
+  linux:
+    name: Linux N1 + N2 + N3
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Setup web
+        uses: ./.github/actions/setup-web
+      - name: Setup Rust and native dependencies
+        uses: ./.github/actions/setup-rust
+      - name: Install native WebDriver and virtual display
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y webkit2gtk-driver xvfb
+          cargo install tauri-driver --locked
+      - name: Provide an ALSA null output for native engine frames
+        run: printf 'pcm.!default { type null }\nctl.!default { type null }\n' > "$HOME/.asoundrc"
+      - name: Build frontend and scaffold-host desktop app
+        run: |
+          bun run build
+          mkdir -p src-tauri/binaries
+          cargo build -p oj-tauri --features custom-protocol
+      - name: N1 + N2 real-app journeys
+        env:
+          OJ_NATIVE_E2E_RUN: '1'
+        run: xvfb-run -a bun test e2e-native/native-e2e.test.ts
+      - name: N3 deterministic WAV + FLAC bounce
+        run: bun test e2e-native/n3-determinism.test.ts
+
+  windows:
+    name: Windows N1 + N2 + N3
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Setup web
+        uses: ./.github/actions/setup-web
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+      - name: Install tauri-driver and matching Edge driver
+        shell: pwsh
+        run: |
+          cargo install tauri-driver --locked
+          cargo install --git https://github.com/chippers/msedgedriver-tool --locked
+          & "$env:USERPROFILE\.cargo\bin\msedgedriver-tool.exe"
+          $PWD.Path | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Build frontend and scaffold-host desktop app
+        shell: bash
+        run: |
+          bun run build
+          mkdir -p src-tauri/binaries
+          cargo build -p oj-tauri --features custom-protocol
+      - name: N1 + N2 real-app journeys
+        env:
+          OJ_NATIVE_E2E_RUN: '1'
+        run: bun test e2e-native/native-e2e.test.ts
+      - name: N3 deterministic WAV + FLAC bounce
+        run: bun test e2e-native/n3-determinism.test.ts
+
+  macos:
+    name: macOS N3 + engine goldens
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Setup web
+        uses: ./.github/actions/setup-web
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+      - name: Existing engine unit and golden suites
+        run: cargo test -p ojcore -p ojinstrument -p ojcore-native
+      - name: N3 deterministic WAV + FLAC bounce
+        run: bun test e2e-native/n3-determinism.test.ts
