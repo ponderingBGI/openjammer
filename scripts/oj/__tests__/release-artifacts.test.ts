@@ -39,7 +39,7 @@ async function fixture(version: string): Promise<{ input: string; output: string
     [`canari-x86_64-unknown-linux-gnu/target/release/bundle/appimage/OpenJammer_${version}_amd64.AppImage`]:
       'appimage',
     [`canari-x86_64-unknown-linux-gnu/target/release/bundle/appimage/OpenJammer_${version}_amd64.AppImage.sig`]:
-      'appimage signature',
+      'appimage signature\n',
     [`canari-x86_64-pc-windows-msvc/target/release/bundle/nsis/OpenJammer_${version}_x64-setup.exe`]:
       'nsis',
     [`canari-x86_64-pc-windows-msvc/target/release/bundle/nsis/OpenJammer_${version}_x64-setup.exe.sig`]:
@@ -84,7 +84,7 @@ describe('canari release artifact assembly', () => {
       'windows-x86_64-nsis',
     ]);
     expect(manifest.platforms['linux-x86_64']).toEqual({
-      signature: 'appimage signature',
+      signature: 'appimage signature\n',
       url: `https://github.com/ponderingBGI/openjammer/releases/download/v${version}/OpenJammer_${version}_amd64.AppImage`,
     });
     expect(manifest.platforms['darwin-aarch64']?.signature).toBe('arm signature');
@@ -104,7 +104,7 @@ describe('canari release artifact assembly', () => {
       ),
     );
 
-    expect(
+    await expect(
       assembleCanariRelease({
         inputDir: dirs.input,
         outputDir: dirs.output,
@@ -114,5 +114,28 @@ describe('canari release artifact assembly', () => {
         notes: 'Canari fixture.',
       }),
     ).rejects.toThrow(/expected exactly one Windows NSIS signature; found 0/);
+  });
+
+  test('rejects an empty signature without rewriting non-empty signature bytes', async () => {
+    const version = '0.0.4-canari.3';
+    const dirs = await fixture(version);
+    await writeFile(
+      join(
+        dirs.input,
+        `canari-x86_64-pc-windows-msvc/target/release/bundle/nsis/OpenJammer_${version}_x64-setup.exe.sig`,
+      ),
+      ' \n',
+    );
+
+    await expect(
+      assembleCanariRelease({
+        inputDir: dirs.input,
+        outputDir: dirs.output,
+        version,
+        repo: 'ponderingBGI/openjammer',
+        tag: `v${version}`,
+        notes: 'Canari fixture.',
+      }),
+    ).rejects.toThrow(`OpenJammer_${version}_x64-setup.exe.sig is empty`);
   });
 });

@@ -171,6 +171,7 @@ export async function assembleCanariRelease(options: BundleOptions): Promise<Upd
   const platforms: UpdaterManifest['platforms'] = {};
   for (const updater of stagedUpdaters) {
     const signature = await readFile(join(outputDir, updater.signatureName), 'utf8');
+    if (!signature.trim()) throw new Error(`${updater.signatureName} is empty`);
     const url = releaseDownloadUrl(repo, tag, updater.assetName);
     for (const platform of updater.platforms) {
       platforms[platform] = { signature, url };
