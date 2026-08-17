@@ -68,6 +68,11 @@ describe.skipIf(!enabled)('tauri-driver native journeys', () => {
     test('N1 — First Light plays in the native engine and exports analyzed audio', async () => {
         await startSession();
         await openStarter('First Light');
+        // CI-gated native plugin insertion doorway: the Browser remains one
+        // shelf even when the runner has no third-party binary installed.
+        await browser.execute("window.dispatchEvent(new CustomEvent('openjammer:open-browser', {detail:{context:'insert'}}))");
+        await browser.waitFor('xpath', '//*[@role="dialog" and @aria-label="Browser"]');
+        await clickXpath('//*[@role="listbox"]//*[@role="option"][1]//button');
         const beforePlayhead = await browser.execute<string>('return document.querySelector(".arrangement-playhead")?.style.transform || ""');
         await clickXpath('//button[@title="Play"]');
         await browser.waitFor('xpath', '//button[@title="Stop"]');

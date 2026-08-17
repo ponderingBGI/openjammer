@@ -1,5 +1,6 @@
 import { effectLoweringFor, manifestFor, type ParamDecl } from '../engine/manifest';
 import type { NodeType } from '../engine/types';
+import { HOSTED_PLUGIN_DESCRIPTOR_KEY, type HostedPluginDescriptor } from '../engine/dynamicRegistry';
 import type { Arrangement, ArrangementTrack, AutomationLane, AutomationLaneState, AutomationPoint } from './types';
 
 export const TRACK_GAIN_PARAM = 0;
@@ -9,7 +10,7 @@ export const TRACK_GAIN_MAX_DB = 12;
 
 export interface AddressableParam extends ParamDecl {
     ref: string;
-    label: string;
+    label: { group: string; name: string };
     unit?: 'dB' | 'pan';
     toggled?: boolean;
 }
@@ -58,8 +59,8 @@ export const protectAutomation = (arrangement: Arrangement) => mapAutomationStat
 export function trackOutputParams(track: ArrangementTrack): AddressableParam[] {
     const refs = outputStageRefs(track);
     return [
-        { ref: refs.gain, id: TRACK_GAIN_PARAM, name: 'gain', label: 'Track Gain', min: TRACK_GAIN_MIN_DB, max: TRACK_GAIN_MAX_DB, default: 0, unit: 'dB' },
-        { ref: refs.pan, id: TRACK_PAN_PARAM, name: 'pan', label: 'Track Pan', min: -1, max: 1, default: 0, unit: 'pan' },
+        { ref: refs.gain, id: TRACK_GAIN_PARAM, name: 'gain', label: { group: 'Track', name: 'Track Gain' }, min: TRACK_GAIN_MIN_DB, max: TRACK_GAIN_MAX_DB, default: 0, unit: 'dB' },
+        { ref: refs.pan, id: TRACK_PAN_PARAM, name: 'pan', label: { group: 'Track', name: 'Track Pan' }, min: -1, max: 1, default: 0, unit: 'pan' },
     ];
 }
 
@@ -84,14 +85,20 @@ export function addressableTrackParams(arrangement: Arrangement, track: Arrangem
     for (const spec of arrangement.graph.nodes) {
         if (!reachable.has(spec.ref) || spec.type === 'speaker' || spec.type === 'recorder') continue;
         let decls: ParamDecl[];
+        const hosted = spec.data?.[HOSTED_PLUGIN_DESCRIPTOR_KEY] as HostedPluginDescriptor | undefined;
         try {
-            decls = spec.type === 'effect'
+            decls = hosted?.params?.map((param, index) => ({ ...param, id: index })) ?? (spec.type === 'effect'
                 ? effectLoweringFor(spec.data).params
-                : manifestFor(spec.type as NodeType).params;
+                : manifestFor(spec.type as NodeType).params);
         } catch {
             continue;
         }
-        for (const decl of decls) params.push({ ...decl, ref: spec.ref, label: `${nodes.get(spec.ref)?.ref ?? spec.ref} · ${decl.name}` });
+        const group = hosted?.name ?? nodes.get(spec.ref)?.ref ?? spec.ref;
+        for (const decl of decls) {
+            if (decl.hidden || decl.automatable === false) continue;
+            const path = decl.module?.split('/').filter(Boolean).join(' › ');
+            params.push({ ...decl, ref: spec.ref, label: { group, name: `${path ? `${path} › ` : ''}${decl.name || `Parameter ${decl.id + 1}`}` } });
+        }
     }
     return params;
 }

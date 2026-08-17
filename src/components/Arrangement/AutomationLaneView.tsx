@@ -11,6 +11,7 @@ const LANE_HEIGHT = AUTOMATION_LANE_HEIGHT;
 export function AutomationLaneView({ arrangement, track, lane, pxPerTick }: { arrangement: Arrangement; track: ArrangementTrack; lane: AutomationLane; pxPerTick: number }) {
     const descriptor = descriptorForLane(arrangement, lane);
     const params = useMemo(() => addressableTrackParams(arrangement, track), [arrangement, track]);
+    const paramGroups = useMemo(() => [...new Set(params.map((param) => param.label.group))], [params]);
     const playheadTick = useArrangementStore((state) => state.playheadTick);
     const fieldRef = useRef<HTMLDivElement>(null);
     const drag = useRef<{ arrangement: Arrangement; startX: number; startY: number; point: AutomationPoint; push: boolean; scale: number } | null>(null);
@@ -41,11 +42,11 @@ export function AutomationLaneView({ arrangement, track, lane, pxPerTick }: { ar
                     const selected = params.find((param) => `${param.ref}:${param.id}` === event.target.value);
                     if (selected) useArrangementStore.getState().apply({ kind: 'setAutomationLaneTarget', laneId: lane.id!, ref: selected.ref, param: selected.id });
                 }}>
-                    {params.map((param) => <option key={`${param.ref}:${param.id}`} value={`${param.ref}:${param.id}`}>{param.label}</option>)}
+                    {paramGroups.map((group) => <optgroup key={group} label={group}>{params.filter((param) => param.label.group === group).map((param) => <option key={`${param.ref}:${param.id}`} value={`${param.ref}:${param.id}`}>{param.label.name}</option>)}</optgroup>)}
                 </Select>
                 <span className="arrangement-automation__value">{live.toFixed(descriptor.unit === 'dB' ? 1 : 2)}{descriptor.unit === 'dB' ? ' dB' : ''}</span>
-                <SegmentedControl className="arrangement-automation__state" aria-label={`${descriptor.label} automation state`} value={lane.state ?? 'Play'} options={[{ value: 'Off', label: 'Off' }, { value: 'Play', label: 'Play' }]} onChange={(state) => useArrangementStore.getState().apply({ kind: 'setAutomationLaneState', laneId: lane.id!, state })} />
-                <SegmentedControl className="arrangement-automation__interp" aria-label={`${descriptor.label} interpolation`} value={lane.interp ?? 'Discrete'} options={[{ value: 'Discrete', label: 'Step' }, { value: 'Linear', label: 'Linear' }]} onChange={(interp) => useArrangementStore.getState().apply({ kind: 'setAutomationLaneInterp', laneId: lane.id!, interp })} />
+                <SegmentedControl className="arrangement-automation__state" aria-label={`${descriptor.label.name} automation state`} value={lane.state ?? 'Play'} options={[{ value: 'Off', label: 'Off' }, { value: 'Play', label: 'Play' }]} onChange={(state) => useArrangementStore.getState().apply({ kind: 'setAutomationLaneState', laneId: lane.id!, state })} />
+                <SegmentedControl className="arrangement-automation__interp" aria-label={`${descriptor.label.name} interpolation`} value={lane.interp ?? 'Discrete'} options={[{ value: 'Discrete', label: 'Step' }, { value: 'Linear', label: 'Linear' }]} onChange={(interp) => useArrangementStore.getState().apply({ kind: 'setAutomationLaneInterp', laneId: lane.id!, interp })} />
             </div>
             <div
                 ref={fieldRef}
@@ -70,7 +71,7 @@ export function AutomationLaneView({ arrangement, track, lane, pxPerTick }: { ar
                     key={point.tick}
                     type="button"
                     className="arrangement-automation__point"
-                    aria-label={`${descriptor.label} at tick ${point.tick}: ${point.value}`}
+                    aria-label={`${descriptor.label.name} at tick ${point.tick}: ${point.value}`}
                     style={{ left: point.tick * pxPerTick, top: yFor(point.value) }}
                     onKeyDown={(event) => {
                         if (event.key === 'Delete' || event.key === 'Backspace') {

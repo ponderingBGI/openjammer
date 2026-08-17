@@ -554,6 +554,8 @@ mod tests {
             path: "/plugins/AcmeSynth.clap".into(),
             format: PluginFormat::Clap,
             is_instrument: true,
+            features: vec!["instrument".into()],
+            has_gui: false,
             ports: PortCounts {
                 audio_in: 0,
                 audio_out: 2,

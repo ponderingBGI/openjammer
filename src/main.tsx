@@ -11,6 +11,7 @@ import { installConsoleCapture, installGlobalErrorHandlers } from './utils/log'
 import { recoverFromStaleBundle } from './utils/staleBundleGuard'
 import './components/AppErrorBoundary.css'
 import { installE2EBridge } from './test/e2eBridge'
+import { PluginWindowShell } from './components/Plugins/PluginWindowShell'
 
 // Route every console.* line into the DevLog ring (and thereby the AI agent's
 // get_logs tool) before anything else logs. Idempotent + StrictMode-safe.
@@ -36,10 +37,11 @@ if (initialTheme) applyTheme(initialTheme)
 void recoverFromStaleBundle()
 installE2EBridge()
 
+const pluginWindowLabel = new URLSearchParams(window.location.search).get('plugin-window')
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <AppErrorBoundary>
-      <App />
+      {pluginWindowLabel ? <PluginWindowShell label={pluginWindowLabel} /> : <App />}
     </AppErrorBoundary>
   </StrictMode>,
 )

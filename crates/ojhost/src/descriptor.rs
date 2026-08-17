@@ -157,6 +157,13 @@ pub struct PluginDescriptor {
     /// Whether the plugin reports itself as an instrument (note consumer) vs a
     /// pure audio effect. Drives default wiring + whether note events route.
     pub is_instrument: bool,
+    /// CLAP descriptor feature strings, in declaration order. Empty for other
+    /// formats (OPEN-3: non-CLAP formats do not acquire guessed family tags).
+    #[serde(default)]
+    pub features: Vec<String>,
+    /// Whether the selected backend confirmed an embeddable native editor.
+    #[serde(default)]
+    pub has_gui: bool,
     /// Audio port topology the plugin reported at scan time.
     pub ports: PortCounts,
     /// Detailed buses in CLAP declaration order. Empty for legacy cache entries
@@ -233,6 +240,8 @@ mod tests {
             path: "/plugins/AcmeReverb.clap".into(),
             format: PluginFormat::Clap,
             is_instrument: false,
+            features: vec!["audio-effect".into(), "reverb".into()],
+            has_gui: false,
             ports: PortCounts {
                 audio_in: 2,
                 audio_out: 2,

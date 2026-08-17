@@ -22,6 +22,8 @@ fn desc(index: usize) -> PluginDescriptor {
         path: format!("/plugins/Acme{index}.vst3"),
         format: PluginFormat::Vst3,
         is_instrument: index.is_multiple_of(2),
+        features: Vec::new(),
+        has_gui: false,
         ports: PortCounts {
             audio_in: if index.is_multiple_of(2) { 0 } else { 2 },
             audio_out: 2,

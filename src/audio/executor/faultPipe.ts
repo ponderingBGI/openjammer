@@ -17,6 +17,9 @@ import type { Event as EngineEvent } from '../../../packages/oj-protocol-ts/src/
 import { useLogStore } from '../../store/logStore';
 import { setEngineHealth } from '../../store/engineHealthStore';
 import { setNodePluginLoadError } from './pluginLoadError';
+import { reportPluginFault } from '../../store/pluginFaultStore';
+import { useGraphStore } from '../../store/graphStore';
+import { resolveNodeDefinition } from '../../engine/registry';
 
 /**
  * Coalesce a batch of engine events so a per-block fault storm collapses to a
@@ -119,10 +122,16 @@ export function routeRuntimeFaults(
     for (const ev of events) {
         const kind = ev.kind;
         if (typeof kind !== 'object' || !('NodeFault' in kind)) continue;
-        if (kind.NodeFault.fault !== 'Crashed' && kind.NodeFault.fault !== 'AutoBypassed') continue;
+        if (kind.NodeFault.fault !== 'Crashed' && kind.NodeFault.fault !== 'AutoBypassed' && kind.NodeFault.fault !== 'NonFinite') continue;
         const visual = resolve(kind.NodeFault.node);
         if (visual === undefined) continue;
-        setNodePluginLoadError(visual, true);
+        const node = useGraphStore.getState().nodes.get(visual);
+        const pluginName = node ? resolveNodeDefinition(node).name : 'Plugin';
+        reportPluginFault({ nodeId: visual, pluginName, kind: kind.NodeFault.fault, corr: ev.corr_id || undefined });
+        if (kind.NodeFault.fault !== 'NonFinite') {
+            setNodePluginLoadError(visual, true);
+            useGraphStore.getState().updateNodeData(visual, { pluginFaultKind: kind.NodeFault.fault, pluginBypassed: true });
+        }
     }
 }
 

@@ -817,6 +817,8 @@ mod tests {
                 path: "/p/x.clap".into(),
                 format: PluginFormat::Clap,
                 is_instrument: true,
+                features: vec!["instrument".into()],
+                has_gui: false,
                 ports: crate::descriptor::PortCounts {
                     audio_in: 0,
                     audio_out: 2,

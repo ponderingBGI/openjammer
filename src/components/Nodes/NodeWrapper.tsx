@@ -34,7 +34,8 @@ import { SongNode } from './SongNode';
 import { AutoParamPanel } from '../params/AutoParamPanel';
 import { manifestFor, manifestForDynamic } from '../../engine/manifest';
 import { resolveNodeDefinition } from '../../engine/registry';
-import { getDynamicPlugin } from '../../engine/dynamicRegistry';
+import { getDynamicPlugin, HOSTED_PLUGIN_DESCRIPTOR_KEY, type HostedPluginDescriptor } from '../../engine/dynamicRegistry';
+import { getInvoke, isTauri } from '../../ai/tauri';
 import { NodeFrame, NodeShell, PortRow } from '@openjammer/oj-ui';
 import './BaseNode.css';
 
@@ -70,6 +71,7 @@ const SCHEMATIC_TYPES = [
 
 export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps) {
     const [isDragging, setIsDragging] = useState(false);
+    const [pluginWindowOpen, setPluginWindowOpen] = useState(false);
     const dragStart = useRef<Position>({ x: 0, y: 0 });
     const nodeStart = useRef<Position>({ x: 0, y: 0 });
 
@@ -467,6 +469,8 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     // for ANY node type via the shared NodeShell header (a held note beats a glitch:
     // the project stays open and the player sees what's missing).
     const pluginDegraded = (node.data as { pluginLoadError?: boolean }).pluginLoadError === true;
+    const hostedDescriptor = (node.data as Record<string, unknown>)[HOSTED_PLUGIN_DESCRIPTOR_KEY] as HostedPluginDescriptor | undefined;
+    const bypassed = (node.data as Record<string, unknown>).pluginBypassed === true || (node.data as Record<string, unknown>).pluginFaultKind === 'AutoBypassed';
     const headerTitleNode: ReactNode = pluginDegraded ? (
         <>
             {headerTitle}
@@ -573,14 +577,15 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
         <NodeFrame
             position={node.position}
             dragging={isDragging}
-            className={`node ${node.type}`}
+            className={`node ${node.type}${bypassed ? ' is-bypassed' : ''}${(node.data as Record<string, unknown>).pluginFaultKind === 'AutoBypassed' ? ' is-watchdog-bypassed' : ''}${pluginWindowOpen ? ' is-window-open' : ''}`}
             onClick={(e) => e.stopPropagation()}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}
         >
             <NodeShell
                 title={headerTitleNode}
-                nodeType={node.category}
+                nodeType={hostedDescriptor?.vendor || node.category}
+                headerAction={hostedDescriptor?.has_gui ? <button type="button" className="oj-node__window" aria-label={`${pluginWindowOpen ? 'Close' : 'Open'} ${hostedDescriptor.name} window`} aria-pressed={pluginWindowOpen} onMouseDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); if (!isTauri()) return; if (pluginWindowOpen) void getInvoke()?.('plugin_window_shell_close', { label: `plugin-${node.id.replace(/[^a-zA-Z0-9]/g, '-')}` }); else void getInvoke()?.('plugin_window_shell_open', { nodeId: node.id, projectId: 'current', pluginName: hostedDescriptor.name, owner: headerTitle, hasGui: hostedDescriptor.has_gui }); setPluginWindowOpen(!pluginWindowOpen); }}><span aria-hidden="true">↗</span></button> : undefined}
                 selected={isSelected}
                 dragging={isDragging}
                 agentPending={isAgentPending}

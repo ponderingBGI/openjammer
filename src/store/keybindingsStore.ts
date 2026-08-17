@@ -133,6 +133,7 @@ export const keybindingActions: KeybindingAction[] = [
         scope: 'surface', surface: 'canvas',
     },
     { id: 'view.toggleArrangement', label: 'Toggle Arrangement', category: 'View', defaultBinding: { key: 'Tab' }, scope: 'global' },
+    { id: 'window.focusHost', label: 'Return to OpenJammer', category: 'View', defaultBinding: { key: 'F6' }, scope: 'global' },
     { id: 'commandBar.toggle', label: 'Open Command Bar', category: 'View', defaultBinding: { key: 'k', ctrl: true }, scope: 'global' },
     { id: 'panel.devLog', label: 'Toggle Developer Log', category: 'View', defaultBinding: { key: 'l', ctrl: true, shift: true }, scope: 'global' },
     { id: 'panel.audioHealth', label: 'Toggle Audio Health', category: 'View', defaultBinding: { key: 'h', ctrl: true, shift: true }, scope: 'global' },

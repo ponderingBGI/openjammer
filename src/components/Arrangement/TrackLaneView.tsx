@@ -74,12 +74,15 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                         store.apply({ kind: 'addAutomationLane', trackId, index: 0, lane: { id: laneId, ref: outputStageRefs(track).gain, param: 0, points: [] } });
                         view.showAutomationLane(trackId, laneId);
                     }}>A</LaneButton>
-                    <button className="arrangement-instrument-chip" type="button" title={`${typeof instrument === 'string' ? instrument : track.ref} · ${inputLabel}`} onClick={(event) => {
+                    <span className="arrangement-instrument-chip" title={`${typeof instrument === 'string' ? instrument : track.ref} · ${inputLabel}`}>
+                    <button className="arrangement-instrument-chip__name" type="button" onClick={(event) => {
                         event.stopPropagation();
                         if (shell) return;
                         useGraphStore.getState().selectNode(track.ref);
                         useUiViewStore.getState().setSurface('canvas');
                     }}>{typeof instrument === 'string' ? instrument : track.ref}</button>
+                    <button className="arrangement-instrument-chip__swap" type="button" aria-label={`Choose instrument for ${track.name ?? track.ref}`} onClick={(event) => { event.stopPropagation(); if (!shell) window.dispatchEvent(new CustomEvent('openjammer:open-browser', { detail: { context: 'pick', trackId } })); }}>⌄</button>
+                    </span>
                 </div>
                 {expandedClipId && <div className="arrangement-track__lane-menu">
                     <span>{drumMode ? 'Drum rows' : 'Pitched notes'}</span>

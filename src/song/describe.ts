@@ -79,7 +79,7 @@ function describeTrack(arr: Arrangement, tb: Timebase, track: ArrangementTrack, 
     const automation = (track.automation ?? [])
         .map((l) => {
             const param = addressable.find((item) => item.ref === l.ref && item.id === l.param);
-            return `      ~ automation ${l.id}: ${param?.label ?? `${l.ref} param ${l.param}`} [${l.state ?? 'Play'}] (${l.points.length} points)`;
+            return `      ~ automation ${l.id}: ${param ? `${param.label.group} · ${param.label.name}` : `${l.ref} param ${l.param}`} [${l.state ?? 'Play'}] (${l.points.length} points)`;
         })
         .join('\n');
     return [head, `      ${body}`, clips, automation].filter((s) => s.length > 0).join('\n');

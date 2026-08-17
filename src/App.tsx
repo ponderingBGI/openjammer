@@ -30,6 +30,7 @@ import { AudioHealthPanel } from './components/AudioHealth/AudioHealthPanel';
 import { useEngineHealthToast } from './components/EngineHealthDot/useEngineHealthToast';
 import { PwaUpdatePrompt } from './components/PwaUpdatePrompt';
 import { NativeUpdaterRunner } from './components/NativeUpdaterRunner';
+import { Bench } from './components/Bench/Bench';
 const PluginsPanel = lazy(() =>
     import('./components/Plugins/PluginsPanel').then((module) => ({
       default: module.PluginsPanel,
@@ -59,6 +60,7 @@ import { SharedSurfaceChrome } from './components/Arrangement/SharedSurfaceChrom
 import { ExportHost } from './components/Export';
 import { PianoRollSurfaceHost } from './components/PianoRoll';
 import { logger } from './utils/log';
+import { getInvoke } from './ai/tauri';
 import './styles/global.css';
 
 function getDocumentVersion(): string {
@@ -73,6 +75,7 @@ function getDocumentVersion(): string {
  */
 function PluginsPanelHost() {
   const [requested, setRequested] = useState(false);
+  const [context, setContext] = useState<'browse' | 'pick' | 'insert'>('browse');
 
   useBindingSet(useMemo(() => ({
     id: 'plugins-panel-toggle',
@@ -89,17 +92,23 @@ function PluginsPanelHost() {
 
   useEffect(() => {
     if (requested) return;
-    const request = () => setRequested(true);
+    const request = (event: Event) => {
+      const requestedContext = (event as CustomEvent<{ context?: 'browse' | 'pick' | 'insert' }>).detail?.context;
+      if (requestedContext) setContext(requestedContext);
+      setRequested(true);
+    };
     window.addEventListener('openjammer:toggle-plugins', request);
+    window.addEventListener('openjammer:open-browser', request);
     return () => {
       window.removeEventListener('openjammer:toggle-plugins', request);
+      window.removeEventListener('openjammer:open-browser', request);
     };
   }, [requested]);
 
   if (!requested) return null;
   return (
     <Suspense fallback={null}>
-      <PluginsPanel initiallyOpen />
+      <PluginsPanel initiallyOpen context={context} />
     </Suspense>
   );
 }
@@ -438,6 +447,10 @@ function App() {
         },
       },
       {
+        actionId: 'window.focusHost',
+        run: () => { void getInvoke()?.('plugin_window_focus_host'); return true; },
+      },
+      {
         actionId: 'view.toggleArrangement',
         run: () => {
           const current = useUiViewStore.getState().surface;
@@ -692,6 +705,7 @@ function App() {
       {/* DevLog panel (L4) — the on-device structured-log surface; the AI agent
           reads the same store. Toggled via the command palette / openjammer:toggle-devlog. */}
       <DevLogPanel />
+      <Bench />
 
       {/* L5 one-click "report a problem" reporter — captures a redacted log bundle. */}
       <IssueReporter />

@@ -187,6 +187,8 @@ mod tests {
             path: "/p/AcmeReverb.clap".into(),
             format: PluginFormat::Clap,
             is_instrument: false,
+            features: vec!["audio-effect".into(), "reverb".into()],
+            has_gui: false,
             ports: PortCounts {
                 audio_in: 2,
                 audio_out: 2,

@@ -138,7 +138,11 @@ function DevLogPanelInner() {
     // Global Ctrl/Cmd+Shift+L toggle + the command bridge. (Escape-to-close is
     // owned by the Modal once the panel is open.)
     useEffect(() => {
-        const onCommand = () => setOpen((v) => !v);
+        const onCommand = (event: Event) => {
+            const correlation = (event as CustomEvent<{ correlation?: number }>).detail?.correlation;
+            if (correlation !== undefined) { setActiveCorr(correlation); setOpen(true); }
+            else setOpen((v) => !v);
+        };
         window.addEventListener('openjammer:toggle-devlog', onCommand);
         return () => {
             window.removeEventListener('openjammer:toggle-devlog', onCommand);

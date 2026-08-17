@@ -51,6 +51,8 @@ fn load_bogus_descriptor_errors_gracefully() {
         path: "/no/such/plugin.clap".into(),
         format: ojhost::PluginFormat::Clap,
         is_instrument: false,
+        features: Vec::new(),
+        has_gui: false,
         ports: ojhost::PortCounts {
             audio_in: 2,
             audio_out: 2,

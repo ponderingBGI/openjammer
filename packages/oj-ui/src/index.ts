@@ -157,3 +157,5 @@ export type { KeyTileProps, KeyTileVariant } from './components/KeyTile/KeyTile'
 
 export { Banner } from './components/Banner/Banner';
 export type { BannerProps, BannerTone } from './components/Banner/Banner';
+export { ParamRow } from './components/ParamRow/ParamRow';
+export type { ParamRowProps } from './components/ParamRow/ParamRow';

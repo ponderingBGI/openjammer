@@ -8,6 +8,7 @@ import { getAgentBackend, MockAgentBackend, setAgentBackend } from '../ai';
 import type { AgentEvent, AgentTask } from '../ai';
 import { useAgentSessionStore } from '../store/agentSessionStore';
 import { useCollabStore } from '../store/collabStore';
+import { reportPluginFault, type PluginFaultKind } from '../store/pluginFaultStore';
 
 type FixtureName = 'denseEdit' | 'firstLight' | 'hundredTracks' | 'pathological';
 
@@ -26,6 +27,7 @@ interface E2EBridge {
     acceptCollabOffer(offer: string): Promise<string>;
     acceptCollabAnswer(answer: string): Promise<void>;
     addGraphNode(label: string): string;
+    pluginFault(pluginName: string, kind: PluginFaultKind, repeats?: number): void;
     setAgentScript(script: AgentEvent[] | ((task: AgentTask) => AgentEvent[])): Promise<void>;
     sendAgent(prompt: string): Promise<void>;
     agentSession(): Promise<{ messages: unknown[]; phase: string }>;
@@ -74,6 +76,11 @@ export function installE2EBridge(): void {
             await transport.acceptAnswer(answer);
         },
         addGraphNode: (label) => useGraphStore.getState().addNode('effect', { x: 120, y: 120 }, null, { name: label }),
+        pluginFault: (pluginName, kind, repeats = 1) => {
+            for (let index = 0; index < repeats; index += 1) {
+                reportPluginFault({ nodeId: `e2e-${pluginName}`, pluginName, kind, corr: 4242 });
+            }
+        },
         setAgentScript: async (script) => setAgentBackend(new MockAgentBackend({ script })),
         sendAgent: async (prompt) => useAgentSessionStore.getState().send(getAgentBackend(), { prompt }),
         agentSession: async () => {

@@ -211,10 +211,8 @@ pub(super) fn probe(path: &Path, format: PluginFormat) -> Result<Vec<PluginDescr
     let path_str = path.to_string_lossy().into_owned();
     let mut out = Vec::new();
     for d in factory.plugin_descriptors() {
-        let is_instrument = d.features().any(|f| {
-            let f = f.to_string_lossy();
-            f == "instrument" || f == "synthesizer"
-        });
+        let features: Vec<String> = d.features().map(|feature| feature.to_string_lossy().into_owned()).collect();
+        let is_instrument = features.iter().any(|feature| feature == "instrument" || feature == "synthesizer");
         let uid = cstr_to_string(d.id());
         // Briefly instantiate to read the plugin's parameter list (CLAP params
         // extension) so the UI shows real knobs with the plugin's own ranges.
@@ -240,6 +238,10 @@ pub(super) fn probe(path: &Path, format: PluginFormat) -> Result<Vec<PluginDescr
             path: path_str.clone(),
             format: PluginFormat::Clap,
             is_instrument,
+            features,
+            // clack 0.1.0 is pinned without the GUI extension; state this
+            // honestly so the web surface never draws a dead editor glyph.
+            has_gui: false,
             // CLAP reports ports via per-instance extensions; conservative
             // defaults here, refined on load.
             ports: PortCounts {
@@ -1393,6 +1395,8 @@ mod state_roundtrip {
             path: String::new(),
             format: PluginFormat::Clap,
             is_instrument: true,
+            features: vec!["instrument".into(), "synthesizer".into()],
+            has_gui: false,
             ports: PortCounts {
                 audio_in: 0,
                 audio_out: 2,
