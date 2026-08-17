@@ -83,6 +83,35 @@ jobs:
           cargo install --git https://github.com/chippers/msedgedriver-tool --locked
           & "$env:USERPROFILE\.cargo\bin\msedgedriver-tool.exe"
           $PWD.Path | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      # WebView2 150+ broke WebDriver session creation on GitHub-hosted Windows
+      # runners: msedgedriver times out with "DevToolsActivePort file doesn't
+      # exist". This is an UPSTREAM runtime regression, not an app bug — Tauri's
+      # own webdriver-example CI passed on WebView2 148/149 and fails with this
+      # exact error since 150.0.4078.65 (2026-07-18) and still on 151.0.4129.72:
+      #   https://github.com/tauri-apps/webdriver-example/actions/runs/29622188753/job/88019271667
+      #   https://github.com/tauri-apps/webdriver-example/actions/runs/31864495419/job/94963272787
+      # Truthful, version-gated skip (the repo pattern): the WebDriver journeys
+      # skip LOUDLY only while the runner's Evergreen runtime is on a broken
+      # major; a future image with a fixed runtime re-arms them automatically.
+      # N3 (no WebDriver) and the native build/audio gates keep running. The
+      # durable alternatives — a pinned Fixed-Version WebView2 + exactly
+      # matching driver held as a repo artifact, or Tauri's embedded WebDriver
+      # provider — need owner-provisioned artifacts/secrets.
+      - name: Detect WebView2 WebDriver automation support
+        id: webview2
+        shell: pwsh
+        run: |
+          $key = 'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          $version = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).pv
+          if (-not $version) { $version = '0.0.0.0' }
+          $major = [int]($version.Split('.')[0])
+          "version=$version" >> $env:GITHUB_OUTPUT
+          if ($major -ge 150) {
+            "broken=true" >> $env:GITHUB_OUTPUT
+            Write-Host "::warning title=WebView2 $version cannot create WebDriver sessions::Skipping the Windows N1+N2 WebDriver journeys - upstream regression since WebView2 150 (see workflow comments). N3 and the audio/build gates still run."
+          } else {
+            "broken=false" >> $env:GITHUB_OUTPUT
+          }
       - name: Build frontend and scaffold-host desktop app
         shell: bash
         run: |
@@ -90,6 +119,7 @@ jobs:
           mkdir -p src-tauri/binaries
           cargo build -p oj-tauri --features custom-protocol
       - name: N1 + N2 real-app journeys
+        if: steps.webview2.outputs.broken != 'true'
         env:
           OJ_NATIVE_E2E_RUN: '1'
         run: bun test e2e-native/native-e2e.test.ts
