@@ -13,7 +13,7 @@ use crate::manifest::ContractVersion;
 /// This kernel build's [`DspInstance`] contract generation (`docs/STABILITY.md` §4).
 /// Bumped MINOR when a backward-compatible capability/extension is added; MAJOR
 /// only on a breaking change to the frozen hot path (which must never happen).
-pub const KERNEL_CONTRACT: ContractVersion = ContractVersion::new(1, 1);
+pub const KERNEL_CONTRACT: ContractVersion = ContractVersion::new(1, 2);
 
 /// The CLOSED set of kernel-known capability EXTENSIONS a node may provide through
 /// [`DspInstance::extension`]. Each maps to a reserved `oj.*` capability id in the
@@ -27,6 +27,8 @@ pub enum ExtId {
     Latency,
     /// `oj.state` — opaque save/restore of the node's full state (sessions, respawn).
     State,
+    /// `oj.tail` — finite sample count or an infinite processing tail.
+    Tail,
     /// `oj.note-expression` — per-note expression / MPE.
     NoteExpression,
     /// `oj.offline-render` — the node opts into HQ paths when `realtime == false`.
@@ -41,6 +43,7 @@ impl ExtId {
         match self {
             ExtId::Latency => "oj.latency",
             ExtId::State => "oj.state",
+            ExtId::Tail => "oj.tail",
             ExtId::NoteExpression => "oj.note-expression",
             ExtId::OfflineRender => "oj.offline-render",
             ExtId::Gui => "oj.gui",
@@ -53,6 +56,7 @@ impl ExtId {
         match id {
             "oj.latency" => Some(ExtId::Latency),
             "oj.state" => Some(ExtId::State),
+            "oj.tail" => Some(ExtId::Tail),
             "oj.note-expression" => Some(ExtId::NoteExpression),
             "oj.offline-render" => Some(ExtId::OfflineRender),
             "oj.gui" => Some(ExtId::Gui),
@@ -74,7 +78,7 @@ pub fn kernel_supports_capability(id: &str) -> bool {
     // as they land; until then a plugin that REQUIRES them degrades to a stub.
     matches!(
         ExtId::from_capability_id(id),
-        Some(ExtId::Latency | ExtId::State)
+        Some(ExtId::Latency | ExtId::State | ExtId::Tail)
     )
 }
 
@@ -86,6 +90,23 @@ pub fn kernel_supports_capability(id: &str) -> bool {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct LatencyExt {
     samples: u32,
+}
+
+/// Off-RT capability object returned for [`ExtId::Tail`]. `None` represents an
+/// infinite tail; `Some(0)` means no tail.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TailExt {
+    samples: Option<u32>,
+}
+
+impl TailExt {
+    pub const fn new(samples: Option<u32>) -> Self {
+        Self { samples }
+    }
+
+    pub const fn tail_samples(&self) -> Option<u32> {
+        self.samples
+    }
 }
 
 impl LatencyExt {
@@ -265,9 +286,9 @@ pub trait DspInstance: Send {
     }
 
     /// OFF-RT state RESTORE seam (the `oj.state` capability's `&mut` half — see
-    /// [`StateSave`] for the `&self` save half). Called at construction time (right
-    /// after `activate` + baked-in `set_param`s + `load_asset`, on the control
-    /// thread) with the opaque blob a prior session saved, so the node comes up
+    /// [`StateSave`] for the `&self` save half). Called at construction time
+    /// before `activate` on the control thread with the opaque blob a prior
+    /// session saved, so the node comes up
     /// exactly as it was left. The default is a no-op so pure-DSP nodes ignore it;
     /// a hosted plugin pushes the blob into `setStateInformation` / the CLAP state
     /// extension. Like `load_asset`, this runs off the audio thread and MAY
@@ -298,6 +319,7 @@ mod ext_tests {
         for id in [
             ExtId::Latency,
             ExtId::State,
+            ExtId::Tail,
             ExtId::NoteExpression,
             ExtId::OfflineRender,
             ExtId::Gui,

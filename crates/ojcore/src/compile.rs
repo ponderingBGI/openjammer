@@ -552,8 +552,11 @@ fn compile_inner(
                 PrimitiveKind::Passthrough,
             ),
         };
-        inst.activate(sample_rate, block_size);
-        // oj.state RESTORE (off-RT, BEFORE params): seed the node with a prior
+        // oj.state RESTORE (off-RT, BEFORE ACTIVATE and params): CLAP explicitly
+        // permits state load on an inactive instance and plug-ins may size their
+        // activation resources from restored state. This ordering is enforced by
+        // construction for every DspInstance; default restore is a no-op.
+        // Seed the node with a prior
         // session's opaque blob so it is the BASE state. The baked-in `set_param`s
         // below then override with the CURRENT param values, so a post-load param
         // edit always wins and the blob never reverts it. Re-applied on EVERY
@@ -563,6 +566,7 @@ fn compile_inner(
         if let Some(blob) = states.resolve_state(node.id) {
             inst.restore_state(blob);
         }
+        inst.activate(sample_rate, block_size);
         // Apply any baked-in param defaults from the IR, then snap smoothers.
         for p in &node.params {
             inst.set_param(p.id, p.value);

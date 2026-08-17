@@ -59,6 +59,13 @@ pub trait HostedBackend: Send {
     /// here. After this, [`HostedBackend::latency_samples`] is authoritative.
     fn activate(&mut self, sample_rate: f32, max_block: usize);
 
+    /// CLAP audio-thread lifecycle boundary. Called immediately before the
+    /// first process block in a run; never performs main-thread work.
+    fn start_processing(&mut self) {}
+
+    /// CLAP audio-thread lifecycle boundary after the final process block.
+    fn stop_processing(&mut self) {}
+
     /// RT-thread hot path. Render `nframes` from `inputs` into `outputs`.
     /// `inputs`/`outputs` are channel-major (one slice per channel). MUST NOT
     /// allocate, lock, or block.
@@ -92,8 +99,43 @@ pub trait HostedBackend: Send {
     /// RT-thread: note-off for instrument plugins. Default no-op.
     fn note_off(&mut self, _note: u8) {}
 
+    /// Queue a timestamped hosted event for the next block. The caller must
+    /// provide nondecreasing `at_frame` values smaller than that block.
+    fn queue_event(&mut self, _event: HostedEvent) {}
+
     /// Plugin-reported processing latency in samples (post-`activate`), for PDC.
     fn latency_samples(&self) -> u32;
+
+    /// Plugin tail in samples. `None` means an infinite tail.
+    fn tail_samples(&self) -> Option<u32> {
+        Some(0)
+    }
+
+    /// OFF-RT CLAP value-to-text conversion.
+    fn param_value_to_text(&mut self, _id: u16, _value: f64) -> Option<String> {
+        None
+    }
+
+    /// OFF-RT CLAP text-to-value conversion.
+    fn param_text_to_value(&mut self, _id: u16, _text: &str) -> Option<f64> {
+        None
+    }
+
+    /// OFF-RT: drain plugin-originated gestures/adjustments captured without
+    /// blocking the audio callback.
+    fn take_param_gestures(&mut self) -> Vec<ParamGesture> {
+        Vec::new()
+    }
+
+    /// OFF-RT: drain plugin-originated note events such as CLAP NOTE_END.
+    fn take_output_events(&mut self) -> Vec<HostedEvent> {
+        Vec::new()
+    }
+
+    /// OFF-RT: consume a coalesced params/ports descriptor refresh request.
+    fn take_descriptor_rescan_request(&self) -> bool {
+        false
+    }
 
     /// OFF-RT: serialize the plugin's full opaque state — VST3
     /// `getStateInformation` / the CLAP state extension — so a session can persist
@@ -111,6 +153,59 @@ pub trait HostedBackend: Send {
 
     /// Off-RT: release activation-time resources. Default no-op.
     fn deactivate(&mut self) {}
+}
+
+/// Sample-accurate events accepted by the hosted-plugin bridge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HostedEvent {
+    Param {
+        at_frame: u32,
+        id: u16,
+        value: f64,
+    },
+    NoteOn {
+        at_frame: u32,
+        port: i16,
+        channel: i16,
+        key: i16,
+        note_id: i32,
+        velocity: f64,
+    },
+    NoteOff {
+        at_frame: u32,
+        port: i16,
+        channel: i16,
+        key: i16,
+        note_id: i32,
+        velocity: f64,
+    },
+    NoteChoke {
+        at_frame: u32,
+        port: i16,
+        channel: i16,
+        key: i16,
+        note_id: i32,
+    },
+    NoteEnd {
+        at_frame: u32,
+        port: i16,
+        channel: i16,
+        key: i16,
+        note_id: i32,
+    },
+    Midi {
+        at_frame: u32,
+        port: u16,
+        data: [u8; 3],
+    },
+}
+
+/// One plugin-originated parameter transaction event.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ParamGesture {
+    Begin { id: u32 },
+    Adjust { id: u32, value: f64 },
+    End { id: u32 },
 }
 
 /// Scan-probe `path` (a binary of `format`) for its plugin(s). See module docs.

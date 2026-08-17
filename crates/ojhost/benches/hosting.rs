@@ -26,11 +26,17 @@ fn desc(index: usize) -> PluginDescriptor {
             audio_in: if index.is_multiple_of(2) { 0 } else { 2 },
             audio_out: 2,
         },
+        audio_ports: Vec::new(),
+        port_configs: Vec::new(),
+        note_ports: PortCounts::default(),
         param_count: 16,
         params: (0..16)
             .map(|id| HostedParam {
                 id,
                 name: format!("param{id}"),
+                module: String::new(),
+                flags: 0,
+                unit: String::new(),
                 min: 0.0,
                 max: 1.0,
                 default: 0.5,

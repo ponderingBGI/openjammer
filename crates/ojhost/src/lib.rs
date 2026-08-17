@@ -41,10 +41,14 @@ mod node;
 mod scan;
 
 pub use backend::take_latency_rescan_request;
-pub use descriptor::{HostedParam, PluginDescriptor, PluginFormat, PortCounts};
+pub use backend::{HostedEvent, ParamGesture};
+pub use descriptor::{
+    HostedAudioPort, HostedParam, HostedPortConfig, PluginDescriptor, PluginFormat, PortCounts,
+};
 pub use error::HostError;
 pub use node::{
-    hosted_plugin_id, HostedPlugin, PluginEditor, PluginHostLoader, PluginHostNode, PLUGIN_HOST_ID,
+    hosted_plugin_id, HostedPlugin, HostedStateBlob, PluginEditor, PluginHostLoader,
+    PluginHostNode, PLUGIN_HOST_ID,
 };
 pub use scan::{
     candidate_paths, clap_plugin_dirs, default_plugin_dirs, probe_candidate, scan, scan_with,
@@ -185,6 +189,9 @@ mod tests {
                 audio_in: 2,
                 audio_out: 2,
             },
+            audio_ports: Vec::new(),
+            port_configs: Vec::new(),
+            note_ports: PortCounts::default(),
             param_count: 5,
             params: Vec::new(),
             latency_samples: 0,

@@ -14,10 +14,10 @@
 use std::sync::Mutex;
 
 use ojcore::{DspInstance, ParamDecl, PluginLoader, PluginManifest, PortDecl, ProcessCtx};
-use ojcore::{DspKind, ExtId, LatencyExt, StateSave, UiKind};
+use ojcore::{DspKind, ExtId, LatencyExt, StateSave, TailExt, UiKind};
 use ojproto::PrimitiveKind;
 
-use crate::backend::{self, HostedBackend};
+use crate::backend::{self, HostedBackend, HostedEvent, ParamGesture};
 use crate::descriptor::PluginDescriptor;
 use crate::error::HostError;
 
@@ -52,6 +52,13 @@ pub struct HostedPlugin {
     descriptor: PluginDescriptor,
 }
 
+/// Opaque plugin state paired with a deterministic content address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedStateBlob {
+    pub bytes: Vec<u8>,
+    pub content_hash: String,
+}
+
 /// A native top-level editor window for a hosted plugin. This is control/UI-rate
 /// only and intentionally separate from the audio-thread DSP instance.
 pub struct PluginEditor {
@@ -75,8 +82,9 @@ impl PluginEditor {
 }
 
 impl HostedPlugin {
-    /// Load and activate the plugin described by `desc` at `sample_rate` /
-    /// `max_block`. Returns [`HostError::Unavailable`] in the scaffold build (no
+    /// Instantiate the plugin described by `desc`, leaving it inactive so state
+    /// can be restored before [`HostedPlugin::activate`]. Returns
+    /// [`HostError::Unavailable`] in the scaffold build (no
     /// hosting backend compiled in).
     pub fn load(
         desc: &PluginDescriptor,
@@ -100,6 +108,82 @@ impl HostedPlugin {
     pub fn latency_samples(&self) -> u32 {
         self.backend.latency_samples()
     }
+
+    pub fn activate(&mut self, sample_rate: f32, max_block: usize) {
+        self.backend.activate(sample_rate, max_block);
+    }
+
+    pub fn start_processing(&mut self) {
+        self.backend.start_processing();
+    }
+
+    pub fn stop_processing(&mut self) {
+        self.backend.stop_processing();
+    }
+
+    pub fn deactivate(&mut self) {
+        self.backend.deactivate();
+    }
+
+    pub fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], nframes: usize) {
+        self.backend.process(inputs, outputs, nframes);
+    }
+
+    pub fn queue_event(&mut self, event: HostedEvent) {
+        self.backend.queue_event(event);
+    }
+
+    pub fn set_param(&mut self, id: u16, value: f32) {
+        self.backend.set_param(id, value);
+    }
+
+    pub fn param_value_to_text(&mut self, id: u16, value: f64) -> Option<String> {
+        self.backend.param_value_to_text(id, value)
+    }
+
+    pub fn param_text_to_value(&mut self, id: u16, text: &str) -> Option<f64> {
+        self.backend.param_text_to_value(id, text)
+    }
+
+    pub fn take_param_gestures(&mut self) -> Vec<ParamGesture> {
+        self.backend.take_param_gestures()
+    }
+
+    pub fn take_output_events(&mut self) -> Vec<HostedEvent> {
+        self.backend.take_output_events()
+    }
+
+    pub fn take_descriptor_rescan_request(&self) -> bool {
+        self.backend.take_descriptor_rescan_request()
+    }
+
+    pub fn tail_samples(&self) -> Option<u32> {
+        self.backend.tail_samples()
+    }
+
+    pub fn save_state_blob(&self) -> HostedStateBlob {
+        let bytes = self.backend.save_state();
+        HostedStateBlob {
+            content_hash: sha256_hex(&bytes),
+            bytes,
+        }
+    }
+
+    pub fn restore_state(&mut self, bytes: &[u8]) {
+        self.backend.restore_state(bytes);
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(bytes);
+    let mut encoded = String::with_capacity(7 + hash.len() * 2);
+    encoded.push_str("sha256:");
+    for byte in hash {
+        use std::fmt::Write;
+        write!(&mut encoded, "{byte:02x}").expect("writing to String is infallible");
+    }
+    encoded
 }
 
 /// An [`ojcore::DspInstance`] backed by a hosted third-party plugin.
@@ -110,6 +194,7 @@ impl HostedPlugin {
 pub struct PluginHostNode {
     plugin: HostedPlugin,
     latency: LatencyExt,
+    tail: TailExt,
     /// Latched `true` once the plugin faults (a segfault caught at the foreign-code
     /// boundary). From then on `process` runs a dry passthrough and never re-enters
     /// the plugin — the crash latch (mirrors `ojwasm`'s `bypassed`). Cleared only by
@@ -121,9 +206,11 @@ impl PluginHostNode {
     /// Wrap an already-loaded [`HostedPlugin`] as a DSP node.
     pub fn new(plugin: HostedPlugin) -> Self {
         let latency = LatencyExt::new(plugin.latency_samples());
+        let tail = TailExt::new(plugin.tail_samples());
         Self {
             plugin,
             latency,
+            tail,
             faulted: false,
         }
     }
@@ -144,6 +231,16 @@ impl PluginHostNode {
 impl DspInstance for PluginHostNode {
     fn activate(&mut self, sample_rate: f32, max_block: usize) {
         self.plugin.backend.activate(sample_rate, max_block);
+        self.latency = LatencyExt::new(self.plugin.latency_samples());
+        self.tail = TailExt::new(self.plugin.tail_samples());
+    }
+
+    fn start_processing(&mut self) {
+        self.plugin.backend.start_processing();
+    }
+
+    fn stop_processing(&mut self) {
+        self.plugin.backend.stop_processing();
     }
 
     fn process(&mut self, ctx: &mut ProcessCtx<'_, '_>) {
@@ -191,6 +288,7 @@ impl DspInstance for PluginHostNode {
         match id {
             ExtId::Latency => Some(&self.latency),
             ExtId::State => Some(self),
+            ExtId::Tail => Some(&self.tail),
             _ => None,
         }
     }
@@ -240,6 +338,9 @@ impl PluginHostLoader {
         let params: Vec<ParamDecl> = if descriptor.params.is_empty() {
             (0..descriptor.param_count.min(u16::MAX as u32) as u16)
                 .map(|i| ParamDecl {
+                    module: String::new(),
+                    unit: String::new(),
+                    flags: 0,
                     id: i,
                     name: alloc_param_name(i),
                     min: 0.0,
@@ -254,6 +355,9 @@ impl PluginHostLoader {
                 .take(u16::MAX as usize)
                 .enumerate()
                 .map(|(i, p)| ParamDecl {
+                    module: p.module.clone(),
+                    unit: p.unit.clone(),
+                    flags: p.flags,
                     id: i as u16,
                     name: p.name.clone(),
                     min: p.min as f32,
@@ -385,6 +489,9 @@ mod tests {
                 audio_in: 0,
                 audio_out: 2,
             },
+            audio_ports: Vec::new(),
+            port_configs: Vec::new(),
+            note_ports: PortCounts::default(),
             param_count: params,
             params: Vec::new(),
             latency_samples: 128,

@@ -122,9 +122,8 @@ and type-check. To finish enabling it in a real environment:
 * install CMake + toolchain (above) and run a `--features juce` build to compile
   JUCE + the shim (cannot be verified in the scaffold sandbox: no CMake there);
 * confirm/extend the platform link libraries in `build.rs` for your OS;
-* wire CLAP param/note events on the `clack` path (`set_param` is currently a
-  no-op there — it needs the `clack-extensions` params extension; the JUCE path
-  already forwards params + MIDI notes).
+* exercise the JUCE path on provisioned release builders and keep its
+  params/state/note parity checked against the pure-Rust CLAP conformance suite.
 
 [`clack`]: https://github.com/prokopyl/clack
 [`ojcore::DspInstance`]: ../ojcore/src/dsp.rs

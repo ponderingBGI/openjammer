@@ -75,7 +75,7 @@ impl PluginFormat {
 }
 
 /// Audio port topology a hosted plugin reports, used to wire it into the graph.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PortCounts {
     /// Main audio input channels (0 for an instrument).
     pub audio_in: u16,
@@ -93,12 +93,48 @@ pub struct HostedParam {
     pub id: u32,
     /// Display name, e.g. "Cutoff".
     pub name: String,
+    /// Plugin-defined grouping path (CLAP `module`, slash-separated).
+    #[serde(default)]
+    pub module: String,
+    /// Raw CLAP parameter flags. Kept losslessly so future UI policy does not
+    /// require rescanning old plug-ins.
+    #[serde(default)]
+    pub flags: u32,
+    /// Unit suffix inferred from the plug-in's value-to-text result for the
+    /// default value. CLAP intentionally has no separate unit declaration.
+    #[serde(default)]
+    pub unit: String,
     /// Minimum plain value (the parameter's own range, NOT normalized).
     pub min: f64,
     /// Maximum plain value.
     pub max: f64,
     /// Default plain value.
     pub default: f64,
+}
+
+/// One CLAP audio bus. OpenJammer flattens buses, in declaration order, into
+/// planar channels at its host boundary while retaining this metadata for UI
+/// and future bus-aware routing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedAudioPort {
+    pub id: u32,
+    pub name: String,
+    pub channel_count: u32,
+    pub is_input: bool,
+    pub is_main: bool,
+    pub in_place_pair: Option<u32>,
+    pub port_type: Option<String>,
+}
+
+/// A selectable CLAP audio-port configuration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostedPortConfig {
+    pub id: u32,
+    pub name: String,
+    pub input_ports: u32,
+    pub output_ports: u32,
+    pub input_channels: u32,
+    pub output_channels: u32,
 }
 
 /// The static description of one scanned plugin. Backend-agnostic and
@@ -123,6 +159,16 @@ pub struct PluginDescriptor {
     pub is_instrument: bool,
     /// Audio port topology the plugin reported at scan time.
     pub ports: PortCounts,
+    /// Detailed buses in CLAP declaration order. Empty for legacy cache entries
+    /// and backends that only report flattened channel counts.
+    #[serde(default)]
+    pub audio_ports: Vec<HostedAudioPort>,
+    /// Selectable CLAP port configurations, if exposed by the plug-in.
+    #[serde(default)]
+    pub port_configs: Vec<HostedPortConfig>,
+    /// Number of note input and output ports reported by CLAP.
+    #[serde(default)]
+    pub note_ports: PortCounts,
     /// Number of automatable parameters the plugin exposes (equals
     /// `params.len()` when the backend filled the detailed list at scan).
     pub param_count: u32,
@@ -191,6 +237,9 @@ mod tests {
                 audio_in: 2,
                 audio_out: 2,
             },
+            audio_ports: Vec::new(),
+            port_configs: Vec::new(),
+            note_ports: PortCounts::default(),
             param_count: 12,
             params: Vec::new(),
             latency_samples: 256,

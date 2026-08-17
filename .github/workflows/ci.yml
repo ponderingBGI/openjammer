@@ -190,6 +190,7 @@ jobs:
         # CMake + a C++ toolchain + the VST3 SDK and is exercised by installer/release jobs.
         run: |
           cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings
+          cargo build -p ojhost-probes
           cargo test -p ojhost --features clap-host
           # The desktop shell (oj-tauri) is excluded from the workspace gate above.
           # Lint + test it here with the pure-Rust CLAP backend so the IPC surface +

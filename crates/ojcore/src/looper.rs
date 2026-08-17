@@ -125,6 +125,9 @@ fn looper_manifest() -> PluginManifest {
         ui: UiKind::Auto,
         params: vec![
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: looper_param::LOOP_SECS,
                 name: String::from("loop_secs"),
                 min: 0.0,
@@ -132,6 +135,9 @@ fn looper_manifest() -> PluginManifest {
                 default: 0.0,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: looper_param::WET,
                 name: String::from("wet"),
                 min: 0.0,
@@ -141,6 +147,9 @@ fn looper_manifest() -> PluginManifest {
                 default: 0.9,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: looper_param::DRY,
                 name: String::from("dry"),
                 min: 0.0,

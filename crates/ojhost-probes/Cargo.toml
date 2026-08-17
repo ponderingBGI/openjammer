@@ -1,0 +1,15 @@
+[package]
+name = "ojhost-probes"
+description = "Real CLAP conformance probes for the OpenJammer host"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+clack-plugin = "0.1.0"
+clack-extensions = { version = "0.1.0", features = ["clack-plugin", "audio-ports", "audio-ports-config", "latency", "note-ports", "params", "state", "tail"] }
+

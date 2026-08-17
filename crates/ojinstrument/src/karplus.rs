@@ -176,6 +176,9 @@ fn karplus_manifest() -> PluginManifest {
         ui: UiKind::Auto,
         params: vec![
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: param::GAIN,
                 name: String::from("gain"),
                 min: 0.0,
@@ -183,6 +186,9 @@ fn karplus_manifest() -> PluginManifest {
                 default: 0.5,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: param::ATTACK,
                 name: String::from("attack"),
                 min: 0.0,
@@ -190,6 +196,9 @@ fn karplus_manifest() -> PluginManifest {
                 default: 0.001,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: param::RELEASE,
                 name: String::from("release"),
                 min: 0.0,
