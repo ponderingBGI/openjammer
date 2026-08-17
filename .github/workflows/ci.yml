@@ -244,8 +244,10 @@ jobs:
           echo "Build emitted zero warnings — gate GREEN."
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
-      - name: Production PWA smoke test
-        run: bun run test:e2e
+      - name: Fast PR browser lane (legacy 3-spec suite)
+        # Measured locally on 2026-08-17: ~45s after the production build. The
+        # six realistic journeys stay in the sharded canari/nightly matrix.
+        run: bun run test:e2e -- e2e/arrangement-editing.spec.ts e2e/pwa-smoke.spec.ts e2e/timeline-preview.spec.ts --project=chromium
 
   windows-native:
     name: Windows native build + audio gate

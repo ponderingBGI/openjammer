@@ -89,3 +89,11 @@ tracing-log = { workspace = true }
 [dev-dependencies]
 # Decode-back parity for the pure-Rust FLAC export path.
 claxon = "0.4.3"
+# Ring 1 macro benches use the same Criterion/CodSpeed compatibility layer as
+# the existing engine crates and deserialize the committed arrangement fixture.
+codspeed-criterion-compat = "4.7.0"
+serde_json = "1.0.150"
+
+[[bench]]
+name = "engine_macro"
+harness = false

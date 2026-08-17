@@ -1,0 +1,3577 @@
+{
+  "name": "First Light",
+  "tempoBpm": 84,
+  "ppq": 960,
+  "timeSignature": [
+    4,
+    4
+  ],
+  "sampleRate": 48000,
+  "blockSize": 256,
+  "graph": {
+    "nodes": [
+      {
+        "ref": "drums",
+        "type": "instrument",
+        "data": {
+          "instrumentId": "gm-synth-drum",
+          "physicalModelFallback": true
+        }
+      },
+      {
+        "ref": "bass",
+        "type": "instrument",
+        "data": {
+          "instrumentId": "gm-electric-bass-finger",
+          "physicalModelFallback": true
+        }
+      },
+      {
+        "ref": "keys",
+        "type": "instrument",
+        "data": {
+          "instrumentId": "gm-electric-piano-1",
+          "physicalModelFallback": true
+        }
+      },
+      {
+        "ref": "lead",
+        "type": "instrument",
+        "data": {
+          "instrumentId": "gm-flute",
+          "physicalModelFallback": true
+        }
+      },
+      {
+        "ref": "pad",
+        "type": "instrument",
+        "data": {
+          "instrumentId": "gm-pad-warm",
+          "physicalModelFallback": true
+        }
+      },
+      {
+        "ref": "master",
+        "type": "speaker"
+      }
+    ],
+    "connections": [
+      {
+        "from": "drums",
+        "to": "master"
+      },
+      {
+        "from": "bass",
+        "to": "master"
+      },
+      {
+        "from": "keys",
+        "to": "master"
+      },
+      {
+        "from": "lead",
+        "to": "master"
+      },
+      {
+        "from": "pad",
+        "to": "master"
+      }
+    ]
+  },
+  "tracks": [
+    {
+      "id": "first-light-drums",
+      "name": "Drums",
+      "ref": "drums",
+      "clips": [
+        {
+          "id": "first-light-drums-clip",
+          "sourceId": "src:midi:first-light-drums",
+          "startTick": 0,
+          "lengthTick": 92160
+        }
+      ],
+      "gainDb": 1.7,
+      "automation": [
+        {
+          "id": "first-light-drums-gain",
+          "ref": "drums:output:gain",
+          "param": 0,
+          "interp": "Linear",
+          "points": [
+            {
+              "tick": 76800,
+              "value": 1.7
+            },
+            {
+              "tick": 88320,
+              "value": 0.19999999999999996
+            },
+            {
+              "tick": 91200,
+              "value": -4.3
+            },
+            {
+              "tick": 92160,
+              "value": -60
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "first-light-bass",
+      "name": "Bass",
+      "ref": "bass",
+      "clips": [
+        {
+          "id": "first-light-bass-clip",
+          "sourceId": "src:midi:first-light-bass",
+          "startTick": 0,
+          "lengthTick": 92160
+        }
+      ],
+      "gainDb": -0.3,
+      "automation": [
+        {
+          "id": "first-light-bass-gain",
+          "ref": "bass:output:gain",
+          "param": 0,
+          "interp": "Linear",
+          "points": [
+            {
+              "tick": 76800,
+              "value": -0.3
+            },
+            {
+              "tick": 88320,
+              "value": -1.8
+            },
+            {
+              "tick": 91200,
+              "value": -6.3
+            },
+            {
+              "tick": 92160,
+              "value": -60
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "first-light-keys",
+      "name": "Keys",
+      "ref": "keys",
+      "clips": [
+        {
+          "id": "first-light-keys-clip",
+          "sourceId": "src:midi:first-light-keys",
+          "startTick": 0,
+          "lengthTick": 92160
+        }
+      ],
+      "gainDb": -2.3,
+      "pan": -0.18,
+      "automation": [
+        {
+          "id": "first-light-keys-gain",
+          "ref": "keys:output:gain",
+          "param": 0,
+          "interp": "Linear",
+          "points": [
+            {
+              "tick": 46080,
+              "value": -2.3
+            },
+            {
+              "tick": 53760,
+              "value": -0.8
+            },
+            {
+              "tick": 61440,
+              "value": -2.3
+            },
+            {
+              "tick": 76800,
+              "value": -2.3
+            },
+            {
+              "tick": 88320,
+              "value": -3.8
+            },
+            {
+              "tick": 91200,
+              "value": -8.3
+            },
+            {
+              "tick": 92160,
+              "value": -60
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "first-light-lead",
+      "name": "Lead",
+      "ref": "lead",
+      "clips": [
+        {
+          "id": "first-light-lead-clip",
+          "sourceId": "src:midi:first-light-lead",
+          "startTick": 0,
+          "lengthTick": 92160
+        }
+      ],
+      "gainDb": -1.3,
+      "pan": 0.12,
+      "automation": [
+        {
+          "id": "first-light-lead-gain",
+          "ref": "lead:output:gain",
+          "param": 0,
+          "interp": "Linear",
+          "points": [
+            {
+              "tick": 76800,
+              "value": -1.3
+            },
+            {
+              "tick": 88320,
+              "value": -2.8
+            },
+            {
+              "tick": 91200,
+              "value": -7.3
+            },
+            {
+              "tick": 92160,
+              "value": -60
+            }
+          ]
+        },
+        {
+          "id": "first-light-lead-pan",
+          "ref": "lead:output:pan",
+          "param": 0,
+          "interp": "Linear",
+          "points": [
+            {
+              "tick": 61440,
+              "value": 0.12
+            },
+            {
+              "tick": 76800,
+              "value": -0.08
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "first-light-pad",
+      "name": "Pad",
+      "ref": "pad",
+      "clips": [
+        {
+          "id": "first-light-pad-clip",
+          "sourceId": "src:midi:first-light-pad",
+          "startTick": 0,
+          "lengthTick": 92160
+        }
+      ],
+      "gainDb": -6.3,
+      "automation": [
+        {
+          "id": "first-light-pad-gain",
+          "ref": "pad:output:gain",
+          "param": 0,
+          "interp": "Linear",
+          "points": [
+            {
+              "tick": 76800,
+              "value": -6.3
+            },
+            {
+              "tick": 88320,
+              "value": -7.8
+            },
+            {
+              "tick": 91200,
+              "value": -12.3
+            },
+            {
+              "tick": 92160,
+              "value": -60
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "sources": {
+    "src:midi:first-light-bass": {
+      "id": "src:midi:first-light-bass",
+      "kind": "midi",
+      "name": "bass",
+      "notes": [
+        {
+          "tick": 15360,
+          "durTick": 1920,
+          "pitch": 33,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n0"
+        },
+        {
+          "tick": 17280,
+          "durTick": 960,
+          "pitch": 40,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n1"
+        },
+        {
+          "tick": 18720,
+          "durTick": 480,
+          "pitch": 45,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n2"
+        },
+        {
+          "tick": 19200,
+          "durTick": 1920,
+          "pitch": 41,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n3"
+        },
+        {
+          "tick": 21120,
+          "durTick": 960,
+          "pitch": 48,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n4"
+        },
+        {
+          "tick": 22560,
+          "durTick": 480,
+          "pitch": 53,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n5"
+        },
+        {
+          "tick": 23040,
+          "durTick": 1920,
+          "pitch": 36,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n6"
+        },
+        {
+          "tick": 24960,
+          "durTick": 960,
+          "pitch": 43,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n7"
+        },
+        {
+          "tick": 26400,
+          "durTick": 480,
+          "pitch": 48,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n8"
+        },
+        {
+          "tick": 26880,
+          "durTick": 1920,
+          "pitch": 43,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n9"
+        },
+        {
+          "tick": 28800,
+          "durTick": 960,
+          "pitch": 50,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n10"
+        },
+        {
+          "tick": 30240,
+          "durTick": 480,
+          "pitch": 55,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n11"
+        },
+        {
+          "tick": 30720,
+          "durTick": 1920,
+          "pitch": 33,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n12"
+        },
+        {
+          "tick": 32640,
+          "durTick": 960,
+          "pitch": 40,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n13"
+        },
+        {
+          "tick": 34080,
+          "durTick": 480,
+          "pitch": 45,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n14"
+        },
+        {
+          "tick": 34560,
+          "durTick": 1920,
+          "pitch": 41,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n15"
+        },
+        {
+          "tick": 36480,
+          "durTick": 960,
+          "pitch": 48,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n16"
+        },
+        {
+          "tick": 37920,
+          "durTick": 480,
+          "pitch": 53,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n17"
+        },
+        {
+          "tick": 38400,
+          "durTick": 1920,
+          "pitch": 36,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n18"
+        },
+        {
+          "tick": 40320,
+          "durTick": 960,
+          "pitch": 43,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n19"
+        },
+        {
+          "tick": 41760,
+          "durTick": 480,
+          "pitch": 48,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n20"
+        },
+        {
+          "tick": 42240,
+          "durTick": 1920,
+          "pitch": 43,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n21"
+        },
+        {
+          "tick": 44160,
+          "durTick": 960,
+          "pitch": 50,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n22"
+        },
+        {
+          "tick": 45600,
+          "durTick": 480,
+          "pitch": 55,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n23"
+        },
+        {
+          "tick": 46080,
+          "durTick": 1920,
+          "pitch": 33,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n24"
+        },
+        {
+          "tick": 48000,
+          "durTick": 960,
+          "pitch": 40,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n25"
+        },
+        {
+          "tick": 49440,
+          "durTick": 480,
+          "pitch": 45,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n26"
+        },
+        {
+          "tick": 49920,
+          "durTick": 1920,
+          "pitch": 41,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n27"
+        },
+        {
+          "tick": 51840,
+          "durTick": 960,
+          "pitch": 48,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n28"
+        },
+        {
+          "tick": 53280,
+          "durTick": 480,
+          "pitch": 53,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n29"
+        },
+        {
+          "tick": 53760,
+          "durTick": 1920,
+          "pitch": 36,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n30"
+        },
+        {
+          "tick": 55680,
+          "durTick": 960,
+          "pitch": 43,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n31"
+        },
+        {
+          "tick": 57120,
+          "durTick": 480,
+          "pitch": 48,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n32"
+        },
+        {
+          "tick": 57600,
+          "durTick": 1920,
+          "pitch": 43,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n33"
+        },
+        {
+          "tick": 59520,
+          "durTick": 960,
+          "pitch": 50,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n34"
+        },
+        {
+          "tick": 60960,
+          "durTick": 480,
+          "pitch": 55,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n35"
+        },
+        {
+          "tick": 61440,
+          "durTick": 1920,
+          "pitch": 33,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n36"
+        },
+        {
+          "tick": 63360,
+          "durTick": 960,
+          "pitch": 40,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n37"
+        },
+        {
+          "tick": 64800,
+          "durTick": 480,
+          "pitch": 45,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n38"
+        },
+        {
+          "tick": 65280,
+          "durTick": 1920,
+          "pitch": 41,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n39"
+        },
+        {
+          "tick": 67200,
+          "durTick": 960,
+          "pitch": 48,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n40"
+        },
+        {
+          "tick": 68640,
+          "durTick": 480,
+          "pitch": 53,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n41"
+        },
+        {
+          "tick": 69120,
+          "durTick": 1920,
+          "pitch": 36,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n42"
+        },
+        {
+          "tick": 71040,
+          "durTick": 960,
+          "pitch": 43,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n43"
+        },
+        {
+          "tick": 72480,
+          "durTick": 480,
+          "pitch": 48,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n44"
+        },
+        {
+          "tick": 72960,
+          "durTick": 1920,
+          "pitch": 43,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n45"
+        },
+        {
+          "tick": 74880,
+          "durTick": 960,
+          "pitch": 50,
+          "vel": 64,
+          "id": "src:midi:first-light-bass.n46"
+        },
+        {
+          "tick": 76320,
+          "durTick": 480,
+          "pitch": 55,
+          "vel": 58,
+          "id": "src:midi:first-light-bass.n47"
+        },
+        {
+          "tick": 76800,
+          "durTick": 3840,
+          "pitch": 33,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n48"
+        },
+        {
+          "tick": 80640,
+          "durTick": 3840,
+          "pitch": 41,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n49"
+        },
+        {
+          "tick": 84480,
+          "durTick": 3840,
+          "pitch": 36,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n50"
+        },
+        {
+          "tick": 88320,
+          "durTick": 3840,
+          "pitch": 43,
+          "vel": 78,
+          "id": "src:midi:first-light-bass.n51"
+        }
+      ],
+      "lengthTick": 92160
+    },
+    "src:midi:first-light-drums": {
+      "id": "src:midi:first-light-drums",
+      "kind": "midi",
+      "name": "drums",
+      "notes": [
+        {
+          "tick": 7680,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n0"
+        },
+        {
+          "tick": 8160,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n1"
+        },
+        {
+          "tick": 8640,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n2"
+        },
+        {
+          "tick": 9120,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n3"
+        },
+        {
+          "tick": 9600,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n4"
+        },
+        {
+          "tick": 10080,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n5"
+        },
+        {
+          "tick": 10560,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n6"
+        },
+        {
+          "tick": 11040,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n7"
+        },
+        {
+          "tick": 11520,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n8"
+        },
+        {
+          "tick": 12000,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n9"
+        },
+        {
+          "tick": 12480,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n10"
+        },
+        {
+          "tick": 12960,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n11"
+        },
+        {
+          "tick": 13440,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n12"
+        },
+        {
+          "tick": 13920,
+          "durTick": 120,
+          "pitch": 46,
+          "vel": 74,
+          "id": "src:midi:first-light-drums.n13"
+        },
+        {
+          "tick": 14400,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n14"
+        },
+        {
+          "tick": 14880,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n15"
+        },
+        {
+          "tick": 15360,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n16"
+        },
+        {
+          "tick": 17280,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n17"
+        },
+        {
+          "tick": 16320,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n18"
+        },
+        {
+          "tick": 18240,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n19"
+        },
+        {
+          "tick": 15360,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n20"
+        },
+        {
+          "tick": 15840,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n21"
+        },
+        {
+          "tick": 16320,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n22"
+        },
+        {
+          "tick": 16800,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n23"
+        },
+        {
+          "tick": 17280,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n24"
+        },
+        {
+          "tick": 17760,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n25"
+        },
+        {
+          "tick": 18240,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n26"
+        },
+        {
+          "tick": 18720,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n27"
+        },
+        {
+          "tick": 19200,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n28"
+        },
+        {
+          "tick": 21120,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n29"
+        },
+        {
+          "tick": 20160,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n30"
+        },
+        {
+          "tick": 22080,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n31"
+        },
+        {
+          "tick": 19200,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n32"
+        },
+        {
+          "tick": 19680,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n33"
+        },
+        {
+          "tick": 20160,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n34"
+        },
+        {
+          "tick": 20640,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n35"
+        },
+        {
+          "tick": 21120,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n36"
+        },
+        {
+          "tick": 21600,
+          "durTick": 120,
+          "pitch": 46,
+          "vel": 74,
+          "id": "src:midi:first-light-drums.n37"
+        },
+        {
+          "tick": 22080,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n38"
+        },
+        {
+          "tick": 22560,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n39"
+        },
+        {
+          "tick": 23040,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n40"
+        },
+        {
+          "tick": 24960,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n41"
+        },
+        {
+          "tick": 24000,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n42"
+        },
+        {
+          "tick": 25920,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n43"
+        },
+        {
+          "tick": 23040,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n44"
+        },
+        {
+          "tick": 23520,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n45"
+        },
+        {
+          "tick": 24000,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n46"
+        },
+        {
+          "tick": 24480,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n47"
+        },
+        {
+          "tick": 24960,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n48"
+        },
+        {
+          "tick": 25440,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n49"
+        },
+        {
+          "tick": 25920,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n50"
+        },
+        {
+          "tick": 26400,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n51"
+        },
+        {
+          "tick": 26880,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n52"
+        },
+        {
+          "tick": 28800,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n53"
+        },
+        {
+          "tick": 27840,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n54"
+        },
+        {
+          "tick": 29760,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n55"
+        },
+        {
+          "tick": 29280,
+          "durTick": 120,
+          "pitch": 38,
+          "vel": 38,
+          "id": "src:midi:first-light-drums.n56"
+        },
+        {
+          "tick": 26880,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n57"
+        },
+        {
+          "tick": 27360,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n58"
+        },
+        {
+          "tick": 27840,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n59"
+        },
+        {
+          "tick": 28320,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n60"
+        },
+        {
+          "tick": 28800,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n61"
+        },
+        {
+          "tick": 29280,
+          "durTick": 120,
+          "pitch": 46,
+          "vel": 74,
+          "id": "src:midi:first-light-drums.n62"
+        },
+        {
+          "tick": 29760,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n63"
+        },
+        {
+          "tick": 30240,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n64"
+        },
+        {
+          "tick": 30720,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n65"
+        },
+        {
+          "tick": 32640,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n66"
+        },
+        {
+          "tick": 31680,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n67"
+        },
+        {
+          "tick": 33600,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n68"
+        },
+        {
+          "tick": 30720,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n69"
+        },
+        {
+          "tick": 31200,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n70"
+        },
+        {
+          "tick": 31680,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n71"
+        },
+        {
+          "tick": 32160,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n72"
+        },
+        {
+          "tick": 32640,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n73"
+        },
+        {
+          "tick": 33120,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n74"
+        },
+        {
+          "tick": 33600,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n75"
+        },
+        {
+          "tick": 34080,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n76"
+        },
+        {
+          "tick": 34560,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n77"
+        },
+        {
+          "tick": 36480,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n78"
+        },
+        {
+          "tick": 35520,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n79"
+        },
+        {
+          "tick": 37440,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n80"
+        },
+        {
+          "tick": 34560,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n81"
+        },
+        {
+          "tick": 35040,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n82"
+        },
+        {
+          "tick": 35520,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n83"
+        },
+        {
+          "tick": 36000,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n84"
+        },
+        {
+          "tick": 36480,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n85"
+        },
+        {
+          "tick": 36960,
+          "durTick": 120,
+          "pitch": 46,
+          "vel": 74,
+          "id": "src:midi:first-light-drums.n86"
+        },
+        {
+          "tick": 37440,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n87"
+        },
+        {
+          "tick": 37920,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n88"
+        },
+        {
+          "tick": 38400,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n89"
+        },
+        {
+          "tick": 40320,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n90"
+        },
+        {
+          "tick": 39360,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n91"
+        },
+        {
+          "tick": 41280,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n92"
+        },
+        {
+          "tick": 38400,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n93"
+        },
+        {
+          "tick": 38880,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n94"
+        },
+        {
+          "tick": 39360,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n95"
+        },
+        {
+          "tick": 39840,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n96"
+        },
+        {
+          "tick": 40320,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n97"
+        },
+        {
+          "tick": 40800,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n98"
+        },
+        {
+          "tick": 41280,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n99"
+        },
+        {
+          "tick": 41760,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n100"
+        },
+        {
+          "tick": 42240,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n101"
+        },
+        {
+          "tick": 44160,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n102"
+        },
+        {
+          "tick": 43200,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n103"
+        },
+        {
+          "tick": 45120,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n104"
+        },
+        {
+          "tick": 44640,
+          "durTick": 120,
+          "pitch": 38,
+          "vel": 38,
+          "id": "src:midi:first-light-drums.n105"
+        },
+        {
+          "tick": 45600,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 70,
+          "id": "src:midi:first-light-drums.n106"
+        },
+        {
+          "tick": 42240,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n107"
+        },
+        {
+          "tick": 42720,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n108"
+        },
+        {
+          "tick": 43200,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n109"
+        },
+        {
+          "tick": 43680,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n110"
+        },
+        {
+          "tick": 44160,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n111"
+        },
+        {
+          "tick": 44640,
+          "durTick": 120,
+          "pitch": 46,
+          "vel": 74,
+          "id": "src:midi:first-light-drums.n112"
+        },
+        {
+          "tick": 45120,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n113"
+        },
+        {
+          "tick": 45600,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n114"
+        },
+        {
+          "tick": 46080,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n115"
+        },
+        {
+          "tick": 48000,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n116"
+        },
+        {
+          "tick": 47040,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n117"
+        },
+        {
+          "tick": 48960,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n118"
+        },
+        {
+          "tick": 46080,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n119"
+        },
+        {
+          "tick": 46560,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n120"
+        },
+        {
+          "tick": 47040,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n121"
+        },
+        {
+          "tick": 47520,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n122"
+        },
+        {
+          "tick": 48000,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n123"
+        },
+        {
+          "tick": 48480,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n124"
+        },
+        {
+          "tick": 48960,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n125"
+        },
+        {
+          "tick": 49440,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n126"
+        },
+        {
+          "tick": 49920,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n127"
+        },
+        {
+          "tick": 51840,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n128"
+        },
+        {
+          "tick": 50880,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n129"
+        },
+        {
+          "tick": 52800,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n130"
+        },
+        {
+          "tick": 49920,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n131"
+        },
+        {
+          "tick": 50400,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n132"
+        },
+        {
+          "tick": 50880,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n133"
+        },
+        {
+          "tick": 51360,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n134"
+        },
+        {
+          "tick": 51840,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n135"
+        },
+        {
+          "tick": 52320,
+          "durTick": 120,
+          "pitch": 46,
+          "vel": 74,
+          "id": "src:midi:first-light-drums.n136"
+        },
+        {
+          "tick": 52800,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n137"
+        },
+        {
+          "tick": 53280,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n138"
+        },
+        {
+          "tick": 53760,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n139"
+        },
+        {
+          "tick": 55680,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n140"
+        },
+        {
+          "tick": 54720,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n141"
+        },
+        {
+          "tick": 56640,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n142"
+        },
+        {
+          "tick": 53760,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n143"
+        },
+        {
+          "tick": 54240,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n144"
+        },
+        {
+          "tick": 54720,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n145"
+        },
+        {
+          "tick": 55200,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n146"
+        },
+        {
+          "tick": 55680,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n147"
+        },
+        {
+          "tick": 56160,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n148"
+        },
+        {
+          "tick": 56640,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n149"
+        },
+        {
+          "tick": 57120,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n150"
+        },
+        {
+          "tick": 57600,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n151"
+        },
+        {
+          "tick": 59520,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n152"
+        },
+        {
+          "tick": 58560,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n153"
+        },
+        {
+          "tick": 60480,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n154"
+        },
+        {
+          "tick": 60000,
+          "durTick": 120,
+          "pitch": 38,
+          "vel": 38,
+          "id": "src:midi:first-light-drums.n155"
+        },
+        {
+          "tick": 57600,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n156"
+        },
+        {
+          "tick": 58080,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n157"
+        },
+        {
+          "tick": 58560,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n158"
+        },
+        {
+          "tick": 59040,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n159"
+        },
+        {
+          "tick": 59520,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n160"
+        },
+        {
+          "tick": 60000,
+          "durTick": 120,
+          "pitch": 46,
+          "vel": 74,
+          "id": "src:midi:first-light-drums.n161"
+        },
+        {
+          "tick": 60480,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n162"
+        },
+        {
+          "tick": 60960,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n163"
+        },
+        {
+          "tick": 61440,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n164"
+        },
+        {
+          "tick": 63360,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n165"
+        },
+        {
+          "tick": 62400,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n166"
+        },
+        {
+          "tick": 64320,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n167"
+        },
+        {
+          "tick": 61440,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n168"
+        },
+        {
+          "tick": 61920,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n169"
+        },
+        {
+          "tick": 62400,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n170"
+        },
+        {
+          "tick": 62880,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n171"
+        },
+        {
+          "tick": 63360,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n172"
+        },
+        {
+          "tick": 63840,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n173"
+        },
+        {
+          "tick": 64320,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n174"
+        },
+        {
+          "tick": 64800,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n175"
+        },
+        {
+          "tick": 65280,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n176"
+        },
+        {
+          "tick": 67200,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n177"
+        },
+        {
+          "tick": 66240,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n178"
+        },
+        {
+          "tick": 68160,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n179"
+        },
+        {
+          "tick": 65280,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n180"
+        },
+        {
+          "tick": 65760,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n181"
+        },
+        {
+          "tick": 66240,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n182"
+        },
+        {
+          "tick": 66720,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n183"
+        },
+        {
+          "tick": 67200,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n184"
+        },
+        {
+          "tick": 67680,
+          "durTick": 120,
+          "pitch": 46,
+          "vel": 74,
+          "id": "src:midi:first-light-drums.n185"
+        },
+        {
+          "tick": 68160,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n186"
+        },
+        {
+          "tick": 68640,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n187"
+        },
+        {
+          "tick": 69120,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n188"
+        },
+        {
+          "tick": 71040,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n189"
+        },
+        {
+          "tick": 70080,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n190"
+        },
+        {
+          "tick": 72000,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n191"
+        },
+        {
+          "tick": 69120,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n192"
+        },
+        {
+          "tick": 69600,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n193"
+        },
+        {
+          "tick": 70080,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n194"
+        },
+        {
+          "tick": 70560,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n195"
+        },
+        {
+          "tick": 71040,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n196"
+        },
+        {
+          "tick": 71520,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n197"
+        },
+        {
+          "tick": 72000,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n198"
+        },
+        {
+          "tick": 72480,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n199"
+        },
+        {
+          "tick": 72960,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n200"
+        },
+        {
+          "tick": 74880,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n201"
+        },
+        {
+          "tick": 73920,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n202"
+        },
+        {
+          "tick": 75840,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n203"
+        },
+        {
+          "tick": 75360,
+          "durTick": 120,
+          "pitch": 38,
+          "vel": 38,
+          "id": "src:midi:first-light-drums.n204"
+        },
+        {
+          "tick": 76320,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 70,
+          "id": "src:midi:first-light-drums.n205"
+        },
+        {
+          "tick": 72960,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n206"
+        },
+        {
+          "tick": 73440,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n207"
+        },
+        {
+          "tick": 73920,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n208"
+        },
+        {
+          "tick": 74400,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n209"
+        },
+        {
+          "tick": 74880,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n210"
+        },
+        {
+          "tick": 75360,
+          "durTick": 120,
+          "pitch": 46,
+          "vel": 74,
+          "id": "src:midi:first-light-drums.n211"
+        },
+        {
+          "tick": 75840,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 58,
+          "id": "src:midi:first-light-drums.n212"
+        },
+        {
+          "tick": 76320,
+          "durTick": 120,
+          "pitch": 42,
+          "vel": 42,
+          "id": "src:midi:first-light-drums.n213"
+        },
+        {
+          "tick": 76800,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n214"
+        },
+        {
+          "tick": 78720,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n215"
+        },
+        {
+          "tick": 77760,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n216"
+        },
+        {
+          "tick": 79680,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n217"
+        },
+        {
+          "tick": 80640,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n218"
+        },
+        {
+          "tick": 82560,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n219"
+        },
+        {
+          "tick": 81600,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n220"
+        },
+        {
+          "tick": 83520,
+          "durTick": 180,
+          "pitch": 38,
+          "vel": 84,
+          "id": "src:midi:first-light-drums.n221"
+        },
+        {
+          "tick": 84480,
+          "durTick": 180,
+          "pitch": 36,
+          "vel": 96,
+          "id": "src:midi:first-light-drums.n222"
+        }
+      ],
+      "lengthTick": 92160
+    },
+    "src:midi:first-light-keys": {
+      "id": "src:midi:first-light-keys",
+      "kind": "midi",
+      "name": "keys",
+      "notes": [
+        {
+          "tick": 0,
+          "durTick": 2880,
+          "pitch": 57,
+          "vel": 52,
+          "id": "src:midi:first-light-keys.n0"
+        },
+        {
+          "tick": 0,
+          "durTick": 2880,
+          "pitch": 60,
+          "vel": 55,
+          "id": "src:midi:first-light-keys.n1"
+        },
+        {
+          "tick": 0,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 58,
+          "id": "src:midi:first-light-keys.n2"
+        },
+        {
+          "tick": 0,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 61,
+          "id": "src:midi:first-light-keys.n3"
+        },
+        {
+          "tick": 2400,
+          "durTick": 1440,
+          "pitch": 79,
+          "vel": 58,
+          "id": "src:midi:first-light-keys.n4"
+        },
+        {
+          "tick": 3840,
+          "durTick": 2880,
+          "pitch": 76,
+          "vel": 53,
+          "id": "src:midi:first-light-keys.n5"
+        },
+        {
+          "tick": 3840,
+          "durTick": 2880,
+          "pitch": 72,
+          "vel": 56,
+          "id": "src:midi:first-light-keys.n6"
+        },
+        {
+          "tick": 3840,
+          "durTick": 2880,
+          "pitch": 69,
+          "vel": 59,
+          "id": "src:midi:first-light-keys.n7"
+        },
+        {
+          "tick": 3840,
+          "durTick": 2880,
+          "pitch": 65,
+          "vel": 62,
+          "id": "src:midi:first-light-keys.n8"
+        },
+        {
+          "tick": 6240,
+          "durTick": 1440,
+          "pitch": 76,
+          "vel": 59,
+          "id": "src:midi:first-light-keys.n9"
+        },
+        {
+          "tick": 7680,
+          "durTick": 2880,
+          "pitch": 60,
+          "vel": 54,
+          "id": "src:midi:first-light-keys.n10"
+        },
+        {
+          "tick": 7680,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 57,
+          "id": "src:midi:first-light-keys.n11"
+        },
+        {
+          "tick": 7680,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 60,
+          "id": "src:midi:first-light-keys.n12"
+        },
+        {
+          "tick": 7680,
+          "durTick": 2880,
+          "pitch": 71,
+          "vel": 63,
+          "id": "src:midi:first-light-keys.n13"
+        },
+        {
+          "tick": 10080,
+          "durTick": 1440,
+          "pitch": 83,
+          "vel": 60,
+          "id": "src:midi:first-light-keys.n14"
+        },
+        {
+          "tick": 11520,
+          "durTick": 2880,
+          "pitch": 74,
+          "vel": 55,
+          "id": "src:midi:first-light-keys.n15"
+        },
+        {
+          "tick": 11520,
+          "durTick": 2880,
+          "pitch": 71,
+          "vel": 58,
+          "id": "src:midi:first-light-keys.n16"
+        },
+        {
+          "tick": 11520,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 61,
+          "id": "src:midi:first-light-keys.n17"
+        },
+        {
+          "tick": 11520,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 64,
+          "id": "src:midi:first-light-keys.n18"
+        },
+        {
+          "tick": 13920,
+          "durTick": 1440,
+          "pitch": 74,
+          "vel": 61,
+          "id": "src:midi:first-light-keys.n19"
+        },
+        {
+          "tick": 15360,
+          "durTick": 2880,
+          "pitch": 57,
+          "vel": 56,
+          "id": "src:midi:first-light-keys.n20"
+        },
+        {
+          "tick": 15360,
+          "durTick": 2880,
+          "pitch": 60,
+          "vel": 59,
+          "id": "src:midi:first-light-keys.n21"
+        },
+        {
+          "tick": 15360,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 62,
+          "id": "src:midi:first-light-keys.n22"
+        },
+        {
+          "tick": 15360,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 65,
+          "id": "src:midi:first-light-keys.n23"
+        },
+        {
+          "tick": 17760,
+          "durTick": 1440,
+          "pitch": 79,
+          "vel": 62,
+          "id": "src:midi:first-light-keys.n24"
+        },
+        {
+          "tick": 19200,
+          "durTick": 2880,
+          "pitch": 76,
+          "vel": 57,
+          "id": "src:midi:first-light-keys.n25"
+        },
+        {
+          "tick": 19200,
+          "durTick": 2880,
+          "pitch": 72,
+          "vel": 60,
+          "id": "src:midi:first-light-keys.n26"
+        },
+        {
+          "tick": 19200,
+          "durTick": 2880,
+          "pitch": 69,
+          "vel": 63,
+          "id": "src:midi:first-light-keys.n27"
+        },
+        {
+          "tick": 19200,
+          "durTick": 2880,
+          "pitch": 65,
+          "vel": 66,
+          "id": "src:midi:first-light-keys.n28"
+        },
+        {
+          "tick": 21600,
+          "durTick": 1440,
+          "pitch": 76,
+          "vel": 63,
+          "id": "src:midi:first-light-keys.n29"
+        },
+        {
+          "tick": 23040,
+          "durTick": 2880,
+          "pitch": 60,
+          "vel": 58,
+          "id": "src:midi:first-light-keys.n30"
+        },
+        {
+          "tick": 23040,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 61,
+          "id": "src:midi:first-light-keys.n31"
+        },
+        {
+          "tick": 23040,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 64,
+          "id": "src:midi:first-light-keys.n32"
+        },
+        {
+          "tick": 23040,
+          "durTick": 2880,
+          "pitch": 71,
+          "vel": 52,
+          "id": "src:midi:first-light-keys.n33"
+        },
+        {
+          "tick": 25440,
+          "durTick": 1440,
+          "pitch": 83,
+          "vel": 64,
+          "id": "src:midi:first-light-keys.n34"
+        },
+        {
+          "tick": 26880,
+          "durTick": 2880,
+          "pitch": 74,
+          "vel": 59,
+          "id": "src:midi:first-light-keys.n35"
+        },
+        {
+          "tick": 26880,
+          "durTick": 2880,
+          "pitch": 71,
+          "vel": 62,
+          "id": "src:midi:first-light-keys.n36"
+        },
+        {
+          "tick": 26880,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 65,
+          "id": "src:midi:first-light-keys.n37"
+        },
+        {
+          "tick": 26880,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 53,
+          "id": "src:midi:first-light-keys.n38"
+        },
+        {
+          "tick": 29280,
+          "durTick": 1440,
+          "pitch": 74,
+          "vel": 65,
+          "id": "src:midi:first-light-keys.n39"
+        },
+        {
+          "tick": 30720,
+          "durTick": 2880,
+          "pitch": 57,
+          "vel": 60,
+          "id": "src:midi:first-light-keys.n40"
+        },
+        {
+          "tick": 30720,
+          "durTick": 2880,
+          "pitch": 60,
+          "vel": 63,
+          "id": "src:midi:first-light-keys.n41"
+        },
+        {
+          "tick": 30720,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 66,
+          "id": "src:midi:first-light-keys.n42"
+        },
+        {
+          "tick": 30720,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 54,
+          "id": "src:midi:first-light-keys.n43"
+        },
+        {
+          "tick": 33120,
+          "durTick": 1440,
+          "pitch": 79,
+          "vel": 58,
+          "id": "src:midi:first-light-keys.n44"
+        },
+        {
+          "tick": 34560,
+          "durTick": 2880,
+          "pitch": 76,
+          "vel": 61,
+          "id": "src:midi:first-light-keys.n45"
+        },
+        {
+          "tick": 34560,
+          "durTick": 2880,
+          "pitch": 72,
+          "vel": 64,
+          "id": "src:midi:first-light-keys.n46"
+        },
+        {
+          "tick": 34560,
+          "durTick": 2880,
+          "pitch": 69,
+          "vel": 52,
+          "id": "src:midi:first-light-keys.n47"
+        },
+        {
+          "tick": 34560,
+          "durTick": 2880,
+          "pitch": 65,
+          "vel": 55,
+          "id": "src:midi:first-light-keys.n48"
+        },
+        {
+          "tick": 36960,
+          "durTick": 1440,
+          "pitch": 76,
+          "vel": 59,
+          "id": "src:midi:first-light-keys.n49"
+        },
+        {
+          "tick": 38400,
+          "durTick": 2880,
+          "pitch": 60,
+          "vel": 62,
+          "id": "src:midi:first-light-keys.n50"
+        },
+        {
+          "tick": 38400,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 65,
+          "id": "src:midi:first-light-keys.n51"
+        },
+        {
+          "tick": 38400,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 53,
+          "id": "src:midi:first-light-keys.n52"
+        },
+        {
+          "tick": 38400,
+          "durTick": 2880,
+          "pitch": 71,
+          "vel": 56,
+          "id": "src:midi:first-light-keys.n53"
+        },
+        {
+          "tick": 40800,
+          "durTick": 1440,
+          "pitch": 83,
+          "vel": 60,
+          "id": "src:midi:first-light-keys.n54"
+        },
+        {
+          "tick": 42240,
+          "durTick": 2880,
+          "pitch": 74,
+          "vel": 63,
+          "id": "src:midi:first-light-keys.n55"
+        },
+        {
+          "tick": 42240,
+          "durTick": 2880,
+          "pitch": 71,
+          "vel": 66,
+          "id": "src:midi:first-light-keys.n56"
+        },
+        {
+          "tick": 42240,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 54,
+          "id": "src:midi:first-light-keys.n57"
+        },
+        {
+          "tick": 42240,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 57,
+          "id": "src:midi:first-light-keys.n58"
+        },
+        {
+          "tick": 44640,
+          "durTick": 1440,
+          "pitch": 74,
+          "vel": 61,
+          "id": "src:midi:first-light-keys.n59"
+        },
+        {
+          "tick": 46080,
+          "durTick": 2880,
+          "pitch": 57,
+          "vel": 64,
+          "id": "src:midi:first-light-keys.n60"
+        },
+        {
+          "tick": 46080,
+          "durTick": 2880,
+          "pitch": 60,
+          "vel": 52,
+          "id": "src:midi:first-light-keys.n61"
+        },
+        {
+          "tick": 46080,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 55,
+          "id": "src:midi:first-light-keys.n62"
+        },
+        {
+          "tick": 46080,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 58,
+          "id": "src:midi:first-light-keys.n63"
+        },
+        {
+          "tick": 48480,
+          "durTick": 1440,
+          "pitch": 79,
+          "vel": 62,
+          "id": "src:midi:first-light-keys.n64"
+        },
+        {
+          "tick": 49920,
+          "durTick": 2880,
+          "pitch": 76,
+          "vel": 65,
+          "id": "src:midi:first-light-keys.n65"
+        },
+        {
+          "tick": 49920,
+          "durTick": 2880,
+          "pitch": 72,
+          "vel": 53,
+          "id": "src:midi:first-light-keys.n66"
+        },
+        {
+          "tick": 49920,
+          "durTick": 2880,
+          "pitch": 69,
+          "vel": 56,
+          "id": "src:midi:first-light-keys.n67"
+        },
+        {
+          "tick": 49920,
+          "durTick": 2880,
+          "pitch": 65,
+          "vel": 59,
+          "id": "src:midi:first-light-keys.n68"
+        },
+        {
+          "tick": 52320,
+          "durTick": 1440,
+          "pitch": 76,
+          "vel": 63,
+          "id": "src:midi:first-light-keys.n69"
+        },
+        {
+          "tick": 53760,
+          "durTick": 2880,
+          "pitch": 60,
+          "vel": 66,
+          "id": "src:midi:first-light-keys.n70"
+        },
+        {
+          "tick": 53760,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 54,
+          "id": "src:midi:first-light-keys.n71"
+        },
+        {
+          "tick": 53760,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 57,
+          "id": "src:midi:first-light-keys.n72"
+        },
+        {
+          "tick": 53760,
+          "durTick": 2880,
+          "pitch": 71,
+          "vel": 60,
+          "id": "src:midi:first-light-keys.n73"
+        },
+        {
+          "tick": 56160,
+          "durTick": 1440,
+          "pitch": 83,
+          "vel": 64,
+          "id": "src:midi:first-light-keys.n74"
+        },
+        {
+          "tick": 57600,
+          "durTick": 2880,
+          "pitch": 74,
+          "vel": 52,
+          "id": "src:midi:first-light-keys.n75"
+        },
+        {
+          "tick": 57600,
+          "durTick": 2880,
+          "pitch": 71,
+          "vel": 55,
+          "id": "src:midi:first-light-keys.n76"
+        },
+        {
+          "tick": 57600,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 58,
+          "id": "src:midi:first-light-keys.n77"
+        },
+        {
+          "tick": 57600,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 61,
+          "id": "src:midi:first-light-keys.n78"
+        },
+        {
+          "tick": 60000,
+          "durTick": 1440,
+          "pitch": 74,
+          "vel": 65,
+          "id": "src:midi:first-light-keys.n79"
+        },
+        {
+          "tick": 61440,
+          "durTick": 2880,
+          "pitch": 57,
+          "vel": 53,
+          "id": "src:midi:first-light-keys.n80"
+        },
+        {
+          "tick": 61440,
+          "durTick": 2880,
+          "pitch": 60,
+          "vel": 56,
+          "id": "src:midi:first-light-keys.n81"
+        },
+        {
+          "tick": 61440,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 59,
+          "id": "src:midi:first-light-keys.n82"
+        },
+        {
+          "tick": 61440,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 62,
+          "id": "src:midi:first-light-keys.n83"
+        },
+        {
+          "tick": 63840,
+          "durTick": 1440,
+          "pitch": 79,
+          "vel": 58,
+          "id": "src:midi:first-light-keys.n84"
+        },
+        {
+          "tick": 65280,
+          "durTick": 2880,
+          "pitch": 76,
+          "vel": 54,
+          "id": "src:midi:first-light-keys.n85"
+        },
+        {
+          "tick": 65280,
+          "durTick": 2880,
+          "pitch": 72,
+          "vel": 57,
+          "id": "src:midi:first-light-keys.n86"
+        },
+        {
+          "tick": 65280,
+          "durTick": 2880,
+          "pitch": 69,
+          "vel": 60,
+          "id": "src:midi:first-light-keys.n87"
+        },
+        {
+          "tick": 65280,
+          "durTick": 2880,
+          "pitch": 65,
+          "vel": 63,
+          "id": "src:midi:first-light-keys.n88"
+        },
+        {
+          "tick": 67680,
+          "durTick": 1440,
+          "pitch": 76,
+          "vel": 59,
+          "id": "src:midi:first-light-keys.n89"
+        },
+        {
+          "tick": 69120,
+          "durTick": 2880,
+          "pitch": 60,
+          "vel": 55,
+          "id": "src:midi:first-light-keys.n90"
+        },
+        {
+          "tick": 69120,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 58,
+          "id": "src:midi:first-light-keys.n91"
+        },
+        {
+          "tick": 69120,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 61,
+          "id": "src:midi:first-light-keys.n92"
+        },
+        {
+          "tick": 69120,
+          "durTick": 2880,
+          "pitch": 71,
+          "vel": 64,
+          "id": "src:midi:first-light-keys.n93"
+        },
+        {
+          "tick": 71520,
+          "durTick": 1440,
+          "pitch": 83,
+          "vel": 60,
+          "id": "src:midi:first-light-keys.n94"
+        },
+        {
+          "tick": 72960,
+          "durTick": 2880,
+          "pitch": 74,
+          "vel": 56,
+          "id": "src:midi:first-light-keys.n95"
+        },
+        {
+          "tick": 72960,
+          "durTick": 2880,
+          "pitch": 71,
+          "vel": 59,
+          "id": "src:midi:first-light-keys.n96"
+        },
+        {
+          "tick": 72960,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 62,
+          "id": "src:midi:first-light-keys.n97"
+        },
+        {
+          "tick": 72960,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 65,
+          "id": "src:midi:first-light-keys.n98"
+        },
+        {
+          "tick": 75360,
+          "durTick": 1440,
+          "pitch": 74,
+          "vel": 61,
+          "id": "src:midi:first-light-keys.n99"
+        },
+        {
+          "tick": 76800,
+          "durTick": 2880,
+          "pitch": 57,
+          "vel": 57,
+          "id": "src:midi:first-light-keys.n100"
+        },
+        {
+          "tick": 76800,
+          "durTick": 2880,
+          "pitch": 60,
+          "vel": 60,
+          "id": "src:midi:first-light-keys.n101"
+        },
+        {
+          "tick": 76800,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 63,
+          "id": "src:midi:first-light-keys.n102"
+        },
+        {
+          "tick": 76800,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 66,
+          "id": "src:midi:first-light-keys.n103"
+        },
+        {
+          "tick": 79200,
+          "durTick": 1440,
+          "pitch": 79,
+          "vel": 62,
+          "id": "src:midi:first-light-keys.n104"
+        },
+        {
+          "tick": 80640,
+          "durTick": 2880,
+          "pitch": 76,
+          "vel": 58,
+          "id": "src:midi:first-light-keys.n105"
+        },
+        {
+          "tick": 80640,
+          "durTick": 2880,
+          "pitch": 72,
+          "vel": 61,
+          "id": "src:midi:first-light-keys.n106"
+        },
+        {
+          "tick": 80640,
+          "durTick": 2880,
+          "pitch": 69,
+          "vel": 64,
+          "id": "src:midi:first-light-keys.n107"
+        },
+        {
+          "tick": 80640,
+          "durTick": 2880,
+          "pitch": 65,
+          "vel": 52,
+          "id": "src:midi:first-light-keys.n108"
+        },
+        {
+          "tick": 83040,
+          "durTick": 1440,
+          "pitch": 76,
+          "vel": 63,
+          "id": "src:midi:first-light-keys.n109"
+        },
+        {
+          "tick": 84480,
+          "durTick": 2880,
+          "pitch": 60,
+          "vel": 59,
+          "id": "src:midi:first-light-keys.n110"
+        },
+        {
+          "tick": 84480,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 62,
+          "id": "src:midi:first-light-keys.n111"
+        },
+        {
+          "tick": 84480,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 65,
+          "id": "src:midi:first-light-keys.n112"
+        },
+        {
+          "tick": 84480,
+          "durTick": 2880,
+          "pitch": 71,
+          "vel": 53,
+          "id": "src:midi:first-light-keys.n113"
+        },
+        {
+          "tick": 86880,
+          "durTick": 1440,
+          "pitch": 83,
+          "vel": 64,
+          "id": "src:midi:first-light-keys.n114"
+        },
+        {
+          "tick": 88320,
+          "durTick": 2880,
+          "pitch": 74,
+          "vel": 60,
+          "id": "src:midi:first-light-keys.n115"
+        },
+        {
+          "tick": 88320,
+          "durTick": 2880,
+          "pitch": 71,
+          "vel": 63,
+          "id": "src:midi:first-light-keys.n116"
+        },
+        {
+          "tick": 88320,
+          "durTick": 2880,
+          "pitch": 67,
+          "vel": 66,
+          "id": "src:midi:first-light-keys.n117"
+        },
+        {
+          "tick": 88320,
+          "durTick": 2880,
+          "pitch": 64,
+          "vel": 54,
+          "id": "src:midi:first-light-keys.n118"
+        },
+        {
+          "tick": 90720,
+          "durTick": 1440,
+          "pitch": 74,
+          "vel": 65,
+          "id": "src:midi:first-light-keys.n119"
+        }
+      ],
+      "lengthTick": 92160
+    },
+    "src:midi:first-light-lead": {
+      "id": "src:midi:first-light-lead",
+      "kind": "midi",
+      "name": "lead",
+      "notes": [
+        {
+          "tick": 46080,
+          "durTick": 720,
+          "pitch": 72,
+          "vel": 60,
+          "id": "src:midi:first-light-lead.n0"
+        },
+        {
+          "tick": 47040,
+          "durTick": 960,
+          "pitch": 74,
+          "vel": 66,
+          "id": "src:midi:first-light-lead.n1"
+        },
+        {
+          "tick": 48240,
+          "durTick": 720,
+          "pitch": 76,
+          "vel": 70,
+          "id": "src:midi:first-light-lead.n2"
+        },
+        {
+          "tick": 49440,
+          "durTick": 240,
+          "pitch": 74,
+          "vel": 62,
+          "id": "src:midi:first-light-lead.n3"
+        },
+        {
+          "tick": 50160,
+          "durTick": 720,
+          "pitch": 72,
+          "vel": 64,
+          "id": "src:midi:first-light-lead.n4"
+        },
+        {
+          "tick": 51120,
+          "durTick": 960,
+          "pitch": 69,
+          "vel": 60,
+          "id": "src:midi:first-light-lead.n5"
+        },
+        {
+          "tick": 52560,
+          "durTick": 720,
+          "pitch": 74,
+          "vel": 68,
+          "id": "src:midi:first-light-lead.n6"
+        },
+        {
+          "tick": 53760,
+          "durTick": 720,
+          "pitch": 74,
+          "vel": 68,
+          "id": "src:midi:first-light-lead.n7"
+        },
+        {
+          "tick": 54720,
+          "durTick": 960,
+          "pitch": 76,
+          "vel": 72,
+          "id": "src:midi:first-light-lead.n8"
+        },
+        {
+          "tick": 55920,
+          "durTick": 720,
+          "pitch": 83,
+          "vel": 75,
+          "id": "src:midi:first-light-lead.n9"
+        },
+        {
+          "tick": 57120,
+          "durTick": 240,
+          "pitch": 76,
+          "vel": 68,
+          "id": "src:midi:first-light-lead.n10"
+        },
+        {
+          "tick": 57840,
+          "durTick": 720,
+          "pitch": 74,
+          "vel": 66,
+          "id": "src:midi:first-light-lead.n11"
+        },
+        {
+          "tick": 58800,
+          "durTick": 960,
+          "pitch": 72,
+          "vel": 64,
+          "id": "src:midi:first-light-lead.n12"
+        },
+        {
+          "tick": 60240,
+          "durTick": 720,
+          "pitch": 69,
+          "vel": 62,
+          "id": "src:midi:first-light-lead.n13"
+        },
+        {
+          "tick": 61440,
+          "durTick": 240,
+          "pitch": 76,
+          "vel": 74,
+          "id": "src:midi:first-light-lead.n14"
+        },
+        {
+          "tick": 62400,
+          "durTick": 960,
+          "pitch": 81,
+          "vel": 84,
+          "id": "src:midi:first-light-lead.n15"
+        },
+        {
+          "tick": 63600,
+          "durTick": 720,
+          "pitch": 83,
+          "vel": 78,
+          "id": "src:midi:first-light-lead.n16"
+        },
+        {
+          "tick": 64560,
+          "durTick": 720,
+          "pitch": 76,
+          "vel": 72,
+          "id": "src:midi:first-light-lead.n17"
+        },
+        {
+          "tick": 65520,
+          "durTick": 720,
+          "pitch": 74,
+          "vel": 70,
+          "id": "src:midi:first-light-lead.n18"
+        },
+        {
+          "tick": 66480,
+          "durTick": 960,
+          "pitch": 72,
+          "vel": 66,
+          "id": "src:midi:first-light-lead.n19"
+        },
+        {
+          "tick": 67920,
+          "durTick": 720,
+          "pitch": 69,
+          "vel": 62,
+          "id": "src:midi:first-light-lead.n20"
+        },
+        {
+          "tick": 69120,
+          "durTick": 720,
+          "pitch": 72,
+          "vel": 68,
+          "id": "src:midi:first-light-lead.n21"
+        },
+        {
+          "tick": 70080,
+          "durTick": 960,
+          "pitch": 74,
+          "vel": 72,
+          "id": "src:midi:first-light-lead.n22"
+        },
+        {
+          "tick": 71520,
+          "durTick": 720,
+          "pitch": 76,
+          "vel": 74,
+          "id": "src:midi:first-light-lead.n23"
+        },
+        {
+          "tick": 73200,
+          "durTick": 720,
+          "pitch": 74,
+          "vel": 68,
+          "id": "src:midi:first-light-lead.n24"
+        },
+        {
+          "tick": 74160,
+          "durTick": 960,
+          "pitch": 72,
+          "vel": 64,
+          "id": "src:midi:first-light-lead.n25"
+        },
+        {
+          "tick": 75600,
+          "durTick": 960,
+          "pitch": 69,
+          "vel": 60,
+          "id": "src:midi:first-light-lead.n26"
+        }
+      ],
+      "lengthTick": 92160
+    },
+    "src:midi:first-light-pad": {
+      "id": "src:midi:first-light-pad",
+      "kind": "midi",
+      "name": "pad",
+      "notes": [
+        {
+          "tick": 61440,
+          "durTick": 3840,
+          "pitch": 57,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n0"
+        },
+        {
+          "tick": 61440,
+          "durTick": 3840,
+          "pitch": 60,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n1"
+        },
+        {
+          "tick": 61440,
+          "durTick": 3840,
+          "pitch": 64,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n2"
+        },
+        {
+          "tick": 61440,
+          "durTick": 3840,
+          "pitch": 71,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n3"
+        },
+        {
+          "tick": 65280,
+          "durTick": 3840,
+          "pitch": 57,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n4"
+        },
+        {
+          "tick": 65280,
+          "durTick": 3840,
+          "pitch": 60,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n5"
+        },
+        {
+          "tick": 65280,
+          "durTick": 3840,
+          "pitch": 64,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n6"
+        },
+        {
+          "tick": 65280,
+          "durTick": 3840,
+          "pitch": 71,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n7"
+        },
+        {
+          "tick": 69120,
+          "durTick": 3840,
+          "pitch": 57,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n8"
+        },
+        {
+          "tick": 69120,
+          "durTick": 3840,
+          "pitch": 60,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n9"
+        },
+        {
+          "tick": 69120,
+          "durTick": 3840,
+          "pitch": 64,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n10"
+        },
+        {
+          "tick": 69120,
+          "durTick": 3840,
+          "pitch": 71,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n11"
+        },
+        {
+          "tick": 72960,
+          "durTick": 3840,
+          "pitch": 57,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n12"
+        },
+        {
+          "tick": 72960,
+          "durTick": 3840,
+          "pitch": 60,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n13"
+        },
+        {
+          "tick": 72960,
+          "durTick": 3840,
+          "pitch": 64,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n14"
+        },
+        {
+          "tick": 72960,
+          "durTick": 3840,
+          "pitch": 71,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n15"
+        },
+        {
+          "tick": 76800,
+          "durTick": 3840,
+          "pitch": 57,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n16"
+        },
+        {
+          "tick": 76800,
+          "durTick": 3840,
+          "pitch": 60,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n17"
+        },
+        {
+          "tick": 76800,
+          "durTick": 3840,
+          "pitch": 64,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n18"
+        },
+        {
+          "tick": 76800,
+          "durTick": 3840,
+          "pitch": 71,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n19"
+        },
+        {
+          "tick": 80640,
+          "durTick": 3840,
+          "pitch": 57,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n20"
+        },
+        {
+          "tick": 80640,
+          "durTick": 3840,
+          "pitch": 60,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n21"
+        },
+        {
+          "tick": 80640,
+          "durTick": 3840,
+          "pitch": 64,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n22"
+        },
+        {
+          "tick": 80640,
+          "durTick": 3840,
+          "pitch": 71,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n23"
+        },
+        {
+          "tick": 84480,
+          "durTick": 3840,
+          "pitch": 57,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n24"
+        },
+        {
+          "tick": 84480,
+          "durTick": 3840,
+          "pitch": 60,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n25"
+        },
+        {
+          "tick": 84480,
+          "durTick": 3840,
+          "pitch": 64,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n26"
+        },
+        {
+          "tick": 84480,
+          "durTick": 3840,
+          "pitch": 71,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n27"
+        },
+        {
+          "tick": 88320,
+          "durTick": 3840,
+          "pitch": 57,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n28"
+        },
+        {
+          "tick": 88320,
+          "durTick": 3840,
+          "pitch": 60,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n29"
+        },
+        {
+          "tick": 88320,
+          "durTick": 3840,
+          "pitch": 64,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n30"
+        },
+        {
+          "tick": 88320,
+          "durTick": 3840,
+          "pitch": 71,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n31"
+        },
+        {
+          "tick": 84480,
+          "durTick": 7680,
+          "pitch": 45,
+          "vel": 40,
+          "id": "src:midi:first-light-pad.n32"
+        }
+      ],
+      "lengthTick": 92160
+    }
+  },
+  "locations": [
+    {
+      "id": "first-light-intro",
+      "name": "Intro",
+      "kind": "section",
+      "startTick": 0,
+      "endTick": 15360
+    },
+    {
+      "id": "first-light-groove",
+      "name": "Groove",
+      "kind": "section",
+      "startTick": 15360,
+      "endTick": 46080
+    },
+    {
+      "id": "first-light-lift",
+      "name": "Lift",
+      "kind": "section",
+      "startTick": 46080,
+      "endTick": 76800
+    },
+    {
+      "id": "first-light-outro",
+      "name": "Outro",
+      "kind": "section",
+      "startTick": 76800,
+      "endTick": 92160
+    },
+    {
+      "id": "first-light-peak",
+      "name": "peak",
+      "kind": "mark",
+      "startTick": 61440
+    }
+  ],
+  "idCounter": 0
+}
