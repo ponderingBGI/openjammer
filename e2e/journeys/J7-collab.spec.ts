@@ -9,6 +9,7 @@ interface CollabBridge {
     createCollabOffer(): Promise<string>;
     acceptCollabOffer(offer: string): Promise<string>;
     acceptCollabAnswer(answer: string): Promise<void>;
+    waitForCollabReady(): Promise<void>;
     addGraphNode(label: string): string;
     graphSnapshot(): { nodes: Array<{ id: string; data?: { name?: string } }> };
 }
@@ -34,11 +35,23 @@ test('@journey @collab J7 Collab seed — graph nodes converge between two conte
     const b = await newAppContext(browser);
     try {
         await Promise.all([activateBrowser(a.page), activateBrowser(b.page)]);
-        const sessionCode = await call<string>(a.page, 'hostCollabWebRTC', ['Alice']);
-        await call<void>(b.page, 'joinCollabWebRTC', [sessionCode, 'Bob']);
-        const offer = await call<string>(a.page, 'createCollabOffer', []);
-        const answer = await call<string>(b.page, 'acceptCollabOffer', [offer]);
-        await call<void>(a.page, 'acceptCollabAnswer', [answer]);
+        await test.step('start isolated LAN-only WebRTC sessions', async () => {
+            const sessionCode = await call<string>(a.page, 'hostCollabWebRTC', ['Alice']);
+            await call<void>(b.page, 'joinCollabWebRTC', [sessionCode, 'Bob']);
+        });
+        const offer = await test.step('host gathers a deterministic offer', () => (
+            call<string>(a.page, 'createCollabOffer', [])
+        ));
+        const answer = await test.step('guest gathers a deterministic answer', () => (
+            call<string>(b.page, 'acceptCollabOffer', [offer])
+        ));
+        await test.step('both data channels become ready', async () => {
+            await call<void>(a.page, 'acceptCollabAnswer', [answer]);
+            await Promise.all([
+                call<void>(a.page, 'waitForCollabReady', []),
+                call<void>(b.page, 'waitForCollabReady', []),
+            ]);
+        });
         const addedId = await call<string>(a.page, 'addGraphNode', ['J7 shared effect']);
 
         await expect.poll(async () => {

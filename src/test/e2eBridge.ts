@@ -26,6 +26,7 @@ interface E2EBridge {
     createCollabOffer(): Promise<string>;
     acceptCollabOffer(offer: string): Promise<string>;
     acceptCollabAnswer(answer: string): Promise<void>;
+    waitForCollabReady(): Promise<void>;
     addGraphNode(label: string): string;
     pluginFault(pluginName: string, kind: PluginFaultKind, repeats?: number): void;
     setAgentScript(script: AgentEvent[] | ((task: AgentTask) => AgentEvent[])): Promise<void>;
@@ -58,8 +59,18 @@ export function installE2EBridge(): void {
         },
         hostCollab: (name) => useCollabStore.getState().hostSession({ name, transport: 'broadcast-channel' }),
         joinCollab: (sessionCode, name) => useCollabStore.getState().joinSession(sessionCode, { name, transport: 'broadcast-channel' }),
-        hostCollabWebRTC: (name) => useCollabStore.getState().hostSession({ name, transport: 'webrtc-manual' }),
-        joinCollabWebRTC: (sessionCode, name) => useCollabStore.getState().joinSession(sessionCode, { name, transport: 'webrtc-manual' }),
+        // These contexts share one host, so host candidates are sufficient. Do
+        // not make a deterministic CRDT journey depend on public STUN egress.
+        hostCollabWebRTC: (name) => useCollabStore.getState().hostSession({
+            name,
+            transport: 'webrtc-manual',
+            webrtcOptions: { iceServers: [] },
+        }),
+        joinCollabWebRTC: (sessionCode, name) => useCollabStore.getState().joinSession(sessionCode, {
+            name,
+            transport: 'webrtc-manual',
+            webrtcOptions: { iceServers: [] },
+        }),
         createCollabOffer: async () => {
             const transport = useCollabStore.getState().webrtcTransport;
             if (!transport) throw new Error('WebRTC collaboration transport is not active');
@@ -74,6 +85,11 @@ export function installE2EBridge(): void {
             const transport = useCollabStore.getState().webrtcTransport;
             if (!transport) throw new Error('WebRTC collaboration transport is not active');
             await transport.acceptAnswer(answer);
+        },
+        waitForCollabReady: async () => {
+            const transport = useCollabStore.getState().webrtcTransport;
+            if (!transport) throw new Error('WebRTC collaboration transport is not active');
+            await transport.waitUntilReady();
         },
         addGraphNode: (label) => useGraphStore.getState().addNode('effect', { x: 120, y: 120 }, null, { name: label }),
         pluginFault: (pluginName, kind, repeats = 1) => {

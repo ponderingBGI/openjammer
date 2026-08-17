@@ -60,11 +60,40 @@ function serveDownloadPage(): Plugin {
   }
 }
 
+// Browser-level offline emulation currently turns a service-worker navigation
+// into an internal WebKit failure. For the PWA journey, simulate the stronger
+// condition we actually care about: the installed origin is unreachable. The
+// middleware is preview-only, opt-in, and scoped to the test context by an
+// HttpOnly cookie, so parallel browser contexts remain unaffected.
+function simulateE2EOriginOutage(): Plugin {
+  return {
+    name: 'oj-e2e-origin-outage',
+    configurePreviewServer(server) {
+      if (process.env.OJ_E2E_ORIGIN_OUTAGE !== '1') return
+      server.middlewares.use((req, res, next) => {
+        const offline = (req.headers.cookie ?? '')
+          .split(';')
+          .some((cookie) => cookie.trim() === 'oj_e2e_origin_outage=1')
+        if (!offline) {
+          next()
+          return
+        }
+        res.statusCode = 503
+        res.setHeader('Cache-Control', 'no-store')
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+        res.setHeader('X-OpenJammer-E2E-Origin-Outage', '1')
+        res.end('OpenJammer E2E origin outage')
+      })
+    },
+  }
+}
+
 export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkgVersion),
   },
   plugins: [
+    simulateE2EOriginOutage(),
     serveDownloadPage(),
     wasm(),
     topLevelAwait(),
