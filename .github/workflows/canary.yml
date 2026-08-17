@@ -119,6 +119,19 @@ jobs:
         with:
           workspaces: ". -> target"
 
+      - name: Fast-fail Rust check for the installer feature set
+        # The merge gate compiles default + clap-host but never plugin-host-juce,
+        # so feature-gated Rust drift (e.g. a struct gaining fields) historically
+        # surfaced only deep inside the tauri installer build. This check hits the
+        # same compile first, before the web build and packaging, and reports the
+        # plain compiler error; the shared rust-cache keeps the duplicate work
+        # near-free on warm runs.
+        shell: bash
+        # --target matches the installer's actual Rust target (the macOS entries
+        # cross-compile), so the check can't silently verify the host triple
+        # while the installer builds a different one.
+        run: cargo check -p ojhost --features juce --target "${{ matrix.piTarget }}"
+
       - name: Canari build config (version stamp + updater artifacts)
         shell: bash
         run: |

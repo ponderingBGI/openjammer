@@ -116,6 +116,15 @@ jobs:
     name: Run latency benchmark (walltime)
     # Pinned image (see the benchmarks job); for stable absolute µs, upgrade to a
     # CodSpeed macro runner — on the shared runner the trend matters, not the value.
+    #
+    # PUSH-ONLY by doctrine ("never gate merges on a noisy number"): walltime
+    # uploads from shared hosted runners land in CodSpeed's PR analysis and have
+    # produced phantom double-digit "regressions" on nanosecond benches compared
+    # across different runner hardware (PR #74: 14 walltime rows flagged while
+    # all 142 deterministic simulation benches were untouched, under CodSpeed's
+    # own "Different runtime environments detected" warning). The canari-push
+    # upload keeps the trend line; PR verdicts stay purely deterministic.
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
