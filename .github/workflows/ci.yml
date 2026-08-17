@@ -245,7 +245,7 @@ jobs:
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
       - name: Fast PR browser lane (legacy 3-spec suite)
-        # Measured locally on 2026-08-17: ~45s after the production build. The
+        # Measured locally on 2026-08-17: 29.0s including the production build. The
         # six realistic journeys stay in the sharded canari/nightly matrix.
         run: bun run test:e2e -- e2e/arrangement-editing.spec.ts e2e/pwa-smoke.spec.ts e2e/timeline-preview.spec.ts --project=chromium
 

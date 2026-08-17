@@ -94,7 +94,7 @@ export function PianoRoll(props: PianoRollProps) {
     const rootRef = useRef<HTMLDivElement>(null);
     const fieldRef = useRef<HTMLDivElement>(null);
     const dragRef = useRef<DragState | null>(null);
-    const drawRef = useRef<{ pointerId: number; clientX: number; tick: number; pitch: number } | null>(null);
+    const drawRef = useRef<{ pointerId: number; clientX: number; tick: number; pitch: number; cleanup: () => void } | null>(null);
     const marqueeRef = useRef<{ pointerId: number; clientX: number; clientY: number; x: number; y: number } | null>(null);
     const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
     const [ghost, setGhost] = useState<{ tick: number; pitch: number; durTick: number } | null>(null);
@@ -246,10 +246,42 @@ export function PianoRoll(props: PianoRollProps) {
         if (mark) setMarquee({ x: Math.min(mark.x, mark.x + event.clientX - mark.clientX), y: Math.min(mark.y, mark.y + event.clientY - mark.clientY), width: Math.abs(event.clientX - mark.clientX), height: Math.abs(event.clientY - mark.clientY) });
     };
 
+    const finishFieldDraw = (pointerId: number, clientX: number) => {
+        const drawing = drawRef.current;
+        if (!drawing || drawing.pointerId !== pointerId) return false;
+        const end = snap(xToTick(clientX));
+        const dragged = Math.abs(clientX - drawing.clientX) >= 3;
+        const duration = dragged ? Math.max(noteDragFloor(ppq), Math.abs(end - drawing.tick)) : drawGrid;
+        drawing.cleanup();
+        drawRef.current = null;
+        drawAt(Math.min(drawing.tick, end), drawing.pitch, duration);
+        return true;
+    };
+
+    const cancelFieldDraw = (pointerId: number) => {
+        const drawing = drawRef.current;
+        if (!drawing || drawing.pointerId !== pointerId) return;
+        drawing.cleanup();
+        drawRef.current = null;
+        setGhost(null);
+    };
+
     const onFieldPointerDown = (event: ReactPointerEvent) => {
         if (event.target !== event.currentTarget && (event.target as HTMLElement).closest('.piano-roll-note')) return;
         if (event.button === 0 && (tool === 'draw' || event.ctrlKey || event.metaKey)) {
-            drawRef.current = { pointerId: event.pointerId, clientX: event.clientX, tick: snap(xToTick(event.clientX)), pitch: yToPitch(event.clientY) };
+            const pointerId = event.pointerId;
+            const finish = (nativeEvent: PointerEvent) => finishFieldDraw(nativeEvent.pointerId, nativeEvent.clientX);
+            const cancel = (nativeEvent: PointerEvent) => cancelFieldDraw(nativeEvent.pointerId);
+            const cleanup = () => {
+                window.removeEventListener('pointerup', finish);
+                window.removeEventListener('pointercancel', cancel);
+            };
+            drawRef.current = { pointerId, clientX: event.clientX, tick: snap(xToTick(event.clientX)), pitch: yToPitch(event.clientY), cleanup };
+            // Keep completion on the real pointer stream even when capture or a
+            // React re-render retargets pointerup. This mirrors arrangement clip
+            // gestures and is essential for pen/touch as well as automation.
+            window.addEventListener('pointerup', finish);
+            window.addEventListener('pointercancel', cancel);
             event.currentTarget.setPointerCapture(event.pointerId);
         }
         else if (event.button === 0) {
@@ -259,15 +291,7 @@ export function PianoRoll(props: PianoRollProps) {
     };
 
     const onFieldPointerUp = (event: ReactPointerEvent) => {
-        const drawing = drawRef.current;
-        if (drawing && drawing.pointerId === event.pointerId) {
-            const end = snap(xToTick(event.clientX));
-            const dragged = Math.abs(event.clientX - drawing.clientX) >= 3;
-            const duration = dragged ? Math.max(noteDragFloor(ppq), Math.abs(end - drawing.tick)) : drawGrid;
-            drawAt(Math.min(drawing.tick, end), drawing.pitch, duration);
-            drawRef.current = null;
-            return;
-        }
+        if (finishFieldDraw(event.pointerId, event.clientX)) return;
         const mark = marqueeRef.current;
         if (!mark || mark.pointerId !== event.pointerId) return;
         const bounds = fieldRef.current?.getBoundingClientRect();
@@ -407,7 +431,7 @@ export function PianoRoll(props: PianoRollProps) {
                 <div className="piano-roll__keys" role="list" aria-label="Pitch rows" style={{ height: contentHeight }}>
                     {pitches.map((pitch) => <div key={pitch} role="listitem" aria-label={drumMode ? (GM_DRUM_NAMES[pitch] ?? pitchName(pitch)) : pitchName(pitch)} className={`piano-roll__key${isBlackPitch(pitch) ? ' is-black' : ''}${isKeyboardSeam(pitch) ? ' is-seam' : ''}`} style={{ height: rowHeight }}>{drumMode ? (GM_DRUM_NAMES[pitch] ?? pitchName(pitch)) : pitch % 12 === 0 && rowHeight >= 7 ? pitchName(pitch) : ''}</div>)}
                 </div>
-                <div ref={fieldRef} className="piano-roll__field" onPointerMove={onFieldPointerMove} onPointerLeave={() => { if (!drawRef.current) setGhost(null); }} onPointerDown={onFieldPointerDown} onPointerUp={onFieldPointerUp} onPointerCancel={() => { drawRef.current = null; marqueeRef.current = null; setMarquee(null); setGhost(null); }}>
+                <div ref={fieldRef} className="piano-roll__field" onPointerMove={onFieldPointerMove} onPointerLeave={() => { if (!drawRef.current) setGhost(null); }} onPointerDown={onFieldPointerDown} onPointerUp={onFieldPointerUp} onPointerCancel={(event) => { cancelFieldDraw(event.pointerId); marqueeRef.current = null; setMarquee(null); setGhost(null); }}>
                     <div className="piano-roll__content" style={{ width: contentWidth, height: contentHeight, transform: `translateX(${-leftTick * props.pxPerTick}px)` }}>
                         <TimeGrid width={contentWidth} height={contentHeight} pxPerTick={props.pxPerTick} ticksPerBar={ticksPerBar} beatsPerBar={beatsPerBar} gridUnit={gridUnit} />
                         {pitches.map((pitch, index) => <div key={pitch} className={`piano-roll__row${isBlackPitch(pitch) ? ' is-black' : ''}${pitch % 12 === 0 ? ' is-c' : ''}`} style={{ top: index * rowHeight, height: rowHeight }} />)}

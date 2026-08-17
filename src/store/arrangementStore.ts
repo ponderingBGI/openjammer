@@ -22,6 +22,7 @@ import type { CapturedNote } from '@openjammer/oj-protocol';
 import { captureResultToVerbs, recordBindings, trackRecordKind, wasmTapToCapturedNote, type RecordTrackBinding } from '../song/recording';
 import { logger } from '../utils/log';
 import { registerHistoryDriver, useHistoryStore, type EditVerb } from './historyStore';
+import { appendMidiRecordJournal, beginMidiRecordJournal, clearMidiRecordJournal } from '../persistence/recovery/midiRecordJournal';
 
 const log = logger('song');
 
@@ -262,6 +263,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             const verbs = captureResultToVerbs({ arrangement: latest, result: capture, bindings: activeRecordBindings, span, mint: get().mintId });
             if (verbs.length) get().apply(verbs);
         }
+        clearMidiRecordJournal();
         activeRecordBindings = [];
         set({ recordStartTick: null, ghostNotes: [], recordingBindings: [] });
     };
@@ -515,12 +517,15 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             set({ isPlaying: true, isRecording: true, recordStartTick: startTick, ghostNotes: [], recordError: null, transportPending: 'play' });
             activeRecordBindings = startPreview(state.arrangement, startTick, () => void finishRecording(), true);
             set({ recordingBindings: activeRecordBindings });
+            beginMidiRecordJournal(startTick, activeRecordBindings);
             const armedNodes = new Set(activeRecordBindings.filter((binding) => binding.kind === 'midi').map((binding) => binding.node));
             liveNoteUnsubscribe?.();
             liveNoteUnsubscribe = getExecutor().subscribeLiveNotes((event) => {
                 const current = get();
                 if (!current.isRecording || !armedNodes.has(event.node)) return;
-                set({ ghostNotes: [...current.ghostNotes, wasmTapToCapturedNote(event, current.currentTick())] });
+                const note = wasmTapToCapturedNote(event, current.currentTick());
+                appendMidiRecordJournal(note);
+                set({ ghostNotes: [...current.ghostNotes, note] });
             });
         },
 
@@ -589,10 +594,12 @@ if (typeof window !== 'undefined' && navigator.webdriver) {
         const binding = state.recordingBindings.find((item) => item.kind === 'midi');
         if (!binding) return;
         const tick = Math.max(0, Math.round(event.detail.tick));
+        const note = { node: binding.node, note: event.detail.note, velocity: event.detail.velocity, on: event.detail.on, tick };
+        appendMidiRecordJournal(note);
         useArrangementStore.setState({
             playheadTick: Math.max(state.playheadTick, tick),
             transportFrameAtMs: null,
-            ghostNotes: [...state.ghostNotes, { node: binding.node, note: event.detail.note, velocity: event.detail.velocity, on: event.detail.on, tick }],
+            ghostNotes: [...state.ghostNotes, note],
         });
     }) as EventListener);
 }

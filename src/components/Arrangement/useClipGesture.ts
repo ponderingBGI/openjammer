@@ -81,7 +81,7 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
         let rawDelta = horizontalAllowed ? Math.round(dx / pxPerTick) : 0;
         const grabbedRaw = clip.startTick + rawDelta;
         const relative = event.altKey && event.shiftKey;
-        const snapInvert = event.altKey && !g.copy;
+        const snapInvert = event.altKey && !event.shiftKey && !g.copy;
         const snapped = snapTick(relative ? grabbedRaw - g.relativeOffset : grabbedRaw, g.candidates, pxPerTick, context.snapMode, snapInvert);
         rawDelta = (relative ? snapped + g.relativeOffset : snapped) - clip.startTick;
         if (g.slip) {
@@ -143,7 +143,11 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
             }
             const nearest = candidates.length ? candidates.reduce((best, value) => Math.abs(value - clip.startTick) < Math.abs(best - clip.startTick) ? value : best) : clip.startTick;
             const scroll = event.currentTarget.closest('.arrangement-scroll') as HTMLElement | null;
-            gesture.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, lastX: event.clientX, lastY: event.clientY, originalScrollLeft: scroll?.scrollLeft ?? 0, copy: event.altKey && !slip, slip, edge: slip ? null : edge, axis: null, active: false, selectedIds, relativeOffset: clip.startTick - nearest, candidates, scroll, frame: null, followPlayheadBefore: context.followPlayhead };
+            // Alt+drag copies; Alt+Shift is the distinct relative-snap gesture.
+            // Keeping those modes exclusive prevents a relative move from
+            // silently becoming a duplicate with snapping inverted.
+            const copy = event.altKey && !event.shiftKey && !slip;
+            gesture.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, lastX: event.clientX, lastY: event.clientY, originalScrollLeft: scroll?.scrollLeft ?? 0, copy, slip, edge: slip ? null : edge, axis: null, active: false, selectedIds, relativeOffset: clip.startTick - nearest, candidates, scroll, frame: null, followPlayheadBefore: context.followPlayhead };
             useEditingContextStore.setState({ followPlayhead: false });
             const move = (nativeEvent: PointerEvent) => { if (gesture.current) preview(nativeEvent); };
             const up = () => { if (gesture.current) finish(true); };
@@ -163,7 +167,7 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
             window.addEventListener('mousemove', mouseMove);
             window.addEventListener('mouseup', mouseUp);
             event.currentTarget.setPointerCapture(event.pointerId);
-            useArrangementStore.getState().beginGesture(slip ? 'Slip clip contents' : edge ? `Trim clip ${edge}` : event.altKey ? 'Duplicate clips' : 'Move clips');
+            useArrangementStore.getState().beginGesture(slip ? 'Slip clip contents' : edge ? `Trim clip ${edge}` : copy ? 'Duplicate clips' : 'Move clips');
             startAutoScroll();
         },
         onPointerCancel: () => finish(false),
