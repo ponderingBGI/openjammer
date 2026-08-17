@@ -7,7 +7,9 @@
 # SDK/license. VST2 is discontinued and must be owner-provisioned via
 # OJHOST_VST2_SDK_DIR; this file never fetches or vendors VST2 headers.
 cmake_minimum_required(VERSION 3.22)
-project(ojhost_juce LANGUAGES CXX)
+# clap-juce-extensions includes C translation units. Declare C up front so
+# cross-target macOS generation has CMAKE_C_COMPILE_OBJECT available.
+project(ojhost_juce LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

@@ -65,7 +65,7 @@ ojcore = { path = "../ojcore", features = ["std"] }
 # CodSpeed-compatible criterion: plain criterion locally, instruction-count +
 # allocation instrumented in CI. Benchmarks the hosted-plugin control plane that
 # must stay off-RT but still instant for live use (scan cache, ids, registration).
-codspeed-criterion-compat = "4.7.0"
+codspeed-criterion-compat = "5.0.1"
 # clack PLUGIN side (MIT) — test-only. Lets the CLAP-state round-trip test define an
 # IN-PROCESS clack plugin (no `.clap` dylib, no audio device) so CI verifies the
 # real `clap_plugin_state` save/load against `ClapBackend`. Only compiled for tests;

@@ -27,9 +27,9 @@ ojcore = { path = "../ojcore", default-features = false }
 ojproto = { path = "../ojproto" }
 # The permanent host output-guard chain, applied outside the wasm sandbox.
 ojcore-dsp = { path = "../ojcore-dsp" }
-wasmtime = { version = "45.0.2", default-features = false, features = ["cranelift", "runtime", "wat"], optional = true }
+wasmtime = { version = "47.0.3", default-features = false, features = ["cranelift", "runtime", "wat"], optional = true }
 # Loads native faust .dlls (native-host feature). Native-only.
-libloading = { version = "0.8", optional = true }
+libloading = { version = "0.9", optional = true }
 
 [dev-dependencies]
 libm = { workspace = true }

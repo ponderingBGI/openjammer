@@ -1,20 +1,20 @@
 {
-  "version": "v0.0.1",
+  "version": "v0.0.3",
   "platforms": {
     "darwin-aarch64": {
-      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.1/OpenJammer_0.0.1_aarch64.dmg"
+      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.3/OpenJammer_0.0.3_aarch64.dmg"
     },
     "darwin-x86_64": {
-      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.1/OpenJammer_0.0.1_x64.dmg"
+      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.3/OpenJammer_0.0.3_x64.dmg"
     },
     "windows-x86_64": {
-      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.1/OpenJammer_0.0.1_x64-setup.exe"
+      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.3/OpenJammer_0.0.3_x64-setup.exe"
     },
     "linux-x86_64-appimage": {
-      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.1/OpenJammer_0.0.1_amd64.AppImage"
+      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.3/OpenJammer_0.0.3_amd64.AppImage"
     },
     "linux-x86_64-deb": {
-      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.1/OpenJammer_0.0.1_amd64.deb"
+      "browser_download_url": "https://github.com/ponderingBGI/openjammer/releases/download/v0.0.3/OpenJammer_0.0.3_amd64.deb"
     }
   }
 }

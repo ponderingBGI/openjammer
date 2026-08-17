@@ -121,17 +121,17 @@ struct OjPluginEditor {
 };
 
 // The POSIX crash-guard's process-global fault handlers are defined in the
-// crash-guard section far below. Forward-declare the installer here (the SAME
-// unnamed namespace) so the off-RT ojhost_prepare can arm the handlers, instead
+// crash-guard section far below. Forward-declare the installer here so the
+// off-RT ojhost_prepare can arm the handlers, instead
 // of paying the std::call_once lock + four sigaction syscalls on the first
 // guarded audio block. (Windows uses SEH and has no install cost.)
+extern "C" {
+
 #if !defined(_WIN32)
 namespace {
 static void ojInstallHandlersOnce();
 }  // namespace
 #endif
-
-extern "C" {
 
 OjHost* ojhost_create(void) {
     return new (std::nothrow) OjHost();

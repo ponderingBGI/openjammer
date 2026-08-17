@@ -39,7 +39,7 @@ jobs:
       engine: ${{ steps.plan.outputs.engine }}
       web: ${{ steps.plan.outputs.web }}
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0 # history needed to diff against the base
       - name: Setup web (Bun + install)
@@ -121,7 +121,7 @@ jobs:
           echo "Merge gate expects:"
           sed 's/^/  - /' ci-gate-selection/expected-jobs.txt
       - name: Upload merge-gate selection
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ci-gate-selection
           path: ci-gate-selection/expected-jobs.txt
@@ -134,7 +134,7 @@ jobs:
     if: needs.changes.outputs.engine == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Rust (stable + nightly wasm leg)
         uses: ./.github/actions/setup-rust
         with:
@@ -165,7 +165,7 @@ jobs:
       # global-allocator swap `assert_no_alloc` installs. A REQUIRED per-PR check
       # via the aggregate `gate` — an RT-path heap regression fails the merge.
       - name: Install cargo-nextest (no-alloc gate)
-        uses: taiki-e/install-action@9e1e5806d4a4822de933115878265be9aaa786d9 # v2
+        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2
         with:
           tool: cargo-nextest
       - name: RT no-alloc gate (assert_no_alloc)
@@ -204,7 +204,7 @@ jobs:
     if: needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup web (Bun + install)
         uses: ./.github/actions/setup-web
       - name: Typecheck
@@ -264,7 +264,7 @@ jobs:
     if: needs.changes.outputs.engine == 'true' || needs.changes.outputs.web == 'true'
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup web (Bun + install)
         uses: ./.github/actions/setup-web
       - name: Setup Rust (stable)
@@ -292,7 +292,7 @@ jobs:
     if: needs.changes.outputs.engine == 'true' || needs.changes.outputs.web == 'true'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Setup Rust (stable)
         uses: ./.github/actions/setup-rust
       - name: Engine tests on macOS (arm64)
@@ -316,7 +316,7 @@ jobs:
     if: needs.changes.outputs.engine == 'true' || needs.changes.outputs.web == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # This job only reads the tree to run pure-TS gates (no authenticated git
           # ops), so don't persist the token into .git/config — least token surface.
@@ -347,7 +347,7 @@ jobs:
       actions: read
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Self-test merge-gate predicate

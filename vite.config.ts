@@ -1,5 +1,5 @@
 import { defineConfig, type Plugin, type Connect } from 'vite'
-import react from '@vitejs/plugin-react-swc'
+import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 // wasm-bindgen libraries (e.g. loro-crdt, the collab CRDT) import their `.wasm`
 // via the ESM-integration proposal, which Vite's dev server can't transform on

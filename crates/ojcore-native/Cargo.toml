@@ -71,7 +71,7 @@ flacenc = { version = "0.5.1", default-features = false }
 # L3 — SQLite + FTS5 persistent log store (optional; the `persist` feature).
 # `bundled` compiles SQLite from source with FTS5 enabled, so there is no system
 # sqlite dependency and FTS5 is guaranteed present on every target.
-rusqlite = { version = "0.32", optional = true, features = ["bundled"] }
+rusqlite = { version = "0.40.2", optional = true, features = ["bundled"] }
 
 # Promote the audio callback thread to realtime scheduling priority. `dbus` is
 # off: we use the direct pthread/SCHED_FIFO path, not the desktop RT portal.
