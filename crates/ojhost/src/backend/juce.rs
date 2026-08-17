@@ -232,6 +232,13 @@ pub(super) fn probe(
                 param_count: d.param_count,
                 params: params_from_c(d.params, d.param_count),
                 latency_samples: d.latency_samples,
+                // The JUCE C bridge does not surface CLAP-style feature tags or
+                // hasEditor yet. Empty features is the signed [OPEN-3] contract
+                // decision (non-CLAP plugins carry no family tags); has_gui stays
+                // false until the bridge exposes JUCE's hasEditor — the same
+                // honest no-embeddable-GUI posture the clack path takes.
+                features: Vec::new(),
+                has_gui: false,
             });
         }
         ojhost_free_scan(result);
