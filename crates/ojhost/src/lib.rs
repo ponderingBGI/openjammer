@@ -19,7 +19,7 @@
 //!
 //! * `--features clap-host` — pure-Rust CLAP hosting via `clack` (MIT, no C++).
 //!   The recommended path to host a real plugin in a CMake-less environment.
-//! * `--features juce` — the bundled C++ JUCE 8 host (VST3 + CLAP, + AU on
+//! * `--features juce` — the bundled C++ JUCE 8 host (VST3, + AU on
 //!   macOS), built by `build.rs` via CMake FetchContent.
 //!
 //! See `README.md` for the founder setup steps and the licensing posture.
@@ -60,14 +60,14 @@ pub use scan::{
 use ojcore::PluginRegistry;
 
 /// Which hosting backend this build was compiled with — reported to the UI so it
-/// can show "CLAP only" vs "VST3/CLAP/AU" vs "no hosting".
+/// can show "CLAP only" vs "VST3/AU" vs "no hosting".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostingBackend {
     /// No backend (default scaffold): scanning is empty, loading is unavailable.
     None,
     /// Pure-Rust CLAP host via `clack`. CLAP only.
     ClapOnly,
-    /// JUCE C++ host: VST2 (when owner-provisioned) + VST3 + CLAP (+ AU on macOS).
+    /// JUCE C++ host: VST2 (when owner-provisioned) + VST3 (+ AU on macOS).
     Juce,
 }
 
@@ -106,14 +106,9 @@ impl HostingBackend {
             HostingBackend::None => &[],
             HostingBackend::ClapOnly => &[PluginFormat::Clap],
             #[cfg(target_os = "macos")]
-            HostingBackend::Juce => &[
-                PluginFormat::Vst2,
-                PluginFormat::Vst3,
-                PluginFormat::Clap,
-                PluginFormat::Au,
-            ],
+            HostingBackend::Juce => &[PluginFormat::Vst2, PluginFormat::Vst3, PluginFormat::Au],
             #[cfg(not(target_os = "macos"))]
-            HostingBackend::Juce => &[PluginFormat::Vst2, PluginFormat::Vst3, PluginFormat::Clap],
+            HostingBackend::Juce => &[PluginFormat::Vst2, PluginFormat::Vst3],
         }
     }
 }

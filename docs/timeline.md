@@ -120,6 +120,11 @@ Export does not yet provide a stem batch or track freeze. **Plugin delay compens
 (PDC) is also pending**, so tracks through latent hosted plugins are not time-aligned by a
 DAW compensation layer.
 
+Hosted instruments and effects use the same track-chain, automation, project-state, and
+export path. Their format tiers and failure behavior are specified in the
+[plugin hosting reliability contract](plugins-hosting.md); a faulted instance is benched or
+auto-bypassed without muting unrelated tracks.
+
 ## Agent parity
 
 The agent first calls `describe_arrangement`, which reports stable ids, ppq, bar positions,

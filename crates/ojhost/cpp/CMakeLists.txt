@@ -23,18 +23,6 @@ FetchContent_Declare(
     GIT_SHALLOW ON)
 FetchContent_MakeAvailable(JUCE)
 
-# --- CLAP hosting extension for JUCE (optional but recommended) -------------
-# JUCE does not host CLAP out of the box; the community `clap-juce-extensions`
-# adds a CLAP AudioPluginFormat. Enable by setting -DOJHOST_WITH_CLAP=ON.
-option(OJHOST_WITH_CLAP "Build the JUCE CLAP hosting format" ON)
-if(OJHOST_WITH_CLAP)
-    FetchContent_Declare(
-        clap_juce_extensions
-        GIT_REPOSITORY https://github.com/free-audio/clap-juce-extensions.git
-        GIT_TAG main)
-    FetchContent_MakeAvailable(clap_juce_extensions)
-endif()
-
 # --- owner-provisioned SDK paths -------------------------------------------
 option(OJHOST_WITH_VST2 "Build VST2 hosting; requires owner-provisioned VST2 SDK headers" OFF)
 set(OJHOST_VST2_SDK_DIR "" CACHE PATH "Path to a legally obtained VST2 SDK/header checkout")
@@ -65,8 +53,9 @@ target_link_libraries(ojhost_juce
         juce::juce_recommended_config_flags
         juce::juce_recommended_warning_flags)
 
-# JUCE hosting feature flags. VST3 + (macOS) AU are built in; CLAP is gated on
-# the extension above. VST2 is gated on owner-provisioned SDK headers.
+# JUCE hosting feature flags. VST3 + (macOS) AU are built in. CLAP hosting is
+# provided by the separate pure-Rust clack backend; clap-juce-extensions is a
+# plugin wrapper and explicitly does not implement JUCE host support.
 target_compile_definitions(ojhost_juce
     PRIVATE
         JUCE_PLUGINHOST_VST3=1
@@ -90,11 +79,6 @@ if(OJHOST_WITH_VST2)
         ${OJHOST_VST2_SDK_DIR}/public.sdk/source/vst2.x
         ${OJHOST_VST2_SDK_DIR}/VST2_SDK
         ${OJHOST_VST2_SDK_DIR}/VST2_SDK/pluginterfaces/vst2.x)
-endif()
-
-if(OJHOST_WITH_CLAP)
-    target_compile_definitions(ojhost_juce PRIVATE JUCE_PLUGINHOST_CLAP=1)
-    target_link_libraries(ojhost_juce PRIVATE clap_juce_extensions)
 endif()
 
 # --- dev/test fault injection ----------------------------------------------

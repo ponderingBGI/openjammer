@@ -38,7 +38,7 @@ impl fmt::Display for HostError {
         match self {
             HostError::Unavailable => f.write_str(
                 "plugin hosting unavailable: build ojhost with `--features clap-host` \
-                 (pure-Rust CLAP) or `--features juce` (VST3/CLAP/AU) — see crate README",
+                 (pure-Rust CLAP) or `--features juce` (VST3/AU) — see crate README",
             ),
             HostError::NotFound { path, uid } => {
                 write!(f, "no plugin with uid '{uid}' at '{path}'")

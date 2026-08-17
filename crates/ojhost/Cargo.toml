@@ -15,7 +15,7 @@ license.workspace = true
 #
 #   cargo build  -p ojhost                      -> scaffold (no real hosting)
 #   cargo build  -p ojhost --features clap-host -> real CLAP hosting via clack
-#   cargo build  -p ojhost --features juce      -> JUCE C++ host (VST3/CLAP/AU)
+#   cargo build  -p ojhost --features juce      -> JUCE C++ host (VST3/AU)
 default = []
 
 # Pure-Rust CLAP host via the `clack` family (MIT, no C++). This is the
@@ -23,7 +23,7 @@ default = []
 # checkout. Supports CLAP only.
 clap-host = ["dep:clack-host", "dep:clack-extensions"]
 
-# The JUCE 8 C++ host (VST3 + CLAP, + AU on macOS). Pulls JUCE via CMake
+# The JUCE 8 C++ host (VST3, + AU on macOS). Pulls JUCE via CMake
 # FetchContent in `build.rs` and links the small `extern "C"` shim in `cpp/`.
 # Heavy (downloads + compiles JUCE); requires `cmake` + a C++ toolchain (and,
 # for VST3, the Steinberg VST3 SDK headers — see README). Off by default so the
@@ -72,6 +72,7 @@ codspeed-criterion-compat = "4.7.0"
 # the state test itself is gated to the `clap-host` cfg (where `clap.rs` exists).
 clack-plugin = "0.1.0"
 libloading = "0.8.9"
+toml = "0.8.23"
 
 # clack-extensions PLUGIN side (test-only): the `clack-plugin` feature exposes
 # `PluginStateImpl` so the in-process state stub can implement the CLAP state

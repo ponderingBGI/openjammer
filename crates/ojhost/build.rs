@@ -16,7 +16,6 @@ fn main() {
     println!("cargo:rerun-if-changed=cpp/ojhost_juce.h");
     println!("cargo:rerun-if-changed=cpp/ojhost_juce.cpp");
     println!("cargo:rerun-if-changed=cpp/CMakeLists.txt");
-    println!("cargo:rerun-if-env-changed=OJHOST_WITH_CLAP");
     println!("cargo:rerun-if-env-changed=OJHOST_ENABLE_VST2");
     println!("cargo:rerun-if-env-changed=VST2_SDK_DIR");
     println!("cargo:rerun-if-env-changed=VST3_SDK_DIR");
@@ -46,7 +45,6 @@ fn build_juce() {
         );
     }
 
-    let with_clap = env_flag("OJHOST_WITH_CLAP").unwrap_or(true);
     let with_vst2 = env_flag("OJHOST_ENABLE_VST2").unwrap_or(false);
     let vst2_sdk = std::env::var("VST2_SDK_DIR").ok();
     let vst3_sdk = std::env::var("VST3_SDK_DIR").ok();
@@ -69,8 +67,7 @@ fn build_juce() {
     // through JUCE internals; this also builds it faster.) No effect off-Windows.
     #[cfg(target_os = "windows")]
     cfg.profile("Release");
-    cfg.define("OJHOST_WITH_CLAP", if with_clap { "ON" } else { "OFF" })
-        .define("OJHOST_WITH_VST2", if with_vst2 { "ON" } else { "OFF" });
+    cfg.define("OJHOST_WITH_VST2", if with_vst2 { "ON" } else { "OFF" });
     // Dev/test: when `OJHOST_FAULT_INJECT` is set, compile the in-guard fault
     // injector so the crash boundary can be PROVEN on a live machine (see
     // `cpp/ojhost_juce.cpp`), and emit `--cfg oj_fault_inject` so the Rust FFI +

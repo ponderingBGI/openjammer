@@ -20,7 +20,7 @@ env:
 
 jobs:
   linux:
-    name: Linux N1 + N2 + N3
+    name: Linux N1 + N2 + N3 + N4 + N5
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -31,6 +31,18 @@ jobs:
         uses: ./.github/actions/setup-web
       - name: Setup Rust and native dependencies
         uses: ./.github/actions/setup-rust
+      - name: Restore nightly real-plugin cache when available
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: .cache/oj-plugins
+          key: p4-plugins-linux-${{ hashFiles('crates/ojhost/tests/fixtures/realworld-plugins.toml') }}
+      - name: Prefer Dexed for N4 when the nightly cache was restored
+        shell: bash
+        run: |
+          plugin=$(find .cache/oj-plugins/plugins/dexed -name Dexed.clap -print -quit 2>/dev/null || true)
+          if [ -n "$plugin" ]; then
+            echo "OJ_N4_PLUGIN=$PWD/$plugin" >> "$GITHUB_ENV"
+          fi
       - name: Install native WebDriver and virtual display
         run: |
           sudo apt-get update
@@ -42,13 +54,15 @@ jobs:
         run: |
           bun run build
           mkdir -p src-tauri/binaries
-          cargo build -p oj-tauri --features custom-protocol
+          cargo build -p oj-tauri --no-default-features --features custom-protocol,plugin-host-clap
       - name: N1 + N2 real-app journeys
         env:
           OJ_NATIVE_E2E_RUN: '1'
         run: xvfb-run -a bun test e2e-native/native-e2e.test.ts
       - name: N3 deterministic WAV + FLAC bounce
         run: bun test e2e-native/n3-determinism.test.ts
+      - name: N4 + N5 hosted-plugin journeys (probe fallback; real synth when provided)
+        run: bun test e2e-native/n4-n5-hosting.test.ts
 
   windows:
     name: Windows N1 + N2 + N3

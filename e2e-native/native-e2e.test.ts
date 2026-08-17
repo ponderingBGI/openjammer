@@ -166,4 +166,16 @@ describe.skipIf(!enabled)('tauri-driver native journeys', () => {
         expect(recovered.tracks.flatMap((track) => track.clips).some((clip) => clip.name?.startsWith('Take '))).toBe(true);
         await browser.quit();
     }, 120_000);
+
+    test('N5 — a hostile hosted track surfaces the calm Bench card and project state still saves', async () => {
+        await startSession();
+        await openStarter('Paper Sketch');
+        await browser.execute("window.__openjammerE2E.pluginFault('probe-block-hang', 'AutoBypassed')");
+        await browser.waitFor('xpath', '//*[contains(normalize-space(.),"probe-block-hang took too long")]', 15_000);
+        const states = await browser.invoke<Array<{ node: number; blob: number[] }>>('save_plugin_states');
+        expect(Array.isArray(states)).toBe(true);
+        const project = await snapshot();
+        expect(JSON.stringify(project).length).toBeGreaterThan(100);
+        await browser.quit();
+    }, 120_000);
 });

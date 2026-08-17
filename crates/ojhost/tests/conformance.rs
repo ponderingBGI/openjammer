@@ -1,4 +1,4 @@
-#![cfg(feature = "clap-host")]
+#![cfg(any(feature = "clap-host", feature = "juce"))]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -43,6 +43,7 @@ fn process(plugin: &mut HostedPlugin, channels: usize, input_value: f32) -> Vec<
 }
 
 #[test]
+#[cfg(not(feature = "juce"))]
 fn all_real_clap_probes_obey_the_host_contract() {
     let clap = probe_binary();
     // SAFETY: the path is the just-built probe library and the exported symbol
@@ -187,4 +188,26 @@ fn all_real_clap_probes_obey_the_host_contract() {
         drop(plugin); // destruction is explicit and must not leak clack's instance Arc.
         assert_eq!(unsafe { live() }, 0, "probe instance fully destroyed");
     }
+}
+
+/// Honest JUCE fallback: JUCE does not host CLAP, so nightly parity exercises
+/// scan/lifecycle against the VST3 build of the same OSS synth used by N4.
+#[test]
+#[cfg(feature = "juce")]
+fn juce_vst3_oss_scan_and_lifecycle_smoke() {
+    let path = PathBuf::from(std::env::var_os("OJHOST_JUCE_TEST_PLUGIN").expect("VST3 test path"));
+    let descriptors = ojhost::scan(&[path.parent().unwrap().to_owned()]).expect("JUCE scans VST3");
+    let descriptor = descriptors
+        .iter()
+        .find(|descriptor| Path::new(&descriptor.path) == path)
+        .expect("JUCE reports requested VST3");
+    let mut plugin = HostedPlugin::load(descriptor, 48_000.0, 64).expect("JUCE instantiates VST3");
+    plugin.activate(48_000.0, 64);
+    plugin.start_processing();
+    let output = process(&mut plugin, 2, 1.0);
+    assert!(output.iter().flatten().all(|sample| sample.is_finite()));
+    assert!(!plugin.take_output_fault());
+    plugin.stop_processing();
+    plugin.deactivate();
+    drop(plugin);
 }

@@ -211,8 +211,13 @@ pub(super) fn probe(path: &Path, format: PluginFormat) -> Result<Vec<PluginDescr
     let path_str = path.to_string_lossy().into_owned();
     let mut out = Vec::new();
     for d in factory.plugin_descriptors() {
-        let features: Vec<String> = d.features().map(|feature| feature.to_string_lossy().into_owned()).collect();
-        let is_instrument = features.iter().any(|feature| feature == "instrument" || feature == "synthesizer");
+        let features: Vec<String> = d
+            .features()
+            .map(|feature| feature.to_string_lossy().into_owned())
+            .collect();
+        let is_instrument = features
+            .iter()
+            .any(|feature| feature == "instrument" || feature == "synthesizer");
         let uid = cstr_to_string(d.id());
         // Briefly instantiate to read the plugin's parameter list (CLAP params
         // extension) so the UI shows real knobs with the plugin's own ranges.

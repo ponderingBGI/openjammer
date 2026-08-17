@@ -2,13 +2,13 @@
 //! hosting backend is compiled in.
 //!
 //! Exactly one backend module is active, selected by feature (the `juce` feature
-//! wins if both are on, since it is the superset format-wise):
+//! wins if both are on):
 //!
 //! * neither feature: [`scaffold`] — `probe` finds nothing, `open` is
 //!   [`HostError::Unavailable`]. The default, dependency-free build.
 //! * `clap-host` (and not `juce`): [`clap`] — pure-Rust CLAP hosting via
 //!   `clack`. No C++, no CMake. CLAP only.
-//! * `juce`: [`juce`] — the bundled C++ JUCE 8 host (VST3 + CLAP, + AU on
+//! * `juce`: [`juce`] — the bundled C++ JUCE 8 host (VST3, + AU on
 //!   macOS) over the `extern "C"` ABI in `cpp/ojhost_juce.h`.
 //!
 //! Each backend exposes the same two functions so the rest of the crate is
@@ -288,7 +288,7 @@ mod scaffold {
 mod clap;
 
 // ---------------------------------------------------------------------------
-// JUCE C++ backend (feature = "juce"). VST3 + CLAP, + AU on macOS.
+// JUCE C++ backend (feature = "juce"). VST3, + AU on macOS.
 // ---------------------------------------------------------------------------
 #[cfg(feature = "juce")]
 mod juce;

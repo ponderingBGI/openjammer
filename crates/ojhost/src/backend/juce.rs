@@ -1,6 +1,6 @@
 //! JUCE C++ backend (feature = "juce"): the Rust binding for the `extern "C"`
 //! ABI declared in `cpp/ojhost_juce.h` and implemented in `cpp/ojhost_juce.cpp`.
-//! Supports VST3 + CLAP (+ AU on macOS). `build.rs` drives CMake to build and
+//! Supports VST3 (+ AU on macOS). `build.rs` drives CMake to build and
 //! link the C++ static library.
 //!
 //! This module is the ONLY place the C++ symbols are named on the Rust side. It

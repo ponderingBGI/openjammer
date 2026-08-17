@@ -89,7 +89,7 @@ AudioPluginFormat* formatFor(AudioPluginFormatManager& mgr, OjPluginFormat fmt) 
 } // namespace
 
 // ---------------------------------------------------------------------------
-// Host context: owns the format manager (VST3 + CLAP, + AU on macOS).
+// Host context: owns the format manager (VST3, + AU on macOS).
 // ---------------------------------------------------------------------------
 struct OjHost {
     ScopedJuceInitialiser_GUI gui;
@@ -97,8 +97,7 @@ struct OjHost {
     String lastError;
 
     OjHost() {
-        // Register the formats we host. CLAP support requires the JUCE CLAP
-        // hosting extension (see CMakeLists.txt). AU only exists on macOS.
+        // Register JUCE's built-in host formats. AU only exists on macOS.
         formats.addDefaultFormats();
     }
 };
