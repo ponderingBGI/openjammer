@@ -17,7 +17,7 @@ export async function openStarter(page: Page, starter: 'Paper Sketch' | 'First L
     await dismiss.waitFor({ state: 'visible', timeout: 3_000 }).then(() => dismiss.click()).catch(() => undefined);
 }
 
-export async function loadFixture(page: Page, name: 'denseEdit' | 'firstLight' | 'pathological'): Promise<void> {
+export async function loadFixture(page: Page, name: 'denseEdit' | 'firstLight' | 'hundredTracks' | 'pathological'): Promise<void> {
     await activateBrowser(page);
     await page.evaluate((fixture) => (window as unknown as { __openjammerE2E: { setFixture(name: string): void } }).__openjammerE2E.setFixture(fixture), name);
     await page.keyboard.press('Tab');

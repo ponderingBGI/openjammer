@@ -1,4 +1,4 @@
-import { buildDenseEdit, buildFirstLight, buildPathological } from '../song/fixtures';
+import { buildDenseEdit, buildFirstLight, buildHundredTracks, buildPathological } from '../song/fixtures';
 import type { Arrangement } from '../song/types';
 import { useArrangementStore } from '../store/arrangementStore';
 import { useHistoryStore, type EditVerb } from '../store/historyStore';
@@ -7,8 +7,9 @@ import { useEditingContextStore } from '../store/editingContextStore';
 import { getAgentBackend, MockAgentBackend, setAgentBackend } from '../ai';
 import type { AgentEvent, AgentTask } from '../ai';
 import { useAgentSessionStore } from '../store/agentSessionStore';
+import { useCollabStore } from '../store/collabStore';
 
-type FixtureName = 'denseEdit' | 'firstLight' | 'pathological';
+type FixtureName = 'denseEdit' | 'firstLight' | 'hundredTracks' | 'pathological';
 
 interface E2EBridge {
     setFixture(name: FixtureName): void;
@@ -17,6 +18,14 @@ interface E2EBridge {
     history(): { cursor: number; entries: number; scopes: string[] };
     selection(): unknown;
     graphSnapshot(): { nodes: unknown[]; connections: unknown[] };
+    hostCollab(name: string): Promise<string>;
+    joinCollab(sessionCode: string, name: string): Promise<void>;
+    hostCollabWebRTC(name: string): Promise<string>;
+    joinCollabWebRTC(sessionCode: string, name: string): Promise<void>;
+    createCollabOffer(): Promise<string>;
+    acceptCollabOffer(offer: string): Promise<string>;
+    acceptCollabAnswer(answer: string): Promise<void>;
+    addGraphNode(label: string): string;
     setAgentScript(script: AgentEvent[] | ((task: AgentTask) => AgentEvent[])): Promise<void>;
     sendAgent(prompt: string): Promise<void>;
     agentSession(): Promise<{ messages: unknown[]; phase: string }>;
@@ -26,7 +35,7 @@ const clone = <T>(value: T): T => structuredClone(value);
 
 export function installE2EBridge(): void {
     if (typeof window === 'undefined' || !navigator.webdriver) return;
-    const fixtures = { denseEdit: buildDenseEdit, firstLight: buildFirstLight, pathological: buildPathological };
+    const fixtures = { denseEdit: buildDenseEdit, firstLight: buildFirstLight, hundredTracks: buildHundredTracks, pathological: buildPathological };
     const bridge: E2EBridge = {
         setFixture(name) {
             useArrangementStore.getState().setArrangement(fixtures[name]());
@@ -45,6 +54,26 @@ export function installE2EBridge(): void {
             const graph = useGraphStore.getState();
             return clone({ nodes: [...graph.nodes.values()], connections: [...graph.connections.values()] });
         },
+        hostCollab: (name) => useCollabStore.getState().hostSession({ name, transport: 'broadcast-channel' }),
+        joinCollab: (sessionCode, name) => useCollabStore.getState().joinSession(sessionCode, { name, transport: 'broadcast-channel' }),
+        hostCollabWebRTC: (name) => useCollabStore.getState().hostSession({ name, transport: 'webrtc-manual' }),
+        joinCollabWebRTC: (sessionCode, name) => useCollabStore.getState().joinSession(sessionCode, { name, transport: 'webrtc-manual' }),
+        createCollabOffer: async () => {
+            const transport = useCollabStore.getState().webrtcTransport;
+            if (!transport) throw new Error('WebRTC collaboration transport is not active');
+            return transport.createOffer();
+        },
+        acceptCollabOffer: async (offer) => {
+            const transport = useCollabStore.getState().webrtcTransport;
+            if (!transport) throw new Error('WebRTC collaboration transport is not active');
+            return transport.acceptOffer(offer);
+        },
+        acceptCollabAnswer: async (answer) => {
+            const transport = useCollabStore.getState().webrtcTransport;
+            if (!transport) throw new Error('WebRTC collaboration transport is not active');
+            await transport.acceptAnswer(answer);
+        },
+        addGraphNode: (label) => useGraphStore.getState().addNode('effect', { x: 120, y: 120 }, null, { name: label }),
         setAgentScript: async (script) => setAgentBackend(new MockAgentBackend({ script })),
         sendAgent: async (prompt) => useAgentSessionStore.getState().send(getAgentBackend(), { prompt }),
         agentSession: async () => {
