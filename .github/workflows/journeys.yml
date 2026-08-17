@@ -17,7 +17,10 @@ concurrency:
 jobs:
   journeys:
     name: Journeys (${{ matrix.engine }}, shard ${{ matrix.shard }}/3)
-    runs-on: ubuntu-latest
+    # GitHub's hosted Ubuntu network can leave headless Firefox with zero ICE
+    # candidates. Keep J7 as a real WebRTC test by running Firefox on a hosted
+    # macOS VM instead of skipping or mocking the collaboration transport.
+    runs-on: ${{ matrix.engine == 'firefox' && 'macos-15-intel' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:

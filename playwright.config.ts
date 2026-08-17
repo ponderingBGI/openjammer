@@ -46,10 +46,9 @@ export default defineConfig({
                       use: {
                           ...devices['Desktop Firefox'],
                           launchOptions: {
-                              // Mozilla disables loopback ICE by default and
-                              // explicitly reserves this pref for offline tests.
+                              // Separate browser contexts cannot resolve one
+                              // another's mDNS-obfuscated host candidates.
                               firefoxUserPrefs: {
-                                  'media.peerconnection.ice.loopback': true,
                                   'media.peerconnection.ice.obfuscate_host_addresses': false,
                               },
                           },

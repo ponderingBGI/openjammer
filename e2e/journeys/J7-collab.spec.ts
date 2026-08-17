@@ -35,7 +35,7 @@ test('@journey @collab J7 Collab seed — graph nodes converge between two conte
     const b = await newAppContext(browser);
     try {
         await Promise.all([activateBrowser(a.page), activateBrowser(b.page)]);
-        await test.step('start isolated LAN-only WebRTC sessions', async () => {
+        await test.step('start isolated deterministic WebRTC sessions', async () => {
             const sessionCode = await call<string>(a.page, 'hostCollabWebRTC', ['Alice']);
             await call<void>(b.page, 'joinCollabWebRTC', [sessionCode, 'Bob']);
         });
