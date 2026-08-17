@@ -23,7 +23,8 @@ jobs:
     # needs the container's ordinary eth0 interface to gather real host ICE
     # candidates; GitHub's hosted VM interfaces yielded none on Linux or macOS.
     container:
-      image: mcr.microsoft.com/playwright:v1.61.0-noble
+      image: mcr.microsoft.com/playwright@sha256:57b65fdc9ceabe0ef613124c7bbe2babcf9362c4d85e382fe3b03604e84b428a # v1.61.0-noble
+      options: --user pwuser
     strategy:
       fail-fast: false
       matrix:
@@ -33,19 +34,17 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Install Bun setup prerequisite
-        run: |
-          apt-get update
-          apt-get install --yes --no-install-recommends unzip
       - name: Setup web (Bun + install)
-        uses: ./.github/actions/setup-web
+        run: |
+          npm install --global --prefix /tmp/openjammer-bun bun@1.3.14
+          /tmp/openjammer-bun/bin/bun install --frozen-lockfile
       - name: Run journey shard
         # Measured locally on 2026-08-17 before sharding (production build
         # included): Chromium 36.0s and Firefox 36.5s. WebKit is CI-measured
         # because this workstation lacks libwoff2dec.so.1.0.2.
         env:
           OJ_E2E_ALL_BROWSERS: '1'
-        run: bun run test:e2e -- e2e/journeys --project=${{ matrix.engine }} --shard=${{ matrix.shard }}/3
+        run: /tmp/openjammer-bun/bin/bun run test:e2e -- e2e/journeys --project=${{ matrix.engine }} --shard=${{ matrix.shard }}/3
       - name: Upload traces on failure
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
