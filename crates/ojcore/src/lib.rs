@@ -106,7 +106,8 @@ pub use compile::{
     StateResolver,
 };
 pub use dsp::{
-    kernel_supports_capability, DspInstance, ExtId, ProcessCtx, StateSave, KERNEL_CONTRACT,
+    kernel_supports_capability, DspInstance, ExtId, LatencyExt, ProcessCtx, StateSave,
+    KERNEL_CONTRACT,
 };
 pub use exec::Engine;
 pub use loader::PluginLoader;

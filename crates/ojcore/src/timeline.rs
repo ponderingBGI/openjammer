@@ -14,12 +14,19 @@ use ojproto::{sched_event_kind, CaptureArm, SchedEvent, Timeline};
 #[derive(Debug)]
 pub struct TimelineRt {
     events: Box<[SchedEvent]>,
+    events_by_node: Box<[NodeEvents]>,
     loop_range: Option<(u64, u64)>,
     punch_range: Option<(u64, u64)>,
     end: u64,
     sample_rate: u32,
     armed_tracks: Box<[CaptureArm]>,
     count_in_beats: u8,
+}
+
+#[derive(Debug)]
+struct NodeEvents {
+    node: ojproto::NodeIdx,
+    events: Box<[SchedEvent]>,
 }
 
 impl TimelineRt {
@@ -45,8 +52,25 @@ impl TimelineRt {
                     b.value.to_bits(),
                 ))
         });
+        let mut nodes: Vec<ojproto::NodeIdx> = events.iter().map(|event| event.node).collect();
+        nodes.sort_by_key(|node| node.0);
+        nodes.dedup();
+        let events_by_node = nodes
+            .into_iter()
+            .map(|node| NodeEvents {
+                node,
+                events: events
+                    .iter()
+                    .copied()
+                    .filter(|event| event.node == node)
+                    .collect::<Vec<_>>()
+                    .into_boxed_slice(),
+            })
+            .collect::<Vec<_>>()
+            .into_boxed_slice();
         Self {
             events: events.into_boxed_slice(),
+            events_by_node,
             loop_range: valid_range(timeline.loop_range),
             punch_range: valid_range(timeline.punch_range),
             end: timeline.end,
@@ -60,6 +84,7 @@ impl TimelineRt {
     pub fn empty(sample_rate: u32) -> Self {
         Self {
             events: Box::new([]),
+            events_by_node: Box::new([]),
             loop_range: None,
             punch_range: None,
             end: 0,
@@ -100,6 +125,20 @@ impl TimelineRt {
     /// First event at or after `at`, used on install, locate, and loop wrap.
     pub fn seek(&self, at: u64) -> usize {
         self.events.partition_point(|event| event.at < at)
+    }
+
+    /// Events for one node, preserving the authored deterministic order.
+    pub fn node_events(&self, node: ojproto::NodeIdx) -> &[SchedEvent] {
+        self.events_by_node
+            .binary_search_by_key(&node.0, |group| group.node.0)
+            .ok()
+            .map_or(&[], |index| self.events_by_node[index].events.as_ref())
+    }
+
+    /// First event for `node` at or after the node-specific timeline position.
+    pub fn seek_node(&self, node: ojproto::NodeIdx, at: u64) -> usize {
+        self.node_events(node)
+            .partition_point(|event| event.at < at)
     }
 }
 

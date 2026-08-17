@@ -40,6 +40,7 @@ mod error;
 mod node;
 mod scan;
 
+pub use backend::take_latency_rescan_request;
 pub use descriptor::{HostedParam, PluginDescriptor, PluginFormat, PortCounts};
 pub use error::HostError;
 pub use node::{

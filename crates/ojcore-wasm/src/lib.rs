@@ -677,7 +677,7 @@ pub fn ring_data_offset() -> u32 {
 
 /// Encode an [`RtCommand`] as the JSON frame the command ring expects. Helper
 /// for tests / a JS-side mirror; not on the render path. Returns the bytes a
-/// producer would `push` into the [`cmd_ring`](Host::cmd_ring).
+/// producer would `push` into the host's command ring.
 #[wasm_bindgen]
 pub fn encode_command_setparam(node: u32, param: u16, value: f32) -> Vec<u8> {
     let cmd = RtCommand::SetParam {
@@ -909,7 +909,7 @@ pub fn has_pending_events() -> bool {
 /// ingests both tiers identically.
 ///
 /// The RT event RING and the CPU watchdog are `std`-only, so the wasm tier
-/// surfaces faults straight from [`NodeBudget`] (the `no_std` NaN/garbage guard
+/// surfaces faults straight from `ojcore::NodeBudget` (the `no_std` NaN/garbage guard
 /// `sanitize` sets `non_finite` from the render path) — exactly how
 /// [`drain_meters`] reads `meters_mut`. Consumed flags are CLEARED so each fault
 /// surfaces once per drain window; a persistently-bad node re-raises next block

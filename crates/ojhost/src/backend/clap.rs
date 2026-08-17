@@ -58,10 +58,20 @@ struct OjMainThread;
 
 impl<'a> MainThreadHandler<'a> for OjMainThread {}
 
+impl clack_extensions::latency::HostLatencyImpl for OjMainThread {
+    fn changed(&mut self) {
+        super::request_latency_rescan();
+    }
+}
+
 impl HostHandlers for OjClapHost {
     type Shared<'a> = OjShared;
     type MainThread<'a> = OjMainThread;
     type AudioProcessor<'a> = ();
+
+    fn declare_extensions(builder: &mut HostExtensions<Self>, _shared: &Self::Shared<'_>) {
+        builder.register::<clack_extensions::latency::HostLatency>();
+    }
 }
 
 fn host_info() -> HostInfo {
@@ -237,6 +247,11 @@ fn open_from_entry(
         .map_err(|e| HostError::Load {
             message: e.to_string(),
         })?;
+    let latency = instance
+        .plugin_shared_handle()
+        .get_extension::<clack_extensions::latency::PluginLatency>()
+        .map(|extension| extension.get(&mut instance.plugin_handle()))
+        .unwrap_or(0);
     let started = stopped.start_processing().map_err(|e| HostError::Load {
         message: e.to_string(),
     })?;
@@ -272,7 +287,7 @@ fn open_from_entry(
         out_events: EventBuffer::new(),
         channels,
         max_block,
-        latency: desc.latency_samples,
+        latency,
         param_ids,
     }))
 }
@@ -567,6 +582,7 @@ mod tests {
 #[cfg(test)]
 mod state_roundtrip {
     use crate::descriptor::{PluginDescriptor, PluginFormat, PortCounts};
+    use clack_extensions::latency::{HostLatencyImpl, PluginLatency, PluginLatencyImpl};
     use clack_extensions::state::{PluginState, PluginStateImpl};
     use clack_host::prelude::PluginEntry;
     use clack_plugin::prelude::*;
@@ -591,6 +607,11 @@ mod state_roundtrip {
             input.read_to_end(&mut buf)?;
             self.value = buf;
             Ok(())
+        }
+    }
+    impl PluginLatencyImpl for StubMainThread {
+        fn get(&mut self) -> u32 {
+            37
         }
     }
 
@@ -624,6 +645,7 @@ mod state_roundtrip {
             _shared: Option<&Self::Shared<'_>>,
         ) {
             builder.register::<PluginState>();
+            builder.register::<PluginLatency>();
         }
     }
     impl DefaultPluginFactory for StubPlugin {
@@ -669,6 +691,8 @@ mod state_roundtrip {
         let mut backend =
             super::open_from_entry(&entry, &desc, 48_000.0, 128).expect("backend opens");
 
+        assert_eq!(backend.latency_samples(), 37);
+
         // SAVE reads the live plugin's current state via the CLAP state extension.
         assert_eq!(
             backend.save_state(),
@@ -691,6 +715,18 @@ mod state_roundtrip {
             backend.save_state(),
             b"restored-blob",
             "an empty restore blob is ignored"
+        );
+    }
+
+    #[test]
+    fn clap_latency_changed_requests_control_thread_rescan() {
+        let _ = crate::take_latency_rescan_request();
+        let mut handler = super::OjMainThread;
+        HostLatencyImpl::changed(&mut handler);
+        assert!(crate::take_latency_rescan_request());
+        assert!(
+            !crate::take_latency_rescan_request(),
+            "request is coalesced"
         );
     }
 }

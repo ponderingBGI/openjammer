@@ -56,7 +56,7 @@ pub struct Engine {
     timeline: Arc<TimelineRt>,
     #[cfg(feature = "std")]
     timeline_rx: Option<crate::swap::RtCellRx<TimelineRt>>,
-    timeline_cursor: usize,
+    timeline_cursors: Vec<usize>,
     timeline_cursor_pos: u64,
     timeline_controls_ranges: bool,
     /// Live timestamped commands drained from the second host ring. Capacity is
@@ -123,7 +123,7 @@ impl Engine {
             timeline: Arc::new(TimelineRt::empty(sample_rate)),
             #[cfg(feature = "std")]
             timeline_rx: None,
-            timeline_cursor: 0,
+            timeline_cursors: vec![0; n],
             timeline_cursor_pos: 0,
             timeline_controls_ranges: false,
             timed: VecDeque::with_capacity(TIMED_CAPACITY),
@@ -161,6 +161,13 @@ impl Engine {
     /// Current transport sample position.
     pub fn sample_pos(&self) -> u64 {
         self.transport.sample_pos()
+    }
+
+    /// Listener-facing timeline clock (`engine_sample - preroll`).
+    pub fn timeline_sample(&self) -> u64 {
+        self.transport
+            .sample_pos()
+            .saturating_sub(u64::from(self.program.preroll))
     }
 
     /// Set the post-master metronome gain. Non-finite values become silence.
@@ -267,12 +274,59 @@ impl Engine {
 
     fn sync_timeline_cursor(&mut self) {
         let at = self.transport.sample_pos();
-        self.timeline_cursor = self.timeline.seek(at);
+        for slot in 0..self.timeline_cursors.len() {
+            let shift = u64::from(
+                self.program
+                    .preroll
+                    .saturating_sub(self.program.to_master[slot]),
+            );
+            let timeline_at = at.saturating_sub(shift);
+            self.timeline_cursors[slot] =
+                self.timeline.seek_node(self.program.ids[slot], timeline_at);
+        }
         self.timeline_cursor_pos = at;
         if self.timeline_controls_ranges {
-            self.transport
-                .set_ranges(self.timeline.loop_range(), self.timeline.punch_range());
+            self.transport.set_ranges(
+                self.timeline.loop_range().map(|(start, end)| {
+                    (
+                        start.saturating_add(u64::from(self.program.preroll)),
+                        end.saturating_add(u64::from(self.program.preroll)),
+                    )
+                }),
+                self.timeline.punch_range().map(|(start, end)| {
+                    (
+                        start.saturating_add(u64::from(self.program.preroll)),
+                        end.saturating_add(u64::from(self.program.preroll)),
+                    )
+                }),
+            );
         }
+    }
+
+    fn shifted_event_at(&self, slot: usize, event: &SchedEvent) -> u64 {
+        event.at.saturating_add(u64::from(
+            self.program
+                .preroll
+                .saturating_sub(self.program.to_master[slot]),
+        ))
+    }
+
+    fn next_timeline_event(&self) -> Option<(usize, SchedEvent, u64)> {
+        let mut next: Option<(usize, SchedEvent, u64)> = None;
+        for slot in 0..self.program.len() {
+            let events = self.timeline.node_events(self.program.ids[slot]);
+            let Some(event) = events.get(self.timeline_cursors[slot]).copied() else {
+                continue;
+            };
+            let at = self.shifted_event_at(slot, &event);
+            if next.as_ref().is_none_or(|(_, prior, prior_at)| {
+                (at, event.at, event.kind, event.node.0)
+                    < (*prior_at, prior.at, prior.kind, prior.node.0)
+            }) {
+                next = Some((slot, event, at));
+            }
+        }
+        next
     }
 
     /// Install loop and punch ranges from the current timeline document.
@@ -281,7 +335,12 @@ impl Engine {
         loop_range: Option<(u64, u64)>,
         punch_range: Option<(u64, u64)>,
     ) {
-        self.transport.set_ranges(loop_range, punch_range);
+        let shift = u64::from(self.program.preroll);
+        self.transport.set_ranges(
+            loop_range.map(|(start, end)| (start.saturating_add(shift), end.saturating_add(shift))),
+            punch_range
+                .map(|(start, end)| (start.saturating_add(shift), end.saturating_add(shift))),
+        );
     }
 
     /// Install the transport-owned ranges from a published timeline document.
@@ -294,7 +353,8 @@ impl Engine {
     /// RT-safe: pure arithmetic, no allocation.
     pub fn transport_pos(&self) -> TransportPos {
         let map = self.tempo_snapshot();
-        self.transport.position(&map, &mut MetricCursor::default())
+        self.transport
+            .position_at(self.timeline_sample(), &map, &mut MetricCursor::default())
     }
 
     /// Borrow the musical transport snapshot (tempo / time signature / playhead).
@@ -387,7 +447,7 @@ impl Engine {
     /// Stamp an input overrun into every armed track.
     #[cfg(feature = "std")]
     pub fn mark_capture_xrun(&mut self, dropped: u32) {
-        let at = self.transport.sample_pos();
+        let at = self.timeline_sample();
         if let Some(sink) = self.capture_sink.as_mut() {
             for arm in self.timeline.armed_tracks() {
                 sink.mark(arm.node.0, ojproto::capture_mark_kind::XRUN, at, dropped);
@@ -423,7 +483,9 @@ impl Engine {
         }
 
         // Transport beat.
-        let pos = self.transport.position(map, &mut self.metric_cursor);
+        let pos = self
+            .transport
+            .position_at(self.timeline_sample(), map, &mut self.metric_cursor);
         let n = return_frame::encode_beat(pos.bar, pos.beat, pos.phase, &mut buf);
         let _ = ring.push(&buf[..n]);
         let n = return_frame::encode_transport(
@@ -538,11 +600,12 @@ impl Engine {
                 }
                 #[cfg(feature = "std")]
                 if !self.applying_timeline_event && self.capture_active {
+                    let at = self.timeline_sample();
                     if let Some(sink) = self.capture_sink.as_mut() {
                         sink.mark(
                             node.0,
                             ojproto::capture_mark_kind::NOTE_ON,
-                            self.transport.sample_pos(),
+                            at,
                             u32::from(note) | (u32::from(vel) << 8),
                         );
                     }
@@ -557,11 +620,12 @@ impl Engine {
                 }
                 #[cfg(feature = "std")]
                 if !self.applying_timeline_event && self.capture_active {
+                    let at = self.timeline_sample();
                     if let Some(sink) = self.capture_sink.as_mut() {
                         sink.mark(
                             node.0,
                             ojproto::capture_mark_kind::NOTE_OFF,
-                            self.transport.sample_pos(),
+                            at,
                             u32::from(note),
                         );
                     }
@@ -575,7 +639,7 @@ impl Engine {
             RtCommand::TransportPlay => {
                 if self.transport.count_in_on() && self.timeline.count_in_beats() != 0 {
                     let map = self.tempo_snapshot();
-                    let start = self.transport.sample_pos();
+                    let start = self.timeline_sample();
                     let start_tick = map.tick_at_sample(start);
                     let end_tick = start_tick.saturating_add(
                         u64::from(self.timeline.count_in_beats()) * u64::from(ojproto::PPQ),
@@ -598,7 +662,9 @@ impl Engine {
             RtCommand::Seek { samples } => {
                 self.count_in_remaining = 0;
                 self.release_held();
-                self.transport.locate(samples);
+                self.program.delay_bank.reset();
+                self.transport
+                    .locate(samples.saturating_add(u64::from(self.program.preroll)));
                 self.sync_timeline_cursor();
             }
             RtCommand::TransportSet { flag, on } => {
@@ -687,6 +753,8 @@ impl Engine {
     /// is the only branch that may allocate and only runs when the new program
     /// is wider; call this at a block boundary, never mid-block.
     pub fn install(&mut self, program: CompiledProgram) -> CompiledProgram {
+        let timeline_sample = self.timeline_sample();
+        let next_engine_sample = timeline_sample.saturating_add(u64::from(program.preroll));
         if program.max_in > self.in_ptrs.len() {
             self.in_ptrs.resize(program.max_in, core::ptr::null());
         }
@@ -701,7 +769,12 @@ impl Engine {
         self.budget.resize(n);
         self.held.clear();
         self.held.resize(n, 0);
-        core::mem::replace(&mut self.program, program)
+        self.timeline_cursors.clear();
+        self.timeline_cursors.resize(n, 0);
+        let old = core::mem::replace(&mut self.program, program);
+        self.transport.rebase_engine_sample(next_engine_sample);
+        self.sync_timeline_cursor();
+        old
     }
 
     /// Render one block of `nframes` into `out` (a single mono device channel).
@@ -742,11 +815,11 @@ impl Engine {
             // live timed commands share the same absolute playhead.
             let mut applied = false;
             if self.transport.is_playing() {
-                while let Some(event) = self.timeline.events().get(self.timeline_cursor).copied() {
-                    if event.at > now {
+                while let Some((slot, event, at)) = self.next_timeline_event() {
+                    if at > now {
                         break;
                     }
-                    self.timeline_cursor += 1;
+                    self.timeline_cursors[slot] += 1;
                     self.apply_sched_event(event);
                     applied = true;
                 }
@@ -780,8 +853,8 @@ impl Engine {
                 edge = edge.min(self.count_in_remaining as usize);
             }
             if self.transport.is_playing() {
-                if let Some(event) = self.timeline.events().get(self.timeline_cursor) {
-                    edge = edge.min(event.at.saturating_sub(now) as usize);
+                if let Some((_, _, at)) = self.next_timeline_event() {
+                    edge = edge.min(at.saturating_sub(now) as usize);
                 }
             }
             if let Some(event) = self.timed.front() {
@@ -862,7 +935,7 @@ impl Engine {
         let base = if self.count_in_remaining != 0 {
             self.count_in_cursor
         } else {
-            self.transport.sample_pos()
+            self.timeline_sample()
         };
         for frame in 0..nframes {
             let sample = base.saturating_add(frame as u64);
@@ -950,7 +1023,12 @@ impl Engine {
                 } else {
                     ojproto::capture_mark_kind::RECORD_START
                 };
-                sink.mark(arm.node.0, kind, capture_start, u32::from(arm.align));
+                sink.mark(
+                    arm.node.0,
+                    kind,
+                    capture_timeline_frame(capture_start, self.program.preroll),
+                    u32::from(arm.align),
+                );
             }
             let source_offset = if matches!(
                 self.program.kinds[slot],
@@ -982,6 +1060,7 @@ impl Engine {
         if !self.capture_active {
             return;
         }
+        let at = capture_timeline_frame(at, self.program.preroll);
         if let Some(sink) = self.capture_sink.as_mut() {
             for arm in self.timeline.armed_tracks() {
                 let kind = if self.transport.punch_on() {
@@ -1005,6 +1084,7 @@ impl Engine {
                 .accumulated_capture_offset
                 .saturating_add(end.saturating_sub(start));
         }
+        let at = capture_timeline_frame(at, self.program.preroll);
         if let Some(sink) = self.capture_sink.as_mut() {
             for arm in self.timeline.armed_tracks() {
                 sink.mark(
@@ -1028,7 +1108,10 @@ impl Engine {
                 // External sources: the host fills their output buffer (see
                 // `input_mut`); the executor leaves it intact (no process, no
                 // zeroing) so injected input flows downstream untouched.
-                PrimitiveKind::GraphIn | PrimitiveKind::MicIn => continue,
+                PrimitiveKind::GraphIn | PrimitiveKind::MicIn => {
+                    self.advance_node_delays(node, output_offset, nframes);
+                    continue;
+                }
                 // Master sinks have no DSP; their resolved input is emitted to
                 // `out` after the loop. Nothing to render here.
                 PrimitiveKind::SpeakerOut | PrimitiveKind::GraphOut => continue,
@@ -1040,6 +1123,7 @@ impl Engine {
                 // still reaches downstream nodes.
                 self.passthrough(node, output_offset, nframes);
                 self.meter_node(node, nframes);
+                self.advance_node_delays(node, 0, nframes);
                 continue;
             }
 
@@ -1082,6 +1166,7 @@ impl Engine {
             self.sanitize_node(node, nframes);
             // U15 metering: fold the node's output into its per-node meter.
             self.meter_node(node, nframes);
+            self.advance_node_delays(node, 0, nframes);
         }
 
         // Emit the master node's RESOLVED INPUT into EVERY device channel. The
@@ -1118,13 +1203,19 @@ impl Engine {
                 // identical to the historical mono path.
                 for k in 0..port0.len() {
                     let src = self.program.routing[master].inputs[0][k];
+                    let delay = self.program.delay_routing[master][0][k];
                     let src_oc = self.program.out_channels[src.node].max(1) as usize;
                     let lane = src.port as usize * src_oc + ch.min(src_oc - 1);
-                    if let Some(src_buf) = self.program.out_bufs[src.node].get(lane) {
+                    let delayed = delay
+                        .and_then(|edge| self.program.delay_bank.output(edge, ch.min(src_oc - 1)));
+                    if let Some(src_buf) = delayed
+                        .or_else(|| self.program.out_bufs[src.node].get(lane).map(Vec::as_slice))
+                    {
                         let source_offset = if matches!(
                             self.program.kinds[src.node],
                             PrimitiveKind::GraphIn | PrimitiveKind::MicIn
-                        ) {
+                        ) && delay.is_none()
+                        {
                             output_offset
                         } else {
                             0
@@ -1165,6 +1256,17 @@ impl Engine {
             #[cfg(feature = "std")]
             self.emit_node_fault(self.program.master_out, ojproto::FaultKind::NonFinite);
         }
+    }
+
+    fn advance_node_delays(&mut self, node: usize, source_offset: usize, nframes: usize) {
+        let program = &mut self.program;
+        program.delay_bank.advance_from(
+            node,
+            source_offset,
+            nframes,
+            &program.out_bufs,
+            &program.out_channels,
+        );
     }
 
     fn apply_declick(&mut self, outs: &mut [&mut [f32]], offset: usize, nframes: usize) {
@@ -1288,14 +1390,20 @@ impl Engine {
         for d in dst.iter_mut() {
             *d = 0.0;
         }
-        for src in &prog.routing[node].inputs[port] {
+        for (source_index, src) in prog.routing[node].inputs[port].iter().enumerate() {
+            let delay = prog.delay_routing[node][port][source_index];
             let src_oc = prog.out_channels[src.node].max(1) as usize;
             let src_lane = src.port as usize * src_oc + channel.min(src_oc - 1);
-            if let Some(src_buf) = prog.out_bufs[src.node].get(src_lane) {
+            let delayed =
+                delay.and_then(|edge| prog.delay_bank.output(edge, channel.min(src_oc - 1)));
+            if let Some(src_buf) =
+                delayed.or_else(|| prog.out_bufs[src.node].get(src_lane).map(Vec::as_slice))
+            {
                 let offset = if matches!(
                     prog.kinds[src.node],
                     PrimitiveKind::GraphIn | PrimitiveKind::MicIn
-                ) {
+                ) && delay.is_none()
+                {
                     source_offset
                 } else {
                     0
@@ -1372,6 +1480,12 @@ pub fn accumulated_capture_frame(
         .saturating_add(loop_offset)
         .saturating_add(event_frame)
         .saturating_sub(accumulated_capture_offset)
+}
+
+/// Place captured material on the listener-facing timeline (D9): capture marks
+/// are generated on the engine clock, which runs `preroll` samples ahead.
+pub const fn capture_timeline_frame(engine_sample: u64, preroll: u32) -> u64 {
+    engine_sample.saturating_sub(preroll as u64)
 }
 
 #[cfg(test)]
@@ -1489,6 +1603,13 @@ mod apply_rt_tests {
             max_in: 1,
             max_out: 1,
             schedule: vec![0, 1],
+            latency: vec![0, 0].into_boxed_slice(),
+            arrival: vec![0, 0].into_boxed_slice(),
+            to_master: vec![0, 0].into_boxed_slice(),
+            edge_delay: vec![0].into_boxed_slice(),
+            preroll: 0,
+            delay_bank: crate::compile::DelayBank::with_nodes(2),
+            delay_routing: vec![vec![], vec![vec![None]]],
         };
         (Engine::new(program), state)
     }
@@ -1544,6 +1665,48 @@ mod apply_rt_tests {
         engine.process_block(&mut [0.0; 4], 4);
         assert_eq!(&*probe.spans.borrow(), &[3, 1]);
         assert_eq!(probe.last_note_on.get(), Some((61, 90)));
+    }
+
+    #[test]
+    fn scheduled_event_uses_node_pdc_shift_but_live_note_is_immediate() {
+        let (mut engine, probe) = probe_engine_with_block(8);
+        engine.program_mut().preroll = 8;
+        engine.program_mut().to_master[0] = 3;
+        engine.install_timeline(timeline(
+            vec![SchedEvent {
+                at: 2,
+                node: NodeIdx(7),
+                kind: sched_event_kind::NOTE_ON,
+                a: 64,
+                b: 100,
+                value: 0.0,
+            }],
+            None,
+        ));
+
+        // Live input bypasses the timeline scheduler entirely: delivery happens
+        // synchronously, even though this program has eight samples of preroll.
+        engine.apply_rt(RtCommand::NoteOn {
+            node: NodeIdx(7),
+            note: 60,
+            vel: 90,
+        });
+        assert_eq!(probe.note_on_count.get(), 1, "live note is never shifted");
+
+        engine.apply_rt(RtCommand::TransportPlay);
+        engine.process_block(&mut [0.0; 8], 8);
+        assert_eq!(&*probe.spans.borrow(), &[7, 1]);
+        assert_eq!(probe.note_on_count.get(), 2, "T=2 dispatches at E=2+8-3=7");
+        assert_eq!(
+            engine.sample_pos(),
+            8,
+            "internal engine clock includes preroll"
+        );
+        assert_eq!(
+            engine.transport_pos().sample,
+            0,
+            "reported clock is E-preroll"
+        );
     }
 
     #[test]
@@ -1710,6 +1873,13 @@ mod apply_rt_tests {
             max_in: 1,
             max_out: 1,
             schedule: vec![0, 1],
+            latency: vec![0, 0].into_boxed_slice(),
+            arrival: vec![0, 0].into_boxed_slice(),
+            to_master: vec![0, 0].into_boxed_slice(),
+            edge_delay: Box::new([]),
+            preroll: 0,
+            delay_bank: crate::compile::DelayBank::with_nodes(2),
+            delay_routing: vec![vec![], vec![]],
         };
         let mut engine = Engine::new(program);
         let ring = Arc::new(EventRing::new());
@@ -1865,6 +2035,13 @@ mod apply_rt_tests {
             max_in: 1,
             max_out: 1,
             schedule: vec![0, 1],
+            latency: vec![0, 0].into_boxed_slice(),
+            arrival: vec![0, 0].into_boxed_slice(),
+            to_master: vec![0, 0].into_boxed_slice(),
+            edge_delay: vec![0].into_boxed_slice(),
+            preroll: 0,
+            delay_bank: crate::compile::DelayBank::with_nodes(2),
+            delay_routing: vec![vec![], vec![vec![None]]],
         };
         let mut engine = Engine::new(program);
 
@@ -1922,6 +2099,13 @@ mod apply_rt_tests {
             max_in: 1,
             max_out: 1,
             schedule: vec![0, 1],
+            latency: vec![0, 0].into_boxed_slice(),
+            arrival: vec![0, 0].into_boxed_slice(),
+            to_master: vec![0, 0].into_boxed_slice(),
+            edge_delay: vec![0].into_boxed_slice(),
+            preroll: 0,
+            delay_bank: crate::compile::DelayBank::with_nodes(2),
+            delay_routing: vec![vec![], vec![vec![None]]],
         };
         let mut engine = Engine::new(program);
         engine.set_transport_ranges(Some((10, 14)), None);
@@ -1977,6 +2161,13 @@ mod apply_rt_tests {
             max_in: 1,
             max_out: 2,
             schedule: vec![0, 1],
+            latency: vec![0, 0].into_boxed_slice(),
+            arrival: vec![0, 0].into_boxed_slice(),
+            to_master: vec![0, 0].into_boxed_slice(),
+            edge_delay: vec![0].into_boxed_slice(),
+            preroll: 0,
+            delay_bank: crate::compile::DelayBank::with_nodes(2),
+            delay_routing: vec![vec![], vec![vec![None]]],
         };
         let mut engine = Engine::new(program);
 
@@ -2075,6 +2266,13 @@ mod apply_rt_tests {
             max_in: 2,
             max_out: 2,
             schedule: vec![0, 1, 2],
+            latency: vec![0, 0, 0].into_boxed_slice(),
+            arrival: vec![0, 0, 0].into_boxed_slice(),
+            to_master: vec![0, 0, 0].into_boxed_slice(),
+            edge_delay: vec![0, 0].into_boxed_slice(),
+            preroll: 0,
+            delay_bank: crate::compile::DelayBank::with_nodes(3),
+            delay_routing: vec![vec![], vec![vec![None]], vec![vec![None]]],
         };
         let mut engine = Engine::new(program);
 

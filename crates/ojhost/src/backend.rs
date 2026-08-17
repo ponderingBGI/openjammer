@@ -26,6 +26,22 @@ use std::path::Path;
 use crate::descriptor::{PluginDescriptor, PluginFormat};
 use crate::error::HostError;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static LATENCY_RESCAN_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Called by a backend host callback when a live plugin invalidates its latency.
+#[cfg(feature = "clap-host")]
+pub(crate) fn request_latency_rescan() {
+    LATENCY_RESCAN_REQUESTED.store(true, Ordering::Release);
+}
+
+/// Consume the coalesced latency-change request on the control thread. The
+/// caller recompiles its retained graph and publishes through `ProgramSwap`.
+pub fn take_latency_rescan_request() -> bool {
+    LATENCY_RESCAN_REQUESTED.swap(false, Ordering::AcqRel)
+}
+
 /// The live, backend-specific half of a hosted plugin. The RT-safe
 /// [`crate::node::PluginHostNode`] owns one and forwards `DspInstance` calls to
 /// it. `process` is on the audio thread and MUST NOT allocate or lock — backends

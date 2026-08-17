@@ -128,3 +128,25 @@ fn loop_wrap_segments_and_live_notes_are_stamped() {
     }));
     assert_eq!(ojcore::exec::accumulated_capture_frame(10, 8, 8, 3), 13);
 }
+
+#[test]
+fn pdc_capture_marks_are_placed_on_the_timeline_clock() {
+    let mut engine = engine();
+    engine.program_mut().preroll = 5;
+    engine.program_mut().to_master.fill(0);
+    install(&mut engine, None, None);
+    let (mut capture, sink) = Capture::new(128);
+    engine.attach_capture_sink(Some(sink));
+    engine.apply_rt(RtCommand::Seek { samples: 10 });
+    engine.apply_rt(RtCommand::TransportSet {
+        flag: transport_flag::RECORD_ARM,
+        on: true,
+    });
+    engine.apply_rt(RtCommand::TransportPlay);
+    engine.process_block(&mut [0.0; 4], 4);
+
+    let mark = capture.pop_mark().expect("record-start mark");
+    assert_eq!(mark.kind, capture_mark_kind::RECORD_START);
+    assert_eq!(mark.at_frame, 10, "E=15 is placed at timeline T=10");
+    assert_eq!(ojcore::exec::capture_timeline_frame(15, 5), 10);
+}

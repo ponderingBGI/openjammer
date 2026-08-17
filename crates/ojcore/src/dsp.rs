@@ -13,7 +13,7 @@ use crate::manifest::ContractVersion;
 /// This kernel build's [`DspInstance`] contract generation (`docs/STABILITY.md` §4).
 /// Bumped MINOR when a backward-compatible capability/extension is added; MAJOR
 /// only on a breaking change to the frozen hot path (which must never happen).
-pub const KERNEL_CONTRACT: ContractVersion = ContractVersion::new(1, 0);
+pub const KERNEL_CONTRACT: ContractVersion = ContractVersion::new(1, 1);
 
 /// The CLOSED set of kernel-known capability EXTENSIONS a node may provide through
 /// [`DspInstance::extension`]. Each maps to a reserved `oj.*` capability id in the
@@ -72,7 +72,30 @@ pub fn kernel_supports_capability(id: &str) -> bool {
     // + `DspInstance::restore_state` restore seam are implemented (a hosted plugin
     // persists + reloads its opaque state). Others (`oj.latency`, …) are added here
     // as they land; until then a plugin that REQUIRES them degrades to a stub.
-    matches!(ExtId::from_capability_id(id), Some(ExtId::State))
+    matches!(
+        ExtId::from_capability_id(id),
+        Some(ExtId::Latency | ExtId::State)
+    )
+}
+
+/// Off-RT capability object returned for [`ExtId::Latency`].
+///
+/// The value is sampled once while a graph is compiled. Keeping the report in a
+/// concrete `Any`-downcastable object preserves the frozen [`DspInstance`]
+/// vtable: nodes that do not opt in return `None`, which is exactly zero samples.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LatencyExt {
+    samples: u32,
+}
+
+impl LatencyExt {
+    pub const fn new(samples: u32) -> Self {
+        Self { samples }
+    }
+
+    pub const fn latency_samples(&self) -> u32 {
+        self.samples
+    }
 }
 
 /// Off-RT capability object behind [`ExtId::State`] (`docs/STABILITY.md` §4): a node
@@ -291,11 +314,9 @@ mod ext_tests {
 
     #[test]
     fn kernel_supports_only_the_wired_capabilities() {
-        // `oj.state` is wired (save + restore seams implemented), so it is
-        // supported; capabilities not yet wired (e.g. `oj.latency`) and
-        // vendor/unknown ids are not.
+        // State and latency are both wired through the additive extension seam.
         assert!(kernel_supports_capability(ExtId::State.capability_id()));
-        assert!(!kernel_supports_capability(ExtId::Latency.capability_id()));
+        assert!(kernel_supports_capability(ExtId::Latency.capability_id()));
         assert!(!kernel_supports_capability("vendor.x"));
         assert!(!kernel_supports_capability("oj.unknown"));
     }

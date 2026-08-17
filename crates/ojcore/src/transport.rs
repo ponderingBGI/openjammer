@@ -380,6 +380,10 @@ impl Transport {
         self.sample_pos
     }
 
+    pub(crate) fn rebase_engine_sample(&mut self, sample: u64) {
+        self.sample_pos = sample;
+    }
+
     pub fn motion(&self) -> Motion {
         self.fsm.motion()
     }
@@ -533,14 +537,25 @@ impl Transport {
 
     /// Derive the current musical coordinates through `map`.
     pub fn position(&self, map: &TempoMapRt, cursor: &mut MetricCursor) -> TransportPos {
-        let tick = map.tick_at_sample_with_cursor(self.sample_pos, cursor);
-        let metric = map.meter_at_sample_with_cursor(self.sample_pos, cursor);
+        self.position_at(self.sample_pos, map, cursor)
+    }
+
+    /// Derive musical coordinates for an explicit timeline sample. PDC keeps
+    /// the internal engine clock ahead of this value by `preroll`.
+    pub fn position_at(
+        &self,
+        sample: u64,
+        map: &TempoMapRt,
+        cursor: &mut MetricCursor,
+    ) -> TransportPos {
+        let tick = map.tick_at_sample_with_cursor(sample, cursor);
+        let metric = map.meter_at_sample_with_cursor(sample, cursor);
         TransportPos {
             bar: metric.bar,
             beat: metric.beat,
             phase: metric.phase,
             tick,
-            sample: self.sample_pos,
+            sample,
         }
     }
 }

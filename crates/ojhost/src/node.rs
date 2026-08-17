@@ -14,7 +14,7 @@
 use std::sync::Mutex;
 
 use ojcore::{DspInstance, ParamDecl, PluginLoader, PluginManifest, PortDecl, ProcessCtx};
-use ojcore::{DspKind, ExtId, StateSave, UiKind};
+use ojcore::{DspKind, ExtId, LatencyExt, StateSave, UiKind};
 use ojproto::PrimitiveKind;
 
 use crate::backend::{self, HostedBackend};
@@ -46,7 +46,7 @@ fn fnv1a32_hex(bytes: &[u8]) -> String {
 }
 
 /// A loaded, processable third-party plugin. The safe wrapper over a
-/// backend-specific [`HostedBackend`]. Construct via [`HostedPlugin::load`].
+/// backend-specific implementation. Construct via [`HostedPlugin::load`].
 pub struct HostedPlugin {
     backend: Box<dyn HostedBackend>,
     descriptor: PluginDescriptor,
@@ -109,6 +109,7 @@ impl HostedPlugin {
 /// all scratch at load/activate, so `process` is allocation-free.
 pub struct PluginHostNode {
     plugin: HostedPlugin,
+    latency: LatencyExt,
     /// Latched `true` once the plugin faults (a segfault caught at the foreign-code
     /// boundary). From then on `process` runs a dry passthrough and never re-enters
     /// the plugin — the crash latch (mirrors `ojwasm`'s `bypassed`). Cleared only by
@@ -119,8 +120,10 @@ pub struct PluginHostNode {
 impl PluginHostNode {
     /// Wrap an already-loaded [`HostedPlugin`] as a DSP node.
     pub fn new(plugin: HostedPlugin) -> Self {
+        let latency = LatencyExt::new(plugin.latency_samples());
         Self {
             plugin,
+            latency,
             faulted: false,
         }
     }
@@ -186,6 +189,7 @@ impl DspInstance for PluginHostNode {
     /// node keeps providing it (its last good state is still the backend's).
     fn extension(&self, id: ExtId) -> Option<&dyn core::any::Any> {
         match id {
+            ExtId::Latency => Some(&self.latency),
             ExtId::State => Some(self),
             _ => None,
         }
@@ -218,7 +222,7 @@ impl StateSave for PluginHostNode {
 ///
 /// `instantiate` loads the real plugin off the RT thread. If loading fails (no
 /// backend in the scaffold build, or a bad plugin), it falls back to a silent
-/// [`PassthroughNode`] so the graph still compiles and runs — the engine never
+/// an internal passthrough node so the graph still compiles and runs — the engine never
 /// panics on a missing plugin.
 pub struct PluginHostLoader {
     manifest: PluginManifest,
@@ -621,9 +625,11 @@ mod tests {
             .downcast_ref::<PluginHostNode>()
             .expect("downcasts to the node");
         assert_eq!(StateSave::save(saver), vec![9, 8, 7]);
-        assert!(
-            node.extension(ExtId::Latency).is_none(),
-            "only oj.state is provided (not yet-unwired capabilities)"
+        assert_eq!(
+            node.extension(ExtId::Latency)
+                .and_then(|ext| ext.downcast_ref::<LatencyExt>())
+                .map(LatencyExt::latency_samples),
+            Some(0)
         );
 
         // RESTORE into a fresh node via the &mut seam (what compile applies at load).
