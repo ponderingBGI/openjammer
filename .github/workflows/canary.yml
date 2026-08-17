@@ -204,10 +204,13 @@ jobs:
     needs: [prepare, build]
     if: ${{ vars.CANARY_RELEASES_ENABLED == 'true' }}
     runs-on: ubuntu-latest
+    env:
+      CANARI_RELEASE_NOTES: "Canari build for the next stable line ${{ needs.prepare.outputs.base }}."
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
 
@@ -221,7 +224,6 @@ jobs:
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
           TAG: ${{ needs.prepare.outputs.tag }}
-          BASE: ${{ needs.prepare.outputs.base }}
         shell: bash
         run: |
           set -euo pipefail
@@ -231,13 +233,12 @@ jobs:
             --version "$VERSION" \
             --repo "$GITHUB_REPOSITORY" \
             --tag "$TAG" \
-            --notes "Canari build for the next stable line $BASE."
+            --notes "$CANARI_RELEASE_NOTES"
 
       - name: Upload atomically through one retrying publisher
         env:
           GH_TOKEN: ${{ secrets.OJ_RELEASE_TOKEN || secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.prepare.outputs.tag }}
-          BASE: ${{ needs.prepare.outputs.base }}
         shell: bash
         run: |
           set -euo pipefail
@@ -256,7 +257,6 @@ jobs:
             done
           }
 
-          notes="Canari build for the next stable line $BASE."
           ensure_draft() {
             local draft
             draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
@@ -274,7 +274,7 @@ jobs:
               --draft \
               --prerelease \
               --title "OpenJammer Canari $TAG" \
-              --notes "$notes" >/dev/null
+              --notes "$CANARI_RELEASE_NOTES" >/dev/null
           }
           retry ensure_draft
 
@@ -282,14 +282,21 @@ jobs:
           # that idempotent asset, not every platform bundle or the whole build.
           while IFS= read -r -d '' asset; do
             retry gh release upload "$TAG" "$asset" \
-              --repo "$GITHUB_REPOSITORY" --clobber
+              --repo "$GITHUB_REPOSITORY" --clobber </dev/null
           done < <(find canari-publish -maxdepth 1 -type f ! -name latest.json -print0 | sort -z)
           retry gh release upload "$TAG" canari-publish/latest.json \
             --repo "$GITHUB_REPOSITORY" --clobber
 
           find canari-publish -maxdepth 1 -type f -printf '%f\n' | sort > expected-assets.txt
-          retry gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --json assets --jq '.assets[].name' | sort > uploaded-assets.txt
+          fetch_asset_names() {
+            local attempt_file
+            attempt_file="$(mktemp remote-assets.XXXXXX)"
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --json assets --jq '.assets[].name' > "$attempt_file" || return 1
+            mv "$attempt_file" remote-assets.raw
+          }
+          retry fetch_asset_names
+          sort remote-assets.raw > uploaded-assets.txt
           if ! diff -u expected-assets.txt uploaded-assets.txt; then
             echo "::error::Draft release asset set differs from the locally validated contract"
             exit 1
@@ -298,9 +305,18 @@ jobs:
           # Publication is the commit point: users cannot discover a partial
           # canari while the matrix builds or while transient uploads retry.
           retry gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --draft=false --prerelease --title "OpenJammer Canari $TAG" --notes "$notes"
-          state="$(retry gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --json isDraft,isPrerelease --jq '[.isDraft, .isPrerelease] | @tsv')"
+            --draft=false --prerelease --title "OpenJammer Canari $TAG" \
+            --notes "$CANARI_RELEASE_NOTES"
+          fetch_release_state() {
+            local attempt_file
+            attempt_file="$(mktemp release-state.XXXXXX)"
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --json isDraft,isPrerelease \
+              --jq '[.isDraft, .isPrerelease] | @tsv' > "$attempt_file" || return 1
+            mv "$attempt_file" release-state.txt
+          }
+          retry fetch_release_state
+          state="$(<release-state.txt)"
           if [ "$state" != $'false\ttrue' ]; then
             echo "::error::$TAG was not published as a prerelease (state: $state)"
             exit 1
