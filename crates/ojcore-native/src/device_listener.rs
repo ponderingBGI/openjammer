@@ -3,7 +3,7 @@
 //! The portable polling [`DeviceWatcher`](crate::device::DeviceWatcher) is the
 //! always-on, cross-platform backstop; this lowers detection latency to "the
 //! instant the OS notices" where a native API exists. It feeds the SAME
-//! [`DeviceFault`] mailbox as the cpal error callback, so the recovery path is
+//! [`DeviceFault`](crate::device::DeviceFault) mailbox as the cpal error callback, so the recovery path is
 //! identical.
 //!
 //! Platform coverage:

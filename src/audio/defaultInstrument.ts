@@ -72,6 +72,10 @@ export function instrumentUsesKarplus(
     data: Record<string, unknown> | undefined,
 ): boolean {
     if (!DEFAULT_VOICE_INSTRUMENTS.has(nodeType)) return false;
+    // Headless song fixtures cannot bind the executor-generated PCM voice bank.
+    // They may retain their catalogue instrumentId (the UI/live timbre contract)
+    // while explicitly selecting the asset-free physical model for offline proof.
+    if (data?.physicalModelFallback === true) return true;
     return isKarplusFamily(familyForNode(nodeType, data));
 }
 

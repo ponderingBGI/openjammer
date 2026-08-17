@@ -59,7 +59,7 @@ export function Modal({
         restoreRef.current = document.activeElement;
         const panel = getPanel();
         if (panel) {
-            const first = panel.querySelector<HTMLElement>(FOCUSABLE);
+            const first = panel.querySelector<HTMLElement>('[data-autofocus="true"]') ?? panel.querySelector<HTMLElement>(FOCUSABLE);
             (first ?? panel).focus();
         }
         return () => {

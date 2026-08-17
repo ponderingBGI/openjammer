@@ -434,6 +434,17 @@ export function AudioSettingsPanel() {
                         </Select>
                     </div>
 
+                    <div className="oj-aud-row">
+                        <div className="oj-aud-row-text">
+                            <span className="oj-aud-row-label">Click level</span>
+                            <span className="oj-aud-row-desc">Level used by the metronome and count-in.</span>
+                        </div>
+                        <div className="oj-aud-control">
+                            <input aria-label="Click gain" type="range" min="0" max="1" step="0.05" value={pendingConfig.clickGain ?? 0.2} onChange={(event) => setPendingConfig((prev) => ({ ...prev, clickGain: Number(event.target.value) }))} />
+                            <output className="oj-aud-bd-val">{Math.round((pendingConfig.clickGain ?? 0.2) * 100)}%</output>
+                        </div>
+                    </div>
+
                     {measured && (
                         <div className="oj-aud-breakdown">
                             <div className="oj-aud-bd-row">

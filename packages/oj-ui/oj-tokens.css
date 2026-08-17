@@ -77,4 +77,22 @@
     --control-connected: #909090;
     --universal-port: #9B59B6;
     --universal-connection: #9B59B6;
+    --timeline-bg: #F5F0E8;
+    --timeline-chrome-bg: #EDE8E0;
+    --timeline-lane-bg: #FAF7F1;
+    --timeline-lane-alt-bg: #EFEAE1;
+    --timeline-grid-bar: rgba(26,26,26,0.24);
+    --timeline-grid-beat: rgba(26,26,26,0.11);
+    --timeline-grid-sub: rgba(26,26,26,0.055);
+    --timeline-lane-divider: #D4CFC6;
+    --timeline-clip-bg: #FFFFFF;
+    --timeline-clip-border: #4A4A4A;
+    --timeline-clip-muted-bg: #E8E3DA;
+    --timeline-note-fill: #4A90C2;
+    --timeline-waveform-fill: #2C5F88;
+    --timeline-automation-line: #6B5B4F;
+    --timeline-playhead: #A65353;
+    --timeline-section-marker: #1A1A1A;
+    --timeline-loop-range: rgba(26,26,26,0.07);
+    --timeline-selection: #C68B3F;
 }

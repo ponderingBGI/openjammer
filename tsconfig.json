@@ -3,5 +3,11 @@
   "references": [
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" }
-  ]
+  ],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@openjammer/oj-protocol": ["./packages/oj-protocol-ts/src/index.ts"]
+    }
+  }
 }

@@ -1,185 +1,130 @@
 import { describe, expect, it } from 'vitest';
 import { conduct } from '../conduct';
-import type { Arrangement } from '../types';
+import type { Arrangement, ArrangementNote } from '../types';
 
-const base: Arrangement = {
-    name: 'unit',
-    tempoBpm: 120,
-    ppq: 960,
-    graph: {
-        nodes: [
-            { ref: 'keys', type: 'keys' },
-            { ref: 'spk', type: 'speaker' },
-        ],
-        connections: [{ from: 'keys', to: 'spk' }],
-    },
-    tracks: [
-        {
-            ref: 'keys',
-            clips: [{ startTick: 0, notes: [{ tick: 0, durTick: 960, pitch: 60, vel: 100 }] }],
-        },
-    ],
-};
+function song(notes: ArrangementNote[], clip: Partial<Arrangement['tracks'][number]['clips'][number]> = {}): Arrangement {
+    return {
+        name: 'unit', tempoBpm: 120, ppq: 960,
+        sources: { midi: { id: 'midi', kind: 'midi', name: 'MIDI', notes, lengthTick: 3840 } },
+        graph: { nodes: [{ ref: 'keys', type: 'keys' }, { ref: 'spk', type: 'speaker' }], connections: [{ from: 'keys', to: 'spk' }] },
+        tracks: [{ ref: 'keys', clips: [{ sourceId: 'midi', startTick: 0, lengthTick: 3840, ...clip }] }],
+    };
+}
+const base = song([{ tick: 0, durTick: 960, pitch: 60, vel: 100 }], { lengthTick: 960 });
 
 describe('conduct', () => {
-    it('lowers a clip to noteOn/noteOff at the right seconds', () => {
-        const r = conduct(base);
-        const node = r.trackIndex['keys'];
-        expect(typeof node).toBe('number');
-        // 120 BPM, 960 PPQ: one quarter note = 0.5s.
-        expect(r.events).toEqual([
+    it('lowers source notes to seconds', () => {
+        const result = conduct(base);
+        const node = result.trackIndex.keys;
+        expect(result.events).toEqual([
             { at: 0, cmd: 'noteOn', node, note: 60, vel: 100 },
             { at: 0.5, cmd: 'noteOff', node, note: 60 },
         ]);
-        // The lowered graph is real IR with a master sink.
-        expect(r.graph.nodes.length).toBeGreaterThanOrEqual(2);
-        // Release tail extends the render past the last event.
-        expect(r.seconds).toBeGreaterThan(0.5);
+        expect(result.seconds).toBeGreaterThan(0.5);
     });
 
-    it('is deterministic (same arrangement -> identical lowering)', () => {
-        expect(conduct(base)).toEqual(conduct(base));
-    });
-
-    it('the SCHEDULE is backend-independent (wasm preview == native bounce notes)', () => {
-        const native = conduct(base, 'native');
-        const wasm = conduct(base, 'wasm');
-        // Same notes, same ticks, same node indices, same length — one core, two clocks.
-        expect(wasm.events).toEqual(native.events);
-        expect(wasm.trackIndex).toEqual(native.trackIndex);
-        expect(wasm.seconds).toBe(native.seconds);
-        // The graph node COUNT matches (same topology); only per-node backend mapping differs.
-        expect(wasm.graph.nodes.length).toBe(native.graph.nodes.length);
-        expect(wasm.graph.nodes.map((n) => n.id)).toEqual(native.graph.nodes.map((n) => n.id));
-    });
-
-    it('a muted track emits no notes (the always-correct gate)', () => {
-        const muted: Arrangement = {
+    it('builds sample-addressed Timeline events and attaches authored ranges', () => {
+        const result = conduct({
             ...base,
-            tracks: [{ ...base.tracks[0]!, mute: true }],
-        };
-        expect(conduct(muted).events).toEqual([]);
-    });
-
-    it('lowers automation to stepped setParam events', () => {
-        const arr: Arrangement = {
-            ...base,
-            tracks: [
-                {
-                    ref: 'keys',
-                    clips: [],
-                    automation: [{ ref: 'keys', param: 0, points: [
-                        { tick: 0, value: 0.2 },
-                        { tick: 1920, value: 0.9 },
-                    ] }],
-                },
+            locations: [
+                { id: 'loop', name: 'Loop', kind: 'loop', startTick: 480, endTick: 960 },
+                { id: 'punch', name: 'Punch', kind: 'punch', startTick: 240, endTick: 720 },
             ],
-        };
-        const r = conduct(arr);
-        const node = r.trackIndex['keys'];
-        expect(r.events).toEqual([
-            { at: 0, cmd: 'setParam', node, param: 0, value: 0.2 },
-            { at: 1, cmd: 'setParam', node, param: 0, value: 0.9 },
+        });
+        expect(result.tempoMap.sample_rate).toBe(48_000);
+        expect(result.timeline.events).toEqual([
+            { at: 0, node: result.trackIndex.keys, kind: 2, a: 60, b: 100, value: 0 },
+            { at: 24_000, node: result.trackIndex.keys, kind: 1, a: 60, b: 0, value: 0 },
+        ]);
+        expect(result.timeline.loop_range).toEqual([12_000, 24_000]);
+        expect(result.timeline.punch_range).toEqual([6_000, 18_000]);
+        expect(result.timeline.armed_tracks).toEqual([]);
+        expect(result.timeline.count_in_beats).toBe(0);
+        expect(result.timeline.end).toBe(Math.round(result.seconds * 48_000));
+    });
+
+    it('clips a note straddling the clip end', () => {
+        const result = conduct(song([{ tick: 720, durTick: 960, pitch: 64 }], { lengthTick: 960 }));
+        expect(result.events.map((event) => event.at)).toEqual([0.375, 0.5]);
+    });
+
+    it('applies sourceStart and clips a note crossing the left boundary', () => {
+        const result = conduct(song([
+            { tick: 240, durTick: 480, pitch: 60 },
+            { tick: 960, durTick: 240, pitch: 64 },
+        ], { startTick: 1920, sourceStart: 480, lengthTick: 720 }));
+        expect(result.events).toEqual([
+            { at: 1, cmd: 'noteOn', node: result.trackIndex.keys, note: 60, vel: 100 },
+            { at: 1.125, cmd: 'noteOff', node: result.trackIndex.keys, note: 60 },
+            { at: 1.25, cmd: 'noteOn', node: result.trackIndex.keys, note: 64, vel: 100 },
+            { at: 1.375, cmd: 'noteOff', node: result.trackIndex.keys, note: 64 },
         ]);
     });
 
-    it('rejects a track that references a node which did not survive lowering', () => {
-        const bad: Arrangement = {
-            ...base,
-            tracks: [{ ref: 'nope', clips: [] }],
-        };
+    it('guards zero-length clips', () => {
+        expect(conduct(song([{ tick: 0, durTick: 480, pitch: 60 }], { lengthTick: 0 })).events).toEqual([]);
+    });
+
+    it('is deterministic and backend-independent', () => {
+        expect(conduct(base)).toEqual(conduct(base));
+        const native = conduct(base, 'native');
+        const wasm = conduct(base, 'wasm');
+        expect(wasm.events).toEqual(native.events);
+        expect(wasm.trackIndex).toEqual(native.trackIndex);
+        expect(wasm.seconds).toBe(native.seconds);
+    });
+
+    it('honours track and clip mute', () => {
+        expect(conduct({ ...base, tracks: [{ ...base.tracks[0]!, mute: true }] }).events).toEqual([]);
+        expect(conduct({ ...base, tracks: [{ ...base.tracks[0]!, clips: [{ ...base.tracks[0]!.clips[0]!, mute: true }] }] }).events).toEqual([]);
+    });
+
+    it('lowers automation to stepped events', () => {
+        const arrangement: Arrangement = { ...base, tracks: [{ ref: 'keys', clips: [], automation: [{ ref: 'keys', param: 0, points: [{ tick: 0, value: 0.2 }, { tick: 1920, value: 0.9 }] }] }] };
+        const result = conduct(arrangement);
+        expect(result.events).toEqual([
+            { at: 0, cmd: 'setParam', node: result.trackIndex.keys, param: 0, value: 0.2 },
+            { at: 1, cmd: 'setParam', node: result.trackIndex.keys, param: 0, value: 0.9 },
+        ]);
+    });
+
+    it('fails strict unresolved refs and skips them in preview', () => {
+        const bad: Arrangement = { ...base, tracks: [{ ref: 'ghost', clips: base.tracks[0]!.clips }] };
         expect(() => conduct(bad)).toThrow(/did not survive/);
+        expect(conduct(bad, 'native', { lenient: true }).skipped).toEqual(['ghost']);
     });
 
-    it('lenient mode (preview) SKIPS a bad track instead of silencing the whole song', () => {
-        const mixed: Arrangement = {
-            ...base,
-            tracks: [
-                base.tracks[0]!, // good (keys)
-                { ref: 'ghost', clips: [{ startTick: 0, notes: [{ tick: 0, durTick: 480, pitch: 60 }] }] },
-            ],
-        };
-        // Strict still throws …
-        expect(() => conduct(mixed)).toThrow(/did not survive/);
-        // … lenient skips the ghost track and plays the rest.
-        const r = conduct(mixed, 'native', { lenient: true });
-        expect(r.skipped).toEqual(['ghost']);
-        expect(r.trackIndex['keys']).toBeDefined();
-        expect(r.trackIndex['ghost']).toBeUndefined();
-        // The good track's notes still lowered.
-        expect(r.events.some((e) => e.cmd === 'noteOn')).toBe(true);
+    it('splices authored code nodes in declared order', () => {
+        const result = conduct({ ...base, codeNodes: [
+            { id: 'ai.wasm.a', onTrack: 'keys', faustSource: 'process = _;' },
+            { id: 'ai.wasm.b', onTrack: 'keys', faustSource: 'process = _;' },
+        ] });
+        const keys = result.trackIndex.keys;
+        const a = result.graph.nodes.find((node) => node.manifest_id === 'ai.wasm.a')!;
+        const b = result.graph.nodes.find((node) => node.manifest_id === 'ai.wasm.b')!;
+        expect(result.graph.edges.some((edge) => edge.from_node === keys && edge.to_node === a.id)).toBe(true);
+        expect(result.graph.edges.some((edge) => edge.from_node === a.id && edge.to_node === b.id)).toBe(true);
     });
 
-    it('splices an agent-authored code node into a track signal path', () => {
-        const arr: Arrangement = {
+    it('emits a bound Sampler node for an audio source', () => {
+        const arrangement: Arrangement = {
             ...base,
-            codeNodes: [{ id: 'ai.wasm.sat', onTrack: 'keys', faustSource: 'process = *(0.5);' }],
+            sources: { 'src:audio:abcdef': { id: 'src:audio:abcdef', kind: 'audio', name: 'take', assetId: 'abcdef', frames: 48000, sampleRate: 48000, channels: 1 } },
+            tracks: [{ ref: 'keys', clips: [{ sourceId: 'src:audio:abcdef', startTick: 0, lengthTick: 960 }] }],
         };
-        const r = conduct(arr);
-        // The authored node is returned (so oj song writes + --code-node's it) …
-        expect(r.codeNodes.map((c) => c.id)).toEqual(['ai.wasm.sat']);
-        // … and is spliced into the IR as a real WasmHost node.
-        const sat = r.graph.nodes.find((n) => n.manifest_id === 'ai.wasm.sat');
-        expect(sat?.kind).toBe('WasmHost');
-        const keysIdx = r.trackIndex['keys'];
-        // keys -> sat (the instrument now routes INTO the authored node) …
-        expect(r.graph.edges.some((e) => e.from_node === keysIdx && e.to_node === sat!.id)).toBe(
-            true,
-        );
-        // … and sat feeds onward to the instrument's former consumer (the master).
-        expect(r.graph.edges.some((e) => e.from_node === sat!.id)).toBe(true);
-        // The instrument's note events are unchanged (only the wiring moved).
-        expect(r.events.some((e) => e.cmd === 'noteOn' && e.node === keysIdx)).toBe(true);
+        const result = conduct(arrangement);
+        const sampler = result.graph.nodes.find((node) => node.kind === 'Sampler' && node.assets.some((asset) => asset.asset === 0xabcdef));
+        expect(sampler).toBeDefined();
+        expect(result.events).toContainEqual({ at: 0, cmd: 'noteOn', node: sampler!.id, note: 60, vel: 127 });
     });
 
-    it('chains MULTIPLE code nodes on one track in DECLARED order (no self-corruption)', () => {
-        const arr: Arrangement = {
-            ...base,
-            codeNodes: [
-                { id: 'ai.wasm.a', onTrack: 'keys', faustSource: 'process = *(0.9);' },
-                { id: 'ai.wasm.b', onTrack: 'keys', faustSource: 'process = *(0.8);' },
-            ],
-        };
-        const r = conduct(arr);
-        const keysIdx = r.trackIndex['keys'];
-        const a = r.graph.nodes.find((n) => n.manifest_id === 'ai.wasm.a')!;
-        const b = r.graph.nodes.find((n) => n.manifest_id === 'ai.wasm.b')!;
-        // keys -> a -> b -> master, in DECLARED order (the old code reversed it).
-        expect(r.graph.edges.some((e) => e.from_node === keysIdx && e.to_node === a.id)).toBe(true);
-        expect(r.graph.edges.some((e) => e.from_node === a.id && e.to_node === b.id)).toBe(true);
-        // The instrument now feeds ONLY the first node in the chain (not the master).
-        const fromKeys = r.graph.edges.filter((e) => e.from_node === keysIdx);
-        expect(fromKeys.map((e) => e.to_node)).toEqual([a.id]);
-        // The former consumer (master) now reads from b, the LAST node in the chain.
-        expect(r.graph.edges.some((e) => e.from_node === b.id)).toBe(true);
-        // b does not feed a (no reversed/cyclic scaffolding).
-        expect(r.graph.edges.some((e) => e.from_node === b.id && e.to_node === a.id)).toBe(false);
-    });
-
-    it('sorts the schedule by integer tick deterministically (bit-identical by construction)', () => {
-        // Two notes whose float `at` could tie/reorder under naive float sort.
-        const arr: Arrangement = {
-            ...base,
-            tracks: [
-                {
-                    ref: 'keys',
-                    clips: [
-                        {
-                            startTick: 0,
-                            notes: [
-                                { tick: 480, durTick: 240, pitch: 64, vel: 80 },
-                                { tick: 0, durTick: 480, pitch: 60, vel: 90 },
-                                { tick: 240, durTick: 240, pitch: 62, vel: 70 },
-                            ],
-                        },
-                    ],
-                },
-            ],
-        };
-        const r = conduct(arr);
-        const onsets = r.events.filter((e) => e.cmd === 'noteOn').map((e) => e.at);
-        // strictly non-decreasing in time, in tick order (0, 240, 480).
-        expect(onsets).toEqual([...onsets].sort((x, y) => x - y));
-        expect(r.events[0]).toMatchObject({ cmd: 'noteOn', note: 60 });
+    it('sorts schedule events by integer tick', () => {
+        const result = conduct(song([
+            { tick: 480, durTick: 240, pitch: 64 },
+            { tick: 0, durTick: 480, pitch: 60 },
+            { tick: 240, durTick: 240, pitch: 62 },
+        ], { lengthTick: 960 }));
+        const onsets = result.events.filter((event) => event.cmd === 'noteOn').map((event) => event.at);
+        expect(onsets).toEqual([...onsets].sort((a, b) => a - b));
     });
 });

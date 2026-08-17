@@ -1,0 +1,12 @@
+# CodSpeed's CLI harness measures this whole browser journey as one real-world
+# walltime executable. Per-phase CDP metrics are emitted beside it by the script
+# and uploaded as an artifact because CodSpeed does not ingest arbitrary trace
+# values as synthetic benchmark durations.
+options:
+  warmup-time: 0s
+  max-rounds: 1
+  max-time: 4m
+
+benchmarks:
+  - name: J8 Long Set browser journey
+    exec: bun scripts/perf/report.ts

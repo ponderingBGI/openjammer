@@ -34,6 +34,7 @@ import {
 } from '../../engine/dynamicRegistry';
 import type { AgentEvent } from '../../ai/types';
 import type { NodeType } from '../../engine/types';
+import { useHistoryStore } from '../historyStore';
 
 const STORAGE_KEY = 'openjammer-graph-v2';
 const CHAT_KEY = 'openjammer-agent-chat';
@@ -48,10 +49,9 @@ function resetGraph() {
         selectedNodeIds: new Set(),
         selectedConnectionIds: new Set(),
         clipboard: null,
-        history: [],
-        historyIndex: -1,
         version: 0,
     });
+    useHistoryStore.getState().clear();
 }
 
 /** Count root-level nodes (derived from the node map, so it survives undo, which

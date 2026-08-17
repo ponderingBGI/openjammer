@@ -31,6 +31,24 @@
     "controlConnection": { "$value": "#8B6BB0", "$type": "color" },
     "controlConnected": { "$value": "#A88BD6", "$type": "color" },
     "universalPort": { "$value": "#FF0090", "$type": "color" },
-    "universalConnection": { "$value": "#FF0090", "$type": "color" }
+    "universalConnection": { "$value": "#FF0090", "$type": "color" },
+    "timelineBg": { "$value": "#08070D", "$type": "color" },
+    "timelineChromeBg": { "$value": "#0F0E16", "$type": "color" },
+    "timelineLaneBg": { "$value": "#14121D", "$type": "color" },
+    "timelineLaneAltBg": { "$value": "#0D0C13", "$type": "color" },
+    "timelineGridBar": { "$value": "rgba(224,244,255,0.22)", "$type": "color" },
+    "timelineGridBeat": { "$value": "rgba(224,244,255,0.10)", "$type": "color" },
+    "timelineGridSub": { "$value": "rgba(224,244,255,0.05)", "$type": "color" },
+    "timelineLaneDivider": { "$value": "#2A2538", "$type": "color" },
+    "timelineClipBg": { "$value": "#14121D", "$type": "color" },
+    "timelineClipBorder": { "$value": "#D896FF", "$type": "color" },
+    "timelineClipMutedBg": { "$value": "#1C1826", "$type": "color" },
+    "timelineNoteFill": { "$value": "#00B8FF", "$type": "color" },
+    "timelineWaveformFill": { "$value": "#0088FF", "$type": "color" },
+    "timelineAutomationLine": { "$value": "#00F0FF", "$type": "color" },
+    "timelinePlayhead": { "$value": "#FF0050", "$type": "color" },
+    "timelineSectionMarker": { "$value": "#E0F4FF", "$type": "color" },
+    "timelineLoopRange": { "$value": "rgba(224,244,255,0.06)", "$type": "color" },
+    "timelineSelection": { "$value": "#FFD600", "$type": "color" }
   }
 }

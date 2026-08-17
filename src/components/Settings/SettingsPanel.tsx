@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Button, Tabs } from '@openjammer/oj-ui';
 import { themes, applyTheme, getThemeById, getSavedThemeId, saveThemeId } from '@openjammer/oj-tokens';
 import { KeybindingsPanel } from './KeybindingsPanel';
@@ -7,6 +7,7 @@ import { UpdatesPanel } from './UpdatesPanel';
 import { AboutPanel } from './AboutPanel';
 import { ScrollContainer } from '../common/ScrollContainer';
 import './SettingsPanel.css';
+import { useModalKeymap } from '../../keymap/useKeymap';
 
 const TABS = [
     { value: 'graphics', label: 'Graphics' },
@@ -19,15 +20,7 @@ const TABS = [
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
     const [activeTab, setActiveTab] = useState('graphics');
     const [selectedTheme, setSelectedTheme] = useState(getSavedThemeId());
-
-    // Esc closes the panel — keyboard-first, never trap the performer (PRODUCT.md).
-    useEffect(() => {
-        const onKey = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') onClose();
-        };
-        window.addEventListener('keydown', onKey);
-        return () => window.removeEventListener('keydown', onKey);
-    }, [onClose]);
+    useModalKeymap('settings', true);
 
     const handleThemeChange = (themeId: string) => {
         setSelectedTheme(themeId);
@@ -46,6 +39,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 aria-modal="true"
                 aria-label="Settings"
                 onClick={e => e.stopPropagation()}
+                onKeyDown={(event) => {
+                    if (event.key === 'Escape') onClose();
+                }}
             >
                 <div className="minimal-settings-header">
                     <h2>Settings</h2>

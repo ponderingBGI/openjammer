@@ -4,7 +4,7 @@
 //! [`atomic_write`] is the write-temp -> fsync -> atomic-rename -> fsync-dir
 //! discipline expressed over an [`OjFs`] trait, so the SAME protocol that makes a
 //! recording crash-safe (see `asset::write_wav_file`) can be exercised by a
-//! [`SimFs`] that injects a process crash at EVERY step. The property it proves:
+//! test-only `SimFs` that injects a process crash at EVERY step. The property it proves:
 //!
 //!   after a crash at ANY point during a durable write, the destination is the
 //!   COMPLETE old content or the COMPLETE new content — never a torn/partial file.

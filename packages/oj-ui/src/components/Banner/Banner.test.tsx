@@ -3,12 +3,12 @@ import { describe, it, expect } from 'vitest';
 import { Banner } from './Banner';
 
 describe('Banner', () => {
-    it('renders the base + tone classes and an alert role', () => {
+    it('renders the base + tone classes and a polite status role', () => {
         const { container } = render(<Banner tone="danger" title="Latency high" />);
         const root = container.querySelector('.oj-banner')!;
         expect(root.className).toContain('oj-banner');
         expect(root.className).toContain('oj-banner--danger');
-        expect(root.getAttribute('role')).toBe('alert');
+        expect(root.getAttribute('role')).toBe('status');
     });
 
     it('builds on the Surface chrome (node fill, hard menu shadow)', () => {

@@ -79,6 +79,9 @@ fn biquad_manifest() -> PluginManifest {
         ui: UiKind::Auto,
         params: vec![
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: biquad_param::TYPE,
                 name: String::from("type"),
                 min: 0.0,
@@ -86,6 +89,9 @@ fn biquad_manifest() -> PluginManifest {
                 default: 0.0,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: biquad_param::FREQ,
                 name: String::from("frequency"),
                 min: 20.0,
@@ -93,6 +99,9 @@ fn biquad_manifest() -> PluginManifest {
                 default: 1_000.0,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: biquad_param::Q,
                 name: String::from("q"),
                 min: 0.1,
@@ -100,6 +109,9 @@ fn biquad_manifest() -> PluginManifest {
                 default: 0.707,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: biquad_param::GAIN_DB,
                 name: String::from("gain_db"),
                 min: -24.0,
@@ -244,6 +256,9 @@ fn waveshaper_manifest() -> PluginManifest {
         ui: UiKind::Auto,
         params: vec![
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: waveshaper_param::AMOUNT,
                 name: String::from("amount"),
                 min: 0.0,
@@ -251,6 +266,9 @@ fn waveshaper_manifest() -> PluginManifest {
                 default: 0.5,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: waveshaper_param::LEVEL,
                 name: String::from("level"),
                 min: 0.0,
@@ -392,6 +410,9 @@ fn delay_manifest() -> PluginManifest {
         ui: UiKind::Auto,
         params: vec![
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: delay_param::TIME,
                 name: String::from("time"),
                 min: 0.0,
@@ -399,6 +420,9 @@ fn delay_manifest() -> PluginManifest {
                 default: 0.25,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: delay_param::FEEDBACK,
                 name: String::from("feedback"),
                 min: 0.0,
@@ -406,6 +430,9 @@ fn delay_manifest() -> PluginManifest {
                 default: 0.3,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: delay_param::MIX,
                 name: String::from("mix"),
                 min: 0.0,
@@ -453,8 +480,8 @@ impl PluginLoader for DelayLoader {
     }
 }
 
-/// A feedback delay reusing [`DelayLine`]. The buffer is sized for
-/// [`DELAY_MAX_SECONDS`] at `activate`; the read tap is the delay-time param in
+/// A feedback delay reusing [`DelayLine`]. The buffer is sized for the internal
+/// maximum delay at `activate`; the read tap is the delay-time param in
 /// samples, clamped into the line.
 pub struct DelayNode {
     line: DelayLine,
@@ -559,6 +586,9 @@ fn convolution_manifest() -> PluginManifest {
         dsp: DspKind::Builtin,
         ui: UiKind::Auto,
         params: vec![ParamDecl {
+            module: String::new(),
+            unit: String::new(),
+            flags: 0,
             id: convolution_param::MIX,
             name: String::from("mix"),
             min: 0.0,

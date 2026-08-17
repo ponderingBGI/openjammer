@@ -262,6 +262,28 @@ fn sampler_plays_loaded_sample_at_root() {
 }
 
 #[test]
+fn sampler_timeline_window_starts_at_source_offset() {
+    let pcm = vec![-0.5, -0.5, -0.5, -0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5];
+    let mut s = SamplerInstrument::new(SR);
+    s.activate(SR, BLOCK);
+    s.set_param(param::ATTACK, 0.0);
+    s.set_param(param::SUSTAIN, 1.0);
+    s.set_sample(Arc::new(SamplerSample::new(pcm, SR, 60)));
+    s.set_param(ojproto::sched_param::SAMPLER_OFFSET_LOW, 5.0);
+    s.set_param(ojproto::sched_param::SAMPLER_OFFSET_HIGH, 0.0);
+    s.note_on(u8::MAX, 127);
+    let out = render(&mut s, 1);
+    assert!(
+        out.iter().take(4).any(|&sample| sample > 0.0),
+        "window trigger did not begin in the positive source region: {out:?}"
+    );
+    assert!(
+        out.iter().take(4).all(|&sample| sample >= 0.0),
+        "window trigger leaked samples before source offset: {out:?}"
+    );
+}
+
+#[test]
 fn sampler_velocity_controls_brightness() {
     // A low fundamental + a strong high partial, so the velocity low-pass changes
     // the spectral BALANCE (a single tone would just be attenuated, not dulled).

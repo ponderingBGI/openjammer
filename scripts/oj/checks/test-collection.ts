@@ -26,6 +26,7 @@ const COVERED_PREFIXES = [
   'packages/oj-ui/src/', // vitest — `bun run test:run`
   'scripts/oj/__tests__/', // bun test — `bun run test:cli`
   'e2e/', // playwright — `bun run test:e2e`
+  'e2e-native/', // bun test — .github/workflows/native-e2e.yml (tauri-driver N1-N5 + determinism)
   'pi-extensions/permission-gate/', // node --test — `bun run test:pi-ext`
 ];
 

@@ -13,6 +13,7 @@ export interface NodeShellProps extends Omit<HTMLAttributes<HTMLDivElement>, 'ti
     agentPending?: boolean;
     /** Props for the draggable header strip (e.g. drag handlers, `cursor`). */
     headerProps?: HTMLAttributes<HTMLDivElement>;
+    headerAction?: ReactNode;
     /** Left-rail input ports — compose `PortRow side="input"`. Edge-anchored,
      *  rendered full-bleed (outside the content padding) so dots hug the card edge. */
     inputs?: ReactNode;
@@ -35,6 +36,7 @@ export function NodeShell({
     dragging = false,
     agentPending = false,
     headerProps,
+    headerAction,
     inputs,
     outputs,
     className,
@@ -55,6 +57,7 @@ export function NodeShell({
             <div className="oj-node__header" {...headerProps}>
                 <span className="oj-node__title">{title}</span>
                 {nodeType != null && <span className="oj-node__type">{nodeType}</span>}
+                {headerAction}
             </div>
             {(inputs != null || outputs != null) && (
                 <div className="oj-node__ports">

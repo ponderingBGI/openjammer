@@ -83,6 +83,9 @@ fn mono_manifest(bytes: &[u8]) -> PluginManifest {
         dsp: DspKind::Wasm,
         ui: UiKind::Auto,
         params: vec![ParamDecl {
+            module: String::new(),
+            unit: String::new(),
+            flags: 0,
             id: 0,
             name: "gain".into(),
             min: 0.0,

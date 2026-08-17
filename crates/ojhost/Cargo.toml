@@ -15,7 +15,7 @@ license.workspace = true
 #
 #   cargo build  -p ojhost                      -> scaffold (no real hosting)
 #   cargo build  -p ojhost --features clap-host -> real CLAP hosting via clack
-#   cargo build  -p ojhost --features juce      -> JUCE C++ host (VST3/CLAP/AU)
+#   cargo build  -p ojhost --features juce      -> JUCE C++ host (VST3/AU)
 default = []
 
 # Pure-Rust CLAP host via the `clack` family (MIT, no C++). This is the
@@ -23,7 +23,7 @@ default = []
 # checkout. Supports CLAP only.
 clap-host = ["dep:clack-host", "dep:clack-extensions"]
 
-# The JUCE 8 C++ host (VST3 + CLAP, + AU on macOS). Pulls JUCE via CMake
+# The JUCE 8 C++ host (VST3, + AU on macOS). Pulls JUCE via CMake
 # FetchContent in `build.rs` and links the small `extern "C"` shim in `cpp/`.
 # Heavy (downloads + compiles JUCE); requires `cmake` + a C++ toolchain (and,
 # for VST3, the Steinberg VST3 SDK headers — see README). Off by default so the
@@ -48,6 +48,7 @@ serde = { workspace = true, features = ["std"] }
 # JSON for the on-disk scan cache. Runtime dep (not dev-only): the cache
 # round-trips through `scan_with` in normal use.
 serde_json = "1.0.150"
+sha2 = "0.10.9"
 
 # Pure-Rust CLAP host (MIT). Only linked with `--features clap-host`. Pinned
 # from a fresh `cargo add` resolve (governing principle #9).
@@ -57,9 +58,10 @@ clack-host = { version = "0.1.0", optional = true }
 # save/restore the plugin's opaque state (the `oj.state` capability — host-managed
 # binary streams) so a project reopens with its CLAP plugins restored. Same
 # pure-Rust clack family (MIT); only linked with `--features clap-host`.
-clack-extensions = { version = "0.1.0", optional = true, features = ["clack-host", "params", "state"] }
+clack-extensions = { version = "0.1.0", optional = true, features = ["clack-host", "audio-ports", "audio-ports-config", "latency", "note-ports", "params", "state", "tail"] }
 
 [dev-dependencies]
+ojcore = { path = "../ojcore", features = ["std"] }
 # CodSpeed-compatible criterion: plain criterion locally, instruction-count +
 # allocation instrumented in CI. Benchmarks the hosted-plugin control plane that
 # must stay off-RT but still instant for live use (scan cache, ids, registration).
@@ -69,6 +71,8 @@ codspeed-criterion-compat = "5.0.1"
 # real `clap_plugin_state` save/load against `ClapBackend`. Only compiled for tests;
 # the state test itself is gated to the `clap-host` cfg (where `clap.rs` exists).
 clack-plugin = "0.1.0"
+libloading = "0.8.9"
+toml = "0.8.23"
 
 # clack-extensions PLUGIN side (test-only): the `clack-plugin` feature exposes
 # `PluginStateImpl` so the in-process state stub can implement the CLAP state
@@ -76,7 +80,7 @@ clack-plugin = "0.1.0"
 # test build; harmless (plugin-side only) when clap-host is off.
 [dev-dependencies.clack-extensions]
 version = "0.1.0"
-features = ["clack-plugin", "state"]
+features = ["clack-plugin", "audio-ports", "audio-ports-config", "latency", "note-ports", "params", "state", "tail"]
 
 # clack-host with its `clack-plugin` feature (test-only): exposes
 # `PluginEntry::load_from_clack`, which loads an IN-PROCESS clack plugin (no dylib).

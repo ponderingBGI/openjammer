@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { describeArrangement } from '../describe';
+import { DESCRIBE_NOTE_CAP, describeArrangement } from '../describe';
 import { normalizeArrangement } from '../normalize';
 import { buildPaperSketch } from '../songs/paperSketch';
 import type { Arrangement } from '../types';
@@ -42,5 +42,50 @@ describe('describeArrangement', () => {
             tracks: [{ ref: 'k', name: 'Keys', mute: true, clips: [] }],
         });
         expect(describeArrangement(arr)).toContain('MUTED');
+    });
+
+    it('BC-30..37 lists addressable note details per clip', () => {
+        const arr = normalizeArrangement({
+            name: 'Notes',
+            tempoBpm: 120,
+            graph: { nodes: [{ ref: 'keys', type: 'keys' }] },
+            sources: {
+                melody: {
+                    id: 'melody', kind: 'midi', name: 'Melody', lengthTick: 960,
+                    notes: [
+                        { id: 'outside', tick: 0, durTick: 60, pitch: 48, vel: 12 },
+                        { id: 'target', tick: 240, durTick: 120, pitch: 64, vel: 91 },
+                    ],
+                },
+            },
+            tracks: [{ ref: 'keys', clips: [{ id: 'clip-a', sourceId: 'melody', startTick: 0, sourceStart: 120, lengthTick: 480 }] }],
+        });
+
+        const out = describeArrangement(arr);
+        expect(out).toContain('notes (first 1 of 1)');
+        expect(out).toContain('{id target, pitch 64, tick 240, durTick 120, vel 91}');
+        expect(out).not.toContain('{id outside,');
+    });
+
+    it('caps dense per-clip note details and reports the omitted count', () => {
+        const count = DESCRIBE_NOTE_CAP + 3;
+        const arr = normalizeArrangement({
+            name: 'Dense', tempoBpm: 120, graph: { nodes: [{ ref: 'keys', type: 'keys' }] },
+            sources: {
+                dense: {
+                    id: 'dense', kind: 'midi', name: 'Dense', lengthTick: count * 10,
+                    notes: Array.from({ length: count }, (_, index) => ({
+                        id: `n${index}`, tick: index * 10, durTick: 8, pitch: 60, vel: index,
+                    })),
+                },
+            },
+            tracks: [{ ref: 'keys', clips: [{ id: 'dense-clip', sourceId: 'dense', startTick: 0, lengthTick: count * 10 }] }],
+        });
+
+        const out = describeArrangement(arr);
+        expect(out).toContain(`notes (first ${DESCRIBE_NOTE_CAP} of ${count})`);
+        expect(out).toContain(`{id n${DESCRIBE_NOTE_CAP - 1},`);
+        expect(out).not.toContain(`{id n${DESCRIBE_NOTE_CAP},`);
+        expect(out).toContain('+3 more');
     });
 });

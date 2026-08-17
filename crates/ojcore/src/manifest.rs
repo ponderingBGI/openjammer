@@ -47,6 +47,16 @@ pub enum UiKind {
 /// (the one param-addressing scheme — same `u16` id as [`ojproto::Param`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParamDecl {
+    /// Optional slash-separated parameter grouping path.
+    #[serde(default)]
+    pub module: String,
+    /// Human-readable display unit (for example `Hz` or `dB`).
+    #[serde(default)]
+    pub unit: String,
+    /// Backend-defined declaration flags. CLAP hosts preserve the complete
+    /// `clap_param_info.flags` bitset here.
+    #[serde(default)]
+    pub flags: u32,
     pub id: u16,
     pub name: String,
     pub min: f32,

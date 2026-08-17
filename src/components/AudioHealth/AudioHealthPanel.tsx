@@ -15,13 +15,14 @@
  * the header, status dots, and actions are oj-ui primitives.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Modal, PanelHeader, Button, StatusDot } from '@openjammer/oj-ui';
 import type { StatusDotStatus } from '@openjammer/oj-ui';
 import { useAudioStore } from '../../store/audioStore';
 import { isTauri } from '../../audio/executor';
 import { gatherDiagnostics } from '../../utils/diagnostics';
 import './AudioHealthPanel.css';
+import { useBindingSet, useModalKeymap } from '../../keymap/useKeymap';
 
 type Status = StatusDotStatus;
 
@@ -55,6 +56,15 @@ const ASK_AI_SEED =
 
 export function AudioHealthPanel() {
     const [open, setOpen] = useState(false);
+    const modalEntries = useMemo(() => [{
+        actionId: 'panel.audioHealth', run: () => { setOpen(false); return true; },
+    }], []);
+    useModalKeymap('audio-health', open, modalEntries);
+    useBindingSet(useMemo(() => ({
+        id: 'audio-health-toggle',
+        scope: 'global' as const,
+        entries: [{ actionId: 'panel.audioHealth', run: () => { setOpen((value) => !value); return true; } }],
+    }), []));
 
     const ready = useAudioStore((s) => s.isAudioContextReady);
     const metrics = useAudioStore((s) => s.audioMetrics);
@@ -64,17 +74,9 @@ export function AudioHealthPanel() {
     // Global toggle (Ctrl/Cmd+Shift+H) + the palette-command bridge. Escape-to-
     // close is now owned by the Modal's focus-trapped handler.
     useEffect(() => {
-        const onKey = (e: KeyboardEvent) => {
-            const hit = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'h';
-            if (!hit) return;
-            e.preventDefault();
-            setOpen((v) => !v);
-        };
         const onCmd = () => setOpen((v) => !v);
-        window.addEventListener('keydown', onKey);
         window.addEventListener('openjammer:toggle-audio-health', onCmd);
         return () => {
-            window.removeEventListener('keydown', onKey);
             window.removeEventListener('openjammer:toggle-audio-health', onCmd);
         };
     }, []);

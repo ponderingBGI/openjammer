@@ -45,6 +45,8 @@
     "test:pi-ext": "node --test pi-extensions/permission-gate/*.test.mjs",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:perf": "playwright test --config=playwright.perf.config.ts",
+    "bench:web": "vitest bench --run --config vitest.bench.config.ts",
     "bench": "cargo bench -p ojcore -p ojcore-dsp -p ojproto -p ojinstrument -p ojhost",
     "bench:codspeed:build": "cargo codspeed build -m simulation -m memory -p ojcore -p ojcore-dsp -p ojproto -p ojinstrument -p ojhost",
     "bench:codspeed:run": "cargo codspeed run -m simulation && cargo codspeed run -m memory",
@@ -72,6 +74,7 @@
     "zustand": "^5.0.9"
   },
   "devDependencies": {
+    "@codspeed/vitest-plugin": "^5.7.1",
     "@earendil-works/pi-coding-agent": "0.79.6",
     "@eslint/js": "^10.0.1",
     "@figma/code-connect": "^1.4.8",

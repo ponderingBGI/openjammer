@@ -24,7 +24,9 @@ import {
     type AgentToolCall,
     type AgentToolName,
     type GetSignalArgs,
+    type ExportSongArgs,
 } from './types';
+import { exportSongForAgent } from '../components/Export/agentExport';
 
 /** Tools that only READ — safe to run here to return real state to Pi. */
 const READ_TOOLS = new Set<AgentToolName>([
@@ -79,6 +81,9 @@ export async function startBridgeListener(): Promise<(() => void) | null> {
                     createEnvPort(),
                 );
                 result = { ok: applied.ok, data: applied.data };
+            } else if (payload.name === 'export_song') {
+                const stats = await exportSongForAgent(payload.args as unknown as ExportSongArgs);
+                result = { ok: true, data: stats };
             } else if (READ_TOOLS.has(payload.name)) {
                 // The read tool's args ARE its fields; mirror the streamed shape.
                 const call = { name: payload.name, args: payload.args } as AgentToolCall;

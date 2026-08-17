@@ -16,7 +16,7 @@ confined to this crate** (the JUCE backend); the rest of the engine stays Rust.
 |-------|---------|-------------|-------|
 | **default (scaffold)** | none | none | `scan` returns empty; `load` is `Unavailable`. Always builds + tests with no toolchain and no network. |
 | `--features clap-host` | CLAP | none (pure Rust) | Real CLAP hosting via [`clack`] (MIT). **Recommended path** in a CMake-less environment. |
-| `--features juce` | VST2 + VST3 + CLAP (+ AU on macOS) | CMake + C++ + VST3 SDK + owner-provisioned VST2 SDK headers | Bundled C++ JUCE 8, built by `build.rs` via CMake FetchContent. VST2 is never vendored; see licensing posture below. |
+| `--features juce` | VST2 + VST3 (+ AU on macOS) | CMake + C++ + VST3 SDK + owner-provisioned VST2 SDK headers | Bundled C++ JUCE 8, built by `build.rs` via CMake FetchContent. CLAP uses the separate clack backend. |
 
 The scaffold default is deliberate: the descriptor marshalling, scan cache,
 crash-blacklist, and the `DspInstance` bridge are all fully present and
@@ -26,7 +26,7 @@ unit-tested without any heavy dependency. Turning on a feature only swaps the
 ```rust
 use ojhost::{scan, HostedPlugin, HostingBackend};
 let found = scan(&[std::path::PathBuf::from("/path/to/plugins")]).unwrap();
-// scaffold: empty; clap-host: real CLAP descriptors; juce: VST3/CLAP/AU
+// scaffold: empty; clap-host: real CLAP descriptors; juce: VST3/AU
 ```
 
 ## Out-of-process scanning posture
@@ -62,11 +62,10 @@ OOP without changing the cache/blacklist file formats.
   local developer explicitly provides a legally obtained SDK/header checkout via
   `VST2_SDK_DIR` and opts in with `OJHOST_ENABLE_VST2=1`. Public release builds
   may advertise VST2 only when CI is provisioned with that private SDK input;
-  otherwise the release must build VST3/CLAP/AU and report VST2 as unavailable.
+  otherwise the release must build VST3/AU and report VST2 as unavailable.
   This keeps source distribution clean while still allowing full VST2 support in
   owner-provisioned binaries.
-* **CLAP** — **MIT**. No restrictions. Both the `clack` (pure-Rust) and JUCE CLAP
-  paths host CLAP plugins under MIT.
+* **CLAP** — **MIT**. No restrictions. Hosted by the pure-Rust `clack` path.
 
 ## Founder setup — to host a REAL plugin
 
@@ -79,7 +78,7 @@ OOP without changing the cache/blacklist file formats.
    `~/.clap`, `/usr/lib/clap`, `/Library/Audio/Plug-Ins/CLAP` (macOS).
 3. No extra system deps. CLAP only (no VST3/AU).
 
-### Option B: full JUCE host (VST2 + VST3 + CLAP + AU)
+### Option B: JUCE host (VST2 + VST3 + AU)
 
 1. Install CMake and a C++17 toolchain:
    `sudo apt-get install -y cmake build-essential` (Linux),
@@ -97,9 +96,8 @@ OOP without changing the cache/blacklist file formats.
 4. **VST2**: provide a legally obtained VST2 SDK/header checkout outside the repo
    and set `OJHOST_ENABLE_VST2=1` plus `VST2_SDK_DIR=/path/to/sdk`. Do not commit
    the SDK or generated header copies.
-5. **CLAP via JUCE**: the CMake build opts in to the community
-   `clap-juce-extensions` (`-DOJHOST_WITH_CLAP=ON`, the build.rs default). If it
-   cannot be fetched, prefer Option A's pure-Rust CLAP path.
+5. **CLAP**: use Option A. `clap-juce-extensions` wraps JUCE plugins for CLAP but
+   explicitly does not add CLAP hosting to JUCE.
 6. Plugin directories (defaults vary by OS):
    * VST3: `~/.vst3`, `/usr/lib/vst3` (Linux) · `~/Library/Audio/Plug-Ins/VST3`,
      `/Library/Audio/Plug-Ins/VST3` (macOS) · `C:\Program Files\Common
@@ -122,9 +120,8 @@ and type-check. To finish enabling it in a real environment:
 * install CMake + toolchain (above) and run a `--features juce` build to compile
   JUCE + the shim (cannot be verified in the scaffold sandbox: no CMake there);
 * confirm/extend the platform link libraries in `build.rs` for your OS;
-* wire CLAP param/note events on the `clack` path (`set_param` is currently a
-  no-op there — it needs the `clack-extensions` params extension; the JUCE path
-  already forwards params + MIDI notes).
+* exercise the JUCE path on provisioned release builders and keep its
+  params/state/note parity checked against the pure-Rust CLAP conformance suite.
 
 [`clack`]: https://github.com/prokopyl/clack
 [`ojcore::DspInstance`]: ../ojcore/src/dsp.rs

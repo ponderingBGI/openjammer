@@ -9,6 +9,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 import wasm from 'vite-plugin-wasm'
 import topLevelAwait from 'vite-plugin-top-level-await'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 // Browserslist staleness: we pin `caniuse-lite` as a direct dependency and refresh
 // it with `bunx update-browserslist-db@latest` (NEVER `npx` — bun-only rule), so the
@@ -73,6 +74,9 @@ export default defineConfig({
       // the page (and yank the AudioContext) mid-performance. The app surfaces a
       // non-blocking prompt and applies the update on idle (see PwaUpdatePrompt).
       registerType: 'prompt',
+      // Keep the fetch handler self-contained. A split Workbox runtime can leave
+      // a cold, fully-offline browser unable to start the worker that owns the
+      // precache, stranding even assets that are present in CacheStorage.
       includeAssets: ['favicon.ico', 'robots.txt', 'apple-touch-icon.png'],
       manifest: {
         name: 'OpenJammer',
@@ -102,7 +106,11 @@ export default defineConfig({
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        inlineWorkboxRuntime: true,
+        // The application entry imports the CRDT and audio-engine wasm modules.
+        // Caching only JS/CSS leaves the offline shell stranded before React can
+        // mount, even though the navigation itself is served successfully.
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2,wasm}'],
         // Allow larger files (audio samples can be big)
         maximumFileSizeToCacheInBytes: 50 * 1024 * 1024, // 50MB
         // The static /download page is NOT the SPA. Without this, the SW's
@@ -178,6 +186,11 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
+      // Use Loro's bundler entry so its 3 MB WASM is emitted as a real asset
+      // instead of a 4.3 MB minified base64 JavaScript module. Collaboration is
+      // imported on first host/join (see collabStore), and the PWA glob below
+      // precaches `.wasm`, so that first use still works when fully offline.
+      'loro-crdt': fileURLToPath(new URL('./node_modules/loro-crdt/bundler/index.js', import.meta.url)),
       '@': '/src',
       // The shared TS protocol package (the wire/event SSOT). Aliased so both the
       // bare workspace specifier and app code resolve to the single source file

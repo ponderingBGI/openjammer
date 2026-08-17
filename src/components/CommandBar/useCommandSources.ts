@@ -34,6 +34,9 @@ import type { Action, ActionCtx, Command } from "../../store/commandRegistry";
 import { seedPaletteLearning } from "../../store/paletteLearningSeed";
 import { useAiLearningStore } from "../../store/aiLearningStore";
 import { getInvoke } from "../../ai/tauri";
+import { useEditingContextStore } from "../../store/editingContextStore";
+import { applyPianoRollQuantize } from "../PianoRoll";
+import { useUiViewStore } from "../../store/uiViewStore";
 
 // Human-readable group label per category (matches the menu's casing).
 const CATEGORY_LABEL: Record<NodeCategory, string> = {
@@ -127,8 +130,52 @@ function buildNodeActions(): Action[] {
  * `surfaces: ['palette']`, so they appear ONLY in the Ctrl+K palette (the strict
  * SUPERSET) and never clutter the curated right-click menu.
  */
-function buildAppCommands(): Command[] {
+function buildAppCommands(): Array<Command | Action> {
   return [
+    {
+      id: "pianoroll.quantize",
+      title: "Quantize selected notes",
+      group: "Piano Roll",
+      keywords: ["quantize", "notes", "grid", "swing", "strength"],
+      run: () => {
+        const surface = useUiViewStore.getState().surface === "pianoroll" ? "pianoroll" : "arrangement";
+        applyPianoRollQuantize(useEditingContextStore.getState().viewports[surface].selection.noteIds);
+      },
+    },
+    {
+      id: "arrangement.delete-time",
+      title: "Delete selected time",
+      group: "Arrangement",
+      keywords: ["delete", "time", "ripple", "close gap"],
+      run: () => {
+        window.dispatchEvent(new CustomEvent("openjammer:time-prompt", { detail: { mode: "delete" } }));
+      },
+    },
+    {
+      id: "arrangement.insert-time",
+      title: "Insert time at playhead",
+      group: "Arrangement",
+      keywords: ["insert", "time", "ripple", "open gap"],
+      run: () => {
+        window.dispatchEvent(new CustomEvent("openjammer:time-prompt", { detail: { mode: "insert" } }));
+      },
+    },
+    {
+      id: "arrangement.loop-from-selection",
+      title: "Loop from time selection",
+      group: "Arrangement",
+      keywords: ["loop", "range", "selection"],
+      run: () => window.dispatchEvent(new CustomEvent("openjammer:loop-from-selection")),
+    },
+    {
+      id: "arrangement.export-song",
+      title: "Export song…",
+      group: "Arrangement",
+      keywords: ["bounce", "render", "master", "wav", "flac", "export"],
+      targets: ["global"],
+      surfaces: ["palette"],
+      run: () => window.dispatchEvent(new CustomEvent("openjammer:export-song")),
+    },
     {
       id: "app.settings.toggle",
       title: "Open Settings",

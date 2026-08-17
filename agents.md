@@ -83,6 +83,47 @@ stay TypeScript). Full crate map and the CI commands that enforce all of this:
 These are not style preferences; they keep the codebase lean enough to trust under a
 performer's hands.
 
+### Model routing & delegation
+
+Use the strongest judgment where it matters and the economical workhorse where work is
+bounded. Never optimize inference cost at the expense of shipped quality — escalating is
+cheaper than shipping mediocre work. Ratings are defaults, not limits; higher **Cost** =
+more economical in *our* environment (subscriptions, not API list price).
+
+| Model | Cost | Intelligence | Taste | Default role |
+|---|---:|---:|---:|---|
+| `gpt-5.6-sol` (via `codex exec`) | 10 | 9 | 2 | **Default workhorse.** Excellent when told exactly what to do: bounded implementation, internet research, low-level optimisation, finding hidden bugs/edge cases, independent second-opinion review (it thinks differently from Anthropic models), and driving human-made UIs (browser e2e). Horrendous taste, from API design to UI — always hand it the design; if you don't, it will make it work but not make it nice. |
+| Fable 5 | 1 | 10 | 10 | Orchestration, final judgment, taste. Should delegate rather than grind. |
+| Opus 5 | 5 | 8 | 9 | The taste workhorse: UIs, public APIs/SDKs, anything perception-facing. Pair it with `gpt-5.6-sol` — Opus brings the taste, codex the technical grind. |
+| Sonnet 5 | 5 | 4 | 5 | Don't use — not good enough for its cost. |
+| Haiku 4.5 | 10 | 1 | 1 | Bridge only — the shim a workflow spawns to invoke `codex exec`. Never substantive work. |
+
+Invoke gpt-5.6-sol like this:
+
+```bash
+codex exec --skip-git-repo-check --yolo -m gpt-5.6-sol "<self-contained prompt>" < /dev/null
+```
+
+`--yolo` (bypass approvals + sandbox) matches the bypass-permissions mode the harness
+already runs in — the environment is the boundary; without it codex tries to sandbox
+itself with bubblewrap and dies with a bare `Operation not permitted`. `< /dev/null` is
+not optional: codex ≥0.144 blocks reading stdin and hangs without it.
+
+**Reaching codex from a workflow:** the `Workflow` tool only selects Claude models. Spawn
+a **Haiku** agent at low effort whose entire job is to run the `codex exec` line above,
+persist codex's full output to an artifact path, read it back, and return a short summary.
+Prefix the node's label with `[CODEX]` so codex-backed steps are visible in `/workflows`.
+The bridge coordinates — it never redoes codex's substantive work.
+
+**Delegation contract:** prompts must be self-contained (codex inherits nothing — state
+the goal, fixed decisions, owned files, acceptance criteria, verification commands, report
+format + artifact path). Require the delegate to report what changed / what it verified /
+what it could NOT verify / risks. Treat reports as claims — verify against code, tests, or
+a real render before relying on them. A timeout doesn't prove failure — check for the
+artifact first. And the OpenJammer-specific clause: **codex never signs off on feel** —
+anything a performer perceives (latency, glitches, UI) gets final judgment from a
+taste-tier model or a human with audio actually playing.
+
 ### Package manager: Bun only
 
 **Always use `bun`, never `npm`, `yarn`, `pnpm`, or `npx`** — one toolchain, one

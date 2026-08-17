@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { assertAudiblePeak, decodeWav } from './helpers/audio';
 
 // Render-smoke for the browser PWA target (plan §4.2 / §3). Proves the production
 // bundle loads, comes up cross-origin isolated (so the SharedArrayBuffer fast
@@ -201,5 +202,51 @@ test.describe('PWA shell', () => {
             unexpectedWarnings,
             `unexpected console warnings (not on allowlist):\n${unexpectedWarnings.join('\n')}`,
         ).toEqual([]);
+    });
+
+    test('browser export downloads a valid 24-bit WAV blob', async ({ page }) => {
+        test.setTimeout(90_000);
+        await page.goto('/');
+        await page.getByRole('button', { name: /play here in your browser/i }).click();
+        await page.keyboard.press('Tab');
+        await page.getByRole('button', { name: /start from 'paper sketch'/i }).click();
+        await page.getByRole('button', { name: 'Export', exact: true }).click();
+
+        const dialog = page.getByRole('dialog', { name: 'Export song' });
+        await expect(dialog).toBeVisible();
+        await expect(dialog.getByText(/faster than real time/i)).toBeVisible();
+
+        const downloadPromise = page.waitForEvent('download', { timeout: 60_000 });
+        await dialog.getByRole('button', { name: 'Export song' }).click();
+        const download = await downloadPromise;
+        const stream = await download.createReadStream();
+        const chunks: Buffer[] = [];
+        for await (const chunk of stream) chunks.push(Buffer.from(chunk));
+        const bytes = Buffer.concat(chunks);
+
+        expect(download.suggestedFilename()).toMatch(/\.wav$/i);
+        expect(bytes.subarray(0, 4).toString('ascii')).toBe('RIFF');
+        expect(bytes.subarray(8, 12).toString('ascii')).toBe('WAVE');
+        expect(bytes.readUInt16LE(20)).toBe(1);
+        expect(bytes.readUInt16LE(22)).toBe(2);
+        expect(bytes.readUInt16LE(34)).toBe(24);
+        expect(bytes.subarray(36, 40).toString('ascii')).toBe('data');
+        expect(bytes.length).toBeGreaterThan(44);
+        assertAudiblePeak(decodeWav(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)));
+    });
+
+    test('First Light starter exports in-browser @slow', async ({ page }) => {
+        test.setTimeout(180_000);
+        await page.goto('/');
+        await page.getByRole('button', { name: /play here in your browser/i }).click();
+        await page.keyboard.press('Tab');
+        await page.getByRole('button', { name: /start from 'first light'/i }).click();
+        await expect(page.locator('.arrangement-track')).toHaveCount(5);
+        await page.getByRole('button', { name: 'Export', exact: true }).click();
+        const dialog = page.getByRole('dialog', { name: 'Export song' });
+        const downloadPromise = page.waitForEvent('download', { timeout: 150_000 });
+        await dialog.getByRole('button', { name: 'Export song' }).click();
+        const download = await downloadPromise;
+        expect(download.suggestedFilename()).toMatch(/first[ -]light.*\.wav$/i);
     });
 });

@@ -50,6 +50,10 @@ export function KeybindingsPanel() {
     // Handle key capture when editing
     useEffect(() => {
         if (!editing) return;
+        // Keep the just-captured combo synchronous with the native key events.
+        // React may batch the state render until after keyup on a quick tap.
+        let pendingCombo = editing.pressedKeys;
+        const actionId = editing.actionId;
 
         function handleKeyDown(e: KeyboardEvent) {
             e.preventDefault();
@@ -80,36 +84,37 @@ export function KeybindingsPanel() {
             if (!combo.shift) delete combo.shift;
             if (!combo.alt) delete combo.alt;
 
+            pendingCombo = combo;
             setEditing((prev) => prev ? { ...prev, pressedKeys: combo } : null);
         }
 
         function handleKeyUp() {
             // When user releases keys with a valid combo, check for conflicts
-            if (editing?.pressedKeys) {
-                const conflicts = getConflictingActions(editing.actionId, editing.pressedKeys);
+            if (pendingCombo) {
+                const conflicts = getConflictingActions(actionId, pendingCombo);
 
                 if (conflicts.length > 0) {
                     // Show conflict dialog
                     setConflict({
-                        actionId: editing.actionId,
-                        combo: editing.pressedKeys,
+                        actionId,
+                        combo: pendingCombo,
                         conflicts,
                     });
                     setEditing(null);
                 } else {
                     // No conflicts, save directly
-                    setBinding(editing.actionId, editing.pressedKeys);
+                    setBinding(actionId, pendingCombo);
                     setEditing(null);
                 }
             }
         }
 
-        window.addEventListener('keydown', handleKeyDown, true);
-        window.addEventListener('keyup', handleKeyUp, true);
+        document.addEventListener('keydown', handleKeyDown, true);
+        document.addEventListener('keyup', handleKeyUp, true);
 
         return () => {
-            window.removeEventListener('keydown', handleKeyDown, true);
-            window.removeEventListener('keyup', handleKeyUp, true);
+            document.removeEventListener('keydown', handleKeyDown, true);
+            document.removeEventListener('keyup', handleKeyUp, true);
         };
     }, [editing, setBinding, getConflictingActions]);
 

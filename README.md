@@ -58,10 +58,36 @@ What you get:
 - 🎛️ **Bring your own sound** — samples, SoundFonts, Faust/code-node DSP, and your
   installed CLAP/VST3 plugins.
 - 🔁 **Layer-based looping** — stack loops as layers, with per-layer mute/delete/effects.
+- 🎼 **A real on-canvas DAW** — arrange clips, edit MIDI in the piano roll, mix and
+  automate tracks, record, and export 24-bit WAV or FLAC from the same Song document.
 - 📴 **Offline-capable PWA** — works after first visit, no external API calls.
 
 For who plays this and why, see **[PRODUCT.md](PRODUCT.md)**; for the visual system, the
 "Living Sketchbook," see **[DESIGN.md](DESIGN.md)**.
+
+## The DAW
+
+Add a **Song** node, press **E** to enter its timeline, and press **Tab** to move back to
+the patch canvas. The arrangement surface includes clip and range editing, a shared-clock
+piano roll, track mixer and playback automation, MIDI/native-audio recording, section and
+loop markers, live preview, project persistence, and finished-file export. Humans and the
+Ctrl/Cmd+K agent use the same reversible song verbs, so every change is visible and one
+Ctrl+Z away. Start with the compact **Paper Sketch** or the 24-bar **First Light** demo.
+
+See **[docs/timeline.md](docs/timeline.md)** for the full editing contracts, export paths,
+agent parity, and the honest remaining gaps (comping UI, Write/Touch capture, and PDC).
+
+## Hosted plugins
+
+The desktop app hosts CLAP as its first-class third-party format through the pure-Rust
+`clack` backend. VST3 and Audio Unit support are available in JUCE-enabled builds (AU is
+macOS-only). Scanning is quarantined, every output block passes through the permanent
+OutputGuard, and a late instance is auto-bypassed with held-note release while other tracks
+keep flowing. Vendor GUI embedding on the CLAP-only path is still pending; its generic named
+parameter surface remains available.
+
+See **[docs/plugins-hosting.md](docs/plugins-hosting.md)** for the exact reliability promises,
+support tiers, Bench model, troubleshooting, and the pinned OSS compatibility matrix.
 
 ---
 
@@ -73,13 +99,13 @@ You only need this to hack on OpenJammer itself — players use the links above.
 bun install   # bun only — one toolchain, one lockfile
 bun dev       # browser dev server (Vite), prints a localhost URL
 bun native        # desktop app, native low-latency engine (first run: bun run oj setup)
-bun native --all  # full hosted-plugin dev loop: VST3 + CLAP (+ AU on macOS)
+bun native --all  # heavy JUCE hosted-plugin loop: VST3 (+ AU on macOS)
 ```
 
 For the browser tier, open the printed URL and click **Start OpenJammer**. For the desktop
 tier, `bun native` opens the app window on its own with the fast scaffold plugin host (no
-JUCE/CMake build); use `bun native --all` for the full hosted-plugin path (VST3 + CLAP,
-+ AU on macOS). `bun native --plugins` remains an alias for the same JUCE host.
+JUCE/CMake build); use `bun native --clap` for CLAP or `bun native --all` for the heavy JUCE
+VST3 path (+ AU on macOS). `bun native --plugins` remains an alias for the JUCE host.
 First workflow: right-click the canvas → add a Keyboard node and an Instrument (e.g. Classic
 Piano), connect them, and play the Q–P row — or press **Ctrl/Cmd+K** and ask the AI to build it
 for you. Native setup + prerequisites: **[CONTRIBUTING.md](CONTRIBUTING.md#native-desktop-tauri)**.
@@ -92,8 +118,8 @@ for you. Native setup + prerequisites: **[CONTRIBUTING.md](CONTRIBUTING.md#nativ
 ## How it works — the core
 
 OpenJammer is powered by **`ojcore`**: one minimal, real-time-safe **Rust** audio core
-that compiles to **native** (low-latency `cpal`; optional VST3/AU/CLAP hosting via JUCE or
-pure-Rust CLAP feature flags) **and** to **WebAssembly** (the zero-install AudioWorklet PWA),
+that compiles to **native** (low-latency `cpal`; VST3/AU via JUCE or CLAP via pure-Rust
+feature flags) **and** to **WebAssembly** (the zero-install AudioWorklet PWA),
 driven by one shared **React 19 + TypeScript** control plane and selected by `VITE_OJ_EXECUTOR`. The
 audio thread never allocates, locks, or blocks — a guarantee enforced mechanically in CI.
 
@@ -113,6 +139,7 @@ Full guides, the node catalog, audio setup, and the architecture live at the
 - **[Sound & instruments](https://ponderingbgi.github.io/openjammer/play/sound-and-instruments/)** — procedural voices, samples, SoundFonts, CLAP/VST3.
 - **[Troubleshooting with the AI](https://ponderingbgi.github.io/openjammer/play/troubleshooting-with-the-ai/)** — let Ctrl/Cmd+K read your logs and fix your setup.
 - **[Architecture & real-time safety](https://ponderingbgi.github.io/openjammer/build/architecture/real-time-safety/)** — how the audio thread never blocks.
+- **[Plugin hosting contract](docs/plugins-hosting.md)** — formats, containment, quarantine, and compatibility testing.
 
 ---
 

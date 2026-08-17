@@ -50,7 +50,10 @@ import type { ParamDecl } from '../engine/manifest';
 import { useGraphStore } from './graphStore';
 import { useCanvasStore } from './canvasStore';
 import { useCanvasNavigationStore } from './canvasNavigationStore';
-import { beginAiFrame, commitAiFrame } from '../collab';
+// This no-op-unless-connected bridge is intentionally independent of the CRDT
+// implementation. Import it directly so opening the app/agent does not pull the
+// optional Loro collaboration stack across the first-use boundary.
+import { beginAiFrame, commitAiFrame } from '../collab/aiCollabFrame';
 import type {
     AgentBackend,
     AgentTask,

@@ -12,12 +12,13 @@
 //! after [`DspInstance::activate`].
 
 use std::sync::Mutex;
+use std::time::Duration;
 
 use ojcore::{DspInstance, ParamDecl, PluginLoader, PluginManifest, PortDecl, ProcessCtx};
-use ojcore::{DspKind, ExtId, StateSave, UiKind};
+use ojcore::{DspKind, ExtId, LatencyExt, StateSave, TailExt, UiKind};
 use ojproto::PrimitiveKind;
 
-use crate::backend::{self, HostedBackend};
+use crate::backend::{self, HostedBackend, HostedEvent, ParamGesture};
 use crate::descriptor::PluginDescriptor;
 use crate::error::HostError;
 
@@ -46,10 +47,18 @@ fn fnv1a32_hex(bytes: &[u8]) -> String {
 }
 
 /// A loaded, processable third-party plugin. The safe wrapper over a
-/// backend-specific [`HostedBackend`]. Construct via [`HostedPlugin::load`].
+/// backend-specific implementation. Construct via [`HostedPlugin::load`].
 pub struct HostedPlugin {
     backend: Box<dyn HostedBackend>,
     descriptor: PluginDescriptor,
+    output_faulted: bool,
+}
+
+/// Opaque plugin state paired with a deterministic content address.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostedStateBlob {
+    pub bytes: Vec<u8>,
+    pub content_hash: String,
 }
 
 /// A native top-level editor window for a hosted plugin. This is control/UI-rate
@@ -75,8 +84,40 @@ impl PluginEditor {
 }
 
 impl HostedPlugin {
-    /// Load and activate the plugin described by `desc` at `sample_rate` /
-    /// `max_block`. Returns [`HostError::Unavailable`] in the scaffold build (no
+    /// Load and activate on a disposable control worker, bounded by `timeout`.
+    /// The audio thread never waits for main-thread plugin work. Rust cannot
+    /// safely kill a thread stuck in foreign activation code, so a timed-out
+    /// worker is detached and its instance is discarded if it eventually
+    /// returns; process isolation is required to reclaim a permanently wedged
+    /// activation call.
+    pub fn load_with_activation_timeout(
+        desc: &PluginDescriptor,
+        sample_rate: f32,
+        max_block: usize,
+        timeout: Duration,
+    ) -> Result<Self, HostError> {
+        let descriptor = desc.clone();
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("ojhost-activate".into())
+            .spawn(move || {
+                let result = Self::load(&descriptor, sample_rate, max_block).map(|mut plugin| {
+                    plugin.activate(sample_rate, max_block);
+                    plugin
+                });
+                let _ = tx.send(result);
+            })
+            .map_err(|error| HostError::Load {
+                message: format!("failed to spawn activation worker: {error}"),
+            })?;
+        rx.recv_timeout(timeout).map_err(|_| HostError::Load {
+            message: format!("plugin activation exceeded {} ms", timeout.as_millis()),
+        })?
+    }
+
+    /// Instantiate the plugin described by `desc`, leaving it inactive so state
+    /// can be restored before [`HostedPlugin::activate`]. Returns
+    /// [`HostError::Unavailable`] in the scaffold build (no
     /// hosting backend compiled in).
     pub fn load(
         desc: &PluginDescriptor,
@@ -87,6 +128,7 @@ impl HostedPlugin {
         Ok(Self {
             backend,
             descriptor: desc.clone(),
+            output_faulted: false,
         })
     }
 
@@ -100,6 +142,95 @@ impl HostedPlugin {
     pub fn latency_samples(&self) -> u32 {
         self.backend.latency_samples()
     }
+
+    pub fn activate(&mut self, sample_rate: f32, max_block: usize) {
+        self.backend.activate(sample_rate, max_block);
+    }
+
+    pub fn start_processing(&mut self) {
+        self.backend.start_processing();
+    }
+
+    pub fn stop_processing(&mut self) {
+        self.backend.stop_processing();
+    }
+
+    pub fn deactivate(&mut self) {
+        self.backend.deactivate();
+    }
+
+    pub fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], nframes: usize) {
+        self.backend.process(inputs, outputs, nframes);
+        for output in outputs {
+            let n = nframes.min(output.len());
+            self.output_faulted |= ojcore::sanitize(&mut output[..n]);
+        }
+    }
+
+    /// Consume the OutputGuard fault latch.
+    pub fn take_output_fault(&mut self) -> bool {
+        core::mem::take(&mut self.output_faulted)
+    }
+
+    pub fn queue_event(&mut self, event: HostedEvent) {
+        self.backend.queue_event(event);
+    }
+
+    pub fn set_param(&mut self, id: u16, value: f32) {
+        self.backend.set_param(id, value);
+    }
+
+    pub fn param_value_to_text(&mut self, id: u16, value: f64) -> Option<String> {
+        self.backend.param_value_to_text(id, value)
+    }
+
+    pub fn param_text_to_value(&mut self, id: u16, text: &str) -> Option<f64> {
+        self.backend.param_text_to_value(id, text)
+    }
+
+    pub fn take_param_gestures(&mut self) -> Vec<ParamGesture> {
+        self.backend.take_param_gestures()
+    }
+
+    pub fn take_output_events(&mut self) -> Vec<HostedEvent> {
+        self.backend.take_output_events()
+    }
+
+    pub fn take_descriptor_rescan_request(&self) -> bool {
+        self.backend.take_descriptor_rescan_request()
+    }
+
+    pub fn tail_samples(&self) -> Option<u32> {
+        self.backend.tail_samples()
+    }
+
+    pub fn save_state_blob(&self) -> HostedStateBlob {
+        let bytes = self.backend.save_state();
+        HostedStateBlob {
+            content_hash: sha256_hex(&bytes),
+            bytes,
+        }
+    }
+
+    pub fn restore_state(&mut self, bytes: &[u8]) {
+        self.backend.restore_state(bytes);
+    }
+
+    pub fn restore_state_checked(&mut self, bytes: &[u8]) -> bool {
+        self.backend.restore_state_checked(bytes)
+    }
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let hash = Sha256::digest(bytes);
+    let mut encoded = String::with_capacity(7 + hash.len() * 2);
+    encoded.push_str("sha256:");
+    for byte in hash {
+        use std::fmt::Write;
+        write!(&mut encoded, "{byte:02x}").expect("writing to String is infallible");
+    }
+    encoded
 }
 
 /// An [`ojcore::DspInstance`] backed by a hosted third-party plugin.
@@ -109,19 +240,28 @@ impl HostedPlugin {
 /// all scratch at load/activate, so `process` is allocation-free.
 pub struct PluginHostNode {
     plugin: HostedPlugin,
+    latency: LatencyExt,
+    tail: TailExt,
     /// Latched `true` once the plugin faults (a segfault caught at the foreign-code
     /// boundary). From then on `process` runs a dry passthrough and never re-enters
     /// the plugin — the crash latch (mirrors `ojwasm`'s `bypassed`). Cleared only by
     /// a fresh `instantiate` on the next off-RT graph swap.
     faulted: bool,
+    /// The host-boundary OutputGuard had to scrub or clamp foreign audio.
+    output_faulted: bool,
 }
 
 impl PluginHostNode {
     /// Wrap an already-loaded [`HostedPlugin`] as a DSP node.
     pub fn new(plugin: HostedPlugin) -> Self {
+        let latency = LatencyExt::new(plugin.latency_samples());
+        let tail = TailExt::new(plugin.tail_samples());
         Self {
             plugin,
+            latency,
+            tail,
             faulted: false,
+            output_faulted: false,
         }
     }
 
@@ -141,6 +281,16 @@ impl PluginHostNode {
 impl DspInstance for PluginHostNode {
     fn activate(&mut self, sample_rate: f32, max_block: usize) {
         self.plugin.backend.activate(sample_rate, max_block);
+        self.latency = LatencyExt::new(self.plugin.latency_samples());
+        self.tail = TailExt::new(self.plugin.tail_samples());
+    }
+
+    fn start_processing(&mut self) {
+        self.plugin.backend.start_processing();
+    }
+
+    fn stop_processing(&mut self) {
+        self.plugin.backend.stop_processing();
     }
 
     fn process(&mut self, ctx: &mut ProcessCtx<'_, '_>) {
@@ -162,6 +312,16 @@ impl DspInstance for PluginHostNode {
         if faulted {
             self.faulted = true;
             dry_passthrough(ctx);
+        } else {
+            // The guard lives here, at the last point foreign samples exist
+            // before joining the graph. NaN/Inf and denormals become zero;
+            // excessive finite output is hard-clamped to +/-4 headroom.
+            for output in ctx.outputs.iter_mut() {
+                let n = ctx.nframes.min(output.len());
+                if ojcore::sanitize(&mut output[..n]) {
+                    self.output_faulted = true;
+                }
+            }
         }
     }
 
@@ -181,12 +341,18 @@ impl DspInstance for PluginHostNode {
         self.faulted
     }
 
+    fn runtime_fault(&self) -> Option<ojproto::FaultKind> {
+        self.output_faulted.then_some(ojproto::FaultKind::NonFinite)
+    }
+
     /// Provide the `oj.state` capability (save half): a caller downcasts the
     /// returned `Any` to `&PluginHostNode` and calls [`StateSave::save`]. A faulted
     /// node keeps providing it (its last good state is still the backend's).
     fn extension(&self, id: ExtId) -> Option<&dyn core::any::Any> {
         match id {
+            ExtId::Latency => Some(&self.latency),
             ExtId::State => Some(self),
+            ExtId::Tail => Some(&self.tail),
             _ => None,
         }
     }
@@ -218,7 +384,7 @@ impl StateSave for PluginHostNode {
 ///
 /// `instantiate` loads the real plugin off the RT thread. If loading fails (no
 /// backend in the scaffold build, or a bad plugin), it falls back to a silent
-/// [`PassthroughNode`] so the graph still compiles and runs — the engine never
+/// an internal passthrough node so the graph still compiles and runs — the engine never
 /// panics on a missing plugin.
 pub struct PluginHostLoader {
     manifest: PluginManifest,
@@ -236,6 +402,9 @@ impl PluginHostLoader {
         let params: Vec<ParamDecl> = if descriptor.params.is_empty() {
             (0..descriptor.param_count.min(u16::MAX as u32) as u16)
                 .map(|i| ParamDecl {
+                    module: String::new(),
+                    unit: String::new(),
+                    flags: 0,
                     id: i,
                     name: alloc_param_name(i),
                     min: 0.0,
@@ -250,6 +419,9 @@ impl PluginHostLoader {
                 .take(u16::MAX as usize)
                 .enumerate()
                 .map(|(i, p)| ParamDecl {
+                    module: p.module.clone(),
+                    unit: p.unit.clone(),
+                    flags: p.flags,
                     id: i as u16,
                     name: p.name.clone(),
                     min: p.min as f32,
@@ -307,7 +479,12 @@ impl PluginLoader for PluginHostLoader {
     }
 
     fn instantiate(&self, sample_rate: f32, max_block: usize) -> Box<dyn DspInstance> {
-        match HostedPlugin::load(&self.descriptor, sample_rate, max_block) {
+        match HostedPlugin::load_with_activation_timeout(
+            &self.descriptor,
+            sample_rate,
+            max_block,
+            Duration::from_millis(500),
+        ) {
             Ok(plugin) => Box::new(PluginHostNode::new(plugin)),
             Err(e) => {
                 if let Ok(mut slot) = self.last_error.lock() {
@@ -377,10 +554,15 @@ mod tests {
             path: "/plugins/AcmeSynth.clap".into(),
             format: PluginFormat::Clap,
             is_instrument: true,
+            features: vec!["instrument".into()],
+            has_gui: false,
             ports: PortCounts {
                 audio_in: 0,
                 audio_out: 2,
             },
+            audio_ports: Vec::new(),
+            port_configs: Vec::new(),
+            note_ports: PortCounts::default(),
             param_count: params,
             params: Vec::new(),
             latency_samples: 128,
@@ -533,6 +715,7 @@ mod tests {
                 fault_at: 2,
             }),
             descriptor: sample_desc(0),
+            output_faulted: false,
         };
         let mut node = PluginHostNode::new(plugin);
         node.activate(48_000.0, 64);
@@ -613,6 +796,7 @@ mod tests {
                 blob: vec![9, 8, 7],
             }),
             descriptor: sample_desc(0),
+            output_faulted: false,
         });
         let any = node
             .extension(ExtId::State)
@@ -621,15 +805,18 @@ mod tests {
             .downcast_ref::<PluginHostNode>()
             .expect("downcasts to the node");
         assert_eq!(StateSave::save(saver), vec![9, 8, 7]);
-        assert!(
-            node.extension(ExtId::Latency).is_none(),
-            "only oj.state is provided (not yet-unwired capabilities)"
+        assert_eq!(
+            node.extension(ExtId::Latency)
+                .and_then(|ext| ext.downcast_ref::<LatencyExt>())
+                .map(LatencyExt::latency_samples),
+            Some(0)
         );
 
         // RESTORE into a fresh node via the &mut seam (what compile applies at load).
         let mut fresh = PluginHostNode::new(HostedPlugin {
             backend: Box::new(StatefulBackend { blob: Vec::new() }),
             descriptor: sample_desc(0),
+            output_faulted: false,
         });
         fresh.restore_state(&[1, 2, 3]);
         let restored = fresh.extension(ExtId::State).unwrap();

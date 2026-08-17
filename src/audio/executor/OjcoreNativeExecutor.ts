@@ -41,6 +41,14 @@ import type {
     SamplerHandle,
     SignalLevelsCallback,
 } from './Executor';
+import {
+    routeTransportFrames,
+    type ArrangementCaptureResult,
+    type ArrangementPlayback,
+    type ArrangementStartOptions,
+    type LiveNoteCallback,
+    type TransportFrameCallback,
+} from './timelinePlayback';
 import { emitWithIndex, remapForBackend, type NodeIdxMap } from '../ojgraph';
 import { resolveKeyboardNotes } from '../ojgraph';
 import {
@@ -62,7 +70,6 @@ import {
 } from './ojcoreHandles';
 import { classifyLatency, type LatencyReport } from './latency';
 import { logger } from '../../utils/log';
-import type { ScheduledCommand } from './arrangementScheduler';
 import { setEngineHealth, useEngineHealthStore } from '../../store/engineHealthStore';
 import {
     ingestEngineEvents,
@@ -141,6 +148,7 @@ export function isTauri(): boolean {
  * recorder / sampler / metering UI works on the native path.
  */
 export class OjcoreNativeExecutor implements Executor {
+    getTimelineBackend(): 'native' { return 'native'; }
     private invoke = getInvoke();
     private getNodes: (() => Map<string, GraphNode>) | null = null;
     private getConnections: (() => Map<string, Connection>) | null = null;
@@ -156,6 +164,10 @@ export class OjcoreNativeExecutor implements Executor {
      *  so the picker selection re-binds but a plain re-push does not. */
     private boundVoiceKey = new Map<string, string>();
     private signalCallbacks = new Set<SignalLevelsCallback>();
+    private transportCallbacks = new Set<TransportFrameCallback>();
+    private liveNoteCallbacks = new Set<LiveNoteCallback>();
+    private previewGeneration = 0;
+    private captureBaselineTakeId: number | null = null;
     /** Latest per-node levels, keyed by visual node id (for meter delivery). */
     private levels = new Map<string, number>();
     /** Interval id for the meter poll loop (engine -> UI level stream). */
@@ -275,6 +287,8 @@ export class OjcoreNativeExecutor implements Executor {
             this.eventPollId = null;
         }
         this.signalCallbacks.clear();
+        this.transportCallbacks.clear();
+        this.liveNoteCallbacks.clear();
         this.levels.clear();
         this.looperLoopLen.clear();
         this.caps.clear();
@@ -321,6 +335,7 @@ export class OjcoreNativeExecutor implements Executor {
             return; // transient; next tick retries
         }
         if (!Array.isArray(frames) || frames.length === 0) return;
+        routeTransportFrames(frames, this.transportCallbacks);
         const haveSignalSubs = this.signalCallbacks.size > 0;
         let changed = false;
         for (const frame of frames) {
@@ -760,9 +775,11 @@ export class OjcoreNativeExecutor implements Executor {
         for (const n of notes) {
             const idx = this.index.get(n.targetNodeId);
             if (idx === undefined) continue;
+            const vel = Math.round(n.velocity * 127);
             this.send({
-                NoteOn: { node: idx, note: n.midiNote, vel: Math.round(n.velocity * 127) },
+                NoteOn: { node: idx, note: n.midiNote, vel },
             });
+            this.emitLiveNote(idx, n.midiNote, vel, true);
         }
     }
 
@@ -780,7 +797,23 @@ export class OjcoreNativeExecutor implements Executor {
             const idx = this.index.get(n.targetNodeId);
             if (idx === undefined) continue;
             this.send({ NoteOff: { node: idx, note: n.midiNote } });
+            this.emitLiveNote(idx, n.midiNote, 0, false);
         }
+    }
+
+    auditionNote(targetNodeId: string | number, pitch: number, velocity: number, on: boolean): void {
+        const node = typeof targetNodeId === 'number' ? targetNodeId : this.index.get(targetNodeId);
+        if (node === undefined) return;
+        const note = Math.max(0, Math.min(127, Math.round(pitch)));
+        const vel = Math.max(1, Math.min(127, Math.round(velocity)));
+        if (on) this.send({ NoteOn: { node, note, vel } });
+        else this.send({ NoteOff: { node, note } });
+        this.emitLiveNote(node, note, on ? vel : 0, on);
+    }
+
+    private emitLiveNote(node: number, note: number, velocity: number, on: boolean): void {
+        const event = { node, note, velocity, on, atMs: globalThis.performance?.now() ?? Date.now() };
+        for (const callback of this.liveNoteCallbacks) callback(event);
     }
 
     // Control-signal VISUALIZATION is a UI affordance; the native path drives no
@@ -918,35 +951,116 @@ export class OjcoreNativeExecutor implements Executor {
         }
     }
 
-    // --- Timeline preview (browser-tier today; native bounces via `oj render`) ---
+    // --- Timeline preview --------------------------------------------------
 
-    /** Logged once so a developer sees WHY native Play is silent — by design, not a
-     *  defect: the native tier's bit-identical path is the offline bounce. */
-    private previewDeferralLogged = false;
+    startArrangementPreview(playback: ArrangementPlayback, startSample: number, options: ArrangementStartOptions = {}): void {
+        const generation = ++this.previewGeneration;
+        void this.publishArrangement(playback, generation, startSample, true, options);
+    }
 
-    /**
-     * Native live preview is deferred. The browser (wasm) tier plays the timeline
-     * live; the native tier's strength is the BIT-IDENTICAL offline bounce (`oj
-     * render` / `oj song`), and native live preview (push the conduct graph + schedule
-     * over the cpal-owned engine) is a follow-up the founder can verify on the box.
-     * Honest no-op, logged once — never a silent pretence of playing.
-     */
-    startArrangementPreview(
-        _graph: OjGraph,
-        _events: readonly ScheduledCommand[],
-        _startSec: number,
-    ): void {
-        if (!this.previewDeferralLogged) {
-            this.previewDeferralLogged = true;
-            log.info(
-                'Timeline live-preview is browser-tier today; the native tier renders a ' +
-                    'bit-identical bounce via `oj render`. Native live preview is a follow-up.',
-            );
+    updateArrangementPreview(playback: ArrangementPlayback): void {
+        const generation = ++this.previewGeneration;
+        void this.publishArrangement(playback, generation, null, false);
+    }
+
+    private async publishArrangement(
+        playback: ArrangementPlayback,
+        generation: number,
+        startSample: number | null,
+        play: boolean,
+        options: ArrangementStartOptions = {},
+    ): Promise<void> {
+        if (!this.invoke) return;
+        try {
+            await this.invoke('push_graph', { graph: playback.graph });
+            await this.invoke('push_tempo_map', { tempoMap: playback.tempoMap });
+            await this.invoke('push_timeline', { timeline: playback.timeline });
+            if (generation !== this.previewGeneration) return;
+            if (playback.meterIndex) {
+                this.reverseIndex = new Map(Object.entries(playback.meterIndex).map(([id, node]) => [node, id]));
+            }
+            if (startSample !== null && startSample > 0) {
+                await this.invoke('send_command', { cmd: { Seek: { samples: startSample } } });
+            }
+            if (play) {
+                if (options.record) {
+                    try {
+                        const previous = await this.invoke('get_capture_result') as ArrangementCaptureResult | null;
+                        this.captureBaselineTakeId = previous?.take_id ?? null;
+                    } catch {
+                        this.captureBaselineTakeId = null;
+                    }
+                }
+                for (const [flag, on] of [[0, options.loop], [1, options.punch], [3, options.click], [4, options.countIn], [2, options.record]] as const) {
+                    if (on !== undefined) await this.invoke('send_command', { cmd: { TransportSet: { flag, on } } });
+                }
+                await this.invoke('send_command', { cmd: 'TransportPlay' });
+            }
+        } catch (err) {
+            log.warn('timeline publication failed; keeping the last good engine snapshot', {
+                detail: String(err),
+            });
         }
     }
 
-    /** No native preview runs, so there is nothing to stop. */
-    stopArrangementPreview(): void {}
+    stopArrangementPreview(): void {
+        const generation = ++this.previewGeneration;
+        if (!this.invoke) return;
+        void this.invoke('send_command', { cmd: 'TransportPause' })
+            .then(() => {
+                if (generation === this.previewGeneration) this.resync();
+            })
+            .catch((err: unknown) => log.error('TransportPause failed', { detail: String(err) }));
+    }
+
+    async stopArrangementRecording(): Promise<ArrangementCaptureResult | null> {
+        const generation = ++this.previewGeneration;
+        if (!this.invoke) return null;
+        try {
+            await this.invoke('send_command', { cmd: 'TransportPause' });
+            let result: ArrangementCaptureResult | null = null;
+            for (let attempt = 0; attempt < 8; attempt++) {
+                result = await this.invoke('get_capture_result') as ArrangementCaptureResult | null;
+                if (result && result.take_id !== this.captureBaselineTakeId) break;
+                if (attempt < 7) await new Promise<void>((resolve) => setTimeout(resolve, 25));
+            }
+            if (generation === this.previewGeneration) this.resync();
+            return result?.take_id === this.captureBaselineTakeId ? null : result;
+        } catch (err) {
+            log.error('record stop failed', { detail: String(err) });
+            return null;
+        }
+    }
+
+    subscribeLiveNotes(callback: LiveNoteCallback): Unsubscribe {
+        this.liveNoteCallbacks.add(callback);
+        return () => this.liveNoteCallbacks.delete(callback);
+    }
+
+    sendTimed(at: number, cmd: RtCommand): void {
+        if (!this.invoke) return;
+        void this.invoke('send_timed_command', { timed: { at, cmd } }).catch((err: unknown) => {
+            log.error('send_timed_command failed', { detail: String(err) });
+        });
+    }
+
+    subscribeTransport(callback: TransportFrameCallback): Unsubscribe {
+        this.transportCallbacks.add(callback);
+        this.startMeterStream();
+        return () => this.transportCallbacks.delete(callback);
+    }
+
+    seekArrangement(samples: number): void {
+        this.send({ Seek: { samples: Math.max(0, Math.round(samples)) } });
+    }
+
+    setArrangementLoop(on: boolean): void {
+        this.send({ TransportSet: { flag: 0, on } });
+    }
+
+    setArrangementPunch(on: boolean): void { this.send({ TransportSet: { flag: 1, on } }); }
+    setArrangementClick(on: boolean): void { this.send({ TransportSet: { flag: 3, on } }); }
+    setArrangementCountIn(on: boolean): void { this.send({ TransportSet: { flag: 4, on } }); }
 
     // --- Native command backings for the capability bridge -----------------
 

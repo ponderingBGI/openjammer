@@ -21,7 +21,8 @@
 /* Accent token per variant — referenced by the left border and the icon, and
    nowhere else. Each maps to a semantic theme color. */
 .oj-callout--info {
-    --callout-accent: var(--audio-connection);
+    --callout-accent: var(--sketch-black);
+    background: var(--bg-node);
 }
 
 .oj-callout--success {

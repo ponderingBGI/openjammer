@@ -10,7 +10,7 @@ describe('Paper Sketch No. 1', () => {
     it('is a multi-track, multi-section arrangement', () => {
         const arr = buildPaperSketch();
         expect(arr.tracks.length).toBeGreaterThanOrEqual(3);
-        expect((arr.sections ?? []).length).toBeGreaterThanOrEqual(3);
+        expect((arr.locations ?? []).filter((location) => location.kind === 'section').length).toBeGreaterThanOrEqual(3);
         expect(arr.tempoBpm).toBe(84);
     });
 
@@ -51,7 +51,7 @@ describe('Paper Sketch No. 1', () => {
         const imported = importWorkflow(JSON.stringify(exported));
         const reread = readArrangement(imported.arrangement);
         expect(reread).toBeDefined();
-        expect(reread!.schemaVersion).toBe(1);
+        expect(reread!.schemaVersion).toBe(2);
         // Lossless where it matters: the re-read arrangement lowers IDENTICALLY, so a
         // reopened song plays exactly what was saved (the export's reason to exist).
         expect(conduct(reread!)).toEqual(conduct(arr));

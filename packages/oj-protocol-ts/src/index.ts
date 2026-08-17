@@ -45,11 +45,55 @@
  *  `ojproto::SCHEMA_VERSION` (a `u16`). */
 export const SCHEMA_VERSION = 1 as const;
 
+/** Musical timeline resolution in quarter-note ticks. Mirrors `ojproto::PPQ`. */
+export const PPQ = 960 as const;
+
 /** Stable per-graph node index. Rust: `NodeIdx(pub u32)` — wire form: bare number. */
 export type NodeIdx = number;
 
 /** Handle to an off-RT-thread asset. Rust: `AssetId(pub u32)` — wire form: bare number. */
 export type AssetId = number;
+
+/** Time unit domain. Rust: `enum TimeDomain { Audio, Beat }` — bare string. */
+export type TimeDomain = "Audio" | "Beat";
+
+/** A position whose value is samples (`Audio`) or ticks at {@link PPQ} (`Beat`). */
+export interface TimePos {
+  domain: TimeDomain;
+  value: number;
+}
+
+/** A duration in one domain; its origin is the position owned by its container. */
+export interface TimeSpan {
+  domain: TimeDomain;
+  len: number;
+}
+
+/** A synchronized tempo-map point in musical and audio coordinates. */
+export interface TempoPoint {
+  tick: number;
+  sample: number;
+  bpm_start: number;
+  bpm_end: number;
+  continuing: boolean;
+}
+
+/** A synchronized meter-map point in musical, audio, and bar coordinates. */
+export interface MeterPoint {
+  tick: number;
+  sample: number;
+  bar: number;
+  divisions_per_bar: number;
+  note_value: number;
+}
+
+/** A tempo and meter document published independently of the graph. */
+export interface TempoMap {
+  ppq: number;
+  sample_rate: number;
+  tempos: TempoPoint[];
+  meters: MeterPoint[];
+}
 
 /**
  * The closed primitive instruction set the RT kernel matches on.
@@ -146,6 +190,49 @@ export interface OjGraph {
   schedule: NodeIdx[][];
 }
 
+/** A compact, sample-addressed event stored in a published {@link Timeline}. */
+export interface SchedEvent {
+  at: number;
+  node: NodeIdx;
+  kind: SchedEventKind;
+  a: number;
+  b: number;
+  value: number;
+}
+
+/** Event-kind codes and deterministic same-sample ordering ranks. */
+export type SchedEventKind = 0 | 1 | 2 | 3;
+
+/** Named event-kind codes, mirroring Rust's `ojproto::sched_event_kind`. */
+export const SchedEventKind = {
+  SET_PARAM: 0,
+  NOTE_OFF: 1,
+  NOTE_ON: 2,
+  SAMPLER_START: 3,
+} as const satisfies Record<string, SchedEventKind>;
+
+/** An immutable authored timeline document published as a whole. */
+export interface Timeline {
+  sample_rate: number;
+  events: SchedEvent[];
+  loop_range: [number, number] | null;
+  punch_range: [number, number] | null;
+  armed_tracks: CaptureArm[];
+  count_in_beats: number;
+  end: number;
+}
+
+export interface CaptureArm { node: NodeIdx; align: CaptureAlign }
+export type CaptureAlign = 0 | 1;
+export const CaptureAlign = { EXISTING_MATERIAL: 0, CAPTURE_TIME: 1 } as const satisfies Record<string, CaptureAlign>;
+
+export type CaptureMarkKind = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export const CaptureMarkKind = { RECORD_START: 0, RECORD_STOP: 1, PUNCH_IN: 2, PUNCH_OUT: 3, LOOP_WRAP: 4, XRUN: 5, NOTE_ON: 6, NOTE_OFF: 7 } as const satisfies Record<string, CaptureMarkKind>;
+export interface CaptureMark { node: NodeIdx; kind: CaptureMarkKind; at_frame: number; payload: number }
+export interface CaptureSegment { node: NodeIdx; asset: AssetId; start_sample: number; frames: number; start_tick: number; length_ticks: number; loop_index: number; xruns: number }
+export interface CapturedNote { node: NodeIdx; note: number; velocity: number; on: boolean; tick: number }
+export interface CaptureResult { take_id: number; segments: CaptureSegment[]; notes: CapturedNote[]; recovered: boolean }
+
 /**
  * Fixed-size, heap-free commands for the wait-free UI->RT queue.
  * Rust: `enum RtCommand { ... }`, EXTERNALLY tagged.
@@ -158,6 +245,7 @@ export interface OjGraph {
  *   "TransportPlay"
  *   "TransportPause"
  *   { "Seek": { "samples": 9000 } }
+ *   { "TransportSet": { "flag": 0, "on": true } }
  *   { "Looper": { "node": 3, "action": 5, "arg": 0 } }
  */
 export type RtCommand =
@@ -168,7 +256,26 @@ export type RtCommand =
   | "TransportPlay"
   | "TransportPause"
   | { Seek: { samples: number } }
+  | { TransportSet: { flag: TransportFlag; on: boolean } }
   | { Looper: { node: NodeIdx; action: LooperAction; arg: number } };
+
+/** Boolean transport-setting codes carried as a bare `u8` on the wire. */
+export type TransportFlag = 0 | 1 | 2 | 3 | 4;
+
+/** Named transport-setting codes, mirroring Rust's `ojproto::transport_flag`. */
+export const TransportFlag = {
+  LOOP_ENABLE: 0,
+  PUNCH_ENABLE: 1,
+  RECORD_ARM: 2,
+  CLICK: 3,
+  COUNT_IN: 4,
+} as const satisfies Record<string, TransportFlag>;
+
+/** A live command scheduled at an absolute timeline sample. */
+export interface TimedCommand {
+  at: number;
+  cmd: RtCommand;
+}
 
 /**
  * Looper transport actions carried by `RtCommand.Looper.action` (a bare `u8` on
@@ -287,6 +394,8 @@ export function paramPatchFromBytes(bytes: Uint8Array): ParamPatch {
  *   { "Meter":  { "node": 3, "rms": 0.1, "peak": 0.9 } }
  *   { "IrAck":  { "ir_version": 1, "ok": true } }
  *   { "Beat":   { "bar": 2, "beat": 3, "phase": 0.5 } }
+ *   { "Transport": { "sample": 9000, "tick": 360, "bar": 1, "beat": 2,
+ *                    "phase": 0.5, "motion": 1, "rec": false, "loop_on": true } }
  *   { "Looper": { "node": 3, "state": 3, "pos": 1024, "loop_len": 48000, "peak": 0.5 } }
  *   { "Error":  { "code": 42, "message": "boom" } }
  */
@@ -302,6 +411,18 @@ export type EngineFrame =
   | { Meter: { node: NodeIdx; rms: number; peak: number } }
   | { IrAck: { ir_version: number; ok: boolean } }
   | { Beat: { bar: number; beat: number; phase: number } }
+  | {
+      Transport: {
+        sample: number;
+        tick: number;
+        bar: number;
+        beat: number;
+        phase: number;
+        motion: number;
+        rec: boolean;
+        loop_on: boolean;
+      };
+    }
   | {
       Looper: {
         node: NodeIdx;

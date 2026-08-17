@@ -1,15 +1,13 @@
 //! Scanning a set of directories for hostable plugins, with the two safety
-//! mechanisms the unit requires when full out-of-process (OOP) scanning is
-//! deferred: a persistent **blacklist** (a plugin that crashed a prior scan is
-//! never probed again) and an on-disk **cache** (probe results are remembered so
-//! a restart doesn't re-probe every plugin).
+//! mechanisms required by the reliability contract: a disposable child process
+//! per candidate, persistent quarantine with reasons, and an on-disk cache.
 //!
-//! # OOP posture (documented deferral)
+//! # OOP posture
 //!
-//! True out-of-process scanning — fork a child, probe one plugin, and treat the
-//! child dying as "this plugin is bad" — is the safest default but needs a
-//! second executable + an IPC channel. THIS unit defers full OOP and instead
-//! ships the two pieces that make in-process scanning *recoverable*:
+//! The normal native build invokes `ojhost-scan-helper` once per candidate and
+//! treats a signal, abort, timeout, or malformed response as quarantine. The
+//! backend fallback exists only for embedders that do not ship the helper; the
+//! Tauri application always ships it beside the main executable.
 //!
 //! * [`Blacklist`]: a plugin path is appended to the blacklist *before* it is
 //!   probed and removed *after* it probes cleanly. So if a probe hard-crashes
@@ -19,29 +17,50 @@
 //! * [`ScanCache`]: clean probe results are persisted, so a restart lists
 //!   plugins instantly without re-probing.
 //!
-//! The C++ JUCE backend can later promote this to genuine OOP (JUCE ships
-//! `PluginDirectoryScanner` + a child-process pattern); the blacklist/cache file
-//! formats are designed to carry over unchanged. See the crate README.
-
-use std::collections::BTreeSet;
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use crate::backend;
 use crate::descriptor::{PluginDescriptor, PluginFormat};
 use crate::error::HostError;
 
+static SCAN_HELPER_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Point scanning at the application's own executable (or a dedicated helper).
+/// OpenJammer uses its packaged main binary in `--ojhost-scan-helper` mode, so
+/// release bundles cannot accidentally omit the disposable scanner.
+pub fn set_scan_helper_path(path: PathBuf) -> Result<(), PathBuf> {
+    SCAN_HELPER_OVERRIDE.set(path)
+}
+
 /// A persistent set of plugin paths that must NOT be probed (they crashed, or
 /// are mid-probe in a run that may yet crash). Stored newline-delimited so it is
 /// human-inspectable and trivially mergeable.
 #[derive(Debug, Default, Clone)]
 pub struct Blacklist {
-    entries: BTreeSet<String>,
+    entries: BTreeMap<String, QuarantineEntry>,
     /// Where to persist; `None` means in-memory only (tests).
     file: Option<PathBuf>,
+}
+
+/// Persisted reliability history for one plugin binary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuarantineEntry {
+    pub path: String,
+    pub reason: String,
+    pub crash_count: u8,
+    pub quarantined: bool,
+}
+
+impl QuarantineEntry {
+    pub fn benched(&self) -> bool {
+        self.crash_count >= 2
+    }
 }
 
 impl Blacklist {
@@ -49,7 +68,7 @@ impl Blacklist {
     /// scan path.
     pub fn in_memory() -> Self {
         Self {
-            entries: BTreeSet::new(),
+            entries: BTreeMap::new(),
             file: None,
         }
     }
@@ -58,15 +77,45 @@ impl Blacklist {
     /// blacklist, not an error.
     pub fn load(file: impl Into<PathBuf>) -> Self {
         let file = file.into();
-        let entries = match fs::read_to_string(&file) {
-            Ok(text) => text
-                .lines()
-                .map(str::trim)
-                .filter(|l| !l.is_empty())
-                .map(str::to_owned)
-                .collect(),
-            Err(_) => BTreeSet::new(),
-        };
+        let entries = fs::read_to_string(&file).map_or_else(
+            |_| BTreeMap::new(),
+            |text| {
+                text.lines()
+                    .filter_map(|line| {
+                        let mut fields = line.splitn(4, '\t');
+                        let count = fields.next()?.parse::<u8>().ok();
+                        if let Some(count) = count {
+                            let quarantined = fields.next()? == "1";
+                            let reason = fields.next()?.to_owned();
+                            let path = fields.next()?.to_owned();
+                            Some((
+                                path.clone(),
+                                QuarantineEntry {
+                                    path,
+                                    reason,
+                                    crash_count: count,
+                                    quarantined,
+                                },
+                            ))
+                        } else {
+                            // Legacy newline-only blacklist.
+                            let path = line.trim().to_owned();
+                            (!path.is_empty()).then(|| {
+                                (
+                                    path.clone(),
+                                    QuarantineEntry {
+                                        path,
+                                        reason: "scan was interrupted".into(),
+                                        crash_count: 1,
+                                        quarantined: true,
+                                    },
+                                )
+                            })
+                        }
+                    })
+                    .collect()
+            },
+        );
         Self {
             entries,
             file: Some(file),
@@ -75,7 +124,9 @@ impl Blacklist {
 
     /// Whether `path` is currently blacklisted.
     pub fn contains(&self, path: &str) -> bool {
-        self.entries.contains(path)
+        self.entries
+            .get(path)
+            .is_some_and(|entry| entry.quarantined || entry.benched())
     }
 
     /// Number of blacklisted paths.
@@ -91,17 +142,66 @@ impl Blacklist {
     /// Mark `path` as suspect *before* probing it and flush immediately, so a
     /// hard crash mid-probe leaves the path blacklisted for the next run.
     pub fn mark_before_probe(&mut self, path: &str) -> Result<(), HostError> {
-        if self.entries.insert(path.to_owned()) {
-            self.flush()?;
-        }
+        self.entries
+            .entry(path.to_owned())
+            .or_insert_with(|| QuarantineEntry {
+                path: path.to_owned(),
+                reason: "scan was interrupted".into(),
+                crash_count: 0,
+                quarantined: true,
+            })
+            .quarantined = true;
+        self.flush()?;
         Ok(())
+    }
+
+    /// Persist the reason a child failed. Two failures bench the binary.
+    pub fn record_failure(
+        &mut self,
+        path: &str,
+        reason: impl Into<String>,
+    ) -> Result<(), HostError> {
+        let entry = self
+            .entries
+            .entry(path.to_owned())
+            .or_insert_with(|| QuarantineEntry {
+                path: path.to_owned(),
+                reason: String::new(),
+                crash_count: 0,
+                quarantined: true,
+            });
+        entry.reason = reason.into();
+        entry.crash_count = entry.crash_count.saturating_add(1);
+        entry.quarantined = true;
+        self.flush()
+    }
+
+    /// Allow one explicit re-scan while retaining crash history.
+    pub fn allow_rescan(&mut self, path: &str) -> Result<(), HostError> {
+        if let Some(entry) = self.entries.get_mut(path) {
+            entry.quarantined = false;
+        }
+        self.flush()
+    }
+
+    /// Full user pardon: remove quarantine and crash history.
+    pub fn pardon(&mut self, path: &str) -> Result<(), HostError> {
+        self.entries.remove(path);
+        self.flush()
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item = &QuarantineEntry> {
+        self.entries.values()
     }
 
     /// Clear `path` *after* it probed cleanly, and flush.
     pub fn clear_after_probe(&mut self, path: &str) -> Result<(), HostError> {
-        if self.entries.remove(path) {
-            self.flush()?;
+        if self.entries.get(path).is_some_and(|e| e.crash_count == 0) {
+            self.entries.remove(path);
+        } else if let Some(entry) = self.entries.get_mut(path) {
+            entry.quarantined = false;
         }
+        self.flush()?;
         Ok(())
     }
 
@@ -111,9 +211,18 @@ impl Blacklist {
                 fs::create_dir_all(parent).map_err(HostError::Io)?;
             }
             let mut text = String::new();
-            for e in &self.entries {
-                text.push_str(e);
-                text.push('\n');
+            for entry in self.entries.values() {
+                use std::fmt::Write as _;
+                let reason = entry.reason.replace(['\t', '\n'], " ");
+                writeln!(
+                    &mut text,
+                    "{}\t{}\t{}\t{}",
+                    entry.crash_count,
+                    u8::from(entry.quarantined),
+                    reason,
+                    entry.path
+                )
+                .expect("writing to String is infallible");
             }
             fs::write(file, text).map_err(HostError::Io)?;
         }
@@ -147,6 +256,43 @@ impl ScanCache {
         let text = serde_json::to_string_pretty(self).map_err(HostError::Serde)?;
         fs::write(file, text).map_err(HostError::Io)
     }
+}
+
+/// Arm the last-launched plugin marker before entering untrusted runtime code.
+/// A clean shutdown removes it; if the process aborts, the next launch recovers
+/// it into quarantine. This cannot save the current in-process host from
+/// `abort()`—it makes the following launch calm and deterministic.
+pub fn write_crash_marker(file: &Path, plugin_path: &str) -> Result<(), HostError> {
+    if let Some(parent) = file.parent() {
+        fs::create_dir_all(parent).map_err(HostError::Io)?;
+    }
+    fs::write(file, plugin_path).map_err(HostError::Io)
+}
+
+pub fn clear_crash_marker(file: &Path) -> Result<(), HostError> {
+    match fs::remove_file(file) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(HostError::Io(error)),
+    }
+}
+
+/// Consume a prior dirty marker into the persisted crash counter.
+pub fn recover_crash_marker(
+    file: &Path,
+    quarantine: &mut Blacklist,
+) -> Result<Option<String>, HostError> {
+    let path = match fs::read_to_string(file) {
+        Ok(path) => path,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(HostError::Io(error)),
+    };
+    let path = path.trim().to_owned();
+    if !path.is_empty() {
+        quarantine.record_failure(&path, "aborted while processing audio")?;
+    }
+    clear_crash_marker(file)?;
+    Ok((!path.is_empty()).then_some(path))
 }
 
 /// Walk `dirs` and return one [`PluginDescriptor`] per hostable plugin found,
@@ -221,6 +367,22 @@ pub fn default_plugin_dirs() -> Vec<PathBuf> {
     dirs
 }
 
+/// Per-user durable location for scan cache, quarantine reasons, and crash
+/// counts. It intentionally does not depend on a GUI framework so tests and
+/// headless hosts share the same policy.
+pub fn default_reliability_dir() -> PathBuf {
+    if let Some(path) = std::env::var_os("XDG_DATA_HOME") {
+        return PathBuf::from(path).join("openjammer/plugins");
+    }
+    if let Some(path) = std::env::var_os("LOCALAPPDATA") {
+        return PathBuf::from(path).join("OpenJammer/plugins");
+    }
+    if let Some(path) = std::env::var_os("HOME") {
+        return PathBuf::from(path).join(".local/share/openjammer/plugins");
+    }
+    std::env::temp_dir().join("openjammer/plugins")
+}
+
 /// The subset of [`default_plugin_dirs`] that hold CLAP plugins — where dropping a
 /// `.clap` makes it hostable. The Plugins panel shows these as the real "drop a
 /// plugin here" folders for this machine (CLAP is the format the pure-Rust backend
@@ -293,7 +455,7 @@ pub fn scan_with(
                 // A *soft* probe error (e.g. not actually a plugin) leaves the
                 // path blacklisted so we don't keep re-probing a dud, but is not
                 // fatal to the overall scan.
-                let _ = e;
+                blacklist.record_failure(&path_str, e.to_string())?;
             }
         }
     }
@@ -345,6 +507,7 @@ pub struct ProbeHelperResponse {
 fn probe_via_helper(path: &Path) -> Result<Vec<PluginDescriptor>, ProbeHelperError> {
     let helper = scan_helper_path().ok_or(ProbeHelperError::Unavailable)?;
     let mut child = Command::new(&helper)
+        .arg("--ojhost-scan-helper")
         .arg(path)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -352,18 +515,34 @@ fn probe_via_helper(path: &Path) -> Result<Vec<PluginDescriptor>, ProbeHelperErr
         .spawn()
         .map_err(|e| ProbeHelperError::Failed(format!("failed to spawn scan helper: {e}")))?;
 
+    // Drain both pipes concurrently. Waiting for exit before reading deadlocks
+    // when a legitimate descriptor set (for example 500 params) exceeds the OS
+    // pipe buffer—the scanner itself would appear hung.
+    let stdout_pipe = child
+        .stdout
+        .take()
+        .ok_or_else(|| ProbeHelperError::Failed("scan helper stdout was not piped".into()))?;
+    let stderr_pipe = child
+        .stderr
+        .take()
+        .ok_or_else(|| ProbeHelperError::Failed("scan helper stderr was not piped".into()))?;
+    let stdout_reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = std::io::BufReader::new(stdout_pipe).read_to_string(&mut text);
+        text
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = std::io::BufReader::new(stderr_pipe).read_to_string(&mut text);
+        text
+    });
+
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let mut stdout = String::new();
-                if let Some(mut out) = child.stdout.take() {
-                    let _ = out.read_to_string(&mut stdout);
-                }
-                let mut stderr = String::new();
-                if let Some(mut err) = child.stderr.take() {
-                    let _ = err.read_to_string(&mut stderr);
-                }
+                let stdout = stdout_reader.join().unwrap_or_default();
+                let stderr = stderr_reader.join().unwrap_or_default();
                 if !status.success() {
                     return Err(ProbeHelperError::Failed(format!(
                         "scan helper exited with {status}: {stderr}"
@@ -386,6 +565,8 @@ fn probe_via_helper(path: &Path) -> Result<Vec<PluginDescriptor>, ProbeHelperErr
                 if Instant::now() >= deadline {
                     let _ = child.kill();
                     let _ = child.wait();
+                    let _ = stdout_reader.join();
+                    let _ = stderr_reader.join();
                     return Err(ProbeHelperError::Failed(format!(
                         "scan helper timed out probing {}",
                         path.display()
@@ -395,6 +576,8 @@ fn probe_via_helper(path: &Path) -> Result<Vec<PluginDescriptor>, ProbeHelperErr
             }
             Err(e) => {
                 let _ = child.kill();
+                let _ = stdout_reader.join();
+                let _ = stderr_reader.join();
                 return Err(ProbeHelperError::Failed(format!(
                     "scan helper wait failed: {e}"
                 )));
@@ -404,7 +587,15 @@ fn probe_via_helper(path: &Path) -> Result<Vec<PluginDescriptor>, ProbeHelperErr
 }
 
 fn scan_helper_path() -> Option<PathBuf> {
+    if let Some(path) = SCAN_HELPER_OVERRIDE.get() {
+        return Some(path.clone());
+    }
     if let Some(path) = std::env::var_os("OJHOST_SCAN_HELPER").map(PathBuf::from) {
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    if let Some(path) = option_env!("CARGO_BIN_EXE_ojhost-scan-helper").map(PathBuf::from) {
         if path.is_file() {
             return Some(path);
         }
@@ -417,7 +608,14 @@ fn scan_helper_path() -> Option<PathBuf> {
         "ojhost-scan-helper"
     };
     let candidate = dir.join(name);
-    candidate.is_file().then_some(candidate)
+    if candidate.is_file() {
+        return Some(candidate);
+    }
+    // Cargo integration tests execute from `target/debug/deps`; the binary
+    // target is its parent sibling at `target/debug/ojhost-scan-helper`.
+    dir.parent()
+        .map(|parent| parent.join(name))
+        .filter(|path| path.is_file())
 }
 
 /// Enumerate candidate plugin paths under `dirs` (one level of recursion into
@@ -619,10 +817,15 @@ mod tests {
                 path: "/p/x.clap".into(),
                 format: PluginFormat::Clap,
                 is_instrument: true,
+                features: vec!["instrument".into()],
+                has_gui: false,
                 ports: crate::descriptor::PortCounts {
                     audio_in: 0,
                     audio_out: 2,
                 },
+                audio_ports: Vec::new(),
+                port_configs: Vec::new(),
+                note_ports: crate::descriptor::PortCounts::default(),
                 param_count: 3,
                 params: Vec::new(),
                 latency_samples: 0,

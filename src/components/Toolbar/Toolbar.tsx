@@ -11,6 +11,7 @@ import { useProjectStore } from '../../store/projectStore';
 import { useTransportStore } from '../../store/transportStore';
 import { useArrangementStore } from '../../store/arrangementStore';
 import { arrangementForExport, readArrangement } from '../../song/project';
+import { collectSaveData } from '../../persistence/collectSaveData';
 import { exportWorkflow, downloadWorkflow, loadWorkflowFromFile, importWorkflow } from '../../engine/serialization';
 import { getExecutor } from '../../audio/executor';
 import { DropdownMenu, type MenuItemOrSeparator } from './DropdownMenu';
@@ -194,21 +195,13 @@ export function Toolbar() {
         }
 
         try {
-            const arr = useArrangementStore.getState().arrangement;
-            const graphData = {
-                nodes: Array.from(nodes.values()),
-                edges: Array.from(connections.values()),
-                viewport: { x: 0, y: 0, zoom },
-                // The timeline rides along (FROZEN-1): a reopened project keeps its song.
-                arrangement: arr ? arrangementForExport(arr) : undefined,
-            };
-            await saveProject(graphData);
+            await saveProject(collectSaveData());
             toast.success('Project saved');
         } catch (err) {
             console.error('Failed to save project:', err);
             toast.error(`Failed to save project: ${(err as Error).message}`);
         }
-    }, [projectName, nodes, connections, zoom, saveProject, handleNewProject]);
+    }, [projectName, saveProject, handleNewProject]);
 
     const handleCloseProject = useCallback(() => {
         closeProject();

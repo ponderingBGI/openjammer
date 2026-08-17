@@ -56,7 +56,7 @@ export function Banner({
             elevation="menu"
             radius="lg"
             className={classes}
-            role="alert"
+            role="status"
             {...rest}
         >
             {icon != null && (

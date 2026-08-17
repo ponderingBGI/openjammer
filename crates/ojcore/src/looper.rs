@@ -13,7 +13,7 @@
 //! # The multi-layer model (owner-locked)
 //! Each recording pass captures an *independent* layer. The FIRST take sets the
 //! loop length; every later take is phase-locked to that length (shared
-//! [`pos`](LooperNode::pos) playhead and [`loop_len`](LooperNode::loop_len)).
+//! shared playhead and loop length).
 //! Layers can be muted or deleted individually, and the most recent layer can be
 //! undone. The loop is ADDED on top of the live monitor (dry) with a controllable
 //! wet level.
@@ -89,7 +89,7 @@ pub mod looper_param {
 
 /// The looper's transport state. Driven by [`ojproto::looper_action`] commands.
 /// The discriminant order MUST mirror `ojproto::looper_state` (IDLE=0, ARMED=1,
-/// RECORDING=2, PLAYING=3, OVERDUBBING=4) so [`LooperNode::state_u8`] is a plain
+/// RECORDING=2, PLAYING=3, OVERDUBBING=4) so [`LooperState::as_u8`] is a plain
 /// cast. `Overdubbing` is retained for protocol parity but the multi-layer model
 /// treats every record pass identically (each is a new layer); the kernel maps
 /// the `OVERDUB` action onto a new `Recording` take.
@@ -125,6 +125,9 @@ fn looper_manifest() -> PluginManifest {
         ui: UiKind::Auto,
         params: vec![
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: looper_param::LOOP_SECS,
                 name: String::from("loop_secs"),
                 min: 0.0,
@@ -132,6 +135,9 @@ fn looper_manifest() -> PluginManifest {
                 default: 0.0,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: looper_param::WET,
                 name: String::from("wet"),
                 min: 0.0,
@@ -141,6 +147,9 @@ fn looper_manifest() -> PluginManifest {
                 default: 0.9,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: looper_param::DRY,
                 name: String::from("dry"),
                 min: 0.0,

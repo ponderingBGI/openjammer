@@ -90,6 +90,9 @@ export interface HostedParamDescriptor {
     min: number;
     max: number;
     default: number;
+    module?: string;
+    flags?: number;
+    unit?: string;
 }
 
 export interface HostedPluginDescriptor {
@@ -103,6 +106,8 @@ export interface HostedPluginDescriptor {
     param_count: number;
     params?: HostedParamDescriptor[];
     latency_samples: number;
+    features?: string[];
+    has_gui?: boolean;
 }
 
 export const HOSTED_PLUGIN_DESCRIPTOR_KEY = 'hostedPluginDescriptor';
@@ -165,7 +170,7 @@ export function makeHostedPluginDefinition(desc: HostedPluginDescriptor): NodeDe
             ...paramDefaults,
             [HOSTED_PLUGIN_DESCRIPTOR_KEY]: desc,
         },
-        dimensions: { width: 190, height: 120 },
+        dimensions: { width: 220, height: 120 },
         canEnter: false,
     };
 }

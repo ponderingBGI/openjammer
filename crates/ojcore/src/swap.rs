@@ -20,11 +20,79 @@
 
 use alloc::sync::Arc;
 
-use arc_swap::ArcSwapOption;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use basedrop::{Collector, Handle, Owned};
 
 use crate::compile::CompiledProgram;
 use crate::exec::Engine;
+
+/// Audio-thread read handle for an [`RtCell`]. Clone it into the process
+/// callback and take exactly one snapshot at each block boundary.
+#[derive(Clone)]
+pub struct RtCellRx<T: Send + Sync + 'static> {
+    current: Arc<ArcSwap<T>>,
+}
+
+impl<T: Send + Sync + 'static> RtCellRx<T> {
+    /// Load and retain one immutable snapshot. `arc-swap` uses atomics only;
+    /// this neither locks nor allocates.
+    pub fn load_full(&self) -> Arc<T> {
+        self.current.load_full()
+    }
+}
+
+/// Swap-whole RCU cell for immutable RT snapshots such as tempo maps.
+///
+/// Publishing and collection happen on the control thread. Readers perform a
+/// single lock-free [`RtCellRx::load_full`] per block. Replaced snapshots are
+/// placed in the existing `basedrop` collector so their contents are reclaimed
+/// by [`Self::collect`] rather than inline with publication or processing.
+pub struct RtCell<T: Send + Sync + 'static> {
+    current: Arc<ArcSwap<T>>,
+    collector: Collector,
+    handle: Handle,
+}
+
+impl<T: Send + Sync + 'static> RtCell<T> {
+    pub fn new(value: T) -> Self {
+        let collector = Collector::new();
+        let handle = collector.handle();
+        Self {
+            current: Arc::new(ArcSwap::from_pointee(value)),
+            collector,
+            handle,
+        }
+    }
+
+    /// Atomically publish a complete replacement (control thread only).
+    pub fn publish(&self, value: T) {
+        let displaced = self.current.swap(Arc::new(value));
+        drop(Owned::new(&self.handle, displaced));
+    }
+
+    /// Obtain the cheap audio-thread side of this cell.
+    pub fn rx(&self) -> RtCellRx<T> {
+        RtCellRx {
+            current: Arc::clone(&self.current),
+        }
+    }
+
+    /// Convenience snapshot for single-threaded callers and tests.
+    pub fn load_full(&self) -> Arc<T> {
+        self.current.load_full()
+    }
+
+    /// Reclaim displaced snapshots off the audio thread.
+    pub fn collect(&mut self) -> usize {
+        let before = self.collector.alloc_count();
+        self.collector.collect();
+        before.saturating_sub(self.collector.alloc_count())
+    }
+
+    pub fn alloc_count(&self) -> usize {
+        self.collector.alloc_count()
+    }
+}
 
 /// Transfer-only wrapper that lets a [`CompiledProgram`] (which is `Send` but
 /// NOT `Sync`, because `dyn DspInstance` is only `Send`) ride through an

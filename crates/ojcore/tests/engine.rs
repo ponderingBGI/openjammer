@@ -326,7 +326,10 @@ fn command_drain_and_process_are_alloc_free() {
     });
 
     assert!(engine.is_playing());
-    assert_eq!(engine.sample_pos(), 4096 + BLOCK as u64);
+    // Seek while rolling is a deferred locate: this block advances through the
+    // declick and must not jump directly to the target.
+    assert_eq!(engine.sample_pos(), BLOCK as u64);
+    assert_eq!(engine.transport().motion(), ojcore::Motion::DeclickToLocate);
     let amp_slot = engine.program().slot_of_id(NodeIdx(2)).unwrap();
     assert!(
         engine.program().bypassed[amp_slot],
@@ -440,19 +443,18 @@ fn engine_transport_advances_bar_and_beat() {
     engine.set_tempo(120.0);
     engine.set_time_signature(4, 4);
 
-    // Start playing and process blocks until ~one bar + one beat has elapsed.
-    let (mut tx, mut rx) = CommandQueue::split(4);
-    tx.push(RtCommand::TransportPlay).unwrap();
-    engine.drain(&mut rx);
-
-    // Seek directly to exactly beat 1 of bar 1 (96000 + 24000 = 120000 samples).
+    // Locate while stopped is immediate.
     let (mut tx2, mut rx2) = CommandQueue::split(4);
     tx2.push(RtCommand::Seek { samples: 120_000 }).unwrap();
     engine.drain(&mut rx2);
 
+    let (mut tx, mut rx) = CommandQueue::split(4);
+    tx.push(RtCommand::TransportPlay).unwrap();
+    engine.drain(&mut rx);
+
     let pos = engine.transport_pos();
-    assert_eq!(pos.bar, 1, "after 120000 samples => bar 1");
-    assert_eq!(pos.beat, 1, "=> beat 1 of bar 1");
+    assert_eq!(pos.bar, 2, "after 120000 samples => one-based bar 2");
+    assert_eq!(pos.beat, 2, "=> one-based beat 2 of bar 2");
     assert!(
         pos.phase < 1e-3,
         "on the beat boundary, phase ~0 (got {})",
@@ -470,8 +472,8 @@ fn engine_transport_advances_bar_and_beat() {
         produced += BLOCK as u64;
     }
     let pos = engine.transport_pos();
-    assert_eq!(pos.bar, 1);
-    assert_eq!(pos.beat, 1);
+    assert_eq!(pos.bar, 2);
+    assert_eq!(pos.beat, 2);
     assert!(
         pos.phase > 0.3 && pos.phase < 0.7,
         "mid-beat phase (got {})",
@@ -545,6 +547,7 @@ fn engine_publishes_meter_and_beat_frames() {
     let mut buf = [0u8; return_frame::MAX_LEN];
     let mut meters = 0;
     let mut beats = 0;
+    let mut transports = 0;
     let mut saw_master_level = false;
     while let Some(n) = ring.pop(&mut buf) {
         match return_frame::decode(&buf[..n]) {
@@ -555,11 +558,17 @@ fn engine_publishes_meter_and_beat_frames() {
                 }
             }
             Some(EngineFrame::Beat { .. }) => beats += 1,
+            Some(EngineFrame::Transport { sample, motion, .. }) => {
+                transports += 1;
+                assert_eq!(sample, 0);
+                assert_eq!(motion, ojcore::Motion::Stopped as u8);
+            }
             other => panic!("unexpected frame: {other:?}"),
         }
     }
     assert!(meters >= 1, "expected meter frames, got {meters}");
     assert_eq!(beats, 1, "exactly one beat frame per block");
+    assert_eq!(transports, 1, "exactly one transport frame per publish");
     assert!(
         saw_master_level,
         "a meter frame carried the 0.5 RMS master level"
@@ -581,7 +590,7 @@ impl NanLoader {
                 abi: None,
                 id: NAN_ID.into(),
                 name: "NaN".into(),
-                kind: PrimitiveKind::Gain, // any processor kind works here
+                kind: PrimitiveKind::PluginHost,
                 dsp: DspKind::Builtin,
                 ui: UiKind::Auto,
                 params: Vec::new(),
@@ -631,7 +640,8 @@ fn engine_silences_and_flags_nan_node() {
     // GraphIn(1) -> NaN(2) -> SpeakerOut(3).
     let mut g = OjGraph::empty(SR, BLOCK);
     g.nodes.push(node(1, GAIN_ID, PrimitiveKind::GraphIn, 0, 1));
-    g.nodes.push(node(2, NAN_ID, PrimitiveKind::Gain, 1, 1));
+    g.nodes
+        .push(node(2, NAN_ID, PrimitiveKind::PluginHost, 1, 1));
     g.nodes
         .push(node(3, GAIN_ID, PrimitiveKind::SpeakerOut, 1, 0));
     g.edges.push(audio_edge(1, 0, 2, 0));
@@ -663,7 +673,9 @@ fn engine_silences_and_flags_nan_node() {
 #[test]
 fn engine_watchdog_auto_bypasses_over_budget_node() {
     let reg = gain_registry();
-    let prog = compile(&graphin_gain_speaker(2.0), &reg).expect("compile");
+    let mut graph = graphin_gain_speaker(2.0);
+    graph.nodes[1].kind = PrimitiveKind::PluginHost;
+    let prog = compile(&graph, &reg).expect("compile");
     let mut engine = Engine::new(prog);
 
     // Zero-ns budget: every node "overruns"; auto-bypass on.
@@ -680,7 +692,25 @@ fn engine_watchdog_auto_bypasses_over_budget_node() {
         engine.budget().over_budget[gain_slot],
         "gain flagged over budget"
     );
-    assert!(engine.program().bypassed[gain_slot], "gain auto-bypassed");
+    assert!(engine.is_auto_bypassed(NodeIdx(2)), "gain auto-bypassed");
+}
+
+#[test]
+fn watchdog_requires_configured_consecutive_overruns() {
+    let reg = gain_registry();
+    let mut graph = graphin_gain_speaker(2.0);
+    graph.nodes[1].kind = PrimitiveKind::PluginHost;
+    let prog = compile(&graph, &reg).expect("compile");
+    let mut engine = Engine::new(prog);
+    engine.set_watchdog(Some(Watchdog::new(0, true).with_consecutive(2)));
+    let input = ramp();
+    let mut out = vec![0.0f32; NB];
+    inject(&mut engine, &input);
+    engine.process_block(&mut out, NB);
+    assert!(!engine.is_auto_bypassed(NodeIdx(2)));
+    inject(&mut engine, &input);
+    engine.process_block(&mut out, NB);
+    assert!(engine.is_auto_bypassed(NodeIdx(2)));
 }
 
 /// REQUIRED gate: `process_block` STILL allocates zero bytes with metering

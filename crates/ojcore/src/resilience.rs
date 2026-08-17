@@ -1,14 +1,13 @@
 //! U16 — real-time resilience: NaN/denormal guard, a per-block CPU watchdog,
 //! and last-wins command coalescing.
 //!
-//! Three independent guards the engine layers around the render loop so one
-//! misbehaving node can never take down the audio thread:
+//! Three independent guards protect foreign-plugin and device boundaries so one
+//! misbehaving hosted node can never take down the audio thread:
 //!
-//! 1. [`sanitize`] — flush any non-finite (NaN/Inf) sample in a node's output to
-//!    silence and report whether it had to. The engine raises a per-node flag so
-//!    the control plane can surface a "node produced garbage" error. `no_std`.
-//! 2. [`Watchdog`] — measures each node's render wall-time and flags / auto-
-//!    bypasses a node that blows its per-block CPU budget. Wall-clock timing
+//! 1. [`sanitize`] — flush any non-finite (NaN/Inf) sample at a hosted-node or
+//!    master output boundary and report whether it had to. `no_std`.
+//! 2. [`Watchdog`] — measures hosted-node render wall-time and flags / auto-
+//!    bypasses a plugin that blows its per-block CPU budget. Wall-clock timing
 //!    needs `std::time::Instant`, so the watchdog itself is `std`-gated; the
 //!    *budget bookkeeping* ([`NodeBudget`]) is `no_std` so the flags survive on
 //!    the worklet (which simply never arms the timer).
@@ -39,6 +38,12 @@ pub fn sanitize(buf: &mut [f32]) -> bool {
         let flush = !s.is_finite() || (*s != 0.0 && s.abs() < DENORMAL_FLOOR);
         if flush {
             *s = 0.0;
+            dirty = true;
+        } else if *s > 4.0 {
+            *s = 4.0;
+            dirty = true;
+        } else if *s < -4.0 {
+            *s = -4.0;
             dirty = true;
         }
     }
@@ -109,6 +114,9 @@ pub struct Watchdog {
     started: Option<std::time::Instant>,
     /// Whether an exceeded budget should auto-bypass the node.
     pub auto_bypass: bool,
+    /// Consecutive over-budget blocks required before auto-bypass. A clean
+    /// block resets the node's streak in the engine.
+    pub consecutive_limit: u8,
 }
 
 #[cfg(feature = "std")]
@@ -121,7 +129,15 @@ impl Watchdog {
             budget_ns,
             started: None,
             auto_bypass,
+            consecutive_limit: 1,
         }
+    }
+
+    /// Require `blocks` consecutive overruns before auto-bypass. Zero is
+    /// normalized to one so a watchdog can never be accidentally inert.
+    pub fn with_consecutive(mut self, blocks: u8) -> Self {
+        self.consecutive_limit = blocks.max(1);
+        self
     }
 
     /// Derive a per-node budget from the block duration and a CPU-fraction cap.
@@ -262,6 +278,13 @@ mod tests {
         assert_eq!(buf[0], 0.0);
         assert_eq!(buf[1], 0.0);
         assert_eq!(buf[2], 0.5);
+    }
+
+    #[test]
+    fn sanitize_hard_clamps_with_headroom() {
+        let mut buf = [3.5, 8.0, -9.0];
+        assert!(sanitize(&mut buf));
+        assert_eq!(buf, [3.5, 4.0, -4.0]);
     }
 
     #[test]

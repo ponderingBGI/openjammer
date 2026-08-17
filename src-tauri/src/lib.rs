@@ -2,12 +2,12 @@
 //!
 //! HYBRID ARCHITECTURE. The frontend is the EXISTING Vite web app (loaded into
 //! the Tauri webview — `bun run dev` in development, the bundled `../dist` in a
-//! release build). The backend is the native, low-latency [`engine`] (the
+//! release build). The backend is the native, low-latency engine module (the
 //! `<5 ms` ojcore engine on a cpal stream). They talk over Tauri's `invoke`
 //! IPC, which is strictly CONTROL-RATE: `OjGraph` and `RtCommand` cross as JSON;
 //! no audio sample buffer ever does (governing principle #4).
 //!
-//! On `setup` we build the [`engine::EngineBackend`] (registers the built-in
+//! On `setup` we build the `EngineBackend` (registers the built-in
 //! gain + the Osc / Sampler / Karplus instrument loaders, compiles a minimal
 //! starter graph, and starts the [`AudioHost`](ojcore_native::AudioHost)) and
 //! `manage` it as Tauri state. The commands below are the UI->RT seam.
@@ -26,8 +26,84 @@ use std::sync::Mutex;
 
 use engine::BackendState;
 use ojhost::{PluginDescriptor, PluginEditor};
-use ojproto::{EngineFrame, Event, NodeIdx, OjGraph, RtCommand};
-use tauri::Manager;
+use ojproto::{EngineFrame, Event, NodeIdx, OjGraph, RtCommand, TempoMap, TimedCommand, Timeline};
+use tauri::{Emitter, Manager};
+use tauri::{WebviewUrl, WebviewWindowBuilder};
+
+/// Native E2E-only crash journal mirror. The production record path remains
+/// unchanged; this command is unavailable unless the harness supplies both
+/// `OJ_NATIVE_E2E=1` and an isolated `OJ_NATIVE_E2E_DIR`.
+fn native_e2e_dir() -> Result<PathBuf, String> {
+    if std::env::var("OJ_NATIVE_E2E").as_deref() != Ok("1") {
+        return Err("native e2e hooks are disabled".into());
+    }
+    let directory = std::env::var_os("OJ_NATIVE_E2E_DIR")
+        .map(PathBuf::from)
+        .ok_or_else(|| "OJ_NATIVE_E2E_DIR is not set".to_string())?;
+    std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory)
+}
+
+#[tauri::command]
+fn native_e2e_process_id() -> Result<u32, String> {
+    native_e2e_dir()?;
+    Ok(std::process::id())
+}
+
+#[tauri::command]
+fn native_e2e_reclog_begin() -> Result<String, String> {
+    use std::io::Write;
+
+    let path = native_e2e_dir()?.join("webdriver-take.reclog");
+    let mut file = std::fs::File::create(&path).map_err(|error| error.to_string())?;
+    // Butler's real journal wire format: M node kind at_frame payload. No stop
+    // mark is written in N2 because the whole point is to kill mid-segment.
+    writeln!(file, "M 0 {} 0 0", ojproto::capture_mark_kind::RECORD_START)
+        .map_err(|error| error.to_string())?;
+    file.sync_all().map_err(|error| error.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn native_e2e_reclog_note(note: u8, velocity: u8, on: bool) -> Result<(), String> {
+    use std::io::Write;
+
+    let path = native_e2e_dir()?.join("webdriver-take.reclog");
+    let prior = std::fs::read_to_string(&path).unwrap_or_default();
+    let frame = prior.lines().count().saturating_mul(256);
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| error.to_string())?;
+    let kind = if on {
+        ojproto::capture_mark_kind::NOTE_ON
+    } else {
+        ojproto::capture_mark_kind::NOTE_OFF
+    };
+    let payload = u32::from(note) | (u32::from(velocity) << 8);
+    writeln!(file, "M 0 {kind} {frame} {payload}").map_err(|error| error.to_string())?;
+    file.sync_data().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn native_e2e_reclog_note_count() -> Result<usize, String> {
+    let path = native_e2e_dir()?.join("webdriver-take.reclog");
+    let contents = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    Ok(contents
+        .lines()
+        .filter(|line| {
+            let mut fields = line.split_whitespace();
+            fields.next() == Some("M")
+                && fields.nth(1).is_some_and(|kind| {
+                    kind.parse::<u8>().is_ok_and(|kind| {
+                        kind == ojproto::capture_mark_kind::NOTE_ON
+                            || kind == ojproto::capture_mark_kind::NOTE_OFF
+                    })
+                })
+        })
+        .count())
+}
 
 /// Push a full graph from the UI: recompile it against the plugin registry and
 /// adopt it into the running engine (publish to the program-swap mailbox + run).
@@ -54,6 +130,42 @@ fn send_command(cmd: RtCommand, state: tauri::State<'_, BackendState>) -> Result
         .lock()
         .map_err(|_| "engine backend mutex poisoned".to_string())?
         .send_command(cmd)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn push_timeline(timeline: Timeline, state: tauri::State<'_, BackendState>) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .push_timeline(&timeline)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn push_tempo_map(
+    tempo_map: TempoMap,
+    state: tauri::State<'_, BackendState>,
+) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .push_tempo_map(&tempo_map)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn send_timed_command(
+    timed: TimedCommand,
+    state: tauri::State<'_, BackendState>,
+) -> Result<(), String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .send_timed_command(timed)
         .map_err(|e| e.to_string())
 }
 
@@ -186,14 +298,156 @@ fn reveal_path(path: String) -> Result<(), String> {
 #[derive(Default)]
 struct PluginEditorState(Mutex<HashMap<String, PluginEditor>>);
 
+#[derive(Clone, serde::Serialize)]
+struct PluginWindowShellInfo {
+    label: String,
+    plugin_name: String,
+    owner: String,
+    has_gui: bool,
+    bypassed: bool,
+    dirty: bool,
+}
+#[derive(Default)]
+struct PluginWindowShellState(Mutex<HashMap<String, PluginWindowShellInfo>>);
+
+#[tauri::command]
+fn plugin_window_shell_open(
+    app: tauri::AppHandle,
+    node_id: String,
+    project_id: String,
+    plugin_name: String,
+    owner: String,
+    has_gui: bool,
+    state: tauri::State<'_, PluginWindowShellState>,
+) -> Result<(), String> {
+    let safe = node_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let label = format!("plugin-{safe}");
+    if let Some(window) = app.get_webview_window(&label) {
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+    state
+        .0
+        .lock()
+        .map_err(|_| "plugin window mutex poisoned".to_string())?
+        .insert(
+            label.clone(),
+            PluginWindowShellInfo {
+                label: label.clone(),
+                plugin_name: plugin_name.clone(),
+                owner: owner.clone(),
+                has_gui,
+                bypassed: false,
+                dirty: false,
+            },
+        );
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is unavailable".to_string())?;
+    let geometry_key = format!("{project_id}:{node_id}");
+    WebviewWindowBuilder::new(
+        &app,
+        &label,
+        WebviewUrl::App(format!("index.html?plugin-window={label}&geometry={geometry_key}").into()),
+    )
+    .title(format!("{plugin_name} — {owner} — OpenJammer"))
+    .inner_size(720.0, 520.0)
+    .decorations(true)
+    .parent(&main)
+    .map_err(|error| error.to_string())?
+    .build()
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+#[tauri::command]
+fn plugin_window_shell_info(
+    label: String,
+    state: tauri::State<'_, PluginWindowShellState>,
+) -> Result<PluginWindowShellInfo, String> {
+    state
+        .0
+        .lock()
+        .map_err(|_| "plugin window mutex poisoned".to_string())?
+        .get(&label)
+        .cloned()
+        .ok_or_else(|| "plugin window metadata is unavailable".to_string())
+}
+#[tauri::command]
+fn plugin_window_shell_close(app: tauri::AppHandle, label: String) -> Result<(), String> {
+    app.get_webview_window(&label)
+        .ok_or_else(|| "plugin window is unavailable".to_string())?
+        .close()
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+fn plugin_window_always_on_top(
+    app: tauri::AppHandle,
+    label: String,
+    always_on_top: bool,
+) -> Result<(), String> {
+    app.get_webview_window(&label)
+        .ok_or_else(|| "plugin window is unavailable".to_string())?
+        .set_always_on_top(always_on_top)
+        .map_err(|error| error.to_string())
+}
+#[tauri::command]
+fn plugin_window_focus_host(app: tauri::AppHandle) -> Result<(), String> {
+    app.get_webview_window("main")
+        .ok_or_else(|| "main window is unavailable".to_string())?
+        .set_focus()
+        .map_err(|error| error.to_string())
+}
+
+#[derive(serde::Serialize)]
+struct PluginQuarantineView {
+    path: String,
+    reason: String,
+    crash_count: u8,
+    benched: bool,
+}
+
+#[tauri::command]
+fn plugin_quarantine_list() -> Vec<PluginQuarantineView> {
+    let blacklist =
+        ojhost::Blacklist::load(ojhost::default_reliability_dir().join("quarantine.tsv"));
+    blacklist
+        .entries()
+        .map(|entry| PluginQuarantineView {
+            path: entry.path.clone(),
+            reason: entry.reason.clone(),
+            crash_count: entry.crash_count,
+            benched: entry.benched(),
+        })
+        .collect()
+}
+
+#[tauri::command]
+fn plugin_quarantine_pardon(path: String) -> Result<(), String> {
+    let mut blacklist =
+        ojhost::Blacklist::load(ojhost::default_reliability_dir().join("quarantine.tsv"));
+    blacklist.pardon(&path).map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 fn plugin_quarantine_reset() -> Result<(), String> {
-    let pedal = std::env::temp_dir().join("ojhost_dead_mans_pedal.txt");
-    match std::fs::remove_file(&pedal) {
-        Ok(()) => Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e.to_string()),
+    let dir = ojhost::default_reliability_dir();
+    for name in ["quarantine.tsv", "scan-cache.json"] {
+        match std::fs::remove_file(dir.join(name)) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
     }
+    Ok(())
 }
 
 #[tauri::command]
@@ -431,6 +685,18 @@ fn recorder_stop(
         .map(|(pcm, sample_rate)| RecorderStopResult { pcm, sample_rate }))
 }
 
+/// Retrieve the most recently finalized native capture report.
+#[tauri::command]
+fn get_capture_result(
+    state: tauri::State<'_, BackendState>,
+) -> Result<Option<ojproto::CaptureResult>, String> {
+    Ok(state
+        .0
+        .lock()
+        .map_err(|_| "engine backend mutex poisoned".to_string())?
+        .capture_result())
+}
+
 /// One hosted plugin's saved opaque state. `node` is the IR node id; `blob` is the
 /// plugin's `getStateInformation` / CLAP-state bytes. The TS layer base64's the blob
 /// into `node.data` for the project file, lockfile-gated on the hosted plugin id.
@@ -527,6 +793,88 @@ fn recorder_export(
         .map_err(|_| "engine backend mutex poisoned".to_string())?
         .recorder_export(NodeIdx(node), &path)
         .map_err(|e| e.to_string())
+}
+
+/// Progress payload emitted on `export-progress` while the blocking bounce
+/// worker advances. `out_path` lets a future UI distinguish concurrent exports.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportProgressEvent {
+    out_path: String,
+    blocks_rendered: u64,
+    total_blocks_estimate: u64,
+}
+
+/// Successful `export_arrangement` result. Level statistics are measured on the
+/// rendered float mix before integer quantization/dither.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportArrangementResult {
+    path: String,
+    max_sample_peak_dbfs: f32,
+    clipped_sample_count: u64,
+    frames: u64,
+    sample_rate: u32,
+    channels: u16,
+}
+
+/// Render and encode a complete arrangement without blocking Tauri's main
+/// thread. The caller-provided path is treated exactly like `recorder_export`:
+/// it is a user-selected host path, while the actual write uses a crash-safe
+/// same-directory temp + atomic replacement inside `ojcore-native`.
+#[tauri::command]
+async fn export_arrangement(
+    graph: OjGraph,
+    timeline: Timeline,
+    tempo_map: TempoMap,
+    spec: ojcore_native::BounceSpec,
+    out_path: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, BackendState>,
+) -> Result<ExportArrangementResult, String> {
+    let (assets, registry) = {
+        let backend = state
+            .0
+            .lock()
+            .map_err(|_| "engine backend mutex poisoned".to_string())?;
+        (backend.asset_catalog_snapshot(), backend.plugin_registry())
+    };
+    let event_path = out_path.clone();
+    let worker_path = out_path.clone();
+    let stats = tauri::async_runtime::spawn_blocking(move || {
+        let registry = registry.read().unwrap_or_else(|error| error.into_inner());
+        ojcore_native::bounce_to_file_with_registry_and_assets(
+            graph,
+            timeline,
+            tempo_map,
+            spec,
+            &registry,
+            &assets,
+            &worker_path,
+            |progress| {
+                let _ = app.emit(
+                    "export-progress",
+                    ExportProgressEvent {
+                        out_path: event_path.clone(),
+                        blocks_rendered: progress.blocks_rendered,
+                        total_blocks_estimate: progress.total_blocks_estimate,
+                    },
+                );
+            },
+        )
+    })
+    .await
+    .map_err(|error| format!("export worker failed: {error}"))?
+    .map_err(|error| error.to_string())?;
+
+    Ok(ExportArrangementResult {
+        path: out_path,
+        max_sample_peak_dbfs: stats.max_sample_peak_dbfs,
+        clipped_sample_count: stats.clipped_sample_count,
+        frames: stats.frames,
+        sample_rate: stats.sample_rate,
+        channels: stats.channels,
+    })
 }
 
 /// Set a speaker node's master volume / mute.
@@ -747,6 +1095,7 @@ pub fn run() {
             }
             app.manage(backend);
             app.manage(PluginEditorState::default());
+            app.manage(PluginWindowShellState::default());
             // The at-most-one warm Pi child for the session (Phase 1: instant feel).
             app.manage(ai::WarmChildState::default());
             // The loopback tool bridge (Phase 3: real graph reads round-trip to Pi).
@@ -772,6 +1121,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             push_graph,
             send_command,
+            push_timeline,
+            push_tempo_map,
+            send_timed_command,
             query_stream,
             engine_running,
             scan_plugins,
@@ -779,9 +1131,16 @@ pub fn run() {
             plugin_dirs,
             reveal_path,
             plugin_quarantine_reset,
+            plugin_quarantine_list,
+            plugin_quarantine_pardon,
             plugin_editor_open,
             plugin_editor_focus,
             plugin_editor_close,
+            plugin_window_shell_open,
+            plugin_window_shell_info,
+            plugin_window_shell_close,
+            plugin_window_always_on_top,
+            plugin_window_focus_host,
             ai::ai_run,
             ai::ai_command,
             ai::ai_prewarm,
@@ -811,9 +1170,15 @@ pub fn run() {
             stage_plugin_restores,
             recorder_start,
             recorder_stop,
+            get_capture_result,
             looper_take_pcm,
             looper_discard_pcm,
             recorder_export,
+            export_arrangement,
+            native_e2e_process_id,
+            native_e2e_reclog_begin,
+            native_e2e_reclog_note,
+            native_e2e_reclog_note_count,
             set_speaker_volume,
             set_speaker_device,
             set_mic,

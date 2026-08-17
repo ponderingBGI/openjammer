@@ -101,3 +101,58 @@ jobs:
         # always find a COMPLETE value, never a torn file (Track B durability).
         run: cargo test -p ojcore-native --test durability_crash -- --ignored
 
+  realworld-plugins:
+    name: P4 — pinned OSS CLAP matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      OJ_PLUGIN_CACHE: ${{ github.workspace }}/.cache/oj-plugins
+      OJ_REALWORLD_PLUGINS: '1'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+      - name: Restore verified plugin artifacts
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: .cache/oj-plugins
+          key: p4-plugins-linux-${{ hashFiles('crates/ojhost/tests/fixtures/realworld-plugins.toml') }}
+      - name: Download, SHA-256 verify and extract the OSS matrix
+        run: scripts/ci/fetch-plugins.sh
+      - name: Full real-world scan → lifecycle → render → state matrix
+        run: cargo test -p ojhost --features clap-host --test realworld -- --nocapture
+      - name: N4 against the cached real synth (Dexed)
+        run: |
+          plugin=$(find "$OJ_PLUGIN_CACHE/plugins/dexed" -name Dexed.clap -print -quit)
+          OJ_N4_PLUGIN="$plugin" cargo test -p ojhost --features clap-host --test native_journeys n4_timeline_synth_automation_state_reload_and_export -- --nocapture
+
+  juce-vst3-parity:
+    name: P4 — JUCE VST3 lifecycle smoke
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    env:
+      OJHOST_JUCE_JOBS: '4'
+      OJ_PLUGIN_CACHE: ${{ github.workspace }}/.cache/oj-plugins
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-rust
+      - name: Restore the verified Dexed artifact
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: .cache/oj-plugins
+          key: p4-plugins-linux-${{ hashFiles('crates/ojhost/tests/fixtures/realworld-plugins.toml') }}
+      - name: Fetch Dexed when the cache is cold
+        env:
+          OJ_PLUGIN_IDS: dexed
+        run: scripts/ci/fetch-plugins.sh
+      # Rust cache includes Cargo's pinned JUCE 8.0.4/CMake build tree.
+      - name: JUCE scan + instantiate + activate + process + destroy VST3 smoke
+        # Honest gap: clap-juce-extensions creates CLAP plugins but explicitly
+        # does not implement JUCE CLAP hosting. A JUCE-wrapped VST3 probe is not
+        # vendored here, so the fallback required by P4 uses Dexed's OSS VST3.
+        run: |
+          plugin=$(find "$OJ_PLUGIN_CACHE/plugins/dexed" -name Dexed.vst3 -print -quit)
+          OJHOST_JUCE_TEST_PLUGIN="$plugin" cargo test -p ojhost --features juce --test conformance juce_vst3_oss_scan_and_lifecycle_smoke -- --nocapture

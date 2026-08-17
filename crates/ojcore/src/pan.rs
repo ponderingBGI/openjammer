@@ -48,6 +48,9 @@ fn pan_manifest() -> PluginManifest {
         dsp: DspKind::Builtin,
         ui: UiKind::Auto,
         params: vec![ParamDecl {
+            module: String::new(),
+            unit: String::new(),
+            flags: 0,
             id: pan_param::PAN,
             name: String::from("pan"),
             min: -1.0,

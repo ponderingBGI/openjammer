@@ -40,6 +40,9 @@ fn width_manifest() -> PluginManifest {
         dsp: DspKind::Builtin,
         ui: UiKind::Auto,
         params: vec![ParamDecl {
+            module: String::new(),
+            unit: String::new(),
+            flags: 0,
             id: width_param::WIDTH,
             name: String::from("width"),
             min: 0.0,

@@ -197,20 +197,31 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
         name: 'describe_arrangement',
         description:
             'Read the current SONG TIMELINE as a readable summary — tracks (by stable ' +
-            'id), clips, notes (count + pitch range), sections, tempo, and automation, ' +
-            'all at bar.beat. Side-effect-free. GROUND yourself with this before editing ' +
+            'id), clips, addressable note details (id/pitch/tick/duration/velocity, capped ' +
+            'per clip), sections, tempo, and automation, ' +
+            'selection, grid, edit mode, armed tracks, click, count-in, punch and record state, all at bar.beat. Side-effect-free. GROUND yourself with this before editing ' +
             'the timeline (the "read the song first" twin of get_graph for the node graph).',
     },
     {
         name: 'edit_timeline',
         description:
-            'Author the SONG TIMELINE with an ordered list of reversible `verbs` — the ' +
-            'SAME vocabulary a human GUI drag emits — applied live and undoable with ' +
-            'Ctrl+Z. Verb kinds: setTempo; setTrackMute/setTrackName; addTrack/removeTrack; ' +
-            'addClip/removeClip/moveClip; addNote/removeNote/editNote; addSection/' +
-            'removeSection; addAutomationLane/removeAutomationLane; setAutomationPoint/' +
-            'removeAutomationPoint. Ids for ADDED entities are minted for you (omit them). ' +
-            'Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
+            'Author the SONG TIMELINE with reversible primitive `verbs` or shared high-level `ops` — ' +
+            'the SAME operation layer a human GUI drag emits — applied live and undoable with ' +
+            'Ctrl+Z. Verb kinds: setTempo; setTrackMute/setTrackSolo/setTrackName/setTrackGain/setTrackPan; addTrack/removeTrack; ' +
+            'addSource/removeSource; addClip/removeClip/moveClip/setClipWindow/splitClip; ' +
+            'setClipGain/setClipFades; addNote/removeNote/editNote; addLocation/removeLocation/' +
+            'moveLocation/setLoopRange/setPunchRange; rippleTracks/insertTime/removeTime; ' +
+            'stretchClip; compound; addAutomationLane/removeAutomationLane; setAutomationPoint/' +
+            'removeAutomationPoint/setAutomationRange/setAutomationLaneState/setAutomationLaneInterp. Ids for ADDED entities are minted for you (omit them). ' +
+            'Record operations: armTrack, setClick, setCountIn, record (start/stop). Timeline operations include moveClips, trimClip, splitAt, duplicateClips, deleteClips, setGrid, nudge, drawNote, note edits, automation edits, and range edits. Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
+    },
+    {
+        name: 'export_song',
+        description:
+            'Export the current arrangement in the desktop app. Pass `outPath` plus the ' +
+            'native BounceSpec fields: sampleRate (44100/48000/88200/96000), bitDepth ' +
+            '(16/24/32f), format (wav/flac), and an auto or fixed-seconds tail. Native-only; ' +
+            'returns path, peak/clipping stats, frames, sample rate, and channels.',
     },
 ];
 
@@ -487,13 +498,14 @@ export interface AgentEnvPort {
  */
 export interface ArrangementToolPort {
     /** A readable summary of the current song (describeArrangement), or null when none. */
-    describe(): { text: string } | null;
+    describe(): { text: string; selection?: unknown; grid?: string; editMode?: string; clipboard?: unknown } | null;
     /**
      * Apply an ordered list of reversible timeline verbs, minting ids for ADDED
      * entities, through the shared command-log. Returns whether it applied, a
      * one-line summary, and a reversible `undo` (a single Ctrl+Z's worth).
      */
     apply(verbs: Verb[]): { ok: boolean; summary: string; undo: () => void };
+    applyOps?: (ops: import('../song/ops').TimelineOp[]) => { ok: boolean; summary: string; undo: () => void };
 }
 
 /**
@@ -550,6 +562,12 @@ export function applyToolCall(
             return applyDescribeArrangement(arrangement);
         case 'edit_timeline':
             return applyEditTimeline(call.args, arrangement);
+        case 'export_song':
+            return {
+                ok: true,
+                summary: 'export_song is executed by the native host bridge.',
+                undo: NO_OP,
+            };
         // DIAGNOSTICS & SETTINGS: read logs/env/settings; write allowlisted settings.
         case 'get_logs':
             return applyGetLogs(call.args, env);
@@ -1179,10 +1197,11 @@ function applyEditTimeline(args: EditTimelineArgs, arrangement?: ArrangementTool
         return { ok: false, summary: `edit_timeline failed: ${ARRANGEMENT_MISSING}.`, undo: NO_OP };
     }
     const verbs = args.verbs ?? [];
-    if (verbs.length === 0) {
+    const ops = args.ops ?? [];
+    if (verbs.length === 0 && ops.length === 0) {
         return { ok: true, summary: 'edit_timeline: no verbs to apply (no-op).', undo: NO_OP };
     }
-    const res = arrangement.apply(verbs);
+    const res = ops.length && arrangement.applyOps ? arrangement.applyOps(ops) : arrangement.apply(verbs);
     return { ok: res.ok, summary: res.summary, undo: once(res.undo) };
 }
 

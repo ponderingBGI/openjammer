@@ -2,13 +2,13 @@
 //! hosting backend is compiled in.
 //!
 //! Exactly one backend module is active, selected by feature (the `juce` feature
-//! wins if both are on, since it is the superset format-wise):
+//! wins if both are on):
 //!
 //! * neither feature: [`scaffold`] — `probe` finds nothing, `open` is
 //!   [`HostError::Unavailable`]. The default, dependency-free build.
 //! * `clap-host` (and not `juce`): [`clap`] — pure-Rust CLAP hosting via
 //!   `clack`. No C++, no CMake. CLAP only.
-//! * `juce`: [`juce`] — the bundled C++ JUCE 8 host (VST3 + CLAP, + AU on
+//! * `juce`: [`juce`] — the bundled C++ JUCE 8 host (VST3, + AU on
 //!   macOS) over the `extern "C"` ABI in `cpp/ojhost_juce.h`.
 //!
 //! Each backend exposes the same two functions so the rest of the crate is
@@ -26,6 +26,22 @@ use std::path::Path;
 use crate::descriptor::{PluginDescriptor, PluginFormat};
 use crate::error::HostError;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static LATENCY_RESCAN_REQUESTED: AtomicBool = AtomicBool::new(false);
+
+/// Called by a backend host callback when a live plugin invalidates its latency.
+#[cfg(feature = "clap-host")]
+pub(crate) fn request_latency_rescan() {
+    LATENCY_RESCAN_REQUESTED.store(true, Ordering::Release);
+}
+
+/// Consume the coalesced latency-change request on the control thread. The
+/// caller recompiles its retained graph and publishes through `ProgramSwap`.
+pub fn take_latency_rescan_request() -> bool {
+    LATENCY_RESCAN_REQUESTED.swap(false, Ordering::AcqRel)
+}
+
 /// The live, backend-specific half of a hosted plugin. The RT-safe
 /// [`crate::node::PluginHostNode`] owns one and forwards `DspInstance` calls to
 /// it. `process` is on the audio thread and MUST NOT allocate or lock — backends
@@ -42,6 +58,13 @@ pub trait HostedBackend: Send {
     /// `process` will request. Backends allocate their channel/buffer scratch
     /// here. After this, [`HostedBackend::latency_samples`] is authoritative.
     fn activate(&mut self, sample_rate: f32, max_block: usize);
+
+    /// CLAP audio-thread lifecycle boundary. Called immediately before the
+    /// first process block in a run; never performs main-thread work.
+    fn start_processing(&mut self) {}
+
+    /// CLAP audio-thread lifecycle boundary after the final process block.
+    fn stop_processing(&mut self) {}
 
     /// RT-thread hot path. Render `nframes` from `inputs` into `outputs`.
     /// `inputs`/`outputs` are channel-major (one slice per channel). MUST NOT
@@ -76,8 +99,43 @@ pub trait HostedBackend: Send {
     /// RT-thread: note-off for instrument plugins. Default no-op.
     fn note_off(&mut self, _note: u8) {}
 
+    /// Queue a timestamped hosted event for the next block. The caller must
+    /// provide nondecreasing `at_frame` values smaller than that block.
+    fn queue_event(&mut self, _event: HostedEvent) {}
+
     /// Plugin-reported processing latency in samples (post-`activate`), for PDC.
     fn latency_samples(&self) -> u32;
+
+    /// Plugin tail in samples. `None` means an infinite tail.
+    fn tail_samples(&self) -> Option<u32> {
+        Some(0)
+    }
+
+    /// OFF-RT CLAP value-to-text conversion.
+    fn param_value_to_text(&mut self, _id: u16, _value: f64) -> Option<String> {
+        None
+    }
+
+    /// OFF-RT CLAP text-to-value conversion.
+    fn param_text_to_value(&mut self, _id: u16, _text: &str) -> Option<f64> {
+        None
+    }
+
+    /// OFF-RT: drain plugin-originated gestures/adjustments captured without
+    /// blocking the audio callback.
+    fn take_param_gestures(&mut self) -> Vec<ParamGesture> {
+        Vec::new()
+    }
+
+    /// OFF-RT: drain plugin-originated note events such as CLAP NOTE_END.
+    fn take_output_events(&mut self) -> Vec<HostedEvent> {
+        Vec::new()
+    }
+
+    /// OFF-RT: consume a coalesced params/ports descriptor refresh request.
+    fn take_descriptor_rescan_request(&self) -> bool {
+        false
+    }
 
     /// OFF-RT: serialize the plugin's full opaque state — VST3
     /// `getStateInformation` / the CLAP state extension — so a session can persist
@@ -93,8 +151,68 @@ pub trait HostedBackend: Send {
     /// (before the instance goes live), so it runs off the audio thread; MAY allocate.
     fn restore_state(&mut self, _blob: &[u8]) {}
 
+    /// Checked restore used by conformance. Legacy backends that cannot report
+    /// rejection retain the previous best-effort behavior.
+    fn restore_state_checked(&mut self, blob: &[u8]) -> bool {
+        self.restore_state(blob);
+        true
+    }
+
     /// Off-RT: release activation-time resources. Default no-op.
     fn deactivate(&mut self) {}
+}
+
+/// Sample-accurate events accepted by the hosted-plugin bridge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HostedEvent {
+    Param {
+        at_frame: u32,
+        id: u16,
+        value: f64,
+    },
+    NoteOn {
+        at_frame: u32,
+        port: i16,
+        channel: i16,
+        key: i16,
+        note_id: i32,
+        velocity: f64,
+    },
+    NoteOff {
+        at_frame: u32,
+        port: i16,
+        channel: i16,
+        key: i16,
+        note_id: i32,
+        velocity: f64,
+    },
+    NoteChoke {
+        at_frame: u32,
+        port: i16,
+        channel: i16,
+        key: i16,
+        note_id: i32,
+    },
+    NoteEnd {
+        at_frame: u32,
+        port: i16,
+        channel: i16,
+        key: i16,
+        note_id: i32,
+    },
+    Midi {
+        at_frame: u32,
+        port: u16,
+        data: [u8; 3],
+    },
+}
+
+/// One plugin-originated parameter transaction event.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ParamGesture {
+    Begin { id: u32 },
+    Adjust { id: u32, value: f64 },
+    End { id: u32 },
 }
 
 /// Scan-probe `path` (a binary of `format`) for its plugin(s). See module docs.
@@ -170,7 +288,7 @@ mod scaffold {
 mod clap;
 
 // ---------------------------------------------------------------------------
-// JUCE C++ backend (feature = "juce"). VST3 + CLAP, + AU on macOS.
+// JUCE C++ backend (feature = "juce"). VST3, + AU on macOS.
 // ---------------------------------------------------------------------------
 #[cfg(feature = "juce")]
 mod juce;

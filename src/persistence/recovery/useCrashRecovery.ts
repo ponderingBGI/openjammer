@@ -28,6 +28,8 @@ import {
     clearEmergencyBackup,
 } from './webPayloads';
 import { useEngineHealthStore } from '../../store/engineHealthStore';
+import { useArrangementStore } from '../../store/arrangementStore';
+import { recoverMidiRecordJournal } from './midiRecordJournal';
 
 /** Forgive the streak once the engine has been LIVE this long. */
 const SETTLE_AFTER_LIVE_MS = 8_000;
@@ -76,8 +78,14 @@ export function useCrashRecovery(): CrashRecoveryApi {
         }
 
         if (outcome.restored) {
-            const { nodes, connections } = outcome.restored.graph;
+            const { nodes, connections, arrangement } = outcome.restored.graph;
             useGraphStore.getState().loadGraph(nodes, connections);
+            useArrangementStore.getState().setArrangement(arrangement);
+            const restoredArrangement = useArrangementStore.getState().arrangement;
+            if (restoredArrangement) {
+                const recordVerbs = recoverMidiRecordJournal(restoredArrangement, useArrangementStore.getState().mintId);
+                if (recordVerbs.length) useArrangementStore.getState().apply(recordVerbs);
+            }
             clearEmergencyBackup(); // consumed — the live graph now IS the work
             logInfo('recovery', 'restored work after an unclean shutdown', {
                 snapshotId: outcome.restored.snapshotId,
@@ -164,6 +172,7 @@ export function useCrashRecovery(): CrashRecoveryApi {
             const graph = loadQuarantined(id);
             if (graph) {
                 useGraphStore.getState().loadGraph(graph.nodes, graph.connections);
+                useArrangementStore.getState().setArrangement(graph.arrangement);
                 logInfo('recovery', 'user recovered a quarantined snapshot from Safe Mode', { id });
             }
             setSafeMode(null);

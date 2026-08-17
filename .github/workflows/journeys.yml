@@ -1,0 +1,51 @@
+name: Browser journeys
+
+on:
+  push:
+    branches: [canari]
+  schedule:
+    - cron: '30 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-journeys-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  journeys:
+    name: Journeys (${{ matrix.engine }}, shard ${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, firefox, webkit]
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Setup web (Bun + install)
+        uses: ./.github/actions/setup-web
+      - name: Install WebKit host libraries
+        if: matrix.engine == 'webkit'
+        run: bunx playwright install-deps webkit
+      - name: Install browser engine
+        run: bunx playwright install ${{ matrix.engine }}
+      - name: Run journey shard
+        # Measured locally on 2026-08-17 before sharding (production build
+        # included): Chromium 36.0s and Firefox 36.5s. WebKit is CI-measured
+        # because this workstation lacks libwoff2dec.so.1.0.2.
+        env:
+          OJ_E2E_ALL_BROWSERS: '1'
+        run: bun run test:e2e -- e2e/journeys --project=${{ matrix.engine }} --shard=${{ matrix.shard }}/3
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: journey-traces-${{ matrix.engine }}-${{ matrix.shard }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7

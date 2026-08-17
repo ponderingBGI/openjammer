@@ -1,341 +1,179 @@
-/**
- * PluginsPanel (§3) — the "bring your own plugins" discovery surface.
- *
- * Scans the OS-standard plugin directories (via the native `scan_plugins`
- * command — empty `dirs` means "the defaults", see `ojhost::default_plugin_dirs`)
- * and lists what's installed, with each plugin's vendor, format, port counts, and
- * whether it's an instrument or an effect. Plugin HOSTING is native-only (JUCE
- * VST2/VST3/CLAP/AU in desktop builds), so in a plain browser this explains that
- * and points at the desktop app.
- *
- * Toggled with Ctrl/Cmd+Shift+P or the "Plugins" palette command. The overlay
- * chrome (portal, scrim, Escape, focus-trap, click-outside) is the oj-ui Modal;
- * the header, actions, notes and tags are oj-ui primitives.
- */
-
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Modal, PanelHeader, Button, Callout, Chip, Spinner, List, ListRow } from '@openjammer/oj-ui';
+import { Button, Callout, Chip, Input, Modal, PanelHeader, SegmentedControl } from '@openjammer/oj-ui';
 import { getInvoke, isTauri } from '../../ai/tauri';
 import { getExecutor } from '../../audio/executor';
-import { hostedPluginIdFor, makeHostedPluginDefinition, registerDynamicPlugin } from '../../engine/dynamicRegistry';
+import {
+    hostedPluginIdFor, makeHostedPluginDefinition, registerDynamicPlugin,
+    type HostedPluginDescriptor,
+} from '../../engine/dynamicRegistry';
+import { nodeDefinitions } from '../../engine/registry';
+import { familiesFromClapFeatures, familyForBuiltIn, PLUGIN_FAMILIES, type PluginFamily } from '../../engine/pluginFamily';
 import { register as registerCommand } from '../../store/commandRegistry';
 import { useGraphStore } from '../../store/graphStore';
+import { useBindingSet, useModalKeymap } from '../../keymap/useKeymap';
 import './PluginsPanel.css';
+import { browserActionWord, defaultBrowserFamilies, filterBrowserItems, type BrowserContext, type BrowserItem, type BrowserSource } from './browserModel';
 
-/** One scanned plugin (mirrors `ojhost::PluginDescriptor`). */
-interface PluginDescriptor {
-    uid: string;
-    name: string;
-    vendor: string;
-    path: string;
-    format: 'Clap' | 'Vst2' | 'Vst3' | 'Au' | string;
-    is_instrument: boolean;
-    ports: { audio_in: number; audio_out: number };
-    param_count: number;
-    latency_samples: number;
+interface PluginDescriptor extends HostedPluginDescriptor {
+    features?: string[];
+    has_gui?: boolean;
+    reliability_note?: string;
+    benched?: boolean;
+}
+interface PluginDir { path: string; scope: string; format?: string }
+interface HostingInfo { backend: string; formats: string[] }
+interface QuarantineEntry { path: string; reason: string; crash_count: number; benched: boolean }
+
+function builtInItems(): BrowserItem[] {
+    const seen = new Set<string>();
+    return Object.values(nodeDefinitions).flatMap((definition, declarationOrder) => {
+        if (seen.has(definition.name)) return [];
+        seen.add(definition.name);
+        return [{
+            id: `builtin:${definition.type}`,
+            name: definition.name,
+            vendor: 'OpenJammer',
+            family: familyForBuiltIn(definition.category, definition.name),
+            source: 'built-in' as const,
+            declarationOrder,
+        }];
+    });
 }
 
-/** A scanned plugin folder + whether it's the per-user or system-wide location. */
-interface PluginDir {
-    path: string;
-    scope: 'user' | 'system' | string;
-    format?: 'VST2' | 'VST3' | 'CLAP' | 'AU' | string;
+function installedItem(plugin: PluginDescriptor, declarationOrder: number): BrowserItem {
+    const format = plugin.format.toUpperCase();
+    return {
+        id: hostedPluginIdFor(plugin), name: plugin.name, vendor: plugin.vendor || 'Unknown maker',
+        family: format === 'CLAP' ? familiesFromClapFeatures(plugin.features)[0] : undefined,
+        format, path: plugin.path, source: 'installed', reliability: plugin.reliability_note,
+        descriptor: plugin, declarationOrder, benched: plugin.benched,
+    };
 }
 
-/** Which hosting backend THIS build compiled in (mirrors `HostingInfo` in the
- *  native shell). `'none'` is the fast scaffold `bun native` that can't host any
- *  plugin — so an empty list there means "build can't host", not "none installed". */
-interface HostingInfo {
-    backend: 'none' | 'clap' | 'juce' | string;
-    formats: string[];
-}
-
-type ScanState =
-    | { kind: 'idle' }
-    | { kind: 'scanning' }
-    | { kind: 'ok'; plugins: PluginDescriptor[]; dirs: PluginDir[]; backend: HostingInfo | null }
-    | { kind: 'error'; message: string }
-    | { kind: 'unsupported' };
-
-export function PluginsPanel({ initiallyOpen = false }: { initiallyOpen?: boolean }) {
+export function PluginsPanel({ initiallyOpen = false, context = 'browse' }: { initiallyOpen?: boolean; context?: BrowserContext }) {
     const [open, setOpen] = useState(initiallyOpen);
-    const [state, setState] = useState<ScanState>({ kind: 'idle' });
-    const addNode = useGraphStore((s) => s.addNode);
-    const setNodePluginId = useGraphStore((s) => s.setNodePluginId);
-    const updateNodePorts = useGraphStore((s) => s.updateNodePorts);
-
-    useEffect(() => {
-        const onKey = (e: KeyboardEvent) => {
-            const hit = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'p';
-            if (!hit) return;
-            e.preventDefault();
-            setOpen((v) => !v);
-        };
-        const onCmd = () => setOpen((v) => !v);
-        window.addEventListener('keydown', onKey);
-        window.addEventListener('openjammer:toggle-plugins', onCmd);
-        return () => {
-            window.removeEventListener('keydown', onKey);
-            window.removeEventListener('openjammer:toggle-plugins', onCmd);
-        };
-    }, []);
+    const [browserContext, setBrowserContext] = useState(context);
+    const [plugins, setPlugins] = useState<PluginDescriptor[]>([]);
+    const [dirs, setDirs] = useState<PluginDir[]>([]);
+    const [backend, setBackend] = useState<HostingInfo | null>(null);
+    const [quarantine, setQuarantine] = useState<QuarantineEntry[]>([]);
+    const [quarantineOpen, setQuarantineOpen] = useState(false);
+    const [query, setQuery] = useState('');
+    const [source, setSource] = useState<BrowserSource>('all');
+    const [families, setFamilies] = useState<PluginFamily[]>(() => defaultBrowserFamilies(context));
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [focused, setFocused] = useState(0);
+    const [scanning, setScanning] = useState(false);
+    const [scanError, setScanError] = useState<string | null>(null);
+    const searchRef = useRef<HTMLInputElement>(null);
+    const addNode = useGraphStore((state) => state.addNode);
+    const setNodePluginId = useGraphStore((state) => state.setNodePluginId);
+    const updateNodePorts = useGraphStore((state) => state.updateNodePorts);
 
     const close = useCallback(() => setOpen(false), []);
+    useModalKeymap('plugins', open, useMemo(() => [{ actionId: 'panel.plugins', run: () => { close(); return true; } }], [close]));
+    useBindingSet(useMemo(() => ({ id: 'plugins-toggle-mounted', scope: 'global' as const, entries: [{ actionId: 'panel.plugins', run: () => { setBrowserContext('browse'); setOpen((value) => !value); return true; } }] }), []));
 
-    const insertPlugin = useCallback(
-        (plugin: PluginDescriptor) => {
-            const pluginId = hostedPluginIdFor(plugin);
-            const def = makeHostedPluginDefinition(plugin);
-            registerDynamicPlugin(pluginId, def);
+    useEffect(() => {
+        const onOpen = (event: Event) => {
+            const detail = (event as CustomEvent<{ context?: BrowserContext }>).detail;
+            const next = detail?.context ?? 'browse';
+            setBrowserContext(next);
+            setFamilies(defaultBrowserFamilies(next));
+            setOpen(true);
+        };
+        window.addEventListener('openjammer:toggle-plugins', onOpen);
+        window.addEventListener('openjammer:open-browser', onOpen);
+        return () => { window.removeEventListener('openjammer:toggle-plugins', onOpen); window.removeEventListener('openjammer:open-browser', onOpen); };
+    }, []);
+
+    const choose = useCallback((item: BrowserItem) => {
+        if (item.source === 'built-in') {
+            const type = item.id.slice('builtin:'.length) as keyof typeof nodeDefinitions;
+            addNode(type, { x: 80, y: 80 });
+        } else if (item.descriptor) {
+            const def = makeHostedPluginDefinition(item.descriptor);
+            registerDynamicPlugin(item.id, def);
             const id = addNode('effect', { x: 80, y: 80 }, null, def.defaultData);
-            setNodePluginId(id, pluginId);
+            setNodePluginId(id, item.id);
             updateNodePorts(id, def.defaultPorts.map((port) => ({ ...port })));
-            toast.success(`Added ${plugin.name}`, {
-                description: plugin.is_instrument ? 'Hosted instrument plugin' : 'Hosted effect plugin',
-            });
-            close();
-        },
-        [addNode, close, setNodePluginId, updateNodePorts],
-    );
+        }
+        window.dispatchEvent(new CustomEvent('openjammer:browser-chosen', { detail: { context: browserContext, item } }));
+        toast.success(`${browserActionWord(browserContext) === 'Add' ? 'Added' : browserActionWord(browserContext)} ${item.name}`);
+        close();
+    }, [addNode, browserContext, close, setNodePluginId, updateNodePorts]);
 
     const scan = useCallback(async () => {
         const invoke = getInvoke();
-        if (!invoke || !isTauri()) {
-            setState({ kind: 'unsupported' });
-            return;
-        }
-        setState({ kind: 'scanning' });
+        if (!invoke || !isTauri()) { setBackend({ backend: 'none', formats: [] }); return; }
+        setScanning(true); setScanError(null);
         try {
-            // Empty dirs -> the native side scans the OS-standard plugin folders;
-            // `plugin_dirs` returns those same VST2/VST3/CLAP/AU folders so the
-            // empty state can show real paths instead of examples. `hosting_backend`
-            // reports which backend this build compiled in, so an empty list can be
-            // explained honestly (a scaffold build can't host anything). It's a new
-            // command, so tolerate an older binary that lacks it (-> null).
-            const [plugins, dirs, backend] = await Promise.all([
+            const [found, foundDirs, info, quarantined] = await Promise.all([
                 invoke('scan_plugins', { dirs: [] }) as Promise<PluginDescriptor[]>,
                 invoke('plugin_dirs') as Promise<PluginDir[]>,
                 (invoke('hosting_backend') as Promise<HostingInfo>).catch(() => null),
+                (invoke('plugin_quarantine_list') as Promise<QuarantineEntry[]>).catch(() => []),
             ]);
-            const safePlugins = Array.isArray(plugins) ? plugins : [];
-            for (const plugin of safePlugins) {
-                const pluginId = hostedPluginIdFor(plugin);
-                registerDynamicPlugin(pluginId, makeHostedPluginDefinition(plugin));
-                registerCommand({
-                    id: `add-${pluginId}`,
-                    title: `Add ${plugin.name}`,
-                    group: 'Plugins',
-                    keywords: [plugin.format, plugin.vendor, plugin.is_instrument ? 'instrument' : 'effect'],
-                    run: () => insertPlugin(plugin),
-                });
-            }
-            setState({
-                kind: 'ok',
-                plugins: safePlugins,
-                dirs: Array.isArray(dirs) ? dirs : [],
-                backend,
+            const safe = Array.isArray(found) ? found : [];
+            setPlugins(safe); setDirs(Array.isArray(foundDirs) ? foundDirs : []); setBackend(info);
+            setQuarantine(Array.isArray(quarantined) ? quarantined : []);
+            safe.forEach((plugin) => {
+                const id = hostedPluginIdFor(plugin); registerDynamicPlugin(id, makeHostedPluginDefinition(plugin));
+                registerCommand({ id: `add-${id}`, title: `Add ${plugin.name}`, group: plugin.is_instrument ? 'Instruments' : 'Effects', keywords: [plugin.format, plugin.vendor], run: () => choose(installedItem(plugin, 0)) });
             });
-            // Auto-rebind (invariant #4a): the engine just re-registered every
-            // scanned plugin, so force a re-push. A node that was degraded because
-            // its plugin was missing now recompiles onto the real loader and its
-            // "(missing plugin)" badge clears — no canvas edit needed.
-            try {
-                getExecutor().resync();
-            } catch {
-                /* no executor yet (pre-audio): the next push rebinds anyway */
-            }
-        } catch (err) {
-            setState({ kind: 'error', message: err instanceof Error ? err.message : String(err) });
-        }
-    }, [insertPlugin]);
+            try { getExecutor().resync(); } catch { /* the first graph push will bind */ }
+        } catch (error) { setScanError(error instanceof Error ? error.message : String(error)); }
+        finally { setScanning(false); }
+    }, [choose]);
 
-    const resetQuarantine = useCallback(async () => {
-        const invoke = getInvoke();
-        if (!invoke) return;
-        try {
-            await invoke('plugin_quarantine_reset');
-            toast.success('Plugin quarantine reset');
-            await scan();
-        } catch (err) {
-            toast.error('Could not reset plugin quarantine', {
-                description: err instanceof Error ? err.message : String(err),
-            });
-        }
-    }, [scan]);
+    useEffect(() => { if (open) void scan(); }, [open, scan]);
+    useEffect(() => { if (open) queueMicrotask(() => searchRef.current?.focus()); }, [open]);
 
-    /** Open one of the known plugin folders in the OS file manager. */
-    const revealPath = useCallback(async (path: string) => {
-        const invoke = getInvoke();
-        if (!invoke) return;
-        try {
-            await invoke('reveal_path', { path });
-        } catch (err) {
-            toast.error('Could not open the folder', {
-                description: err instanceof Error ? err.message : String(err),
-            });
-        }
-    }, []);
+    const items = useMemo(() => [...builtInItems(), ...plugins.map(installedItem)], [plugins]);
+    const visible = useMemo(() => filterBrowserItems(items, query, source, families), [families, items, query, source]);
+    const availableFamilies = useMemo(() => PLUGIN_FAMILIES.filter((family) => items.some((item) => item.family === family)), [items]);
+    const action = browserActionWord(browserContext);
+    const folderCount = dirs.length;
 
-    // Scan once each time the panel opens.
-    useEffect(() => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- opening the panel kicks off a native plugin scan (side effect on an external system); the scan's setState is the sanctioned subscribe-and-update pattern
-        if (open) void scan();
-    }, [open, scan]);
+    const onListKeyDown = (event: React.KeyboardEvent) => {
+        if (event.key === '/') { event.preventDefault(); searchRef.current?.focus(); return; }
+        if (event.key === 'ArrowDown') { event.preventDefault(); setFocused((value) => Math.min(visible.length - 1, value + 1)); }
+        else if (event.key === 'ArrowUp') { event.preventDefault(); setFocused((value) => Math.max(0, value - 1)); }
+        else if (event.key === 'Enter' && visible[focused]) choose(visible[focused]);
+        else if (event.key === ' ' && visible[focused]) { event.preventDefault(); setExpandedId((id) => id === visible[focused]!.id ? null : visible[focused]!.id); }
+    };
 
     return (
-        <Modal open={open} onClose={close} ariaLabel="Plugins" align="top" size="md">
-            <PanelHeader
-                title="Plugins"
-                onClose={close}
-                actions={
-                    <>
-                        <Button onClick={() => void resetQuarantine()} title="Reset crashed-plugin quarantine and re-scan">
-                            Reset quarantine
-                        </Button>
-                        <Button onClick={() => void scan()} title="Re-scan">
-                            Re-scan
-                        </Button>
-                    </>
-                }
-            />
-
-            <div className="plugins-body">
-                {state.kind === 'unsupported' && (
-                    <Callout variant="info">
-                        Plugin hosting is part of the <strong>desktop app</strong>. Install OpenJammer
-                        for your OS to scan and host VST2, VST3, CLAP, and macOS AU plugins.
-                    </Callout>
-                )}
-                {state.kind === 'scanning' && (
-                    <p className="plugins-note">
-                        <Spinner /> Scanning your plugin folders…
-                    </p>
-                )}
-                {state.kind === 'error' && (
-                    <Callout variant="danger" title="Scan failed">
-                        {state.message}
-                    </Callout>
-                )}
-                {state.kind === 'ok' && state.plugins.length === 0 && (
-                    <PluginsEmptyState
-                        backend={state.backend}
-                        dirs={state.dirs}
-                        onReveal={(path) => void revealPath(path)}
-                    />
-                )}
-                {state.kind === 'ok' && state.plugins.length > 0 && (
-                    <List aria-label="Installed plugins">
-                        {state.plugins.map((p) => (
-                            <ListRow
-                                key={p.uid || p.path}
-                                actions={
-                                    <div className="plugins-meta">
-                                        <Button onClick={() => insertPlugin(p)} title={`Add ${p.name} to the graph`}>
-                                            Add
-                                        </Button>
-                                        <Chip>{p.format}</Chip>
-                                        <Chip>{p.is_instrument ? 'instrument' : 'effect'}</Chip>
-                                        <Chip>
-                                            {p.ports.audio_in}→{p.ports.audio_out} ch
-                                        </Chip>
-                                        <Chip>{p.param_count} params</Chip>
-                                    </div>
-                                }
-                            >
-                                <span className="plugins-item-main">
-                                    <span className="plugins-name">{p.name}</span>
-                                    <span className="plugins-vendor">{p.vendor}</span>
-                                </span>
-                            </ListRow>
-                        ))}
-                    </List>
-                )}
+        <Modal open={open} onClose={close} ariaLabel="Browser" align="top" size="auto">
+            <div className={`plugin-browser plugin-browser--${browserContext}`}>
+                <PanelHeader title="Browser" onClose={close} actions={<Button onClick={() => void scan()}>Re-scan</Button>} />
+                <div className="plugin-browser__search">
+                    <Input ref={searchRef} data-autofocus="true" aria-label="Search plugins" placeholder="search…" value={query} onChange={(event) => { setQuery(event.target.value); setFocused(0); }} />
+                    <SegmentedControl aria-label="Plugin source" value={source} options={[{ value: 'all', label: 'All' }, { value: 'built-in', label: 'Built-in' }, { value: 'installed', label: 'Installed' }]} onChange={setSource} />
+                </div>
+                <div className="plugin-browser__families" aria-label="Plugin families">
+                    {availableFamilies.map((family) => <Chip key={family} pressed={families.includes(family)} onClick={() => setFamilies((current) => current.includes(family) ? current.filter((value) => value !== family) : [...current, family])}>{family}</Chip>)}
+                </div>
+                {scanError && <Callout variant="danger" title="Scan failed">{scanError}</Callout>}
+                <div className="plugin-browser__results" role="listbox" aria-label="Sounds and effects" tabIndex={0} onKeyDown={onListKeyDown}>
+                    {visible.map((item, index) => {
+                        const provenance = [item.vendor, item.family, item.format, item.reliability].filter(Boolean).join(' · ');
+                        return <div key={item.id} className={`plugin-browser__row${item.benched ? ' is-benched' : ''}`} role="option" aria-selected={index === focused} aria-label={[item.name, provenance].filter(Boolean).join(', ')} onMouseEnter={() => setFocused(index)} onClick={() => choose(item)}>
+                            <div className="plugin-browser__identity"><strong>{item.name}</strong><span>{provenance}</span></div>
+                            <Button onClick={(event) => { event.stopPropagation(); choose(item); }}>{item.benched ? 'Un-bench' : action}</Button>
+                            {expandedId === item.id && <div className="plugin-browser__detail"><span>{item.descriptor ? `${item.descriptor.ports.audio_in}→${item.descriptor.ports.audio_out} ch · ${item.descriptor.param_count} params` : 'OpenJammer built-in'}</span>{item.path && <code>{item.path}</code>}</div>}
+                        </div>;
+                    })}
+                    {visible.length === 0 && <p className="plugin-browser__none">nothing matches that — try fewer letters.</p>}
+                </div>
+                {quarantineOpen && <section className="plugin-browser__quarantine"><h3>{quarantine.length} plugins sat out this scan</h3><p>They crashed while being read, so we stopped asking and finished without them. Nothing else was affected.</p><Button onClick={() => void getInvoke()?.('plugin_quarantine_reset').then(scan)}>Try them again</Button>{quarantine.map((entry) => <div className="plugin-browser__quarantine-row" key={entry.path}><code>{entry.path.split(/[\\/]/).pop()}</code><span>{entry.reason}</span><Button onClick={() => void getInvoke()?.('plugin_quarantine_pardon', { path: entry.path }).then(scan)}>Try again</Button></div>)}</section>}
+                <footer className="plugin-browser__status">
+                    <span>{scanning ? `Reading ${folderCount ? 1 : 0} of ${folderCount} folders — ${plugins.length} plugins so far.` : backend?.backend === 'none' ? "This build doesn't host plugins — built-ins only." : `Read ${folderCount} folders — ${plugins.length} plugins.`}</span>
+                    {quarantine.length > 0 && <button type="button" onClick={() => setQuarantineOpen((value) => !value)}>{quarantine.length} sat out ›</button>}
+                    <span className="plugin-browser__ruler" style={{ transform: `scaleX(${scanning && folderCount ? 1 / folderCount : 1})` }} />
+                </footer>
             </div>
         </Modal>
-    );
-}
-
-/**
- * The empty state, told honestly by what this build can actually host. The old
- * copy always said "install a plugin into a folder below, then Re-scan" — a lie in
- * a scaffold `bun native`, which can't host anything no matter what's installed.
- * Now the message follows `hosting_backend`:
- *   • `none`  → hosting is off; point at `bun native --all` (no folder dump — it's
- *               noise when dropping a plugin can't help).
- *   • `clap`  → CLAP-only; VST3/AU won't show; folders shown.
- *   • `juce`/unknown → really scanned and found nothing; folders shown + a nudge to
- *               Reset quarantine (a plugin that crashed a prior scan stays skipped).
- */
-function PluginsEmptyState({
-    backend,
-    dirs,
-    onReveal,
-}: {
-    backend: HostingInfo | null;
-    dirs: PluginDir[];
-    onReveal: (path: string) => void;
-}) {
-    const kind = backend?.backend ?? 'unknown';
-
-    if (kind === 'none') {
-        return (
-            <div className="plugins-empty">
-                <Callout variant="info" title="Plugin hosting is off in this build">
-                    This fast <code>bun native</code> build doesn’t scan or host plugins, so nothing
-                    appears here no matter what’s installed. Relaunch with <code>bun native --all</code>{' '}
-                    (VST2/VST3/CLAP/AU) or <code>bun native --clap</code> (CLAP-only), then reopen this panel.
-                </Callout>
-            </div>
-        );
-    }
-
-    const formats = backend?.formats?.length ? backend.formats.join('/').toUpperCase() : '';
-    const title = kind === 'clap' ? 'No CLAP plugins found' : 'No plugins found';
-    const body =
-        kind === 'clap' ? (
-            <>
-                This build hosts <strong>CLAP only</strong> — VST3 and AU plugins won’t appear. Drop a{' '}
-                <code>.clap</code> into a folder below and <strong>Re-scan</strong>, or relaunch with{' '}
-                <code>bun native --all</code> for VST3/AU.
-            </>
-        ) : (
-            <>
-                {formats ? `Hosting is on (${formats}). ` : ''}OpenJammer scanned the folders below and
-                found nothing. If a plugin you installed is missing, try <strong>Reset quarantine</strong>{' '}
-                then <strong>Re-scan</strong> — a plugin that crashed a previous scan stays skipped until
-                quarantine is cleared.
-            </>
-        );
-
-    return (
-        <div className="plugins-empty">
-            <Callout variant="info" title={title}>
-                {body}
-            </Callout>
-            {dirs.length > 0 && (
-                <List aria-label="Plugin folders">
-                    {dirs.map((dir) => (
-                        <ListRow
-                            key={dir.path}
-                            actions={
-                                <Button
-                                    onClick={() => onReveal(dir.path)}
-                                    title="Open this folder in your file manager"
-                                >
-                                    Open folder
-                                </Button>
-                            }
-                        >
-                            <span className="plugins-dir">
-                                <code className="plugins-path">{dir.path}</code>
-                                <Chip>{dir.format ?? 'Plugin'}</Chip>
-                                <Chip>{dir.scope === 'user' ? 'your account' : 'all users'}</Chip>
-                            </span>
-                        </ListRow>
-                    ))}
-                </List>
-            )}
-        </div>
     );
 }

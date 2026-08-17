@@ -1,0 +1,7 @@
+.oj-param-row { min-height: 36px; display: flex; flex-direction: column; justify-content: center; gap: 1px; }
+.oj-param-row__line { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.oj-param-row__label { min-width: 0; padding: 0; overflow: hidden; border: 0; background: transparent; color: var(--text-secondary); font: 500 13px/16px var(--font-sans); text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.oj-param-row__label[aria-pressed="true"]::before { content: '⌐ '; }
+.oj-param-row__value { min-width: 64px; color: var(--text-primary); font: 400 13px/16px var(--font-mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+.oj-param-row__value.is-driven { text-decoration: underline; text-decoration-color: var(--timeline-automation-line); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.oj-param-row .oj-slider { width: 100%; height: 14px; margin-block: -7px; padding-block: 7px; box-sizing: content-box; }

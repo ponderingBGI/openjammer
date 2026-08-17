@@ -84,6 +84,12 @@ import { useGraphStore } from '../../../store/graphStore';
 import { useAuthStore } from '../../../auth/authStore';
 import { useCommandBarStore } from '../../../store/commandBarStore';
 import { useAgentSessionStore } from '../../../store/agentSessionStore';
+import { useKeymapArbiter } from '../../../keymap/useKeymap';
+
+function ArbiterHarness() {
+    useKeymapArbiter();
+    return null;
+}
 
 function makeAction(id: string, title: string, run = vi.fn()): Action {
     return {
@@ -139,7 +145,7 @@ describe('CommandBar (M2)', () => {
 
     it('host lazy-loads on Ctrl+K and renders registered actions', async () => {
         register(makeAction('node.add.looper', 'Add Looper'));
-        render(<CommandBarHost />);
+        render(<><ArbiterHarness /><CommandBarHost /></>);
 
         expect(screen.queryByPlaceholderText(/Search commands/i)).toBeNull();
         fireEvent.keyDown(window, { key: 'k', ctrlKey: true });

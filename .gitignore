@@ -84,3 +84,4 @@ ds-bundle/
 
 # Generated third-party Rust notice bundle (`just licenses`; bundled into installers at release)
 THIRD-PARTY-RUST.html
+perf-results/

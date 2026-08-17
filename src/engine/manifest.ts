@@ -57,6 +57,12 @@ export interface ParamDecl {
     min: number;
     max: number;
     default: number;
+    module?: string;
+    stepped?: boolean;
+    automatable?: boolean;
+    hidden?: boolean;
+    readOnly?: boolean;
+    valueText?: string;
 }
 
 /** Declares a node's port topology (audio + control, in + out) + per-audio-port
@@ -448,6 +454,14 @@ export function manifestForDynamic(id: string, def: NodeDefinition): PluginManif
             min: p.min,
             max: p.max,
             default: p.default,
+            module: p.module,
+            // CLAP flags are retained losslessly in the descriptor. These
+            // conservative defaults avoid inventing widgets when a legacy
+            // cache did not carry the newer fields.
+            stepped: p.flags === undefined ? false : (p.flags & 1) !== 0,
+            automatable: p.flags === undefined ? true : (p.flags & (1 << 5)) !== 0,
+            hidden: p.flags === undefined ? false : (p.flags & (1 << 2)) !== 0,
+            readOnly: p.flags === undefined ? false : (p.flags & (1 << 3)) !== 0,
         }));
         return {
             id,

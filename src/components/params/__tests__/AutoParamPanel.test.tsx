@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { AutoParamPanel } from '../AutoParamPanel';
+import { formatParamValue, seededParamIds, togglePinnedParam } from '../paramModel';
 import type { PluginManifest } from '../../../engine/manifest';
 import type { GraphNode } from '../../../engine/types';
 import { useGraphStore } from '../../../store/graphStore';
@@ -42,6 +43,17 @@ const manifest: PluginManifest = {
 describe('AutoParamPanel', () => {
     beforeEach(() => {
         cleanup();
+    });
+
+    it('pins at most eight parameters and toggles by stable id', () => {
+        expect(togglePinnedParam([1, 2], 2)).toEqual([1]);
+        expect(togglePinnedParam([1, 2, 3, 4, 5, 6, 7, 8], 9)).toEqual([2, 3, 4, 5, 6, 7, 8, 9]);
+        expect(seededParamIds([], [2, 3, 2, 4, 5])).toEqual([2, 3, 4, 5]);
+    });
+
+    it('shows plugin value text verbatim and invents no unit on fallback', () => {
+        expect(formatParamValue(1240, '1.24 kHz')).toBe('1.24 kHz');
+        expect(formatParamValue(1240)).toBe('1240.00');
     });
 
     it('renders one slider per manifest param with its label + default', () => {

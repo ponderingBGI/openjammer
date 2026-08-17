@@ -17,6 +17,9 @@ import type { Event as EngineEvent } from '../../../packages/oj-protocol-ts/src/
 import { useLogStore } from '../../store/logStore';
 import { setEngineHealth } from '../../store/engineHealthStore';
 import { setNodePluginLoadError } from './pluginLoadError';
+import { reportPluginFault } from '../../store/pluginFaultStore';
+import { useGraphStore } from '../../store/graphStore';
+import { resolveNodeDefinition } from '../../engine/registry';
 
 /**
  * Coalesce a batch of engine events so a per-block fault storm collapses to a
@@ -97,8 +100,8 @@ export function remapFaultNodes(
 }
 
 /**
- * Tap a drained event batch for RUNTIME CRASH faults (`NodeFault` with
- * `fault === 'Crashed'`) and badge the affected node — the runtime twin of the
+ * Tap a drained event batch for terminal runtime faults (`Crashed` or
+ * `AutoBypassed`) and badge the affected node — the runtime twin of the
  * load-degraded "(missing plugin)" badge, sharing the one `setNodePluginLoadError`
  * SSOT. A hosted plugin that crashed mid-set (the per-node fault latch) or a
  * trapped code node thus shows the same non-modal node badge.
@@ -109,8 +112,8 @@ export function remapFaultNodes(
  * badge — one clear-owner, no flicker. `resolve` maps the engine `NodeIdx` to its
  * visual node id (each tier owns its reverse index). Shared by BOTH executors so
  * there is one runtime-fault owner, not a fork (the same covenant as the rest of
- * this pipe). Other fault kinds (NonFinite/OverBudget/AutoBypassed) are NOT badged
- * here — those are transient/watchdog and stay in the DevLog via `ingestEngineEvents`.
+ * this pipe). NonFinite and OverBudget remain diagnostic warnings; AutoBypassed
+ * is terminal for this instance and therefore must never fail silently.
  */
 export function routeRuntimeFaults(
     events: readonly EngineEvent[],
@@ -119,10 +122,16 @@ export function routeRuntimeFaults(
     for (const ev of events) {
         const kind = ev.kind;
         if (typeof kind !== 'object' || !('NodeFault' in kind)) continue;
-        if (kind.NodeFault.fault !== 'Crashed') continue;
+        if (kind.NodeFault.fault !== 'Crashed' && kind.NodeFault.fault !== 'AutoBypassed' && kind.NodeFault.fault !== 'NonFinite') continue;
         const visual = resolve(kind.NodeFault.node);
         if (visual === undefined) continue;
-        setNodePluginLoadError(visual, true);
+        const node = useGraphStore.getState().nodes.get(visual);
+        const pluginName = node ? resolveNodeDefinition(node).name : 'Plugin';
+        reportPluginFault({ nodeId: visual, pluginName, kind: kind.NodeFault.fault, corr: ev.corr_id || undefined });
+        if (kind.NodeFault.fault !== 'NonFinite') {
+            setNodePluginLoadError(visual, true);
+            useGraphStore.getState().updateNodeData(visual, { pluginFaultKind: kind.NodeFault.fault, pluginBypassed: true });
+        }
     }
 }
 
