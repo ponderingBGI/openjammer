@@ -185,4 +185,7 @@ installer build.
 
 Canari builds are published by `.github/workflows/canary.yml` as numbered
 prereleases like `v0.0.1-canari.1`. The `0.0.1` part is the stable version the
-current `canari -> main` promotion will publish.
+current `canari -> main` promotion will publish. Platform jobs build and sign in
+parallel, then hand immutable workflow artifacts to one publisher. That publisher
+assembles and checks the complete updater manifest, retries each release upload,
+and keeps the GitHub Release as a draft until every expected asset is present.
