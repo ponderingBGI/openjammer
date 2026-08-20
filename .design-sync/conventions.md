@@ -27,9 +27,14 @@ and write your own layout glue with the **semantic CSS variables** below (real n
 - **Color** — surfaces `--bg-canvas` `--bg-node` `--bg-node-header` `--bg-tertiary`; text
   `--text-primary` `--text-secondary` `--text-muted` `--text-on-accent`; accents
   `--accent-primary` `--accent-secondary` `--accent-success` `--accent-warning` `--accent-danger`;
-  ink/borders `--sketch-black` `--border-subtle`; **wiring (ports/cables)** `--audio-input`
-  `--audio-output` `--audio-connected` `--control-input` `--control-output` `--control-connected`
-  `--universal-port`.
+  ink/borders `--sketch-black` `--border-subtle` `--border-strong`; **wiring (ports/cables)**
+  `--audio-input` `--audio-output` `--audio-connected` `--control-input` `--control-output`
+  `--control-connected` `--universal-port`; **timeline/arrangement** `--timeline-bg`
+  `--timeline-chrome-bg` `--timeline-lane-bg` `--timeline-lane-alt-bg` `--timeline-lane-divider`
+  `--timeline-clip-bg` `--timeline-clip-border` `--timeline-clip-muted-bg` `--timeline-grid-bar`
+  `--timeline-grid-beat` `--timeline-grid-sub` `--timeline-playhead` `--timeline-selection`
+  `--timeline-loop-range` `--timeline-section-marker` `--timeline-note-fill`
+  `--timeline-waveform-fill` `--timeline-automation-line`.
 - **Space** `--space-xs --space-sm --space-md --space-lg --space-xl`
 - **Radius** `--radius-sm --radius-md --radius-lg --radius-xl --radius-pill`
 - **Type** sizes `--text-xs … --text-2xl`; families `--font-sketch` (Caveat — titles/labels),
@@ -38,9 +43,15 @@ and write your own layout glue with the **semantic CSS variables** below (real n
 
 Key prop vocabularies: `Button` `variant` = node｜primary｜secondary｜success｜danger｜ghost｜link
 (+ `iconOnly`, `active`). `Port`/`PortRow` `kind` = audio｜control｜universal (+ `direction`
-input｜output, `connected`, `active`, `placeholder`). `Callout`/`Banner` `tone`; `Toggle`
-`checked`; `Slider` `value/min/max/step`. Port color *is* meaning — audio=blue, control=grey,
-universal=violet; only pair a state color with a label or icon.
+input｜output, `connected`, `active`, `placeholder`). `Callout` `variant` =
+success｜danger｜warning｜info｜tip; `Banner` `tone` = danger｜warning｜info (they differ — Callout
+has no `tone`). `Toggle` `checked`; `Slider` `value/min/max/step`. Timeline family: `LaneButton`
+`tone` = default｜mute｜solo｜armed｜recording (styling lands on the pressed state, so pass
+`aria-pressed`); `ParamRow` label + `valueText` + range, `control` swaps the slider out;
+`TimeRuler` `marks` with `level` = bar｜beat｜sub; `WaveformCanvas` `peaks` as flat min/max pairs.
+Port color *is* meaning — audio=blue, control=grey, universal shows the rainbow-until-typed
+gradient until you pass `resolvedKind`, then it takes that kind's color; only pair a state color
+with a label or icon.
 
 ## Where the truth lives
 
