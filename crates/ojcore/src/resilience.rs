@@ -85,12 +85,8 @@ impl NodeBudget {
 
     /// Clear every flag (e.g. after the control plane has consumed them).
     pub fn clear(&mut self) {
-        for b in &mut self.non_finite {
-            *b = false;
-        }
-        for b in &mut self.over_budget {
-            *b = false;
-        }
+        self.non_finite.fill(false);
+        self.over_budget.fill(false);
     }
 }
 

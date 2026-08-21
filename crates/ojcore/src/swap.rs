@@ -19,6 +19,7 @@
 //! bare `alloc`, and the compile/exec core stays `no_std` for wasm.
 
 use alloc::sync::Arc;
+use std::sync::Mutex;
 
 use arc_swap::{ArcSwap, ArcSwapOption};
 use basedrop::{Collector, Handle, Owned};
@@ -49,8 +50,8 @@ impl<T: Send + Sync + 'static> RtCellRx<T> {
 /// by [`Self::collect`] rather than inline with publication or processing.
 pub struct RtCell<T: Send + Sync + 'static> {
     current: Arc<ArcSwap<T>>,
-    collector: Collector,
-    handle: Handle,
+    collector: Option<Collector>,
+    handle: Option<Handle>,
 }
 
 impl<T: Send + Sync + 'static> RtCell<T> {
@@ -59,15 +60,18 @@ impl<T: Send + Sync + 'static> RtCell<T> {
         let handle = collector.handle();
         Self {
             current: Arc::new(ArcSwap::from_pointee(value)),
-            collector,
-            handle,
+            collector: Some(collector),
+            handle: Some(handle),
         }
     }
 
     /// Atomically publish a complete replacement (control thread only).
     pub fn publish(&self, value: T) {
         let displaced = self.current.swap(Arc::new(value));
-        drop(Owned::new(&self.handle, displaced));
+        drop(Owned::new(
+            self.handle.as_ref().expect("RT cell handle is live"),
+            displaced,
+        ));
     }
 
     /// Obtain the cheap audio-thread side of this cell.
@@ -84,13 +88,29 @@ impl<T: Send + Sync + 'static> RtCell<T> {
 
     /// Reclaim displaced snapshots off the audio thread.
     pub fn collect(&mut self) -> usize {
-        let before = self.collector.alloc_count();
-        self.collector.collect();
-        before.saturating_sub(self.collector.alloc_count())
+        let collector = self.collector.as_mut().expect("RT cell collector is live");
+        let before = collector.alloc_count();
+        collector.collect();
+        before.saturating_sub(collector.alloc_count())
     }
 
     pub fn alloc_count(&self) -> usize {
-        self.collector.alloc_count()
+        self.collector
+            .as_ref()
+            .expect("RT cell collector is live")
+            .alloc_count()
+    }
+}
+
+impl<T: Send + Sync + 'static> Drop for RtCell<T> {
+    fn drop(&mut self) {
+        if let Some(mut collector) = self.collector.take() {
+            collector.collect();
+            drop(self.handle.take());
+            // basedrop deliberately leaks its queue metadata unless cleanup is
+            // requested after the final handle and allocation are gone.
+            let _ = collector.try_cleanup();
+        }
     }
 }
 
@@ -108,6 +128,53 @@ struct RtProgram(CompiledProgram);
 // SAFETY: see `RtProgram` docs — exclusive-transfer use makes `Sync` sound.
 unsafe impl Sync for RtProgram {}
 
+/// Shared owner for the deferred-drop collector.
+///
+/// Receivers retain this owner alongside their [`Handle`], so the collector's
+/// queue remains valid even if a receiver outlives the control-side
+/// [`ProgramSwap`]. The mutex is touched only by control-thread collection and
+/// teardown; the audio-thread install path uses only its lock-free `Handle`.
+struct SharedCollector {
+    collector: Mutex<Option<Collector>>,
+}
+
+impl SharedCollector {
+    fn new(collector: Collector) -> Self {
+        Self {
+            collector: Mutex::new(Some(collector)),
+        }
+    }
+
+    fn collect(&self) -> usize {
+        let mut guard = self.collector.lock().unwrap_or_else(|e| e.into_inner());
+        let collector = guard.as_mut().expect("program-swap collector is live");
+        let before = collector.alloc_count();
+        collector.collect();
+        before.saturating_sub(collector.alloc_count())
+    }
+
+    fn alloc_count(&self) -> usize {
+        self.collector
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .expect("program-swap collector is live")
+            .alloc_count()
+    }
+}
+
+impl Drop for SharedCollector {
+    fn drop(&mut self) {
+        let slot = self.collector.get_mut().unwrap_or_else(|e| e.into_inner());
+        let mut collector = slot.take().expect("program-swap collector is live");
+        collector.collect();
+        assert!(
+            collector.try_cleanup().is_ok(),
+            "program-swap collector dropped with live handles or allocations"
+        );
+    }
+}
+
 /// The AUDIO-THREAD end of a [`ProgramSwap`]: a clone-cheap, `Send` handle that
 /// installs the newest published program into the engine and defers the old
 /// program's drop. Move one into the cpal callback (via [`ProgramSwap::rx`]); the
@@ -116,6 +183,9 @@ unsafe impl Sync for RtProgram {}
 pub struct ProgramSwapRx {
     pending: Arc<ArcSwapOption<RtProgram>>,
     handle: Handle,
+    // Declared after `handle` so the final receiver drops its handle before it
+    // can release the shared collector owner.
+    _collector: Arc<SharedCollector>,
 }
 
 impl ProgramSwapRx {
@@ -164,8 +234,8 @@ pub struct ProgramSwap {
     /// once the audio thread has adopted it, or before the first publish. An
     /// `Arc` so the audio-thread [`ProgramSwapRx`] shares the SAME mailbox.
     pending: Arc<ArcSwapOption<RtProgram>>,
-    collector: Collector,
-    handle: Handle,
+    handle: Option<Handle>,
+    collector: Arc<SharedCollector>,
 }
 
 impl ProgramSwap {
@@ -175,8 +245,8 @@ impl ProgramSwap {
         let handle = collector.handle();
         Self {
             pending: Arc::new(ArcSwapOption::empty()),
-            collector,
-            handle,
+            handle: Some(handle),
+            collector: Arc::new(SharedCollector::new(collector)),
         }
     }
 
@@ -198,7 +268,12 @@ impl ProgramSwap {
     pub fn rx(&self) -> ProgramSwapRx {
         ProgramSwapRx {
             pending: Arc::clone(&self.pending),
-            handle: self.handle.clone(),
+            handle: self
+                .handle
+                .as_ref()
+                .expect("program-swap handle is live")
+                .clone(),
+            _collector: Arc::clone(&self.collector),
         }
     }
 
@@ -213,14 +288,23 @@ impl ProgramSwap {
     /// Run pending deferred drops (call off the audio thread). Returns how many
     /// allocations were reclaimed.
     pub fn collect(&mut self) -> usize {
-        let before = self.collector.alloc_count();
-        self.collector.collect();
-        before.saturating_sub(self.collector.alloc_count())
+        self.collector.collect()
     }
 
     /// Live allocation count still owned by the collector (for tests/metrics).
     pub fn alloc_count(&self) -> usize {
         self.collector.alloc_count()
+    }
+}
+
+impl Drop for ProgramSwap {
+    fn drop(&mut self) {
+        // Reclaim everything already queued while still on the control thread,
+        // then release our handle. Receiver clones retain `SharedCollector`, so
+        // a later enqueue still has a live collector and the final receiver
+        // performs the remaining cleanup after its handle is gone.
+        self.collector.collect();
+        drop(self.handle.take());
     }
 }
 
