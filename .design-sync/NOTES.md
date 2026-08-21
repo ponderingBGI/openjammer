@@ -35,7 +35,12 @@ oj-ui adds a brand font family, add its woff2 to `public/fonts/`, a `@font-face`
 - `[FONT_MISSING]` "Comic Sans MS" / "Fira Code": these are **fallback names** in the
   `--font-sketch` / `--font-mono` stacks, not shipped faces — the design tool falls back to a
   system font, which is correct. Not a defect; do not chase.
-- All 53 components render clean (0 bad/thin); 117 cells graded good.
+- `[GRID_OVERFLOW]` (converter check added after the first sync): Banner, Cable, Marquee,
+  NodeShell and Waveform render wider than a grid cell. **Resolved** with
+  `cfg.overrides.<Name>.cardMode: "column"` — one export per row at full card width. If a new
+  wide component flags it, apply the same override rather than shrinking the preview.
+- All 57 components render clean (0 bad / 0 thin / 0 variantsIdentical); every authored cell
+  graded good.
 
 ## Re-sync risks (watch-list)
 - **oj-tokens.css is auto-generated** by `bun run tokens` (build.mjs step 3) — just run it before
@@ -45,7 +50,40 @@ oj-ui adds a brand font family, add its woff2 to `public/fonts/`, a `@font-face`
   if font families change.
 - **DesignSync `localDir` gotcha**: the tool resolves relative paths against the persisted shell
   cwd. A prior `cd ds-bundle` doubled the path — pass an **absolute** `localDir`
-  (`/home/wsl/projects/openjammer/ds-bundle`), or `cd` back to repo root first.
+  (`<repo-root>/ds-bundle` — the absolute path differs per clone/worktree), or `cd` back to
+  repo root first.
+- **`Port` universal is an animated rainbow gradient** (`Port.css` `@keyframes oj-port-rainbow`,
+  3s loop) — its screenshot lands on whatever gradient phase the capture caught, so a cleared
+  Port grade on an otherwise unchanged re-sync is animation phase, not a real diff. Re-confirm
+  the sheet and move on.
+- **`TimeRuler` marks hang below the ruler box.** `.oj-time-ruler__mark` is `bottom: 3px` on a
+  6px-tall span, so a 14px bar label overflows ~5px past the container. Its preview wrapper
+  gives 8px of bottom padding and does NOT set `overflow: hidden` — a clipping wrapper cuts the
+  bar numbers in half. (The app's own `.arrangement-ruler-viewport` clips them the same way;
+  that's an app-side observation, not a sync problem.)
+- **`cfg.dtsPropsFor.TimeRuler`** is hand-written: the extracted `.d.ts` referenced a bare
+  `TimeRulerMark[]` that it never defined, leaving the design agent without the mark shape. If
+  `TimeRulerMark` changes in source, update that config entry to match.
 - Previews were ported from the Ladle stories (`packages/oj-ui/src/components/*/*.stories.tsx`)
   + hand-authored for gaps (Port/NodeShell/Field/Input/Select/List/Tabs/Menu-items/icons). If a
   story's API changes, re-port that preview.
+
+## Conventions header — drift fixed 2026-08-20
+`.design-sync/conventions.md` is validated against the fresh build on every re-sync. This run
+corrected two claims that no longer verified, plus one gap:
+- `Callout` takes **`variant`** (success｜danger｜warning｜info｜tip), not `tone` — only `Banner`
+  has `tone`. The old text said "`Callout`/`Banner` `tone`", which would have had the design
+  agent writing a prop that does nothing.
+- Universal ports render the **rainbow-until-typed gradient**, not solid violet. `--universal-port`
+  (#9B59B6) is defined in the tokens but no component consumes it (see
+  `docs/node-migration-plan.md` — the violet-vs-rainbow decision is still open with the design
+  owner). If that decision lands, re-check this line.
+- Added the `--timeline-*` token family, now that the timeline components ship.
+
+## Timeline components (added this sync)
+`LaneButton`, `ParamRow`, `TimeRuler`, `WaveformCanvas` arrived with the Tab-timeline work.
+Previews are authored in `.design-sync/previews/`; `LaneButton`/`TimeRuler`/`WaveformCanvas`
+were ported from their Ladle stories and then composed further (a lane-header strip, a chrome
+strip with height, clip frames), `ParamRow` has no story and was composed from its props plus
+`src/components/params/AutoParamPanel.tsx`. `ParamRow.control` has **no repo usage** — its
+preview cell composes `SegmentedControl` from the API alone.

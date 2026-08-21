@@ -73,13 +73,26 @@ export default defineConfig({
                     label: 'Build OpenJammer',
                     items: [
                         { label: 'Overview', slug: 'build' },
-                        { label: 'Architecture', autogenerate: { directory: 'build/architecture' } },
-                        { label: 'Create a node', autogenerate: { directory: 'build/create-a-node' } },
+                        {
+                            label: 'Architecture',
+                            items: [{ autogenerate: { directory: 'build/architecture' } }],
+                        },
+                        {
+                            label: 'Create a node',
+                            items: [{ autogenerate: { directory: 'build/create-a-node' } }],
+                        },
                         typeDocSidebarGroup,
                         {
                             label: 'Internals / release engineering',
                             collapsed: true,
-                            autogenerate: { directory: 'build/internals' },
+                            items: [
+                                {
+                                    autogenerate: {
+                                        directory: 'build/internals',
+                                        collapsed: true,
+                                    },
+                                },
+                            ],
                         },
                         'build/contributing',
                     ],

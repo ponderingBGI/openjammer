@@ -23,7 +23,14 @@ updates:
       interval: "weekly"
 
   # Frontend / control-plane deps installed via Bun from the npm registry.
-  - package-ecosystem: "npm"
+  - package-ecosystem: "bun"
     directory: "/"
+    schedule:
+      interval: "weekly"
+
+  # The docs site is intentionally isolated from the root Bun workspace and
+  # carries its own package manifest and lockfile.
+  - package-ecosystem: "bun"
+    directory: "/apps/docs"
     schedule:
       interval: "weekly"
