@@ -75,7 +75,7 @@ jobs:
       - name: Install cargo-fuzz (prebuilt binary)
         # taiki-e/install-action fetches a prebuilt binary in seconds instead of
         # compiling cargo-fuzz from source (matches the per-PR nextest install).
-        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2
+        uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2
         with:
           tool: cargo-fuzz
       - name: Fuzz the WAV decoder (time-boxed)
@@ -109,12 +109,12 @@ jobs:
       OJ_PLUGIN_CACHE: ${{ github.workspace }}/.cache/oj-plugins
       OJ_REALWORLD_PLUGINS: '1'
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
       - name: Restore verified plugin artifacts
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4
         with:
           path: .cache/oj-plugins
           key: p4-plugins-linux-${{ hashFiles('crates/ojhost/tests/fixtures/realworld-plugins.toml') }}
@@ -135,12 +135,12 @@ jobs:
       OJHOST_JUCE_JOBS: '4'
       OJ_PLUGIN_CACHE: ${{ github.workspace }}/.cache/oj-plugins
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v4
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
       - name: Restore the verified Dexed artifact
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4
         with:
           path: .cache/oj-plugins
           key: p4-plugins-linux-${{ hashFiles('crates/ojhost/tests/fixtures/realworld-plugins.toml') }}
