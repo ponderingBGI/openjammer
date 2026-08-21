@@ -23,7 +23,8 @@ export { CollabSession } from './CollabSession';
 export type { CollabSessionOptions, SessionState } from './CollabSession';
 
 export { BroadcastChannelTransport } from './transport/BroadcastChannelTransport';
-export { ManualWebRTCTransport } from './transport/ManualWebRTCTransport';
+export { IceGatheringError, ManualWebRTCTransport } from './transport/ManualWebRTCTransport';
+export type { ManualWebRTCTransportOptions } from './transport/ManualWebRTCTransport';
 export { encodeFrame, decodeFrame } from './transport/Transport';
 export type { Transport, TransportEvents, TransportFrame, FrameKind } from './transport/Transport';
 

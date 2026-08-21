@@ -88,9 +88,17 @@ test('@journey J3 Editor\'s Hour — every edit family converges with verb repla
     await page.keyboard.press('Delete');
 
     // Nudge an object, then prove selection undo and object undo are independent.
+    // Overlapping clips can make the pointer select the frontmost object rather
+    // than the locator's DOM node. Capture the production selection result, not
+    // a potentially covered element's attribute; the nudge may also reorder the
+    // rendered collection.
     await clips.first().click({ position: { x: 30, y: 34 } });
+    const nudgeSelection = await page.evaluate(() => (
+        window as unknown as { __openjammerE2E: Bridge }
+    ).__openjammerE2E.selection());
+    expect(nudgeSelection.clipIds).toHaveLength(1);
+    const selectedId = nudgeSelection.clipIds[0]!;
     await page.keyboard.press('ArrowRight');
-    const selectedId = await clips.first().getAttribute('data-clip-id');
     await clips.nth(1).click({ position: { x: 30, y: 34 } });
     await page.keyboard.press('Control+Alt+z');
     await expect.poll(async () => {
