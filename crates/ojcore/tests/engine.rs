@@ -421,6 +421,30 @@ fn swap_publishes_and_engine_reads_new_program() {
     engine.process_block(&mut out, NB);
 }
 
+#[test]
+fn swap_receiver_keeps_deferred_drop_collector_alive() {
+    let reg = gain_registry();
+    let prog_a = compile(&graphin_gain_speaker(1.0), &reg).expect("compile a");
+    let prog_b = compile(&graphin_gain_speaker(2.0), &reg).expect("compile b");
+    let mut engine = Engine::new(prog_a);
+
+    let swap = ProgramSwap::new();
+    let rx = swap.rx();
+    swap.publish(prog_b);
+
+    // A receiver may outlive the control owner during host teardown. It must
+    // retain the collector that backs its basedrop handle, install safely, and
+    // reclaim the displaced program when the final receiver is dropped.
+    drop(swap);
+    assert!(rx.install_into(&mut engine));
+    drop(rx);
+
+    let input = ramp();
+    let mut out = vec![0.0f32; NB];
+    inject(&mut engine, &input);
+    engine.process_block(&mut out, NB);
+}
+
 // ===========================================================================
 // U12 transport + U15 metering + U16 resilience integration tests.
 // ===========================================================================

@@ -59,7 +59,10 @@ ENGINE (`src/audio/**`) is also untouched by this unit.
 - **Transports** all implement one `Transport` interface:
   - `BroadcastChannelTransport` — zero-infra default; same-origin tabs/windows.
   - `ManualWebRTCTransport` — true LAN/peer link via copy-paste SDP signaling
-    (no signaling server). A relay/WebSocket transport can slot in later.
+    (no signaling server). Its non-trickle ICE gathering is bounded: if STUN is
+    unavailable it can continue with viable LAN host candidates, or fails with
+    a structured error when no candidate exists. A relay/WebSocket transport
+    can slot in later.
 
 ## Single-user safety
 
@@ -74,6 +77,10 @@ tests remain green.
   field edits and delete-vs-edit),
 - a remote op applies into graphStore **without re-emitting** (origin tagging),
 - presence **add / update / remove**, and that presence stays out of the doc.
+
+`src/collab/transport/__tests__/ManualWebRTCTransport.test.ts` proves bounded
+ICE completion, LAN-candidate fallback, no-candidate failure, cancellation, and
+event-listener cleanup without contacting public STUN infrastructure.
 
 ## Founder setup (to enable the deferred realtime AUDIO plane)
 

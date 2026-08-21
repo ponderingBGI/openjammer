@@ -13,14 +13,12 @@ test('native-readiness returns a valid CheckResult', async () => {
   expect(['pass', 'warn', 'skip']).toContain(r.status);
   expect(typeof r.detail).toBe('string');
   expect((r.detail ?? '').length).toBeGreaterThan(0);
-});
-
-test('a warn result carries a fix hint pointing at oj setup', async () => {
-  const r = await run();
   if (r.status === 'warn') {
     expect(r.fix ?? '').toContain('oj setup');
   } else {
     // tier-1 satisfied on this runner — nothing to assert about fixes.
     expect(r.status).toBe('pass');
   }
-});
+// Toolchain probes can initialize rustup on a fresh CI runner. Keep this
+// bounded, but allow more than Bun's five-second default for that real work.
+}, 30_000);
