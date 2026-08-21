@@ -31,11 +31,11 @@
 
 // Concurrency primitives: the real ones in production, loom's instrumented ones
 // under `--cfg loom` so the nightly model checker can exhaustively explore the
-// SPSC interleavings. The `cfg(not(loom))` path below is byte-for-byte the shipping
-// code, so loom support cannot change production behaviour (verified by the normal
-// `cargo test` run, which builds the `not(loom)` path).
+// SPSC interleavings. The production byte cells are atomic as well: relaxed byte
+// accesses remain wait-free and the index Release/Acquire pair publishes each
+// complete frame without mutating memory through a shared reference.
 #[cfg(not(loom))]
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 #[cfg(loom)]
 use loom::sync::atomic::{AtomicU32, Ordering};
 
@@ -85,11 +85,12 @@ pub struct ByteRing<const N: usize> {
     read: AtomicU32,
     /// Constant data capacity in bytes, mirrored into the buffer for JS.
     capacity: u32,
-    /// Inline data region. Under `--cfg loom` it is wrapped in loom's tracked cell
-    /// so the model checker observes the producer/consumer byte accesses; the
-    /// production type is the bare array (the frozen `#[repr(C)]` SAB layout).
+    /// Inline data region. `AtomicU8` has the same size, alignment, and bit
+    /// validity as `u8`, preserving the frozen SAB layout while permitting
+    /// mutation through `&self`. Under `--cfg loom`, a tracked cell models each
+    /// complete producer/consumer byte-copy region.
     #[cfg(not(loom))]
-    data: [u8; N],
+    data: [AtomicU8; N],
     #[cfg(loom)]
     data: loom::cell::UnsafeCell<[u8; N]>,
 }
@@ -97,7 +98,7 @@ pub struct ByteRing<const N: usize> {
 // SAFETY (loom build only): the SPSC contract (one producer owns `write`, one
 // consumer owns `read`, synchronized by the Acquire/Release pairing) is exactly
 // what loom is asked to verify; loom's `UnsafeCell` is `!Sync`, so we assert it for
-// the model. Production is auto-`Sync` (bare array + atomics) and untouched.
+// the model. Production is auto-`Sync` because every byte cell is atomic.
 #[cfg(loom)]
 unsafe impl<const N: usize> Sync for ByteRing<N> {}
 
@@ -121,7 +122,7 @@ impl<const N: usize> ByteRing<N> {
             read: AtomicU32::new(0),
             capacity: N as u32,
             #[cfg(not(loom))]
-            data: [0u8; N],
+            data: core::array::from_fn(|_| AtomicU8::new(0)),
             #[cfg(loom)]
             data: loom::cell::UnsafeCell::new([0u8; N]),
         }
@@ -139,22 +140,14 @@ impl<const N: usize> ByteRing<N> {
     fn write_wrapping(&self, at: u32, src: &[u8]) {
         let mask = (N - 1) as u32;
         let start = (at & mask) as usize;
+        #[cfg(loom)]
         let first = core::cmp::min(src.len(), N - start);
-        // SAFETY: producer is the sole writer of these bytes; the consumer
-        // cannot read them until `write` is published with a Release store.
+        // Relaxed is sufficient for the byte cells: the Release store to
+        // `write` publishes them as one frame to the consumer's Acquire load.
         #[cfg(not(loom))]
-        {
-            let cell = self.data.as_ptr() as *mut u8;
-            unsafe {
-                core::ptr::copy_nonoverlapping(src.as_ptr(), cell.add(start), first);
-                if first < src.len() {
-                    core::ptr::copy_nonoverlapping(
-                        src.as_ptr().add(first),
-                        cell,
-                        src.len() - first,
-                    );
-                }
-            }
+        for (offset, byte) in src.iter().copied().enumerate() {
+            let index = start.wrapping_add(offset) & (N - 1);
+            self.data[index].store(byte, Ordering::Relaxed);
         }
         #[cfg(loom)]
         self.data.with_mut(|p| {
@@ -178,23 +171,15 @@ impl<const N: usize> ByteRing<N> {
     fn read_wrapping(&self, at: u32, dst: &mut [u8]) {
         let mask = (N - 1) as u32;
         let start = (at & mask) as usize;
+        #[cfg(loom)]
         let first = core::cmp::min(dst.len(), N - start);
-        // SAFETY: these bytes were published by the producer's Release store on
-        // `write`, observed via this consumer's Acquire load; they are stable
-        // until the consumer advances `read`.
+        // The Acquire load of `write` makes the producer's relaxed byte stores
+        // visible before these relaxed loads. The producer does not reuse the
+        // cells until this consumer publishes `read`.
         #[cfg(not(loom))]
-        {
-            let cell = self.data.as_ptr();
-            unsafe {
-                core::ptr::copy_nonoverlapping(cell.add(start), dst.as_mut_ptr(), first);
-                if first < dst.len() {
-                    core::ptr::copy_nonoverlapping(
-                        cell,
-                        dst.as_mut_ptr().add(first),
-                        dst.len() - first,
-                    );
-                }
-            }
+        for (offset, byte) in dst.iter_mut().enumerate() {
+            let index = start.wrapping_add(offset) & (N - 1);
+            *byte = self.data[index].load(Ordering::Relaxed);
         }
         #[cfg(loom)]
         self.data.with(|p| {
@@ -297,6 +282,9 @@ mod tests {
     #[test]
     fn repr_c_offsets_are_frozen() {
         type R = ByteRing<64>;
+        assert_eq!(core::mem::size_of::<core::sync::atomic::AtomicU8>(), 1);
+        assert_eq!(core::mem::align_of::<core::sync::atomic::AtomicU8>(), 1);
+        assert_eq!(core::mem::size_of::<R>(), 12 + 64);
         assert_eq!(offset_of!(R, write), 0);
         assert_eq!(offset_of!(R, read), 4);
         assert_eq!(offset_of!(R, capacity), 8);
