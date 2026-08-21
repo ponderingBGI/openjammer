@@ -833,7 +833,7 @@ fn main() {
         }
         let mut left = Vec::with_capacity(rendered.interleaved.len() / 2);
         let mut right = Vec::with_capacity(rendered.interleaved.len() / 2);
-        for stereo in rendered.interleaved.chunks_exact(2) {
+        for stereo in rendered.interleaved.as_chunks::<2>().0 {
             left.push(stereo[0]);
             right.push(stereo[1]);
         }
