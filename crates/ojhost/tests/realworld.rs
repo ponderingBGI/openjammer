@@ -274,18 +274,28 @@ fn oss_plugin_matrix_obeys_the_reliability_contract() {
                     entry.tolerance
                 );
             }
-        } else {
+        } else if matches!(
+            entry.assertion.as_str(),
+            "synth-envelope" | "synth-envelope-relative"
+        ) {
             let mut repeat = HostedPlugin::load(&desc, RATE, BLOCK).expect("repeat instantiate");
             configure_seeded_params(&mut repeat, &desc);
             let repeated = rms_windows(&scheduled_render(&mut repeat, &desc));
+            let stable = envelope.iter().zip(&repeated).all(|(a, b)| {
+                let difference = (a - b).abs();
+                if entry.assertion == "synth-envelope-relative" {
+                    difference / a.abs().max(b.abs()).max(f64::EPSILON) <= entry.tolerance
+                } else {
+                    difference <= 0.002
+                }
+            });
             assert!(
-                envelope
-                    .iter()
-                    .zip(&repeated)
-                    .all(|(a, b)| (a - b).abs() <= 0.002),
+                stable,
                 "{} RMS envelope was unstable: first {envelope:?}, repeat {repeated:?}",
                 entry.id
             );
+        } else {
+            panic!("{} has unknown assertion `{}`", entry.id, entry.assertion);
         }
     }
 }
