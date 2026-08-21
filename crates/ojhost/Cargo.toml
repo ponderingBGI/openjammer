@@ -72,7 +72,7 @@ codspeed-criterion-compat = "5.0.1"
 # the state test itself is gated to the `clap-host` cfg (where `clap.rs` exists).
 clack-plugin = "0.1.0"
 libloading = "0.8.9"
-toml = "0.8.23"
+toml = "1.1.2"
 
 # clack-extensions PLUGIN side (test-only): the `clack-plugin` feature exposes
 # `PluginStateImpl` so the in-process state stub can implement the CLAP state
