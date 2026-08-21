@@ -3,7 +3,7 @@ name: Lane B (nightly)
 # Heavy correctness backstop (plan §2.5 / §4.3). Lane B is the slow, thorough
 # leg that does NOT gate per-PR merges — it runs on a schedule + on demand, so a
 # long run (or a genuine finding) never blocks a merge. It runs miri over the
-# workspace's unsafe-heavy code (the wait-free SPSC ring + the hot-swap cell) and
+# shared-memory SPSC ring and the unsafe hot-swap cell, and performs
 # UNBOUNDED fuzz of the untrusted WAV parse surface (the bounded per-PR smoke is
 # `crates/ojcore-native/tests/fuzz_smoke.rs`). loom model checking is the next
 # addition here.
@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   miri:
-    name: miri — unsafe ring + hot-swap
+    name: miri — shared-memory ring + unsafe hot-swap
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,10 +33,10 @@ jobs:
         with:
           toolchain: nightly
           components: miri
-      - name: miri — wait-free SPSC ByteRing (copy_nonoverlapping) + swap
-        # The ring and the RtProgram hot-swap are the workspace's load-bearing
-        # `unsafe`. miri runs their existing tests under its UB checker. Isolation
-        # is disabled so tests that read the clock/time work under miri.
+      - name: miri — wait-free SPSC ByteRing + swap
+        # Miri checks the ring's shared-memory access model and the RtProgram
+        # hot-swap's load-bearing `unsafe`. Isolation is disabled so tests that
+        # read the clock/time work under miri.
         env:
           MIRIFLAGS: -Zmiri-disable-isolation
         run: |
@@ -75,14 +75,19 @@ jobs:
       - name: Install cargo-fuzz (prebuilt binary)
         # taiki-e/install-action fetches a prebuilt binary in seconds instead of
         # compiling cargo-fuzz from source (matches the per-PR nextest install).
-        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2
+        uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2
         with:
           tool: cargo-fuzz
       - name: Fuzz the WAV decoder (time-boxed)
         # A clean Err on any input is correct; a crash/UB is a finding. Time-boxed
         # so the nightly stays bounded; the corpus is seeded from the smoke's RIFF
         # shapes implicitly via libFuzzer's mutation.
-        run: cargo +nightly fuzz run wav_decode -- -max_total_time=300 -rss_limit_mb=4096
+        # cargo-fuzz defaults to the target it was built for. Its prebuilt Linux
+        # binary is musl-linked, while libFuzzer's address sanitizer requires the
+        # GNU runner target with dynamically linked libc.
+        run: |
+          cargo +nightly fuzz run wav_decode --target x86_64-unknown-linux-gnu -- \
+            -max_total_time=300 -rss_limit_mb=4096
 
   durability:
     name: durability — real-process SIGKILL crash test
@@ -109,12 +114,12 @@ jobs:
       OJ_PLUGIN_CACHE: ${{ github.workspace }}/.cache/oj-plugins
       OJ_REALWORLD_PLUGINS: '1'
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
       - name: Restore verified plugin artifacts
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/oj-plugins
           key: p4-plugins-linux-${{ hashFiles('crates/ojhost/tests/fixtures/realworld-plugins.toml') }}
@@ -135,12 +140,12 @@ jobs:
       OJHOST_JUCE_JOBS: '4'
       OJ_PLUGIN_CACHE: ${{ github.workspace }}/.cache/oj-plugins
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
       - name: Restore the verified Dexed artifact
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: .cache/oj-plugins
           key: p4-plugins-linux-${{ hashFiles('crates/ojhost/tests/fixtures/realworld-plugins.toml') }}

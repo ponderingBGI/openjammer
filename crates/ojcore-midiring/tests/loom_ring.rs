@@ -10,8 +10,9 @@
 //! nightly Miri run (which checks UB on the same `unsafe`, but one schedule at a
 //! time).
 //!
-//! Compiled + run ONLY under `--cfg loom` (the nightly job); the production path is
-//! `cfg(not(loom))` and byte-identical, so this can never affect shipped behaviour.
+//! Compiled + run ONLY under `--cfg loom` (the nightly job). Production uses
+//! layout-compatible atomic byte cells, while this model treats each complete
+//! frame copy as one tracked access to keep the explored state space bounded.
 #![cfg(loom)]
 
 use ojcore_midiring::ByteRing;
