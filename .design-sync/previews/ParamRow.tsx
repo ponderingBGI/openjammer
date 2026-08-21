@@ -2,6 +2,14 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { ParamRow, SegmentedControl } from '@openjammer/oj-ui';
 
+type Oversampling = '1x' | '2x' | '4x';
+
+const oversamplingOptions: Array<{ value: Oversampling; label: string }> = [
+    { value: '1x', label: '1×' },
+    { value: '2x', label: '2×' },
+    { value: '4x', label: '4×' },
+];
+
 /** ParamRow is a node-panel row — narrow, stacked, label + readout over the slider. */
 const panel = (children: ReactNode) => (
     <div
@@ -76,24 +84,26 @@ export const States = () => panel(
 );
 
 /** `control` swaps the slider out when the parameter isn't a continuous range. */
-export const CustomControl = () => panel(
-    <ParamRow
-        label="Oversample"
-        value={2}
-        valueText="4×"
-        min={0}
-        max={2}
-        control={
-            <SegmentedControl
-                aria-label="Oversample"
-                value="4x"
-                onChange={() => {}}
-                options={[
-                    { value: '1x', label: '1×' },
-                    { value: '2x', label: '2×' },
-                    { value: '4x', label: '4×' },
-                ]}
-            />
-        }
-    />,
-);
+export const CustomControl = () => {
+    const [oversampling, setOversampling] = useState<Oversampling>('4x');
+    const selectedIndex = oversamplingOptions.findIndex(option => option.value === oversampling);
+    const selected = oversamplingOptions[selectedIndex];
+
+    return panel(
+        <ParamRow
+            label="Oversample"
+            value={selectedIndex}
+            valueText={selected?.label ?? oversampling}
+            min={0}
+            max={oversamplingOptions.length - 1}
+            control={
+                <SegmentedControl
+                    aria-label="Oversample"
+                    value={oversampling}
+                    onChange={setOversampling}
+                    options={oversamplingOptions}
+                />
+            }
+        />,
+    );
+};

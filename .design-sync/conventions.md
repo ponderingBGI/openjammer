@@ -42,8 +42,10 @@ and write your own layout glue with the **semantic CSS variables** below (real n
 - **Depth** `--shadow-node` `--shadow-menu` (hard, blur 0); `--border-sketch-width` (2px)
 
 Key prop vocabularies: `Button` `variant` = node｜primary｜secondary｜success｜danger｜ghost｜link
-(+ `iconOnly`, `active`). `Port`/`PortRow` `kind` = audio｜control｜universal (+ `direction`
-input｜output, `connected`, `active`, `placeholder`). `Callout` `variant` =
+(+ `iconOnly`, `active`). `Port`/`PortRow` `kind` = audio｜control｜universal; optional
+`resolvedKind` = audio｜control｜universal. `PortRow` forwards `resolvedKind` to `Port`, which uses
+it as the color kind when `kind` is universal (+ `direction` input｜output, `connected`, `active`,
+`placeholder`). `Callout` `variant` =
 success｜danger｜warning｜info｜tip; `Banner` `tone` = danger｜warning｜info (they differ — Callout
 has no `tone`). `Toggle` `checked`; `Slider` `value/min/max/step`. Timeline family: `LaneButton`
 `tone` = default｜mute｜solo｜armed｜recording (styling lands on the pressed state, so pass
