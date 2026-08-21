@@ -28,12 +28,14 @@ const READY: &str = "writer-ready";
 fn child_write_loop(dir: &str) -> ! {
     let mut fs = RealFs::new(dir);
     let mut v: u64 = 0;
+    let mut ready_marked = false;
     loop {
         v = v.wrapping_add(1);
-        if atomic_write(&mut fs, STATE, &v.to_le_bytes()).is_ok() && v == 1 {
+        if atomic_write(&mut fs, STATE, &v.to_le_bytes()).is_ok() && !ready_marked {
             // Test-only process synchronization: the parent must not mistake
             // cold process startup for an interrupted atomic write.
             std::fs::write(PathBuf::from(dir).join(READY), b"ready").expect("mark writer ready");
+            ready_marked = true;
         }
     }
 }
