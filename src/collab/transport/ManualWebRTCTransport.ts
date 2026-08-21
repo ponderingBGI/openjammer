@@ -19,8 +19,33 @@
 import type { Transport, TransportEvents, TransportFrame } from './Transport';
 import { decodeFrame, encodeFrame } from './Transport';
 
-/** Public STUN servers are enough for most LAN + many home-NAT setups. */
+/** Public STUN is a best-effort default; callers can provide controlled ICE infrastructure. */
 const DEFAULT_ICE: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }];
+const DEFAULT_ICE_GATHERING_TIMEOUT_MS = 8_000;
+
+export interface ManualWebRTCTransportOptions {
+    /** Override ICE infrastructure. Pass an empty array for deterministic LAN-only operation. */
+    iceServers?: RTCIceServer[];
+    /** Maximum wait for non-trickle ICE gathering before using viable local candidates. */
+    iceGatheringTimeoutMs?: number;
+}
+
+/** Actionable failure (or degraded-success warning) from non-trickle ICE gathering. */
+export class IceGatheringError extends Error {
+    readonly code: 'ICE_GATHERING_ABORTED' | 'ICE_GATHERING_NO_CANDIDATES' | 'ICE_GATHERING_TIMEOUT';
+    readonly candidateErrorCount: number;
+
+    constructor(
+        code: IceGatheringError['code'],
+        message: string,
+        candidateErrorCount = 0,
+    ) {
+        super(message);
+        this.name = 'IceGatheringError';
+        this.code = code;
+        this.candidateErrorCount = candidateErrorCount;
+    }
+}
 
 /** Base64-encode an SDP blob into a shareable code. */
 function encodeSignal(desc: RTCSessionDescriptionInit): string {
@@ -32,17 +57,93 @@ function decodeSignal(code: string): RTCSessionDescriptionInit {
     return JSON.parse(atob(code)) as RTCSessionDescriptionInit;
 }
 
-/** Wait for ICE gathering to finish so the SDP contains all candidates. */
-function waitForIce(pc: RTCPeerConnection): Promise<void> {
-    if (pc.iceGatheringState === 'complete') return Promise.resolve();
-    return new Promise((resolve) => {
-        const check = () => {
+interface IceGatheringResult {
+    candidateErrorCount: number;
+    timedOut: boolean;
+}
+
+interface ReadyWaiter {
+    resolve: () => void;
+    reject: (error: Error) => void;
+}
+
+/**
+ * Wait for non-trickle ICE without allowing a blocked STUN server to hang the
+ * manual signaling UI forever. Candidate errors are observations, not an
+ * immediate terminal failure: host candidates can still support LAN peers.
+ */
+function waitForIce(
+    pc: RTCPeerConnection,
+    timeoutMs: number,
+    signal: AbortSignal,
+): Promise<IceGatheringResult> {
+    if (signal.aborted) {
+        return Promise.reject(new IceGatheringError(
+            'ICE_GATHERING_ABORTED',
+            'ICE gathering was cancelled before it started.',
+        ));
+    }
+    if (pc.iceGatheringState === 'complete') {
+        return Promise.resolve({ candidateErrorCount: 0, timedOut: false });
+    }
+
+    return new Promise((resolve, reject) => {
+        let candidateErrorCount = 0;
+        let settled = false;
+        const cleanup = () => {
+            clearTimeout(timer);
+            pc.removeEventListener('icecandidateerror', onCandidateError);
+            pc.removeEventListener('icegatheringstatechange', onGatheringStateChange);
+            pc.removeEventListener('signalingstatechange', onSignalingStateChange);
+            signal.removeEventListener('abort', onAbort);
+        };
+        const finish = (result: IceGatheringResult) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve(result);
+        };
+        const fail = (error: IceGatheringError) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(error);
+        };
+        const onCandidateError = () => {
+            candidateErrorCount += 1;
+        };
+        const onGatheringStateChange = () => {
             if (pc.iceGatheringState === 'complete') {
-                pc.removeEventListener('icegatheringstatechange', check);
-                resolve();
+                finish({ candidateErrorCount, timedOut: false });
             }
         };
-        pc.addEventListener('icegatheringstatechange', check);
+        const onSignalingStateChange = () => {
+            if (pc.signalingState === 'closed') {
+                fail(new IceGatheringError(
+                    'ICE_GATHERING_ABORTED',
+                    'The peer connection closed while gathering ICE candidates.',
+                    candidateErrorCount,
+                ));
+            }
+        };
+        const onAbort = () => fail(new IceGatheringError(
+            'ICE_GATHERING_ABORTED',
+            'ICE gathering was cancelled.',
+            candidateErrorCount,
+        ));
+
+        const timer = setTimeout(
+            () => finish({ candidateErrorCount, timedOut: true }),
+            timeoutMs,
+        );
+        pc.addEventListener('icecandidateerror', onCandidateError);
+        pc.addEventListener('icegatheringstatechange', onGatheringStateChange);
+        pc.addEventListener('signalingstatechange', onSignalingStateChange);
+        signal.addEventListener('abort', onAbort, { once: true });
+        // Close the event-registration race if the browser completed gathering
+        // between the initial state check and installing the listeners.
+        onGatheringStateChange();
+        onSignalingStateChange();
     });
 }
 
@@ -54,10 +155,18 @@ export class ManualWebRTCTransport implements Transport {
     private connected = false;
     private readonly selfId: string;
     private readonly iceServers: RTCIceServer[];
+    private readonly iceGatheringTimeoutMs: number;
+    private iceGatherAbort: AbortController | null = null;
+    private lastIceGatheringWarning: IceGatheringError | null = null;
+    private readonly readyWaiters = new Set<ReadyWaiter>();
 
-    constructor(selfId: string, iceServers: RTCIceServer[] = DEFAULT_ICE) {
+    constructor(selfId: string, options: ManualWebRTCTransportOptions = {}) {
         this.selfId = selfId;
-        this.iceServers = iceServers;
+        this.iceServers = options.iceServers ?? DEFAULT_ICE;
+        this.iceGatheringTimeoutMs = options.iceGatheringTimeoutMs ?? DEFAULT_ICE_GATHERING_TIMEOUT_MS;
+        if (!Number.isFinite(this.iceGatheringTimeoutMs) || this.iceGatheringTimeoutMs <= 0) {
+            throw new RangeError('iceGatheringTimeoutMs must be a positive finite number');
+        }
     }
 
     /**
@@ -72,7 +181,9 @@ export class ManualWebRTCTransport implements Transport {
     private makePeerConnection(): RTCPeerConnection {
         const pc = new RTCPeerConnection({ iceServers: this.iceServers });
         pc.onconnectionstatechange = () => {
+            if (pc !== this.pc) return;
             if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+                this.rejectReadyWaiters(new Error(`WebRTC peer connection ${pc.connectionState} before the data channel became ready`));
                 if (this.connected) {
                     this.connected = false;
                     this.events?.onPeerDisconnect?.('remote');
@@ -86,19 +197,114 @@ export class ManualWebRTCTransport implements Transport {
         channel.binaryType = 'arraybuffer';
         this.channel = channel;
         channel.onopen = () => {
+            if (channel !== this.channel) return;
             this.connected = true;
+            this.resolveReadyWaiters();
             this.events?.onPeerConnect?.('remote');
         };
         channel.onclose = () => {
+            if (channel !== this.channel) return;
+            this.rejectReadyWaiters(new Error('WebRTC data channel closed before becoming ready'));
             if (this.connected) {
                 this.connected = false;
                 this.events?.onPeerDisconnect?.('remote');
             }
         };
+        channel.onerror = () => {
+            if (channel !== this.channel) return;
+            this.rejectReadyWaiters(new Error('WebRTC data channel failed before becoming ready'));
+        };
         channel.onmessage = (e: MessageEvent<ArrayBuffer>) => {
+            if (channel !== this.channel) return;
             const frame = decodeFrame(new Uint8Array(e.data));
             if (frame) this.events?.onFrame?.(frame);
         };
+    }
+
+    private resolveReadyWaiters(): void {
+        for (const waiter of this.readyWaiters) waiter.resolve();
+        this.readyWaiters.clear();
+    }
+
+    private rejectReadyWaiters(error: Error): void {
+        for (const waiter of this.readyWaiters) waiter.reject(error);
+        this.readyWaiters.clear();
+    }
+
+    /** Release one handshake before starting another, including stale callbacks. */
+    private resetPeer(reason: string): void {
+        this.iceGatherAbort?.abort();
+        this.iceGatherAbort = null;
+        this.rejectReadyWaiters(new Error(reason));
+
+        const channel = this.channel;
+        const pc = this.pc;
+        const wasConnected = this.connected;
+        this.channel = null;
+        this.pc = null;
+        this.connected = false;
+
+        if (channel) {
+            channel.onopen = null;
+            channel.onclose = null;
+            channel.onerror = null;
+            channel.onmessage = null;
+            channel.close();
+        }
+        if (pc) {
+            pc.onconnectionstatechange = null;
+            pc.ondatachannel = null;
+            pc.close();
+        }
+        if (wasConnected) this.events?.onPeerDisconnect?.('remote');
+    }
+
+    private assertCurrentPeer(pc: RTCPeerConnection): void {
+        if (pc !== this.pc) {
+            throw new IceGatheringError(
+                'ICE_GATHERING_ABORTED',
+                'The WebRTC handshake was replaced by a newer attempt.',
+            );
+        }
+    }
+
+    private async finishIceGathering(pc: RTCPeerConnection): Promise<RTCSessionDescription> {
+        this.iceGatherAbort?.abort();
+        const controller = new AbortController();
+        this.iceGatherAbort = controller;
+        this.lastIceGatheringWarning = null;
+        try {
+            const result = await waitForIce(pc, this.iceGatheringTimeoutMs, controller.signal);
+            const description = pc.localDescription;
+            const hasCandidate = /^a=candidate:/m.test(description?.sdp ?? '');
+            if (!description || !hasCandidate) {
+                const code = result.timedOut ? 'ICE_GATHERING_TIMEOUT' : 'ICE_GATHERING_NO_CANDIDATES';
+                throw new IceGatheringError(
+                    code,
+                    result.timedOut
+                        ? `ICE gathering timed out after ${this.iceGatheringTimeoutMs} ms without a usable candidate. Check firewall, STUN, or TURN configuration.`
+                        : 'ICE gathering completed without a usable candidate. Check network and ICE configuration.',
+                    result.candidateErrorCount,
+                );
+            }
+            if (result.timedOut) {
+                // LAN host candidates are still viable. Preserve them instead of
+                // turning an unreachable public STUN server into a hard failure.
+                this.lastIceGatheringWarning = new IceGatheringError(
+                    'ICE_GATHERING_TIMEOUT',
+                    `ICE gathering timed out after ${this.iceGatheringTimeoutMs} ms; continuing with the candidates gathered so far.`,
+                    result.candidateErrorCount,
+                );
+            }
+            return description;
+        } finally {
+            if (this.iceGatherAbort === controller) this.iceGatherAbort = null;
+        }
+    }
+
+    /** Diagnostic for callers that want to surface degraded STUN/TURN gathering. */
+    getLastIceGatheringWarning(): IceGatheringError | null {
+        return this.lastIceGatheringWarning;
     }
 
     // ------------------------------------------------------------------------
@@ -107,13 +313,16 @@ export class ManualWebRTCTransport implements Transport {
 
     /** HOST step 1: create the offer code to share with the guest. */
     async createOffer(): Promise<string> {
-        this.pc = this.makePeerConnection();
-        const channel = this.pc.createDataChannel(`oj-${this.selfId}`, { ordered: true });
+        this.resetPeer('WebRTC handshake restarted before the data channel became ready');
+        const pc = this.makePeerConnection();
+        this.pc = pc;
+        const channel = pc.createDataChannel(`oj-${this.selfId}`, { ordered: true });
         this.wireChannel(channel);
-        const offer = await this.pc.createOffer();
-        await this.pc.setLocalDescription(offer);
-        await waitForIce(this.pc);
-        return encodeSignal(this.pc.localDescription!);
+        const offer = await pc.createOffer();
+        this.assertCurrentPeer(pc);
+        await pc.setLocalDescription(offer);
+        this.assertCurrentPeer(pc);
+        return encodeSignal(await this.finishIceGathering(pc));
     }
 
     /** HOST step 2: paste the guest's answer code to finish connecting. */
@@ -128,13 +337,46 @@ export class ManualWebRTCTransport implements Transport {
 
     /** GUEST: paste the host's offer code and return the answer code to share back. */
     async acceptOffer(offerCode: string): Promise<string> {
-        this.pc = this.makePeerConnection();
-        this.pc.ondatachannel = (e) => this.wireChannel(e.channel);
-        await this.pc.setRemoteDescription(decodeSignal(offerCode));
-        const answer = await this.pc.createAnswer();
-        await this.pc.setLocalDescription(answer);
-        await waitForIce(this.pc);
-        return encodeSignal(this.pc.localDescription!);
+        this.resetPeer('WebRTC handshake restarted before the data channel became ready');
+        const pc = this.makePeerConnection();
+        this.pc = pc;
+        pc.ondatachannel = (e) => this.wireChannel(e.channel);
+        await pc.setRemoteDescription(decodeSignal(offerCode));
+        this.assertCurrentPeer(pc);
+        const answer = await pc.createAnswer();
+        this.assertCurrentPeer(pc);
+        await pc.setLocalDescription(answer);
+        this.assertCurrentPeer(pc);
+        return encodeSignal(await this.finishIceGathering(pc));
+    }
+
+    /** Wait for the data channel itself, not merely SDP exchange, to be usable. */
+    async waitUntilReady(timeoutMs = 10_000): Promise<void> {
+        if (this.channel?.readyState === 'open') return;
+        if (!this.pc) throw new Error('WebRTC handshake has not started');
+
+        await new Promise<void>((resolve, reject) => {
+            const waiter: ReadyWaiter = {
+                resolve: () => {
+                    clearTimeout(timer);
+                    this.readyWaiters.delete(waiter);
+                    resolve();
+                },
+                reject: (error) => {
+                    clearTimeout(timer);
+                    this.readyWaiters.delete(waiter);
+                    reject(error);
+                },
+            };
+            const timer = setTimeout(() => {
+                waiter.reject(new Error(`WebRTC data channel did not open within ${timeoutMs} ms`));
+            }, timeoutMs);
+            this.readyWaiters.add(waiter);
+
+            // Close the registration race if the channel opened between the
+            // initial state check and adding this waiter.
+            if (this.channel?.readyState === 'open') waiter.resolve();
+        });
     }
 
     // ------------------------------------------------------------------------
@@ -157,11 +399,7 @@ export class ManualWebRTCTransport implements Transport {
     }
 
     close(): void {
-        this.channel?.close();
-        this.pc?.close();
-        this.channel = null;
-        this.pc = null;
-        this.connected = false;
+        this.resetPeer('WebRTC transport closed before the data channel became ready');
         this.events = null;
     }
 }
