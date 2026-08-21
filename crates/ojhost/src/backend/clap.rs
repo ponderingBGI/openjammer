@@ -1006,11 +1006,11 @@ impl HostedBackend for ClapBackend {
     }
 
     fn take_param_gestures(&mut self) -> Vec<ParamGesture> {
-        self.pending_gestures.drain(..).collect()
+        std::mem::take(&mut self.pending_gestures)
     }
 
     fn take_output_events(&mut self) -> Vec<HostedEvent> {
-        self.pending_output_events.drain(..).collect()
+        std::mem::take(&mut self.pending_output_events)
     }
 
     fn take_descriptor_rescan_request(&self) -> bool {
