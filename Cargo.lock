@@ -651,9 +651,9 @@ dependencies = [
 
 [[package]]
 name = "clack-common"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cc803ecdd9db71036304f1e308bc23274e58bb9251c447c20ed2d0a30c69d6c"
+checksum = "2f6a27523c0b3563da8286628d3f3a54fde73de3190d28586c2c314c3bdad1e6"
 dependencies = [
  "bitflags 2.13.0",
  "clap-sys",
@@ -661,9 +661,9 @@ dependencies = [
 
 [[package]]
 name = "clack-extensions"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f7a09059637aa2043aeaab65e1d95bc91f340da1f05512c0c00e6e0283e5d9b"
+checksum = "6d97d8b4cab1975314c053b9ec35575c5cccd8c7b3db37b21cbe435be6174416"
 dependencies = [
  "bitflags 2.13.0",
  "clack-common",
@@ -674,9 +674,9 @@ dependencies = [
 
 [[package]]
 name = "clack-host"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a3e2891319937507e5d1c85e853de54abbf1939bdee0aa81079fab2cbc5eb15"
+checksum = "0f0d9f10d8ea9b1b79863aefb41fb8eae144db8491557cc58f91e16c8be32e55"
 dependencies = [
  "clack-common",
  "clack-plugin",
@@ -687,9 +687,9 @@ dependencies = [
 
 [[package]]
 name = "clack-plugin"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab76aa9fd46c79fbd5770e86a14d0a9d97adb239ff9173b51e3f5101aeb32c73"
+checksum = "2fa04a5185c367bfd5566e616c9c20cec2abaee9bf8a6060a3f6e44b505d5f32"
 dependencies = [
  "clack-common",
  "clap-sys",
