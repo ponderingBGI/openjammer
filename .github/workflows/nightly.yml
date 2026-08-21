@@ -3,7 +3,7 @@ name: Lane B (nightly)
 # Heavy correctness backstop (plan §2.5 / §4.3). Lane B is the slow, thorough
 # leg that does NOT gate per-PR merges — it runs on a schedule + on demand, so a
 # long run (or a genuine finding) never blocks a merge. It runs miri over the
-# workspace's unsafe-heavy code (the wait-free SPSC ring + the hot-swap cell) and
+# shared-memory SPSC ring and the unsafe hot-swap cell, and performs
 # UNBOUNDED fuzz of the untrusted WAV parse surface (the bounded per-PR smoke is
 # `crates/ojcore-native/tests/fuzz_smoke.rs`). loom model checking is the next
 # addition here.
@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   miri:
-    name: miri — unsafe ring + hot-swap
+    name: miri — shared-memory ring + unsafe hot-swap
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -33,10 +33,10 @@ jobs:
         with:
           toolchain: nightly
           components: miri
-      - name: miri — wait-free SPSC ByteRing (copy_nonoverlapping) + swap
-        # The ring and the RtProgram hot-swap are the workspace's load-bearing
-        # `unsafe`. miri runs their existing tests under its UB checker. Isolation
-        # is disabled so tests that read the clock/time work under miri.
+      - name: miri — wait-free SPSC ByteRing + swap
+        # Miri checks the ring's shared-memory access model and the RtProgram
+        # hot-swap's load-bearing `unsafe`. Isolation is disabled so tests that
+        # read the clock/time work under miri.
         env:
           MIRIFLAGS: -Zmiri-disable-isolation
         run: |
@@ -82,7 +82,12 @@ jobs:
         # A clean Err on any input is correct; a crash/UB is a finding. Time-boxed
         # so the nightly stays bounded; the corpus is seeded from the smoke's RIFF
         # shapes implicitly via libFuzzer's mutation.
-        run: cargo +nightly fuzz run wav_decode -- -max_total_time=300 -rss_limit_mb=4096
+        # cargo-fuzz defaults to the target it was built for. Its prebuilt Linux
+        # binary is musl-linked, while libFuzzer's address sanitizer requires the
+        # GNU runner target with dynamically linked libc.
+        run: |
+          cargo +nightly fuzz run wav_decode --target x86_64-unknown-linux-gnu -- \
+            -max_total_time=300 -rss_limit_mb=4096
 
   durability:
     name: durability — real-process SIGKILL crash test
