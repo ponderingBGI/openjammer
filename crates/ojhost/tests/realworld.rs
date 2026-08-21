@@ -75,7 +75,10 @@ fn descriptor_for(path: &Path, expected_name: &str) -> PluginDescriptor {
     let descriptors = ojhost::scan(&[parent.to_owned()]).expect("real plugin scan succeeds");
     descriptors
         .into_iter()
-        .find(|desc| Path::new(&desc.path) == path || desc.name.contains(expected_name))
+        // A single CLAP bundle may expose multiple descriptors. Surge XT, for
+        // example, exposes both the synth and its effect under the same path;
+        // selecting by path alone can silently choose the effect descriptor.
+        .find(|desc| desc.name == expected_name && Path::new(&desc.path) == path)
         .unwrap_or_else(|| {
             panic!(
                 "scan did not return {} from {}",
@@ -271,18 +274,28 @@ fn oss_plugin_matrix_obeys_the_reliability_contract() {
                     entry.tolerance
                 );
             }
-        } else {
+        } else if matches!(
+            entry.assertion.as_str(),
+            "synth-envelope" | "synth-envelope-relative"
+        ) {
             let mut repeat = HostedPlugin::load(&desc, RATE, BLOCK).expect("repeat instantiate");
             configure_seeded_params(&mut repeat, &desc);
             let repeated = rms_windows(&scheduled_render(&mut repeat, &desc));
+            let stable = envelope.iter().zip(&repeated).all(|(a, b)| {
+                let difference = (a - b).abs();
+                if entry.assertion == "synth-envelope-relative" {
+                    difference / a.abs().max(b.abs()).max(f64::EPSILON) <= entry.tolerance
+                } else {
+                    difference <= 0.002
+                }
+            });
             assert!(
-                envelope
-                    .iter()
-                    .zip(repeated)
-                    .all(|(a, b)| (a - b).abs() <= 0.002),
-                "{} RMS envelope was unstable: {envelope:?}",
+                stable,
+                "{} RMS envelope was unstable: first {envelope:?}, repeat {repeated:?}",
                 entry.id
             );
+        } else {
+            panic!("{} has unknown assertion `{}`", entry.id, entry.assertion);
         }
     }
 }
