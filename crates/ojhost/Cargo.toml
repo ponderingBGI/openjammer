@@ -48,7 +48,7 @@ serde = { workspace = true, features = ["std"] }
 # JSON for the on-disk scan cache. Runtime dep (not dev-only): the cache
 # round-trips through `scan_with` in normal use.
 serde_json = "1.0.150"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 
 # Pure-Rust CLAP host (MIT). Only linked with `--features clap-host`. Pinned
 # from a fresh `cargo add` resolve (governing principle #9).
