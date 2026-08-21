@@ -185,7 +185,7 @@ pub struct ProgramSwapRx {
     handle: Handle,
     // Declared after `handle` so the final receiver drops its handle before it
     // can release the shared collector owner.
-    collector: Arc<SharedCollector>,
+    _collector: Arc<SharedCollector>,
 }
 
 impl ProgramSwapRx {
@@ -273,7 +273,7 @@ impl ProgramSwap {
                 .as_ref()
                 .expect("program-swap handle is live")
                 .clone(),
-            collector: Arc::clone(&self.collector),
+            _collector: Arc::clone(&self.collector),
         }
     }
 
