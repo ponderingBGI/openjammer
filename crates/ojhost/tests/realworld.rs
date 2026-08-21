@@ -75,7 +75,10 @@ fn descriptor_for(path: &Path, expected_name: &str) -> PluginDescriptor {
     let descriptors = ojhost::scan(&[parent.to_owned()]).expect("real plugin scan succeeds");
     descriptors
         .into_iter()
-        .find(|desc| Path::new(&desc.path) == path || desc.name.contains(expected_name))
+        // A single CLAP bundle may expose multiple descriptors. Surge XT, for
+        // example, exposes both the synth and its effect under the same path;
+        // selecting by path alone can silently choose the effect descriptor.
+        .find(|desc| desc.name == expected_name && Path::new(&desc.path) == path)
         .unwrap_or_else(|| {
             panic!(
                 "scan did not return {} from {}",
