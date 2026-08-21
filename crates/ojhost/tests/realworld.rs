@@ -281,9 +281,9 @@ fn oss_plugin_matrix_obeys_the_reliability_contract() {
             assert!(
                 envelope
                     .iter()
-                    .zip(repeated)
+                    .zip(&repeated)
                     .all(|(a, b)| (a - b).abs() <= 0.002),
-                "{} RMS envelope was unstable: {envelope:?}",
+                "{} RMS envelope was unstable: first {envelope:?}, repeat {repeated:?}",
                 entry.id
             );
         }
