@@ -59,7 +59,11 @@ url = "https://github.com/surge-synthesizer/surge/releases/download/Nightly/surg
 sha256 = "aa05c7af7b43db1001e3f78ed8d5c112da3543b0f283357c9902e5fde1e39e69"
 archive = "tar.gz"
 plugin_file = "Surge XT.clap"
-assertion = "synth-envelope"
+# Surge randomizes oscillator phase across instances. Keep the repeated-render
+# health gate, but compare each RMS window proportionally instead of requiring
+# byte-like absolute determinism from a deliberately nondeterministic synth.
+assertion = "synth-envelope-relative"
+tolerance = 0.15
 
 [[plugin]]
 id = "chow-kick"
