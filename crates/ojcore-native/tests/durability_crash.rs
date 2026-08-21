@@ -15,12 +15,13 @@
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use ojcore_native::{atomic_write, RealFs};
 
 const CHILD_DIR_ENV: &str = "OJ_DURABILITY_CHILD_DIR";
 const STATE: &str = "state";
+const READY: &str = "writer-ready";
 
 /// The writer child: atomically rewrite `state` with an ever-incrementing u64,
 /// forever. Never returns — the parent SIGKILLs it.
@@ -29,7 +30,11 @@ fn child_write_loop(dir: &str) -> ! {
     let mut v: u64 = 0;
     loop {
         v = v.wrapping_add(1);
-        let _ = atomic_write(&mut fs, STATE, &v.to_le_bytes());
+        if atomic_write(&mut fs, STATE, &v.to_le_bytes()).is_ok() && v == 1 {
+            // Test-only process synchronization: the parent must not mistake
+            // cold process startup for an interrupted atomic write.
+            std::fs::write(PathBuf::from(dir).join(READY), b"ready").expect("mark writer ready");
+        }
     }
 }
 
@@ -53,6 +58,8 @@ fn destination_survives_repeated_sigkill() {
     let exe = std::env::current_exe().expect("test exe");
 
     for round in 0..6 {
+        let ready = dir.join(READY);
+        let _ = std::fs::remove_file(&ready);
         let mut child = Command::new(&exe)
             .args([
                 "--exact",
@@ -65,27 +72,35 @@ fn destination_survives_repeated_sigkill() {
             .spawn()
             .expect("spawn writer child");
 
-        // Let it get well into the write loop, then kill it mid-flight (SIGKILL on
-        // Unix — no destructors, the worst-case interruption).
-        std::thread::sleep(Duration::from_millis(50));
+        // Wait until this child has completed one durable write, then vary the
+        // delay so SIGKILL lands at different points in its continuing loop.
+        // This separates process-startup scheduling from the crash window.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            if let Some(status) = child.try_wait().expect("poll writer child") {
+                panic!("writer child exited before readiness: {status}");
+            }
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("writer child did not become ready");
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        std::thread::sleep(Duration::from_millis(round));
         let _ = child.kill();
         let _ = child.wait();
 
-        // Recovery: the destination is either absent (killed before the first
-        // rename, round 0 only) or a COMPLETE 8-byte u64 — never a torn/partial
-        // file, because `atomic_write` only ever swaps it via an atomic rename.
-        match std::fs::read(dir.join(STATE)) {
-            Ok(bytes) => {
-                assert_eq!(
-                    bytes.len(),
-                    8,
-                    "round {round}: destination was torn ({} bytes, not a complete u64)",
-                    bytes.len()
-                );
-                let _v = u64::from_le_bytes(bytes.try_into().unwrap()); // parses cleanly
-            }
-            Err(_) => assert_eq!(round, 0, "only the first round may find no file yet"),
-        }
+        // Readiness guarantees the destination already existed. Recovery must
+        // therefore find a COMPLETE old or new u64, never absence or a torn file.
+        let bytes = std::fs::read(dir.join(STATE)).expect("durable destination remains present");
+        assert_eq!(
+            bytes.len(),
+            8,
+            "round {round}: destination was torn ({} bytes, not a complete u64)",
+            bytes.len()
+        );
+        let _v = u64::from_le_bytes(bytes.try_into().unwrap()); // parses cleanly
     }
 
     let _ = std::fs::remove_dir_all(&dir);
