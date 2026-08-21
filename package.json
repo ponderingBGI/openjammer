@@ -59,7 +59,7 @@
     "idb-keyval": "^6.2.2",
     "loro-crdt": "1.14.1",
     "lru-cache": "^11.2.4",
-    "music-metadata": "^11.10.3",
+    "music-metadata": "^11.14.0",
     "react": "^19.2.0",
     "react-arborist": "^3.4.3",
     "react-dom": "^19.2.0",
