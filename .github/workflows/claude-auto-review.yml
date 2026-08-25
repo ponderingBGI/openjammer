@@ -33,7 +33,7 @@ jobs:
 
       - name: Claude Iterative Review & Fix
         # Pinned to v1.0.195 for supply chain security
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50
+        uses: anthropics/claude-code-action@24dcd50c0568f0fc9e9211213a4fd2d9eb15c4e0
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
