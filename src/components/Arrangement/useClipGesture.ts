@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ArrangementClip } from '../../song/types';
+import type { Arrangement, ArrangementClip } from '../../song/types';
 import { deleteClips, duplicateClips, moveClips, slipClips, trimClip } from '../../song/ops';
 import type { Verb } from '../../song/verbs';
 import { gridTicks, snapTick, useEditingContextStore } from '../../store/editingContextStore';
@@ -9,6 +9,7 @@ import { autoScrollDelta, crossedDragThreshold, dominantAxis, type DragAxis } fr
 import { ownPointerGesture } from './pointerGestureLifetime';
 
 interface Gesture {
+    previewBase: Arrangement;
     pointerId: number;
     startX: number;
     startY: number;
@@ -96,7 +97,7 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
         const snapped = snapTick(relative ? grabbedRaw - g.relativeOffset : grabbedRaw, g.candidates, pxPerTick, context.snapMode, snapInvert);
         rawDelta = (relative ? snapped + g.relativeOffset : snapped) - clip.startTick;
         if (g.slip) {
-            useArrangementStore.getState().previewGesture(slipClips(arrangement, g.selectedIds, rawDelta).verbs);
+            useArrangementStore.getState().previewGesture(slipClips(g.previewBase, g.selectedIds, rawDelta).verbs);
         } else if (g.edge) {
             const at = g.edge === 'start' ? clip.startTick + rawDelta : clip.startTick + clip.lengthTick + rawDelta;
             useArrangementStore.getState().previewGesture(trimClip(arrangement, g.selectedIds, g.edge, at).verbs);
@@ -112,12 +113,12 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
             }));
         } else {
             const ripple = context.editMode === 'ripple';
-            const finalVerbs = moveClips(arrangement, g.selectedIds, rawDelta, { ripple, toTrackId: ripple ? undefined : hoveredTrackId }).verbs;
+            const finalVerbs = moveClips(g.previewBase, g.selectedIds, rawDelta, { ripple, toTrackId: ripple ? undefined : hoveredTrackId }).verbs;
             g.finalVerbs = finalVerbs;
             // Keep the dragged ClipView mounted while crossing lanes. The final
             // track reassignment is applied atomically on pointer-up.
             useArrangementStore.getState().previewGesture(hoveredTrackId && hoveredTrackId !== trackId
-                ? moveClips(arrangement, g.selectedIds, rawDelta, { ripple, toTrackId: ripple ? undefined : trackId }).verbs
+                ? moveClips(g.previewBase, g.selectedIds, rawDelta, { ripple, toTrackId: ripple ? undefined : trackId }).verbs
                 : finalVerbs);
         }
         if (!g.edge && !g.slip) {
@@ -186,7 +187,7 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
             // Keeping those modes exclusive prevents a relative move from
             // silently becoming a duplicate with snapping inverted.
             const copy = event.altKey && !event.shiftKey && !slip;
-            gesture.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, lastX: event.clientX, lastY: event.clientY, originalScrollLeft: scroll?.scrollLeft ?? 0, copy, slip, edge: slip ? null : edge, axis: null, active: false, selectedIds, relativeOffset: clip.startTick - nearest, candidates, scroll, frame: null, followPlayheadBefore: context.followPlayhead };
+            gesture.current = { previewBase: arrangement, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, lastX: event.clientX, lastY: event.clientY, originalScrollLeft: scroll?.scrollLeft ?? 0, copy, slip, edge: slip ? null : edge, axis: null, active: false, selectedIds, relativeOffset: clip.startTick - nearest, candidates, scroll, frame: null, followPlayheadBefore: context.followPlayhead };
             useEditingContextStore.setState({ followPlayhead: false });
             const releasePointer = ownPointerGesture(event.pointerId, {
                 move: preview,
