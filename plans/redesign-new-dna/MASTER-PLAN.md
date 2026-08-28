@@ -62,7 +62,7 @@ Legend: **[C]** codex gpt-5.6-sol · **[O]** Opus 5 · **[R]** review gate (Opus
 - **W4-S4 [O]** — app shell: topbar, **TransportPill + Meter** (master RMS selector, rAF), onboarding overlay (3 steps, personas, preset rigs via verbs, step-grid view for looped rigs, "Redo setup"), `HelpPanel` persona default, delete `.oj-welcome` + first-run toast, `index.html` boot shell, e2e boot helper + the PR-lane specs. Owns `App.tsx`, `Toolbar/**`, `global.css` (welcome section), new `src/components/Shell/**`, `Onboarding/**`, `e2e/journeys/support.ts`.
 - **W4-P5 [O]** — CommandBar (1127 lines) + AiPanel redesign to `.nj-menu`/`.nj-input`/`.nj-chip` physics.
 - **W4-P3 [C]** — oj-ui canvas & media: KeyTile, Waveform, WaveformView, Marquee, OffscreenPointer, TimeRuler, LaneButton, DeviceSelect, EditableLabel, ParamRow.
-- **W4-P9 [C]** — panels retheme (Settings ×4, Guide, DevLog, Plugins, Export, Dialogs, MIDI, Collab, AudioHealth, IssueReporter, common) + literal-color cleanup.
+- **W4-P9 [O, C assist]** — panels REDESIGN (not a token swap): Settings (all tabs: audio, keybindings, updates, about, theme), Guides (LowLatencyGuide + GuideStep family), DevLog, Plugins panel + PluginWindowShell, Export dialog, Dialogs (RelinkSamples), MIDI (device browser, device card, connection toast), Collab (control, presence overlay), AudioHealth, IssueReporter, Bench, LatencyWarningBanner, PwaUpdatePrompt, AppErrorBoundary + SafeModeScreen, HelpPanel, Sonner toasts, WaveformEditorModal + AudioClipVisual + ClipDragLayer, common (PanelSeparator, ResizeHandles, ScrollContainer). Each gets a taste pass to the New DNA physics (surface cards, hairlines, inset controls, spring press, one focus ring) and a light+dark screenshot. Literal-color cleanup is a by-product, not the goal.
 - **[R]**.
 
 ### Wave 5 — node faceplates (after S3 splits `SchematicNodes.css`)
@@ -75,6 +75,23 @@ Legend: **[C]** codex gpt-5.6-sol · **[O]** Opus 5 · **[R]** review gate (Opus
 - **W6-DOCS [O]** — D15 docs; `component-map.json` regen; README node list.
 - **W6-REVIEW [C + O]** — independent full-diff review (codex second opinion + Opus taste critique with screenshots in both themes at 1280×800 and 1920×1080, reduced-motion, keyboard-only); founder listening pass with audio playing is required before merge (codex never signs off on feel).
 - Open PR → `canari`; babysit per the stewardship rules.
+
+## Scope = everything (owner clarification 2026-08-28)
+
+The redesign covers **every surface, every node, every setting, everything** in the new language. Nothing ships as "rethemed but not redesigned". The completeness inventory — each row needs a taste-pass owner, a light screenshot and a dark screenshot before Wave 6 closes:
+
+| Area | Items |
+|---|---|
+| Shell | topbar, transport pill, breadcrumbs, surface switcher/sky band, onboarding (3 steps), help panel, toasts, PWA update prompt, latency banner, engine-health dot, offline chip, project chip, collab control + presence overlay, error boundary, safe-mode screen, plugin window shell |
+| Canvas | dot grid, marquee, offscreen pointer, cables (audio/control/universal/temp/bundled), ghost mode, context menu (→ oj-ui Menu), node frames/selection/agent-pending, resize handles, bundle port groups |
+| Every node faceplate (40 registered types) | keyboard, keyboard-key, keyboard-visual, instrument, instrument-visual, microphone, midi, midi-visual, minilab-3, minilab3-visual, piano, cello, electricCello, violin, saxophone, strings, keys, winds, looper, effect, pan, width, multiplier, speaker, recorder, canvas-input, canvas-output, output-panel, input-panel, container, add, subtract, library (incl. the two-panel file browser), sampler, sampler-visual, song, audio-in, audio-out — plus `AutoParamPanel` (Knob) and every in-node control |
+| Timeline | arrangement (ruler, headers, field, clips, playhead, loop/punch, markers, selection, readouts), mixer drawer, automation lanes, piano roll (toolbar, key bed, field, velocity lane, scroomer), record ghost, empty states, export dialog |
+| Command bar | palette, AI panel/composer, model picker, sessions, slash items, rewind rows, auth chooser |
+| Settings | panel shell + sidebar tabs, audio settings (devices, latency, guide), keybindings (editor, conflicts), updates/channels, about, theme picker, MIDI device browser |
+| Design system | all 41 oj-ui components + Knob/Meter/TransportPill, Ladle catalog + theme switcher, stories, Figma Code Connect examples, component-map |
+| Outside `src/` | `index.html` boot shell, `public/download` page, `apps/docs` site (fonts, hero, custom.css), `.design-sync` previews, `.impeccable/design.json`, DESIGN.md/PRODUCT.md/README |
+
+Gate (Wave 6): a coverage matrix `plans/redesign-new-dna/COVERAGE.md` listing every row above with owner + screenshot paths; any row without both screenshots or still carrying a retired token/literal/2px-ink/hard-shadow/Caveat rule is a defect, not a follow-up.
 
 ## Owner flags (do not block; noted for the recap)
 1. Third rig has no oscillator/filter node — built from instrument+effect (D12). Adding DSP node types is plugin-territory follow-up.
