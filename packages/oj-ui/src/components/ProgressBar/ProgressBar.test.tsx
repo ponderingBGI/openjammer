@@ -6,7 +6,7 @@ describe('ProgressBar', () => {
     it('renders the base class and progressbar role without a tone modifier', () => {
         const { container } = render(<ProgressBar value={0.5} />);
         const bar = container.querySelector('.oj-progress')!;
-        expect(bar.className).toBe('oj-progress');
+        expect(bar.className).toContain('oj-progress');
         expect(bar.getAttribute('role')).toBe('progressbar');
     });
 

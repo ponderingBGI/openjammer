@@ -16,7 +16,7 @@
 
 /* Port label — the name span schematic nodes render beside an oj-ui Port. */
 .port-label {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     color: var(--text-secondary);
 }
@@ -35,7 +35,7 @@
  * Input Fields
  * ============================================ */
 .node-label {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     color: var(--text-muted);
     margin-bottom: var(--space-xs);
@@ -55,7 +55,7 @@
     border: var(--border-sketch-width) solid var(--sketch-black);
     border-radius: var(--radius-sm);
     color: var(--text-primary);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     cursor: pointer;
 }
@@ -83,7 +83,7 @@
     border: 1px solid var(--sketch-light);
     border-radius: var(--radius-sm);
     margin-bottom: var(--space-xs);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
 }
 

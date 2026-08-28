@@ -15,7 +15,7 @@
     border: var(--border-sketch-width) solid var(--sketch-black);
     background: var(--bg-node);
     color: var(--text-primary);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     line-height: 1.2;
     cursor: pointer;

@@ -62,7 +62,7 @@
 }
 
 .midi-device-card-name {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm, 14px);
     font-weight: 600;
     color: var(--text-primary);

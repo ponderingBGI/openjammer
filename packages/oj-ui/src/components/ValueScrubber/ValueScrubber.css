@@ -9,7 +9,7 @@
     display: inline-flex;
     align-items: baseline;
     gap: var(--space-xs);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
 }
 
 .oj-value-scrubber__label {

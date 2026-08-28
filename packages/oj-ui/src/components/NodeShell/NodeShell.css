@@ -48,12 +48,6 @@
     }
 }
 
-@media (prefers-reduced-motion: reduce) {
-    .oj-node.is-agent-pending {
-        animation: none;
-    }
-}
-
 .oj-node__header {
     display: flex;
     align-items: center;
@@ -70,7 +64,7 @@
 }
 
 .oj-node__title {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-weight: 600;
     font-size: var(--text-lg);
     color: var(--text-primary);

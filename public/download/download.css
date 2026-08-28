@@ -1,7 +1,7 @@
 /*
  * OpenJammer — /download
  * The Living Sketchbook, hand-authored (no framework, no theme to fight).
- * Warm paper + dot grid, ink line, Caveat voice, hard blur-free offset shadows.
+ * Warm paper + dot grid, ink line, Outfit voice, hard blur-free offset shadows.
  * See DESIGN.md. Fonts are the PWA's own /fonts/*.woff2 (same build, visible here).
  *
  * Color contract (from the plan / DESIGN.md):
@@ -17,40 +17,28 @@
 
 /* ---- fonts: reuse the PWA's woff2 (public/fonts → /fonts in the build) ---- */
 @font-face {
-  font-family: 'Caveat';
+  font-family: 'Outfit';
   font-weight: 400;
   font-display: swap;
-  src: url('/fonts/caveat-regular.woff2') format('woff2');
+  src: url('/fonts/outfit-regular.woff2') format('woff2');
 }
 @font-face {
-  font-family: 'Caveat';
-  font-weight: 700;
-  font-display: swap;
-  src: url('/fonts/caveat-bold.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
-  font-weight: 400;
-  font-display: swap;
-  src: url('/fonts/inter-regular.woff2') format('woff2');
-}
-@font-face {
-  font-family: 'Inter';
+  font-family: 'Outfit';
   font-weight: 500;
   font-display: swap;
-  src: url('/fonts/inter-medium.woff2') format('woff2');
+  src: url('/fonts/outfit-medium.woff2') format('woff2');
 }
 @font-face {
-  font-family: 'Inter';
+  font-family: 'Outfit';
   font-weight: 600;
   font-display: swap;
-  src: url('/fonts/inter-semibold.woff2') format('woff2');
+  src: url('/fonts/outfit-semibold.woff2') format('woff2');
 }
 @font-face {
-  font-family: 'Inter';
+  font-family: 'Outfit';
   font-weight: 700;
   font-display: swap;
-  src: url('/fonts/inter-bold.woff2') format('woff2');
+  src: url('/fonts/outfit-bold.woff2') format('woff2');
 }
 @font-face {
   font-family: 'JetBrains Mono';
@@ -90,8 +78,8 @@
   --oj-r-xl: 20px;
   --oj-r-pill: 50px;
 
-  --oj-font-voice: 'Caveat', 'Comic Sans MS', cursive;
-  --oj-font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --oj-font-voice: 'Outfit', system-ui, 'Segoe UI', -apple-system, sans-serif;
+  --oj-font-body: 'Outfit', system-ui, 'Segoe UI', -apple-system, sans-serif;
   --oj-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 }
 

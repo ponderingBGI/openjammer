@@ -345,7 +345,7 @@
 
 .minilab3-header .schematic-title {
     color: var(--text-primary);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-weight: 600;
     font-size: var(--text-lg, 14px);
 }
@@ -372,7 +372,7 @@
     border: var(--border-sketch-width, 2px) solid var(--sketch-black);
     border-radius: var(--radius-md, 8px);
     padding: 12px 24px;
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-md, 14px);
     font-weight: 600;
     cursor: pointer;
@@ -431,7 +431,7 @@
     border: 2px solid var(--sketch-black);
     border-radius: var(--radius-md, 6px);
     padding: var(--space-sm, 8px) var(--space-md, 16px);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm, 12px);
     font-weight: 600;
     cursor: pointer;

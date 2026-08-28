@@ -4,46 +4,32 @@
    from a different root, so relative is the portable form). */
 
 @font-face {
-    font-family: 'Caveat';
+    font-family: 'Outfit';
     font-style: normal;
     font-weight: 400;
     font-display: swap;
-    src: url('./caveat-regular.woff2') format('woff2');
+    src: url('./outfit-regular.woff2') format('woff2');
 }
 @font-face {
-    font-family: 'Caveat';
-    font-style: normal;
-    font-weight: 700;
-    font-display: swap;
-    src: url('./caveat-bold.woff2') format('woff2');
-}
-@font-face {
-    font-family: 'Inter';
-    font-style: normal;
-    font-weight: 400;
-    font-display: swap;
-    src: url('./inter-regular.woff2') format('woff2');
-}
-@font-face {
-    font-family: 'Inter';
+    font-family: 'Outfit';
     font-style: normal;
     font-weight: 500;
     font-display: swap;
-    src: url('./inter-medium.woff2') format('woff2');
+    src: url('./outfit-medium.woff2') format('woff2');
 }
 @font-face {
-    font-family: 'Inter';
+    font-family: 'Outfit';
     font-style: normal;
     font-weight: 600;
     font-display: swap;
-    src: url('./inter-semibold.woff2') format('woff2');
+    src: url('./outfit-semibold.woff2') format('woff2');
 }
 @font-face {
-    font-family: 'Inter';
+    font-family: 'Outfit';
     font-style: normal;
     font-weight: 700;
     font-display: swap;
-    src: url('./inter-bold.woff2') format('woff2');
+    src: url('./outfit-bold.woff2') format('woff2');
 }
 @font-face {
     font-family: 'JetBrains Mono';

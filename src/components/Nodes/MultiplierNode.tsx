@@ -97,7 +97,7 @@ export function MultiplierNode({ node }: MultiplierNodeProps) {
                     style={{
                         fontSize: '12px',
                         color: 'var(--text-muted)',
-                        fontFamily: 'var(--font-sketch)',
+                        fontFamily: 'var(--font-sans)',
                     }}
                 >
                     from In 2

@@ -9,7 +9,7 @@
   --oj-shadow-rest:2px 3px 0 rgba(0,0,0,.10);
   --oj-shadow-lift:3px 4px 0 rgba(0,0,0,.15);
   --oj-shadow-ink:2px 2px 0 var(--oj-ink);
-  --sl-font:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --sl-font:'Outfit',system-ui,'Segoe UI',-apple-system,sans-serif;
   --sl-font-mono:'JetBrains Mono','Fira Code',monospace;
   --sl-shadow-sm:var(--oj-shadow-rest);
   --sl-shadow-md:var(--oj-shadow-rest);
@@ -71,9 +71,9 @@ body{ background-image:radial-gradient(rgba(0,0,0,.06) 1px, transparent 1px); ba
 :root[data-theme='dark'] body{ background-image:radial-gradient(rgba(255,255,255,.05) 1px, transparent 1px); }
 
 /* ---- KILL STARLIGHT DEFAULTS that would ship a brand-ban ---- */
-/* Caveat is VOICE — scoped to hero headline + h1/h2 ONLY (never sidebar/card titles → toy cuteness) */
+/* Outfit is the UI voice — scoped here to hero headline + h1/h2. */
 .hero h1, .sl-markdown-content h1, .sl-markdown-content h2{
-  font-family:'Caveat','Comic Sans MS',cursive; font-weight:700; letter-spacing:.2px;
+  font-family:'Outfit',system-ui,'Segoe UI',-apple-system,sans-serif; font-weight:700; letter-spacing:.2px;
 }
 .sl-markdown-content h1{font-size:2.6rem;line-height:1.1;}
 .sl-markdown-content h2{font-size:1.9rem;line-height:1.15;}

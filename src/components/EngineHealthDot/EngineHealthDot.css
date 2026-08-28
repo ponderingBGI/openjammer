@@ -10,7 +10,7 @@
     align-items: center;
     gap: var(--space-xs);
     padding: var(--space-xs) var(--space-sm);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     color: var(--text-primary, var(--sketch-black));
     background: var(--surface-paper, var(--bg-node, #fff));

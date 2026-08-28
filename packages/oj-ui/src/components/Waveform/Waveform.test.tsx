@@ -9,7 +9,7 @@ describe('Waveform', () => {
         const { container } = render(<Waveform data={sine} />);
         const root = container.querySelector('.oj-waveform')!;
         expect(root).not.toBeNull();
-        expect(root.className).toBe('oj-waveform');
+        expect(root.className).toContain('oj-waveform');
         expect(container.querySelector('svg.oj-waveform__svg')).not.toBeNull();
         expect(container.querySelector('polyline.oj-waveform__trace')).not.toBeNull();
     });

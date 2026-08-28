@@ -65,9 +65,9 @@ body,
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .surface-transition-in,
-    .surface-transition-out {
-        animation: none;
+    *:not(.oj-cable):not(.oj-meter):not(.oj-meter *), *::before, *::after {
+        animation-duration: .01ms !important; animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important; scroll-behavior: auto !important;
     }
 }
 
@@ -94,7 +94,7 @@ body,
 }
 
 body {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-md);
     color: var(--text-primary);
     background: var(--bg-canvas);
@@ -132,7 +132,7 @@ body {
 
 /* Button Reset */
 button {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: inherit;
     border: none;
     background: none;
@@ -197,7 +197,7 @@ textarea:focus {
 
 .oj-welcome-title {
     margin: 0;
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-2xl);
     line-height: 1.15;              /* > 1.05 so Caveat apostrophe descenders don't clip */
     color: var(--text-primary);
@@ -256,7 +256,7 @@ textarea:focus {
 }
 
 .oj-welcome-option-label {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-lg);
     line-height: 1.1;
 }
@@ -347,7 +347,7 @@ textarea:focus {
     --normal-bg: var(--bg-secondary);
     --normal-border: var(--border-sketch);
     --normal-text: var(--text-primary);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
 }
 
 /* Override Sonner's default toast styles when using custom toasts */

@@ -20,7 +20,7 @@
     border: none;
     background: transparent;
     color: var(--text-secondary);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     font-weight: 500;
     padding: var(--space-xs) var(--space-lg);

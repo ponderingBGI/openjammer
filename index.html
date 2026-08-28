@@ -5,6 +5,10 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>OpenJammer</title>
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/outfit-regular.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/outfit-medium.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/outfit-semibold.woff2" />
+    <link rel="preload" as="font" type="font/woff2" crossorigin href="/fonts/outfit-bold.woff2" />
     <style>
       :root {
         --oj-boot-paper: #f5f0e8;
@@ -27,7 +31,7 @@
         overflow: hidden;
         color: var(--oj-boot-ink);
         background: var(--oj-boot-paper);
-        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-family: 'Outfit', system-ui, 'Segoe UI', -apple-system, sans-serif;
       }
 
       #root {
@@ -57,7 +61,7 @@
 
       .oj-boot-title {
         margin: 0 0 8px;
-        font-family: Caveat, "Comic Sans MS", cursive;
+        font-family: 'Outfit', system-ui, 'Segoe UI', -apple-system, sans-serif;
         font-size: 36px;
         line-height: 1.1;
       }

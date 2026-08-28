@@ -60,7 +60,7 @@
 }
 
 .guide-header-title {
-  font-family: var(--font-sketch);
+  font-family: var(--font-sans);
   font-size: var(--text-xl);
   color: var(--text-primary);
   margin: 0;
@@ -481,7 +481,7 @@
 }
 
 .guide-section-title {
-  font-family: var(--font-sketch);
+  font-family: var(--font-sans);
   font-size: var(--text-lg);
   color: var(--text-primary);
   margin: 0;

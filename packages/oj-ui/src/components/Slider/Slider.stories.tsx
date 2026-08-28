@@ -22,7 +22,7 @@ function Demo({
     const [value, setValue] = useState(initial);
     return (
         <label style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xs)' }}>
-            <span style={{ fontFamily: 'var(--font-sketch)', color: 'var(--text-secondary)' }}>
+            <span style={{ fontFamily: 'var(--font-sans)', color: 'var(--text-secondary)' }}>
                 {label}
             </span>
             <Slider

@@ -10,7 +10,7 @@
     align-items: flex-start;
     gap: var(--space-sm);
     cursor: pointer;
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
 }
 
 /* The real control: present for keyboard + screen readers, visually hidden. */

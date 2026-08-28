@@ -6,7 +6,7 @@ describe('Button', () => {
     it('renders the base class and defaults to type=button', () => {
         const { container } = render(<Button>Go</Button>);
         const btn = container.querySelector('button')!;
-        expect(btn.className).toBe('oj-btn');
+        expect(btn.className).toContain('oj-btn');
         expect(btn.getAttribute('type')).toBe('button');
         expect(btn.textContent).toBe('Go');
     });

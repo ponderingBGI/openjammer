@@ -12,7 +12,7 @@
     padding: var(--space-xs) var(--space-sm);
     border: var(--border-sketch-width) solid var(--sketch-black);
     border-radius: var(--radius-md);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     font-weight: 500;
     background: var(--bg-node);

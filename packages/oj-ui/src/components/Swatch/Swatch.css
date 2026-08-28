@@ -53,7 +53,7 @@
 
 /* The theme name — Caveat voice (Caveat-Is-the-Voice). */
 .oj-swatch__name {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     font-weight: 500;
     color: var(--text-primary);

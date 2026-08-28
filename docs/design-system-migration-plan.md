@@ -3,7 +3,7 @@
 # OpenJammer oj-ui Master Migration Plan
 **Lead Design-System Architect — ground-up rebuild, zero legacy, no parallel paths**
 
-This plan extracts every reusable UI element into `@openjammer/oj-ui` as theme-agnostic, presentational, prop-driven components, and rewires the app to consume them while deleting every twin. It honors the covenant: **minimal core, infinite edges; every line used; migrate fully, remove legacy; the audio path is sacred.** It honors DESIGN.md's named rules (Hard-Shadow, Press-Is-Physical, No-Surprise, Port-Color-Is-Meaning, Signal-Not-Brand, Caveat-Is-the-Voice, Mono-Means-Exact).
+This plan extracts every reusable UI element into `@openjammer/oj-ui` as theme-agnostic, presentational, prop-driven components, and rewires the app to consume them while deleting every twin. It honors the covenant: **minimal core, infinite edges; every line used; migrate fully, remove legacy; the audio path is sacred.** It honors the shipped UI rules (Hard-Shadow, Press-Is-Physical, No-Surprise, Port-Color-Is-Meaning, Signal-Not-Brand, Outfit as the UI face, Mono-Means-Exact).
 
 The non-negotiable invariant for every increment: **GREEN (typecheck + lint + test + build) and a VISUAL NO-OP** — today's look is preserved exactly, captured as the `sketchbook` theme, until the designer's new default theme lands in Phases 4–6.
 
@@ -78,7 +78,7 @@ The non-negotiable invariant for every increment: **GREEN (typecheck + lint + te
 |---|---|---|
 | **PortRow** | NodeWrapper input/output map bodies, schematic `.port-row*`, Keyboard/MIDI/MiniLab3/Container/Input/OutputPanel port lists | `label: ReactNode`, `side: 'input'\|'output'`, port props (`kind`/`direction`/`connected` + `data-*` + handlers via `...rest`), `editableLabel?` slot, `placeholder?`, `hideLabel?`. Composes `Port`. |
 | **NodeFrame** | NodeWrapper absolute-positioned `.node`/`.schematic-node` outer container | `position: {x,y}`, `selected`, `dragging`, `agentPending`, `className`, `children`. Positioning wrapper around (but distinct from) `NodeShell` chrome. |
-| **EditableLabel** | CanvasIO/Container/MIDI/Input/OutputPanel inline rename | `value`, `editing` (controlled) **or** `defaultEditing`, `placeholder?`, `align?`, `onCommit`, `onCancel`. Caveat span ↔ `Input`. |
+| **EditableLabel** | CanvasIO/Container/MIDI/Input/OutputPanel inline rename | `value`, `editing` (controlled) **or** `defaultEditing`, `placeholder?`, `align?`, `onCommit`, `onCancel`. Outfit span ↔ `Input`. |
 | **ValueScrubber** | `ScrollableRowValue`/`ScrollableControl`/`ScrollableValue`/`EditableValue` + Looper inline duration (4–5 copies) | `value`, `display` (pre-formatted), `label?`, `editable?`, `disabled?`, `title?`, `onChange`, `onCommit`. Span ↔ `Input`. **No scroll-capture import** — the wheel hook stays app-side (see §2). |
 | **Cable** | `ConnectionPath` + `renderTempConnection()` (duplicated bezier math) | `start`, `end`, `kind`, `selected?`, `bundled?`, `bundleCount?`, `signalLevel`, `temp?`, `onSelect?`. Owns path-string math. **Must keep the existing memo comparator** (skip re-render on <1% signal change). |
 | **Waveform** | Looper/Sampler/Microphone SVG polyline | `data: number[]`, `playhead?`, `recording?`, `showCenterLine?`. Pure SVG from props. |

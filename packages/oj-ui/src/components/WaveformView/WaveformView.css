@@ -63,7 +63,7 @@
 .oj-waveform-view__name {
     padding: var(--space-xs) var(--space-sm);
     border-top: 1px solid var(--border-subtle);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     color: var(--text-secondary);
     text-align: center;

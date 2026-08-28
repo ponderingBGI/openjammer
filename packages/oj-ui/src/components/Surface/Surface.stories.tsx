@@ -5,7 +5,7 @@ export default { title: 'Primitives/Surface' };
 
 const demoStyle = {
     padding: 'var(--space-md)',
-    fontFamily: 'var(--font-sketch)',
+    fontFamily: 'var(--font-sans)',
     color: 'var(--text-primary)',
     minWidth: '160px',
 };

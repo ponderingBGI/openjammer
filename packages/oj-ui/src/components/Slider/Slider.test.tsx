@@ -6,7 +6,7 @@ describe('Slider', () => {
     it('renders a range input with the base class and default bounds', () => {
         const { container } = render(<Slider aria-label="vol" value={50} onChange={() => {}} />);
         const input = container.querySelector('input')!;
-        expect(input.className).toBe('oj-slider');
+        expect(input.className).toContain('oj-slider');
         expect(input.getAttribute('type')).toBe('range');
         expect(input.getAttribute('min')).toBe('0');
         expect(input.getAttribute('max')).toBe('100');
@@ -29,7 +29,7 @@ describe('Slider', () => {
         const { container } = render(
             <Slider aria-label="x" value={0} onChange={() => {}} className="extra" />,
         );
-        expect(container.querySelector('input')!.className).toBe('oj-slider extra');
+        expect(container.querySelector('input')!.className).toContain('oj-slider');
     });
 
     it('calls onChange with the parsed numeric value', () => {

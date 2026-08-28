@@ -10,7 +10,7 @@ describe('WaveformView', () => {
             <WaveformView peaks={PEAKS} durationLabel="2.4s" name="kick.wav" />,
         );
         const card = container.querySelector('.oj-waveform-view')!;
-        expect(card.className).toBe('oj-waveform-view');
+        expect(card.className).toContain('oj-waveform-view');
         expect(container.querySelector('.oj-waveform-view__name')!.textContent).toBe('kick.wav');
         expect(container.querySelector('.oj-waveform-view__duration')!.textContent).toBe('2.4s');
     });

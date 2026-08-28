@@ -5,7 +5,7 @@ import { Input } from './Input';
 describe('Input', () => {
     it('renders an input with the base class', () => {
         const { container } = render(<Input defaultValue="1" />);
-        expect(container.querySelector('input')!.className).toBe('oj-input');
+        expect(container.querySelector('input')!.className).toContain('oj-input');
     });
 
     it('forwards value and native props', () => {

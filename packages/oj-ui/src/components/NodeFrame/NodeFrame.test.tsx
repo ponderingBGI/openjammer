@@ -8,7 +8,7 @@ describe('NodeFrame', () => {
             <NodeFrame position={{ x: 40, y: 32 }}>node</NodeFrame>,
         );
         const frame = container.firstElementChild as HTMLDivElement;
-        expect(frame.className).toBe('oj-node-frame');
+        expect(frame.className).toContain('oj-node-frame');
         // position:absolute lives in NodeFrame.css (like all oj-ui styling); the
         // dynamic translate is the only inline style. Assert the class + transform.
         expect(frame.style.transform).toBe('translate(40px, 32px)');

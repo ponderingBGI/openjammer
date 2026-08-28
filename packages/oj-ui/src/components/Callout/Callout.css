@@ -4,7 +4,7 @@
  * accent is confined to the thick left edge and the icon; the surface and
  * title stay neutral so the box reads as a labelled signal, not a brand panel.
  * Styled only via semantic tokens (no literal colors), so it follows the
- * active theme. Title uses --font-sketch (Caveat-Is-the-Voice).
+ * active theme. Title uses --font-sans (Caveat-Is-the-Voice).
  */
 .oj-callout {
     display: flex;
@@ -67,7 +67,7 @@
    in the Caveat voice. */
 .oj-callout__title {
     margin-bottom: var(--space-xs);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-md);
     font-weight: 600;
     color: var(--text-primary);

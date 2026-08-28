@@ -43,7 +43,7 @@
 
 .minimal-settings-header h2 {
     margin: 0;
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-xl);
     font-weight: 700;
 }

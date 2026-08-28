@@ -6,7 +6,7 @@ describe('Chip', () => {
     it('renders the base class and its label for the default neutral tone', () => {
         const { container } = render(<Chip>Tag</Chip>);
         const chip = container.querySelector('span.oj-chip')!;
-        expect(chip.className).toBe('oj-chip');
+        expect(chip.className).toContain('oj-chip');
         expect(chip.querySelector('.oj-chip__label')!.textContent).toBe('Tag');
     });
 

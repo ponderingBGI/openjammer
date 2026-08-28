@@ -25,7 +25,7 @@ export default defineConfig({
                 baseUrl: 'https://github.com/ponderingBGI/openjammer/edit/main/apps/docs/',
             },
             // Living-Sketchbook skin: CSS-variable token remap (warm paper, ink
-            // line, Caveat voice, hard offset shadows) plus exactly ONE bespoke
+            // line, Outfit voice, hard offset shadows) plus exactly ONE bespoke
             // component slot — the splash Hero. This is the only component
             // override (hard cap): the brand ships through tokens, not forks.
             customCss: ['./src/styles/custom.css'],

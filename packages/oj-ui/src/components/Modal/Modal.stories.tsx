@@ -23,7 +23,7 @@ export const Default: Story = () => {
             </Button>
             <Modal open={open} onClose={() => setOpen(false)} ariaLabel="Example dialog">
                 <div style={panelStyle}>
-                    <p style={{ margin: 0, fontFamily: 'var(--font-sketch)' }}>
+                    <p style={{ margin: 0, fontFamily: 'var(--font-sans)' }}>
                         Escape, a scrim click, or the button below all close this.
                     </p>
                     <div style={{ display: 'flex', gap: 'var(--space-sm)', justifyContent: 'flex-end' }}>
@@ -54,7 +54,7 @@ export const Alignments: Story = () => {
                 align={align ?? 'center'}
             >
                 <div style={panelStyle}>
-                    <p style={{ margin: 0, fontFamily: 'var(--font-sketch)' }}>
+                    <p style={{ margin: 0, fontFamily: 'var(--font-sans)' }}>
                         Aligned to <strong>{align}</strong>.
                     </p>
                     <Button onClick={() => setAlign(null)}>Close</Button>
@@ -80,7 +80,7 @@ export const Sizes: Story = () => {
                 size={size ?? 'md'}
             >
                 <div style={panelStyle}>
-                    <p style={{ margin: 0, fontFamily: 'var(--font-sketch)' }}>
+                    <p style={{ margin: 0, fontFamily: 'var(--font-sans)' }}>
                         Size <strong>{size}</strong>.
                     </p>
                     <Button onClick={() => setSize(null)}>Close</Button>
@@ -102,7 +102,7 @@ export const ScrimLocked: Story = () => {
                 closeOnScrim={false}
             >
                 <div style={panelStyle}>
-                    <p style={{ margin: 0, fontFamily: 'var(--font-sketch)' }}>
+                    <p style={{ margin: 0, fontFamily: 'var(--font-sans)' }}>
                         Clicking the scrim does nothing here — only Escape or the button closes it.
                     </p>
                     <Button variant="primary" onClick={() => setOpen(false)}>

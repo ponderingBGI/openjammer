@@ -12,7 +12,7 @@ everything else is the way it is.
 - [PRODUCT.md](../PRODUCT.md): who plays OpenJammer and why — register, users,
   anti-references, the design principles, and the Live Performance Rule. The strategic brief.
 - [DESIGN.md](../DESIGN.md): the visual system — "The Living Sketchbook" (hand-drawn
-  Caveat, warm dot-grid paper, hard blur-free shadows, audio-blue/control-grey ports).
+  Outfit, warm dot-grid paper, hard blur-free shadows, audio-blue/control-grey ports).
 
 ## Architecture & extension
 

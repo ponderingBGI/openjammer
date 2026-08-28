@@ -15,7 +15,7 @@
 
 .midi-browser-section h3 {
     margin: 0 0 var(--space-md);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     font-weight: 600;
     text-transform: uppercase;

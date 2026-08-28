@@ -5,7 +5,6 @@
     padding: var(--space-md);
     color: var(--text-primary);
 }
-
 .export-dialog__intro,
 .export-dialog__advice,
 .export-dialog__destination-note,
@@ -94,7 +93,7 @@
 }
 
 .export-stats span {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
 }
 
@@ -125,8 +124,4 @@
 
 @media (max-width: 560px) {
     .export-dialog__form { grid-template-columns: 1fr; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .export-dialog *, .export-dialog *::before, .export-dialog *::after { transition-duration: 0ms !important; }
 }

@@ -23,7 +23,7 @@
 }
 
 .app-error-title {
-    font-family: var(--font-sketch, sans-serif);
+    font-family: var(--font-sans, sans-serif);
     margin: 0 0 var(--space-sm, 8px);
 }
 
@@ -48,7 +48,7 @@
 }
 
 .app-error-btn {
-    font-family: var(--font-sketch, sans-serif);
+    font-family: var(--font-sans, sans-serif);
     padding: var(--space-xs, 6px) var(--space-md, 16px);
     border: var(--border-sketch-width, 2px) solid var(--sketch-black, #1a1a1a);
     border-radius: var(--radius-sm, 8px);

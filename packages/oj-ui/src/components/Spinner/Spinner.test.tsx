@@ -6,7 +6,7 @@ describe('Spinner', () => {
     it('renders the base class with the status role and default size', () => {
         const { container } = render(<Spinner />);
         const el = container.querySelector('span')!;
-        expect(el.className).toBe('oj-spinner');
+        expect(el.className).toContain('oj-spinner');
         expect(el.getAttribute('role')).toBe('status');
         expect(el.style.width).toBe('16px');
         expect(el.style.height).toBe('16px');

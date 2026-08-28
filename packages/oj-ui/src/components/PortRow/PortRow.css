@@ -25,7 +25,7 @@
 
 /* Caveat voice — the friendly label naming what the dot wires. */
 .oj-port-row__label {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     color: var(--text-secondary);
     line-height: 1.2;

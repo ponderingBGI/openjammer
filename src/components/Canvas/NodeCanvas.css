@@ -173,7 +173,7 @@
 }
 
 .back-to-action-label {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-md);
     color: var(--text-secondary);
 }

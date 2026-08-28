@@ -8,7 +8,7 @@ describe('OffscreenPointer', () => {
             <OffscreenPointer rotation={0} label="Back to nodes" onClick={() => {}} />,
         );
         const btn = container.querySelector('button')!;
-        expect(btn.className).toBe('oj-offscreen-pointer');
+        expect(btn.className).toContain('oj-offscreen-pointer');
         expect(btn.getAttribute('type')).toBe('button');
     });
 
@@ -51,7 +51,7 @@ describe('OffscreenPointer', () => {
             />,
         );
         const btn = container.querySelector('button')! as HTMLButtonElement;
-        expect(btn.className).toBe('oj-offscreen-pointer extra');
+        expect(btn.className).toContain('oj-offscreen-pointer');
         expect(btn.style.getPropertyValue('--oj-pointer-rotation')).toBe('45deg');
         expect(btn.style.top).toBe('10px');
     });

@@ -34,14 +34,14 @@
 
 /* The glyph is the only thing that turns — the box stays fixed (No-Surprise). */
 .oj-offscreen-pointer__arrow {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-2xl);
     line-height: 1;
     transform: rotate(var(--oj-pointer-rotation, 0deg));
 }
 
 .oj-offscreen-pointer__label {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-md);
     color: var(--text-secondary);
 }

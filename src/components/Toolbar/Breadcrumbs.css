@@ -10,7 +10,7 @@
     gap: var(--space-xs);
     padding: var(--space-xs) var(--space-sm);
     background: transparent;
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-md);
     white-space: nowrap;
 }

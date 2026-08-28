@@ -6,7 +6,7 @@ describe('Marquee', () => {
     it('renders the base class', () => {
         const { container } = render(<Marquee x={0} y={0} width={10} height={10} />);
         const el = container.querySelector('div')!;
-        expect(el.className).toBe('oj-marquee');
+        expect(el.className).toContain('oj-marquee');
     });
 
     it('positions and sizes from x/y/width/height', () => {

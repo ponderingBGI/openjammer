@@ -11,7 +11,7 @@
 }
 
 .issue-preview-note {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-xs);
     color: var(--text-secondary);
     line-height: 1.4;

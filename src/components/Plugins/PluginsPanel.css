@@ -17,18 +17,17 @@
 .plugin-browser__row[aria-selected="true"] { outline: 2px solid var(--accent-primary); outline-offset: -2px; }
 .plugin-browser__row.is-benched { background-image: var(--hatch-benched); }
 .plugin-browser__identity { min-width: 0; display: flex; flex-direction: column; }
-.plugin-browser__identity strong { overflow: hidden; color: var(--text-primary); font: 600 18px/22px var(--font-sketch); text-overflow: ellipsis; white-space: nowrap; }
+.plugin-browser__identity strong { overflow: hidden; color: var(--text-primary); font: 600 18px/22px var(--font-sans); text-overflow: ellipsis; white-space: nowrap; }
 .plugin-browser__identity span { overflow: hidden; color: var(--text-secondary); font: 400 13px/18px var(--font-sans); text-overflow: ellipsis; white-space: nowrap; }
 .plugin-browser__detail { grid-column: 1 / -1; min-height: 72px; display: flex; flex-direction: column; justify-content: center; gap: 4px; color: var(--text-secondary); font: 400 12px/1.4 var(--font-mono); }
 .plugin-browser__detail code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plugin-browser__none { margin: 24px 12px; opacity: .5; font: 400 15px/1.4 var(--font-sketch); }
+.plugin-browser__none { margin: 24px 12px; opacity: .5; font: 400 15px/1.4 var(--font-sans); }
 .plugin-browser__status { position: relative; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-top: 1px solid var(--border-subtle); background: var(--bg-node-header); color: var(--text-secondary); font: 400 14px/1.2 var(--font-sans); }
 .plugin-browser__status button { padding: 0; border: 0; background: transparent; color: var(--text-primary); font: inherit; text-decoration: underline; cursor: pointer; }
 .plugin-browser__ruler { position: absolute; right: 0; bottom: 0; left: 0; height: 1px; background: color-mix(in srgb, var(--sketch-black) 35%, transparent); transform-origin: left; transition: transform 120ms linear; }
 .plugin-browser__quarantine { position: absolute; right: 0; bottom: 48px; left: 0; z-index: 1; height: 220px; padding: 12px 16px; overflow: auto; border-top: 2px solid var(--border-strong); background: var(--bg-node); }
-.plugin-browser__quarantine h3 { margin: 0; font: 600 18px/1.2 var(--font-sketch); }
+.plugin-browser__quarantine h3 { margin: 0; font: 600 18px/1.2 var(--font-sans); }
 .plugin-browser__quarantine p { margin: 4px 0 8px; max-width: 65ch; color: var(--text-secondary); font: 400 14px/1.4 var(--font-sans); }
 .plugin-browser__quarantine-row { min-height: 44px; display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: center; gap: 8px; border-top: 1px solid var(--border-subtle); font: 400 13px/1.2 var(--font-sans); }
 .plugin-browser__quarantine-row code { overflow: hidden; font-family: var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px), (max-height: 620px) { .plugin-browser { width: calc(100vw - 48px); height: min(560px, calc(100vh - 48px)); } }
-@media (prefers-reduced-motion: reduce) { .plugin-browser__row, .plugin-browser__ruler { transition-duration: 0ms; } }

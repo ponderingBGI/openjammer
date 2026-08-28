@@ -22,8 +22,7 @@
     "2xl": { "$value": "36px", "$type": "dimension" }
   },
   "font": {
-    "sketch": { "$value": "'Caveat', 'Comic Sans MS', cursive", "$type": "fontFamily" },
-    "sans": { "$value": "'Inter', -apple-system, BlinkMacSystemFont, sans-serif", "$type": "fontFamily" },
+    "sans": { "$value": "'Outfit', system-ui, 'Segoe UI', -apple-system, sans-serif", "$type": "fontFamily" },
     "mono": { "$value": "'JetBrains Mono', 'Fira Code', monospace", "$type": "fontFamily" }
   },
   "node": {

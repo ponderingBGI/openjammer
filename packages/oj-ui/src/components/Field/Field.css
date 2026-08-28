@@ -13,7 +13,7 @@
 }
 
 .oj-field__label {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     color: var(--text-muted);
 }

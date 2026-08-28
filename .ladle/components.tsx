@@ -47,7 +47,7 @@ export const Provider: GlobalProvider = ({ children, globalState }) => {
                 padding: 'var(--space-lg)',
                 background: 'var(--bg-canvas)',
                 color: 'var(--text-primary)',
-                fontFamily: 'var(--font-sketch)',
+                fontFamily: 'var(--font-sans)',
             }}
         >
             {figma && (
@@ -69,7 +69,7 @@ export const Provider: GlobalProvider = ({ children, globalState }) => {
                         border: 'var(--border-sketch-width) solid var(--sketch-black)',
                         background: 'var(--bg-node)',
                         color: 'var(--text-primary)',
-                        fontFamily: 'var(--font-sketch)',
+                        fontFamily: 'var(--font-sans)',
                         fontSize: 'var(--text-sm)',
                         textDecoration: 'none',
                         boxShadow: 'var(--shadow-node)',

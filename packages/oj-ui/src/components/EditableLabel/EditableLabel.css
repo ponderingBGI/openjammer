@@ -21,7 +21,7 @@
     padding: var(--space-xs) var(--space-sm);
     border: var(--border-sketch-width) solid transparent;
     border-radius: var(--radius-sm);
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-md);
     color: var(--text-primary);
     cursor: text;
@@ -54,7 +54,7 @@
 /* Edit field — the Input primitive sized to the label, sketch voice (not mono:
    a name is read as words, not digit-by-digit, so it stays Caveat). */
 .oj-editable-label__input {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-md);
 }
 

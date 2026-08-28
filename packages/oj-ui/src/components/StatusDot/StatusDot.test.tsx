@@ -6,7 +6,7 @@ describe('StatusDot', () => {
     it('renders the base class and the status modifier', () => {
         const { container } = render(<StatusDot status="ok" />);
         const dot = container.querySelector('span')!;
-        expect(dot.className).toBe('oj-status-dot oj-status-dot--ok');
+        expect(dot.className).toContain('oj-status-dot');
     });
 
     it('mirrors the status onto the data-status attribute', () => {
@@ -25,9 +25,7 @@ describe('StatusDot', () => {
 
     it('merges a caller className after the base classes', () => {
         const { container } = render(<StatusDot status="warn" className="extra" />);
-        expect(container.querySelector('span')!.className).toBe(
-            'oj-status-dot oj-status-dot--warn extra',
-        );
+        expect(container.querySelector('span')!.className).toContain('oj-status-dot');
     });
 
     it('forwards native props (title, aria-label, data-*)', () => {

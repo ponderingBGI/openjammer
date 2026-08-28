@@ -12,7 +12,6 @@
     font-family: var(--font-sans);
     animation: oj-upd-fade var(--transition-normal) ease-out;
 }
-
 /* ── Mono version stamp (Mono-Means-Exact) ── */
 .oj-upd-ver {
     font-family: var(--font-mono);
@@ -49,7 +48,7 @@
 }
 
 .oj-upd-hero-head {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-lg);
     font-weight: 600;
     line-height: 1.1;
@@ -97,7 +96,7 @@
 }
 
 .oj-upd-row-label {
-    font-family: var(--font-sketch);
+    font-family: var(--font-sans);
     font-size: var(--text-md);
     font-weight: 600;
     color: var(--text-primary);
@@ -146,11 +145,5 @@
     }
     to {
         opacity: 1;
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .oj-upd {
-        animation: none;
     }
 }

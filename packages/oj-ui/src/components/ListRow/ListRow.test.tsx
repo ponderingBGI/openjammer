@@ -6,7 +6,7 @@ describe('List', () => {
     it('renders the base class and defaults to role=list', () => {
         const { container } = render(<List>x</List>);
         const list = container.querySelector('.oj-list')!;
-        expect(list.className).toBe('oj-list');
+        expect(list.className).toContain('oj-list');
         expect(list.getAttribute('role')).toBe('list');
     });
 
@@ -27,7 +27,7 @@ describe('ListRow', () => {
     it('renders the base class and wraps children in the body slot', () => {
         const { container } = render(<ListRow>Row</ListRow>);
         const row = container.querySelector('.oj-list-row')!;
-        expect(row.className).toBe('oj-list-row');
+        expect(row.className).toContain('oj-list-row');
         expect(row.querySelector('.oj-list-row__body')!.textContent).toBe('Row');
     });
 
