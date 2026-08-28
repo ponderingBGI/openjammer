@@ -1,8 +1,15 @@
+/*
+ * Field — New DNA (handoff `.nj-field`).
+ *
+ * A micro-label above its control: 600/12px Outfit, uppercase, secondary ink,
+ * 6px gap. The label is a caption, not a heading — it names the control and
+ * then gets out of the way.
+ */
 
 .oj-field {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: 6px;
     margin-bottom: var(--space-sm);
 }
 
@@ -14,6 +21,34 @@
 
 .oj-field__label {
     font-family: var(--font-sans);
-    font-size: var(--text-sm);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.oj-field__description {
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 400;
+    line-height: 1.45;
     color: var(--text-muted);
+    max-width: 60ch;
+}
+
+/* The description sits under the control it explains, not under the label. */
+.oj-field__description,
+.oj-field__error {
+    order: 3;
+}
+
+.oj-field__error {
+    font-family: var(--font-sans);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.45;
+    color: var(--danger-ink);
+    max-width: 60ch;
 }

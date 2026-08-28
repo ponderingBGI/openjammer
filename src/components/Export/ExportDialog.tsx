@@ -173,13 +173,13 @@ export function ExportDialog({ open, arrangement, onClose }: Props) {
                     <fieldset className="export-dialog__tail" disabled={status === 'exporting'}>
                         <legend>Tail</legend>
                         <SegmentedControl aria-label="Export tail" className="export-dialog__tail-options" value={tailMode} disabled={status === 'exporting'} onChange={setTailMode} options={[{ value: 'auto', label: 'Auto — listen for the ring-out' }, { value: 'fixed', label: 'Fixed' }]} />
-                        {tailMode === 'fixed' && <Input aria-label="Tail seconds" type="number" min={0} step={0.1} value={tailSeconds} onChange={(event) => setTailSeconds(Number(event.target.value))} />}
+                        {tailMode === 'fixed' && <Input mono aria-label="Tail seconds" type="number" min={0} step={0.1} value={tailSeconds} onChange={(event) => setTailSeconds(Number(event.target.value))} />}
                         {tailMode === 'fixed' && <span className="export-dialog__unit">seconds</span>}
                     </fieldset>
                     {native ? (
                         <Field label="Destination folder" htmlFor="export-destination">
                             <div className="export-dialog__destination">
-                                <Input id="export-destination" value={destination} placeholder="Choose a folder or type its full path" onChange={(event) => setDestination(event.target.value)} disabled={status === 'exporting'} />
+                                <Input mono id="export-destination" value={destination} placeholder="Choose a folder or type its full path" onChange={(event) => setDestination(event.target.value)} disabled={status === 'exporting'} />
                                 <Button type="button" disabled={status === 'exporting'} onClick={() => void chooseDestination()}>Choose…</Button>
                             </div>
                         </Field>

@@ -1,30 +1,47 @@
+/*
+ * Button — New DNA (handoff `.nj-btn`).
+ *
+ * Flat inset construction: no border, no shadow. The button IS a recess in the
+ * surface, so the only thing that reads as "raised" on a panel is something
+ * actually carrying signal (Calm ground, loud signal). Weight comes from the
+ * press: 120ms colour, a 260ms spring on the transform, nothing animates layout.
+ */
 
 .oj-btn {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: var(--space-xs) var(--space-sm);
-    border: 1px solid var(--border-strong);
+    gap: var(--space-xs);
+    padding: 9px 16px;
+    border: 0;
     border-radius: var(--radius-md);
-    font-family: var(--font-sans);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    background: var(--bg-node);
+    background: var(--bg-tertiary);
     color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
+    font-weight: 600;
+    line-height: 1;
     cursor: pointer;
-    transition: background var(--motion-fast), transform var(--motion-fast),
-        box-shadow var(--motion-fast);
+    transition: background var(--motion-fast), color var(--motion-fast),
+        box-shadow var(--motion-fast), transform var(--motion-spring);
 }
 
 .oj-btn:hover {
-    background: var(--bg-tertiary);
-    transform: translateY(-1px);
+    background: color-mix(in oklab, var(--text-primary) 8%, var(--bg-tertiary));
 }
 
+/* Press-Is-Physical: the button compresses, it does not move the layout. */
 .oj-btn:active {
-    transform: translateY(1px);
+    transform: scale(var(--press-scale-btn));
 }
 
+/* One focus ring everywhere. */
+.oj-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* ── Primary: the only solid accent fill in the family ────────────────────── */
 .oj-btn--primary {
     background: var(--accent-primary);
     color: var(--text-on-accent);
@@ -34,53 +51,62 @@
     background: var(--accent-secondary);
 }
 
+/* ── Secondary: the same inset box, quieter ink ───────────────────────────── */
 .oj-btn--secondary {
-    background: var(--bg-tertiary);
     color: var(--text-secondary);
 }
 
 .oj-btn--secondary:hover {
-    background: var(--bg-tertiary);
     color: var(--text-primary);
 }
 
-.oj-btn--success {
-    background: var(--accent-success);
-    color: var(--text-on-accent);
-}
-
+/* ── Semantic tints: the surface carries a wash, the INK carries the meaning.
+      Never a solid red/green fill — a destructive button must not out-shout a
+      cable that is actually making sound. ────────────────────────────────── */
 .oj-btn--danger {
-    background: var(--accent-danger);
+    background: color-mix(in oklab, var(--accent-danger) 10%, var(--bg-tertiary));
+    color: var(--danger-ink);
+}
+
+.oj-btn--danger:hover {
+    background: color-mix(in oklab, var(--accent-danger) 18%, var(--bg-tertiary));
+}
+
+.oj-btn--success {
+    background: color-mix(in oklab, var(--accent-success) 10%, var(--bg-tertiary));
+    color: var(--success-ink);
+}
+
+.oj-btn--success:hover {
+    background: color-mix(in oklab, var(--accent-success) 18%, var(--bg-tertiary));
+}
+
+/* ── Active / armed: accent is the engaged colour in the new language ─────── */
+.oj-btn.is-active,
+.oj-btn--success.is-active {
+    background: var(--accent-primary);
     color: var(--text-on-accent);
 }
 
-.oj-btn.is-active {
-    background: var(--accent-success);
-    color: var(--text-on-accent);
+.oj-btn.is-active:hover,
+.oj-btn--success.is-active:hover {
+    background: var(--accent-secondary);
 }
 
-/* Ghost — borderless trigger (toolbar/menu). No lift (No-Surprise): the bg
-   shift is the feedback, matching the menu triggers it replaces. */
+/* ── Ghost: transparent until touched ────────────────────────────────────── */
 .oj-btn--ghost {
     background: transparent;
-    border-color: transparent;
     color: var(--text-primary);
 }
 
 .oj-btn--ghost:hover {
     background: var(--bg-tertiary);
-    transform: none;
 }
 
-.oj-btn--ghost:active {
-    transform: none;
-}
-
-/* Link — text-only affordance; no fill, no lift, underline on hover. */
+/* ── Link: text-only. Ink token so tinted text still clears AA. ───────────── */
 .oj-btn--link {
     background: transparent;
-    border-color: transparent;
-    color: var(--accent-primary);
+    color: var(--accent-ink);
     padding-left: 0;
     padding-right: 0;
 }
@@ -88,16 +114,142 @@
 .oj-btn--link:hover {
     background: transparent;
     text-decoration: underline;
-    transform: none;
+    text-underline-offset: 2px;
 }
 
 .oj-btn--link:active {
     transform: none;
 }
 
-/* Icon-only — square, equal padding around a single glyph. */
+/* ── Icon-only: 34×34 ────────────────────────────────────────────────────── */
 .oj-btn--icon-only {
-    padding: var(--space-xs);
-    aspect-ratio: 1 / 1;
+    width: 34px;
+    height: 34px;
+    padding: 9px;
     min-width: 0;
+}
+
+/* ── Disabled: no hover, no press, muted ink, honest cursor.
+      A LOADING button is disabled too, but it is busy, not unavailable — it
+      keeps its colour and says so with the cursor and the marching dots. ──── */
+.oj-btn:disabled:not(.is-loading),
+.oj-btn[aria-disabled='true']:not(.is-loading) {
+    color: var(--text-muted);
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.oj-btn:disabled:not(.is-loading):hover,
+.oj-btn[aria-disabled='true']:not(.is-loading):hover {
+    background: var(--bg-tertiary);
+}
+
+.oj-btn--primary:disabled:hover,
+.oj-btn--primary[aria-disabled='true']:hover {
+    background: var(--accent-primary);
+}
+
+.oj-btn--danger:disabled:hover,
+.oj-btn--danger[aria-disabled='true']:hover {
+    background: color-mix(in oklab, var(--accent-danger) 10%, var(--bg-tertiary));
+}
+
+.oj-btn--success:disabled:hover,
+.oj-btn--success[aria-disabled='true']:hover {
+    background: color-mix(in oklab, var(--accent-success) 10%, var(--bg-tertiary));
+}
+
+.oj-btn--ghost:disabled:hover,
+.oj-btn--link:disabled:hover,
+.oj-btn--ghost[aria-disabled='true']:hover,
+.oj-btn--link[aria-disabled='true']:hover {
+    background: transparent;
+    text-decoration: none;
+}
+
+.oj-btn:disabled:active,
+.oj-btn[aria-disabled='true']:active {
+    transform: none;
+}
+
+/* ── Loading: the label keeps its width so nothing reflows; three dots march
+      in its place. CSS-only (no Spinner dependency). ─────────────────────── */
+.oj-btn.is-loading {
+    position: relative;
+    cursor: progress;
+}
+
+/* A busy button does not react to the pointer — it is already answering. */
+.oj-btn.is-loading:hover {
+    background: var(--bg-tertiary);
+}
+
+.oj-btn--primary.is-loading:hover {
+    background: var(--accent-primary);
+}
+
+.oj-btn--ghost.is-loading:hover,
+.oj-btn--link.is-loading:hover {
+    background: transparent;
+}
+
+.oj-btn--danger.is-loading:hover {
+    background: color-mix(in oklab, var(--accent-danger) 10%, var(--bg-tertiary));
+}
+
+.oj-btn--success.is-loading:hover {
+    background: color-mix(in oklab, var(--accent-success) 10%, var(--bg-tertiary));
+}
+
+.oj-btn__label {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+.oj-btn.is-loading .oj-btn__label {
+    visibility: hidden;
+}
+
+.oj-btn__loader {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+
+.oj-btn__loader i {
+    width: 4px;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: currentColor;
+    opacity: 0.35;
+    animation: oj-btn-dots 900ms ease-in-out infinite;
+}
+
+.oj-btn__loader i:nth-child(2) {
+    animation-delay: 150ms;
+}
+
+.oj-btn__loader i:nth-child(3) {
+    animation-delay: 300ms;
+}
+
+@keyframes oj-btn-dots {
+    0%,
+    100% {
+        opacity: 0.25;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .oj-btn__loader i {
+        animation: none;
+        opacity: 0.6;
+    }
 }

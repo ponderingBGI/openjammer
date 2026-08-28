@@ -1,16 +1,63 @@
-/* Input — DESIGN.md §5 Inputs/Fields. Numeric/exact values use mono. */
+/*
+ * Input — New DNA (handoff `.nj-input`).
+ *
+ * Surface fill, one hairline, 10px radius. Outfit by default (prose is prose);
+ * `mono` opts into JetBrains for exact values — Mono-Means-Exact survives the
+ * DNA change. Focus is the accent border plus the one focus ring; invalid is
+ * the danger ink border plus a danger ring. Nothing reflows.
+ */
 .oj-input {
     width: 100%;
-    padding: var(--space-xs) var(--space-sm);
-    background: var(--bg-canvas);
+    box-sizing: border-box;
+    padding: 9px 12px;
+    background: var(--bg-node);
     border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     color: var(--text-primary);
-    font-size: var(--text-sm);
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
+    font-weight: 500;
+    line-height: 1.3;
+    transition: border-color var(--motion-fast), box-shadow var(--motion-fast),
+        background var(--motion-fast);
+}
+
+/* Exact values read digit-by-digit. */
+.oj-input--mono {
     font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.oj-input::placeholder {
+    color: var(--text-muted);
+}
+
+.oj-input:hover:not(:disabled):not(:focus) {
+    border-color: var(--border-control);
 }
 
 .oj-input:focus {
     outline: none;
     border-color: var(--accent-primary);
+    box-shadow: var(--focus-ring);
+}
+
+.oj-input[aria-invalid='true'] {
+    border-color: var(--danger-ink);
+}
+
+.oj-input[aria-invalid='true']:focus {
+    border-color: var(--danger-ink);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent-danger) 28%, transparent);
+}
+
+.oj-input:disabled {
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.oj-input:read-only:not(:disabled) {
+    background: var(--bg-tertiary);
 }

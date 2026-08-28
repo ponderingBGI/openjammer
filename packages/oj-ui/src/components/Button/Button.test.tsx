@@ -39,4 +39,33 @@ describe('Button', () => {
         expect(btn.getAttribute('aria-label')).toBe('lbl');
         expect((btn as HTMLButtonElement).disabled).toBe(true);
     });
+    it('keeps the label and reports aria-busy while loading', () => {
+        const { container } = render(<Button loading>Export</Button>);
+        const btn = container.querySelector('button')! as HTMLButtonElement;
+        expect(btn.className).toContain('is-loading');
+        expect(btn.getAttribute('aria-busy')).toBe('true');
+        // The label keeps its box so nothing on the toolbar reflows.
+        expect(container.querySelector('.oj-btn__label')!.textContent).toBe('Export');
+        expect(container.querySelectorAll('.oj-btn__loader i').length).toBe(3);
+        // A button that is already working cannot be asked to work again.
+        expect(btn.disabled).toBe(true);
+    });
+
+    it('does not wrap the label when it is not loading', () => {
+        const { container } = render(<Button>Export</Button>);
+        expect(container.querySelector('.oj-btn__label')).toBeNull();
+        expect(container.querySelector('.oj-btn__loader')).toBeNull();
+        expect(container.querySelector('button')!.getAttribute('aria-busy')).toBeNull();
+    });
+
+    it('does not fire onClick while loading', () => {
+        const onClick = vi.fn();
+        const { container } = render(
+            <Button loading onClick={onClick}>
+                x
+            </Button>,
+        );
+        (container.querySelector('button') as HTMLButtonElement).click();
+        expect(onClick).not.toHaveBeenCalled();
+    });
 });

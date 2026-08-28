@@ -1,17 +1,57 @@
-
+/*
+ * Select — New DNA. Input's shape (surface fill, one hairline, 10px radius)
+ * with a muted caret drawn in the padding so the native arrow never fights the
+ * theme. Text choices, so Outfit — mono is reserved for exact values.
+ */
 .oj-select {
     flex: 1;
-    padding: var(--space-xs) var(--space-sm);
-    background: var(--bg-canvas);
+    box-sizing: border-box;
+    appearance: none;
+    -webkit-appearance: none;
+    padding: 9px 32px 9px 12px;
+    background-color: var(--bg-node);
+    /* Caret: two 1.5px strokes in --text-muted, drawn as an inline SVG mask-free
+       gradient-safe data URI would need a literal colour, so use conic-free
+       CSS shapes instead: a rotated square corner. */
+    background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+        linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+    background-position: calc(100% - 17px) calc(50% + 1px), calc(100% - 12px) calc(50% + 1px);
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
     border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     color: var(--text-primary);
     font-family: var(--font-sans);
-    font-size: var(--text-sm);
+    font-size: var(--text-md);
+    font-weight: 500;
+    line-height: 1.3;
     cursor: pointer;
+    transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.oj-select:hover:not(:disabled):not(:focus) {
+    border-color: var(--border-control);
 }
 
 .oj-select:focus {
     outline: none;
     border-color: var(--accent-primary);
+    box-shadow: var(--focus-ring);
+}
+
+.oj-select[aria-invalid='true'] {
+    border-color: var(--danger-ink);
+}
+
+.oj-select:disabled {
+    background-color: var(--bg-tertiary);
+    color: var(--text-muted);
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+/* The popup list is drawn by the OS; keep its ground consistent with the field. */
+.oj-select option {
+    background: var(--bg-node);
+    color: var(--text-primary);
 }

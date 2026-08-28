@@ -12,7 +12,7 @@ export interface ValueScrubberProps
      * (DESIGN.md Mono-Means-Exact). The parent formats; this never touches it.
      */
     display: string;
-    /** Optional label shown beside the value (Caveat voice). */
+    /** Optional label shown beside the value. */
     label?: ReactNode;
     /**
      * Whether clicking opens an inline editor and the display can be scrubbed.
@@ -83,6 +83,7 @@ export function ValueScrubber({
             {editing ? (
                 <Input
                     autoFocus
+                    mono
                     type="number"
                     inputMode="decimal"
                     className="oj-value-scrubber__input"

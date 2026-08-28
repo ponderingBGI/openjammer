@@ -1,89 +1,112 @@
+/*
+ * Slider — New DNA (handoff `.nj-range`).
+ *
+ * A real <input type="range">: 6px pill track (inset rail, accent progress),
+ * an 18px surface thumb with a 1.5px control ring and the raised shadow. The
+ * thumb is the only thing that moves — it swells 15% under the pointer and
+ * wears the one focus ring. Track height never changes, so nothing reflows.
+ *
+ * `--oj-slider-progress` (0–100) is written by Slider.tsx so WebKit, which has
+ * no ::-moz-range-progress equivalent, can paint the filled portion with a
+ * hard-stop gradient on the runnable track.
+ */
 
 .oj-slider {
     -webkit-appearance: none;
     appearance: none;
     width: 100%;
-    height: var(--space-md);
+    height: 22px;
     margin: 0;
     background: transparent;
     cursor: pointer;
-    transition: opacity var(--motion-fast);
+    --oj-slider-progress: 0;
 }
 
-/* Track — WebKit */
+/* ── Track ───────────────────────────────────────────────────────────────── */
 .oj-slider::-webkit-slider-runnable-track {
-    height: var(--space-xs);
+    height: 6px;
     border-radius: var(--radius-pill);
-    background: var(--bg-tertiary);
-    border: 1px solid var(--text-muted);
+    background: linear-gradient(
+        90deg,
+        var(--accent-primary) 0 calc(var(--oj-slider-progress) * 1%),
+        var(--bg-tertiary) calc(var(--oj-slider-progress) * 1%)
+    );
 }
 
-/* Track — Firefox */
 .oj-slider::-moz-range-track {
-    height: var(--space-xs);
+    height: 6px;
     border-radius: var(--radius-pill);
     background: var(--bg-tertiary);
-    border: 1px solid var(--text-muted);
 }
 
-/* Filled portion — Firefox only (WebKit has no equivalent pseudo) */
 .oj-slider::-moz-range-progress {
-    height: var(--space-xs);
+    height: 6px;
     border-radius: var(--radius-pill);
-    background: var(--text-muted);
+    background: var(--accent-primary);
 }
 
-/* Thumb — WebKit */
+/* ── Thumb ───────────────────────────────────────────────────────────────── */
 .oj-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
-    width: var(--space-md);
-    height: var(--space-md);
-    /* Center the disc on the thin track: (thumb - track) / 2, negated. */
-    margin-top: calc((var(--space-md) - var(--space-xs)) / -2);
+    width: 18px;
+    height: 18px;
+    /* Centre the disc on the 6px rail: (18 - 6) / 2, negated. */
+    margin-top: -6px;
     border-radius: var(--radius-pill);
-    background: var(--accent-primary);
-    border: 1px solid var(--border-control);
+    background: var(--bg-node);
+    border: 1.5px solid var(--border-control);
     box-shadow: var(--shadow-raised);
     cursor: grab;
-    transition: background var(--motion-fast), transform var(--motion-fast);
+    transition: transform var(--motion-spring), box-shadow var(--motion-fast);
 }
 
-/* Thumb — Firefox */
 .oj-slider::-moz-range-thumb {
-    width: var(--space-md);
-    height: var(--space-md);
+    width: 18px;
+    height: 18px;
+    box-sizing: border-box;
     border-radius: var(--radius-pill);
-    background: var(--accent-primary);
-    border: 1px solid var(--border-control);
+    background: var(--bg-node);
+    border: 1.5px solid var(--border-control);
     box-shadow: var(--shadow-raised);
     cursor: grab;
-    transition: background var(--motion-fast), transform var(--motion-fast);
+    transition: transform var(--motion-spring), box-shadow var(--motion-fast);
 }
-
 
 .oj-slider:hover::-webkit-slider-thumb {
-    background: var(--accent-secondary);
-    transform: translateY(-1px);
+    transform: scale(1.15);
+    box-shadow: var(--shadow-raised), var(--focus-ring);
 }
 
 .oj-slider:hover::-moz-range-thumb {
-    background: var(--accent-secondary);
-    transform: translateY(-1px);
+    transform: scale(1.15);
+    box-shadow: var(--shadow-raised), var(--focus-ring);
+}
+
+/* One focus ring everywhere — on the thumb, where the eye already is. */
+.oj-slider:focus {
+    outline: none;
+}
+
+.oj-slider:focus-visible::-webkit-slider-thumb {
+    box-shadow: var(--shadow-raised), var(--focus-ring);
+}
+
+.oj-slider:focus-visible::-moz-range-thumb {
+    box-shadow: var(--shadow-raised), var(--focus-ring);
 }
 
 .oj-slider:active::-webkit-slider-thumb {
     cursor: grabbing;
-    transform: translateY(1px);
 }
 
 .oj-slider:active::-moz-range-thumb {
     cursor: grabbing;
-    transform: translateY(1px);
 }
 
+/* ── Disabled ────────────────────────────────────────────────────────────── */
 .oj-slider:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: not-allowed;
 }
 
@@ -93,4 +116,21 @@
 
 .oj-slider:disabled::-moz-range-thumb {
     cursor: not-allowed;
+}
+
+.oj-slider:disabled:hover::-webkit-slider-thumb {
+    transform: none;
+    box-shadow: var(--shadow-raised);
+}
+
+.oj-slider:disabled:hover::-moz-range-thumb {
+    transform: none;
+    box-shadow: var(--shadow-raised);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .oj-slider::-webkit-slider-thumb,
+    .oj-slider::-moz-range-thumb {
+        transition: box-shadow var(--motion-fast);
+    }
 }

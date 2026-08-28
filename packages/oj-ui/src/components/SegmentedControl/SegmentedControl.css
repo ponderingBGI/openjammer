@@ -1,36 +1,54 @@
+/*
+ * SegmentedControl / Tabs — New DNA (handoff `.nj-seg`).
+ *
+ * A 3px-padded inset pill holding transparent segments. The SELECTED segment is
+ * the raised one — `--bg-node` + `--shadow-raised` — not an accent fill: the
+ * accent belongs to things that are engaged or carrying signal, not to "which
+ * page am I on". Only the selection changes; segments never move.
+ */
 
-
-/* ── Horizontal (default): the inline channel toggle (was .oj-upd-seg) ── */
 .oj-seg {
     display: inline-flex;
+    gap: 2px;
     align-self: flex-start;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-pill);
-    overflow: hidden;
-    background: var(--bg-node);
+    padding: 3px;
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
 }
 
 .oj-seg__btn {
     appearance: none;
-    border: none;
+    border: 0;
     background: transparent;
     color: var(--text-secondary);
     font-family: var(--font-sans);
     font-size: var(--text-sm);
-    font-weight: 500;
-    padding: var(--space-xs) var(--space-lg);
+    font-weight: 600;
+    line-height: 1.3;
+    padding: 6px 14px;
+    border-radius: 8px;
     cursor: pointer;
-    transition: background var(--motion-fast), color var(--motion-fast);
-}
-
-/* Hairline divider between adjacent segments. */
-.oj-seg__btn + .oj-seg__btn {
-    border-left: 1px solid var(--border-subtle);
+    transition: background var(--motion-fast), color var(--motion-fast),
+        box-shadow var(--motion-fast);
 }
 
 .oj-seg__btn:hover {
-    background: var(--bg-tertiary);
     color: var(--text-primary);
+}
+
+.oj-seg__btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.oj-seg__btn.is-active {
+    background: var(--bg-node);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-raised);
+}
+
+.oj-seg__btn.is-active:focus-visible {
+    box-shadow: var(--shadow-raised), var(--focus-ring);
 }
 
 .oj-seg__btn:disabled {
@@ -43,52 +61,26 @@
     color: var(--text-muted);
 }
 
-.oj-seg__btn.is-active {
-    background: var(--accent-primary);
-    color: var(--text-on-accent);
+.oj-seg__btn:disabled.is-active {
+    background: var(--bg-node);
 }
 
-/* Whole control frozen (e.g. channel locked while an update is pinned). The
-   per-button :disabled already mutes the segments; dim the pill so the inked
-   active fill reads as inactive too, and block the pointer. */
+/* Whole control frozen (e.g. channel locked while an update is pinned). */
 .oj-seg.is-disabled {
-    opacity: 0.55;
+    opacity: 0.45;
     cursor: not-allowed;
 }
 
-/* ── Vertical: the Settings sidebar (was .minimal-tab-btn) ── */
+/* ── Vertical: the Settings sidebar. Same physics, stacked. ───────────────── */
 .oj-seg--vertical {
     display: flex;
     flex-direction: column;
     align-self: stretch;
-    border: none;
-    border-radius: 0;
-    background: transparent;
-    overflow: visible;
 }
 
 .oj-seg--vertical .oj-seg__btn {
     width: 100%;
     text-align: left;
-    padding: var(--space-sm) var(--space-lg);
+    padding: 8px 12px;
     font-size: var(--text-md);
-    color: var(--text-muted);
-    transition: color var(--motion-fast), background var(--motion-fast);
-}
-
-/* No left hairline in the column layout; the divider is the active edge below. */
-.oj-seg--vertical .oj-seg__btn + .oj-seg__btn {
-    border-left: none;
-}
-
-.oj-seg--vertical .oj-seg__btn:hover {
-    color: var(--text-primary);
-    background: var(--bg-tertiary);
-}
-
-.oj-seg--vertical .oj-seg__btn.is-active {
-    color: var(--text-primary);
-    background: var(--bg-tertiary);
-
-    box-shadow: inset calc(-1 * 1px) 0 0 0 var(--text-primary);
 }

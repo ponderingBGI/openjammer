@@ -44,6 +44,6 @@ export function ParamRow({ label, value, valueText, min, max, step, readOnly, dr
             <button type="button" className="oj-param-row__label" title={label} aria-pressed={pinned} onClick={onLabelClick}>{label}</button>
             <span className={`oj-param-row__value${driven ? ' is-driven' : ''}`}>{valueText}</span>
         </div>
-        {!readOnly && (control ?? <Slider aria-label={label} aria-valuetext={valueText} min={min} max={max} step={step} value={value} onChange={onChange ?? (() => {})} onPointerDown={startGesture} onPointerUp={closeGesture} onPointerCancel={closeGesture} onBlur={closeGesture} onMouseDown={(event) => event.stopPropagation()} />)}
+        {!readOnly && (control ?? <Slider aria-label={label} aria-valuetext={valueText} min={min} max={max} step={step ?? 1} value={value} onChange={onChange ?? (() => {})} onPointerDown={startGesture} onPointerUp={closeGesture} onPointerCancel={closeGesture} onBlur={closeGesture} onMouseDown={(event) => event.stopPropagation()} />)}
     </div>;
 }

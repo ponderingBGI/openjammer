@@ -22,7 +22,7 @@ export const generatedThemes: Theme[] = [
             "borderStrong": "#C8C5BB",
             "borderControl": "#89867C",
             "accentPrimary": "oklch(0.66 0.19 40)",
-            "accentSecondary": "oklch(0.6 0.19 40)",
+            "accentSecondary": "oklch(0.71 0.19 40)",
             "accentSuccess": "oklch(0.64 0.17 150)",
             "accentWarning": "oklch(0.72 0.15 80)",
             "accentDanger": "oklch(0.58 0.21 25)",
@@ -55,11 +55,11 @@ export const generatedThemes: Theme[] = [
             "shadowInset": "inset 0 1px 3px rgba(0,0,0,.22)",
             "shadowPressed": "inset 0 2px 6px rgba(0,0,0,.28)",
             "focusRing": "0 0 0 3px color-mix(in oklab, var(--accent-primary) 28%, transparent)",
-            "accentInk": "oklch(0.54 0.19 40)",
-            "successInk": "oklch(0.49 0.17 150)",
-            "warningInk": "oklch(0.52 0.15 80)",
-            "dangerInk": "oklch(0.54 0.21 25)",
-            "audioInk": "oklch(0.49 0.12 200)",
+            "accentInk": "oklch(0.504 0.19 40)",
+            "successInk": "oklch(0.459 0.17 150)",
+            "warningInk": "oklch(0.497 0.15 80)",
+            "dangerInk": "oklch(0.491 0.21 25)",
+            "audioInk": "oklch(0.453 0.12 200)",
             "overlayScrim": "color-mix(in oklab, #F4F3F0 45%, transparent)"
         }
     },
@@ -114,11 +114,11 @@ export const generatedThemes: Theme[] = [
             "shadowInset": "inset 0 1px 3px rgba(0,0,0,.45)",
             "shadowPressed": "inset 0 2px 6px rgba(0,0,0,.5)",
             "focusRing": "0 0 0 3px color-mix(in oklab, var(--accent-primary) 35%, transparent)",
-            "accentInk": "oklch(0.72 0.19 40)",
-            "successInk": "oklch(0.7 0.17 150)",
+            "accentInk": "oklch(0.767 0.19 40)",
+            "successInk": "oklch(0.707 0.17 150)",
             "warningInk": "oklch(0.78 0.15 80)",
-            "dangerInk": "oklch(0.69 0.21 25)",
-            "audioInk": "oklch(0.7 0.12 200)",
+            "dangerInk": "oklch(0.785 0.21 25)",
+            "audioInk": "oklch(0.711 0.12 200)",
             "overlayScrim": "color-mix(in oklab, #161510 55%, transparent)"
         }
     }

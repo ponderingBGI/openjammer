@@ -262,6 +262,7 @@ function ProviderDetail({
                 <>
                     {isOpenAiCompatible && (
                         <Input
+                            mono
                             className="command-bar-auth-input"
                             placeholder="Base URL (e.g. https://api.example.com/v1)"
                             value={baseUrl}
@@ -270,6 +271,7 @@ function ProviderDetail({
                         />
                     )}
                     <Input
+                        mono
                         autoFocus
                         className="command-bar-auth-input"
                         type="password"

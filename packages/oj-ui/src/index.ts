@@ -58,6 +58,10 @@ export type { SliderProps } from './components/Slider/Slider';
 export { Toggle } from './components/Toggle/Toggle';
 export type { ToggleProps } from './components/Toggle/Toggle';
 
+export { Knob } from './components/Knob/Knob';
+export type { KnobProps } from './components/Knob/Knob';
+export { knobNorm, knobValue, knobRotation } from './components/Knob/knobMath';
+
 export { SegmentedControl, Tabs } from './components/SegmentedControl/SegmentedControl';
 export type {
     SegmentedControlProps,

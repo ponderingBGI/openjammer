@@ -6,7 +6,7 @@ describe('ParamRow gesture lifetime', () => {
     it.each(['cancel', 'blur', 'window-blur', 'unmount'] as const)('closes an open slider gesture on %s exactly once', (ending) => {
         const onGestureStart = vi.fn();
         const onGestureEnd = vi.fn();
-        const view = render(<ParamRow label="Gain" value={0.5} valueText="50%" onChange={() => {}} onGestureStart={onGestureStart} onGestureEnd={onGestureEnd} />);
+        const view = render(<ParamRow label="Gain" value={0.5} valueText="50%" min={0} max={1} onChange={() => {}} onGestureStart={onGestureStart} onGestureEnd={onGestureEnd} />);
         const slider = screen.getByRole('slider', { name: 'Gain' });
         fireEvent.pointerDown(slider);
         if (ending === 'cancel') {

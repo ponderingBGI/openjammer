@@ -1,18 +1,53 @@
-
+/*
+ * Textarea — New DNA. Input's shape for multiline prose: surface fill, one
+ * hairline, 10px radius, Outfit 500. Vertical-only resize — free horizontal
+ * resize would break canvas layout.
+ */
 .oj-textarea {
     width: 100%;
-    padding: var(--space-xs) var(--space-sm);
-    background: var(--bg-canvas);
+    box-sizing: border-box;
+    padding: 9px 12px;
+    background: var(--bg-node);
     border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     color: var(--text-primary);
-    font-size: var(--text-sm);
     font-family: var(--font-sans);
-    /* Vertical-only: free horizontal resize would break canvas layout. */
+    font-size: var(--text-md);
+    font-weight: 500;
+    line-height: 1.5;
     resize: vertical;
+    transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+}
+
+.oj-textarea::placeholder {
+    color: var(--text-muted);
+}
+
+.oj-textarea:hover:not(:disabled):not(:focus) {
+    border-color: var(--border-control);
 }
 
 .oj-textarea:focus {
     outline: none;
     border-color: var(--accent-primary);
+    box-shadow: var(--focus-ring);
+}
+
+.oj-textarea[aria-invalid='true'] {
+    border-color: var(--danger-ink);
+}
+
+.oj-textarea[aria-invalid='true']:focus {
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent-danger) 28%, transparent);
+}
+
+.oj-textarea:disabled {
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.oj-textarea:read-only:not(:disabled) {
+    background: var(--bg-tertiary);
 }

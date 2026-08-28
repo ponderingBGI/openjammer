@@ -1,5 +1,6 @@
 import type { GlobalProvider } from '@ladle/react'
 import { useEffect } from 'react'
+import '../src/styles/fonts.css'
 // Token primitives (:root vars) + the runtime theme engine — the same source
 // the app uses, so the catalog renders components exactly as they ship.
 import '../packages/oj-tokens/dist/variables.css'

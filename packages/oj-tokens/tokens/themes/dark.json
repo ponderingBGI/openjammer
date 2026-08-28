@@ -14,7 +14,7 @@
     "borderStrong": { "$value": "#4B473D", "$type": "color" },
     "borderControl": { "$value": "#807C6F", "$type": "color" },
     "accentPrimary": { "$value": "oklch(0.72 0.19 40)", "$type": "color" },
-    "accentSecondary": { "$value": "oklch(0.78 0.19 40)", "$type": "color" },
+    "accentSecondary": { "$value": "oklch(0.78 0.19 40)", "$type": "color", "$description": "Hover stays lighter because textOnAccent is dark ink in both themes." },
     "accentSuccess": { "$value": "oklch(0.7 0.17 150)", "$type": "color" },
     "accentWarning": { "$value": "oklch(0.78 0.15 80)", "$type": "color" },
     "accentDanger": { "$value": "oklch(0.66 0.21 25)", "$type": "color" },
@@ -47,11 +47,11 @@
     "shadowInset": { "$value": "inset 0 1px 3px rgba(0,0,0,.45)" },
     "shadowPressed": { "$value": "inset 0 2px 6px rgba(0,0,0,.5)" },
     "focusRing": { "$value": "0 0 0 3px color-mix(in oklab, var(--accent-primary) 35%, transparent)" },
-    "accentInk": { "$value": "oklch(0.72 0.19 40)", "$type": "color" },
-    "successInk": { "$value": "oklch(0.7 0.17 150)", "$type": "color" },
+    "accentInk": { "$value": "oklch(0.767 0.19 40)", "$type": "color" },
+    "successInk": { "$value": "oklch(0.707 0.17 150)", "$type": "color" },
     "warningInk": { "$value": "oklch(0.78 0.15 80)", "$type": "color" },
-    "dangerInk": { "$value": "oklch(0.69 0.21 25)", "$type": "color" },
-    "audioInk": { "$value": "oklch(0.7 0.12 200)", "$type": "color" },
+    "dangerInk": { "$value": "oklch(0.785 0.21 25)", "$type": "color" },
+    "audioInk": { "$value": "oklch(0.711 0.12 200)", "$type": "color" },
     "overlayScrim": { "$value": "color-mix(in oklab, #161510 55%, transparent)", "$type": "color" }
   }
 }

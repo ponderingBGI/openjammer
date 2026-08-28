@@ -1,8 +1,16 @@
+/*
+ * Toggle — New DNA (handoff `.nj-toggle`).
+ *
+ * A 40×23 inset pill with a 17px raised knob that springs 17px across. Checked
+ * is the accent track (accent = "engaged" in the new language). The real
+ * checkbox is present but visually hidden, so keyboard and screen readers get
+ * the native control and the focus ring lands on the track.
+ */
 
 .oj-toggle {
     display: flex;
     align-items: flex-start;
-    gap: var(--space-sm);
+    gap: 10px;
     cursor: pointer;
     font-family: var(--font-sans);
 }
@@ -20,61 +28,66 @@
     white-space: nowrap;
 }
 
-/* The drawn track. */
+/* The track — a recess in the surface. */
 .oj-toggle__track {
     position: relative;
     flex: none;
-    width: var(--space-xl);
-    height: var(--space-md);
+    box-sizing: border-box;
+    width: 40px;
+    height: 23px;
+    margin-top: 1px;
+    /* D5: a fill delta already separates the track from its ground, so the
+       hairline is `--border-strong`, not the heavier control ring. */
     border: 1px solid var(--border-strong);
     border-radius: var(--radius-pill);
     background: var(--bg-tertiary);
-    transition: background var(--motion-fast);
+    transition: background var(--motion-fast), border-color var(--motion-fast),
+        box-shadow var(--motion-fast);
 }
 
-/* The knob — a small inked disc that slides across the track. */
+/* The knob — a raised disc that springs across the track. */
 .oj-toggle__knob {
     position: absolute;
-    top: 1px;
-    left: 1px;
-    width: calc(var(--space-md) - var(--space-xs) - 2px);
-    height: calc(var(--space-md) - var(--space-xs) - 2px);
-    border: 1px solid var(--border-strong);
+    top: 2px;
+    left: 2px;
+    box-sizing: border-box;
+    width: 17px;
+    height: 17px;
     border-radius: var(--radius-pill);
     background: var(--bg-node);
-    transition: transform var(--motion-fast), background var(--motion-fast);
+    /* D5: the knob and the track have almost no fill delta in dark, so the cap
+       earns the control ring — the same one the slider thumb wears. */
+    border: 1px solid var(--border-control);
+    box-shadow: var(--shadow-raised);
+    transition: transform var(--motion-spring);
 }
 
 .oj-toggle.is-checked .oj-toggle__track {
-    background: var(--accent-success);
+    background: var(--accent-primary);
+    border-color: transparent;
 }
 
 .oj-toggle.is-checked .oj-toggle__knob {
-    /* Slide right by the track width minus the knob and its insets. */
-    transform: translateX(calc(var(--space-xl) - var(--space-md) - 2px));
-    background: var(--text-on-accent);
+    transform: translateX(17px);
 }
 
-/* Press-Is-Physical (§4): knob nudges down on click, no layout shift. */
-.oj-toggle:active .oj-toggle__knob {
-    transform: translateY(1px);
-}
-
-.oj-toggle.is-checked:active .oj-toggle__knob {
-    transform: translateX(calc(var(--space-xl) - var(--space-md) - 2px)) translateY(1px);
+/* One focus ring everywhere — on the track, since the input is hidden. */
+.oj-toggle__input:focus-visible + .oj-toggle__track {
+    box-shadow: var(--focus-ring);
 }
 
 /* Label + description stack. */
 .oj-toggle__text {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: 2px;
 }
 
 .oj-toggle__label {
     font-size: var(--text-md);
+    font-weight: 500;
     color: var(--text-primary);
-    line-height: 1.2;
+    line-height: 1.4;
 }
 
 .oj-toggle__desc {
@@ -86,5 +99,11 @@
 
 .oj-toggle.is-disabled {
     cursor: not-allowed;
-    opacity: 0.5;
+    opacity: 0.45;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .oj-toggle__knob {
+        transition: none;
+    }
 }

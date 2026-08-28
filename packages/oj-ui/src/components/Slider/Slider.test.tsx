@@ -50,4 +50,22 @@ describe('Slider', () => {
         fireEvent.pointerDown(input);
         expect(onPointerDown).toHaveBeenCalled();
     });
+    it('publishes the fill percentage so WebKit can paint the progress', () => {
+        const { container, rerender } = render(
+            <Slider aria-label="x" value={-60} min={-60} max={6} onChange={() => {}} />,
+        );
+        const input = container.querySelector('input')!;
+        expect(input.getAttribute('style')).toContain('--oj-slider-progress: 0');
+        rerender(<Slider aria-label="x" value={6} min={-60} max={6} onChange={() => {}} />);
+        expect(input.getAttribute('style')).toContain('--oj-slider-progress: 100');
+    });
+
+    it('keeps a caller-supplied style alongside the progress property', () => {
+        const { container } = render(
+            <Slider aria-label="x" value={50} onChange={() => {}} style={{ width: '80px' }} />,
+        );
+        const style = container.querySelector('input')!.getAttribute('style')!;
+        expect(style).toContain('width: 80px');
+        expect(style).toContain('--oj-slider-progress: 50');
+    });
 });

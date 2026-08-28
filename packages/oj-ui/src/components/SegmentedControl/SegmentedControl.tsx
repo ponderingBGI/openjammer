@@ -32,15 +32,15 @@ export interface SegmentedControlProps<T extends string> {
 }
 
 /**
- * A segmented selector — a row (or column) of sketch buttons where exactly one
- * is active. Rendered as a `tablist` of `tab`s with roving tabindex: the active
- * segment is in the tab order, and Arrow/Home/End move *and* select between
- * segments (automatic activation, the standard tablist pattern) so the control
- * is fully keyboard-operable — a hard requirement on a live instrument. The
- * active segment inks with the accent fill; selection is the only feedback —
- * segments never move on hover or press (DESIGN.md No-Surprise). Theme-agnostic:
- * styled entirely via semantic CSS variables. Replaces `.minimal-tab-btn` and
- * `.oj-upd-seg`.
+ * A segmented selector — a row (or column) of segments inside an inset pill
+ * where exactly one is selected. Rendered as a `tablist` of `tab`s with roving
+ * tabindex: the active segment is in the tab order, and Arrow/Home/End move
+ * *and* select between segments (automatic activation, the standard tablist
+ * pattern) so the control is fully keyboard-operable — a hard requirement on a
+ * live instrument. The selected segment RISES (`--bg-node` + `--shadow-raised`)
+ * rather than taking an accent fill; selection is the only feedback — segments
+ * never move on hover or press. Theme-agnostic: styled entirely via semantic
+ * CSS variables. Replaces `.minimal-tab-btn` and `.oj-upd-seg`.
  */
 export function SegmentedControl<T extends string>({
     options,

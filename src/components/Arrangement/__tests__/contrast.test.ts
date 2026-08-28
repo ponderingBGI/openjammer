@@ -4,9 +4,10 @@ import light from '../../../../packages/oj-tokens/tokens/themes/light.json';
 import dark from '../../../../packages/oj-tokens/tokens/themes/dark.json';
 
 type RGB = [number, number, number];
-type ThemeFile = typeof light;
-const rgb = (value: string): RGB => {
-    const color = new Color(value).to('srgb');
+type ColorKey = keyof typeof light.color;
+type ThemeFile = { color: Record<ColorKey, { $value: string }> };
+const rgb = (value: string | Color): RGB => {
+    const color = (typeof value === 'string' ? new Color(value) : value).to('srgb');
     return color.coords.map((channel) => Math.max(0, Math.min(1, channel)) * 255) as RGB;
 };
 const blend = (foreground: RGB, background: RGB, alpha: number): RGB => foreground.map((channel, index) => channel * alpha + background[index]! * (1 - alpha)) as RGB;
@@ -16,11 +17,23 @@ const parse = (source: string, background: RGB): RGB => {
 };
 const luminance = ([r, g, b]: RGB) => [r, g, b].map((channel) => channel / 255).map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index]!, 0);
 const ratio = (a: RGB, b: RGB) => (Math.max(luminance(a), luminance(b)) + 0.05) / (Math.min(luminance(a), luminance(b)) + 0.05);
-const value = (theme: ThemeFile, key: keyof ThemeFile['color']) => theme.color[key].$value;
-const contrast = (theme: ThemeFile, foreground: keyof ThemeFile['color'], background: keyof ThemeFile['color']) => {
+const mixOklab = (first: string, second: string, firstWeight: number): RGB =>
+    rgb(Color.mix(new Color(second), new Color(first), firstWeight, { space: 'oklab' }));
+const value = (theme: ThemeFile, key: ColorKey) => theme.color[key].$value;
+const contrast = (theme: ThemeFile, foreground: ColorKey, background: ColorKey) => {
     const ground = rgb(value(theme, background));
     return ratio(parse(value(theme, foreground), ground), ground);
 };
+const washContrast = (
+    theme: ThemeFile,
+    ink: ColorKey,
+    state: ColorKey,
+    stateWeight: number,
+) =>
+    ratio(
+        rgb(value(theme, ink)),
+        mixOklab(value(theme, state), value(theme, 'bgTertiary'), stateWeight),
+    );
 
 describe.each([['light', light], ['dark', dark]] as const)('%s arrangement contrast floors', (_name, theme) => {
     it.each([
@@ -41,6 +54,25 @@ describe.each([['light', light], ['dark', dark]] as const)('%s arrangement contr
 
     it('keeps the bar rhythm at 1.5:1 against the lane', () => {
         expect(contrast(theme, 'timelineGridBar', 'timelineLaneBg')).toBeGreaterThanOrEqual(1.5);
+    });
+
+    it.each(['accentPrimary', 'accentSecondary'] as const)(
+        'keeps text-on-accent readable on %s',
+        (background) => {
+            expect(contrast(theme, 'textOnAccent', background)).toBeGreaterThanOrEqual(4.5);
+        },
+    );
+
+    it.each([
+        ['accentInk', 'accentPrimary'],
+        ['successInk', 'accentSuccess'],
+        ['warningInk', 'accentWarning'],
+        ['dangerInk', 'accentDanger'],
+        ['audioInk', 'audioConnection'],
+    ] as const)('%s clears its own %s wash', (ink, state) => {
+        for (const percentage of [10, 18]) {
+            expect(washContrast(theme, ink, state, percentage / 100)).toBeGreaterThanOrEqual(4.5);
+        }
     });
 
     it.each(['bgTertiary', 'bgCanvas', 'bgNode', 'bgNodeHeader'] as const)(
