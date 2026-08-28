@@ -98,7 +98,7 @@ export function createArrangementPort(): ArrangementToolPort {
             const ticksPerBar = timebase(arr).ticksPerBar;
             const record = useArrangementStore.getState();
             const recordingState = `Recording: ${record.isRecording ? 'RECORDING' : 'stopped'}; armed [${record.armedTrackIds.join(', ') || 'none'}]; click ${record.clickEnabled ? 'on' : 'off'}; count-in ${record.countInBars} bar(s); punch ${record.punchEnabled ? 'on' : 'off'}.`;
-            return { text: `${describeArrangement(arr)}\n${recordingState}`, selection: editing.viewports.arrangement.selection, grid: editing.gridUnit, editMode: editing.editMode, clipboard: { ...clipboard, durationBars: clipboard.durationTick / ticksPerBar } };
+            return { text: `${describeArrangement(arr)}\n${recordingState}`, selection: editing.viewports.arrangement.selection, grid: editing.gridUnit, editMode: editing.editMode, clipboard: { ...clipboard, durationBars: clipboard.durationTick / ticksPerBar }, lastQueuedEditResult: record.lastQueuedEditResult };
         },
         applyOps(ops: TimelineOp[]) {
             const store = useArrangementStore.getState();
@@ -178,9 +178,18 @@ export function createArrangementPort(): ArrangementToolPort {
             } catch (error) {
                 return { ok: false, summary: `edit_timeline failed: ${error instanceof Error ? error.message : String(error)}`, undo: () => {} };
             }
-            if (verbs.length) store.apply(verbs);
+            const application = verbs.length ? store.apply(verbs) : { status: 'applied' as const };
             if (selectedClipIds) useEditingContextStore.getState().setSelection('arrangement', { clipIds: selectedClipIds });
             if (selectedNoteIds) useEditingContextStore.getState().setSelection('arrangement', { noteIds: selectedNoteIds });
+            if (application.status === 'queued') {
+                return {
+                    ok: true,
+                    queued: true,
+                    appliedAfterGesture: true,
+                    summary: `Queued ${ops.length} timeline operation(s); they will land when the performer's gesture ends.`,
+                    undo: () => application.requestUndo?.(),
+                };
+            }
             return { ok: true, summary: `Applied ${ops.length} timeline operation(s).`, undo: () => useArrangementStore.getState().undo() };
         },
         apply(verbs) {
@@ -193,7 +202,16 @@ export function createArrangementPort(): ArrangementToolPort {
                 // One store.apply = one command-log entry = one Ctrl+Z (atomic: a bad
                 // verb throws inside applyVerbs BEFORE any state commits, so the edit is
                 // all-or-nothing).
-                s.apply(minted);
+                const application = s.apply(minted);
+                if (application.status === 'queued') {
+                    return {
+                        ok: true,
+                        queued: true,
+                        appliedAfterGesture: true,
+                        summary: `Queued ${minted.length} timeline edit(s); they will land when the performer's gesture ends.`,
+                        undo: () => application.requestUndo?.(),
+                    };
+                }
             } catch (err) {
                 return {
                     ok: false,

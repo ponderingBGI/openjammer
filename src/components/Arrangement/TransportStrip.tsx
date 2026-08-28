@@ -17,6 +17,7 @@ export function TransportStrip({ fieldWidth, onOpenSettings }: { fieldWidth: num
     const isRecording = useArrangementStore((state) => state.isRecording);
     const armedCount = useArrangementStore((state) => state.armedTrackIds.length);
     const recordError = useArrangementStore((state) => state.recordError);
+    const transportError = useArrangementStore((state) => state.transportError);
     const playheadTick = useArrangementStore((state) => state.playheadTick);
     const canUndo = useHistoryStore((state) => state.cursor > 0);
     const canRedo = useHistoryStore((state) => state.cursor < state.entries.length);
@@ -35,7 +36,7 @@ export function TransportStrip({ fieldWidth, onOpenSettings }: { fieldWidth: num
                     const store = useArrangementStore.getState();
                     if (store.isPlaying) store.stop(); else store.play();
                 }}>{isPlaying ? '■' : '▶'}</Button>
-                <Button title="Return to start" onClick={() => useArrangementStore.getState().seek(0)}>↤</Button>
+                <Button title="Return to start" onClick={() => useArrangementStore.getState().returnToStart()}>↤</Button>
                 <Button
                     aria-pressed={loopEnabled}
                     title={loopEnabled ? 'Disable loop' : 'Enable loop'}
@@ -59,7 +60,7 @@ export function TransportStrip({ fieldWidth, onOpenSettings }: { fieldWidth: num
                     value={arrangement.tempoBpm}
                     display={`${arrangement.tempoBpm} BPM`}
                     aria-label="Tempo"
-                    onCommit={(tempoBpm) => useArrangementStore.getState().apply({ kind: 'setTempo', tempoBpm })}
+                    onCommit={(tempoBpm) => useArrangementStore.getState().setTempo(tempoBpm)}
                 />
                 <ValueScrubber
                     className="arrangement-zoom-scrubber"
@@ -77,6 +78,7 @@ export function TransportStrip({ fieldWidth, onOpenSettings }: { fieldWidth: num
                 <Button title="Redo" disabled={!canRedo} onClick={() => useHistoryStore.getState().redo()}>↷</Button>
             </div>
             {recordError && <div className="arrangement-record-error" role="status">{recordError}</div>}
+            {transportError && <div className="arrangement-record-error" role="status">{transportError}</div>}
             <div className="arrangement-record-live" aria-live="assertive" aria-atomic="true">{isRecording ? 'Recording started' : 'Recording stopped'}{recordError ? `. ${recordError}` : ''}</div>
         </div>
     );

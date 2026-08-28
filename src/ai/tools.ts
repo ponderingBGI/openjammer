@@ -207,7 +207,8 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
         description:
             'Author the SONG TIMELINE with reversible primitive `verbs` or shared high-level `ops` — ' +
             'the SAME operation layer a human GUI drag emits — applied live and undoable with ' +
-            'Ctrl+Z. Verb kinds: setTempo; setTrackMute/setTrackSolo/setTrackName/setTrackGain/setTrackPan; addTrack/removeTrack; ' +
+            'Ctrl+Z. During a live performer gesture it returns `queued: true` and lands afterward; the next `describe_arrangement` reports the queued result. ' +
+            'Verb kinds: setTempo; setTrackMute/setTrackSolo/setTrackName/setTrackGain/setTrackPan; addTrack/removeTrack; ' +
             'addSource/removeSource; addClip/removeClip/moveClip/setClipWindow/splitClip; ' +
             'setClipGain/setClipFades; addNote/removeNote/editNote; addLocation/removeLocation/' +
             'moveLocation/setLoopRange/setPunchRange; rippleTracks/insertTime/removeTime; ' +
@@ -243,6 +244,10 @@ export function catalogueToMarkdown(): string {
 export interface AppliedToolResult {
     /** True if the mutation succeeded. */
     ok: boolean;
+    /** True when the edit is waiting for a live performer gesture to end. */
+    queued?: boolean;
+    /** The queued edit is applied atomically after that gesture closes. */
+    appliedAfterGesture?: boolean;
     /** Human-readable one-liner for the transcript ("Added Looper node …"). */
     summary: string;
     /** Reverts exactly this mutation. Safe to call once; idempotent thereafter. */
@@ -498,14 +503,14 @@ export interface AgentEnvPort {
  */
 export interface ArrangementToolPort {
     /** A readable summary of the current song (describeArrangement), or null when none. */
-    describe(): { text: string; selection?: unknown; grid?: string; editMode?: string; clipboard?: unknown } | null;
+    describe(): { text: string; selection?: unknown; grid?: string; editMode?: string; clipboard?: unknown; lastQueuedEditResult?: unknown } | null;
     /**
      * Apply an ordered list of reversible timeline verbs, minting ids for ADDED
      * entities, through the shared command-log. Returns whether it applied, a
      * one-line summary, and a reversible `undo` (a single Ctrl+Z's worth).
      */
-    apply(verbs: Verb[]): { ok: boolean; summary: string; undo: () => void };
-    applyOps?: (ops: import('../song/ops').TimelineOp[]) => { ok: boolean; summary: string; undo: () => void };
+    apply(verbs: Verb[]): { ok: boolean; summary: string; undo: () => void; queued?: boolean; appliedAfterGesture?: boolean };
+    applyOps?: (ops: import('../song/ops').TimelineOp[]) => { ok: boolean; summary: string; undo: () => void; queued?: boolean; appliedAfterGesture?: boolean };
 }
 
 /**
@@ -1202,7 +1207,7 @@ function applyEditTimeline(args: EditTimelineArgs, arrangement?: ArrangementTool
         return { ok: true, summary: 'edit_timeline: no verbs to apply (no-op).', undo: NO_OP };
     }
     const res = ops.length && arrangement.applyOps ? arrangement.applyOps(ops) : arrangement.apply(verbs);
-    return { ok: res.ok, summary: res.summary, undo: once(res.undo) };
+    return { ok: res.ok, summary: res.summary, undo: once(res.undo), queued: res.queued, appliedAfterGesture: res.appliedAfterGesture };
 }
 
 /** Wrap a side-effecting closure so it runs at most once (idempotent undo). */

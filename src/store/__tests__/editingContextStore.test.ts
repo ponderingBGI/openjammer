@@ -23,3 +23,24 @@ describe('editingContextStore zoom', () => {
         expect(zoomAroundPointer({ pxPerTick: 0.1, leftTick: 0 }, 0, 0.00001, 100).pxPerTick).toBe(0.04);
     });
 });
+
+describe('editingContextStore surface selection history', () => {
+    it('keeps arrangement and piano-roll depth, branches, undo, and redo independent', () => {
+        const context = useEditingContextStore.getState();
+        context.beginSelectionOpHistory('arrangement');
+        context.beginSelectionOpHistory('pianoroll');
+        context.beginSelectionOp('arrangement');
+        context.setSelection('arrangement', { clipIds: ['clip-a'] });
+        context.commitSelectionOp('arrangement');
+        context.beginSelectionOp('pianoroll');
+        context.setSelection('pianoroll', { noteIds: ['note-a'] });
+        context.commitSelectionOp('pianoroll');
+        context.undoSelection('arrangement');
+        expect(useEditingContextStore.getState().viewports.arrangement.selection.clipIds).toEqual([]);
+        expect(useEditingContextStore.getState().viewports.pianoroll.selection.noteIds).toEqual(['note-a']);
+        context.undoSelection('pianoroll');
+        context.redoSelection('arrangement');
+        expect(useEditingContextStore.getState().viewports.arrangement.selection.clipIds).toEqual(['clip-a']);
+        expect(useEditingContextStore.getState().viewports.pianoroll.selection.noteIds).toEqual([]);
+    });
+});

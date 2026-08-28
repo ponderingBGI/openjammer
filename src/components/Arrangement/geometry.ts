@@ -1,3 +1,5 @@
+import { tickToBarBeat, type Timebase } from '../../song/time';
+
 export function tickToPx(tick: number, leftTick: number, pxPerTick: number): number {
     return (tick - leftTick) * pxPerTick;
 }
@@ -7,6 +9,14 @@ export function clipGeometry(startTick: number, lengthTick: number, leftTick: nu
         left: tickToPx(startTick, leftTick, pxPerTick),
         width: Math.max(1, lengthTick * pxPerTick),
     };
+}
+
+/** Bars occupied by [startTick, endTick): an end exactly on a bar line stays in the preceding bar. */
+export function clipBarSpan(tb: Timebase, startTick: number, lengthTick: number): { startBar: number; endBar: number } {
+    const startBar = tickToBarBeat(tb, startTick).bar;
+    const endExclusive = startTick + Math.max(0, lengthTick);
+    const lastOccupiedTick = endExclusive > startTick ? endExclusive - 1 : startTick;
+    return { startBar, endBar: tickToBarBeat(tb, lastOccupiedTick).bar };
 }
 
 export interface VirtualizationWindow {

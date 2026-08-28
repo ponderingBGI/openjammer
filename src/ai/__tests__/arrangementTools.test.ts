@@ -107,6 +107,38 @@ describe('createArrangementPort — live binding to the arrangement store', () =
         expect(res.ok).toBe(false);
     });
 
+    it('honestly reports a timeline edit queued behind a live gesture', () => {
+        const store = useArrangementStore.getState();
+        const trackId = store.arrangement!.tracks[0]!.id!;
+        store.beginGesture('Performer drag');
+        store.previewGesture({ kind: 'setTrackPan', trackId, pan: 0.4 });
+
+        const result = createArrangementPort().apply([{ kind: 'setTrackMute', trackId, mute: true }]);
+
+        expect(result).toMatchObject({ ok: true, queued: true, appliedAfterGesture: true });
+        expect(result.summary).toMatch(/will land when the performer.*gesture ends/i);
+        expect(store.arrangement!.tracks[0]!.mute).toBeUndefined();
+        store.commitGesture();
+        expect(useArrangementStore.getState().arrangement!.tracks[0]!.mute).toBe(true);
+        expect(createArrangementPort().describe()).toMatchObject({
+            lastQueuedEditResult: expect.objectContaining({ status: 'applied' }),
+        });
+    });
+
+    it('surfaces a queued rejection in transport and the next arrangement description', () => {
+        const store = useArrangementStore.getState();
+        const clipId = store.arrangement!.tracks[0]!.clips[0]!.id!;
+        store.beginGesture('Delete clip');
+        store.previewGesture({ kind: 'removeClip', clipId });
+        const result = createArrangementPort().apply([{ kind: 'setClipMute', clipId, mute: true }]);
+        expect(result.queued).toBe(true);
+        store.commitGesture();
+        expect(useArrangementStore.getState().transportError).toMatch(/rejected/i);
+        expect(createArrangementPort().describe()).toMatchObject({
+            lastQueuedEditResult: expect.objectContaining({ status: 'rejected' }),
+        });
+    });
+
     it('shared moveClips op matches the hand op and is one undo step', () => {
         const clip = useArrangementStore.getState().arrangement!.tracks[0]!.clips[0]!;
         const before = structuredClone(useArrangementStore.getState().arrangement!);

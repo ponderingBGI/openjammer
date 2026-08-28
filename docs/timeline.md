@@ -34,7 +34,8 @@ wasm `OjGraph`, normalized `TempoMap`, and immutable sample-addressed `Timeline`
 preview and offline bounce. Backend remapping changes engine manifest ids, not musical
 time. Playback publishes those documents to the active executor; the transport freezes
 honestly on stop and auto-stops after the authored release tail. Loop range is absent
-unless the document contains a `loop` location.
+unless the document contains a `loop` location. Enabling Loop without such a range does
+not create an implicit whole-song loop: playback still stops at the authored end.
 
 Saved projects carry the normalized arrangement alongside the visual graph. Entity ids
 are deterministic and `normalizeArrangement` is idempotent, so reopening and conducting
@@ -46,6 +47,10 @@ Every committed edit is a serializable `Verb` from `src/song/verbs.ts`. `applyVe
 an exact inverse and `applyVerbs` makes a batch one undo step. Pointer previews may be
 transient, but drop/commit always enters this command log. The same laws are pinned by the
 BC contract tests:
+
+Agent edits requested during a live performer gesture queue without interrupting it, then
+apply atomically as their own undo entry when the gesture ends. A rejected queued edit is
+reported in the transport status and in the next `describe_arrangement` result.
 
 - Grid units and magnetic snap are BC-05/06. A drag begins only after BC-12's movement
   threshold and dominant axis is established.

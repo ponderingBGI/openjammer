@@ -3,9 +3,10 @@ import type { ArrangementClip, Source } from '../../song/types';
 import { getWaveform } from '../../store/libraryStore';
 import { base64ToPeaks } from '../../utils/audioMetadata';
 import type { PitchRange } from '../../store/trackLaneViewStore';
-import { clipGeometry } from './geometry';
+import { clipBarSpan, clipGeometry } from './geometry';
 import { WaveformCanvas } from '@openjammer/oj-ui';
 import { useClipGesture } from './useClipGesture';
+import type { Timebase } from '../../song/time';
 
 function paintCanvas(
     canvas: HTMLCanvasElement,
@@ -56,6 +57,7 @@ export function ClipView({
     onSelect,
     trackId,
     onDoubleClick,
+    timebase,
 }: {
     clip: ArrangementClip;
     source: Source;
@@ -68,6 +70,7 @@ export function ClipView({
     onSelect: (event: React.PointerEvent, phase: 'press' | 'release') => void;
     trackId: string;
     onDoubleClick?: () => void;
+    timebase: Timebase;
 }) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [peaks, setPeaks] = useState<Float32Array | null>(null);
@@ -93,8 +96,7 @@ export function ClipView({
         if (canvas && source.kind === 'midi') paintCanvas(canvas, source, clip, geometry.width, height, range);
     }, [source, clip, geometry.width, height, range, peaks]);
     const noteCount = source.kind === 'midi' ? source.notes.length : 0;
-    const startBar = Math.floor(clip.startTick / 3840) + 1;
-    const endBar = Math.ceil((clip.startTick + clip.lengthTick) / 3840) + 1;
+    const { startBar, endBar } = clipBarSpan(timebase, clip.startTick, clip.lengthTick);
     return (
         <button
             type="button"
@@ -102,6 +104,7 @@ export function ClipView({
             style={{ left: geometry.left, width: geometry.width, height }}
             onPointerDown={gesture.onPointerDown}
             onPointerCancel={gesture.onPointerCancel}
+            onLostPointerCapture={gesture.onLostPointerCapture}
             onClick={(event) => onSelect(event as unknown as React.PointerEvent, 'release')}
             onDoubleClick={(event) => { event.stopPropagation(); onDoubleClick?.(); }}
             role="listitem"

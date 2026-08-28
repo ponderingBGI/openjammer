@@ -13,7 +13,8 @@ function Meter({ value }: { value: number }) {
 function TrackStrip({ track, peak }: { track: ArrangementTrack; peak: number }) {
     const trackId = track.id ?? track.ref;
     const gesture = useRef(false);
-    const panGesture = useRef<{ y: number; value: number } | null>(null);
+    const panGesture = useRef<{ y: number; value: number; moved: boolean } | null>(null);
+    const suppressPanClick = useRef(false);
     const preview = (verb: Parameters<ReturnType<typeof useArrangementStore.getState>['previewGesture']>[0]) => {
         const store = useArrangementStore.getState();
         if (!gesture.current) {
@@ -24,6 +25,7 @@ function TrackStrip({ track, peak }: { track: ArrangementTrack; peak: number }) 
     };
     const finish = () => {
         if (!gesture.current) return;
+        suppressPanClick.current = panGesture.current?.moved === true;
         gesture.current = false;
         panGesture.current = null;
         useArrangementStore.getState().commitGesture();
@@ -63,17 +65,27 @@ function TrackStrip({ track, peak }: { track: ArrangementTrack; peak: number }) 
                 aria-label={`${track.name ?? track.ref} pan`}
                 onPointerDown={(event: PointerEvent<HTMLSpanElement>) => {
                     event.currentTarget.setPointerCapture(event.pointerId);
-                    panGesture.current = { y: event.clientY, value: track.pan ?? 0 };
+                    panGesture.current = { y: event.clientY, value: track.pan ?? 0, moved: false };
                     useArrangementStore.getState().beginGesture('Adjust track pan');
                     gesture.current = true;
                 }}
                 onPointerMove={(event: PointerEvent<HTMLSpanElement>) => {
                     if (!panGesture.current) return;
+                    if (Math.abs(event.clientY - panGesture.current.y) < 3) return;
+                    panGesture.current.moved = true;
                     preview({ kind: 'setTrackPan', trackId, pan: panGesture.current.value + (panGesture.current.y - event.clientY) / 80 });
                 }}
                 onPointerUp={finish}
-                onPointerCancel={() => { gesture.current = false; panGesture.current = null; useArrangementStore.getState().abortGesture(); }}
-                onCommit={(pan) => useArrangementStore.getState().apply({ kind: 'setTrackPan', trackId, pan })}
+                onPointerCancel={() => { gesture.current = false; panGesture.current = null; suppressPanClick.current = false; useArrangementStore.getState().abortGesture(); }}
+                onClickCapture={(event) => {
+                    if (!suppressPanClick.current) return;
+                    suppressPanClick.current = false;
+                    event.preventDefault();
+                    event.stopPropagation();
+                }}
+                onCommit={(pan) => {
+                    useArrangementStore.getState().apply({ kind: 'setTrackPan', trackId, pan });
+                }}
             />
             <div className="mixer-strip__switches">
                 <LaneButton tone="mute" aria-label={`Mute ${track.name ?? track.ref}`} aria-pressed={track.mute === true} onClick={() => useArrangementStore.getState().apply({ kind: 'setTrackMute', trackId, mute: !track.mute })}>M</LaneButton>

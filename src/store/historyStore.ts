@@ -3,8 +3,9 @@ import type { Verb } from '../song/verbs';
 import type { GraphVerb } from './graphVerbs';
 import { useEditingContextStore } from './editingContextStore';
 import { useClipboardStore } from './clipboardStore';
+import type { SurfaceId } from './uiViewStore';
 
-export type HistoryScope = 'graph' | 'arrangement' | 'mixed';
+export type HistoryScope = 'graph' | 'arrangement' | 'pianoroll' | 'mixed';
 export type EditVerb = { domain: 'graph'; verb: GraphVerb } | { domain: 'arrangement'; verb: Verb };
 
 export interface HistoryEntry {
@@ -57,6 +58,7 @@ interface HistoryState {
 }
 
 const mergeScope = (a: HistoryScope, b: HistoryScope): HistoryScope => a === b ? a : 'mixed';
+const selectionSurface = (scope: HistoryScope): SurfaceId => scope === 'graph' ? 'canvas' : scope === 'pianoroll' ? 'pianoroll' : 'arrangement';
 
 export const useHistoryStore = create<HistoryState>((set, get) => ({
     entries: [],
@@ -76,7 +78,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
         const state = get();
         const entry: HistoryEntry = { verbs, inverse, label, scope };
         set({ entries: [...state.entries.slice(0, state.cursor), entry], cursor: state.cursor + 1 });
-        useEditingContextStore.getState().beginSelectionOpHistory();
+        useEditingContextStore.getState().beginSelectionOpHistory(selectionSurface(scope));
     },
     commit: () => {
         const open = get().open;
@@ -90,7 +92,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
         const state = get();
         const entry: HistoryEntry = { verbs: open.verbs, inverse: open.inverse, label: open.label, scope: open.scope };
         set({ entries: [...state.entries.slice(0, state.cursor), entry], cursor: state.cursor + 1 });
-        useEditingContextStore.getState().beginSelectionOpHistory();
+        useEditingContextStore.getState().beginSelectionOpHistory(selectionSurface(open.scope));
     },
     abort: () => {
         const open = get().open;
@@ -104,7 +106,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
         const entry = state.entries[state.cursor - 1]!;
         dispatch(entry.inverse);
         set({ cursor: state.cursor - 1 });
-        useEditingContextStore.getState().beginSelectionOpHistory();
+        useEditingContextStore.getState().beginSelectionOpHistory(selectionSurface(entry.scope));
         useClipboardStore.getState().resetPasteContext();
     },
     redo: () => {
@@ -112,7 +114,7 @@ export const useHistoryStore = create<HistoryState>((set, get) => ({
         if (state.open || state.cursor >= state.entries.length) return;
         dispatch(state.entries[state.cursor]!.verbs);
         set({ cursor: state.cursor + 1 });
-        useEditingContextStore.getState().beginSelectionOpHistory();
+        useEditingContextStore.getState().beginSelectionOpHistory(selectionSurface(state.entries[state.cursor]!.scope));
         useClipboardStore.getState().resetPasteContext();
     },
     clear: () => set({ entries: [], cursor: 0, cleanCursor: 0, open: null }),

@@ -24,6 +24,8 @@ import {
     VELOCITY_LANE_HEIGHT,
 } from './geometry';
 import './PianoRoll.css';
+import { cancelPianoRollAuditions, type PianoRollAuditionToken } from './actions';
+import { ownPointerGesture } from '../Arrangement/pointerGestureLifetime';
 
 const GM_DRUM_NAMES: Record<number, string> = {
     35: 'Kick', 36: 'Kick', 37: 'Side stick', 38: 'Snare', 39: 'Clap', 40: 'Snare',
@@ -49,7 +51,7 @@ export interface PianoRollProps {
     onClose?: () => void;
     onOpenSurface?: () => void;
     onQuantize?: (noteIds: string[]) => void;
-    onAudition?: (pitch: number, velocity: number, phase: 'on' | 'off') => void;
+    onAudition?: (pitch: number, velocity: number, phase: 'on' | 'off', token?: PianoRollAuditionToken) => PianoRollAuditionToken | null | void;
 }
 
 interface DragState {
@@ -61,6 +63,7 @@ interface DragState {
     primary: ArrangementNote;
     base: Arrangement;
     copyIds: string[] | null;
+    cleanup: () => void;
 }
 
 function noteRange(notes: readonly ArrangementNote[]): PitchRange {
@@ -95,7 +98,12 @@ export function PianoRoll(props: PianoRollProps) {
     const fieldRef = useRef<HTMLDivElement>(null);
     const dragRef = useRef<DragState | null>(null);
     const drawRef = useRef<{ pointerId: number; clientX: number; tick: number; pitch: number; cleanup: () => void } | null>(null);
-    const marqueeRef = useRef<{ pointerId: number; clientX: number; clientY: number; x: number; y: number } | null>(null);
+    const marqueeRef = useRef<{ pointerId: number; clientX: number; clientY: number; x: number; y: number; cleanup: () => void } | null>(null);
+    const velocityWheelTimer = useRef<number | null>(null);
+    const velocityWheelBase = useRef<Arrangement | null>(null);
+    const velocityWheelDelta = useRef(0);
+    const velocityGestureId = useRef<number | null>(null);
+    const auditionTokens = useRef(new Map<number, PianoRollAuditionToken[]>());
     const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
     const [ghost, setGhost] = useState<{ tick: number; pitch: number; durTick: number } | null>(null);
 
@@ -136,6 +144,27 @@ export function PianoRoll(props: PianoRollProps) {
         }
     }, [props.trackId, range, rememberPitchRange, trackPitchMax, trackPitchMin, trackRange]);
 
+    useEffect(() => () => {
+        const drag = dragRef.current;
+        if (drag) {
+            drag.cleanup();
+            dragRef.current = null;
+            useArrangementStore.getState().abortGesture();
+        }
+        drawRef.current?.cleanup();
+        drawRef.current = null;
+        marqueeRef.current?.cleanup();
+        marqueeRef.current = null;
+        if (velocityWheelTimer.current !== null) window.clearTimeout(velocityWheelTimer.current);
+        if (velocityGestureId.current !== null && useArrangementStore.getState().isGestureOpen(velocityGestureId.current)) useArrangementStore.getState().commitGesture();
+        velocityWheelTimer.current = null;
+        velocityWheelBase.current = null;
+        velocityWheelDelta.current = 0;
+        velocityGestureId.current = null;
+        auditionTokens.current.clear();
+        cancelPianoRollAuditions();
+    }, [props.clipId, props.trackId, selectionSurface]);
+
     const grid = gridTicks(gridUnit, ppq, ticksPerBar, props.pxPerTick);
     const drawGrid = gridTicks(drawLength, ppq, ticksPerBar, props.pxPerTick, true) ?? ppq / 4;
     const stepLength = gridTicks(stepEntry.length, ppq, ticksPerBar, props.pxPerTick, true) ?? grid ?? ppq / 4;
@@ -152,7 +181,16 @@ export function PianoRoll(props: PianoRollProps) {
     };
 
     const audition = (pitch: number, velocity: number, phase: 'on' | 'off') => {
-        if (!isPlaying) props.onAudition?.(pitch, velocity, phase);
+        if (isPlaying) return;
+        if (phase === 'on') {
+            const token = props.onAudition?.(pitch, velocity, phase);
+            if (typeof token === 'number') auditionTokens.current.set(pitch, [...(auditionTokens.current.get(pitch) ?? []), token]);
+            return;
+        }
+        const tokens = auditionTokens.current.get(pitch) ?? [];
+        const token = tokens.shift();
+        if (tokens.length) auditionTokens.current.set(pitch, tokens); else auditionTokens.current.delete(pitch);
+        props.onAudition?.(pitch, velocity, phase, token);
     };
 
     const selectNote = (event: ReactPointerEvent, note: ArrangementNote) => {
@@ -168,7 +206,16 @@ export function PianoRoll(props: PianoRollProps) {
             noteIds = [note.id];
         } else noteIds = current;
         context.setSelection(selectionSurface, { noteIds });
-        useArrangementStore.getState().selectNotes(noteIds);
+    };
+
+    const finishVelocityWheelGesture = () => {
+        if (velocityWheelTimer.current !== null) window.clearTimeout(velocityWheelTimer.current);
+        const id = velocityGestureId.current;
+        velocityWheelTimer.current = null;
+        velocityWheelBase.current = null;
+        velocityWheelDelta.current = 0;
+        velocityGestureId.current = null;
+        if (id !== null) useArrangementStore.getState().commitGesture(id);
     };
 
     const startNoteDrag = (event: ReactPointerEvent<HTMLButtonElement>, note: ArrangementNote, width: number) => {
@@ -180,12 +227,21 @@ export function PianoRoll(props: PianoRollProps) {
         const edge = resizeEdge(event.nativeEvent.offsetX, width);
         if (!arrangement) return;
         const copy = !edge && (event.ctrlKey || event.metaKey);
-        dragRef.current = { kind: edge ? `resize-${edge}` : 'move', pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, notes, primary: note, base: arrangement, copyIds: copy ? notes.map(() => useArrangementStore.getState().mintId('note')) : null };
+        // A wheel burst owns a short-lived gesture. Land it before the pointer
+        // gesture begins so its timer can never orphan an outer history frame.
+        finishVelocityWheelGesture();
+        useArrangementStore.getState().beginGesture(edge ? 'Resize notes' : copy ? 'Copy notes' : 'Move notes', selectionSurface);
+        const pointerId = event.pointerId;
+        dragRef.current = { kind: edge ? `resize-${edge}` : 'move', pointerId, startX: event.clientX, startY: event.clientY, notes, primary: note, base: arrangement, copyIds: copy ? notes.map(() => useArrangementStore.getState().mintId('note')) : null, cleanup: () => undefined };
+        dragRef.current.cleanup = ownPointerGesture(pointerId, {
+            move: moveNoteDrag,
+            commit: (nativeEvent) => endDrag(nativeEvent.pointerId),
+            abort: () => cancelNoteDrag(),
+        });
         event.currentTarget.setPointerCapture(event.pointerId);
-        useArrangementStore.getState().beginGesture(edge ? 'Resize notes' : 'Move notes');
     };
 
-    const moveNoteDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    function moveNoteDrag(event: Pick<PointerEvent, 'pointerId' | 'clientX' | 'clientY' | 'shiftKey'>) {
         const drag = dragRef.current;
         if (!drag || drag.pointerId !== event.pointerId) return;
         const deltaPitch = drag.kind === 'move' ? Math.round((drag.startY - event.clientY) / rowHeight) : 0;
@@ -199,24 +255,33 @@ export function PianoRoll(props: PianoRollProps) {
                 : moveNotes(drag.base, ids, deltaTick, deltaPitch)
             : resizeNotes(drag.base, ids, drag.kind === 'resize-start' ? 'start' : 'end', { deltaTick, mode: event.shiftKey ? 'absolute' : 'relative' });
         useArrangementStore.getState().previewGesture(result.verbs);
-    };
+    }
 
-    const endDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    function endDrag(pointerId: number) {
         const drag = dragRef.current;
-        if (!drag || drag.pointerId !== event.pointerId) return;
+        if (!drag || drag.pointerId !== pointerId) return;
         audition(drag.primary.pitch, Math.min(48, drag.primary.vel ?? 96), 'off');
         if (drag.copyIds) {
             useEditingContextStore.getState().setSelection(selectionSurface, { noteIds: drag.copyIds });
-            useArrangementStore.getState().selectNotes(drag.copyIds);
         }
+        drag.cleanup();
         dragRef.current = null;
         useArrangementStore.getState().commitGesture();
+    }
+
+    const cancelNoteDrag = () => {
+        const drag = dragRef.current;
+        if (!drag) return;
+        audition(drag.primary.pitch, Math.min(48, drag.primary.vel ?? 96), 'off');
+        drag.cleanup();
+        dragRef.current = null;
+        useArrangementStore.getState().abortGesture();
     };
 
     const erase = (event: ReactPointerEvent, note: ArrangementNote) => {
         if (event.button !== 2 || !note.id) return;
         event.preventDefault();
-        if (arrangement) useArrangementStore.getState().apply(eraseNotes(arrangement, { noteIds: [note.id] }).verbs);
+        if (arrangement) useArrangementStore.getState().apply(eraseNotes(arrangement, { noteIds: [note.id] }).verbs, { surface: selectionSurface });
     };
 
     const drawAt = (tick: number, pitch: number, duration = drawGrid) => {
@@ -226,15 +291,14 @@ export function PianoRoll(props: PianoRollProps) {
         if (midiSource.notes.some((note) => note.tick === sourceTick && note.pitch === pitch)) return;
         const note: ArrangementNote = { tick: sourceTick, durTick: drumMode ? 1 : Math.max(1, Math.round(duration)), pitch, vel: drawVelocity };
         const result = drawNotes(arrangement, clip.id!, [note], useArrangementStore.getState().mintId, useEditingContextStore.getState().overlapPolicy);
-        useArrangementStore.getState().apply(result.verbs);
+        useArrangementStore.getState().apply(result.verbs, { surface: selectionSurface });
         const noteIds = result.selectedNoteIds ?? [];
         useEditingContextStore.getState().setSelection(selectionSurface, { noteIds });
-        useArrangementStore.getState().selectNotes(noteIds);
         audition(pitch, Math.min(48, drawVelocity), 'on');
         window.setTimeout(() => audition(pitch, Math.min(48, drawVelocity), 'off'), 100);
     };
 
-    const onFieldPointerMove = (event: ReactPointerEvent) => {
+    const onFieldPointerMove = (event: Pick<PointerEvent, 'clientX' | 'clientY'>) => {
         const tick = snap(xToTick(event.clientX));
         const drawing = drawRef.current;
         if (drawing) {
@@ -266,37 +330,12 @@ export function PianoRoll(props: PianoRollProps) {
         setGhost(null);
     };
 
-    const onFieldPointerDown = (event: ReactPointerEvent) => {
-        if (event.target !== event.currentTarget && (event.target as HTMLElement).closest('.piano-roll-note')) return;
-        if (event.button === 0 && (tool === 'draw' || event.ctrlKey || event.metaKey)) {
-            const pointerId = event.pointerId;
-            const finish = (nativeEvent: PointerEvent) => finishFieldDraw(nativeEvent.pointerId, nativeEvent.clientX);
-            const cancel = (nativeEvent: PointerEvent) => cancelFieldDraw(nativeEvent.pointerId);
-            const cleanup = () => {
-                window.removeEventListener('pointerup', finish);
-                window.removeEventListener('pointercancel', cancel);
-            };
-            drawRef.current = { pointerId, clientX: event.clientX, tick: snap(xToTick(event.clientX)), pitch: yToPitch(event.clientY), cleanup };
-            // Keep completion on the real pointer stream even when capture or a
-            // React re-render retargets pointerup. This mirrors arrangement clip
-            // gestures and is essential for pen/touch as well as automation.
-            window.addEventListener('pointerup', finish);
-            window.addEventListener('pointercancel', cancel);
-            event.currentTarget.setPointerCapture(event.pointerId);
-        }
-        else if (event.button === 0) {
-            const bounds = fieldRef.current?.getBoundingClientRect();
-            if (bounds) { marqueeRef.current = { pointerId: event.pointerId, clientX: event.clientX, clientY: event.clientY, x: event.clientX - bounds.left, y: event.clientY - bounds.top }; event.currentTarget.setPointerCapture(event.pointerId); }
-        }
-    };
-
-    const onFieldPointerUp = (event: ReactPointerEvent) => {
-        if (finishFieldDraw(event.pointerId, event.clientX)) return;
+    const finishMarquee = (pointerId: number, clientX: number, clientY: number) => {
         const mark = marqueeRef.current;
-        if (!mark || mark.pointerId !== event.pointerId) return;
+        if (!mark || mark.pointerId !== pointerId) return;
         const bounds = fieldRef.current?.getBoundingClientRect();
-        const dx = event.clientX - mark.clientX;
-        const dy = event.clientY - mark.clientY;
+        const dx = clientX - mark.clientX;
+        const dy = clientY - mark.clientY;
         let noteIds: string[] = [];
         if (bounds && Math.hypot(dx, dy) >= 4) {
             const left = bounds.left + Math.min(mark.x, mark.x + dx);
@@ -305,16 +344,58 @@ export function PianoRoll(props: PianoRollProps) {
             const bottom = top + Math.abs(dy);
             noteIds = [...fieldRef.current!.querySelectorAll<HTMLElement>('[data-note-id]')].filter((element) => { const rect = element.getBoundingClientRect(); return rect.left < right && rect.right > left && rect.top < bottom && rect.bottom > top; }).map((element) => element.dataset.noteId!);
         }
+        mark.cleanup();
         useEditingContextStore.getState().setSelection(selectionSurface, { noteIds });
-        useArrangementStore.getState().selectNotes(noteIds);
         marqueeRef.current = null;
         setMarquee(null);
+    };
+
+    const cancelMarquee = () => {
+        marqueeRef.current?.cleanup();
+        marqueeRef.current = null;
+        setMarquee(null);
+    };
+
+    const onFieldPointerDown = (event: ReactPointerEvent) => {
+        if (event.target !== event.currentTarget && (event.target as HTMLElement).closest('.piano-roll-note')) return;
+        if (event.button === 0 && (tool === 'draw' || event.ctrlKey || event.metaKey)) {
+            const pointerId = event.pointerId;
+            drawRef.current = { pointerId, clientX: event.clientX, tick: snap(xToTick(event.clientX)), pitch: yToPitch(event.clientY), cleanup: () => undefined };
+            // Keep completion on the real pointer stream even when capture or a
+            // React re-render retargets pointerup. This mirrors arrangement clip
+            // gestures and is essential for pen/touch as well as automation.
+            drawRef.current.cleanup = ownPointerGesture(pointerId, {
+                move: onFieldPointerMove,
+                commit: (nativeEvent) => { finishFieldDraw(nativeEvent.pointerId, nativeEvent.clientX); },
+                abort: () => cancelFieldDraw(pointerId),
+            });
+            event.currentTarget.setPointerCapture(event.pointerId);
+        }
+        else if (event.button === 0) {
+            const bounds = fieldRef.current?.getBoundingClientRect();
+            if (bounds) {
+                const pointerId = event.pointerId;
+                marqueeRef.current = { pointerId, clientX: event.clientX, clientY: event.clientY, x: event.clientX - bounds.left, y: event.clientY - bounds.top, cleanup: () => undefined };
+                marqueeRef.current.cleanup = ownPointerGesture(pointerId, {
+                    move: onFieldPointerMove,
+                    commit: (nativeEvent) => finishMarquee(nativeEvent.pointerId, nativeEvent.clientX, nativeEvent.clientY),
+                    abort: cancelMarquee,
+                });
+                event.currentTarget.setPointerCapture(pointerId);
+            }
+        }
+    };
+
+    const onFieldPointerUp = (event: ReactPointerEvent) => {
+        if (finishFieldDraw(event.pointerId, event.clientX)) return;
+        finishMarquee(event.pointerId, event.clientX, event.clientY);
     };
 
     const onKeyDown = (event: React.KeyboardEvent) => {
         if (!arrangement || !midiSource) return;
         const stepKeys: Record<string, number> = { a: 0, w: 1, s: 2, e: 3, d: 4, f: 5, t: 6, g: 7, y: 8, h: 9, u: 10, j: 11 };
         if (stepEntry.trackId === props.trackId && !event.ctrlKey && !event.metaKey) {
+            if (event.repeat) return;
             if (event.key === ' ') {
                 event.preventDefault();
                 useEditingContextStore.getState().setStepEntry({ positionTick: stepEntry.positionTick + stepLength });
@@ -331,7 +412,7 @@ export function PianoRoll(props: PianoRollProps) {
                 const pitch = Math.max(0, Math.min(127, (stepEntry.octave + 1) * 12 + offset));
                 const sourceTick = Math.round((clip.sourceStart ?? 0) + stepEntry.positionTick - clip.startTick);
                 const result = drawNotes(arrangement, clip.id!, [{ tick: sourceTick, durTick: Math.max(1, Math.round(stepLength)), pitch, vel: stepEntry.velocity }], useArrangementStore.getState().mintId, useEditingContextStore.getState().overlapPolicy);
-                useArrangementStore.getState().apply(result.verbs);
+                useArrangementStore.getState().apply(result.verbs, { surface: selectionSurface });
                 useEditingContextStore.getState().setSelection(selectionSurface, { noteIds: result.selectedNoteIds ?? [] });
                 useEditingContextStore.getState().setStepEntry({ positionTick: stepEntry.positionTick + stepLength, pitch });
                 audition(pitch, Math.min(48, stepEntry.velocity), 'on');
@@ -343,7 +424,16 @@ export function PianoRoll(props: PianoRollProps) {
             event.preventDefault();
             const noteIds = midiSource.notes.flatMap((note) => note.id ? [note.id] : []);
             useEditingContextStore.getState().setSelection(selectionSurface, { noteIds });
-            useArrangementStore.getState().selectNotes(noteIds);
+            return;
+        }
+        if ((event.ctrlKey || event.metaKey) && event.altKey && event.key.toLowerCase() === 'z') {
+            event.preventDefault();
+            useEditingContextStore.getState().undoSelection(selectionSurface);
+            return;
+        }
+        if ((event.ctrlKey || event.metaKey) && event.altKey && event.key.toLowerCase() === 'y') {
+            event.preventDefault();
+            useEditingContextStore.getState().redoSelection(selectionSurface);
             return;
         }
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') { event.preventDefault(); copySelection('pianoroll'); return; }
@@ -356,9 +446,8 @@ export function PianoRoll(props: PianoRollProps) {
         else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'd') {
             event.preventDefault();
             const result = copyNotes(arrangement, selectedNoteIds, grid ?? 1, 0, useArrangementStore.getState().mintId);
-            useArrangementStore.getState().apply(result.verbs);
+            useArrangementStore.getState().apply(result.verbs, { surface: selectionSurface });
             useEditingContextStore.getState().setSelection(selectionSurface, { noteIds: result.selectedNoteIds ?? [] });
-            useArrangementStore.getState().selectNotes(result.selectedNoteIds ?? []);
             return;
         } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
             const amount = Math.max(1, Math.round((grid ?? 1) / (event.shiftKey ? 4 : 1)));
@@ -381,7 +470,7 @@ export function PianoRoll(props: PianoRollProps) {
             return;
         } else return;
         event.preventDefault();
-        if (verbs?.length) useArrangementStore.getState().apply(verbs);
+        if (verbs?.length) useArrangementStore.getState().apply(verbs, { surface: selectionSurface });
     };
 
     const currentNotes = midiSource?.notes ?? [];
@@ -408,7 +497,20 @@ export function PianoRoll(props: PianoRollProps) {
                 const amount = (event.altKey ? 10 : 1) * (event.deltaY < 0 ? 1 : -1);
                 const selected = currentNotes.filter((note) => note.id && selectedNoteIds.includes(note.id));
                 const request = event.shiftKey ? { mode: 'set' as const, amount: (selected[0]?.vel ?? 64) + amount, smush: true } : { mode: 'delta' as const, amount };
-                useArrangementStore.getState().apply(lowerVelocity(arrangement, selectedNoteIds, request).verbs);
+                const store = useArrangementStore.getState();
+                if (!velocityWheelBase.current) {
+                    velocityWheelBase.current = arrangement;
+                    velocityWheelDelta.current = 0;
+                    velocityGestureId.current = store.beginGesture('Adjust note velocity', selectionSurface);
+                }
+                const base = velocityWheelBase.current;
+                if (!event.shiftKey) velocityWheelDelta.current += amount;
+                const burstRequest = event.shiftKey ? request : { mode: 'delta' as const, amount: velocityWheelDelta.current };
+                store.previewGesture(lowerVelocity(base, selectedNoteIds, burstRequest).verbs);
+                if (velocityWheelTimer.current !== null) window.clearTimeout(velocityWheelTimer.current);
+                velocityWheelTimer.current = window.setTimeout(() => {
+                    finishVelocityWheelGesture();
+                }, 180);
             }}
             onDoubleClick={(event) => {
                 if ((event.target as HTMLElement).closest('.piano-roll-note')) props.onOpenSurface?.();
@@ -431,7 +533,7 @@ export function PianoRoll(props: PianoRollProps) {
                 <div className="piano-roll__keys" role="list" aria-label="Pitch rows" style={{ height: contentHeight }}>
                     {pitches.map((pitch) => <div key={pitch} role="listitem" aria-label={drumMode ? (GM_DRUM_NAMES[pitch] ?? pitchName(pitch)) : pitchName(pitch)} className={`piano-roll__key${isBlackPitch(pitch) ? ' is-black' : ''}${isKeyboardSeam(pitch) ? ' is-seam' : ''}`} style={{ height: rowHeight }}>{drumMode ? (GM_DRUM_NAMES[pitch] ?? pitchName(pitch)) : pitch % 12 === 0 && rowHeight >= 7 ? pitchName(pitch) : ''}</div>)}
                 </div>
-                <div ref={fieldRef} className="piano-roll__field" onPointerMove={onFieldPointerMove} onPointerLeave={() => { if (!drawRef.current) setGhost(null); }} onPointerDown={onFieldPointerDown} onPointerUp={onFieldPointerUp} onPointerCancel={(event) => { cancelFieldDraw(event.pointerId); marqueeRef.current = null; setMarquee(null); setGhost(null); }}>
+                <div ref={fieldRef} className="piano-roll__field" onPointerMove={onFieldPointerMove} onPointerLeave={() => { if (!drawRef.current) setGhost(null); }} onPointerDown={onFieldPointerDown} onPointerUp={onFieldPointerUp} onPointerCancel={(event) => { cancelFieldDraw(event.pointerId); cancelMarquee(); setGhost(null); }}>
                     <div className="piano-roll__content" style={{ width: contentWidth, height: contentHeight, transform: `translateX(${-leftTick * props.pxPerTick}px)` }}>
                         <TimeGrid width={contentWidth} height={contentHeight} pxPerTick={props.pxPerTick} ticksPerBar={ticksPerBar} beatsPerBar={beatsPerBar} gridUnit={gridUnit} />
                         {pitches.map((pitch, index) => <div key={pitch} className={`piano-roll__row${isBlackPitch(pitch) ? ' is-black' : ''}${pitch % 12 === 0 ? ' is-c' : ''}`} style={{ top: index * rowHeight, height: rowHeight }} />)}
@@ -444,7 +546,7 @@ export function PianoRoll(props: PianoRollProps) {
                             const geometry = clippedNoteGeometry(note, clip.startTick, clip.sourceStart ?? 0, clip.lengthTick, props.pxPerTick);
                             if (!geometry || note.pitch < range.lo || note.pitch > range.hi) return null;
                             const selected = !!note.id && noteIdSet.has(note.id);
-                            return <button key={note.id ?? index} type="button" data-note-id={note.id} className={`piano-roll-note${selected ? ' is-selected' : ''}${drumMode ? ' is-drum' : ''}`} style={{ left: geometry.left, top: (range.hi - note.pitch) * rowHeight + Math.max(1, (rowHeight - (drumMode ? 10 : Math.max(3, rowHeight - 2))) / 2), width: drumMode ? 10 : geometry.width, height: drumMode ? 10 : Math.max(3, rowHeight - 2), '--note-opacity': `${velocityOpacity(note.vel) * 100}%` } as CSSProperties} aria-label={`${pitchName(note.pitch)}, tick ${note.tick}, duration ${note.durTick}, velocity ${note.vel ?? 96}`} aria-pressed={selected} onPointerDown={(event) => { erase(event, note); startNoteDrag(event, note, geometry.width); }} onPointerMove={moveNoteDrag} onPointerUp={endDrag} onPointerCancel={() => { dragRef.current = null; useArrangementStore.getState().abortGesture(); }} onContextMenu={(event) => event.preventDefault()} />;
+                            return <button key={note.id ?? index} type="button" data-note-id={note.id} className={`piano-roll-note${selected ? ' is-selected' : ''}${drumMode ? ' is-drum' : ''}`} style={{ left: geometry.left, top: (range.hi - note.pitch) * rowHeight + Math.max(1, (rowHeight - (drumMode ? 10 : Math.max(3, rowHeight - 2))) / 2), width: drumMode ? 10 : geometry.width, height: drumMode ? 10 : Math.max(3, rowHeight - 2), '--note-opacity': `${velocityOpacity(note.vel) * 100}%` } as CSSProperties} aria-label={`${pitchName(note.pitch)}, tick ${note.tick}, duration ${note.durTick}, velocity ${note.vel ?? 96}`} aria-pressed={selected} onPointerDown={(event) => { erase(event, note); startNoteDrag(event, note, geometry.width); }} onPointerMove={moveNoteDrag} onPointerUp={(event) => endDrag(event.pointerId)} onPointerCancel={cancelNoteDrag} onLostPointerCapture={() => undefined} onContextMenu={(event) => event.preventDefault()} />;
                         })}
                         {ghost && <span className={`piano-roll-note piano-roll-note--draw${drumMode ? ' is-drum' : ''}`} style={{ left: ghost.tick * props.pxPerTick, top: (range.hi - ghost.pitch) * rowHeight + Math.max(1, (rowHeight - (drumMode ? 10 : Math.max(3, rowHeight - 2))) / 2), width: drumMode ? 10 : Math.max(2, ghost.durTick * props.pxPerTick), height: drumMode ? 10 : Math.max(3, rowHeight - 2) }} />}
                         {stepEntry.trackId === props.trackId && <span className="piano-roll__step-cursor" style={{ left: stepEntry.positionTick * props.pxPerTick, top: (range.hi - stepEntry.pitch) * rowHeight, width: Math.max(2, stepLength * props.pxPerTick), height: rowHeight }} />}
@@ -454,7 +556,7 @@ export function PianoRoll(props: PianoRollProps) {
                     </div>
                 </div>
             </div>
-            <VelocityLane notes={currentNotes} clip={clip} pxPerTick={props.pxPerTick} leftTick={leftTick} selectedIds={noteIdSet} onSelect={(id) => { useEditingContextStore.getState().setSelection(selectionSurface, { noteIds: [id] }); useArrangementStore.getState().selectNotes([id]); }} />
+            <VelocityLane notes={currentNotes} clip={clip} pxPerTick={props.pxPerTick} leftTick={leftTick} selectedIds={noteIdSet} onSelect={(id) => { useEditingContextStore.getState().setSelection(selectionSurface, { noteIds: [id] }); }} />
         </section>
     );
 }
@@ -501,17 +603,32 @@ function PitchScroomer({ trackId, range, pitchesWithNotes }: { trackId: string; 
 
 function VelocityLane({ notes, clip, pxPerTick, leftTick, selectedIds, onSelect }: { notes: readonly ArrangementNote[]; clip: ArrangementClip; pxPerTick: number; leftTick: number; selectedIds: Set<string>; onSelect: (id: string) => void }) {
     const laneRef = useRef<HTMLDivElement>(null);
-    const drag = useRef<{ pointerId: number; noteId: string; base: Arrangement } | null>(null);
-    const previewVelocity = (event: ReactPointerEvent, note: ArrangementNote) => {
+    const drag = useRef<{ pointerId: number; noteId: string; base: Arrangement; cleanup: () => void } | null>(null);
+    const previewVelocity = (event: Pick<PointerEvent, 'clientY'>, note: ArrangementNote) => {
         if (!note.id || !laneRef.current) return;
         const bounds = laneRef.current.getBoundingClientRect();
         const vel = Math.max(0, Math.min(127, Math.round((bounds.bottom - event.clientY) / bounds.height * 127)));
         const base = drag.current?.base;
         if (base) useArrangementStore.getState().previewGesture(lowerVelocity(base, [note.id], { mode: 'set', amount: vel }).verbs);
     };
+    const finish = (pointerId: number, commit: boolean) => {
+        const current = drag.current;
+        if (!current || current.pointerId !== pointerId) return;
+        current.cleanup();
+        drag.current = null;
+        if (commit) useArrangementStore.getState().commitGesture();
+        else useArrangementStore.getState().abortGesture();
+    };
+    useEffect(() => () => {
+        const current = drag.current;
+        if (!current) return;
+        current.cleanup();
+        drag.current = null;
+        useArrangementStore.getState().abortGesture();
+    }, []);
     return <div ref={laneRef} className="piano-roll__velocity" aria-label="Velocity lane">
         <i className="is-guide is-96" /><i className="is-guide is-64" /><i className="is-guide is-32" />
-        {notes.map((note) => note.id && <button key={note.id} type="button" className={`piano-roll__lollipop${selectedIds.has(note.id) ? ' is-selected' : ''}`} style={{ left: (clip.startTick + note.tick - (clip.sourceStart ?? 0) - leftTick) * pxPerTick, height: `${(note.vel ?? 96) / 127 * 100}%` }} aria-label={`${pitchName(note.pitch)} velocity ${note.vel ?? 96}`} onPointerDown={(event) => { const base = useArrangementStore.getState().arrangement; if (!base) return; onSelect(note.id!); drag.current = { pointerId: event.pointerId, noteId: note.id!, base }; event.currentTarget.setPointerCapture(event.pointerId); useArrangementStore.getState().beginGesture('Set note velocity'); previewVelocity(event, note); }} onPointerMove={(event) => { if (drag.current?.pointerId === event.pointerId) previewVelocity(event, note); }} onPointerUp={(event) => { if (drag.current?.pointerId !== event.pointerId) return; drag.current = null; useArrangementStore.getState().commitGesture(); }} onPointerCancel={() => { drag.current = null; useArrangementStore.getState().abortGesture(); }} />)}
+        {notes.map((note) => note.id && <button key={note.id} type="button" className={`piano-roll__lollipop${selectedIds.has(note.id) ? ' is-selected' : ''}`} style={{ left: (clip.startTick + note.tick - (clip.sourceStart ?? 0) - leftTick) * pxPerTick, height: `${(note.vel ?? 96) / 127 * 100}%` }} aria-label={`${pitchName(note.pitch)} velocity ${note.vel ?? 96}`} onPointerDown={(event) => { const base = useArrangementStore.getState().arrangement; if (!base) return; onSelect(note.id!); const pointerId = event.pointerId; drag.current = { pointerId, noteId: note.id!, base, cleanup: () => undefined }; drag.current.cleanup = ownPointerGesture(pointerId, { move: (nativeEvent) => previewVelocity(nativeEvent, note), commit: () => finish(pointerId, true), abort: () => finish(pointerId, false) }); event.currentTarget.setPointerCapture(pointerId); useArrangementStore.getState().beginGesture('Set note velocity'); previewVelocity(event, note); }} onPointerMove={(event) => { if (drag.current?.pointerId === event.pointerId) previewVelocity(event, note); }} onPointerUp={(event) => finish(event.pointerId, true)} onPointerCancel={(event) => finish(event.pointerId, false)} onLostPointerCapture={() => undefined} />)}
     </div>;
 }
 

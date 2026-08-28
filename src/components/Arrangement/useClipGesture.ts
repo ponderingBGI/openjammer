@@ -6,6 +6,7 @@ import { gridTicks, snapTick, useEditingContextStore } from '../../store/editing
 import { useArrangementStore } from '../../store/arrangementStore';
 import { timebase } from '../../song/time';
 import { autoScrollDelta, crossedDragThreshold, dominantAxis, type DragAxis } from './dragController';
+import { ownPointerGesture } from './pointerGestureLifetime';
 
 interface Gesture {
     pointerId: number;
@@ -27,10 +28,13 @@ interface Gesture {
     copyTemplates?: Extract<Verb, { kind: 'addClip' }>[];
     cleanup?: () => void;
     followPlayheadBefore: boolean;
+    finalVerbs?: Verb[];
 }
 
 export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick: number, width: number, onClickSelect: (event: React.PointerEvent, phase: 'press' | 'release') => void) {
     const gesture = useRef<Gesture | null>(null);
+    const finishRef = useRef<(commit: boolean) => void>(() => {});
+    const mounted = useRef(true);
     const [dragging, setDragging] = useState(false);
 
     const stopAutoScroll = () => {
@@ -39,23 +43,29 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
     };
 
     const finish = (commit: boolean) => {
+        const finalVerbs = gesture.current?.finalVerbs;
         stopAutoScroll();
         gesture.current?.cleanup?.();
         const active = gesture.current?.active;
         const followPlayheadBefore = gesture.current?.followPlayheadBefore;
         gesture.current = null;
-        setDragging(false);
+        if (mounted.current) setDragging(false);
         useEditingContextStore.getState().setDragActive(false);
+        useEditingContextStore.getState().setActiveClipDragIds([]);
+        useEditingContextStore.getState().setClipDragPreview(null);
         if (followPlayheadBefore !== undefined) useEditingContextStore.setState({ followPlayhead: followPlayheadBefore });
-        if (active && commit) useArrangementStore.getState().commitGesture();
+        if (active && commit) {
+            if (finalVerbs) useArrangementStore.getState().previewGesture(finalVerbs);
+            useArrangementStore.getState().commitGesture();
+        }
         else useArrangementStore.getState().abortGesture();
     };
+    useEffect(() => { finishRef.current = finish; });
 
     useEffect(() => {
-        const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && gesture.current) finish(false); };
-        window.addEventListener('keydown', escape);
-        return () => window.removeEventListener('keydown', escape);
-    });
+        mounted.current = true;
+        return () => { mounted.current = false; };
+    }, []);
 
     const preview = (event: PointerEvent | React.PointerEvent) => {
         const g = gesture.current;
@@ -72,6 +82,7 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
             if (g.copy) g.copyTemplates = duplicateClips(arrangement, g.selectedIds, 0, (prefix) => useArrangementStore.getState().mintId(prefix)).verbs.filter((verb): verb is Extract<Verb, { kind: 'addClip' }> => verb.kind === 'addClip');
             setDragging(true);
             useEditingContextStore.getState().setDragActive(true);
+            useEditingContextStore.getState().setActiveClipDragIds([...g.selectedIds, ...(g.copyTemplates ?? []).map((verb) => verb.clip.id).filter((id): id is string => id !== undefined)]);
         }
         const context = useEditingContextStore.getState();
         const shiftLock = event.shiftKey && !g.edge;
@@ -90,10 +101,38 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
             const at = g.edge === 'start' ? clip.startTick + rawDelta : clip.startTick + clip.lengthTick + rawDelta;
             useArrangementStore.getState().previewGesture(trimClip(arrangement, g.selectedIds, g.edge, at).verbs);
         } else if (g.copy) {
-            useArrangementStore.getState().previewGesture((g.copyTemplates ?? []).map((verb) => ({ ...verb, clip: { ...verb.clip, startTick: Math.max(0, verb.clip.startTick + rawDelta) } })));
+            const primaryIndex = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === trackId);
+            const hoveredIndex = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === hoveredTrackId);
+            const trackDelta = hoveredIndex >= 0 && primaryIndex >= 0 ? hoveredIndex - primaryIndex : 0;
+            useArrangementStore.getState().previewGesture((g.copyTemplates ?? []).map((verb) => {
+                const sourceIndex = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === verb.trackId);
+                const targetIndex = Math.max(0, Math.min(arrangement.tracks.length - 1, sourceIndex + trackDelta));
+                const target = arrangement.tracks[targetIndex];
+                return { ...verb, trackId: target ? (target.id ?? target.ref) : verb.trackId, clip: { ...verb.clip, startTick: Math.max(0, verb.clip.startTick + rawDelta) } };
+            }));
         } else {
             const ripple = context.editMode === 'ripple';
-            useArrangementStore.getState().previewGesture(moveClips(arrangement, g.selectedIds, rawDelta, { ripple, toTrackId: ripple ? undefined : hoveredTrackId }).verbs);
+            const finalVerbs = moveClips(arrangement, g.selectedIds, rawDelta, { ripple, toTrackId: ripple ? undefined : hoveredTrackId }).verbs;
+            g.finalVerbs = finalVerbs;
+            // Keep the dragged ClipView mounted while crossing lanes. The final
+            // track reassignment is applied atomically on pointer-up.
+            useArrangementStore.getState().previewGesture(hoveredTrackId && hoveredTrackId !== trackId
+                ? moveClips(arrangement, g.selectedIds, rawDelta, { ripple, toTrackId: ripple ? undefined : trackId }).verbs
+                : finalVerbs);
+        }
+        if (!g.edge && !g.slip) {
+            const surface = document.querySelector<HTMLElement>('[data-surface-root="arrangement"]');
+            const surfaceRect = surface?.getBoundingClientRect();
+            useEditingContextStore.getState().setClipDragPreview({
+                clipId: clip.id!,
+                sourceTrackId: trackId,
+                hoveredTrackId: hoveredTrackId ?? trackId,
+                x: event.clientX - (surfaceRect?.left ?? 0),
+                y: event.clientY - (surfaceRect?.top ?? 0),
+                width,
+                height: 24,
+                copy: g.copy,
+            });
         }
     };
 
@@ -127,7 +166,7 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
             const selection = useEditingContextStore.getState().viewports.arrangement.selection.clipIds;
             const selectedIds = selection.includes(clip.id) ? selection : [clip.id];
             const zone = Math.max(0, Math.min(8, width / 2 - 1));
-            const x = event.nativeEvent.offsetX;
+            const x = event.clientX - event.currentTarget.getBoundingClientRect().left;
             const edge = x <= zone + 4 ? 'start' : x >= width - zone - 4 ? 'end' : null;
             const context = useEditingContextStore.getState();
             const slip = (event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey;
@@ -149,28 +188,23 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
             const copy = event.altKey && !event.shiftKey && !slip;
             gesture.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, lastX: event.clientX, lastY: event.clientY, originalScrollLeft: scroll?.scrollLeft ?? 0, copy, slip, edge: slip ? null : edge, axis: null, active: false, selectedIds, relativeOffset: clip.startTick - nearest, candidates, scroll, frame: null, followPlayheadBefore: context.followPlayhead };
             useEditingContextStore.setState({ followPlayhead: false });
-            const move = (nativeEvent: PointerEvent) => { if (gesture.current) preview(nativeEvent); };
-            const up = () => { if (gesture.current) finish(true); };
-            const cancel = () => { if (gesture.current) finish(false); };
-            const mouseMove = (nativeEvent: MouseEvent) => { if (gesture.current) preview(nativeEvent as unknown as PointerEvent); };
-            const mouseUp = () => { if (gesture.current) finish(true); };
+            const releasePointer = ownPointerGesture(event.pointerId, {
+                move: preview,
+                commit: () => { if (gesture.current) finish(true); },
+                abort: () => { if (gesture.current) finish(false); },
+            });
+            const escape = (keyboardEvent: KeyboardEvent) => { if (keyboardEvent.key === 'Escape' && gesture.current) finishRef.current(false); };
+            window.addEventListener('keydown', escape);
             gesture.current.cleanup = () => {
-                window.removeEventListener('pointermove', move);
-                window.removeEventListener('pointerup', up);
-                window.removeEventListener('pointercancel', cancel);
-                window.removeEventListener('mousemove', mouseMove);
-                window.removeEventListener('mouseup', mouseUp);
+                releasePointer();
+                window.removeEventListener('keydown', escape);
             };
-            window.addEventListener('pointermove', move);
-            window.addEventListener('pointerup', up);
-            window.addEventListener('pointercancel', cancel);
-            window.addEventListener('mousemove', mouseMove);
-            window.addEventListener('mouseup', mouseUp);
             event.currentTarget.setPointerCapture(event.pointerId);
             useArrangementStore.getState().beginGesture(slip ? 'Slip clip contents' : edge ? `Trim clip ${edge}` : copy ? 'Duplicate clips' : 'Move clips');
             startAutoScroll();
         },
-        onPointerCancel: () => finish(false),
+        onPointerCancel: () => { if (gesture.current) finish(false); },
+        onLostPointerCapture: () => undefined,
         deleteSelection: () => {
             const arrangement = useArrangementStore.getState().arrangement;
             if (!arrangement) return;

@@ -1,0 +1,26 @@
+.arrangement-drag-ghost-layer {
+    position: absolute;
+    z-index: 10;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.arrangement-drag-ghost {
+    position: absolute;
+    top: 0;
+    left: 0;
+    border: 2px solid var(--timeline-selection);
+    border-radius: var(--radius-sm);
+    background: var(--timeline-clip-bg);
+    box-shadow: var(--shadow-menu);
+    opacity: .96;
+    will-change: transform;
+}
+
+.arrangement-clip.is-dragging { opacity: .35; }
+
+.arrangement-track.is-drop-target .arrangement-lane {
+    outline: 2px solid var(--timeline-selection);
+    outline-offset: -2px;
+}

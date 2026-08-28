@@ -6,6 +6,7 @@ export interface PitchRange {
 }
 
 const EMPTY_RANGE: PitchRange = { lo: 48, hi: 72 };
+export const COLLAPSED_LANE_HEIGHT = 72;
 
 export function initialPitchRange(min: number, max: number): PitchRange {
     if (!Number.isFinite(min) || !Number.isFinite(max)) return EMPTY_RANGE;
@@ -23,6 +24,7 @@ export function growPitchRange(range: PitchRange, min: number, max: number): Pit
 interface TrackLaneViewStore {
     pitchRanges: Record<string, PitchRange>;
     laneHeights: Record<string, number>;
+    previousLaneHeights: Record<string, number>;
     expandedPianoRolls: Record<string, string>;
     automationLaneByTrack: Record<string, string>;
     mixerOpen: boolean;
@@ -38,6 +40,7 @@ interface TrackLaneViewStore {
 export const useTrackLaneViewStore = create<TrackLaneViewStore>((set) => ({
     pitchRanges: {},
     laneHeights: {},
+    previousLaneHeights: {},
     expandedPianoRolls: {},
     automationLaneByTrack: {},
     mixerOpen: false,
@@ -55,17 +58,38 @@ export const useTrackLaneViewStore = create<TrackLaneViewStore>((set) => ({
     togglePianoRoll: (trackId, clipId) => set((state) => {
         const open = state.expandedPianoRolls[trackId] === clipId;
         const expandedPianoRolls = { ...state.expandedPianoRolls };
-        if (open) delete expandedPianoRolls[trackId];
-        else expandedPianoRolls[trackId] = clipId;
+        const previousLaneHeights = { ...state.previousLaneHeights };
+        if (open) {
+            delete expandedPianoRolls[trackId];
+            const restoredHeight = previousLaneHeights[trackId] ?? COLLAPSED_LANE_HEIGHT;
+            delete previousLaneHeights[trackId];
+            return {
+                expandedPianoRolls,
+                previousLaneHeights,
+                laneHeights: { ...state.laneHeights, [trackId]: restoredHeight },
+            };
+        }
+        expandedPianoRolls[trackId] = clipId;
+        if (state.expandedPianoRolls[trackId] === undefined) {
+            previousLaneHeights[trackId] = state.laneHeights[trackId] ?? COLLAPSED_LANE_HEIGHT;
+        }
         return {
             expandedPianoRolls,
-            laneHeights: { ...state.laneHeights, [trackId]: open ? 72 : Math.max(220, state.laneHeights[trackId] ?? 72) },
+            previousLaneHeights,
+            laneHeights: { ...state.laneHeights, [trackId]: Math.max(220, state.laneHeights[trackId] ?? COLLAPSED_LANE_HEIGHT) },
         };
     }),
     closePianoRoll: (trackId) => set((state) => {
         const expandedPianoRolls = { ...state.expandedPianoRolls };
+        const previousLaneHeights = { ...state.previousLaneHeights };
         delete expandedPianoRolls[trackId];
-        return { expandedPianoRolls, laneHeights: { ...state.laneHeights, [trackId]: 72 } };
+        const restoredHeight = previousLaneHeights[trackId] ?? state.laneHeights[trackId] ?? COLLAPSED_LANE_HEIGHT;
+        delete previousLaneHeights[trackId];
+        return {
+            expandedPianoRolls,
+            previousLaneHeights,
+            laneHeights: { ...state.laneHeights, [trackId]: restoredHeight },
+        };
     }),
     showAutomationLane: (trackId, laneId) => set((state) => {
         const automationLaneByTrack = { ...state.automationLaneByTrack };

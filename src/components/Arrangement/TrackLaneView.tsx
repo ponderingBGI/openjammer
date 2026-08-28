@@ -12,6 +12,7 @@ import { outputStageRefs } from '../../song/automation';
 import { trackRecordInput, trackRecordKind } from '../../song/recording';
 import { RecordGhost } from './RecordGhost';
 import { useGraphStore } from '../../store/graphStore';
+import { timebase } from '../../song/time';
 
 const TRACK_TINTS = ['var(--accent-secondary)', 'var(--accent-success)', 'var(--accent-warning)', 'var(--accent-danger)', 'var(--sketch-gray)'];
 
@@ -30,6 +31,9 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
     const selectedClipIds = useEditingContextStore((state) => state.viewports.arrangement.selection.clipIds);
     const selectedTrackIds = useEditingContextStore((state) => state.viewports.arrangement.selection.trackIds);
     const selectedNoteIds = useEditingContextStore((state) => state.viewports.arrangement.selection.noteIds);
+    const dragActive = useEditingContextStore((state) => state.dragActive);
+    const activeClipDragIds = useEditingContextStore((state) => state.activeClipDragIds);
+    const dropTargetId = useEditingContextStore((state) => state.clipDragPreview?.hoveredTrackId ?? null);
     const expandedClipId = useTrackLaneViewStore((state) => state.expandedPianoRolls[trackId]);
     const visibleAutomationId = useTrackLaneViewStore((state) => state.automationLaneByTrack[trackId]);
     const visibleAutomation = (track.automation ?? []).find((lane) => lane.id === visibleAutomationId);
@@ -47,7 +51,7 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
     const range = rememberedRange ? growPitchRange(rememberedRange, min, max) : initialPitchRange(min, max);
     useEffect(() => rememberPitchRange(trackId, range), [rememberPitchRange, trackId, range]);
     const instrument = arrangement.graph.nodes.find((node) => node.ref === track.ref)?.data?.instrumentId;
-    const clips = track.clips.filter((clip) => clip.startTick + clip.lengthTick >= visibleStartTick && clip.startTick <= visibleEndTick);
+    const clips = track.clips.filter((clip) => (dragActive && clip.id !== undefined && activeClipDragIds.includes(clip.id)) || (clip.startTick + clip.lengthTick >= visibleStartTick && clip.startTick <= visibleEndTick));
     const inputLabel = trackRecordInput(arrangement, track);
     const recordKind = trackRecordKind(arrangement, track);
     const [drumMode, setDrumMode] = useState<boolean | undefined>(undefined);
@@ -56,7 +60,7 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
     const ghostStart = Math.max(recordStartTick ?? 0, punch?.startTick ?? 0);
     const ghostEnd = punch?.endTick ?? Number.POSITIVE_INFINITY;
     return (
-        <div className={`arrangement-track${visibleAutomation ? ' has-automation' : ''}${selectedTrackIds.includes(trackId) ? ' is-selected' : ''}${expandedClipId ? ' has-lane-menu' : ''}`} data-track-id={trackId} role="listitem" aria-label={track.name ?? track.ref} style={{ height: laneHeight + (visibleAutomation ? AUTOMATION_LANE_HEIGHT : 0), gridTemplateRows: visibleAutomation ? `${laneHeight}px ${AUTOMATION_LANE_HEIGHT}px` : `${laneHeight}px`, '--track-tint': track.color ?? TRACK_TINTS[tintIndex] } as CSSProperties}>
+        <div className={`arrangement-track${visibleAutomation ? ' has-automation' : ''}${selectedTrackIds.includes(trackId) ? ' is-selected' : ''}${expandedClipId ? ' has-lane-menu' : ''}${dropTargetId === trackId ? ' is-drop-target' : ''}`} data-track-id={trackId} role="listitem" aria-label={track.name ?? track.ref} style={{ height: laneHeight + (visibleAutomation ? AUTOMATION_LANE_HEIGHT : 0), gridTemplateRows: visibleAutomation ? `${laneHeight}px ${AUTOMATION_LANE_HEIGHT}px` : `${laneHeight}px`, '--track-tint': track.color ?? TRACK_TINTS[tintIndex] } as CSSProperties}>
             <div className="arrangement-track__header" onPointerDown={() => { if (!shell) useEditingContextStore.getState().setSelection('arrangement', { trackIds: [trackId] }); }}>
                 <span className="arrangement-track__stripe" />
                 <div className="arrangement-track__top"><span className="arrangement-track__grab" aria-hidden="true">⠿</span><span className="arrangement-track__name">{track.name ?? track.ref}</span></div>
@@ -87,7 +91,7 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                 {expandedClipId && <div className="arrangement-track__lane-menu">
                     <span>{drumMode ? 'Drum rows' : 'Pitched notes'}</span>
                     <button type="button" aria-pressed={drumMode === true} onClick={() => setDrumMode((current) => !current)}>Drums</button>
-                    <button className="arrangement-lane-menu__quantize" type="button" onClick={() => applyPianoRollQuantize(selectedNoteIds)}>{selectedNoteIds.length ? 'Quantize' : 'select notes to quantize'}</button>
+                    <button className="arrangement-lane-menu__quantize" type="button" onClick={() => applyPianoRollQuantize(selectedNoteIds, 'arrangement')}>{selectedNoteIds.length ? 'Quantize' : 'select notes to quantize'}</button>
                     <button type="button" aria-pressed={useEditingContextStore.getState().stepEntry.trackId === trackId} onClick={() => {
                         const editing = useEditingContextStore.getState();
                         editing.setStepEntry({ trackId: editing.stepEntry.trackId === trackId ? null : trackId, positionTick: arrangement.tracks.find((item) => (item.id ?? item.ref) === trackId)?.clips.find((clip) => clip.id === expandedClipId)?.startTick ?? 0 });
@@ -102,10 +106,10 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                     useEditingContextStore.getState().setViewport('pianoroll', { pxPerTick: arrangementViewport.pxPerTick, leftTick: arrangementViewport.leftTick });
                     useEditingContextStore.getState().setSelection('pianoroll', { clipIds: [expandedClipId] });
                     useUiViewStore.getState().openPianoRoll(expandedClipId);
-                }} onQuantize={applyPianoRollQuantize} onAudition={(pitch, velocity, phase) => auditionPianoRollNote(track.ref, pitch, velocity, phase)} /> : clips.map((clip) => {
+                }} onQuantize={applyPianoRollQuantize} onAudition={(pitch, velocity, phase, token) => auditionPianoRollNote(track.ref, pitch, velocity, phase, token)} /> : clips.map((clip) => {
                     const source = arrangement.sources?.[clip.sourceId];
                     const takeCount = track.clips.filter((item) => item.startTick < clip.startTick + clip.lengthTick && clip.startTick < item.startTick + item.lengthTick && (item.layerIndex !== undefined || clip.layerIndex !== undefined)).length;
-                    return source && clip.id ? <ClipView key={clip.id} clip={clip} source={source} trackName={track.name ?? track.ref} trackId={trackId} range={range} pxPerTick={pxPerTick} laneHeight={laneHeight} selected={selectedClipIds.includes(clip.id)} takeCount={takeCount} onDoubleClick={source.kind === 'midi' ? () => useTrackLaneViewStore.getState().togglePianoRoll(trackId, clip.id!) : undefined} onSelect={(event, phase) => {
+                    return source && clip.id ? <ClipView key={clip.id} clip={clip} source={source} trackName={track.name ?? track.ref} trackId={trackId} range={range} pxPerTick={pxPerTick} laneHeight={laneHeight} timebase={timebase(arrangement)} selected={selectedClipIds.includes(clip.id)} takeCount={takeCount} onDoubleClick={source.kind === 'midi' ? () => useTrackLaneViewStore.getState().togglePianoRoll(trackId, clip.id!) : undefined} onSelect={(event, phase) => {
                         event.stopPropagation();
                         const context = useEditingContextStore.getState();
                         if (phase === 'press') context.beginSelectionOp('arrangement');

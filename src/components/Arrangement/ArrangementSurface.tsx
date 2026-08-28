@@ -18,10 +18,13 @@ import { gridTicks } from '../../store/editingContextStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { useUiViewStore } from '../../store/uiViewStore';
 import './ArrangementSurface.css';
+import './DragGhost.css';
+import { DragGhostLayer } from './DragGhost';
 import { MixerDrawer } from './MixerDrawer';
 import { AUTOMATION_LANE_HEIGHT } from './AutomationLaneView';
 import { copySelection, cutSelection, deleteSelection, duplicateSelectedRange, loopFromSelection, paste, splitSelectedRange } from '../../song/editingActions';
 import { virtualizationWindow } from './geometry';
+import { abortOwnedPointerGestures } from './pointerGestureLifetime';
 
 function parseMusicalDuration(value: string, ticksPerBeat: number, ticksPerBar: number): number | null {
     const match = value.trim().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*(bars?|beats?)?$/);
@@ -54,6 +57,34 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     const [timeError, setTimeError] = useState('');
     const marqueeStart = useRef<{ x: number; y: number; clientX: number; clientY: number; pointerId: number; add: boolean; toggle: boolean; mode: 'object' | 'range'; tick: number; trackId: string } | null>(null);
     const scrollbarFade = useRef<number | null>(null);
+    const viewportFrame = useRef<number | null>(null);
+    const pendingZoom = useRef<{ pointer: number; factor: number; ticksPerBar: number } | null>(null);
+
+    const scheduleViewportWrite = () => {
+        if (viewportFrame.current !== null) return;
+        viewportFrame.current = requestAnimationFrame(() => {
+            viewportFrame.current = null;
+            const scroll = scrollRef.current;
+            if (!scroll) return;
+            const zoom = pendingZoom.current;
+            pendingZoom.current = null;
+            if (zoom) {
+                useEditingContextStore.getState().zoomAt('arrangement', zoom.pointer, zoom.factor, zoom.ticksPerBar);
+                const next = useEditingContextStore.getState().viewports.arrangement;
+                setView((current) => ({ ...current, left: next.leftTick * next.pxPerTick, top: scroll.scrollTop }));
+                useEditingContextStore.getState().setViewport('arrangement', { yOrigin: scroll.scrollTop });
+                requestAnimationFrame(() => {
+                    const live = scrollRef.current;
+                    const canonical = useEditingContextStore.getState().viewports.arrangement;
+                    if (live) live.scrollLeft = canonical.leftTick * canonical.pxPerTick;
+                });
+                return;
+            }
+            const currentScale = useEditingContextStore.getState().viewports.arrangement.pxPerTick;
+            setView((current) => ({ ...current, left: scroll.scrollLeft, top: scroll.scrollTop }));
+            useEditingContextStore.getState().setViewport('arrangement', { leftTick: scroll.scrollLeft / currentScale, yOrigin: scroll.scrollTop });
+        });
+    };
 
     useBindingSet(useMemo(() => ({
         id: 'arrangement-surface',
@@ -104,6 +135,22 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     }, [arrangement]);
 
     useEffect(() => {
+        const element = scrollRef.current;
+        if (!element || !arrangement) return;
+        const ticksPerBar = timebase(arrangement).ticksPerBar;
+        const wheel = (event: WheelEvent) => {
+            if (!(event.ctrlKey || event.metaKey)) return;
+            event.preventDefault();
+            const pointer = event.clientX - element.getBoundingClientRect().left - HEADER_WIDTH;
+            const pending = pendingZoom.current;
+            pendingZoom.current = { pointer: Math.max(0, pointer), factor: (pending?.factor ?? 1) * Math.exp(-event.deltaY * 0.002), ticksPerBar };
+            scheduleViewportWrite();
+        };
+        element.addEventListener('wheel', wheel, { passive: false });
+        return () => element.removeEventListener('wheel', wheel);
+    }, [arrangement]);
+
+    useEffect(() => {
         const prompt = (event: Event) => { const mode = (event as CustomEvent<{ mode: 'insert' | 'delete' }>).detail?.mode; if (mode) { setTimePrompt(mode); setTimeError(''); } };
         const loopSelection = () => loopFromSelection();
         window.addEventListener('openjammer:time-prompt', prompt);
@@ -112,7 +159,9 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     }, []);
 
     useEffect(() => () => {
+        abortOwnedPointerGestures();
         if (scrollbarFade.current !== null) window.clearTimeout(scrollbarFade.current);
+        if (viewportFrame.current !== null) cancelAnimationFrame(viewportFrame.current);
     }, []);
 
     if (!arrangement) {
@@ -162,6 +211,7 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     return (
         <div className={`arrangement-surface song-interior ${transition ? `surface-transition-${transition}` : ''}`} data-surface-root="arrangement" data-song-node={songNodeId ?? 'song'} tabIndex={-1} role="region" aria-label="Arrangement" hidden={!visible} inert={!active ? true : undefined} aria-hidden={!active}>
             <TransportStrip fieldWidth={fieldViewportWidth} onOpenSettings={onOpenSettings} />
+            <DragGhostLayer />
             <div
                 className="arrangement-scroll"
                 ref={scrollRef}
@@ -170,22 +220,7 @@ export function ArrangementSurface({ active, visible = active, transition, songN
                     target.classList.add('is-scrolling');
                     if (scrollbarFade.current !== null) window.clearTimeout(scrollbarFade.current);
                     scrollbarFade.current = window.setTimeout(() => target.classList.remove('is-scrolling'), 200);
-                    requestAnimationFrame(() => {
-                        setView((current) => ({ ...current, left: target.scrollLeft, top: target.scrollTop }));
-                        useEditingContextStore.getState().setViewport('arrangement', { leftTick: target.scrollLeft / viewport.pxPerTick, yOrigin: target.scrollTop });
-                    });
-                }}
-                onWheel={(event) => {
-                    if (!(event.ctrlKey || event.metaKey)) return;
-                    event.preventDefault();
-                    const scroll = scrollRef.current;
-                    if (!scroll) return;
-                    const pointer = event.clientX - scroll.getBoundingClientRect().left - HEADER_WIDTH;
-                    useEditingContextStore.getState().zoomAt('arrangement', Math.max(0, pointer), Math.exp(-event.deltaY * 0.002), tb.ticksPerBar);
-                    requestAnimationFrame(() => {
-                        const next = useEditingContextStore.getState().viewports.arrangement;
-                        scroll.scrollLeft = next.leftTick * next.pxPerTick;
-                    });
+                    scheduleViewportWrite();
                 }}
             >
                 <div

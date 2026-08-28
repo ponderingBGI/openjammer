@@ -24,7 +24,7 @@ beforeEach(() => {
     id = 0;
     useClipboardStore.setState({ buffer: null, pasteCount: 0, lastPastePos: null });
     useHistoryStore.getState().clear();
-    useEditingContextStore.setState({ selectionHistory: [emptySelection()], selectionHistoryIndex: 0, selectionOpDepth: 0, selectionOpBefore: null });
+    useEditingContextStore.setState({ selectionHistoryBySurface: useEditingContextStore.getInitialState().selectionHistoryBySurface });
     useEditingContextStore.getState().clearSelection('arrangement');
 });
 
@@ -67,9 +67,9 @@ describe('BC-26 selection undo', () => {
         context.undoSelection('arrangement'); context.undoSelection('arrangement');
         expect(useEditingContextStore.getState().viewports.arrangement.selection.clipIds).toEqual(['a']);
         context.beginSelectionOp('arrangement'); context.setSelection('arrangement', { clipIds: ['branch'] }); context.commitSelectionOp('arrangement');
-        expect(useEditingContextStore.getState().selectionHistory.map((entry) => entry.clipIds)).toEqual([['branch'], ['a'], []]);
+        expect(useEditingContextStore.getState().selectionHistoryBySurface.arrangement.entries.map((entry) => entry.clipIds)).toEqual([['branch'], ['a'], []]);
         useHistoryStore.getState().record([{ domain: 'arrangement', verb: { kind: 'setTempo', tempoBpm: 121 } }], [{ domain: 'arrangement', verb: { kind: 'setTempo', tempoBpm: 120 } }], 'tempo', 'arrangement');
-        expect(useEditingContextStore.getState().selectionHistory).toHaveLength(1);
+        expect(useEditingContextStore.getState().selectionHistoryBySurface.arrangement.entries).toHaveLength(1);
     });
 });
 
