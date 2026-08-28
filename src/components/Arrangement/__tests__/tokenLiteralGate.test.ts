@@ -41,8 +41,15 @@ describe('Plugin component color gate', () => {
 
 describe('S2b CSS invariants', () => {
     it('keeps every port state free of glow shadows', () => {
+        // D7: no glow on a port, ever. The recessed socket well needs exactly two
+        // shadows — the inset depth that makes it a hole, and the one shared focus
+        // ring — so the gate now allows those and rejects anything else, which is
+        // a stricter statement than "no box-shadow at all" (that version would
+        // have been satisfied by a port with no depth AND no focus ring).
         const port = readFileSync(join(process.cwd(), 'packages/oj-ui/src/components/Port/Port.css'), 'utf8');
-        expect(port).not.toContain('box-shadow');
+        const shadows = [...port.matchAll(/box-shadow:\s*([^;]+);/g)].map((match) => match[1]!.trim());
+        expect(shadows.filter((value) => !/^(none|var\(--shadow-inset\)(,\s*var\(--focus-ring\))?)$/.test(value))).toEqual([]);
+        expect(port).not.toContain('drop-shadow');
     });
 
     it('removes the Speaker range input outer track', () => {

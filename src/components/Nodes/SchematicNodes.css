@@ -1,3 +1,8 @@
+/* Socket rules for the schematic faceplates live in _sockets.css — one socket
+   language for the whole canvas (D7). Imported here so every consumer of this
+   stylesheet gets them without touching a node component. */
+@import './_sockets.css';
+
 
 
 /* ============================================
@@ -283,19 +288,6 @@
     gap: var(--space-sm);
 }
 
-/* Port rows in keyboard body - left-aligned labels, ports on right */
-.keyboard-schematic-body .port-row {
-    width: 100%;
-}
-
-.keyboard-schematic-body .port-row.output {
-    flex-direction: row;
-    justify-content: space-between;
-}
-
-.keyboard-schematic-body .port-label {
-    text-align: left;
-}
 
 
 /* ============================================
@@ -383,27 +375,6 @@
 }
 
 
-/* Output port on right side of instrument */
-.instrument-output-port {
-    width: 16px;
-    height: 16px;
-    border: 1px solid var(--border-strong);
-    border-radius: 50%;
-    background: var(--audio-connection);
-    cursor: crosshair;
-    transition: all var(--motion-fast);
-    flex-shrink: 0;
-}
-
-.instrument-output-port:hover {
-    transform: scale(1.2);
-    filter: brightness(1.2);
-}
-
-.instrument-output-port.connected {
-    background: var(--audio-connected);
-    box-shadow: 0 0 6px var(--audio-connected);
-}
 
 /* Pedal row */
 .pedal-row {
@@ -419,37 +390,6 @@
     font-family: var(--font-sans);
 }
 
-/* Bundle input port for instrument */
-.bundle-input-port {
-    width: 12px;
-    height: 12px;
-    border: 2px solid var(--text-primary);
-    border-radius: 50%;
-    background: var(--control-connection);
-    cursor: crosshair;
-    transition: all var(--motion-fast);
-    flex-shrink: 0;
-}
-
-.bundle-input-port:hover {
-    transform: scale(1.2);
-    filter: brightness(1.2);
-}
-
-.bundle-input-port.connected {
-    background: var(--control-connected);
-    box-shadow: 0 0 4px var(--control-connected);
-}
-
-.bundle-input-port.empty {
-    border-style: dashed;
-    background: transparent;
-}
-
-.bundle-input-port.empty:hover {
-    background: var(--control-connection);
-    border-style: solid;
-}
 
 .empty-row {
     opacity: 0.6;
@@ -470,15 +410,6 @@
     margin-left: var(--space-sm);
 }
 
-.bundle-input-port.pedal {
-    border-color: #888;
-    background: #f0f0f0;
-}
-
-.bundle-input-port.pedal.connected {
-    background: #888;
-    box-shadow: 0 0 4px #888;
-}
 
 
 @keyframes ghost-fade-in {
@@ -1202,23 +1133,6 @@
 /* ============================================
  * Keyboard Node - Bundle Mode (Simple)
  * ============================================ */
-.bundle-port-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    padding: var(--space-xs) 0;
-    gap: var(--space-sm);
-}
-
-.port-label {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    font-family: var(--font-sans);
-}
 
 
 /* ============================================
@@ -1382,22 +1296,6 @@
 }
 
 
-/* Port row layout (for auto-generated ports from internal canvas-IO) */
-.port-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--space-xs) var(--space-sm);
-    gap: var(--space-sm);
-}
-
-.port-row.input {
-    flex-direction: row;
-}
-
-.port-row.output {
-    flex-direction: row-reverse;
-}
 
 /* ============================================================================
    OUTPUT PANEL NODE - Multi-port output panel with editable labels
@@ -1465,19 +1363,6 @@
     font-style: italic;
 }
 
-/* Individual port row */
-.output-panel-port-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-xs) var(--space-xs);
-    border-radius: var(--radius-sm);
-    transition: background var(--motion-fast);
-}
-
-.output-panel-port-row:hover {
-    background: var(--border-subtle);
-}
 
 
 /* Label */
@@ -1595,20 +1480,6 @@
     font-style: italic;
 }
 
-/* Individual port row - reversed order from output panel */
-.input-panel-port-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-sm);
-    padding: var(--space-xs) var(--space-xs);
-    border-radius: var(--radius-sm);
-    transition: background var(--motion-fast);
-}
-
-.input-panel-port-row:hover {
-    background: rgba(0, 0, 0, 0.05);
-}
 
 
 /* Label on left side */
@@ -1661,27 +1532,6 @@
 }
 
 
-/* ============================================
- * Empty Slot Styling - "Always one empty port"
- * ============================================ */
-.input-panel-port-row.empty-slot,
-.output-panel-port-row.empty-slot {
-    opacity: 0.6;
-    border-top: 1px dashed var(--border-subtle);
-    margin-top: var(--space-xs);
-    padding-top: var(--space-xs);
-}
-
-.input-panel-port-row.empty-slot:hover,
-.output-panel-port-row.empty-slot:hover {
-    opacity: 1;
-}
-
-.empty-slot-label {
-    font-style: italic;
-    color: var(--text-muted, #888);
-    font-size: var(--text-xs, 11px);
-}
 
 
 /* ============================================
@@ -1808,15 +1658,6 @@
     justify-content: flex-start;
 }
 
-.math-port-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
-}
-
-.math-port-row.output {
-    justify-content: flex-end;
-}
 
 .subtract-indicator {
     font-family: var(--font-mono);
@@ -1833,37 +1674,6 @@
     max-width: 320px;
 }
 
-/* SEAM-1: the library's single live seam — the sample feed to connected samplers.
-   Right edge, vertically centered (matches the registry port position y:0.5). */
-.library-sample-out-port {
-    position: absolute;
-    width: 14px;
-    height: 14px;
-    right: -7px;
-    top: 50%;
-    transform: translateY(-50%);
-    border: 1px solid var(--border-strong);
-    border-radius: 50%;
-    background: var(--audio-connection);
-    cursor: crosshair;
-    transition: transform var(--motion-fast), box-shadow var(--motion-fast);
-    z-index: 10;
-}
-
-.library-sample-out-port:hover,
-.library-sample-out-port:focus-visible {
-    transform: translateY(-50%) scale(1.2);
-}
-
-.library-sample-out-port:focus-visible {
-    outline: 2px solid var(--accent-primary);
-    outline-offset: 2px;
-}
-
-.library-sample-out-port.connected {
-    background: var(--audio-connected);
-    box-shadow: 0 0 6px var(--audio-connected);
-}
 
 .library-node .schematic-header {
     display: flex;
@@ -2756,59 +2566,6 @@
     text-align: center;
 }
 
-/* Side ports - positioned outside the node */
-.sampler-side-port {
-    position: absolute;
-    width: 14px;
-    height: 14px;
-    border: 1px solid var(--border-strong);
-    border-radius: 50%;
-    cursor: crosshair;
-    transition: transform var(--motion-fast), box-shadow var(--motion-fast);
-    z-index: 10;
-}
-
-.sampler-side-port:hover {
-    transform: scale(1.2);
-}
-
-.sampler-side-port:focus-visible {
-    outline: 2px solid var(--accent-primary);
-    outline-offset: 2px;
-    transform: scale(1.2);
-}
-
-/* Input port - top left, just under header */
-.sampler-side-port.input {
-    left: -7px;
-    top: 22px;
-    background: var(--control-connection);
-}
-
-.sampler-side-port.input:hover {
-    transform: scale(1.2);
-}
-
-.sampler-side-port.input.connected {
-    background: var(--control-connected);
-    box-shadow: 0 0 6px var(--control-connected);
-}
-
-/* Output port - top right, just under header */
-.sampler-side-port.output {
-    right: -7px;
-    top: 22px;
-    background: var(--audio-connection);
-}
-
-.sampler-side-port.output:hover {
-    transform: scale(1.2);
-}
-
-.sampler-side-port.output.connected {
-    background: var(--audio-connected);
-    box-shadow: 0 0 6px var(--audio-connected);
-}
 
 /* Sample drop zone - AudioClipVisual style */
 .sampler-sample-area {

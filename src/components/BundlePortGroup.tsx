@@ -96,8 +96,8 @@ export const BundlePortGroup = memo(function BundlePortGroup({
                             </Button>
                             <span className="bundle-label" title={bundleInfo.bundleLabel}>
                                 {bundleInfo.bundleLabel}
-                                <span className="bundle-count">({channelCount})</span>
                             </span>
+                            <span className="bundle-count">({channelCount})</span>
                         </>
                     )}
 
@@ -106,7 +106,6 @@ export const BundlePortGroup = memo(function BundlePortGroup({
                         kind={port.type}
                         direction={port.direction}
                         connected={!!isConnected}
-                        style={{ width: 14, height: 14 }}
                         data-node-id={nodeId}
                         data-port-id={port.id}
                         data-port-type={port.type}
@@ -130,8 +129,8 @@ export const BundlePortGroup = memo(function BundlePortGroup({
                         <>
                             <span className="bundle-label" title={bundleInfo.bundleLabel}>
                                 {bundleInfo.bundleLabel}
-                                <span className="bundle-count">({channelCount})</span>
                             </span>
+                            <span className="bundle-count">({channelCount})</span>
                             <Button
                                 variant="ghost"
                                 iconOnly
@@ -168,8 +167,8 @@ export const BundlePortGroup = memo(function BundlePortGroup({
                         </Button>
                         <span className="bundle-label" title={bundleInfo.bundleLabel}>
                             {bundleInfo.bundleLabel}
-                            <span className="bundle-count">({channelCount})</span>
                         </span>
+                        <span className="bundle-count">({channelCount})</span>
                     </>
                 )}
 
@@ -178,7 +177,6 @@ export const BundlePortGroup = memo(function BundlePortGroup({
                     kind={port.type}
                     direction={port.direction}
                     connected={!!isConnected}
-                    style={{ width: 12, height: 12 }}
                     data-node-id={nodeId}
                     data-port-id={port.id}
                     data-port-type={port.type}
@@ -195,8 +193,8 @@ export const BundlePortGroup = memo(function BundlePortGroup({
                     <>
                         <span className="bundle-label" title={bundleInfo.bundleLabel}>
                             {bundleInfo.bundleLabel}
-                            <span className="bundle-count">({channelCount})</span>
                         </span>
+                        <span className="bundle-count">({channelCount})</span>
                         <Button
                             variant="ghost"
                             iconOnly

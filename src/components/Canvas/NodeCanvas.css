@@ -56,6 +56,19 @@
     position: absolute;
     inset: 0;
     z-index: 10; /* Above connections by default */
+    /* The layer is a full-bleed 10000px box sitting over the whole canvas, so as
+       a pointer target it swallowed EVERY pixel between the cards — which is why
+       no cable had ever actually been clickable (audit UI-022): the wire's own
+       hit path was correct and permanently covered. The layer itself is now
+       transparent to the pointer and each node root takes its own events back,
+       so the gaps fall through to the cable underneath. `pointer-events` is an
+       inherited property, so the `display: contents` wrapper the schematic nodes
+       render through passes `auto` down to the real card. */
+    pointer-events: none;
+}
+
+.nodes-layer > * {
+    pointer-events: auto;
 }
 
 .clips-layer {
@@ -99,40 +112,27 @@
     pointer-events: none;
 }
 
-/* Ports remain visible and glowing in ghost mode */
+/* Ghost mode is the wiring X-ray: the cards fade back and the patch comes
+   forward. The sockets stay grabbable while the card around them stops being a
+   pointer target — and they do NOT glow. D7 bans a glowing port everywhere, and
+   an X-ray view is not an exception; the pulsing halo that used to live here was
+   the last one on the canvas. (Making a socket BRIGHTER than its card is not
+   possible from here: the node roots fade with `opacity`, which no descendant
+   can climb back out of. That is a ghost-mode redesign, not a socket change.) */
 .node-canvas.ghost-mode .oj-port {
-    opacity: 1;
     pointer-events: auto;
-    animation: portGlow 1.5s ease-in-out infinite;
-    will-change: box-shadow;
 }
 
-/* Connections fully visible and on top in ghost mode */
+/* Connections fully visible and on top in ghost mode. Signal still drives the
+   width — a hot cable is still the fattest one — but the floor is raised so a
+   silent patch is fully readable. */
 .node-canvas.ghost-mode .oj-cable {
+    stroke-width: calc(3px + var(--oj-cable-signal) * 2.5px);
+    opacity: 1;
+}
+
+.node-canvas.ghost-mode .oj-cable__hit {
     pointer-events: stroke;
-    stroke-width: 4;
-    opacity: 1 !important; /* Override any signal-based opacity */
-    filter: drop-shadow(0 0 4px currentColor); /* Add glow for visibility */
-}
-
-.node-canvas.ghost-mode .oj-cable--audio {
-    filter: drop-shadow(0 0 6px var(--audio-connection));
-}
-
-.node-canvas.ghost-mode .oj-cable--control {
-    filter: drop-shadow(0 0 6px var(--control-connection));
-}
-
-@keyframes portGlow {
-
-    0%,
-    100% {
-        box-shadow: 0 0 8px 2px var(--audio-connection);
-    }
-
-    50% {
-        box-shadow: 0 0 16px 4px var(--audio-connection);
-    }
 }
 
 

@@ -50,6 +50,16 @@ export const SelectedAndBundled: Story = () => (
     </Stage>
 );
 
+/** Quiet is the resting state of every cable on the canvas: 2.5px, 45%, no
+ *  glow. Only the signal formula lights a wire up. */
+export const Quiet: Story = () => (
+    <Stage>
+        <Cable kind="audio" start={{ x: 30, y: 60 }} end={{ x: 330, y: 60 }} />
+        <Cable kind="control" start={{ x: 30, y: 110 }} end={{ x: 330, y: 110 }} />
+        <Cable kind="universal" start={{ x: 30, y: 160 }} end={{ x: 330, y: 160 }} />
+    </Stage>
+);
+
 export const SignalLevels: Story = () => (
     <Stage>
         <Cable kind="audio" start={{ x: 30, y: 40 }} end={{ x: 330, y: 40 }} signalLevel={0} />

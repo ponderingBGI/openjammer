@@ -220,7 +220,7 @@ const audioInput: PortDefinition = {
     name: 'Audio In',
     type: 'audio',
     direction: 'input',
-    position: { x: 0, y: 0.5 }  // Left side, centered
+    position: { x: 0, y: 0.5 }  // input column; set y to the node's socket row
 };
 
 // Standard audio output
@@ -229,7 +229,7 @@ const audioOutput: PortDefinition = {
     name: 'Audio Out',
     type: 'audio',
     direction: 'output',
-    position: { x: 1, y: 0.5 }  // Right side, centered
+    position: { x: 1, y: 0.5 }  // output column; set y to the node's socket row
 };
 ```
 
@@ -382,19 +382,32 @@ Examples: `add`, `subtract`
 
 ### Position Normalization
 
-All port positions use normalized 0-1 coordinates:
-- `x: 0` = left edge
-- `x: 1` = right edge
-- `y: 0` = top edge
-- `y: 1` = bottom edge
+All port positions use normalized 0-1 coordinates against the node's declared
+`dimensions`:
+- `x: 0` = the **input side**, `x: 1` = the **output side**
+- `y: 0` = top edge, `y: 1` = bottom edge
+
+`x: 0` / `x: 1` name a SIDE, not a pixel. Since the New DNA the socket is a
+recessed well living inside the node body, so `utils/portPositions.ts` resolves
+an edge-anchored x to the real socket column — 14px body padding + 9px socket
+radius in from the card edge (`SOCKET_INSET_PX`). An x strictly between 0 and 1
+is a faceplate coordinate (the visual keyboard's keys, MiniLab's knobs) and is
+used exactly as written.
+
+These coordinates are only the **fallback**: the canvas anchors cables by
+measuring the socket's real DOM box. They matter on the frames before a node has
+painted (project load), so keep them honest — the first socket row of a card
+built on `NodeShell` sits at `socketRowY(height)` = 60px down, each further row
+26px below it.
 
 ### Standard Layouts
 
 **Single input/output:**
 ```typescript
 ports: [
-    { ...input,  position: { x: 0, y: 0.5 } },  // Centered left
-    { ...output, position: { x: 1, y: 0.5 } }   // Centered right
+    // y = socketRowY(height) — the first body row, not the card's middle.
+    { ...input,  position: { x: 0, y: 0.6 } },  // input column
+    { ...output, position: { x: 1, y: 0.6 } }   // output column
 ]
 ```
 

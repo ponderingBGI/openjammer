@@ -4,17 +4,18 @@ import './PortRow.css';
 
 export interface PortRowProps
     extends Omit<HTMLAttributes<HTMLSpanElement>, 'children'> {
-    /** The port's name shown beside the dot (Caveat voice). */
+    /** The port's name shown beside the socket — rendered in the 9.5px mono
+     *  micro-voice, uppercased by CSS. */
     label: ReactNode;
-    /** `input` lays out [Port][label]; `output` lays out [label][Port]. */
+    /** `input` lays out [socket][label]; `output` lays out [label][socket]. */
     side: PortDirection;
-    /** What travels the cable — sets the Port's wiring color. */
+    /** What travels the cable — sets the socket core's wiring color once live. */
     kind: PortKind;
-    /** Live connection — brightens the dot and gives it the one allowed glow. */
+    /** Live connection — fills the socket core with the wiring color. */
     connected?: boolean;
     /** For a `universal` port: the kind it resolved to once connected. */
     resolvedKind?: PortKind;
-    /** A faint, dashed "add a port" slot. */
+    /** An empty, dashed "add a port" slot. */
     placeholder?: boolean;
     /** Hide the text label but keep it in the DOM for assistive tech (aria). */
     hideLabel?: boolean;
@@ -24,13 +25,16 @@ export interface PortRowProps
 }
 
 /**
- * A labeled port row for node bodies (DESIGN.md §5 Ports). Composes Port and
- * sits it beside its name: `input` rows read [dot][label] left-to-right,
- * `output` rows read [label][dot] right-aligned (row-reverse) so the dot always
- * hugs the node edge it wires to. The `...rest` — including the canvas's
- * `data-node-id` / `data-port-id` / `data-port-type` and pointer handlers —
- * forwards to the Port, since that DOM is the connection target, not the row.
- * Theme-agnostic (semantic tokens only).
+ * A labeled port row — the atom a node body's port block is built from
+ * (master-plan D7). Composes Port and sits it beside its name: `input` rows read
+ * [socket][label] left-to-right, `output` rows read [label][socket] right-aligned
+ * (row-reverse), so the two groups mirror across the body and every socket faces
+ * the side its cable arrives from. The row is 24px tall minimum — the socket is
+ * 18px, but the target has to be bigger than the drawing.
+ *
+ * The `...rest` — including the canvas's `data-node-id` / `data-port-id` /
+ * `data-port-type` and pointer handlers — forwards to the Port, since that DOM
+ * is the connection target, not the row. Theme-agnostic (semantic tokens only).
  */
 export function PortRow({
     label,

@@ -2,7 +2,7 @@
  * Node Canvas - Main canvas with pan/zoom, box selection, and node rendering
  */
 
-import { useCallback, useRef, useState, useEffect, useMemo, lazy, Suspense } from 'react';
+import { useCallback, useRef, useState, useEffect, useLayoutEffect, useMemo, lazy, Suspense } from 'react';
 import type { Position, Connection } from '../../engine/types';
 import { useGraphStore, getNodeDimensions, type NodeBounds } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -242,18 +242,11 @@ export function NodeCanvas() {
             return { x: canvasX, y: canvasY };
         }
 
-        // Fallback: calculate from node position + port.position
-        const port = node.ports.find(p => p.id === portId);
-        if (port?.position) {
-            const graphNode = useGraphStore.getState().nodes.get(node.id);
-            if (!graphNode) return null;
-            const { width: nodeWidth, height: nodeHeight } = getNodeDimensions(graphNode);
-            return {
-                x: node.position.x + port.position.x * nodeWidth,
-                y: node.position.y + port.position.y * nodeHeight
-            };
-        }
-        return null;
+        // Fallback: the ONE port-geometry home (utils/portPositions), so the
+        // marquee and the cables can never disagree about where a socket is.
+        const graphNode = useGraphStore.getState().nodes.get(node.id);
+        if (!graphNode) return null;
+        return calculatePortPosition(graphNode, portId);
     }, [pan, zoom]);
 
     // Handle right-click context menu - just prevent default
@@ -1074,15 +1067,16 @@ export function NodeCanvas() {
         portPositionCache.current.clear();
     }, [allNodes]);
 
-    // Connections render before nodes, so the first pass can only use fallback
-    // math. Re-render once after the node DOM paints so cables anchor to dots.
-    useEffect(() => {
-        const frame = window.requestAnimationFrame(() => {
-            portPositionCache.current.clear();
-            setPortLayoutVersion(version => version + 1);
-        });
-
-        return () => window.cancelAnimationFrame(frame);
+    // Connections render before nodes, so the first render pass of a mount or a
+    // node add can only use fallback math. This runs AFTER the DOM is committed
+    // but BEFORE the browser paints, so the re-render it schedules is flushed
+    // synchronously and the very first painted frame already has cables measured
+    // off the real sockets. As a rAF this was one frame late — visible as cables
+    // snapping from the card corner into the well on every add. (Design for
+    // instant: the player watches the change land, never a correction.)
+    useLayoutEffect(() => {
+        portPositionCache.current.clear();
+        setPortLayoutVersion(version => version + 1);
     }, [nodes, connections.size]);
 
     // Cable anchors can move without a graph mutation when a node's content or

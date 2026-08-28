@@ -11,12 +11,22 @@ import { MINILAB3_CONFIG, generatePortsFromConfig } from '../components/controls
 // Port Templates
 // ============================================================================
 
+// Port `position` is normalized against the node's declared `dimensions`.
+// x names the SIDE — 0 = input column, 1 = output column — and
+// `utils/portPositions.socketColumnX` resolves it to the real in-body socket
+// column (14px body padding + 9px socket radius from the card edge), because
+// the New DNA socket is a well sunk INTO the body, not a dot on the edge
+// (master-plan D7). y is measured from the card top; the first socket row sits
+// at `socketRowY(height)` = 60px down (39px header + 12px body padding + 9px
+// radius), each further row 26px below it. Faceplates that place their own
+// sockets (the visual keyboard's keys, MiniLab's knobs) carry real coordinates
+// instead and are left alone.
 const audioOutput: PortDefinition = {
     id: 'audio-out',
     name: 'Audio Out',
     type: 'audio',
     direction: 'output',
-    position: { x: 1, y: 0.5 }  // Right side, centered
+    position: { x: 1, y: 0.5 }  // output column; y overridden per node
 };
 
 const audioInput: PortDefinition = {
@@ -24,7 +34,7 @@ const audioInput: PortDefinition = {
     name: 'Audio In',
     type: 'audio',
     direction: 'input',
-    position: { x: 0, y: 0.5 }  // Left side, centered
+    position: { x: 0, y: 0.5 }  // input column; y overridden per node
 };
 
 // ============================================================================
@@ -510,8 +520,9 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Audio effect processor',
         ui: 'react', // EffectNode (renderNodeContent switch)
         defaultPorts: [
-            { ...audioInput, position: { x: 0, y: 0.5 } },
-            { ...audioOutput, position: { x: 1, y: 0.5 } }
+            // First body socket row: 60 / 100px card height.
+            { ...audioInput, position: { x: 0, y: 0.6 } },
+            { ...audioOutput, position: { x: 1, y: 0.6 } }
         ],
         defaultData: {
             effectType: 'distortion',
@@ -527,8 +538,9 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Place a mono signal in the stereo field (−1 left … +1 right)',
         ui: 'auto', // AutoParamPanel (one pan knob) — no bespoke NodeWrapper branch
         defaultPorts: [
-            { ...audioInput, position: { x: 0, y: 0.5 } },
-            { ...audioOutput, position: { x: 1, y: 0.5 } }
+            // First body socket row: 60 / 90px card height.
+            { ...audioInput, position: { x: 0, y: 0.667 } },
+            { ...audioOutput, position: { x: 1, y: 0.667 } }
         ],
         defaultData: {
             pan: 0
@@ -543,8 +555,9 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Stereo width via mid/side (0 = mono … 1 = unchanged … 2 = wide)',
         ui: 'auto', // AutoParamPanel (one width knob) — no bespoke NodeWrapper branch
         defaultPorts: [
-            { ...audioInput, position: { x: 0, y: 0.5 } },
-            { ...audioOutput, position: { x: 1, y: 0.5 } }
+            // First body socket row: 60 / 90px card height.
+            { ...audioInput, position: { x: 0, y: 0.667 } },
+            { ...audioOutput, position: { x: 1, y: 0.667 } }
         ],
         defaultData: {
             width: 1
@@ -563,9 +576,10 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Multiply a signal by a number, or by a second signal (×)',
         ui: 'react', // MultiplierNode (renderNodeContent switch)
         defaultPorts: [
-            { id: 'in-1', name: 'In 1', type: 'universal', direction: 'input', position: { x: 0, y: 0.33 } },
-            { id: 'in-2', name: 'In 2', type: 'universal', direction: 'input', position: { x: 0, y: 0.67 } },
-            { id: 'out', name: 'Out', type: 'universal', direction: 'output', position: { x: 1, y: 0.5 } }
+            // Socket rows 0 and 1: 60 / 86 over a 100px card height.
+            { id: 'in-1', name: 'In 1', type: 'universal', direction: 'input', position: { x: 0, y: 0.6 } },
+            { id: 'in-2', name: 'In 2', type: 'universal', direction: 'input', position: { x: 0, y: 0.86 } },
+            { id: 'out', name: 'Out', type: 'universal', direction: 'output', position: { x: 1, y: 0.6 } }
         ],
         defaultData: {
             factor: 1,
@@ -600,6 +614,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Record audio to WAV file',
         ui: 'react', // RecorderNode (renderNodeContent switch)
         defaultPorts: [
+            // First body socket row: 60 / 120px card height.
             { ...audioInput, position: { x: 0, y: 0.5 } }
         ],
         defaultData: {

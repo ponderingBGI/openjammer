@@ -12,11 +12,52 @@ import type { GraphNode, PortDefinition, PortLayoutConfig, Position } from '../e
 import { getNodeDefinition } from '../engine/registry';
 import { getNodeDimensions } from '../store/graphStore';
 
-// Default port layout when none specified
+/**
+ * New DNA socket geometry (master-plan D7). Sockets are recessed wells INSIDE
+ * the node body, not dots on the card edge, so the fallback math has to land on
+ * the same pixel the DOM does — otherwise every canvas mount and every node add
+ * paints one frame of cables hooked to the card's corners and then snaps. The
+ * covenant calls that a bug, not a cosmetic issue.
+ *
+ * The numbers are measured off the rendered card, not guessed:
+ *   x: 14px body padding + 9px socket radius              = 23px from the edge
+ *   y: 39px header + 12px body padding + 9px socket radius = 60px from the top
+ *   step: 18px well + 8px row gap                          = 26px per row
+ *
+ * `SOCKET_*_PX` are exported because the registry's normalized `position`
+ * literals are derived from them — `src/engine/__tests__/socketGeometry.test.ts`
+ * recomputes every edge-anchored literal from these constants and the node's own
+ * declared dimensions, so the two can never drift apart silently.
+ */
+export const SOCKET_INSET_PX = 23;
+export const SOCKET_ROW_TOP_PX = 60;
+export const SOCKET_ROW_STEP_PX = 26;
+
+/**
+ * Normalized x of the socket column for a node `width` px wide. Clamped at 30%
+ * so the two columns of a very narrow card can never cross in the middle — a
+ * few node types declare nominal boxes far smaller than the card they actually
+ * render (`keyboard-key` says 50x50), and a fallback that puts the input on top
+ * of the output would be worse than the edge it replaced.
+ */
+export function socketColumnX(width: number, side: 'input' | 'output'): number {
+    const inset = Math.min(SOCKET_INSET_PX / width, 0.3);
+    return side === 'input' ? inset : 1 - inset;
+}
+
+/** Normalized y of the `index`-th socket row on a node `height` px tall. */
+export function socketRowY(height: number, index = 0): number {
+    return (SOCKET_ROW_TOP_PX + index * SOCKET_ROW_STEP_PX) / height;
+}
+
+// Default port layout when none specified. `x: 0 / 1` names the input and
+// output SIDE; resolveSocketX turns that into the real in-body column for this
+// node's width. The band is top-weighted because the sockets open the body
+// rather than straddling the card's vertical middle.
 const DEFAULT_PORT_LAYOUT: Required<PortLayoutConfig> = {
     direction: 'vertical',
-    inputArea: { x: 0, startY: 0.2, endY: 0.8 },
-    outputArea: { x: 1, startY: 0.2, endY: 0.8 }
+    inputArea: { x: 0, startY: 0.45, endY: 0.85 },
+    outputArea: { x: 1, startY: 0.45, endY: 0.85 }
 };
 
 /**
@@ -30,17 +71,21 @@ export function getPortPosition(node: GraphNode, portId: string): Position | nul
     const dimensions = definition.dimensions ?? getNodeDimensions(node);
     const portLayout = definition.portLayout ?? {};
 
-    // Merge with defaults
+    // Merge with defaults. The default areas are edge-anchored (x 0 / 1) because
+    // that is what "the input side" means; resolveSocketX turns that into the
+    // real in-body column for this node's width.
     const layout: Required<PortLayoutConfig> = {
         direction: portLayout.direction ?? DEFAULT_PORT_LAYOUT.direction,
         inputArea: portLayout.inputArea ?? DEFAULT_PORT_LAYOUT.inputArea,
         outputArea: portLayout.outputArea ?? DEFAULT_PORT_LAYOUT.outputArea
     };
 
-    // If port has explicit position, use it
+    // If port has explicit position, use it — with the same edge-to-column
+    // resolution the dynamic path gets, so an author writing "the output side"
+    // as x: 1 lands on the socket, not on the card's corner.
     if (port.position) {
         return {
-            x: node.position.x + port.position.x * dimensions.width,
+            x: node.position.x + resolveSocketX(port.position.x, dimensions.width) * dimensions.width,
             y: node.position.y + port.position.y * dimensions.height
         };
     }
@@ -103,9 +148,21 @@ function calculateDynamicPortPosition(
     }
 
     return {
-        x: node.position.x + normalizedX * dimensions.width,
+        x: node.position.x + resolveSocketX(normalizedX, dimensions.width) * dimensions.width,
         y: node.position.y + normalizedY * dimensions.height
     };
+}
+
+/**
+ * Pull an edge-anchored x (0 = left rail, 1 = right rail) in to the socket
+ * column. Anything between the rails is a bespoke faceplate coordinate (the
+ * visual keyboard's keys, MiniLab's knobs) and is left exactly where the node
+ * author put it.
+ */
+function resolveSocketX(normalizedX: number, width: number): number {
+    if (normalizedX <= 0) return socketColumnX(width, 'input');
+    if (normalizedX >= 1) return socketColumnX(width, 'output');
+    return normalizedX;
 }
 
 /**

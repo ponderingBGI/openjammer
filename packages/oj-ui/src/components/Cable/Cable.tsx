@@ -8,35 +8,40 @@ export type CableKind = 'audio' | 'control' | 'universal';
 
 export interface CableProps
     extends Omit<SVGProps<SVGPathElement>, 'd' | 'onSelect' | 'start' | 'end'> {
-    /** Where the cable leaves the source port (canvas coords). */
+    /** Where the cable leaves the source socket (canvas coords). */
     start: CablePoint;
-    /** Where the cable enters the target port (canvas coords). */
+    /** Where the cable enters the target socket (canvas coords). */
     end: CablePoint;
-    /** What travels the cable: `audio` (blue), `control` (grey), `universal`
+    /** What travels the cable: `audio` (teal), `control` (grey), `universal`
      *  (violet). Stroke color follows the type — Port-Color-Is-Meaning. */
     kind: CableKind;
-    /** Selected — brightens to the kind's connected color and thickens. */
+    /** Selected — full opacity, a pixel wider, and an accent halo. */
     selected?: boolean;
     /** This cable stands in for several wired together — drawn heavier. */
     bundled?: boolean;
     /** How many connections the bundle represents (for the hover `<title>`). */
     bundleCount?: number;
-    /** Live signal RMS, 0..1 — raises stroke-width, opacity, and the soft
-     *  live-connection glow (DESIGN.md §5 exception) so a hot cable reads as alive. */
+    /** Live signal RMS, 0..1 — raises stroke-width, opacity and the glow. This
+     *  is the canvas's meter: a cable is one of the only two things here allowed
+     *  to light up, and only while it is actually carrying sound. */
     signalLevel?: number;
-    /** In-progress drag from a port to the cursor — drawn dashed. */
+    /** In-progress drag from a socket to the cursor — drawn dashed. */
     temp?: boolean;
     /** Click the stroke to select the connection. */
     onSelect?: () => void;
 }
 
 /**
- * A connection cable between two ports, drawn as a single SVG `<path>` inside
- * a `<g>`. Theme-agnostic: stroke comes from the kind's wiring token, so it
- * recolors with the active theme. The stroke is the only pointer target, so a
- * click selects the cable without swallowing the canvas underneath. Wrapped in
- * `React.memo` with a comparator that treats sub-1% `signalLevel` changes as
- * equal — the live-canvas perf guard for 60fps meter updates.
+ * A connection cable between two sockets: an SVG `<g>` holding a fat invisible
+ * hit path and, over it, the visible wire. The wire is `pointer-events: none`
+ * and the hit path is 14px wide, so a 2.5px quiet cable is still clickable at
+ * any zoom without either path stealing the canvas underneath.
+ *
+ * Theme-agnostic: stroke AND `color` come from the kind's wiring token, so the
+ * signal glow (which draws with `currentColor`) matches the wire instead of
+ * inheriting the surrounding text ink. Wrapped in `React.memo` with a
+ * comparator that treats sub-1% `signalLevel` changes as equal — the
+ * live-canvas perf guard for 60fps meter updates.
  */
 function CableBase({
     start,
@@ -52,39 +57,37 @@ function CableBase({
     style,
     ...rest
 }: CableProps) {
-    const classes = [
-        'oj-cable',
-        `oj-cable--${kind}`,
+    const signal = Math.max(0, Math.min(1, signalLevel));
+    const states = [
         selected && 'is-selected',
         bundled && 'is-bundled',
         temp && 'is-temp',
-        className,
-    ]
+        signal === 0 && 'is-quiet',
+    ].filter(Boolean) as string[];
+
+    const classes = ['oj-cable', `oj-cable--${kind}`, ...states, className]
         .filter(Boolean)
         .join(' ');
 
     const signalStyle = {
         ...style,
         // Clamp + fixed precision so the variable is stable and CSS calc-friendly.
-        '--oj-cable-signal': Math.max(0, Math.min(1, signalLevel)).toFixed(3),
+        '--oj-cable-signal': signal.toFixed(3),
     } as CSSProperties;
 
+    const d = cablePath(start, end);
+    const handleSelect = onSelect
+        ? (e: React.MouseEvent<SVGPathElement>) => {
+              e.stopPropagation();
+              onSelect();
+          }
+        : undefined;
+
     return (
-        <g className="oj-cable-group">
-            <path
-                d={cablePath(start, end)}
-                className={classes}
-                style={signalStyle}
-                onClick={
-                    onSelect
-                        ? (e) => {
-                              e.stopPropagation();
-                              onSelect();
-                          }
-                        : undefined
-                }
-                {...rest}
-            />
+        <g className={['oj-cable-group', ...states].join(' ')}>
+            {/* The click target, under the wire and invisible (UI-022). */}
+            <path d={d} className="oj-cable__hit" onClick={handleSelect} />
+            <path d={d} className={classes} style={signalStyle} {...rest} />
             {bundled && bundleCount > 1 && (
                 <title>{`Bundle (${bundleCount} connections)`}</title>
             )}

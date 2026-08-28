@@ -1,67 +1,90 @@
-
+/*
+ * Port — the recessed socket well (New DNA, master-plan D7).
+ *
+ * A port is a HOLE, not a lamp. The well is an 18px circle sunk into the node
+ * body: inset fill, a `--border-control` ring (the one token that clears the
+ * 3:1 WCAG 1.4.11 boundary floor with no fill delta to lean on), and the shared
+ * `--shadow-inset` depth. A core dot sits in the middle: `--text-muted` when
+ * nothing is plugged in (4.5:1 on the inset — an empty socket has to read at a
+ * glance mid-set), the wiring color once a cable lands.
+ *
+ * Two rules this file exists to keep:
+ *   1. NO GLOW. Ever. "Sound is visible" allows exactly two glowing things —
+ *      a cable carrying signal and a meter. A port is neither.
+ *   2. NO SCALE on hover. A connection target that grows under the pointer moves
+ *      the thing you are aiming at (No-Surprise). Hover recolors the ring instead.
+ *
+ * The core dot is a fixed 8px target inside every shared 18px well. Schematic
+ * faceplates normalize their wells to that shared size in `_sockets.css`.
+ */
 .oj-port {
-    display: inline-block;
+    display: inline-grid;
+    place-items: center;
+    box-sizing: border-box;
+    flex-shrink: 0;
     width: var(--port-size);
     height: var(--port-size);
     border-radius: 50%;
-    border: 1px solid var(--border-control);
-    background: var(--bg-canvas);
-    cursor: crosshair;
-    transition: transform var(--motion-fast), background var(--motion-fast);
-}
-.oj-port:hover {
-    transform: scale(1.25);
     background: var(--bg-tertiary);
+    border: 1px solid var(--border-control);
+    box-shadow: var(--shadow-inset);
+    cursor: crosshair;
+    transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
 }
 
-.oj-port--audio {
-    background: var(--audio-connection);
+/* The core — what the socket is carrying. Exactly 8px in every shared well. */
+.oj-port::after {
+    content: '';
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+    transition: background var(--motion-fast);
 }
 
-.oj-port--control {
+/* Hover — a 1px accent ring on the well. The target does not move. */
+.oj-port:hover {
+    border-color: var(--accent-primary);
+}
+
+/* One focus ring, everywhere. */
+.oj-port:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-inset), var(--focus-ring);
+}
+
+/* Live wiring colors — the legend. The port TYPE is the source of truth; the
+   core color follows from it (Port-Color-Is-Meaning), and only once something
+   is actually plugged in. An idle socket of any type reads the same, because
+   what it is carrying right now is: nothing. */
+.oj-port--control.is-connected::after {
     background: var(--control-connection);
 }
 
-.oj-port--audio.is-connected {
-    background: var(--audio-connected);
+.oj-port--audio.is-connected::after {
+    background: var(--audio-connection);
 }
 
-.oj-port--control.is-connected {
-    background: var(--control-connected);
-}
-
-/* Universal — violet until the connection resolves to a concrete signal type. */
-.oj-port--universal {
-    background: var(--universal-port);
-}
-
-.oj-port--universal.is-connected {
+.oj-port--universal.is-connected::after {
     background: var(--universal-connection);
 }
 
-/* A faint dashed slot inviting a new connection (e.g. a node's "+ port"). */
+/* A placeholder slot ("add a port") — the well is drawn, dashed, with nothing
+   in it. An empty outline reads as an invitation; a dimmed dot would read as a
+   broken connection. */
 .oj-port.is-placeholder {
-    opacity: 0.4;
     border-style: dashed;
+    box-shadow: none;
+    background: transparent;
     cursor: copy;
 }
 
-/* Active — a control port firing right now (e.g. a held control key on a
-   keyboard). Success-green fill + the one sanctioned live glow + a brief pulse;
-   a performance signal you read mid-set (DESIGN.md §5). Stilled for reduced motion. */
-.oj-port.is-active {
-    background: var(--accent-success);
-    animation: oj-port-active-pulse 0.3s ease-in-out;
+.oj-port.is-placeholder::after {
+    display: none;
 }
 
-@keyframes oj-port-active-pulse {
-    0% {
-        transform: scale(1);
-    }
-    50% {
-        transform: scale(1.2);
-    }
-    100% {
-        transform: scale(1);
-    }
+/* Active — a control port firing right now (a held control key). The core goes
+   success-ink; no pulse, no glow. The performer reads the core, not a halo. */
+.oj-port.is-active::after {
+    background: var(--success-ink);
 }

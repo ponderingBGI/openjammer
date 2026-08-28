@@ -1,0 +1,174 @@
+/*
+ * Sockets on the schematic faceplates — the ONE place the New DNA socket
+ * language is applied outside the oj-ui Port/PortRow pair.
+ *
+ * Every socket on this canvas is already an oj-ui `<Port>`; the schematic nodes
+ * just hand it a nickname (`.instrument-output-port`, `.sampler-side-port`, …)
+ * and, historically, a full set of overrides that repainted it as a coloured
+ * disc with a glow. Those overrides are gone. What is left here is the two
+ * things a faceplate legitimately owns — WHERE its socket sits and WHAT ITS ROW
+ * looks like — while the well itself (recessed, `--border-control` ring, muted
+ * core until something is plugged in, never a glow) comes from `Port.css` for
+ * every node in the app. One language, defined once, at every size.
+ *
+ * Extracted out of SchematicNodes.css (which lost these rules, it did not gain
+ * a copy) so the socket redesign lives in one readable file instead of eleven
+ * places 3000 lines apart.
+ */
+
+/* ============================================================
+ * 1. Socket rows — the label beside the well
+ * ============================================================
+ * Same shape as `.oj-port-row`: socket + 9.5px uppercase mono name, 24px of
+ * hittable row around an 18px well.
+ */
+.port-row,
+.bundle-port-row,
+.math-port-row,
+.output-panel-port-row,
+.input-panel-port-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 24px;
+}
+
+.port-row {
+    justify-content: space-between;
+    padding: 0 var(--space-xs);
+}
+
+.port-row.input {
+    flex-direction: row;
+}
+
+.port-row.output {
+    flex-direction: row-reverse;
+}
+
+.bundle-port-row,
+.output-panel-port-row,
+.input-panel-port-row {
+    justify-content: space-between;
+    width: 100%;
+    padding: 2px var(--space-xs);
+    border-radius: var(--radius-sm);
+    transition: background var(--motion-fast);
+}
+
+/* Bundle names are identities, not hints. A 140px input panel leaves only
+   ~52px after the disclosure, count and well; the 9.5px tracked mono name needs
+   90px for `KEYBOARD ROW 1`. Widen only panels that actually contain bundles. */
+.input-panel-node:has(.bundle-port-group) {
+    width: 190px;
+}
+
+.output-panel-port-row:hover,
+.input-panel-port-row:hover {
+    background: var(--bg-tertiary);
+}
+
+.math-port-row.output {
+    justify-content: flex-end;
+}
+
+/* The name beside a socket. The micro mono voice, matched to
+   `.oj-port-row__label` — a port label is an exact machine name, not prose. */
+.port-label,
+.empty-slot-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
+    line-height: 1.2;
+}
+
+.keyboard-schematic-body .port-row {
+    width: 100%;
+}
+
+.keyboard-schematic-body .port-row.output {
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.keyboard-schematic-body .port-label {
+    text-align: left;
+}
+
+/* "Always one empty port": the trailing slot every panel keeps open. A dashed
+   rule above it, and the slot's own socket is already the dashed empty well. */
+.input-panel-port-row.empty-slot,
+.output-panel-port-row.empty-slot {
+    border-top: 1px dashed var(--border-subtle);
+    margin-top: var(--space-xs);
+    padding-top: var(--space-sm);
+    opacity: 0.75;
+    transition: opacity var(--motion-fast), background var(--motion-fast);
+}
+
+.input-panel-port-row.empty-slot:hover,
+.output-panel-port-row.empty-slot:hover {
+    opacity: 1;
+}
+
+/* ============================================================
+ * 2. One socket size on the canvas
+ * ============================================================
+ * A handful of faceplates still pass `style={{ width: 12 }}` to their <Port>,
+ * from the era when a port was a dot whose size carried meaning. Inline styles
+ * can only be answered with `!important`, and one socket size is worth it: a
+ * player reads "that is a socket" from the shape, and a canvas with 12px, 14px
+ * and 18px versions of the same object reads as three different things.
+ * DELETE THIS RULE when Wave 5 removes the inline sizes from
+ * Instrument / Sampler / Library / Keyboard / the panel nodes.
+ */
+.schematic-node .oj-port {
+    width: var(--port-size) !important;
+    height: var(--port-size) !important;
+}
+
+/* ============================================================
+ * 3. Where the bespoke sockets sit
+ * ============================================================
+ * Position only. Every one of these is an `.oj-port`, so the well, the ring,
+ * the core and the states all come from Port.css — a faceplate does not get to
+ * invent its own socket.
+ */
+
+/* Instrument: the audio out closes the body, the bundle inputs open each row. */
+.instrument-output-port {
+    align-self: flex-end;
+}
+
+/* Sampler: trigger in and audio out sit INSIDE the card, one body row under the
+   header, so the cable slides beneath the edge and ends in the well (D7). They
+   used to hang half-off the card at `left: -7px`. */
+.sampler-side-port {
+    position: absolute;
+    top: 34px;
+    z-index: 2;
+}
+
+.sampler-side-port.input {
+    left: 14px;
+}
+
+.sampler-side-port.output {
+    right: 14px;
+}
+
+/* Library: SEAM-1, the sample feed to connected samplers. Right column,
+   vertically centred (matches the registry port position y: 0.5). */
+.library-sample-out-port {
+    position: absolute;
+    right: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+}
