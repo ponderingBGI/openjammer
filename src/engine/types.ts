@@ -659,16 +659,6 @@ export interface NodeDefinition {
     // If false, pressing E will flash red instead of entering
     canEnter?: boolean;
 
-    /**
-     * What the node's INTERIOR is when entered (default: `'graph'`).
-     *   • `'graph'`    — the existing nested sub-canvas of child nodes (container,
-     *                    instrument, sampler…). Entering requires `childIds.length>0`.
-     *   • `'timeline'` — a hand-drawn DAW timeline (the `song` node). It has NO graph
-     *                    children, so the canvas enter-gate lets it in on this flag
-     *                    alone and renders `<SongInterior>` instead of the node layer.
-     * One discriminator, two interiors — depth, never a separate mode (BOUNDARY §9).
-     */
-    interior?: 'graph' | 'timeline';
 }
 
 // ============================================================================

@@ -13,7 +13,7 @@ use crate::manifest::ContractVersion;
 /// This kernel build's [`DspInstance`] contract generation (`docs/STABILITY.md` §4).
 /// Bumped MINOR when a backward-compatible capability/extension is added; MAJOR
 /// only on a breaking change to the frozen hot path (which must never happen).
-pub const KERNEL_CONTRACT: ContractVersion = ContractVersion::new(1, 0);
+pub const KERNEL_CONTRACT: ContractVersion = ContractVersion::new(1, 2);
 
 /// The CLOSED set of kernel-known capability EXTENSIONS a node may provide through
 /// [`DspInstance::extension`]. Each maps to a reserved `oj.*` capability id in the
@@ -27,6 +27,8 @@ pub enum ExtId {
     Latency,
     /// `oj.state` — opaque save/restore of the node's full state (sessions, respawn).
     State,
+    /// `oj.tail` — finite sample count or an infinite processing tail.
+    Tail,
     /// `oj.note-expression` — per-note expression / MPE.
     NoteExpression,
     /// `oj.offline-render` — the node opts into HQ paths when `realtime == false`.
@@ -41,6 +43,7 @@ impl ExtId {
         match self {
             ExtId::Latency => "oj.latency",
             ExtId::State => "oj.state",
+            ExtId::Tail => "oj.tail",
             ExtId::NoteExpression => "oj.note-expression",
             ExtId::OfflineRender => "oj.offline-render",
             ExtId::Gui => "oj.gui",
@@ -53,6 +56,7 @@ impl ExtId {
         match id {
             "oj.latency" => Some(ExtId::Latency),
             "oj.state" => Some(ExtId::State),
+            "oj.tail" => Some(ExtId::Tail),
             "oj.note-expression" => Some(ExtId::NoteExpression),
             "oj.offline-render" => Some(ExtId::OfflineRender),
             "oj.gui" => Some(ExtId::Gui),
@@ -72,7 +76,47 @@ pub fn kernel_supports_capability(id: &str) -> bool {
     // + `DspInstance::restore_state` restore seam are implemented (a hosted plugin
     // persists + reloads its opaque state). Others (`oj.latency`, …) are added here
     // as they land; until then a plugin that REQUIRES them degrades to a stub.
-    matches!(ExtId::from_capability_id(id), Some(ExtId::State))
+    matches!(
+        ExtId::from_capability_id(id),
+        Some(ExtId::Latency | ExtId::State | ExtId::Tail)
+    )
+}
+
+/// Off-RT capability object returned for [`ExtId::Latency`].
+///
+/// The value is sampled once while a graph is compiled. Keeping the report in a
+/// concrete `Any`-downcastable object preserves the frozen [`DspInstance`]
+/// vtable: nodes that do not opt in return `None`, which is exactly zero samples.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LatencyExt {
+    samples: u32,
+}
+
+/// Off-RT capability object returned for [`ExtId::Tail`]. `None` represents an
+/// infinite tail; `Some(0)` means no tail.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TailExt {
+    samples: Option<u32>,
+}
+
+impl TailExt {
+    pub const fn new(samples: Option<u32>) -> Self {
+        Self { samples }
+    }
+
+    pub const fn tail_samples(&self) -> Option<u32> {
+        self.samples
+    }
+}
+
+impl LatencyExt {
+    pub const fn new(samples: u32) -> Self {
+        Self { samples }
+    }
+
+    pub const fn latency_samples(&self) -> u32 {
+        self.samples
+    }
 }
 
 /// Off-RT capability object behind [`ExtId::State`] (`docs/STABILITY.md` §4): a node
@@ -192,7 +236,7 @@ pub trait DspInstance: Send {
 
     /// OFF-RT asset-resolution seam (the U6 sample / IR loading point).
     ///
-    /// Called by [`crate::compile`] (or any host that resolves an
+    /// Called by [`crate::compile()`] (or any host that resolves an
     /// [`ojproto::AssetRef`]) AFTER `activate` + the baked-in `set_param`s, with
     /// the already-decoded PCM behind the node's asset slot. `slot` is the
     /// [`ojproto::AssetRef::slot`]; `pcm` is INTERLEAVED `f32` in `[-1, 1]` with
@@ -242,9 +286,9 @@ pub trait DspInstance: Send {
     }
 
     /// OFF-RT state RESTORE seam (the `oj.state` capability's `&mut` half — see
-    /// [`StateSave`] for the `&self` save half). Called at construction time (right
-    /// after `activate` + baked-in `set_param`s + `load_asset`, on the control
-    /// thread) with the opaque blob a prior session saved, so the node comes up
+    /// [`StateSave`] for the `&self` save half). Called at construction time
+    /// before `activate` on the control thread with the opaque blob a prior
+    /// session saved, so the node comes up
     /// exactly as it was left. The default is a no-op so pure-DSP nodes ignore it;
     /// a hosted plugin pushes the blob into `setStateInformation` / the CLAP state
     /// extension. Like `load_asset`, this runs off the audio thread and MAY
@@ -262,6 +306,13 @@ pub trait DspInstance: Send {
         false
     }
 
+    /// Latched output-boundary fault reported by a hosted node. This is a
+    /// single RT-safe field read; the engine transports it through the existing
+    /// `NodeFault` ring. Built-ins leave it empty.
+    fn runtime_fault(&self) -> Option<ojproto::FaultKind> {
+        None
+    }
+
     /// Clear internal state (filter memory, delay lines, phase). Default no-op.
     fn reset(&mut self) {}
 }
@@ -275,6 +326,7 @@ mod ext_tests {
         for id in [
             ExtId::Latency,
             ExtId::State,
+            ExtId::Tail,
             ExtId::NoteExpression,
             ExtId::OfflineRender,
             ExtId::Gui,
@@ -291,11 +343,9 @@ mod ext_tests {
 
     #[test]
     fn kernel_supports_only_the_wired_capabilities() {
-        // `oj.state` is wired (save + restore seams implemented), so it is
-        // supported; capabilities not yet wired (e.g. `oj.latency`) and
-        // vendor/unknown ids are not.
+        // State and latency are both wired through the additive extension seam.
         assert!(kernel_supports_capability(ExtId::State.capability_id()));
-        assert!(!kernel_supports_capability(ExtId::Latency.capability_id()));
+        assert!(kernel_supports_capability(ExtId::Latency.capability_id()));
         assert!(!kernel_supports_capability("vendor.x"));
         assert!(!kernel_supports_capability("oj.unknown"));
     }

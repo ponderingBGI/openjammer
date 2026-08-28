@@ -22,16 +22,16 @@
 use ojcore::effects::{biquad_param, convolution_param, delay_param, waveshaper_param};
 use ojcore::{
     compile, compile_with_assets, master_param, AssetPcm, AssetResolver, Engine, PluginRegistry,
-    BIQUAD_ID, CONVOLUTION_ID, DELAY_ID, GAIN_ID, GAIN_PARAM, GRAPH_IN_ID, LOOPER_ID, PAN_ID,
-    SPEAKER_OUT_ID, WAVESHAPER_ID, WIDTH_ID,
+    TempoMapRt, TimelineRt, BIQUAD_ID, CONVOLUTION_ID, DELAY_ID, GAIN_ID, GAIN_PARAM, GRAPH_IN_ID,
+    LOOPER_ID, PAN_ID, SPEAKER_OUT_ID, WAVESHAPER_ID, WIDTH_ID,
 };
 use ojinstrument::{
     param as instr_param, register_all, RegisterOpts, KARPLUS_ID, OSC_ID, SAMPLER_ID,
     SAMPLER_PCM_PARAM,
 };
 use ojproto::{
-    looper_action, AssetId, AssetRef, ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, Param,
-    PrimitiveKind, RtCommand,
+    looper_action, sched_event_kind, AssetId, AssetRef, ConnectionType, IrEdge, IrNode, NodeIdx,
+    OjGraph, Param, PrimitiveKind, RtCommand, SchedEvent, Timeline,
 };
 
 const SR: u32 = 48_000;
@@ -1102,6 +1102,79 @@ const OSC440_GOLDEN: [f32; 16] = [
     -0.36808708,
     0.6857557,
 ];
+
+#[test]
+fn scheduled_timeline_render_has_committed_fingerprint() {
+    let mut g = OjGraph::empty(SR, BLOCK);
+    g.nodes.push(with_params(
+        node(1, OSC_ID, PrimitiveKind::Osc, 0, 1),
+        &[
+            (instr_param::GAIN, 0.7),
+            (instr_param::ATTACK, 0.001),
+            (instr_param::DECAY, 0.001),
+            (instr_param::SUSTAIN, 1.0),
+            (instr_param::RELEASE, 0.02),
+        ],
+    ));
+    g.nodes
+        .push(node(2, SPEAKER_OUT_ID, PrimitiveKind::SpeakerOut, 1, 0));
+    g.edges.push(audio_edge(1, 2));
+    let mut engine = Engine::new(compile(&g, &registry()).expect("compile scheduled osc"));
+    let timeline = Timeline {
+        sample_rate: SR,
+        events: vec![
+            SchedEvent {
+                at: 73,
+                node: NodeIdx(1),
+                kind: sched_event_kind::NOTE_ON,
+                a: 69,
+                b: 110,
+                value: 0.0,
+            },
+            SchedEvent {
+                at: 401,
+                node: NodeIdx(1),
+                kind: sched_event_kind::NOTE_OFF,
+                a: 69,
+                b: 0,
+                value: 0.0,
+            },
+        ],
+        loop_range: None,
+        punch_range: None,
+        armed_tracks: vec![],
+        count_in_beats: 0,
+        end: 512,
+    };
+    let map = TempoMapRt::one_point(SR, 120.0, 4, 4);
+    engine.install_timeline(TimelineRt::from_wire(&timeline, &map));
+    engine.apply(RtCommand::TransportPlay);
+    let out = render(&mut engine, 2);
+    let got: Vec<f32> = [0usize, 72, 73, 80, 96, 128, 255, 400, 401, 420, 480, 511]
+        .iter()
+        .map(|&i| out[i])
+        .collect();
+    const WANT: [f32; 12] = [
+        0.0,
+        0.0,
+        0.0,
+        0.039_645_605,
+        0.294_016_4,
+        -0.015_870_593,
+        -0.526_653_5,
+        -0.009_530_459_5,
+        0.025_355_468,
+        0.535_760_34,
+        -0.548_460_8,
+        0.050_818_983,
+    ];
+    for (i, (&sample, &want)) in got.iter().zip(WANT.iter()).enumerate() {
+        assert!(
+            (sample - want).abs() <= 2.0e-6,
+            "scheduled fingerprint[{i}] got {sample}; full={got:?}"
+        );
+    }
+}
 
 #[test]
 fn osc_440_matches_committed_golden() {

@@ -517,11 +517,18 @@ impl KarplusString {
     #[inline]
     pub fn tick(&mut self) -> f32 {
         let cur = self.buf[self.idx];
-        let nxt = self.buf[(self.idx + 1) % self.len];
+        // The cursor advances by exactly one, so wrapping is a comparison, not
+        // two integer divisions per sample. This is bit-identical DSP state.
+        let next = if self.idx + 1 == self.len {
+            0
+        } else {
+            self.idx + 1
+        };
+        let nxt = self.buf[next];
         let out = cur;
         // averaging lowpass with feedback damping
         self.buf[self.idx] = 0.5 * (cur + nxt) * self.damp;
-        self.idx = (self.idx + 1) % self.len;
+        self.idx = next;
         out
     }
 }

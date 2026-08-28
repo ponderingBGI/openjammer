@@ -32,6 +32,9 @@ fn gain_manifest() -> PluginManifest {
         dsp: DspKind::Builtin,
         ui: UiKind::Auto,
         params: vec![ParamDecl {
+            module: String::new(),
+            unit: String::new(),
+            flags: 0,
             id: GAIN_PARAM,
             name: String::from("gain"),
             min: 0.0,

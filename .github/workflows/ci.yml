@@ -165,7 +165,7 @@ jobs:
       # global-allocator swap `assert_no_alloc` installs. A REQUIRED per-PR check
       # via the aggregate `gate` — an RT-path heap regression fails the merge.
       - name: Install cargo-nextest (no-alloc gate)
-        uses: taiki-e/install-action@6c6fd71fe4fb72c3697d269963d0e15df8adedad # v2
+        uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2
         with:
           tool: cargo-nextest
       - name: RT no-alloc gate (assert_no_alloc)
@@ -190,6 +190,7 @@ jobs:
         # CMake + a C++ toolchain + the VST3 SDK and is exercised by installer/release jobs.
         run: |
           cargo clippy -p ojhost --features clap-host --all-targets -- -D warnings
+          cargo build -p ojhost-probes
           cargo test -p ojhost --features clap-host
           # The desktop shell (oj-tauri) is excluded from the workspace gate above.
           # Lint + test it here with the pure-Rust CLAP backend so the IPC surface +
@@ -244,8 +245,10 @@ jobs:
           echo "Build emitted zero warnings — gate GREEN."
       - name: Install Playwright browser
         run: bunx playwright install --with-deps chromium
-      - name: Production PWA smoke test
-        run: bun run test:e2e
+      - name: Fast PR browser lane (legacy 3-spec suite)
+        # Measured locally on 2026-08-17: 29.0s including the production build. The
+        # six realistic journeys stay in the sharded canari/nightly matrix.
+        run: bun run test:e2e -- e2e/arrangement-editing.spec.ts e2e/pwa-smoke.spec.ts e2e/timeline-preview.spec.ts --project=chromium
 
   windows-native:
     name: Windows native build + audio gate

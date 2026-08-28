@@ -1,67 +1,34 @@
-/* PluginsPanel (§3) — inner-content layout only. The overlay chrome
-   (scrim/panel/header/close), the action button, the notes/errors and the
-   plugin tags are all oj-ui primitives (Modal/PanelHeader/Button/Callout/
-   Chip/Spinner/List/ListRow), which own their tokens. This file is just the
-   body padding, the scanning-note row, and each row's name/vendor + tag layout. */
-
-.plugins-body {
-    padding: var(--space-sm) var(--space-md);
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
+.plugin-browser, .plugin-window-shell {
+    --hatch-benched: repeating-linear-gradient(45deg, color-mix(in srgb, var(--sketch-black) 12%, transparent) 0 1px, transparent 1px 6px);
+    --plugin-strip-h: 28px;
 }
-
-.plugins-note {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    font-size: var(--text-sm);
-    color: var(--text-secondary, var(--text-muted));
-    line-height: 1.5;
-}
-
-.plugins-item-main {
-    display: flex;
-    align-items: baseline;
-    gap: var(--space-sm);
-}
-
-.plugins-name {
-    font-family: var(--font-sketch);
-    font-size: var(--text-md, 14px);
-}
-
-.plugins-vendor {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-}
-
-.plugins-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-xs);
-}
-
-/* Empty state: the intro callout stacked over the real CLAP folder list. */
-.plugins-empty {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-}
-
-/* One folder row: the path next to its scope tag (your account / all users). */
-.plugins-dir {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    flex-wrap: wrap;
-}
-
-/* An actual on-disk plugin folder path — monospace, wraps on long Windows paths. */
-.plugins-path {
-    font-family: var(--font-mono, ui-monospace, monospace);
-    font-size: var(--text-xs);
-    color: var(--text-secondary, var(--text-muted));
-    word-break: break-all;
-}
+.plugin-browser { width: 720px; height: 560px; display: grid; grid-template-rows: 44px 40px 32px minmax(0, 1fr) 48px; overflow: hidden; background: var(--bg-node); }
+.plugin-browser--pick, .plugin-browser--insert { width: 320px; height: 420px; grid-template-rows: 44px 72px 32px minmax(0, 1fr) 48px; }
+.plugin-browser--pick .plugin-browser__search, .plugin-browser--insert .plugin-browser__search { flex-direction: column; }
+.plugin-browser > .oj-panel-header { min-height: 44px; }
+.plugin-browser__search { display: flex; gap: 8px; padding: 4px 12px; }
+.plugin-browser__search .oj-input { flex: 1; font: 400 15px/1 var(--font-sans); }
+.plugin-browser__search .oj-segmented-control { flex: 0 0 200px; }
+.plugin-browser__families { display: flex; gap: 6px; padding: 4px 12px; overflow-x: auto; white-space: nowrap; }
+.plugin-browser__families .oj-chip { height: 24px; }
+.plugin-browser__results { min-height: 0; overflow-y: auto; outline: none; }
+.plugin-browser__row { position: relative; min-height: 56px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 5px 12px; cursor: default; transition: background-color 90ms linear, opacity 120ms linear; }
+.plugin-browser__row:hover { background: var(--bg-tertiary); }
+.plugin-browser__row[aria-selected="true"] { outline: 2px solid var(--accent-primary); outline-offset: -2px; }
+.plugin-browser__row.is-benched { background-image: var(--hatch-benched); }
+.plugin-browser__identity { min-width: 0; display: flex; flex-direction: column; }
+.plugin-browser__identity strong { overflow: hidden; color: var(--text-primary); font: 600 18px/22px var(--font-sketch); text-overflow: ellipsis; white-space: nowrap; }
+.plugin-browser__identity span { overflow: hidden; color: var(--text-secondary); font: 400 13px/18px var(--font-sans); text-overflow: ellipsis; white-space: nowrap; }
+.plugin-browser__detail { grid-column: 1 / -1; min-height: 72px; display: flex; flex-direction: column; justify-content: center; gap: 4px; color: var(--text-secondary); font: 400 12px/1.4 var(--font-mono); }
+.plugin-browser__detail code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plugin-browser__none { margin: 24px 12px; opacity: .5; font: 400 15px/1.4 var(--font-sketch); }
+.plugin-browser__status { position: relative; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-top: 1px solid var(--border-subtle); background: var(--bg-node-header); color: var(--text-secondary); font: 400 14px/1.2 var(--font-sans); }
+.plugin-browser__status button { padding: 0; border: 0; background: transparent; color: var(--text-primary); font: inherit; text-decoration: underline; cursor: pointer; }
+.plugin-browser__ruler { position: absolute; right: 0; bottom: 0; left: 0; height: 1px; background: color-mix(in srgb, var(--sketch-black) 35%, transparent); transform-origin: left; transition: transform 120ms linear; }
+.plugin-browser__quarantine { position: absolute; right: 0; bottom: 48px; left: 0; z-index: 1; height: 220px; padding: 12px 16px; overflow: auto; border-top: 2px solid var(--border-strong); background: var(--bg-node); }
+.plugin-browser__quarantine h3 { margin: 0; font: 600 18px/1.2 var(--font-sketch); }
+.plugin-browser__quarantine p { margin: 4px 0 8px; max-width: 65ch; color: var(--text-secondary); font: 400 14px/1.4 var(--font-sans); }
+.plugin-browser__quarantine-row { min-height: 44px; display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: center; gap: 8px; border-top: 1px solid var(--border-subtle); font: 400 13px/1.2 var(--font-sans); }
+.plugin-browser__quarantine-row code { overflow: hidden; font-family: var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px), (max-height: 620px) { .plugin-browser { width: calc(100vw - 48px); height: min(560px, calc(100vh - 48px)); } }
+@media (prefers-reduced-motion: reduce) { .plugin-browser__row, .plugin-browser__ruler { transition-duration: 0ms; } }

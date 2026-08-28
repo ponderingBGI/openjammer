@@ -84,8 +84,12 @@ pub mod exec;
 // the only `std`-gated pieces (they need `Instant` / host atomics).
 pub mod meter;
 pub mod resilience;
+pub mod tempo;
+pub mod timeline;
 pub mod transport;
 
+#[cfg(feature = "std")]
+pub mod capture;
 #[cfg(feature = "std")]
 pub mod command;
 #[cfg(feature = "std")]
@@ -102,7 +106,8 @@ pub use compile::{
     StateResolver,
 };
 pub use dsp::{
-    kernel_supports_capability, DspInstance, ExtId, ProcessCtx, StateSave, KERNEL_CONTRACT,
+    kernel_supports_capability, DspInstance, ExtId, LatencyExt, ProcessCtx, StateSave, TailExt,
+    KERNEL_CONTRACT,
 };
 pub use exec::Engine;
 pub use loader::PluginLoader;
@@ -134,16 +139,21 @@ pub use structural::{
 // --- U12/U15/U16 additive surface ---
 pub use meter::{Meter, MeterBank};
 pub use resilience::{sanitize, CommandCoalescer, NodeBudget};
-pub use transport::{Transport, TransportPos};
+pub use tempo::{MetricCursor, MetricPosition, TempoMapRt};
+pub use timeline::TimelineRt;
+pub use transport::{DeclickAmp, Disposition, Motion, Transport, TransportFsm, TransportPos};
 
 #[cfg(feature = "std")]
-pub use command::{CommandConsumer, CommandProducer, CommandQueue};
+pub use command::{
+    CommandConsumer, CommandProducer, CommandQueue, TimedCommandConsumer, TimedCommandProducer,
+    TimedCommandQueue,
+};
 #[cfg(feature = "std")]
 pub use meter::{EventRing, MeterRing};
 #[cfg(feature = "std")]
 pub use resilience::Watchdog;
 #[cfg(feature = "std")]
-pub use swap::{ProgramSwap, ProgramSwapRx};
+pub use swap::{ProgramSwap, ProgramSwapRx, RtCell, RtCellRx};
 
 #[cfg(test)]
 mod tests {

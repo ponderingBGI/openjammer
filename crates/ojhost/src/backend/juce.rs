@@ -1,6 +1,6 @@
 //! JUCE C++ backend (feature = "juce"): the Rust binding for the `extern "C"`
 //! ABI declared in `cpp/ojhost_juce.h` and implemented in `cpp/ojhost_juce.cpp`.
-//! Supports VST3 + CLAP (+ AU on macOS). `build.rs` drives CMake to build and
+//! Supports VST3 (+ AU on macOS). `build.rs` drives CMake to build and
 //! link the C++ static library.
 //!
 //! This module is the ONLY place the C++ symbols are named on the Rust side. It
@@ -226,9 +226,19 @@ pub(super) fn probe(
                     audio_in: d.audio_in,
                     audio_out: d.audio_out,
                 },
+                audio_ports: Vec::new(),
+                port_configs: Vec::new(),
+                note_ports: PortCounts::default(),
                 param_count: d.param_count,
                 params: params_from_c(d.params, d.param_count),
                 latency_samples: d.latency_samples,
+                // The JUCE C bridge does not surface CLAP-style feature tags or
+                // hasEditor yet. Empty features is the signed [OPEN-3] contract
+                // decision (non-CLAP plugins carry no family tags); has_gui stays
+                // false until the bridge exposes JUCE's hasEditor — the same
+                // honest no-embeddable-GUI posture the clack path takes.
+                features: Vec::new(),
+                has_gui: false,
             });
         }
         ojhost_free_scan(result);
@@ -250,6 +260,9 @@ unsafe fn params_from_c(ptr: *const OjHostedParam, count: u32) -> Vec<HostedPara
             id: p.id,
             // SAFETY: C++ stores each param name as a valid NUL-terminated string.
             name: unsafe { cstr_owned(p.name) },
+            module: String::new(),
+            flags: 0,
+            unit: String::new(),
             min: p.min,
             max: p.max,
             default: p.default_value,

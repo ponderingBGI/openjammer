@@ -78,6 +78,68 @@ fn node_idx_and_asset_id_are_bare_numbers() {
 }
 
 #[test]
+fn time_domain_position_and_span_shapes() {
+    assert_eq!(PPQ, 960);
+    assert_json(&TimeDomain::Audio, "\"Audio\"");
+    assert_json(&TimeDomain::Beat, "\"Beat\"");
+    assert_json(
+        &TimePos {
+            domain: TimeDomain::Beat,
+            value: -960,
+        },
+        r#"{"domain":"Beat","value":-960}"#,
+    );
+    assert_json(
+        &TimeSpan {
+            domain: TimeDomain::Audio,
+            len: 48_000,
+        },
+        r#"{"domain":"Audio","len":48000}"#,
+    );
+}
+
+#[test]
+fn tempo_and_meter_map_shapes() {
+    let tempo = TempoPoint {
+        tick: 0,
+        sample: 0,
+        bpm_start: 120.0,
+        bpm_end: 128.0,
+        continuing: true,
+    };
+    assert_json(
+        &tempo,
+        r#"{"tick":0,"sample":0,"bpm_start":120.0,"bpm_end":128.0,"continuing":true}"#,
+    );
+
+    let meter = MeterPoint {
+        tick: 0,
+        sample: 0,
+        bar: 1,
+        divisions_per_bar: 4,
+        note_value: 4,
+    };
+    assert_json(
+        &meter,
+        r#"{"tick":0,"sample":0,"bar":1,"divisions_per_bar":4,"note_value":4}"#,
+    );
+
+    assert_json(
+        &TempoMap {
+            ppq: PPQ,
+            sample_rate: 48_000,
+            tempos: vec![tempo],
+            meters: vec![meter],
+        },
+        concat!(
+            r#"{"ppq":960,"sample_rate":48000,"tempos":[{"tick":0,"sample":0,"#,
+            r#""bpm_start":120.0,"bpm_end":128.0,"continuing":true}],"#,
+            r#""meters":[{"tick":0,"sample":0,"bar":1,"divisions_per_bar":4,"note_value":4}]}"#,
+        ),
+    );
+}
+
+#[test]
 fn param_and_asset_ref_shapes() {
     assert_json(&Param { id: 3, value: 0.5 }, r#"{"id":3,"value":0.5}"#);
     assert_json(
@@ -143,6 +205,47 @@ fn empty_graph_shape() {
 }
 
 #[test]
+fn scheduled_event_and_timeline_shapes() {
+    let event = SchedEvent {
+        at: 24_000,
+        node: NodeIdx(3),
+        kind: sched_event_kind::NOTE_ON,
+        a: 60,
+        b: 100,
+        value: 0.25,
+    };
+    assert_json(
+        &event,
+        r#"{"at":24000,"node":3,"kind":2,"a":60,"b":100,"value":0.25}"#,
+    );
+    assert_json(
+        &Timeline {
+            sample_rate: 48_000,
+            events: vec![event],
+            loop_range: Some((0, 96_000)),
+            punch_range: None,
+            armed_tracks: vec![],
+            count_in_beats: 0,
+            end: 192_000,
+        },
+        concat!(
+            r#"{"sample_rate":48000,"events":[{"at":24000,"node":3,"kind":2,"#,
+            r#""a":60,"b":100,"value":0.25}],"loop_range":[0,96000],"#,
+            r#""punch_range":null,"armed_tracks":[],"count_in_beats":0,"end":192000}"#,
+        ),
+    );
+}
+
+/// Pin scheduled-event kind codes and their same-sample ordering rank.
+#[test]
+fn scheduled_event_kind_codes() {
+    assert_eq!(sched_event_kind::SET_PARAM, 0);
+    assert_eq!(sched_event_kind::NOTE_OFF, 1);
+    assert_eq!(sched_event_kind::NOTE_ON, 2);
+    assert_eq!(sched_event_kind::SAMPLER_START, 3);
+}
+
+#[test]
 fn rt_command_external_tagging() {
     // Struct variants => { "<Variant>": { ..fields.. } }
     assert_json(
@@ -183,6 +286,13 @@ fn rt_command_external_tagging() {
         &RtCommand::Seek { samples: 9000 },
         r#"{"Seek":{"samples":9000}}"#,
     );
+    assert_json(
+        &RtCommand::TransportSet {
+            flag: transport_flag::LOOP_ENABLE,
+            on: true,
+        },
+        r#"{"TransportSet":{"flag":0,"on":true}}"#,
+    );
     // Looper carries a node + a u8 action (one of `looper_action::*`) + a u32
     // `arg` (layer index / packed flags for the indexed actions, ignored by the
     // transport actions). `action`/`arg` serialize as bare numbers, mirrored on
@@ -204,6 +314,61 @@ fn rt_command_external_tagging() {
             arg: 2 | looper_action::MUTE_FLAG,
         },
         r#"{"Looper":{"node":3,"action":7,"arg":2147483650}}"#,
+    );
+}
+
+/// Pin the numeric transport-setting codes so the TS mirror cannot drift.
+#[test]
+fn transport_flag_codes() {
+    assert_eq!(transport_flag::LOOP_ENABLE, 0);
+    assert_eq!(transport_flag::PUNCH_ENABLE, 1);
+    assert_eq!(transport_flag::RECORD_ARM, 2);
+    assert_eq!(transport_flag::CLICK, 3);
+    assert_eq!(transport_flag::COUNT_IN, 4);
+}
+
+#[test]
+fn capture_wire_shapes() {
+    assert_json(
+        &CaptureMark {
+            node: NodeIdx(7),
+            kind: capture_mark_kind::NOTE_ON,
+            at_frame: 123,
+            payload: 60 | (100 << 8),
+        },
+        r#"{"node":7,"kind":6,"at_frame":123,"payload":25660}"#,
+    );
+    assert_json(
+        &CaptureResult {
+            take_id: 9,
+            segments: vec![CaptureSegment {
+                node: NodeIdx(7),
+                asset: AssetId(42),
+                start_sample: 10,
+                frames: 20,
+                start_tick: 1,
+                length_ticks: 2,
+                loop_index: 0,
+                xruns: 0,
+            }],
+            notes: vec![],
+            recovered: false,
+        },
+        r#"{"take_id":9,"segments":[{"node":7,"asset":42,"start_sample":10,"frames":20,"start_tick":1,"length_ticks":2,"loop_index":0,"xruns":0}],"notes":[],"recovered":false}"#,
+    );
+}
+
+#[test]
+fn timed_command_shape() {
+    assert_json(
+        &TimedCommand {
+            at: 24_000,
+            cmd: RtCommand::TransportSet {
+                flag: transport_flag::CLICK,
+                on: false,
+            },
+        },
+        r#"{"at":24000,"cmd":{"TransportSet":{"flag":3,"on":false}}}"#,
     );
 }
 
@@ -256,6 +421,22 @@ fn engine_frame_external_tagging() {
             phase: 0.5,
         },
         r#"{"Beat":{"bar":2,"beat":3,"phase":0.5}}"#,
+    );
+    assert_json(
+        &EngineFrame::Transport {
+            sample: 9_000,
+            tick: 360,
+            bar: 1,
+            beat: 2,
+            phase: 0.5,
+            motion: 1,
+            rec: false,
+            loop_on: true,
+        },
+        concat!(
+            r#"{"Transport":{"sample":9000,"tick":360,"bar":1,"beat":2,"#,
+            r#""phase":0.5,"motion":1,"rec":false,"loop_on":true}}"#,
+        ),
     );
     // Looper telemetry frame: node + state(u8) + pos(u32) + loop_len(u32) + peak(f32).
     // `state` is a bare number (one of `looper_state::*`); mirrored on the TS

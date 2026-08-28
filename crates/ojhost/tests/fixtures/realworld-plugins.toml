@@ -1,0 +1,80 @@
+# OpenJammer P4 real-world CLAP matrix (Linux x86_64).
+#
+# URLs name an immutable build/commit in the asset filename and every byte is
+# independently pinned below. `scripts/ci/fetch-plugins.sh` refuses mismatches.
+# The source license is what makes each project suitable for this OSS matrix;
+# Airwindows' distributed JUCE bundle also carries GPL-3.0 for the combined work.
+schema = 1
+
+[[plugin]]
+id = "airwindows-consolidated"
+name = "Airwindows Consolidated"
+version = "2026-08-16-35ad772"
+vendor = "Airwindows"
+source_license = "MIT"
+binary_license = "GPL-3.0"
+kind = "effect"
+url = "https://github.com/baconpaul/airwin2rack/releases/download/DAWPlugin/AirwindowsConsolidated-2026-08-16-35ad772-Linux.zip"
+sha256 = "3e5855377daaf9e57be3557eba9eec679ca79349a3497438b425a91a086f81dd"
+archive = "zip"
+plugin_file = "Airwindows Consolidated.clap"
+# The default Airwindows program is deterministic on a fixed build. We compare
+# an eight-window normalized RMS signature with a tolerance, not raw floats.
+assertion = "fingerprint"
+fingerprint = [
+  0.11565809,
+  0.11566131,
+  0.11566419,
+  0.11566675,
+  0.11566898,
+  0.11567087,
+  0.06026364,
+  0.00000003,
+]
+tolerance = 0.0005
+
+[[plugin]]
+id = "dexed"
+name = "Dexed"
+version = "1.1.0-nightly-30da05c"
+vendor = "Digital Suburban"
+source_license = "GPL-3.0"
+binary_license = "GPL-3.0"
+kind = "synth"
+url = "https://github.com/asb2m10/dexed/releases/download/Nightly/Dexed-1.1.0-NIGHTLY-2026-07-25-30da05c-lnx.zip"
+sha256 = "da91497808e92043f05c33f8b3b9ae485d21015bb54d2a7c7a8622830c395e5e"
+archive = "zip"
+plugin_file = "Dexed.clap"
+assertion = "synth-envelope"
+
+[[plugin]]
+id = "surge-xt"
+name = "Surge XT"
+version = "nightly-2026-08-16-2644c61"
+vendor = "Surge Synth Team"
+source_license = "GPL-3.0"
+binary_license = "GPL-3.0"
+kind = "synth"
+url = "https://github.com/surge-synthesizer/surge/releases/download/Nightly/surge-xt-linux-NIGHTLY-2026-08-16-2644c61-pluginsonly.tar.gz"
+sha256 = "aa05c7af7b43db1001e3f78ed8d5c112da3543b0f283357c9902e5fde1e39e69"
+archive = "tar.gz"
+plugin_file = "Surge XT.clap"
+# Surge randomizes oscillator phase across instances. Keep the repeated-render
+# health gate, but compare each RMS window proportionally instead of requiring
+# byte-like absolute determinism from a deliberately nondeterministic synth.
+assertion = "synth-envelope-relative"
+tolerance = 0.15
+
+[[plugin]]
+id = "chow-kick"
+name = "ChowKick"
+version = "1.2.0"
+vendor = "ChowDSP"
+source_license = "BSD-3-Clause"
+binary_license = "BSD-3-Clause"
+kind = "synth"
+url = "https://github.com/Chowdhury-DSP/ChowKick/releases/download/v1.2.0/ChowKick-Linux-x64-1.2.0.deb"
+sha256 = "2c1328c65bd4af1c188f96d088d71527eccbdc5c434cafe57c8352f53969bb2f"
+archive = "deb"
+plugin_file = "ChowKick.clap"
+assertion = "synth-envelope"

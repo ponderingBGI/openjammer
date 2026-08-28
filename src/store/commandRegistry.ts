@@ -111,6 +111,8 @@ export interface Action {
     surfaces?: readonly Surface[];
     /** Optional gate: when it returns false the action is hidden in that context. */
     enabled?(ctx: ActionCtx): boolean;
+    /** Keep a known-future command visible but inert, with an explanatory tooltip. */
+    disabledReason?: string;
     /**
      * Invoked when the user selects the action, with the surface's context.
      *

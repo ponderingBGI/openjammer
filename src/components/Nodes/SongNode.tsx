@@ -2,7 +2,7 @@
  * Song Node — the on-canvas handle for the ONE timeline (the arrangementStore's
  * Arrangement). Collapsed, it is a warm little record sleeve: the song title, a
  * one-line summary (tracks · bars · tempo), and the invitation to press E. Entered
- * (E), the canvas swaps the node layer for the hand-drawn `SongInterior` timeline.
+ * (E), the canvas swaps the node layer for the peer Arrangement surface.
  *
  * It owns no audio — the instruments it plays are ordinary graph nodes referenced by
  * the arrangement — so it carries no ports. Living Sketchbook: paper, ink, Caveat, a
@@ -12,6 +12,7 @@
 import type { GraphNode } from '../../engine/types';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
 import { useArrangementStore } from '../../store/arrangementStore';
+import { useUiViewStore } from '../../store/uiViewStore';
 import { arrangementLengthTicks, timebase } from '../../song/time';
 import './SongNode.css';
 
@@ -38,6 +39,7 @@ export function SongNode({
     const isPlaying = useArrangementStore((s) => s.isPlaying);
     const flashingNodes = useUIFeedbackStore((s) => s.flashingNodes);
     const isFlashing = flashingNodes.has(node.id);
+    const openArrangement = useUiViewStore((s) => s.setSurface);
 
     const title = arrangement?.name ?? 'Empty song';
     const summary = arrangement
@@ -60,7 +62,16 @@ export function SongNode({
             </div>
             <div className="song-node-body">
                 <div className="song-node-summary">{summary}</div>
-                <div className="song-node-hint">Press E to open the timeline</div>
+                <button
+                    type="button"
+                    className="song-node-hint"
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        openArrangement('arrangement', node.id);
+                    }}
+                >
+                    Open arrangement · E
+                </button>
             </div>
         </div>
     );

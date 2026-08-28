@@ -7,7 +7,7 @@ export interface CalloutProps extends Omit<HTMLAttributes<HTMLDivElement>, 'titl
     /**
      * The signal this box carries. The accent shows ONLY on the left border and
      * the icon (Signal-Not-Brand) — never on the surface or title text:
-     * `info` → --audio-connection, `success` → --accent-success,
+     * `info` → neutral ink, `success` → --accent-success,
      * `warning` → --accent-warning, `danger` → --accent-danger,
      * `tip` → --accent-secondary. All read theme tokens, never literals.
      */

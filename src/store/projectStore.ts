@@ -22,6 +22,8 @@ import { useLibraryStore } from './libraryStore';
 import { useGraphStore } from './graphStore';
 import { useAudioClipStore, clearClipBufferCache } from './audioClipStore';
 import { useArrangementStore } from './arrangementStore';
+import { arrangementForExport } from '../song/project';
+import type { Arrangement } from '../song/types';
 
 // ============================================================================
 // Types
@@ -34,13 +36,6 @@ export interface ProjectManifest {
   engineVersion: string;
   created: string;
   modified: string;
-  transport?: {
-    bpm: number;
-    timeSignature: [number, number];
-    loop: boolean;
-    loopStart: number;
-    loopEnd: number;
-  };
   audioFiles?: Record<string, {
     path: string;
     duration?: number;
@@ -51,10 +46,7 @@ export interface ProjectManifest {
     edges: unknown[];
     viewport?: { x: number; y: number; zoom: number };
   };
-  /** The song-layer timeline (the on-canvas DAW's Arrangement), OPAQUE here — the
-   *  project store never interprets it; the song layer produces it via
-   *  `arrangementForExport` and reads it back via `readArrangement`. So a saved
-   *  project keeps its whole timeline (FROZEN-1). */
+  /** The song-layer timeline (the on-canvas DAW's Arrangement). */
   arrangement?: unknown;
 }
 
@@ -83,7 +75,7 @@ export interface ProjectState {
   createProject: (name?: string) => Promise<FileSystemDirectoryHandle>;
   openProject: () => Promise<{ handle: FileSystemDirectoryHandle; manifest: ProjectManifest }>;
   openRecentProject: (project: RecentProject) => Promise<{ handle: FileSystemDirectoryHandle; manifest: ProjectManifest }>;
-  saveProject: (graphData: { nodes: unknown[]; edges: unknown[]; viewport?: { x: number; y: number; zoom: number }; arrangement?: unknown }) => Promise<void>;
+  saveProject: (graphData: { nodes: unknown[]; edges: unknown[]; viewport?: { x: number; y: number; zoom: number }; arrangement?: Arrangement | null }) => Promise<void>;
   closeProject: () => void;
   markDirty: () => void;
   markClean: () => void;
@@ -336,13 +328,6 @@ async function createProjectStructure(
     engineVersion: ENGINE_VERSION,
     created: new Date().toISOString(),
     modified: new Date().toISOString(),
-    transport: {
-      bpm: 120,
-      timeSignature: [4, 4],
-      loop: false,
-      loopStart: 0,
-      loopEnd: 16,
-    },
     audioFiles: {},
     graph: {
       nodes: [],
@@ -433,6 +418,35 @@ async function writeProjectManifest(
   manifest: ProjectManifest
 ): Promise<void> {
   const fileHandle = await handle.getFileHandle(PROJECT_FILE_NAME, { create: true });
+  // Preserve the prior complete document before replacement. File System Access
+  // writable streams commit on close; the explicit backup also gives migration a
+  // durable copy of the last v1 payload.
+  const previousText = await (await fileHandle.getFile()).text();
+  if (previousText.length > 0) {
+    const writeBackup = async (name: string) => {
+      const backup = await handle.getFileHandle(name, { create: true });
+      const stream = await backup.createWritable();
+      try {
+        await stream.write(previousText);
+        await stream.close();
+      } catch (err) {
+        await stream.abort().catch(() => {});
+        throw err;
+      }
+    };
+    await writeBackup(`${PROJECT_FILE_NAME}.bak`);
+    try {
+      const previous = JSON.parse(previousText) as ProjectManifest;
+      const previousVersion = (previous.arrangement as { schemaVersion?: number } | undefined)?.schemaVersion ?? 1;
+      const nextVersion = (manifest.arrangement as { schemaVersion?: number } | undefined)?.schemaVersion ?? 1;
+      if (previous.arrangement !== undefined && previousVersion < 2 && nextVersion >= 2) {
+        await writeBackup(`${PROJECT_FILE_NAME}.v1.bak`);
+      }
+    } catch {
+      // An unreadable previous manifest is still retained in the general .bak;
+      // parsing it must never prevent the valid replacement from being written.
+    }
+  }
   const writable = await fileHandle.createWritable();
   try {
     await writable.write(JSON.stringify(manifest, null, 2));
@@ -736,12 +750,13 @@ export const useProjectStore = create<ProjectState>()(
             edges: validatedGraph.edges,
             viewport: validateViewport(graphData.viewport)
           };
-          // Persist the timeline UNTOUCHED (opaque; FROZEN-1). Present => keep it,
-          // explicit null/undefined => drop it (the project has no song).
-          if (graphData.arrangement !== undefined && graphData.arrangement !== null) {
-            manifest.arrangement = graphData.arrangement;
-          } else {
-            delete manifest.arrangement;
+          // Missing means an older graph-only caller: preserve the saved timeline.
+          // Explicit null means this document has no timeline; otherwise stamp the
+          // current song schema at the persistence boundary.
+          if (graphData.arrangement !== undefined) {
+            manifest.arrangement = graphData.arrangement === null
+              ? null
+              : arrangementForExport(graphData.arrangement);
           }
 
           // Write back

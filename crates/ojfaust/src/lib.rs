@@ -1,7 +1,7 @@
 //! Host-side Faust DSP compilation for OpenJammer.
 //!
-//! OpenJammer treats "everything as a plugin" ([`ojcore::PluginLoader`] /
-//! [`ojcore::DspInstance`]). A *Faust* node is one such plugin whose DSP is
+//! OpenJammer treats "everything as a plugin" (`ojcore::PluginLoader` /
+//! `ojcore::DspInstance`). A *Faust* node is one such plugin whose DSP is
 //! authored as [Faust] source — either by a human or, in U20, by the AI
 //! DSP-node authoring flow. This crate is the off-RT-thread tooling that turns
 //! that source text into something loadable, plus the **agentic compile-repair
@@ -13,7 +13,7 @@
 //! # Backends (default = CLI Path B)
 //!
 //! The DEFAULT build needs no native library. It shells the `faust` BINARY
-//! ([`backend`] Path B) to compile source to `.wasm` and read the `-json`
+//! (the backend's Path B) to compile source to `.wasm` and read the `-json`
 //! metadata — pure `std::process` + a `serde_json` parse, no `build.rs`, no
 //! `libfaust` link. When `faust` is NOT on `PATH`, [`FaustCompiler::compile`]
 //! returns [`FaustError::Unavailable`] (terminal: the repair loop bails). The
@@ -192,7 +192,7 @@ impl FaustCompiler {
     /// * otherwise [`FaustError::Unavailable`] — no toolchain, so retrying is
     ///   futile and the repair loop bails immediately.
     ///
-    /// With `libfaust` ON, dispatches to the native backend (see [`backend`]).
+    /// With `libfaust` ON, dispatches to the native backend.
     ///
     /// This performs exactly one compile attempt; the iterative
     /// author-in-the-loop behaviour lives in [`compile_repair`].

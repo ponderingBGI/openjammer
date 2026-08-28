@@ -32,6 +32,8 @@ proptest = "1"                                        # property tests over comp
 # and is instrumented for instruction-count measurement by the CodSpeed CI action
 # (Track A P1 — perf-regression gate on the hot paths).
 codspeed-criterion-compat = "5.0.1"
+serde = { workspace = true }
+serde_json = "1.0.150"
 
 [[bench]]
 name = "engine"

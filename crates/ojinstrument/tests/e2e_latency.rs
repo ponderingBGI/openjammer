@@ -59,7 +59,13 @@ fn note_on_is_audible_within_one_block() {
             sf2: false,
         },
     );
-    let mut engine = Engine::new(compile(&g, &reg).expect("compile"));
+    let program = compile(&g, &reg).expect("compile");
+    assert_eq!(
+        program.preroll, 0,
+        "a graph with no latency extensions retains the bit-identical zero-PDC path"
+    );
+    assert!(program.edge_delay.iter().all(|delay| *delay == 0));
+    let mut engine = Engine::new(program);
 
     // Silent before any note: nothing should leak out of an un-gated oscillator.
     let mut warmup = vec![0.0f32; NB];

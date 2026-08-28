@@ -20,6 +20,9 @@ const ALL_BROWSERS = process.env.OJ_E2E_ALL_BROWSERS === '1';
 
 export default defineConfig({
     testDir: './e2e',
+    // J8 is deliberately isolated: wall-clock/frame measurements are noisy and
+    // run only through `bun run test:perf` on Chromium's CDP tracing backend.
+    testIgnore: ['**/perf/**'],
     fullyParallel: true,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
@@ -38,15 +41,38 @@ export default defineConfig({
         { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
         ...(ALL_BROWSERS
             ? [
-                  { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
+                  {
+                      name: 'firefox',
+                      use: {
+                          ...devices['Desktop Firefox'],
+                          launchOptions: {
+                              // Separate browser contexts cannot resolve one
+                              // another's mDNS-obfuscated host candidates.
+                              firefoxUserPrefs: {
+                                  'media.peerconnection.ice.obfuscate_host_addresses': false,
+                              },
+                          },
+                      },
+                  },
                   { name: 'webkit', use: { ...devices['Desktop Safari'] } },
               ]
             : []),
     ],
     webServer: {
-        command: `bun run build && bun run preview --port ${PORT} --strictPort`,
+        // Firefox filters loopback ICE candidates. Binding preview only to
+        // localhost therefore leaves a data-channel-only peer connection in
+        // `new` forever in Linux containers; expose the container interface so
+        // Firefox can gather the routable host candidate used by J7.
+        command: `bun run build && bun run preview --host 0.0.0.0 --port ${PORT} --strictPort`,
         url: `http://localhost:${PORT}`,
-        reuseExistingServer: !process.env.CI,
+        env: {
+            OJ_E2E_ORIGIN_OUTAGE: '1',
+            OJ_E2E_STUN_PORT: '3478',
+            VITE_OJ_E2E_STUN_URL: 'stun:127.0.0.1:3478',
+        },
+        // These journeys depend on preview-only outage and loopback-STUN
+        // fixtures. Reusing an arbitrary local server would silently omit them.
+        reuseExistingServer: false,
         timeout: 180_000,
     },
 });

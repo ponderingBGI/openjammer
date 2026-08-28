@@ -140,6 +140,15 @@ export type { WaveformProps } from './components/Waveform/Waveform';
 export { WaveformView } from './components/WaveformView/WaveformView';
 export type { WaveformViewProps } from './components/WaveformView/WaveformView';
 
+export { WaveformCanvas } from './components/WaveformCanvas/WaveformCanvas';
+export type { WaveformCanvasProps } from './components/WaveformCanvas/WaveformCanvas';
+
+export { LaneButton } from './components/LaneButton/LaneButton';
+export type { LaneButtonProps, LaneButtonTone } from './components/LaneButton/LaneButton';
+
+export { TimeRuler } from './components/TimeRuler/TimeRuler';
+export type { TimeRulerMark } from './components/TimeRuler/TimeRuler';
+
 export { DeviceSelect } from './components/DeviceSelect/DeviceSelect';
 export type { DeviceSelectProps, DeviceSelectItem } from './components/DeviceSelect/DeviceSelect';
 
@@ -148,3 +157,5 @@ export type { KeyTileProps, KeyTileVariant } from './components/KeyTile/KeyTile'
 
 export { Banner } from './components/Banner/Banner';
 export type { BannerProps, BannerTone } from './components/Banner/Banner';
+export { ParamRow } from './components/ParamRow/ParamRow';
+export type { ParamRowProps } from './components/ParamRow/ParamRow';

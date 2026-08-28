@@ -7,8 +7,9 @@
 //! backoff — never thrash, never steal focus. This module is that decision logic
 //! as a small, deterministic state machine, kept FREE of any host/IO dependency so
 //! it is exhaustively unit-testable; `oj-tauri`'s `EngineBackend` drives it from
-//! the real [`AudioHost::drain_device_faults`] + a reopen attempt (the thin wiring
-//! is the consumer, modeled byte-for-byte on the existing `UpdateGate` discipline).
+//! the real [`AudioHost::drain_device_faults`](crate::AudioHost::drain_device_faults)
+//! + a reopen attempt (the thin wiring
+//!   is the consumer, modeled byte-for-byte on the existing `UpdateGate` discipline).
 //!
 //! The load-bearing invariants it encodes (mirrored by the engine-tier oracle
 //! harness for the audio side):

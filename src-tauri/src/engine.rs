@@ -31,24 +31,27 @@
 //! JSON (governing principle #4).
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 use ojcore::meter::{event_frame, return_frame};
 use ojcore::{
     compile, compile_resilient_with_state, master_param, CommandConsumer, CommandProducer,
     CommandQueue, CompileError, Engine, EventRing, MeterRing, PluginManifest, PluginRegistry,
-    ProgramSwap, StateResolver,
+    ProgramSwap, RtCell, StateResolver, TempoMapRt, TimedCommandProducer, TimedCommandQueue,
+    TimelineRt,
 };
 use ojcore_native::{
     device_fault_channel, install_device_listener, probe_default_output, AssetCatalog, AssetError,
     AssetStore, AudioHost, DeviceFault, DeviceFaultRx, DeviceListener, DeviceSupervisor,
     DeviceWatcher, HostError, LogRecord, LogStore, Pcm, RecoveryAction, StreamRequest,
 };
-use ojhost::{register_scanned, scan, HostError as PluginHostError, PluginDescriptor};
+use ojhost::{
+    register_scanned, scan_with, Blacklist, HostError as PluginHostError, PluginDescriptor,
+};
 use ojinstrument::{register_all, RegisterOpts};
 use ojproto::{
     AssetId, AssetRef, EngineFrame, Event, EventKind, NodeIdx, OjGraph, RtCommand, RtEvent,
-    Severity, Source,
+    Severity, Source, TempoMap, TimedCommand, Timeline,
 };
 use ojwasm::WasmHostLoader;
 
@@ -138,7 +141,7 @@ impl StateResolver for PendingStates<'_> {
 /// control-rate and runs on the IPC/control thread, never the audio thread.
 pub struct EngineBackend {
     /// Open registry: `manifest_id -> loader`. Used to recompile a pushed graph.
-    registry: PluginRegistry,
+    registry: Arc<RwLock<PluginRegistry>>,
     /// The live audio host (cpal stream + engine on the audio thread). `None`
     /// when no device is available (headless/CI) — the backend stays usable for
     /// compile/validation and re-tries on the next `push_graph`.
@@ -147,9 +150,14 @@ pub struct EngineBackend {
     /// Re-created whenever the host (re)starts, since the consumer half moves
     /// into the new audio callback.
     producer: CommandProducer,
+    /// Control end of the independent timestamped command ring.
+    timed_producer: TimedCommandProducer,
     /// The graph hot-swap mailbox. `push_graph` publishes a freshly compiled
     /// program here per the unit's contract; see [`EngineBackend::push_graph`].
     swap: ProgramSwap,
+    /// Swap-whole tempo and timeline publications retained across graph swaps.
+    tempo_map: RtCell<TempoMapRt>,
+    timeline: RtCell<TimelineRt>,
     /// The stream request the host (re)starts with.
     stream: StreamRequest,
     /// Control-side clone of the engine's RT -> control meter return ring. The
@@ -183,6 +191,8 @@ pub struct EngineBackend {
     /// PCM here so `recorder_stop` can return it / `recorder_export` can write a
     /// WAV; the live engine-output tap is the documented gap (see `recorder_start`).
     captures: std::collections::HashMap<u32, CaptureState>,
+    /// Most recently finalized capture completion report for Tauri polling.
+    capture_result: Option<ojproto::CaptureResult>,
     /// The last graph adopted into the engine. Kept so a control command that
     /// must alter the LIVE program without a fresh UI push — binding a freshly
     /// loaded sample to a Sampler node — can re-resolve + recompile the same
@@ -209,6 +219,12 @@ pub struct EngineBackend {
     /// `saved_states` (the only time `getStateInformation` runs). Set by
     /// `save_plugin_states` around a forced re-adopt, cleared immediately after.
     capture_states: bool,
+    /// CLAP latency changes coalesce here until the retained graph can be
+    /// recompiled through the normal ProgramSwap path. Recompute is deferred
+    /// while record-arm is active, per the D9 recording invariant.
+    latency_rescan_pending: bool,
+    record_armed: bool,
+    transport_playing: bool,
     /// `true` while the engine is in the DEVICE-LOST state: the running output
     /// stream faulted (device yanked/disabled/reconfigured) and a rebuild has not
     /// yet succeeded. Set by [`tick`] on the first detected fault, cleared on a
@@ -276,7 +292,7 @@ impl EngineBackend {
     /// left `None`, the producer is a live ring (its consumer parked until the
     /// first successful start), and control commands still validate.
     pub fn new() -> Self {
-        let registry = Self::build_registry();
+        let registry = Arc::new(RwLock::new(Self::build_registry()));
         // Event-driven OS device-change listener (macOS; None elsewhere) feeds this
         // mailbox; drained alongside the host's err_fn faults + the polling watcher.
         let (listener_tx, listener_rx) = device_fault_channel(8);
@@ -289,6 +305,8 @@ impl EngineBackend {
             stream.sample_rate = rate;
         }
         let swap = ProgramSwap::new();
+        let tempo_map = RtCell::new(TempoMapRt::one_point(stream.sample_rate, 120.0, 4, 4));
+        let timeline = RtCell::new(TimelineRt::empty(stream.sample_rate));
         let meter_ring = Arc::new(MeterRing::new());
         let event_ring = Arc::new(EventRing::new());
 
@@ -298,14 +316,18 @@ impl EngineBackend {
         // Justified panic (Phase-4 scoped panic guard): the precondition is a
         // compile-time invariant, not runtime input — an `Err` here is unreachable.
         #[allow(clippy::expect_used)]
-        let program =
-            compile(&Self::starter_graph(stream), &registry).expect("starter graph compiles");
+        let program = {
+            let registry = registry.read().unwrap_or_else(|error| error.into_inner());
+            compile(&Self::starter_graph(stream), &registry).expect("starter graph compiles")
+        };
         let mut engine = Engine::new(program);
         // Attach the control-side meter ring up front. The same `Arc` clone is
         // kept on the control side so `drain_meters` reads what the audio thread
         // publishes.
         engine.attach_meter_ring(Some(Arc::clone(&meter_ring)));
         engine.attach_event_ring(Some(Arc::clone(&event_ring)));
+        engine.attach_tempo_map(Some(tempo_map.rx()));
+        engine.attach_timeline(Some(timeline.rx()));
         // Metering is enabled for the engine's whole life. With publish-only graph
         // swaps the engine INSTANCE persists inside the audio callback, so we can
         // no longer flip its flag from the control thread on the next push (the
@@ -317,12 +339,21 @@ impl EngineBackend {
 
         // Split a fresh command ring; the consumer moves into the audio host.
         let (producer, consumer) = CommandQueue::split(COMMAND_RING_CAP);
+        let (timed_producer, timed_consumer) = TimedCommandQueue::split(COMMAND_RING_CAP);
 
         // Try to start audio. No device => keep the backend alive without a host
         // (the expected sandbox path); any other host error is also non-fatal
         // here — the next `push_graph` re-attempts the start. The host adopts
         // UI graph edits in-callback via the swap mailbox (no stream restart).
-        let host = match AudioHost::start_with_swap(stream, engine, consumer, swap.rx()) {
+        let host = match AudioHost::start_with_swap_timing_on_device(
+            stream,
+            engine,
+            consumer,
+            timed_consumer,
+            swap.rx(),
+            None,
+            None,
+        ) {
             Ok(h) => Some(h),
             Err(HostError::NoOutputDevice) => {
                 eprintln!(
@@ -340,7 +371,10 @@ impl EngineBackend {
             registry,
             host,
             producer,
+            timed_producer,
             swap,
+            tempo_map,
+            timeline,
             stream,
             meter_ring,
             event_ring,
@@ -350,11 +384,15 @@ impl EngineBackend {
             catalog: AssetCatalog::new(),
             store: AssetStore::new(),
             captures: std::collections::HashMap::new(),
+            capture_result: None,
             last_graph: None,
             last_degraded: Vec::new(),
             pending_restores: std::collections::HashMap::new(),
             saved_states: std::collections::HashMap::new(),
             capture_states: false,
+            latency_rescan_pending: false,
+            record_armed: false,
+            transport_playing: false,
             device_lost: false,
             log_store: None,
             // Up to 8 reopen attempts per loss event before a calm give-up.
@@ -610,9 +648,18 @@ impl EngineBackend {
         // the blob is the base and current params win, re-applied on every compile.
         let program = {
             let states = PendingStates(&self.pending_restores);
-            compile_resilient_with_state(&g, &self.registry, &self.catalog, &states)
+            let registry = self
+                .registry
+                .read()
+                .unwrap_or_else(|error| error.into_inner());
+            compile_resilient_with_state(&g, &registry, &self.catalog, &states)
                 .map_err(BackendError::Compile)?
         };
+        // A plugin may emit `latency.changed` from its activation callback. This
+        // compile queried the extension after activation, so that notification is
+        // already represented by `program`; consume it to avoid a redundant
+        // recompile loop. A later live notification remains pending for the poll.
+        let _ = ojhost::take_latency_rescan_request();
 
         // oj.state SAVE (off-RT, only when a project save asked for it): the
         // just-compiled hosted instances are reachable HERE on the control thread,
@@ -666,17 +713,21 @@ impl EngineBackend {
         let mut engine = Engine::new(program);
         engine.attach_meter_ring(Some(Arc::clone(&self.meter_ring)));
         engine.attach_event_ring(Some(Arc::clone(&self.event_ring)));
+        engine.attach_tempo_map(Some(self.tempo_map.rx()));
+        engine.attach_timeline(Some(self.timeline.rx()));
         engine.set_metering(true); // always-on; see `new()`.
         let (producer, consumer) = CommandQueue::split(COMMAND_RING_CAP);
+        let (timed_producer, timed_consumer) = TimedCommandQueue::split(COMMAND_RING_CAP);
 
         // ANY start failure is NON-FATAL (matching [`EngineBackend::new`]): the
         // producer is live so commands still validate, and the next `push_graph`
         // re-attempts the start. Covers a device-less sandbox AND a present-but-
         // incompatible default output.
-        match self.open_host(engine, consumer) {
+        match self.open_host(engine, consumer, timed_consumer) {
             Ok(h) => {
                 self.host = Some(h);
                 self.producer = producer;
+                self.timed_producer = timed_producer;
             }
             Err(e) => {
                 // Device-less or incompatible default output: the start failed.
@@ -696,6 +747,7 @@ impl EngineBackend {
                     self.emit_lifecycle(Severity::Warn, format!("audio host failed to start: {e}"));
                 }
                 self.producer = producer;
+                self.timed_producer = timed_producer;
             }
         }
         Ok(())
@@ -830,7 +882,67 @@ impl EngineBackend {
     /// path: note on/off, param patches, transport). Wait-free push; a full
     /// ring drops the command rather than blocking the control thread.
     pub fn send_command(&mut self, cmd: RtCommand) -> Result<(), BackendError> {
-        self.producer.push(cmd).map_err(|_| BackendError::RingFull)
+        self.producer
+            .push(cmd)
+            .map_err(|_| BackendError::RingFull)?;
+        match cmd {
+            RtCommand::TransportSet { flag, on } if flag == ojproto::transport_flag::RECORD_ARM => {
+                self.record_armed = on;
+                if !on {
+                    self.poll_latency_rescan();
+                }
+            }
+            RtCommand::TransportPause => {
+                self.transport_playing = false;
+                self.poll_latency_rescan();
+            }
+            RtCommand::TransportPlay => self.transport_playing = true,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Consume CLAP's coalesced `latency.changed` callback and rebuild the
+    /// retained graph through `adopt`/ProgramSwap. Called from existing UI
+    /// control polls; never from the audio callback.
+    fn poll_latency_rescan(&mut self) {
+        self.latency_rescan_pending |= ojhost::take_latency_rescan_request();
+        if !self.latency_rescan_pending || (self.record_armed && self.transport_playing) {
+            return;
+        }
+        let Some(graph) = self.last_graph.clone() else {
+            return;
+        };
+        match self.adopt(&graph) {
+            Ok(()) => self.latency_rescan_pending = false,
+            Err(error) => {
+                eprintln!("ojhost: latency-change graph recompile deferred: {error}");
+            }
+        }
+    }
+
+    /// Enqueue a sample-addressed live command on the dedicated second ring.
+    pub fn send_timed_command(&mut self, cmd: TimedCommand) -> Result<(), BackendError> {
+        self.timed_producer
+            .push(cmd)
+            .map_err(|_| BackendError::RingFull)
+    }
+
+    /// Compile and atomically publish a complete tempo map.
+    pub fn push_tempo_map(&mut self, map: &TempoMap) -> Result<(), BackendError> {
+        self.tempo_map.publish(TempoMapRt::from_wire(map));
+        self.tempo_map.collect();
+        Ok(())
+    }
+
+    /// Compile and atomically publish a complete authored timeline. Musical
+    /// positions have already been resolved by conduct; this validates/sorts
+    /// the absolute frame form against the currently published tempo snapshot.
+    pub fn push_timeline(&mut self, timeline: &Timeline) -> Result<(), BackendError> {
+        let map = self.tempo_map.load_full();
+        self.timeline.publish(TimelineRt::from_wire(timeline, &map));
+        self.timeline.collect();
+        Ok(())
     }
 
     // --- U-EXEC-PARITY capability seam (control-rate) ----------------------
@@ -863,22 +975,28 @@ impl EngineBackend {
     /// the audio thread. Decodes the compact wire frames the audio thread pushed.
     ///
     /// SINGLE CONSUMER, ALL TAGS: the meter ring is one SPSC queue, so this is the
-    /// only place the wire frames are decoded. It surfaces both `Meter` frames
-    /// (the signal-level stream consumes their peaks) AND `Looper` frames (the
-    /// looper UI consumes their transport snapshot) — folding both into one drain
-    /// keeps a single ring consumer (a second drainer would race-steal frames).
-    /// `Beat` still rides the transport path and is filtered out here.
+    /// only place the wire frames are decoded. It surfaces `Meter` frames (the
+    /// signal-level stream consumes their peaks), `Looper` frames (the looper UI
+    /// consumes their transport snapshot), AND `Transport` frames (the
+    /// arrangement playhead's authoritative position — the frontend's
+    /// `routeTransportFrames` reads them from this very drain; on the browser
+    /// tier the worklet posts the same snapshot as a dedicated `frame` message).
+    /// Folding all three into one drain keeps a single ring consumer (a second
+    /// drainer would race-steal frames). `Beat` has no frontend consumer on this
+    /// tier and stays filtered.
     pub fn drain_meters(&mut self) -> Vec<EngineFrame> {
+        self.poll_latency_rescan();
         let mut out = Vec::new();
         let mut buf = [0u8; return_frame::MAX_LEN];
         while let Some(n) = self.meter_ring.pop(&mut buf) {
             if let Some(frame) = return_frame::decode(&buf[..n]) {
-                // Surface Meter + Looper frames here (Beat goes via the transport
-                // path). One drain decodes every tag because there is exactly one
+                // One drain decodes every tag because there is exactly one
                 // consumer of the meter ring.
                 if matches!(
                     frame,
-                    EngineFrame::Meter { .. } | EngineFrame::Looper { .. }
+                    EngineFrame::Meter { .. }
+                        | EngineFrame::Looper { .. }
+                        | EngineFrame::Transport { .. }
                 ) {
                     out.push(frame);
                 }
@@ -965,6 +1083,7 @@ impl EngineBackend {
     /// DevLog/diagnostics. Control-rate: called by the UI poll command, never on
     /// the audio thread.
     pub fn drain_events(&mut self) -> Vec<Event> {
+        self.poll_latency_rescan();
         // Drive device-loss recovery on the same control-poll tick the UI already
         // makes, so a mid-set unplug is held + reconnected without a separate loop.
         self.poll_device_recovery();
@@ -1058,6 +1177,8 @@ impl EngineBackend {
         let manifest: PluginManifest =
             serde_json::from_str(manifest_json).map_err(|e| format!("bad manifest json: {e}"))?;
         self.registry
+            .write()
+            .unwrap_or_else(|error| error.into_inner())
             .register(Box::new(WasmHostLoader::new_native(manifest, dll_path)));
         // Recompile the live graph so the loader resolves + instantiates: the node
         // may already be present (re-author), else the next `push_graph` uses it.
@@ -1137,7 +1258,39 @@ impl EngineBackend {
             cap.pcm = pcm.samples;
             cap.sample_rate = pcm.sample_rate;
         }
-        Some((cap.pcm.clone(), cap.sample_rate))
+        let returned = (cap.pcm.clone(), cap.sample_rate);
+        let pcm = Pcm {
+            samples: returned.0.clone(),
+            channels: cap.channels,
+            sample_rate: cap.sample_rate,
+        };
+        if !pcm.samples.is_empty() {
+            if let Ok(asset) = self.catalog.insert(pcm) {
+                let map = self.tempo_map.rx().load_full();
+                let frames = returned.0.len() as u64 / u64::from(cap.channels.max(1));
+                self.capture_result = Some(ojproto::CaptureResult {
+                    take_id: now_us(),
+                    segments: vec![ojproto::CaptureSegment {
+                        node,
+                        asset,
+                        start_sample: 0,
+                        frames,
+                        start_tick: 0,
+                        length_ticks: map.tick_at_sample(frames),
+                        loop_index: 0,
+                        xruns: 0,
+                    }],
+                    notes: Vec::new(),
+                    recovered: false,
+                });
+            }
+        }
+        Some(returned)
+    }
+
+    /// Clone the most recently finalized report; polling is idempotent.
+    pub fn capture_result(&self) -> Option<ojproto::CaptureResult> {
+        self.capture_result.clone()
     }
 
     /// STAGE-3 finalize-PCM: take looper `node`'s just-COMMITTED take as MONO PCM
@@ -1185,6 +1338,19 @@ impl EngineBackend {
             .map_err(BackendError::Asset)
     }
 
+    /// Deep-copy the off-RT PCM catalog for a background arrangement bounce.
+    /// The copy keeps the backend mutex out of the render/encode loop while
+    /// preserving every sampler/convolution asset referenced by the graph.
+    pub fn asset_catalog_snapshot(&self) -> AssetCatalog {
+        self.catalog.clone()
+    }
+
+    /// Share the loader table with a background bounce. Plugin registrations
+    /// briefly take the write side; export compilation holds the read side.
+    pub fn plugin_registry(&self) -> Arc<RwLock<PluginRegistry>> {
+        Arc::clone(&self.registry)
+    }
+
     /// Set a speaker node's master volume / mute. The SpeakerOut sink now carries
     /// real `volume` / `mute` params ([`master_param`]); this routes both as
     /// wait-free [`RtCommand::SetParam`]s to the live engine, which scales its
@@ -1219,14 +1385,16 @@ impl EngineBackend {
         &mut self,
         engine: Engine,
         consumer: CommandConsumer,
+        timed_consumer: ojcore::TimedCommandConsumer,
     ) -> Result<AudioHost, HostError> {
         let mut req = self.stream;
         // The duplex input is opened iff mic capture is wired to a live node.
         req.duplex_input = self.mic_node.is_some();
-        AudioHost::start_with_swap_on_device(
+        AudioHost::start_with_swap_timing_on_device(
             req,
             engine,
             consumer,
+            timed_consumer,
             self.swap.rx(),
             self.selected_output_device.clone(),
             self.mic_node,
@@ -1352,7 +1520,19 @@ impl EngineBackend {
         // backend that sees the binaries but can't host them (vs. nothing
         // installed) — the only way to tell those apart after the fact.
         let candidates = ojhost::candidate_paths(dirs).len();
-        let found = scan(dirs).map_err(BackendError::PluginScan)?;
+        // The helper child owns all foreign scan code. Its crash/timeout reason
+        // and count survive app restarts; clean descriptors are cached beside it.
+        let reliability_dir = ojhost::default_reliability_dir();
+        if let Ok(executable) = std::env::current_exe() {
+            let _ = ojhost::set_scan_helper_path(executable);
+        }
+        let mut quarantine = Blacklist::load(reliability_dir.join("quarantine.tsv"));
+        let found = scan_with(
+            dirs,
+            &mut quarantine,
+            Some(&reliability_dir.join("scan-cache.json")),
+        )
+        .map_err(BackendError::PluginScan)?;
         tracing::info!(
             target: "engine",
             backend = ojhost::HostingBackend::current().slug(),
@@ -1361,7 +1541,13 @@ impl EngineBackend {
             found = found.len(),
             "plugin scan"
         );
-        register_scanned(&mut self.registry, &found);
+        register_scanned(
+            &mut self
+                .registry
+                .write()
+                .unwrap_or_else(|error| error.into_inner()),
+            &found,
+        );
         Ok(found)
     }
 
@@ -1724,24 +1910,32 @@ mod tests {
         assert!(be.metering);
     }
 
-    /// `drain_meters` surfaces `Meter` AND `Looper` frames (one ring, one consumer,
-    /// all tags), and filters out `Beat` (it rides the transport path). With no
-    /// audio device the ring is otherwise empty, so the drain never panics.
+    /// `drain_meters` surfaces `Meter`, `Looper`, AND `Transport` frames (one
+    /// ring, one consumer, all tags) — the Transport snapshot is what moves the
+    /// arrangement playhead on the native tier — and filters out `Beat` (no
+    /// frontend consumer). With no audio device the ring is otherwise empty, so
+    /// the drain never panics.
     #[test]
     fn drain_meters_decodes_meter_and_looper_frames() {
         let mut be = EngineBackend::new();
-        // Drain any frames a live audio device (present in this sandbox) already
-        // published, so the assertions only see the frames we push below — the test
-        // must be deterministic with OR without a device.
+        // `host = None` so this is deterministic on a dev box that DOES have a
+        // device: the ring is SPSC and the live audio thread is its producer —
+        // this test pushing alongside it would be a second producer (torn
+        // frames, spurious failures). Dropping the host stops that thread; then
+        // drain whatever it already published so the assertions only see the
+        // frames pushed below.
+        be.host = None;
         let _ = be.drain_meters();
-        // Push one Meter, one Looper, and one Beat frame directly onto the ring
-        // (simulating the audio thread's publish), then drain.
+        // Push one Meter, one Looper, one Beat, and one Transport frame directly
+        // onto the ring (simulating the audio thread's publish), then drain.
         let mut buf = [0u8; return_frame::MAX_LEN];
         let n = return_frame::encode_meter(NodeIdx(5), 0.1, 0.8, &mut buf);
         assert!(be.meter_ring.push(&buf[..n]));
         let n = return_frame::encode_looper(NodeIdx(9), 3, 240, 480, 0.5, &mut buf);
         assert!(be.meter_ring.push(&buf[..n]));
         let n = return_frame::encode_beat(1, 2, 0.5, &mut buf);
+        assert!(be.meter_ring.push(&buf[..n]));
+        let n = return_frame::encode_transport(4_800, 960, 3, 4, 0.25, 1, true, true, &mut buf);
         assert!(be.meter_ring.push(&buf[..n]));
 
         let frames = be.drain_meters();
@@ -1772,6 +1966,32 @@ mod tests {
                 assert!((peak - 0.5).abs() < 1e-6);
             }
             other => panic!("expected the pushed Looper frame, got {other:?}"),
+        }
+
+        // The Transport frame survives — it is the playhead's only source on
+        // this tier. Assert on the SPECIFIC frame we pushed (sample=4_800), so a
+        // live device's own transport frames can't confuse the assertion.
+        let transport = frames
+            .iter()
+            .find(|f| matches!(f, EngineFrame::Transport { sample: 4_800, .. }));
+        match transport {
+            Some(EngineFrame::Transport {
+                tick,
+                bar,
+                beat,
+                motion,
+                rec,
+                loop_on,
+                ..
+            }) => {
+                assert_eq!(*tick, 960);
+                assert_eq!(*bar, 3);
+                assert_eq!(*beat, 4);
+                assert_eq!(*motion, 1);
+                assert!(*rec);
+                assert!(*loop_on);
+            }
+            other => panic!("expected the pushed Transport frame, got {other:?}"),
         }
 
         // No Beat frame from OUR push survives the filter (a device may still emit

@@ -10,8 +10,18 @@ import { emitWithIndex } from '../audio/ojgraph/emit';
 import { remapForBackend } from '../audio/ojgraph';
 import { clampMidi } from '../music/note';
 import { specToGraph } from './spec';
+import { buildTempoMap, tickToSample } from './tempoMap';
 import type { Arrangement, CodeNode, ScheduleEvent } from './types';
-import type { IrNode, OjGraph } from '../../packages/oj-protocol-ts/src/index';
+import { dbToGain, outputStageRefs } from './automation';
+import { ENGINE_IDS } from '../audio/ojgraph/backendMap';
+import {
+    SchedEventKind,
+    type IrNode,
+    type OjGraph,
+    type SchedEvent,
+    type TempoMap,
+    type Timeline,
+} from '../../packages/oj-protocol-ts/src/index';
 
 /** Which engine backend the conduct graph is remapped for. The SCHEDULE (events +
  * trackIndex) is identical across backends — only the graph's per-node manifest/kind
@@ -26,10 +36,16 @@ export interface ConductResult {
     graph: OjGraph;
     /** The note/param schedule in seconds — exactly the render bin's SchedEvent shape. */
     events: ScheduleEvent[];
+    /** The normalized musical clock snapshot published beside the timeline. */
+    tempoMap: TempoMap;
+    /** The sample-addressed immutable schedule consumed by both live executors. */
+    timeline: Timeline;
     /** Total render length in seconds (last event + a release tail). */
     seconds: number;
     /** Surviving track ref -> IR NodeIdx (the agent's read surface / debugging). */
     trackIndex: Record<string, number>;
+    /** Stable document/synthetic address -> IR node, used by the existing meter stream. */
+    meterIndex: Record<string, number>;
     /** Agent-authored code nodes that were spliced into the IR — `oj song` writes
      * each source to a .dsp and passes `--code-node id=path` to the render bin. */
     codeNodes: CodeNode[];
@@ -86,7 +102,66 @@ export function conduct(
     const { graph, index } = emitWithIndex(nodes, connections, { sampleRate, blockSize });
     const remapped = remapForBackend(graph, backend);
 
-    const ppq = arr.ppq ?? DEFAULTS.ppq;
+    // Every arrangement track owns one addressable output stage. Insert it after
+    // the track's downstream effect chain and before its master consumer. Unity
+    // defaults are golden-equivalent to the pre-mixer graph.
+    let nextOutputNode = remapped.nodes.reduce((max, item) => Math.max(max, item.id), -1) + 1;
+    const trackOutputIndex: Record<string, number> = {};
+    const originalEdges = remapped.edges.map((edge) => ({ ...edge }));
+    const trackRoots = new Set(arr.tracks.flatMap((track) => {
+        const idx = index.get(track.ref);
+        return idx === undefined ? [] : [idx as number];
+    }));
+    const reachCount = new Map<number, number>();
+    for (const root of trackRoots) {
+        const reached = new Set<number>();
+        const queue = [root];
+        while (queue.length) {
+            const node = queue.shift()!;
+            if (reached.has(node)) continue;
+            reached.add(node);
+            queue.push(...originalEdges.filter((edge) => edge.kind === 'Audio' && edge.from_node === node).map((edge) => edge.to_node));
+        }
+        for (const node of reached) reachCount.set(node, (reachCount.get(node) ?? 0) + 1);
+    }
+    const hasSolo = arr.tracks.some((track) => track.solo === true);
+    for (const track of arr.tracks) {
+        const root = index.get(track.ref);
+        if (root === undefined) continue;
+        let tail = root as number;
+        const visited = new Set<number>();
+        while (!visited.has(tail)) {
+            visited.add(tail);
+            const outgoing = originalEdges.filter((edge) => edge.kind === 'Audio' && edge.from_node === tail);
+            if (outgoing.length !== 1) break;
+            const target = remapped.nodes.find((node) => node.id === outgoing[0]!.to_node);
+            if (!target || target.kind === 'SpeakerOut' || target.kind === 'GraphOut' || (reachCount.get(target.id) ?? 0) > 1 || (trackRoots.has(target.id) && target.id !== root)) break;
+            tail = target.id;
+        }
+        const consumers = remapped.edges.filter((edge) => edge.kind === 'Audio' && edge.from_node === tail);
+        const gainNode = nextOutputNode++;
+        const panNode = nextOutputNode++;
+        const refs = outputStageRefs(track);
+        const audible = !track.mute && (!hasSolo || track.solo === true);
+        remapped.nodes.push(
+            { id: gainNode, manifest_id: ENGINE_IDS.gain, kind: 'Gain', params: [{ id: 0, value: audible ? dbToGain(track.gainDb ?? 0) : 0 }], assets: [], n_in: 1, n_out: 1 },
+            { id: panNode, manifest_id: ENGINE_IDS.pan, kind: 'Pan', params: [{ id: 0, value: track.pan ?? 0 }], assets: [], n_in: 1, n_out: 1 },
+        );
+        remapped.edges.push(
+            { from_node: tail, from_port: consumers[0]?.from_port ?? 0, to_node: gainNode, to_port: 0, kind: 'Audio' },
+            { from_node: gainNode, from_port: 0, to_node: panNode, to_port: 0, kind: 'Audio' },
+        );
+        for (const edge of consumers) {
+            edge.from_node = panNode;
+            edge.from_port = 0;
+        }
+        index.set(refs.gain, gainNode);
+        index.set(refs.pan, panNode);
+        trackOutputIndex[track.ref] = panNode;
+    }
+
+    const tempoMap = buildTempoMap({ ...arr, sampleRate });
+    const ppq = tempoMap.ppq;
     const secPerTick = 60 / (arr.tempoBpm * ppq);
     const tickToSec = (tick: number) => tick * secPerTick;
 
@@ -109,34 +184,95 @@ export function conduct(
     // Build events carrying their INTEGER tick, so we can sort on a total integer
     // order (not the post-conversion float `at`) — the bit-identical bounce must hold
     // by construction, never by V8 stable-sort accident.
-    const timed: { tick: number; ev: ScheduleEvent }[] = [];
+    const timed: { tick: number; ev: ScheduleEvent; sched?: SchedEvent }[] = [];
     const trackIndex: Record<string, number> = {};
     let lastTick = 0;
+    let nextTimelineNode = remapped.nodes.reduce((max, item) => Math.max(max, item.id), -1) + 1;
 
     for (const track of arr.tracks) {
         const node = idxOf(track.ref);
         if (node === null) continue; // lenient: this track's ref didn't survive — skip it
         trackIndex[track.ref] = node;
 
-        if (!track.mute) {
+        if (!track.mute && (!hasSolo || track.solo === true)) {
             for (const clip of track.clips) {
-                for (const n of clip.notes) {
-                    const onTick = clip.startTick + n.tick;
-                    const offTick = onTick + Math.max(1, n.durTick);
+                if (clip.mute || !(clip.lengthTick > 0)) continue;
+                const source = arr.sources?.[clip.sourceId];
+                if (!source) continue; // unresolved media is a silent placeholder
+                const sourceStart = clip.sourceStart ?? 0;
+                if (source.kind === 'midi') for (const n of source.notes) {
+                    const noteEnd = n.tick + Math.max(1, n.durTick);
+                    const windowEnd = sourceStart + clip.lengthTick;
+                    if (noteEnd <= sourceStart || n.tick >= windowEnd) continue;
+                    const onTick = clip.startTick + Math.max(0, n.tick - sourceStart);
+                    const offTick = clip.startTick + Math.min(clip.lengthTick, noteEnd - sourceStart);
+                    if (offTick <= onTick) continue;
                     lastTick = Math.max(lastTick, offTick);
                     const note = clampMidi(n.pitch);
-                    timed.push({ tick: onTick, ev: { at: tickToSec(onTick), cmd: 'noteOn', node, note, vel: clampVel(n.vel) } });
-                    timed.push({ tick: offTick, ev: { at: tickToSec(offTick), cmd: 'noteOff', node, note } });
+                    const vel = clampVel(n.vel);
+                    timed.push({ tick: onTick, ev: { at: tickToSec(onTick), cmd: 'noteOn', node, note, vel }, sched: { at: tickToSample(tempoMap, onTick), node, kind: SchedEventKind.NOTE_ON, a: note, b: vel, value: 0 } });
+                    timed.push({ tick: offTick, ev: { at: tickToSec(offTick), cmd: 'noteOff', node, note }, sched: { at: tickToSample(tempoMap, offTick), node, kind: SchedEventKind.NOTE_OFF, a: note, b: 0, value: 0 } });
+                } else {
+                    // One bound Sampler per audio clip. The current sampler contract can
+                    // trigger the immutable asset but cannot yet seek sourceStart or stop
+                    // an unpitched one-shot sample-accurately; those executor controls are
+                    // the explicit seam retained by Wave 1.
+                    const samplerNode = nextTimelineNode++;
+                    const consumers = remapped.edges.filter((edge) => edge.from_node === node);
+                    const asset = Number.parseInt(source.assetId.replace(/^0x/i, ''), 16);
+                    remapped.nodes.push({
+                        id: samplerNode,
+                        manifest_id: 'builtin.sampler',
+                        kind: 'Sampler',
+                        params: [{ id: 16, value: 60 }, { id: 0, value: clip.gain ?? 1 }],
+                        assets: Number.isFinite(asset) ? [{ slot: 0, asset }] : [],
+                        n_in: 0,
+                        n_out: 1,
+                    });
+                    for (const edge of consumers) remapped.edges.push({ ...edge, from_node: samplerNode, from_port: 0 });
+                    const onTick = clip.startTick;
+                    const offTick = clip.startTick + clip.lengthTick;
+                    lastTick = Math.max(lastTick, offTick);
+                    const sourceOffset = Math.max(0, Math.floor(sourceStart));
+                    timed.push({ tick: onTick, ev: { at: tickToSec(onTick), cmd: 'noteOn', node: samplerNode, note: 60, vel: 127 }, sched: {
+                        at: tickToSample(tempoMap, onTick), node: samplerNode,
+                        kind: SchedEventKind.SAMPLER_START,
+                        a: sourceOffset & 0xff,
+                        b: (sourceOffset >>> 8) & 0xff,
+                        value: Math.floor(sourceOffset / 65_536),
+                    } });
                 }
             }
         }
 
         for (const lane of track.automation ?? []) {
+            if ((lane.state ?? 'Play') !== 'Play') continue;
             const anode = idxOf(lane.ref);
             if (anode === null) continue; // lenient: skip an automation lane with a bad ref
-            for (const pt of lane.points) {
+            const scheduled = lane.interp === 'Linear'
+                ? lane.points.flatMap((point, pointIndex) => {
+                    const next = lane.points[pointIndex + 1];
+                    if (!next || next.tick <= point.tick) return [point];
+                    // Densify authoring-time ramps at 1/32 beat, capped per segment.
+                    const step = Math.max(1, Math.ceil(ppq / 32));
+                    const count = Math.min(128, Math.ceil((next.tick - point.tick) / step));
+                    return Array.from({ length: count }, (_, index) => {
+                        const mix = index / count;
+                        return { tick: Math.round(point.tick + (next.tick - point.tick) * mix), value: point.value + (next.value - point.value) * mix };
+                    });
+                }).concat(lane.points.at(-1) ? [lane.points.at(-1)!] : [])
+                : lane.points;
+            const gainRef = outputStageRefs(track).gain;
+            for (const pt of scheduled) {
+                const value = lane.ref === gainRef ? dbToGain(pt.value) : pt.value;
                 lastTick = Math.max(lastTick, pt.tick);
-                timed.push({ tick: pt.tick, ev: { at: tickToSec(pt.tick), cmd: 'setParam', node: anode, param: lane.param, value: pt.value } });
+                timed.push({ tick: pt.tick, ev: { at: tickToSec(pt.tick), cmd: 'setParam', node: anode, param: lane.param, value }, sched: {
+                    at: tickToSample(tempoMap, pt.tick), node: anode,
+                    kind: SchedEventKind.SET_PARAM,
+                    a: lane.param & 0xff,
+                    b: Math.floor(lane.param / 256) & 0xff,
+                    value,
+                } });
             }
         }
     }
@@ -221,5 +357,23 @@ export function conduct(
     const tailSec = Math.max(1, ppq * beatsPerBar * secPerTick);
     const seconds = tickToSec(lastTick) + tailSec;
 
-    return { graph: remapped, events, seconds, trackIndex, codeNodes, skipped };
+    const range = (kind: 'loop' | 'punch'): [number, number] | null => {
+        const location = (arr.locations ?? []).find((item) => item.kind === kind);
+        if (!location || location.endTick === undefined) return null;
+        return [tickToSample(tempoMap, location.startTick), tickToSample(tempoMap, location.endTick)];
+    };
+    const timeline: Timeline = {
+        sample_rate: sampleRate,
+        events: timed.flatMap((item) => item.sched ? [item.sched] : []),
+        loop_range: range('loop'),
+        punch_range: range('punch'),
+        armed_tracks: [],
+        count_in_beats: 0,
+        end: Math.max(0, Math.round(seconds * sampleRate)),
+    };
+
+    const meterIndex: Record<string, number> = { ...trackOutputIndex };
+    const master = remapped.nodes.find((node) => node.kind === 'SpeakerOut' || node.kind === 'GraphOut');
+    if (master) meterIndex.__master__ = master.id;
+    return { graph: remapped, events, tempoMap, timeline, seconds, trackIndex, meterIndex, codeNodes, skipped };
 }

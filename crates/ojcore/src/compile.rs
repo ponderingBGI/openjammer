@@ -21,7 +21,7 @@ use alloc::vec::Vec;
 
 use ojproto::{AssetId, ConnectionType, NodeIdx, OjGraph, PrimitiveKind};
 
-use crate::dsp::DspInstance;
+use crate::dsp::{DspInstance, ExtId, LatencyExt};
 use crate::loader::PluginLoader;
 use crate::registry::PluginRegistry;
 
@@ -114,7 +114,7 @@ impl AssetResolver for NoAssets {
 }
 
 /// Resolves a node's saved opaque STATE blob (the `oj.state` RESTORE half) — the
-/// state analogue of [`AssetResolver`]. [`compile_inner`] applies it via
+/// state analogue of [`AssetResolver`]. Compilation applies it via
 /// [`DspInstance::restore_state`] right after `activate` and BEFORE the baked-in
 /// `set_param`s, so the blob is the BASE state and the IR's CURRENT param values
 /// always win (a post-load param edit is never overridden by a stale blob). It is
@@ -148,6 +148,121 @@ pub struct Source {
     pub port: u16,
 }
 
+#[derive(Debug)]
+struct DelayLine {
+    ring: Box<[f32]>,
+    pos: usize,
+}
+
+impl DelayLine {
+    fn new(samples: u32) -> Self {
+        Self {
+            ring: vec![0.0; samples as usize].into_boxed_slice(),
+            pos: 0,
+        }
+    }
+
+    fn process(&mut self, input: &[f32], output: &mut [f32]) {
+        for (&sample, delayed) in input.iter().zip(output.iter_mut()) {
+            *delayed = self.ring[self.pos];
+            self.ring[self.pos] = sample;
+            self.pos += 1;
+            if self.pos == self.ring.len() {
+                self.pos = 0;
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct DelayedEdge {
+    source: usize,
+    port: u16,
+    lines: Vec<DelayLine>,
+    output: Vec<Vec<f32>>,
+}
+
+/// Compile-time-sized delay lines for every compensated audio edge.
+///
+/// The RT path only advances fixed rings and reads their pre-sized output
+/// buffers. Zero-delay edges do not enter this bank at all.
+#[derive(Debug, Default)]
+pub struct DelayBank {
+    edges: Vec<DelayedEdge>,
+    outgoing: Vec<Vec<usize>>,
+}
+
+impl DelayBank {
+    pub(crate) fn with_nodes(nodes: usize) -> Self {
+        Self {
+            edges: Vec::new(),
+            outgoing: vec![Vec::new(); nodes],
+        }
+    }
+
+    fn add(
+        &mut self,
+        source: usize,
+        port: u16,
+        channels: usize,
+        samples: u32,
+        block_size: usize,
+    ) -> usize {
+        let index = self.edges.len();
+        self.edges.push(DelayedEdge {
+            source,
+            port,
+            lines: (0..channels).map(|_| DelayLine::new(samples)).collect(),
+            output: (0..channels).map(|_| vec![0.0; block_size]).collect(),
+        });
+        self.outgoing[source].push(index);
+        index
+    }
+
+    pub(crate) fn advance_from(
+        &mut self,
+        source: usize,
+        source_offset: usize,
+        nframes: usize,
+        out_bufs: &[Vec<Vec<f32>>],
+        out_channels: &[u8],
+    ) {
+        for &edge_index in &self.outgoing[source] {
+            let edge = &mut self.edges[edge_index];
+            debug_assert_eq!(edge.source, source);
+            let channels = out_channels[source].max(1) as usize;
+            for channel in 0..edge.lines.len() {
+                let lane = edge.port as usize * channels + channel;
+                let Some(input) = out_bufs[source].get(lane) else {
+                    continue;
+                };
+                let end = source_offset.saturating_add(nframes).min(input.len());
+                let input = &input[source_offset.min(end)..end];
+                edge.lines[channel].process(input, &mut edge.output[channel][..input.len()]);
+            }
+        }
+    }
+
+    pub(crate) fn output(&self, edge: usize, channel: usize) -> Option<&[f32]> {
+        let edge = self.edges.get(edge)?;
+        edge.output
+            .get(channel.min(edge.output.len().saturating_sub(1)))
+            .map(Vec::as_slice)
+    }
+
+    pub(crate) fn reset(&mut self) {
+        for edge in &mut self.edges {
+            for line in &mut edge.lines {
+                line.ring.fill(0.0);
+                line.pos = 0;
+            }
+            for output in &mut edge.output {
+                output.fill(0.0);
+            }
+        }
+    }
+}
+
 /// The routing for one node: for each of its input ports, the list of producer
 /// buffers feeding it. Multiple sources on one port are summed (mixed) at run
 /// time into a reused input-mix scratch — so this stays a flat plan with no
@@ -162,6 +277,8 @@ pub struct NodeRouting {
 /// handed across the graph-swap seam. Building one may allocate; running one
 /// (see `exec.rs`) must not.
 pub struct CompiledProgram {
+    /// Graph sample rate used to activate nodes and seed the default tempo map.
+    pub sample_rate: u32,
     /// One live DSP instance per node, indexed by compiled slot.
     pub instances: Vec<Box<dyn DspInstance>>,
     /// Per-node routing plan (same indexing as `instances`).
@@ -203,6 +320,27 @@ pub struct CompiledProgram {
     /// Compiler-derived, cycle-free execution order (compiled slots). The RT
     /// loop walks this and indexes the by-slot tables above.
     pub schedule: Vec<usize>,
+    /// Plugin latency reported at compile time, by compiled node slot.
+    /// EMPTY on the zero-latency fast path (every entry is zero) — that case
+    /// allocates nothing; read through [`Self::to_master_at`]-style accessors
+    /// or treat a missing entry as `0`.
+    pub latency: Box<[u32]>,
+    /// Longest upstream arrival at each node input. Empty ⇒ all zero.
+    pub arrival: Box<[u32]>,
+    /// Remaining processing latency from each node through the master.
+    /// Empty ⇒ all zero; use [`Self::to_master_at`].
+    pub to_master: Box<[u32]>,
+    /// Compensation in samples for each audio edge, in graph audio-edge order.
+    /// Empty ⇒ all zero.
+    pub edge_delay: Box<[u32]>,
+    /// Maximum source-to-master latency; the engine/timeline clock offset.
+    pub preroll: u32,
+    /// Materialized fixed delay lines for non-zero entries of `edge_delay`.
+    pub delay_bank: DelayBank,
+    /// Parallel to `routing[node].inputs[port][source]`: optional DelayBank edge.
+    /// `None` is the zero-latency fast path: it avoids both the nested routing
+    /// allocation at compile time and delay lookups in every rendered block.
+    pub(crate) delay_routing: Option<Vec<Vec<Vec<Option<usize>>>>>,
 }
 
 impl CompiledProgram {
@@ -215,6 +353,14 @@ impl CompiledProgram {
     /// requires a master output, but kept for clippy's `len`/`is_empty` pair).
     pub fn is_empty(&self) -> bool {
         self.instances.is_empty()
+    }
+
+    /// Remaining processing latency from `slot` through the master. The
+    /// zero-latency fast path keeps `to_master` EMPTY (no allocation), so a
+    /// missing entry reads as `0` — exactly what every slot's value is there.
+    #[inline]
+    pub fn to_master_at(&self, slot: usize) -> u32 {
+        self.to_master.get(slot).copied().unwrap_or(0)
     }
 
     /// Resolve an IR [`NodeIdx`] to its compiled slot via binary search over
@@ -421,8 +567,11 @@ fn compile_inner(
                 PrimitiveKind::Passthrough,
             ),
         };
-        inst.activate(sample_rate, block_size);
-        // oj.state RESTORE (off-RT, BEFORE params): seed the node with a prior
+        // oj.state RESTORE (off-RT, BEFORE ACTIVATE and params): CLAP explicitly
+        // permits state load on an inactive instance and plug-ins may size their
+        // activation resources from restored state. This ordering is enforced by
+        // construction for every DspInstance; default restore is a no-op.
+        // Seed the node with a prior
         // session's opaque blob so it is the BASE state. The baked-in `set_param`s
         // below then override with the CURRENT param values, so a post-load param
         // edit always wins and the blob never reverts it. Re-applied on EVERY
@@ -432,6 +581,7 @@ fn compile_inner(
         if let Some(blob) = states.resolve_state(node.id) {
             inst.restore_state(blob);
         }
+        inst.activate(sample_rate, block_size);
         // Apply any baked-in param defaults from the IR, then snap smoothers.
         for p in &node.params {
             inst.set_param(p.id, p.value);
@@ -509,6 +659,122 @@ fn compile_inner(
     }
     let master_out = master.ok_or(CompileError::NoMasterOutput)?;
 
+    // --- D9 plugin-delay compensation, entirely off the RT thread ----------
+    // Query the additive capability once. A node that does not expose the
+    // extension is exactly zero latency and stays on the bit-identical fast path.
+    let node_latency = |instance: &dyn DspInstance| {
+        instance
+            .extension(ExtId::Latency)
+            .and_then(|ext| ext.downcast_ref::<LatencyExt>())
+            .map_or(0, LatencyExt::latency_samples)
+    };
+    let (latency, arrival, to_master, edge_delay, preroll, delay_bank, delay_routing) = if instances
+        .iter()
+        .all(|instance| node_latency(instance.as_ref()) == 0)
+    {
+        // Built-ins and the overwhelmingly common hosted-plugin graph report
+        // zero latency. Preserve the public PDC metadata contract (empty ⇒
+        // all zero, see the field docs) while allocating NOTHING here: empty
+        // boxed slices need no heap, and the renderer recognizes `None` to
+        // stay on its historical no-delay hot path. This keeps the fast-path
+        // compile cost identical to the pre-PDC compiler apart from the
+        // per-instance latency query itself.
+        (
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            0,
+            DelayBank::default(),
+            None,
+        )
+    } else {
+        let latency: Vec<u32> = instances
+            .iter()
+            .map(|instance| node_latency(instance.as_ref()))
+            .collect();
+        let audio_edge_count = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.kind == ConnectionType::Audio)
+            .count();
+        // Longest signal arrival at every node input (forward topological pass).
+        let mut arrival = vec![0u32; n];
+        for &node in &order {
+            let mut latest = 0u32;
+            for port in &routing[node].inputs {
+                for source in port {
+                    latest = latest.max(arrival[source.node].saturating_add(latency[source.node]));
+                }
+            }
+            arrival[node] = latest;
+        }
+
+        // Remaining processing latency through the master (reverse pass).
+        let mut consumers: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for edge in &graph.edges {
+            if edge.kind == ConnectionType::Audio {
+                let from = slot_of(edge.from_node).ok_or(CompileError::DanglingEdge)?;
+                let to = slot_of(edge.to_node).ok_or(CompileError::DanglingEdge)?;
+                consumers[from].push(to);
+            }
+        }
+        let mut to_master = vec![0u32; n];
+        for &node in order.iter().rev() {
+            let downstream = consumers[node]
+                .iter()
+                .map(|&consumer| to_master[consumer])
+                .max()
+                .unwrap_or(0);
+            to_master[node] = latency[node].saturating_add(downstream);
+        }
+        let preroll = to_master.iter().copied().max().unwrap_or(0);
+
+        // One delay per audio edge. Graph order matches routing-source order.
+        let mut edge_delay = Vec::with_capacity(audio_edge_count);
+        let mut delay_bank = DelayBank::with_nodes(n);
+        let mut delay_routing: Vec<Vec<Vec<Option<usize>>>> = routing
+            .iter()
+            .map(|route| {
+                route
+                    .inputs
+                    .iter()
+                    .map(|sources| vec![None; sources.len()])
+                    .collect()
+            })
+            .collect();
+        let mut route_cursor: Vec<Vec<usize>> = routing
+            .iter()
+            .map(|route| vec![0; route.inputs.len()])
+            .collect();
+        for edge in &graph.edges {
+            if edge.kind != ConnectionType::Audio {
+                continue;
+            }
+            let from = slot_of(edge.from_node).ok_or(CompileError::DanglingEdge)?;
+            let to = slot_of(edge.to_node).ok_or(CompileError::DanglingEdge)?;
+            let port = edge.to_port as usize;
+            let samples = arrival[to].saturating_sub(arrival[from].saturating_add(latency[from]));
+            edge_delay.push(samples);
+            let source_index = route_cursor[to][port];
+            route_cursor[to][port] += 1;
+            if samples != 0 {
+                let channels = out_channels[from].max(1) as usize;
+                let delay = delay_bank.add(from, edge.from_port, channels, samples, block_size);
+                delay_routing[to][port][source_index] = Some(delay);
+            }
+        }
+        (
+            latency,
+            arrival,
+            to_master,
+            edge_delay,
+            preroll,
+            delay_bank,
+            Some(delay_routing),
+        )
+    };
+
     // Pre-size the hot-path scratch: one mix row per input LANE (audio ports ×
     // channels) of the widest node, and channel-pointer arrays as wide as the
     // widest lane count. Sized here so `process_block` never grows or allocates.
@@ -528,6 +794,7 @@ fn compile_inner(
     // No reorder of the by-slot tables is needed: the RT loop walks `schedule`
     // (the computed, cycle-free order) and indexes the by-slot tables by slot.
     Ok(CompiledProgram {
+        sample_rate: graph.sample_rate,
         instances,
         routing,
         out_bufs,
@@ -543,6 +810,13 @@ fn compile_inner(
         max_out,
         schedule: order,
         id_index: id_to_slot,
+        latency: latency.into_boxed_slice(),
+        arrival: arrival.into_boxed_slice(),
+        to_master: to_master.into_boxed_slice(),
+        edge_delay: edge_delay.into_boxed_slice(),
+        preroll,
+        delay_bank,
+        delay_routing,
     })
 }
 

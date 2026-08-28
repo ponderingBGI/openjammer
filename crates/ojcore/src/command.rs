@@ -9,8 +9,8 @@
 //! Behind the `std` feature: `rtrb` needs OS atomics/threads beyond bare
 //! `alloc`, and the compile/exec core must stay `no_std` for wasm.
 
-use ojproto::RtCommand;
-use rtrb::{Consumer, Producer, RingBuffer};
+use ojproto::{RtCommand, TimedCommand};
+use rtrb::{Consumer, Producer, PushError, RingBuffer};
 
 use crate::exec::Engine;
 
@@ -22,6 +22,37 @@ pub type CommandConsumer = Consumer<RtCommand>;
 /// A wait-free SPSC ring of [`RtCommand`]s. Construct once, then `split` it into
 /// the producer (UI thread) and consumer (audio thread) halves.
 pub struct CommandQueue;
+
+/// Producer end of the dedicated timestamped command ring. It enforces the
+/// single-producer non-decreasing timestamp contract in debug builds.
+pub struct TimedCommandProducer {
+    inner: Producer<TimedCommand>,
+    last_at: u64,
+}
+
+impl TimedCommandProducer {
+    pub fn push(&mut self, command: TimedCommand) -> Result<(), PushError<TimedCommand>> {
+        debug_assert!(command.at == 0 || command.at >= self.last_at);
+        self.inner.push(command)?;
+        if command.at != 0 {
+            self.last_at = command.at;
+        }
+        Ok(())
+    }
+}
+/// Consumer end of the dedicated timestamped command ring.
+pub type TimedCommandConsumer = Consumer<TimedCommand>;
+
+/// A second wait-free SPSC ring for [`TimedCommand`]. The frozen immediate
+/// [`RtCommand`] ring remains unchanged.
+pub struct TimedCommandQueue;
+
+impl TimedCommandQueue {
+    pub fn split(capacity: usize) -> (TimedCommandProducer, TimedCommandConsumer) {
+        let (inner, consumer) = RingBuffer::new(capacity);
+        (TimedCommandProducer { inner, last_at: 0 }, consumer)
+    }
+}
 
 impl CommandQueue {
     /// Allocate a ring with room for `capacity` pending commands and split it
@@ -50,6 +81,14 @@ impl Engine {
     pub fn drain(&mut self, rx: &mut CommandConsumer) {
         while let Ok(cmd) = rx.pop() {
             self.apply(cmd);
+        }
+    }
+
+    /// Drain timestamped commands into the engine's preallocated pending queue.
+    /// Producers must push in non-decreasing `at` order.
+    pub fn drain_timed(&mut self, rx: &mut TimedCommandConsumer) {
+        while let Ok(cmd) = rx.pop() {
+            let _ = self.enqueue_timed(cmd);
         }
     }
 }

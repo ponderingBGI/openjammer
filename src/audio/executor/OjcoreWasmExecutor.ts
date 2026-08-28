@@ -42,11 +42,15 @@ import type {
 } from './Executor';
 import { getAudioContext } from '../audioContext';
 import {
-    commandsUpTo,
-    cursorAtOrAfter,
-    heldNoteOffs,
-    type ScheduledCommand,
-} from './arrangementScheduler';
+    encodeTimedCommand,
+    encodeTimelineDocuments,
+    type ArrangementCaptureResult,
+    type ArrangementPlayback,
+    type ArrangementStartOptions,
+    type LiveNoteCallback,
+    type TransportFrame,
+    type TransportFrameCallback,
+} from './timelinePlayback';
 import { classifyLatency, type LatencyReport } from './latency';
 import {
     DEFAULT_VOICE_INSTRUMENTS,
@@ -130,6 +134,7 @@ const MASTER_PARAM_VOLUME = 0;
 const MASTER_PARAM_MUTE = 1;
 
 export class OjcoreWasmExecutor implements Executor {
+    getTimelineBackend(): 'wasm' { return 'wasm'; }
     private getNodes: (() => Map<string, GraphNode>) | null = null;
     private getConnections: (() => Map<string, Connection>) | null = null;
     private unsub: Unsubscribe | null = null;
@@ -149,19 +154,8 @@ export class OjcoreWasmExecutor implements Executor {
     private levels = new Map<string, number>();
     private encoder = new TextEncoder();
 
-    // --- Timeline preview state (a main-thread look-ahead scheduler) ----------
-    /** The active preview's dispatch timer, or null when not previewing. */
-    private previewTimer: ReturnType<typeof setInterval> | null = null;
-    /** The conducted schedule being previewed (offsets in seconds from tick 0). */
-    private previewEvents: readonly ScheduledCommand[] = [];
-    /** Cursor into {@link previewEvents}: the next event to dispatch. */
-    private previewCursor = 0;
-    /** The cursor playback STARTED at (so a mid-song stop releases only sent notes). */
-    private previewStartCursor = 0;
-    /** Playback position (absolute seconds from tick 0) when the timer started. */
-    private previewStartSec = 0;
-    /** AudioContext.currentTime when the timer started (the wall-clock anchor). */
-    private previewAnchorSec = 0;
+    private transportCallbacks = new Set<TransportFrameCallback>();
+    private liveNoteCallbacks = new Set<LiveNoteCallback>();
     /** Pending recorder-capture resolvers, keyed by NodeIdx, for the worklet's
      *  `recorder-data` reply. */
     private captureResolvers = new Map<number, (blob: Blob | null) => void>();
@@ -300,6 +294,7 @@ export class OjcoreWasmExecutor implements Executor {
                 rootNote?: number;
                 bytes?: Uint8Array;
                 degradedNodeIds?: number[];
+                frame?: TransportFrame;
             };
             switch (data.type) {
                 case 'ready':
@@ -325,6 +320,11 @@ export class OjcoreWasmExecutor implements Executor {
                     break;
                 case 'meters':
                     this.onMeterFrame(data.levels ?? []);
+                    break;
+                case 'transport':
+                    if (data.frame) {
+                        for (const callback of this.transportCallbacks) callback(data.frame);
+                    }
                     break;
                 case 'looper':
                     this.onLooperFrames(data.frames);
@@ -429,9 +429,8 @@ export class OjcoreWasmExecutor implements Executor {
         this.node = null;
         this.ready = false;
         this.pendingGraph = null;
-        // Kill any preview dispatch timer (the node is gone; nothing to restore).
-        this.clearPreviewTimer();
-        this.previewEvents = [];
+        this.transportCallbacks.clear();
+        this.liveNoteCallbacks.clear();
         this.signalCallbacks.clear();
         this.levels.clear();
         this.caps.clear();
@@ -793,71 +792,68 @@ export class OjcoreWasmExecutor implements Executor {
 
     // --- Timeline preview --------------------------------------------------
 
-    /** Stop the dispatch timer (without restoring the graph or releasing notes). */
-    private clearPreviewTimer(): void {
-        if (this.previewTimer !== null) {
-            clearInterval(this.previewTimer);
-            this.previewTimer = null;
+    private publishArrangement(playback: ArrangementPlayback): void {
+        if (!this.node || !this.ready) return;
+        if (playback.meterIndex) {
+            this.reverseIndex = new Map(Object.entries(playback.meterIndex).map(([id, node]) => [node, id]));
         }
+        this.sendGraph(playback.graph);
+        const bytes = encodeTimelineDocuments(playback.tempoMap, playback.timeline);
+        this.node.port.postMessage({ type: 'load_tempo_map', bytes: bytes.tempoMap }, [bytes.tempoMap.buffer]);
+        this.node.port.postMessage({ type: 'load_timeline', bytes: bytes.timeline }, [bytes.timeline.buffer]);
     }
 
-    startArrangementPreview(
-        graph: OjGraph,
-        events: readonly ScheduledCommand[],
-        startSec: number,
-    ): void {
-        // Clean restart: release the old preview's notes + timer first.
-        this.stopArrangementPreview();
-        const ctx = getAudioContext();
-        if (!this.node || !this.ready || !ctx) return; // no engine yet — silent, no throw
+    startArrangementPreview(playback: ArrangementPlayback, startSample: number, options: ArrangementStartOptions = {}): void {
+        this.publishArrangement(playback);
+        if (!this.node || !this.ready) return;
+        if (startSample > 0) this.send({ Seek: { samples: Math.round(startSample) } });
+        for (const [flag, on] of [[0, options.loop], [1, options.punch], [3, options.click], [4, options.countIn], [2, options.record]] as const) {
+            if (on !== undefined) this.send({ TransportSet: { flag, on } });
+        }
+        this.send('TransportPlay');
+    }
 
-        // Load the arrangement's graph (replaces the canvas graph in the worklet until
-        // stop restores it). The instruments now exist in the engine at the NodeIdx the
-        // schedule addresses.
-        this.sendGraph(graph);
-
-        this.previewEvents = events;
-        this.previewStartSec = startSec;
-        this.previewAnchorSec = ctx.currentTime;
-        this.previewCursor = cursorAtOrAfter(events, startSec);
-        this.previewStartCursor = this.previewCursor;
-
-        // Look-ahead scheduler (the standard Web Audio "two clocks" pattern): a coarse
-        // ~25 ms timer dispatches every command that has entered a short horizon. This
-        // runs on the MAIN thread and only postMessages bytes to the worklet — the
-        // audio thread never allocates or blocks for it.
-        const LOOKAHEAD_SEC = 0.12;
-        const TICK_MS = 25;
-        this.previewTimer = setInterval(() => {
-            const c = getAudioContext();
-            if (!c) return;
-            const playbackSec = this.previewStartSec + (c.currentTime - this.previewAnchorSec);
-            const { commands, cursor } = commandsUpTo(
-                this.previewEvents,
-                this.previewCursor,
-                playbackSec + LOOKAHEAD_SEC,
-            );
-            this.previewCursor = cursor;
-            for (const cmd of commands) this.send(cmd);
-            // Once the whole schedule has been dispatched, stop the timer but KEEP the
-            // graph so tails (delay/reverb) ring out; the store stops on its own clock.
-            if (this.previewCursor >= this.previewEvents.length) this.clearPreviewTimer();
-        }, TICK_MS);
+    updateArrangementPreview(playback: ArrangementPlayback): void {
+        this.publishArrangement(playback);
     }
 
     stopArrangementPreview(): void {
-        this.clearPreviewTimer();
-        // Release exactly the notes still sounding, so nothing strands on the engine.
-        for (const off of heldNoteOffs(this.previewEvents, this.previewStartCursor, this.previewCursor)) {
-            this.send(off);
-        }
-        this.previewEvents = [];
-        this.previewCursor = 0;
-        this.previewStartCursor = 0;
-        // Restore the live canvas graph (a held note beats a glitch: leave the engine
-        // exactly as the canvas describes it).
+        this.send('TransportPause');
         if (this.ready && this.node) this.resync();
     }
+
+    async stopArrangementRecording(): Promise<ArrangementCaptureResult | null> {
+        this.stopArrangementPreview();
+        return null;
+    }
+
+    subscribeLiveNotes(callback: LiveNoteCallback): Unsubscribe {
+        this.liveNoteCallbacks.add(callback);
+        return () => this.liveNoteCallbacks.delete(callback);
+    }
+
+    sendTimed(at: number, cmd: RtCommand): void {
+        if (!this.node || !this.ready) return;
+        const bytes = encodeTimedCommand(at, cmd);
+        this.node.port.postMessage({ type: 'command', bytes }, [bytes.buffer]);
+    }
+
+    subscribeTransport(callback: TransportFrameCallback): Unsubscribe {
+        this.transportCallbacks.add(callback);
+        return () => this.transportCallbacks.delete(callback);
+    }
+
+    seekArrangement(samples: number): void {
+        this.send({ Seek: { samples: Math.max(0, Math.round(samples)) } });
+    }
+
+    setArrangementLoop(on: boolean): void {
+        this.send({ TransportSet: { flag: 0, on } });
+    }
+
+    setArrangementPunch(on: boolean): void { this.send({ TransportSet: { flag: 1, on } }); }
+    setArrangementClick(on: boolean): void { this.send({ TransportSet: { flag: 3, on } }); }
+    setArrangementCountIn(on: boolean): void { this.send({ TransportSet: { flag: 4, on } }); }
 
     // --- Note / control input ---------------------------------------------
 
@@ -874,7 +870,9 @@ export class OjcoreWasmExecutor implements Executor {
         for (const n of notes) {
             const idx = this.index.get(n.targetNodeId);
             if (idx === undefined) continue;
-            this.send({ NoteOn: { node: idx, note: n.midiNote, vel: Math.round(n.velocity * 127) } });
+            const vel = Math.round(n.velocity * 127);
+            this.send({ NoteOn: { node: idx, note: n.midiNote, vel } });
+            this.emitLiveNote(idx, n.midiNote, vel, true);
         }
     }
 
@@ -892,7 +890,23 @@ export class OjcoreWasmExecutor implements Executor {
             const idx = this.index.get(n.targetNodeId);
             if (idx === undefined) continue;
             this.send({ NoteOff: { node: idx, note: n.midiNote } });
+            this.emitLiveNote(idx, n.midiNote, 0, false);
         }
+    }
+
+    auditionNote(targetNodeId: string | number, pitch: number, velocity: number, on: boolean): void {
+        const node = typeof targetNodeId === 'number' ? targetNodeId : this.index.get(targetNodeId);
+        if (node === undefined) return;
+        const note = Math.max(0, Math.min(127, Math.round(pitch)));
+        const vel = Math.max(1, Math.min(127, Math.round(velocity)));
+        if (on) this.send({ NoteOn: { node, note, vel } });
+        else this.send({ NoteOff: { node, note } });
+        this.emitLiveNote(node, note, on ? vel : 0, on);
+    }
+
+    private emitLiveNote(node: number, note: number, velocity: number, on: boolean): void {
+        const event = { node, note, velocity, on, atMs: globalThis.performance?.now() ?? Date.now() };
+        for (const callback of this.liveNoteCallbacks) callback(event);
     }
 
     activateControlSignal(connectionId: string): void {

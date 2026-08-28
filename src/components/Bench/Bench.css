@@ -1,0 +1,9 @@
+.plugin-bench { position: fixed; bottom: 12px; left: 12px; z-index: var(--z-popover); width: 380px; display: flex; flex-direction: column; gap: 8px; }
+.plugin-bench .oj-banner { width: 380px; padding: 14px 16px; opacity: 1; animation: plugin-bench-in 120ms linear; }
+.plugin-bench .oj-banner__title { font-size: 18px; }
+.plugin-bench .oj-banner__message { font-size: 14px; }
+.plugin-bench .oj-banner__actions { gap: 4px; }
+.plugin-bench__more { min-height: 28px; border: 2px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-node); color: var(--text-primary); font: 500 14px/1 var(--font-sans); }
+.plugin-bench__ghost { position: fixed; bottom: 12px; left: 0; z-index: var(--z-popover); width: 20px; height: 36px; border: 2px solid var(--border-strong); border-left: 0; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: var(--bg-node); color: var(--text-primary); font: 600 13px/1 var(--font-mono); }
+@keyframes plugin-bench-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .plugin-bench .oj-banner { animation: none; } }

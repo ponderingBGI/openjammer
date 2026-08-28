@@ -1,0 +1,72 @@
+name: Browser journeys
+
+on:
+  push:
+    branches: [canari]
+  schedule:
+    - cron: '30 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: browser-journeys-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  journeys:
+    name: Journeys (${{ matrix.engine }}, shard ${{ matrix.shard }}/3)
+    runs-on: ubuntu-latest
+    # Match the Playwright package exactly and give every engine its supported,
+    # reproducible Linux runtime. J7 also uses the container's ordinary eth0
+    # interface, exposed by the explicit preview host in playwright.config.ts.
+    container:
+      image: mcr.microsoft.com/playwright@sha256:57b65fdc9ceabe0ef613124c7bbe2babcf9362c4d85e382fe3b03604e84b428a # v1.61.0-noble
+      options: --user pwuser
+    strategy:
+      fail-fast: false
+      matrix:
+        engine: [chromium, firefox, webkit]
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup web (Bun + install)
+        env:
+          # npm registry integrity for @oven/bun-linux-x64@1.3.14, decoded to hex.
+          BUN_TARBALL_SHA512: ece55300abf07cf9926c85751e974ea15571e5545ce36ec6b8f3e77bddcdeaf93879004f21df675e664387dff319a28f75b56356d41265a7d6428523c77f14b7
+        run: |
+          curl --proto '=https' --tlsv1.2 --connect-timeout 10 --max-time 120 \
+            --retry 5 --retry-connrefused --retry-max-time 180 --location --silent --show-error --fail \
+            https://registry.npmjs.org/@oven/bun-linux-x64/-/bun-linux-x64-1.3.14.tgz \
+            --output /tmp/openjammer-bun.tgz
+          echo "$BUN_TARBALL_SHA512  /tmp/openjammer-bun.tgz" | sha512sum -c -
+          mkdir -p /tmp/openjammer-bun/bin
+          tar --extract --gzip --file /tmp/openjammer-bun.tgz \
+            --directory /tmp/openjammer-bun/bin --strip-components=2 package/bin/bun
+          /tmp/openjammer-bun/bin/bun --version
+          # Expose Bun to this repository's package-manager guard and lifecycle hooks.
+          env \
+            PATH="/tmp/openjammer-bun/bin:$PATH" \
+            npm_execpath=/tmp/openjammer-bun/bin/bun \
+            /tmp/openjammer-bun/bin/bun install --frozen-lockfile
+      - name: Run journey shard
+        # Measured locally on 2026-08-17 before sharding (production build
+        # included): Chromium 36.0s and Firefox 36.5s. WebKit is CI-measured
+        # because this workstation lacks libwoff2dec.so.1.0.2.
+        env:
+          OJ_E2E_ALL_BROWSERS: '1'
+        run: |
+          env \
+            PATH="/tmp/openjammer-bun/bin:$PATH" \
+            /tmp/openjammer-bun/bin/bun run test:e2e -- e2e/journeys --project=${{ matrix.engine }} --shard=${{ matrix.shard }}/3
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: journey-traces-${{ matrix.engine }}-${{ matrix.shard }}
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7

@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { TOOL_CATALOGUE } from '../tools';
+import { EDIT_OPS } from '../../song/ops';
 
 const EXT_PATH = resolve(process.cwd(), 'pi-openjammer-graph/index.ts');
 
@@ -31,5 +32,17 @@ describe('Pi extension ↔ host tool parity', () => {
             `pi-openjammer-graph/index.ts does not register: ${missing.join(', ')} — ` +
                 'the agent cannot call a catalogued host tool the extension never declares.',
         ).toEqual([]);
+    });
+
+    it('declares every edit_timeline operation to the model', () => {
+        const missing = EDIT_OPS.filter((op) => !src.includes(`'${op}'`));
+        expect(missing).toEqual([]);
+    });
+
+    it('declares the BC-30..37 note-op payloads, not only their names', () => {
+        for (const field of ['clipId', 'note', 'noteIds', 'semitones', 'targets', 'grid', 'strength', 'swing', 'threshold']) {
+            expect(src, `edit_timeline schema is missing note-op field ${field}`).toContain(`${field}: Type.`);
+        }
+        for (const mode of ['delta', 'set', 'ramp']) expect(src).toContain(`Type.Literal('${mode}')`);
     });
 });

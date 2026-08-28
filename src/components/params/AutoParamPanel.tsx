@@ -1,130 +1,79 @@
-/**
- * AutoParamPanel — the FREE control surface.
- *
- * Renders an editable slider per {@link ParamDecl} purely from a node's
- * {@link PluginManifest}. This is the UI that AI- and Faust-authored nodes get
- * for nothing: declare numeric params in the manifest and they become editable
- * here, with no bespoke React component required.
- *
- * Bespoke (ui:'react') nodes keep their hand-written components; NodeWrapper
- * only falls back to this panel for manifests whose `ui` is `'auto'`.
- *
- * Param `name` doubles as the node-`data` key (manifests are derived from each
- * definition's numeric `defaultData` fields — see `engine/manifest.ts`), so a
- * change writes straight back through `updateNodeData`.
- */
-
-import { useCallback, useState } from 'react';
-import { Button, Slider } from '@openjammer/oj-ui';
+import { useMemo, useState } from 'react';
+import { Button, Input, ParamRow } from '@openjammer/oj-ui';
 import type { GraphNode, NodeData } from '../../engine/types';
 import type { ParamDecl, PluginManifest } from '../../engine/manifest';
 import { HOSTED_PLUGIN_DESCRIPTOR_KEY, type HostedPluginDescriptor } from '../../engine/dynamicRegistry';
 import { getInvoke, isTauri } from '../../ai/tauri';
 import { useGraphStore } from '../../store/graphStore';
-
-interface AutoParamPanelProps {
-    node: GraphNode;
-    manifest: PluginManifest;
-}
+import './AutoParamPanel.css';
+import { formatParamValue, seededParamIds, togglePinnedParam } from './paramModel';
 
 function stepFor(param: ParamDecl): number {
+    if (param.stepped) return 1;
     const span = param.max - param.min;
     if (span <= 0) return 0.01;
-    // ~100 steps across the range, rounded to a clean magnitude.
     const raw = span / 100;
-    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-    return mag > 0 ? mag : 0.01;
+    return 10 ** Math.floor(Math.log10(raw));
 }
 
-function ParamRow({ node, param }: { node: GraphNode; param: ParamDecl }) {
-    const updateNodeData = useGraphStore((s) => s.updateNodeData);
-
-    const stored = (node.data as Record<string, unknown>)[param.name];
-    const value = typeof stored === 'number' && Number.isFinite(stored) ? stored : param.default;
-
-    const handleChange = useCallback(
-        (next: number) => {
-            if (Number.isNaN(next)) return;
-            updateNodeData<NodeData>(node.id, { [param.name]: next });
-        },
-        [node.id, param.name, updateNodeData],
-    );
-
-    return (
-        <div className="node-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '2px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>{param.name}</span>
-                <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>
-                    {value.toFixed(2)}
-                </span>
-            </div>
-            <Slider
-                aria-label={param.name}
-                min={param.min}
-                max={param.max}
-                step={stepFor(param)}
-                value={value}
-                onChange={handleChange}
-                onMouseDown={(e) => e.stopPropagation()}
-                style={{ width: '100%' }}
-            />
-        </div>
-    );
+function displayName(param: ParamDecl): string {
+    const parts = param.module?.split('/').filter(Boolean) ?? [];
+    return parts.length > 1 ? `${parts.slice(1).join(' › ')} › ${param.name}` : param.name || `Parameter ${param.id + 1}`;
 }
 
-function HostedEditorControls({ node }: { node: GraphNode }) {
-    const [status, setStatus] = useState<string | null>(null);
-    const descriptor = (node.data as Record<string, unknown>)[HOSTED_PLUGIN_DESCRIPTOR_KEY] as
-        | HostedPluginDescriptor
-        | undefined;
-    if (!descriptor) return null;
-    if (!isTauri()) {
-        return <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Native editor requires desktop app</div>;
+function groupParams(params: readonly ParamDecl[]): Array<{ name: string; params: ParamDecl[] }> {
+    const groups = new Map<string, ParamDecl[]>();
+    for (const param of params) {
+        const group = param.module?.split('/').filter(Boolean)[0] ?? '';
+        groups.set(group, [...(groups.get(group) ?? []), param]);
     }
-    const call = async (cmd: 'plugin_editor_open' | 'plugin_editor_focus' | 'plugin_editor_close') => {
+    return [...groups].map(([name, members]) => ({ name: members.length === 1 ? '' : name, params: members }));
+}
+
+function WindowGlyph({ node, descriptor }: { node: GraphNode; descriptor: HostedPluginDescriptor }) {
+    const [open, setOpen] = useState(false);
+    if (!descriptor.has_gui) return null;
+    const toggle = async () => {
         const invoke = getInvoke();
-        if (!invoke) return;
-        try {
-            if (cmd === 'plugin_editor_open') {
-                await invoke(cmd, { nodeId: node.id, descriptor });
-                setStatus('Editor open');
-            } else {
-                await invoke(cmd, { nodeId: node.id });
-                setStatus(cmd === 'plugin_editor_focus' ? 'Editor focused' : 'Editor closed');
-            }
-        } catch (err) {
-            setStatus(err instanceof Error ? err.message : String(err));
-        }
+        if (!invoke || !isTauri()) return;
+        const command = open ? 'plugin_editor_close' : 'plugin_editor_open';
+        await invoke(command, open ? { nodeId: node.id } : { nodeId: node.id, descriptor });
+        setOpen(!open);
     };
-    return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', padding: '4px' }}>
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
-                <Button onClick={() => void call('plugin_editor_open')}>Open editor</Button>
-                <Button onClick={() => void call('plugin_editor_focus')}>Focus</Button>
-                <Button onClick={() => void call('plugin_editor_close')}>Close</Button>
-            </div>
-            {status && <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{status}</div>}
-        </div>
-    );
+    return <Button className="plugin-window-glyph" aria-label={`${open ? 'Close' : 'Open'} ${descriptor.name} window`} aria-pressed={open} onClick={() => void toggle()} title="Open plugin window"><span aria-hidden="true">↗</span></Button>;
 }
 
-export function AutoParamPanel({ node, manifest }: AutoParamPanelProps) {
-    const editor = manifest.kind === 'PluginHost' ? <HostedEditorControls node={node} /> : null;
-    if (manifest.params.length === 0) {
-        return (
-            <div className="auto-param-panel" style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '4px' }}>
-                {editor}
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No parameters</div>
-            </div>
-        );
-    }
+export function AutoParamPanel({ node, manifest }: { node: GraphNode; manifest: PluginManifest }) {
+    const updateNodeData = useGraphStore((state) => state.updateNodeData);
+    const beginGesture = useGraphStore((state) => state.beginGesture);
+    const endGesture = useGraphStore((state) => state.endGesture);
+    const data = node.data as Record<string, unknown>;
+    const descriptor = data[HOSTED_PLUGIN_DESCRIPTOR_KEY] as HostedPluginDescriptor | undefined;
+    const pinned = Array.isArray(data.pinnedParams) ? data.pinnedParams.filter((id): id is number => typeof id === 'number') : [];
+    const touched = Array.isArray(data.touchedParams) ? data.touchedParams.filter((id): id is number => typeof id === 'number') : [];
+    const [query, setQuery] = useState('');
+    const [closedGroups, setClosedGroups] = useState<Set<string>>(() => new Set(manifest.params.length > 24 ? groupParams(manifest.params).slice(1).map((group) => group.name) : []));
+    const params = useMemo(() => manifest.params.filter((param) => !param.hidden && `${param.name} ${param.module ?? ''}`.toLowerCase().includes(query.toLowerCase())), [manifest.params, query]);
+    const shownPinned = seededParamIds(pinned, touched).map((id) => manifest.params.find((param) => param.id === id)).filter((param): param is ParamDecl => Boolean(param));
 
-    return (
-        <div className="auto-param-panel" style={{ display: 'flex', flexDirection: 'column', gap: '6px', padding: '4px' }}>
-            {editor}
-            {manifest.params.map((param) => (
-                <ParamRow key={param.id} node={node} param={param} />
-            ))}
+    const row = (param: ParamDecl, inPinned = false) => {
+        const stored = data[param.name];
+        const value = typeof stored === 'number' && Number.isFinite(stored) ? stored : param.default;
+        const label = displayName(param);
+        return <ParamRow key={`${inPinned ? 'pin' : 'all'}:${param.id}`} label={label} value={value} valueText={formatParamValue(value, param.valueText)} min={param.min} max={param.max} step={stepFor(param)} readOnly={param.readOnly} pinned={pinned.includes(param.id)} onLabelClick={() => updateNodeData<NodeData>(node.id, { pinnedParams: togglePinnedParam(pinned, param.id) })} onGestureStart={beginGesture} onGestureEnd={endGesture} onChange={(next) => { if (!Number.isFinite(next)) return; updateNodeData<NodeData>(node.id, { [param.name]: next, touchedParams: [...touched.filter((id) => id !== param.id), param.id].slice(-4) }); }} />;
+    };
+
+    return <div className="auto-param-panel">
+        {descriptor && <div className="auto-param-panel__window"><span>{descriptor.vendor}</span><WindowGlyph node={node} descriptor={descriptor} /></div>}
+        {manifest.params.length > 24 && <Input aria-label="Filter parameters" placeholder="filter parameters" value={query} onChange={(event) => setQuery(event.target.value)} />}
+        <div className="auto-param-panel__scroll">
+            {manifest.params.length > 24 && <section className="auto-param-panel__pinned"><h3>Pinned</h3>{shownPinned.length ? shownPinned.map((param) => row(param, true)) : <p>⌐ pin the ones you play — click a name</p>}</section>}
+            {groupParams(params).map((group) => <section key={group.name || 'ungrouped'}>
+                {group.name && <button type="button" className="auto-param-panel__group" aria-expanded={!closedGroups.has(group.name)} onClick={() => setClosedGroups((current) => { const next = new Set(current); if (next.has(group.name)) next.delete(group.name); else next.add(group.name); return next; })}>{closedGroups.has(group.name) ? '▸' : '⌄'} {group.name}<span>{group.params.length} params</span></button>}
+                {!closedGroups.has(group.name) && group.params.map((param) => row(param))}
+            </section>)}
+            {manifest.params.length === 0 && <p className="auto-param-panel__empty">No parameters</p>}
         </div>
-    );
+        {descriptor && <footer className="plugin-node-footer"><button type="button" aria-label={`Bypass ${descriptor.name}`} aria-pressed={data.pluginBypassed === true} onClick={() => updateNodeData<NodeData>(node.id, { pluginBypassed: data.pluginBypassed !== true })}>⊸</button>{descriptor.latency_samples > 0 && <span title={`Delay-compensated at the master.`}>+{descriptor.latency_samples} smp aligned</span>}<i className={data.pluginStateDirty === true ? 'is-dirty' : ''} title="unsaved plugin state — Ctrl+S" /></footer>}
+    </div>;
 }

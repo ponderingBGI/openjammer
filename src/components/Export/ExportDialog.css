@@ -1,0 +1,132 @@
+.export-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    color: var(--text-primary);
+}
+
+.export-dialog__intro,
+.export-dialog__advice,
+.export-dialog__destination-note,
+.export-dialog__progress p,
+.export-stats p {
+    margin: 0;
+}
+
+.export-dialog__intro {
+    font: 400 16px/1.5 var(--font-sans);
+}
+
+.export-dialog__form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-md);
+}
+
+.export-dialog__tail {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    min-width: 0;
+    margin: 0;
+    padding: var(--space-sm);
+    border: 2px solid var(--sketch-black);
+    border-radius: var(--radius-sm);
+}
+
+.export-dialog__tail legend { font: 500 14px/1 var(--font-sans); }
+.export-dialog__tail-options { border-radius: var(--radius-sm); }
+.export-dialog__tail-options .oj-seg__btn { padding: var(--space-xs) var(--space-sm); font: 500 14px/1 var(--font-sans); }
+
+.export-dialog__tail .oj-input {
+    width: 5rem;
+}
+
+.export-dialog__unit,
+.export-dialog__destination-note,
+.export-dialog__advice,
+.export-dialog__cancel-note {
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+}
+
+.export-dialog__filename .oj-input { font-family: var(--font-sans); }
+.export-dialog__preflight { margin: 0; color: var(--text-secondary); font: 500 13px/1.4 var(--font-mono); }
+
+.export-dialog__destination {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+.export-dialog__destination .oj-input {
+    min-width: 0;
+    flex: 1;
+}
+
+.export-dialog__progress {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.export-dialog__cancel-note {
+    max-width: 65ch;
+}
+
+.export-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm) var(--space-md);
+    padding: var(--space-md);
+    border: var(--border-sketch-width) solid var(--sketch-black);
+    border-radius: var(--radius-md);
+    background: var(--bg-node);
+    box-shadow: 2px 2px 0 var(--sketch-black);
+}
+
+.export-stats > div {
+    display: flex;
+    flex: 1 1 7rem;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+
+.export-stats span {
+    font-family: var(--font-sketch);
+    font-size: var(--text-sm);
+}
+
+.export-stats strong,
+.export-stats__path {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+}
+
+.export-stats .is-warning strong { color: var(--accent-warning); }
+.export-stats .is-danger strong,
+.export-stats__hint { color: var(--accent-danger); }
+
+.export-stats__hint,
+.export-stats__path {
+    flex-basis: 100%;
+}
+
+.export-stats__path {
+    overflow-wrap: anywhere;
+}
+
+.export-dialog__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+}
+
+@media (max-width: 560px) {
+    .export-dialog__form { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .export-dialog *, .export-dialog *::before, .export-dialog *::after { transition-duration: 0ms !important; }
+}

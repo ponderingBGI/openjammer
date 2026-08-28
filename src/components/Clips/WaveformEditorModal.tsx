@@ -17,6 +17,7 @@ import { getAudioContext } from '../../audio/audioContext';
 import { useScrollCapture } from '../../hooks/useScrollCapture';
 import type { ScrollData } from '../../hooks/useScrollCapture';
 import { Button, Slider } from '@openjammer/oj-ui';
+import { useModalKeymap } from '../../keymap/useKeymap';
 import './WaveformEditorModal.css';
 
 // Preview audio state
@@ -24,6 +25,7 @@ let previewSource: AudioBufferSourceNode | null = null;
 
 export const WaveformEditorModal = memo(function WaveformEditorModal() {
     const editingClipId = useAudioClipStore((s) => s.editingClipId);
+    useModalKeymap('waveform-editor', Boolean(editingClipId));
     const clips = useAudioClipStore((s) => s.clips);
     const closeEditor = useAudioClipStore((s) => s.closeEditor);
     const updateCropRegion = useAudioClipStore((s) => s.updateCropRegion);
@@ -536,26 +538,6 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
         closeEditor();
     }, [closeEditor]);
 
-    // Keyboard shortcuts
-    useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                handleCancel();
-            } else if (e.code === 'Space') {
-                e.preventDefault();
-                handlePreview();
-            } else if (e.key === 'Enter') {
-                e.preventDefault();
-                handleApply();
-            }
-        };
-
-        if (editingClipId) {
-            window.addEventListener('keydown', handleKeyDown);
-            return () => window.removeEventListener('keydown', handleKeyDown);
-        }
-    }, [editingClipId, handleCancel, handlePreview, handleApply]);
-
     if (!editingClipId || !clip) {
         return null;
     }
@@ -566,6 +548,16 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
                 ref={containerRef}
                 className="waveform-editor-modal"
                 onClick={(e) => e.stopPropagation()}
+                onKeyDown={(event) => {
+                    if (event.key === 'Escape') handleCancel();
+                    else if (event.code === 'Space') {
+                        event.preventDefault();
+                        handlePreview();
+                    } else if (event.key === 'Enter') {
+                        event.preventDefault();
+                        handleApply();
+                    }
+                }}
             >
                 <div className="waveform-editor-header">
                     <span className="waveform-editor-title">

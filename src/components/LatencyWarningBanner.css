@@ -1,38 +1,7 @@
-/* LatencyWarningBanner — positioning only. The surface, tone accent, icon, and
-   actions are the oj-ui <Banner> + <Button> (which own their tokens). This file
-   just pins the banner above the canvas and slides it in. */
+/* LatencyWarningBanner is inline. Its parent transport cluster owns placement. */
 
 .latency-warning-banner {
-    position: fixed;
-    bottom: var(--space-lg);
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: var(--z-top);
-    width: calc(100% - var(--space-xl));
-    max-width: 600px;
-    animation: oj-latency-slide-up var(--transition-normal) ease-out;
+    width: 100%;
 }
 
-@keyframes oj-latency-slide-up {
-    from {
-        opacity: 0;
-        transform: translateX(-50%) translateY(var(--space-md));
-    }
-    to {
-        opacity: 1;
-        transform: translateX(-50%) translateY(0);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .latency-warning-banner {
-        animation: none;
-    }
-}
-
-@media (max-width: 600px) {
-    .latency-warning-banner {
-        bottom: var(--space-sm);
-        width: calc(100% - var(--space-md));
-    }
-}
+.latency-warning-banner__actions { display: flex; gap: var(--space-xs); margin-top: var(--space-xs); }

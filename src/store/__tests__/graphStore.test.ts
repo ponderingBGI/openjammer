@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { useGraphStore } from '../graphStore';
+import { useHistoryStore } from '../historyStore';
 
 // The localStorage key used by the store
 const STORAGE_KEY = 'openjammer-graph-v2';
@@ -18,10 +19,9 @@ describe('graphStore', () => {
             selectedNodeIds: new Set(),
             selectedConnectionIds: new Set(),
             clipboard: null,
-            history: [],
-            historyIndex: -1,
             version: 0,
         });
+        useHistoryStore.getState().clear();
         vi.clearAllMocks();
     });
 
@@ -379,21 +379,19 @@ describe('graphStore', () => {
         const volOf = (id: string) =>
             (useGraphStore.getState().getNode(id)!.data as { volume: number }).volume;
 
-        it('a param mutation OUTSIDE a gesture records NO history (system/per-frame safe)', () => {
+        it('a param mutation outside a gesture is one unified history entry', () => {
             const id = addSpeaker();
-            const idx = useGraphStore.getState().historyIndex;
+            const idx = useHistoryStore.getState().cursor;
             useGraphStore.getState().updateNodeData(id, { volume: 0.5 });
             // The data changed...
             expect(volOf(id)).toBe(0.5);
-            // ...but no new undo entry was created (zero-regression: this is the
-            // path MIDI propagation / per-frame writes take).
-            expect(useGraphStore.getState().historyIndex).toBe(idx);
+            expect(useHistoryStore.getState().cursor).toBe(idx + 1);
         });
 
         it('a gesture brackets multiple mutations into ONE undo entry', () => {
             const id = addSpeaker();
             const before = volOf(id);
-            const idx = useGraphStore.getState().historyIndex;
+            const idx = useHistoryStore.getState().cursor;
 
             const s = useGraphStore.getState();
             s.beginGesture();
@@ -402,7 +400,7 @@ describe('graphStore', () => {
             s.endGesture();
 
             // Exactly one snapshot (deferred to the first mutation in the gesture).
-            expect(useGraphStore.getState().historyIndex).toBe(idx + 1);
+            expect(useHistoryStore.getState().cursor).toBe(idx + 1);
             expect(volOf(id)).toBe(0.7);
 
             // ONE undo reverts the WHOLE gesture to the pre-gesture value.
@@ -412,17 +410,17 @@ describe('graphStore', () => {
 
         it('an empty gesture creates no history entry', () => {
             addSpeaker();
-            const idx = useGraphStore.getState().historyIndex;
+            const idx = useHistoryStore.getState().cursor;
             const s = useGraphStore.getState();
             s.beginGesture();
             s.endGesture();
-            expect(useGraphStore.getState().historyIndex).toBe(idx);
+            expect(useHistoryStore.getState().cursor).toBe(idx);
         });
 
         it('nested gestures coalesce into a single undo entry', () => {
             const id = addSpeaker();
             const before = volOf(id);
-            const idx = useGraphStore.getState().historyIndex;
+            const idx = useHistoryStore.getState().cursor;
             const s = useGraphStore.getState();
             s.beginGesture();
             s.beginGesture();
@@ -430,7 +428,7 @@ describe('graphStore', () => {
             s.updateNodeData(id, { volume: 0.2 });
             s.endGesture();
             s.endGesture();
-            expect(useGraphStore.getState().historyIndex).toBe(idx + 1);
+            expect(useHistoryStore.getState().cursor).toBe(idx + 1);
             useGraphStore.getState().undo();
             expect(volOf(id)).toBe(before);
         });

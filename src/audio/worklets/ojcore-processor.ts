@@ -87,6 +87,14 @@ interface CommandMsg {
     type: 'command';
     bytes: Uint8Array;
 }
+interface TempoMapMsg {
+    type: 'load_tempo_map';
+    bytes: Uint8Array;
+}
+interface TimelineMsg {
+    type: 'load_timeline';
+    bytes: Uint8Array;
+}
 /** Enable/disable the per-node meter level stream back to the UI. */
 interface MetersMsg {
     type: 'meters';
@@ -116,6 +124,8 @@ type InboundMsg =
     | InitMsg
     | GraphMsg
     | CommandMsg
+    | TempoMapMsg
+    | TimelineMsg
     | MetersMsg
     | LoadSampleMsg
     | RecorderStartMsg
@@ -181,6 +191,12 @@ class OjcoreProcessor extends AudioWorkletProcessor {
                 case 'command':
                     this.pushCommandFrame(msg.bytes);
                     break;
+                case 'load_tempo_map':
+                    if (this.ready) this.callOptionalLoader(msg.type, msg.bytes);
+                    break;
+                case 'load_timeline':
+                    if (this.ready) this.callOptionalLoader(msg.type, msg.bytes);
+                    break;
                 case 'meters':
                     this.metersEnabled = msg.enabled;
                     if (this.ready) wasm.set_metering(msg.enabled);
@@ -198,6 +214,13 @@ class OjcoreProcessor extends AudioWorkletProcessor {
         } catch (err) {
             this.port.postMessage({ type: 'error', message: String(err) });
         }
+    }
+
+    /** Resolve W3 loaders dynamically so the committed pre-W3 generated glue stays
+     * usable until it is rebuilt; a missing optional export is a quiet no-op. */
+    private callOptionalLoader(name: 'load_tempo_map' | 'load_timeline', bytes: Uint8Array): void {
+        const loader = Reflect.get(wasm as object, name) as ((payload: Uint8Array) => boolean) | undefined;
+        if (typeof loader === 'function') loader(bytes);
     }
 
     /**
@@ -475,6 +498,26 @@ class OjcoreProcessor extends AudioWorkletProcessor {
         this.looperTick++;
         if (this.looperTick >= 4) {
             this.looperTick = 0;
+            // Newer W3 wasm glue exposes the engine's latest Transport snapshot.
+            // Keep the committed pre-W3 binary safe until its generated bindings are
+            // refreshed: absence means no frame, never a render-thread exception.
+            const transportDrain = Reflect.get(wasm as object, 'drain_transport') as
+                (() => Uint8Array) | undefined;
+            if (typeof transportDrain === 'function') {
+                const transportBytes = transportDrain();
+                if (transportBytes?.length) {
+                    try {
+                        const decoded = JSON.parse(new TextDecoder().decode(transportBytes)) as {
+                            Transport?: unknown;
+                        };
+                        if (decoded.Transport) {
+                            this.port.postMessage({ type: 'transport', frame: decoded.Transport });
+                        }
+                    } catch {
+                        // Telemetry is lossy; a later complete frame replaces this one.
+                    }
+                }
+            }
             const lframes = wasm.drain_looper() as Float32Array;
             if (lframes && lframes.length >= 5) {
                 this.port.postMessage({ type: 'looper', frames: lframes }, [lframes.buffer]);

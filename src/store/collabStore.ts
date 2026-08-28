@@ -14,21 +14,46 @@
 
 import { create } from 'zustand';
 import { useGraphStore } from './graphStore';
-import {
-    BroadcastChannelTransport,
-    CollabSession,
+import type { CollabSession, SessionState } from '../collab/CollabSession';
+import type { GraphStoreLike } from '../collab/graphStoreBridge';
+import type { PeerPresence, SessionStatus } from '../collab/types';
+import type { BroadcastChannelTransport } from '../collab/transport/BroadcastChannelTransport';
+import type {
     ManualWebRTCTransport,
-    generateSessionCode,
-    type PeerPresence,
-    type SessionState,
-    type SessionStatus,
-} from '../collab';
-import type { GraphStoreLike } from '../collab';
+    ManualWebRTCTransportOptions,
+} from '../collab/transport/ManualWebRTCTransport';
 import type { Position } from '../engine/types';
 
 type ManualWebRTCTransportType = ManualWebRTCTransport;
+type CollabRuntime = {
+    CollabSession: typeof import('../collab/CollabSession').CollabSession;
+    BroadcastChannelTransport: typeof import('../collab/transport/BroadcastChannelTransport').BroadcastChannelTransport;
+    ManualWebRTCTransport: typeof import('../collab/transport/ManualWebRTCTransport').ManualWebRTCTransport;
+};
+
+let collabRuntimePromise: Promise<CollabRuntime> | null = null;
+
+function loadCollabRuntime(): Promise<CollabRuntime> {
+    collabRuntimePromise ??= Promise.all([
+        import('../collab/CollabSession'),
+        import('../collab/transport/BroadcastChannelTransport'),
+        import('../collab/transport/ManualWebRTCTransport'),
+    ]).then(([session, broadcast, webRtc]) => ({
+        CollabSession: session.CollabSession,
+        BroadcastChannelTransport: broadcast.BroadcastChannelTransport,
+        ManualWebRTCTransport: webRtc.ManualWebRTCTransport,
+    }));
+    return collabRuntimePromise;
+}
 
 export type TransportKind = 'broadcast-channel' | 'webrtc-manual';
+
+interface StartSessionOptions {
+    name?: string;
+    transport?: TransportKind;
+    /** Primarily for controlled deployments and deterministic browser journeys. */
+    webrtcOptions?: ManualWebRTCTransportOptions;
+}
 
 interface CollabStoreState {
     /** Null when not in a session. */
@@ -44,9 +69,9 @@ interface CollabStoreState {
 
     // Actions
     /** Host a new session on the chosen transport. Returns the session code. */
-    hostSession: (opts?: { name?: string; transport?: TransportKind }) => Promise<string>;
+    hostSession: (opts?: StartSessionOptions) => Promise<string>;
     /** Join an existing session by code. */
-    joinSession: (sessionCode: string, opts?: { name?: string; transport?: TransportKind }) => Promise<void>;
+    joinSession: (sessionCode: string, opts?: StartSessionOptions) => Promise<void>;
     /** Leave the active session and return to single-user mode. */
     leaveSession: () => void;
 
@@ -78,15 +103,22 @@ export const useCollabStore = create<CollabStoreState>((set, get) => ({
     webrtcTransport: null,
     _unsub: null,
 
-    hostSession: async ({ name, transport = 'broadcast-channel' } = {}) => {
+    hostSession: async ({ name, transport = 'broadcast-channel', webrtcOptions } = {}) => {
         get().leaveSession();
 
+        const runtime = await loadCollabRuntime();
         const sessionCode = generateSessionCode();
         const projectionPeerId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-        const { transportInstance, webrtc } = makeTransport(transport, sessionCode, projectionPeerId);
+        const { transportInstance, webrtc } = makeTransport(
+            runtime,
+            transport,
+            sessionCode,
+            projectionPeerId,
+            webrtcOptions,
+        );
 
-        const session = new CollabSession({
+        const session = new runtime.CollabSession({
             role: 'host',
             sessionCode,
             store: graphStoreLike(),
@@ -101,13 +133,20 @@ export const useCollabStore = create<CollabStoreState>((set, get) => ({
         return sessionCode;
     },
 
-    joinSession: async (sessionCode, { name, transport = 'broadcast-channel' } = {}) => {
+    joinSession: async (sessionCode, { name, transport = 'broadcast-channel', webrtcOptions } = {}) => {
         get().leaveSession();
 
+        const runtime = await loadCollabRuntime();
         const projectionPeerId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-        const { transportInstance, webrtc } = makeTransport(transport, sessionCode, projectionPeerId);
+        const { transportInstance, webrtc } = makeTransport(
+            runtime,
+            transport,
+            sessionCode,
+            projectionPeerId,
+            webrtcOptions,
+        );
 
-        const session = new CollabSession({
+        const session = new runtime.CollabSession({
             role: 'guest',
             sessionCode,
             store: graphStoreLike(),
@@ -156,13 +195,22 @@ export const useCollabStore = create<CollabStoreState>((set, get) => ({
 }));
 
 function makeTransport(
+    runtime: CollabRuntime,
     kind: TransportKind,
     sessionCode: string,
     selfId: string,
+    webrtcOptions?: ManualWebRTCTransportOptions,
 ): { transportInstance: BroadcastChannelTransport | ManualWebRTCTransportType; webrtc: ManualWebRTCTransportType | null } {
     if (kind === 'webrtc-manual') {
-        const webrtc = new ManualWebRTCTransport(selfId);
+        const webrtc = new runtime.ManualWebRTCTransport(selfId, webrtcOptions);
         return { transportInstance: webrtc, webrtc };
     }
-    return { transportInstance: new BroadcastChannelTransport(sessionCode, selfId), webrtc: null };
+    return { transportInstance: new runtime.BroadcastChannelTransport(sessionCode, selfId), webrtc: null };
+}
+
+function generateSessionCode(length = 6): string {
+    const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+    const bytes = new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join('');
 }

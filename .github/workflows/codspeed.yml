@@ -1,12 +1,13 @@
 name: CodSpeed
 
 # Continuous performance measurement for the OpenJammer hot paths, across all
-# five benched crates:
+# six benched crates:
 #   * ojcore       — engine compile (Kahn topo-sort + routing plan) + process_block
+#   * ojcore-native — full First Light scheduled render + WAV24 bounce/encode
 #   * ojcore-dsp   — the DSP kernels + the master output guards (soft-limit/scrub)
 #   * ojinstrument — polyphonic voice render + a realistic end-to-end patch
 #   * ojproto      — the control-plane wire codec (OjGraph / ParamPatch / RtCommand)
-#   * ojhost       — hosted-plugin control plane (ids, registry insertion, scan cache)
+#   * ojhost       — control plane + hermetic CLAP host ring (flush/events/state/lifecycle)
 #
 # Three CodSpeed instruments run on every PR:
 #   * simulation — CPU instruction + cache-model count; catches an O(n^2) schedule
@@ -64,8 +65,13 @@ jobs:
           cache-target: release
           bins: cargo-codspeed
 
+      - name: Install native audio build prerequisites
+        # ojcore-native benchmarks compile cpal's Linux ALSA backend even though
+        # the benchmark itself opens no device.
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
       - name: Build the benchmark target(s) for both instruments
-        run: cargo codspeed build -m simulation -m memory -p ojcore -p ojcore-dsp -p ojproto -p ojinstrument -p ojhost
+        run: cargo codspeed build -m simulation -m memory -p ojcore -p ojcore-native -p ojcore-dsp -p ojproto -p ojinstrument -p ojhost --features ojhost/clap-host
 
       - name: Run the benchmarks (CPU simulation)
         uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
@@ -79,6 +85,28 @@ jobs:
           mode: memory
           run: cargo codspeed run -m memory
 
+  # Ring 2: deterministic TypeScript control-plane hot paths. The CodSpeed Vitest
+  # plugin instruments these in CI and falls back to plain Vitest timing locally.
+  web-benchmarks:
+    name: Run control-plane benchmarks (Ring 2)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - name: Install web dependencies
+        # Benchmarks do not need the repository's git-hook postinstall. Skipping
+        # lifecycle scripts also avoids the package preinstall's npm_execpath guard.
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Run the control-plane benchmarks (CPU simulation)
+        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
+        with:
+          mode: simulation
+          run: bun run bench:web
+
   # Wall-clock CPU time for the end-to-end latency bench — an absolute-µs reading
   # of the per-block render cost against the real-time deadline. Separate job so
   # its noisier instrument never gates the deterministic simulation/memory run.
@@ -88,6 +116,15 @@ jobs:
     name: Run latency benchmark (walltime)
     # Pinned image (see the benchmarks job); for stable absolute µs, upgrade to a
     # CodSpeed macro runner — on the shared runner the trend matters, not the value.
+    #
+    # PUSH-ONLY by doctrine ("never gate merges on a noisy number"): walltime
+    # uploads from shared hosted runners land in CodSpeed's PR analysis and have
+    # produced phantom double-digit "regressions" on nanosecond benches compared
+    # across different runner hardware (PR #74: 14 walltime rows flagged while
+    # all 142 deterministic simulation benches were untouched, under CodSpeed's
+    # own "Different runtime environments detected" warning). The canari-push
+    # upload keeps the trend line; PR verdicts stay purely deterministic.
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -107,3 +144,46 @@ jobs:
         with:
           mode: walltime
           run: cargo codspeed run -m walltime
+
+  # Ring 3: browser experience trends. CDP frame markers and cold-open timing are
+  # preserved as JSON + raw traces; CodSpeed measures the complete J8 executable
+  # because its walltime action cannot import arbitrary trace-derived durations.
+  # This host's absolute values remain indicative: only repeated macro-runner
+  # trends are comparable. The job is intentionally never a merge gate.
+  codspeed-walltime:
+    name: Long Set experience trend (Ring 3)
+    # CodSpeed MACRO walltime runners are unavailable to personal GitHub
+    # accounts. Keep this trend-only lane neutral here; an organization fork
+    # can opt in after provisioning a runner by setting this repository variable.
+    if: ${{ vars.CODSPEED_MACRO_ENABLED == 'true' }}
+    runs-on: codspeed-macro
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - name: Install web dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+
+      - name: Install Chromium and host libraries
+        run: bunx playwright install --with-deps chromium
+
+      - name: Run J8 as a CodSpeed walltime target
+        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
+        with:
+          mode: walltime
+          config: codspeed.perf.yml
+
+      - name: Upload Ring 3 CDP traces and metrics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ring-3-j8-traces-and-stats
+          path: perf-results/
+          if-no-files-found: warn
+          retention-days: 14

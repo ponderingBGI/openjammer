@@ -8,7 +8,7 @@
 //!    for the `wasm32` worklet.
 //!
 //! 2. [`MeterRing`] / [`return_frame`] — a SECOND wait-free SPSC ring carrying
-//!    [`EngineFrame::Meter`] / [`EngineFrame::Beat`] from the audio thread back
+//!    [`ojproto::EngineFrame::Meter`] / [`ojproto::EngineFrame::Beat`] from the audio thread back
 //!    to the control thread. It reuses the zero-dep [`ojcore_midiring::ByteRing`]
 //!    with a compact fixed-size wire format, and a non-blocking publish at block
 //!    end. This half is `std`-gated (it is a host-side return path; the worklet
@@ -146,6 +146,8 @@ pub mod return_frame {
     /// `TAG_METER = 1` / `TAG_BEAT = 2`. (Note: this `return_frame` tag space is
     /// independent of `event_frame::TAG_EVENT`, which lives on a different ring.)
     pub const TAG_LOOPER: u8 = 4;
+    /// Tag byte for the authoritative transport frame.
+    pub const TAG_TRANSPORT: u8 = 5;
 
     /// Wire size of a `Meter` frame: tag + node(u32) + rms(f32) + peak(f32).
     pub const METER_LEN: usize = 1 + 4 + 4 + 4;
@@ -154,6 +156,8 @@ pub mod return_frame {
     /// Wire size of a `Looper` frame:
     /// tag + node(u32) + state(u8) + pos(u32) + loop_len(u32) + peak(f32).
     pub const LOOPER_LEN: usize = 1 + 4 + 1 + 4 + 4 + 4;
+    /// Wire size of a `Transport` frame.
+    pub const TRANSPORT_LEN: usize = 1 + 8 + 8 + 4 + 2 + 4 + 1 + 1 + 1;
     /// The largest frame the ring will ever carry (for fixed out-buffers).
     pub const MAX_LEN: usize = {
         let mut m = if METER_LEN > BEAT_LEN {
@@ -163,6 +167,9 @@ pub mod return_frame {
         };
         if LOOPER_LEN > m {
             m = LOOPER_LEN;
+        }
+        if TRANSPORT_LEN > m {
+            m = TRANSPORT_LEN;
         }
         m
     };
@@ -206,6 +213,31 @@ pub mod return_frame {
         LOOPER_LEN
     }
 
+    /// Encode an authoritative transport snapshot into `buf`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_transport(
+        sample: u64,
+        tick: u64,
+        bar: u32,
+        beat: u16,
+        phase: f32,
+        motion: u8,
+        rec: bool,
+        loop_on: bool,
+        buf: &mut [u8; MAX_LEN],
+    ) -> usize {
+        buf[0] = TAG_TRANSPORT;
+        buf[1..9].copy_from_slice(&sample.to_le_bytes());
+        buf[9..17].copy_from_slice(&tick.to_le_bytes());
+        buf[17..21].copy_from_slice(&bar.to_le_bytes());
+        buf[21..23].copy_from_slice(&beat.to_le_bytes());
+        buf[23..27].copy_from_slice(&phase.to_le_bytes());
+        buf[27] = motion;
+        buf[28] = u8::from(rec);
+        buf[29] = u8::from(loop_on);
+        TRANSPORT_LEN
+    }
+
     /// Decode one wire frame back into an [`EngineFrame`]. Returns `None` on an
     /// unknown tag or a truncated frame.
     pub fn decode(bytes: &[u8]) -> Option<EngineFrame> {
@@ -236,6 +268,16 @@ pub mod return_frame {
                     peak,
                 })
             }
+            TAG_TRANSPORT if bytes.len() >= TRANSPORT_LEN => Some(EngineFrame::Transport {
+                sample: u64::from_le_bytes(bytes[1..9].try_into().ok()?),
+                tick: u64::from_le_bytes(bytes[9..17].try_into().ok()?),
+                bar: u32::from_le_bytes(bytes[17..21].try_into().ok()?),
+                beat: u16::from_le_bytes(bytes[21..23].try_into().ok()?),
+                phase: f32::from_le_bytes(bytes[23..27].try_into().ok()?),
+                motion: bytes[27],
+                rec: bytes[28] != 0,
+                loop_on: bytes[29] != 0,
+            }),
             _ => None,
         }
     }
@@ -457,6 +499,26 @@ mod tests {
             }
             other => panic!("expected Beat, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn return_frame_transport_roundtrips() {
+        let mut buf = [0u8; return_frame::MAX_LEN];
+        let n = return_frame::encode_transport(48_000, 960, 2, 1, 0.25, 1, true, true, &mut buf);
+        assert_eq!(n, return_frame::TRANSPORT_LEN);
+        assert_eq!(
+            return_frame::decode(&buf[..n]),
+            Some(EngineFrame::Transport {
+                sample: 48_000,
+                tick: 960,
+                bar: 2,
+                beat: 1,
+                phase: 0.25,
+                motion: 1,
+                rec: true,
+                loop_on: true,
+            })
+        );
     }
 
     #[test]

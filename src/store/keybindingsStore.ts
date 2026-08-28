@@ -4,6 +4,8 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { KeymapScope } from '../keymap/types';
+import type { SurfaceId } from './uiViewStore';
 
 // ============================================================================
 // Constants
@@ -29,6 +31,9 @@ export interface KeybindingAction {
     label: string;         // Display name
     category: string;      // For grouping in UI
     defaultBinding: KeyCombo;
+    /** Surface where the shortcut is active. Global shortcuts overlap every scope. */
+    scope: Exclude<KeymapScope, 'text' | 'modal'>;
+    surface?: SurfaceId;
 }
 
 // ============================================================================
@@ -42,24 +47,28 @@ export const keybindingActions: KeybindingAction[] = [
         label: 'New Workflow',
         category: 'File',
         defaultBinding: { key: 'n', ctrl: true },
+        scope: 'global',
     },
     {
         id: 'file.import',
         label: 'Import Workflow',
         category: 'File',
         defaultBinding: { key: 'o', ctrl: true },
+        scope: 'global',
     },
     {
         id: 'file.save',
         label: 'Save Project',
         category: 'File',
         defaultBinding: { key: 's', ctrl: true },
+        scope: 'global',
     },
     {
         id: 'file.export',
-        label: 'Export Workflow',
+        label: 'Export Song',
         category: 'File',
-        defaultBinding: { key: 's', ctrl: true, shift: true },
+        defaultBinding: { key: 'e', ctrl: true, shift: true },
+        scope: 'global',
     },
 
     // Edit actions
@@ -68,18 +77,21 @@ export const keybindingActions: KeybindingAction[] = [
         label: 'Delete Selected',
         category: 'Edit',
         defaultBinding: { key: 'Delete' },
+        scope: 'surface', surface: 'canvas',
     },
     {
         id: 'edit.undo',
         label: 'Undo',
         category: 'Edit',
         defaultBinding: { key: 'z', ctrl: true },
+        scope: 'surface', surface: 'canvas',
     },
     {
         id: 'edit.redo',
         label: 'Redo',
         category: 'Edit',
         defaultBinding: { key: 'z', ctrl: true, shift: true },
+        scope: 'surface', surface: 'canvas',
     },
 
     // View actions
@@ -88,24 +100,28 @@ export const keybindingActions: KeybindingAction[] = [
         label: 'Zoom In',
         category: 'View',
         defaultBinding: { key: '=', ctrl: true },
+        scope: 'surface', surface: 'canvas',
     },
     {
         id: 'view.zoomOut',
         label: 'Zoom Out',
         category: 'View',
         defaultBinding: { key: '-', ctrl: true },
+        scope: 'surface', surface: 'canvas',
     },
     {
         id: 'view.resetView',
         label: 'Reset View',
         category: 'View',
         defaultBinding: { key: '0', ctrl: true },
+        scope: 'surface', surface: 'canvas',
     },
     {
         id: 'view.ghostMode',
         label: 'Toggle Ghost Mode',
         category: 'View',
         defaultBinding: { key: 'w' },
+        scope: 'surface', surface: 'canvas',
     },
 
     // Canvas actions
@@ -114,7 +130,57 @@ export const keybindingActions: KeybindingAction[] = [
         label: 'Multi-Connect Mode',
         category: 'Canvas',
         defaultBinding: { key: 'a' },
+        scope: 'surface', surface: 'canvas',
     },
+    { id: 'view.toggleArrangement', label: 'Toggle Arrangement', category: 'View', defaultBinding: { key: 'Tab' }, scope: 'global' },
+    { id: 'window.focusHost', label: 'Return to OpenJammer', category: 'View', defaultBinding: { key: 'F6' }, scope: 'global' },
+    { id: 'commandBar.toggle', label: 'Open Command Bar', category: 'View', defaultBinding: { key: 'k', ctrl: true }, scope: 'global' },
+    { id: 'panel.devLog', label: 'Toggle Developer Log', category: 'View', defaultBinding: { key: 'l', ctrl: true, shift: true }, scope: 'global' },
+    { id: 'panel.audioHealth', label: 'Toggle Audio Health', category: 'View', defaultBinding: { key: 'h', ctrl: true, shift: true }, scope: 'global' },
+    { id: 'panel.plugins', label: 'Toggle Plugins', category: 'View', defaultBinding: { key: 'p', ctrl: true, shift: true }, scope: 'global' },
+    { id: 'canvas.escape', label: 'Escape Canvas Action', category: 'Canvas', defaultBinding: { key: 'Escape' }, scope: 'surface', surface: 'canvas' },
+    { id: 'canvas.exitLevel', label: 'Exit Node Level', category: 'Canvas', defaultBinding: { key: 'q' }, scope: 'surface', surface: 'canvas' },
+    { id: 'canvas.enterNode', label: 'Open Selected Node', category: 'Canvas', defaultBinding: { key: 'e' }, scope: 'surface', surface: 'canvas' },
+    { id: 'canvas.transport', label: 'Toggle Canvas Transport', category: 'Canvas', defaultBinding: { key: ' ' }, scope: 'surface', surface: 'canvas' },
+    { id: 'canvas.copy', label: 'Copy Nodes', category: 'Canvas', defaultBinding: { key: 'c', ctrl: true }, scope: 'surface', surface: 'canvas' },
+    { id: 'canvas.paste', label: 'Paste Nodes', category: 'Canvas', defaultBinding: { key: 'v', ctrl: true }, scope: 'surface', surface: 'canvas' },
+    { id: 'canvas.deleteBackspace', label: 'Delete Selected (Backspace)', category: 'Canvas', defaultBinding: { key: 'Backspace' }, scope: 'surface', surface: 'canvas' },
+    { id: 'arrangement.transport', label: 'Toggle Arrangement Transport', category: 'Arrangement', defaultBinding: { key: ' ' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.undo', label: 'Undo Arrangement Edit', category: 'Arrangement', defaultBinding: { key: 'z', ctrl: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.redo', label: 'Redo Arrangement Edit', category: 'Arrangement', defaultBinding: { key: 'z', ctrl: true, shift: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.selectionUndo', label: 'Undo Selection', category: 'Arrangement', defaultBinding: { key: 'z', ctrl: true, alt: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.selectionRedo', label: 'Redo Selection', category: 'Arrangement', defaultBinding: { key: 'z', ctrl: true, alt: true, shift: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.cut', label: 'Cut Selection', category: 'Arrangement', defaultBinding: { key: 'x', ctrl: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.copy', label: 'Copy Selection', category: 'Arrangement', defaultBinding: { key: 'c', ctrl: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.paste', label: 'Paste', category: 'Arrangement', defaultBinding: { key: 'v', ctrl: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.delete', label: 'Delete Arrangement Selection', category: 'Arrangement', defaultBinding: { key: 'Delete' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.deleteBackspace', label: 'Delete Arrangement Selection (Backspace)', category: 'Arrangement', defaultBinding: { key: 'Backspace' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.zoomToSelection', label: 'Zoom to Arrangement Selection', category: 'Arrangement', defaultBinding: { key: 'z', shift: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.duplicate', label: 'Duplicate Clips', category: 'Arrangement', defaultBinding: { key: 'd', ctrl: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.nudgeLeft', label: 'Nudge Clips Left', category: 'Arrangement', defaultBinding: { key: 'ArrowLeft' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.nudgeRight', label: 'Nudge Clips Right', category: 'Arrangement', defaultBinding: { key: 'ArrowRight' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.nudgeLeftFine', label: 'Fine Nudge Clips Left', category: 'Arrangement', defaultBinding: { key: 'ArrowLeft', shift: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.nudgeRightFine', label: 'Fine Nudge Clips Right', category: 'Arrangement', defaultBinding: { key: 'ArrowRight', shift: true }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.split', label: 'Split Clips at Edit Point', category: 'Arrangement', defaultBinding: { key: 's' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.toggleRipple', label: 'Toggle Ripple Mode', category: 'Arrangement', defaultBinding: { key: 'r' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.escape', label: 'Clear Arrangement Selection', category: 'Arrangement', defaultBinding: { key: 'Escape' }, scope: 'surface', surface: 'arrangement' },
+    { id: 'arrangement.openPianoRoll', label: 'Open Selected MIDI Clip in Piano Roll', category: 'Arrangement', defaultBinding: { key: 'Enter' }, scope: 'surface', surface: 'arrangement' },
+    ...Array.from({ length: 9 }, (_, index): KeybindingAction => ({
+        id: `mode.${index + 1}`,
+        label: `Switch to Mode ${index + 1}`,
+        category: 'Modes',
+        defaultBinding: { key: String(index + 1) },
+        scope: 'global',
+    })),
+    ...['q','w','e','r','t','y','u','i','o','p','a','s','d','f','g','h','j','k','l','z','x','c','v','b','n','m',',','.','/'].map((key): KeybindingAction => ({
+        id: `note.${key}`,
+        label: `Play Note (${key.toUpperCase()})`,
+        category: 'Note Input',
+        defaultBinding: { key },
+        scope: 'surface',
+        surface: 'canvas',
+    })),
+    { id: 'note.controlSpace', label: 'Keyboard Control Signal', category: 'Note Input', defaultBinding: { key: ' ' }, scope: 'surface', surface: 'canvas' },
 ];
 
 // ============================================================================
@@ -331,10 +397,18 @@ export const useKeybindingsStore = create<KeybindingsStore>()(
 
             getConflictingActions: (actionId: string, combo: KeyCombo) => {
                 const conflicting: KeybindingAction[] = [];
+                const target = keybindingActions.find((action) => action.id === actionId);
+                const targetScope = target?.scope ?? 'global';
 
                 for (const action of keybindingActions) {
                     // Skip the action we're setting
                     if (action.id === actionId) continue;
+
+                    const actionScope = action.scope ?? 'global';
+                    const sameSurface = target?.surface === action.surface;
+                    const scopesOverlap = targetScope === 'global' || actionScope === 'global' ||
+                        (targetScope === actionScope && (targetScope !== 'surface' || sameSurface));
+                    if (!scopesOverlap) continue;
 
                     const binding = get().getBinding(action.id);
                     if (binding && keyComboEquals(binding, combo)) {

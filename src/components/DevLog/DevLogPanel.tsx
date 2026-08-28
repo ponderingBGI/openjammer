@@ -23,6 +23,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useBindingSet, useModalKeymap } from '../../keymap/useKeymap';
 import { useDebounce } from 'use-debounce';
 import type { Severity } from '@openjammer/oj-protocol';
 import {
@@ -112,6 +113,15 @@ export function DevLogPanel() {
 
 function DevLogPanelInner() {
     const [open, setOpen] = useState(false);
+    const modalEntries = useMemo(() => [{
+        actionId: 'panel.devLog', run: () => { setOpen(false); return true; },
+    }], []);
+    useModalKeymap('dev-log', open, modalEntries);
+    useBindingSet(useMemo(() => ({
+        id: 'dev-log-toggle',
+        scope: 'global' as const,
+        entries: [{ actionId: 'panel.devLog', run: () => { setOpen((value) => !value); return true; } }],
+    }), []));
 
     // Filter state.
     const [activeLevels, setActiveLevels] = useState<ReadonlySet<Severity> | null>(null);
@@ -128,17 +138,13 @@ function DevLogPanelInner() {
     // Global Ctrl/Cmd+Shift+L toggle + the command bridge. (Escape-to-close is
     // owned by the Modal once the panel is open.)
     useEffect(() => {
-        const onKeyDown = (e: KeyboardEvent) => {
-            const isToggle = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'l';
-            if (!isToggle) return;
-            e.preventDefault();
-            setOpen((v) => !v);
+        const onCommand = (event: Event) => {
+            const correlation = (event as CustomEvent<{ correlation?: number }>).detail?.correlation;
+            if (correlation !== undefined) { setActiveCorr(correlation); setOpen(true); }
+            else setOpen((v) => !v);
         };
-        const onCommand = () => setOpen((v) => !v);
-        window.addEventListener('keydown', onKeyDown);
         window.addEventListener('openjammer:toggle-devlog', onCommand);
         return () => {
-            window.removeEventListener('keydown', onKeyDown);
             window.removeEventListener('openjammer:toggle-devlog', onCommand);
         };
     }, []);

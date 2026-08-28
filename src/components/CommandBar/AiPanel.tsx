@@ -591,20 +591,15 @@ export function AiPanel({
         else if (sb.requestYolo()) setYoloConfirm(true);
     }, []);
 
-    // YOLO toggle hotkey (⌘/Ctrl+Shift+Y) on the live agent surface.
-    useEffect(() => {
-        if (!available || showAuth) return;
-        const onKey = (e: KeyboardEvent) => {
-            const mod = e.ctrlKey || e.metaKey;
-            if (mod && e.shiftKey && e.key.toLowerCase() === 'y') {
-                e.preventDefault();
-                e.stopPropagation();
-                toggleYolo();
-            }
-        };
-        window.addEventListener('keydown', onKey, true);
-        return () => window.removeEventListener('keydown', onKey, true);
-    }, [available, showAuth, toggleYolo]);
+    const onAiKeyDownCapture = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'y') {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleYolo();
+            return;
+        }
+        onChatKeyDownCapture(e);
+    }, [onChatKeyDownCapture, toggleYolo]);
 
     if (!available) {
         return (
@@ -679,7 +674,7 @@ export function AiPanel({
     }
 
     return (
-        <div className="command-bar-ai" onKeyDownCapture={onChatKeyDownCapture}>
+        <div className="command-bar-ai" onKeyDownCapture={onAiKeyDownCapture}>
             <div className="command-bar-ai-header">
                 <Button
                     variant="ghost"

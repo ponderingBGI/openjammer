@@ -1,236 +1,675 @@
-//! U12 — the musical transport clock (no_std, alloc-free).
+//! Real-time transport clock and finite-state machine.
 //!
-//! `exec.rs` ships a *minimal* clock: a `u64` sample counter plus a play/pause
-//! bool, enough to honour `TransportPlay/Pause/Seek`. This module ADDS the
-//! musical interpretation on top of that same playhead — tempo (BPM), a time
-//! signature, and a derived bar / beat / intra-beat phase — so the engine can
-//! emit an [`ojproto::EngineFrame::Beat`] from a control-rate position read.
-//!
-//! It is deliberately additive: a [`Transport`] is a small `Copy` value the
-//! [`crate::Engine`] holds alongside (and keeps in lockstep with) the existing
-//! `playing` / `sample_pos` fields. Nothing here allocates, locks, or names
-//! `std`, so it compiles unchanged for the `wasm32` AudioWorklet.
+//! The transport owns the authoritative sample playhead. Musical coordinates
+//! are always derived from an immutable [`crate::TempoMapRt`] snapshot; there
+//! are deliberately no scalar tempo or meter twins here.
 
-/// A musical position derived from the sample playhead. Returned by
-/// [`Transport::position`] so the host can build a `Beat` frame.
+use crate::tempo::{MetricCursor, TempoMapRt};
+
+/// A musical position derived from the sample playhead.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TransportPos {
-    /// Zero-based bar index since the seek origin (sample 0).
+    /// One-based bar number.
     pub bar: u32,
-    /// Zero-based beat within the current bar (`0..beats_per_bar`).
+    /// One-based beat within the current bar.
     pub beat: u32,
-    /// Fractional progress through the current beat, in `[0.0, 1.0)`.
+    /// Fractional progress through the current meter beat.
     pub phase: f32,
-    /// The underlying sample playhead this position was derived from.
+    /// Musical quarter-note ticks at [`ojproto::PPQ`].
+    pub tick: u64,
+    /// The sample playhead used for this read.
     pub sample: u64,
 }
 
-/// The musical clock: tempo + time signature laid over the sample playhead.
+/// The independent motion dimension of the transport FSM.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Motion {
+    /// No timeline movement; live DSP still renders.
+    #[default]
+    Stopped = 0,
+    /// Timeline movement is active.
+    Rolling = 1,
+    /// Fading the master before stopping.
+    DeclickToStop = 2,
+    /// Fading the master before changing position.
+    DeclickToLocate = 3,
+    /// A non-RT locate is outstanding.
+    WaitingForLocate = 4,
+    /// Metronome-only pre-roll; timeline time remains fixed.
+    CountIn = 5,
+}
+
+/// What motion should follow a locate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Disposition {
+    MustRoll,
+    MustStop,
+    RollIfAppropriate,
+}
+
+/// RT-internal transport event. It never appears on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TransportEvent {
+    Start,
+    Stop {
+        flush: bool,
+    },
+    Locate {
+        at: u64,
+        roll: Disposition,
+        for_loop: bool,
+    },
+    LocateDone,
+    ButlerDone,
+}
+
+/// Short, stepped master-gain fade used before stop and locate operations.
 ///
-/// `Copy` and field-light so the [`crate::Engine`] can hold one by value and a
-/// position read is pure arithmetic (no allocation). The playhead itself is
-/// advanced by [`Transport::advance`] once per block while playing.
+/// The duration is the sample-rate equivalent of 800 frames at 48 kHz and the
+/// gain is updated every four frames, matching the transport specification.
 #[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DeclickAmp {
+    gain: f32,
+    step: f32,
+    remaining: u32,
+    until_step: u8,
+}
+
+impl Default for DeclickAmp {
+    fn default() -> Self {
+        Self {
+            gain: 1.0,
+            step: 0.0,
+            remaining: 0,
+            until_step: 4,
+        }
+    }
+}
+
+impl DeclickAmp {
+    /// Fade length in frames at `sample_rate`.
+    pub fn length(sample_rate: f32) -> u32 {
+        let rate = if sample_rate.is_finite() && sample_rate > 0.0 {
+            sample_rate
+        } else {
+            48_000.0
+        };
+        let raw = libm::roundf(rate / 60.0).max(4.0) as u32;
+        raw.div_ceil(4) * 4
+    }
+
+    /// Begin a unity-to-silence fade.
+    pub fn start(&mut self, sample_rate: f32) {
+        let length = Self::length(sample_rate);
+        self.gain = 1.0;
+        self.step = 4.0 / length as f32;
+        self.remaining = length;
+        self.until_step = 4;
+    }
+
+    /// Cancel any fade and return to unity.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    pub fn remaining(&self) -> u32 {
+        self.remaining
+    }
+
+    pub fn is_active(&self) -> bool {
+        self.remaining != 0
+    }
+
+    /// Gain for one master frame, advancing the four-frame stepper once.
+    pub fn next_gain(&mut self) -> f32 {
+        if self.remaining == 0 {
+            return 1.0;
+        }
+        let gain = self.gain;
+        self.remaining -= 1;
+        self.until_step -= 1;
+        if self.until_step == 0 {
+            self.gain = (self.gain - self.step).max(0.0);
+            self.until_step = 4;
+        }
+        gain
+    }
+}
+
+/// Allocation-free transport finite-state machine.
+#[derive(Debug, Clone, Copy)]
+pub struct TransportFsm {
+    motion: Motion,
+    waiting_for_butler: bool,
+    locate_target: u64,
+    roll_after_locate: Option<bool>,
+    punch_or_loop: u8,
+    deferred: [Option<TransportEvent>; 8],
+    processing: u8,
+    declick: DeclickAmp,
+    seek_counter: u32,
+}
+
+impl Default for TransportFsm {
+    fn default() -> Self {
+        Self {
+            motion: Motion::Stopped,
+            waiting_for_butler: false,
+            locate_target: u64::MAX,
+            roll_after_locate: None,
+            punch_or_loop: 0,
+            deferred: [None; 8],
+            processing: 0,
+            declick: DeclickAmp::default(),
+            seek_counter: 0,
+        }
+    }
+}
+
+impl TransportFsm {
+    pub fn motion(&self) -> Motion {
+        self.motion
+    }
+
+    pub fn is_rolling(&self) -> bool {
+        matches!(
+            self.motion,
+            Motion::Rolling | Motion::DeclickToStop | Motion::DeclickToLocate
+        )
+    }
+
+    pub fn begin_count_in(&mut self) {
+        self.motion = Motion::CountIn;
+        self.declick.reset();
+    }
+
+    pub fn finish_count_in(&mut self) {
+        if self.motion == Motion::CountIn {
+            self.motion = Motion::Rolling;
+        }
+    }
+
+    pub fn waiting_for_butler(&self) -> bool {
+        self.waiting_for_butler
+    }
+
+    pub fn seek_counter(&self) -> u32 {
+        self.seek_counter
+    }
+
+    pub fn declick_remaining(&self) -> u32 {
+        self.declick.remaining()
+    }
+
+    pub fn next_declick_gain(&mut self) -> f32 {
+        self.declick.next_gain()
+    }
+
+    fn enqueue(&mut self, event: TransportEvent, sample_rate: f32) -> Option<u64> {
+        if self.processing != 0 {
+            if let Some(slot) = self.deferred.iter_mut().find(|slot| slot.is_none()) {
+                *slot = Some(event);
+            }
+            return None;
+        }
+
+        self.processing = self.processing.saturating_add(1);
+        let mut locate = self.apply_event(event, sample_rate);
+        while let Some(i) = self.deferred.iter().position(Option::is_some) {
+            let deferred = self.deferred[i].take().expect("occupied deferred slot");
+            locate = self.apply_event(deferred, sample_rate).or(locate);
+        }
+        self.processing -= 1;
+        locate
+    }
+
+    fn apply_event(&mut self, event: TransportEvent, sample_rate: f32) -> Option<u64> {
+        match event {
+            TransportEvent::Start => {
+                self.motion = Motion::Rolling;
+                self.roll_after_locate = None;
+                self.locate_target = u64::MAX;
+                self.declick.reset();
+                None
+            }
+            TransportEvent::Stop { flush } => {
+                let _ = flush;
+                if self.is_rolling() {
+                    self.motion = Motion::DeclickToStop;
+                    self.declick.start(sample_rate);
+                } else {
+                    self.motion = Motion::Stopped;
+                }
+                None
+            }
+            TransportEvent::Locate { at, roll, for_loop } => {
+                let was_rolling = self.is_rolling();
+                let roll_after = match roll {
+                    Disposition::MustRoll => true,
+                    Disposition::MustStop => false,
+                    Disposition::RollIfAppropriate => was_rolling,
+                };
+                self.seek_counter = self.seek_counter.wrapping_add(1);
+                self.locate_target = at;
+                self.roll_after_locate = Some(roll_after);
+                if was_rolling && !for_loop {
+                    self.motion = Motion::DeclickToLocate;
+                    self.declick.start(sample_rate);
+                    None
+                } else {
+                    self.finish_locate()
+                }
+            }
+            TransportEvent::LocateDone => self.finish_locate(),
+            TransportEvent::ButlerDone => {
+                self.waiting_for_butler = false;
+                if self.motion == Motion::WaitingForLocate {
+                    self.finish_locate()
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn finish_locate(&mut self) -> Option<u64> {
+        let at = (self.locate_target != u64::MAX).then_some(self.locate_target)?;
+        self.locate_target = u64::MAX;
+        self.motion = if self.roll_after_locate.take().unwrap_or(false) {
+            Motion::Rolling
+        } else {
+            Motion::Stopped
+        };
+        self.declick.reset();
+        Some(at)
+    }
+
+    pub fn start(&mut self, sample_rate: f32) {
+        let _ = self.enqueue(TransportEvent::Start, sample_rate);
+    }
+
+    pub fn stop(&mut self, sample_rate: f32) {
+        let _ = self.enqueue(TransportEvent::Stop { flush: false }, sample_rate);
+    }
+
+    pub fn locate(
+        &mut self,
+        at: u64,
+        disposition: Disposition,
+        for_loop: bool,
+        sample_rate: f32,
+    ) -> Option<u64> {
+        self.enqueue(
+            TransportEvent::Locate {
+                at,
+                roll: disposition,
+                for_loop,
+            },
+            sample_rate,
+        )
+    }
+
+    /// Finish a declick edge. Returns a deferred locate target when applicable.
+    pub fn finish_declick(&mut self, sample_rate: f32) -> Option<u64> {
+        if self.declick.is_active() {
+            return None;
+        }
+        match self.motion {
+            Motion::DeclickToStop => {
+                self.motion = Motion::Stopped;
+                self.declick.reset();
+                None
+            }
+            Motion::DeclickToLocate => self.enqueue(TransportEvent::LocateDone, sample_rate),
+            _ => None,
+        }
+    }
+
+    pub fn butler_done(&mut self, sample_rate: f32) -> Option<u64> {
+        self.enqueue(TransportEvent::ButlerDone, sample_rate)
+    }
+}
+
+/// Authoritative sample clock plus loop/punch runtime state.
+#[derive(Debug, Clone, Copy)]
 pub struct Transport {
-    /// Sample rate in Hz. Set from the graph at install time.
-    pub sample_rate: f32,
-    /// Tempo in beats per minute (quarter-notes by convention).
-    pub tempo_bpm: f32,
-    /// Beats per bar (the time-signature numerator, e.g. 4 for 4/4).
-    pub beats_per_bar: u32,
-    /// Note value that gets one beat (the denominator, e.g. 4 for 4/4). Carried
-    /// for completeness / UI display; the sample-clock maths uses `tempo_bpm`
-    /// which is already quarter-note based.
-    pub beat_unit: u32,
-    /// Sample playhead (mirrors the engine's `sample_pos`).
-    pub sample_pos: u64,
-    /// Whether the clock is running (mirrors the engine's `playing`).
-    pub playing: bool,
+    sample_rate: f32,
+    sample_pos: u64,
+    fsm: TransportFsm,
+    loop_range: Option<(u64, u64)>,
+    punch_range: Option<(u64, u64)>,
+    loop_on: bool,
+    punch_on: bool,
+    record_armed: bool,
+    click_on: bool,
+    count_in_on: bool,
 }
 
 impl Default for Transport {
     fn default() -> Self {
-        Self {
-            sample_rate: 48_000.0,
-            tempo_bpm: 120.0,
-            beats_per_bar: 4,
-            beat_unit: 4,
-            sample_pos: 0,
-            playing: false,
-        }
+        Self::new(48_000.0)
     }
 }
 
 impl Transport {
-    /// A transport at `sample_rate`, 120 BPM, 4/4, stopped at sample 0.
     pub fn new(sample_rate: f32) -> Self {
         Self {
-            sample_rate,
-            ..Self::default()
+            sample_rate: valid_sample_rate(sample_rate),
+            sample_pos: 0,
+            fsm: TransportFsm::default(),
+            loop_range: None,
+            punch_range: None,
+            loop_on: false,
+            punch_on: false,
+            record_armed: false,
+            click_on: false,
+            count_in_on: false,
         }
     }
 
-    /// Samples per beat at the current tempo (a quarter-note). Guards against a
-    /// zero/garbage tempo or sample rate so the position maths never divides by
-    /// zero on the audio thread.
-    #[inline]
-    pub fn samples_per_beat(&self) -> f64 {
-        let bpm = if self.tempo_bpm > 0.0 {
-            self.tempo_bpm
-        } else {
-            120.0
-        };
-        let sr = if self.sample_rate > 0.0 {
-            self.sample_rate
-        } else {
-            48_000.0
-        };
-        (sr as f64) * 60.0 / (bpm as f64)
+    pub fn sample_rate(&self) -> f32 {
+        self.sample_rate
     }
 
-    /// Set the tempo in BPM (ignored if non-positive — the prior tempo stays).
-    #[inline]
-    pub fn set_tempo(&mut self, bpm: f32) {
-        if bpm > 0.0 {
-            self.tempo_bpm = bpm;
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.sample_rate = valid_sample_rate(sample_rate);
+    }
+
+    pub fn sample_pos(&self) -> u64 {
+        self.sample_pos
+    }
+
+    pub(crate) fn rebase_engine_sample(&mut self, sample: u64) {
+        self.sample_pos = sample;
+    }
+
+    pub fn motion(&self) -> Motion {
+        self.fsm.motion()
+    }
+
+    pub fn is_playing(&self) -> bool {
+        self.fsm.is_rolling()
+    }
+
+    pub fn loop_on(&self) -> bool {
+        self.loop_on
+    }
+
+    pub fn punch_on(&self) -> bool {
+        self.punch_on
+    }
+
+    pub fn record_armed(&self) -> bool {
+        self.record_armed
+    }
+
+    pub fn click_on(&self) -> bool {
+        self.click_on
+    }
+
+    pub fn count_in_on(&self) -> bool {
+        self.count_in_on
+    }
+
+    pub fn fsm(&self) -> &TransportFsm {
+        &self.fsm
+    }
+
+    pub fn set_ranges(&mut self, loop_range: Option<(u64, u64)>, punch_range: Option<(u64, u64)>) {
+        self.loop_range = loop_range.filter(|(start, end)| start < end);
+        self.punch_range = punch_range.filter(|(start, end)| start < end);
+    }
+
+    pub fn loop_range(&self) -> Option<(u64, u64)> {
+        self.loop_range
+    }
+
+    pub fn punch_range(&self) -> Option<(u64, u64)> {
+        self.punch_range
+    }
+
+    /// Apply one of the compact `ojproto::transport_flag` toggles.
+    pub fn set_flag(&mut self, flag: u8, on: bool) {
+        match flag {
+            ojproto::transport_flag::LOOP_ENABLE => {
+                self.loop_on = on;
+                if on {
+                    self.punch_on = false;
+                    self.fsm.punch_or_loop = 2;
+                } else if self.fsm.punch_or_loop == 2 {
+                    self.fsm.punch_or_loop = 0;
+                }
+            }
+            ojproto::transport_flag::PUNCH_ENABLE => {
+                self.punch_on = on;
+                if on {
+                    self.loop_on = false;
+                    self.fsm.punch_or_loop = 1;
+                } else if self.fsm.punch_or_loop == 1 {
+                    self.fsm.punch_or_loop = 0;
+                }
+            }
+            ojproto::transport_flag::RECORD_ARM => self.record_armed = on,
+            ojproto::transport_flag::CLICK => self.click_on = on,
+            ojproto::transport_flag::COUNT_IN => self.count_in_on = on,
+            _ => {}
         }
     }
 
-    /// Set the time signature `numerator/denominator` (each clamped to >= 1).
-    #[inline]
-    pub fn set_time_signature(&mut self, numerator: u32, denominator: u32) {
-        self.beats_per_bar = numerator.max(1);
-        self.beat_unit = denominator.max(1);
+    pub fn play(&mut self) {
+        self.fsm.start(self.sample_rate);
     }
 
-    /// Advance the playhead by `nframes` if playing. Called once per block by
-    /// the executor. No-op while paused (frozen position).
-    #[inline]
+    pub fn begin_count_in(&mut self) {
+        self.fsm.begin_count_in();
+    }
+
+    pub fn finish_count_in(&mut self) {
+        self.fsm.finish_count_in();
+    }
+
+    pub fn pause(&mut self) {
+        self.fsm.stop(self.sample_rate);
+    }
+
+    pub fn locate(&mut self, sample: u64) {
+        if let Some(at) = self.fsm.locate(
+            sample,
+            Disposition::RollIfAppropriate,
+            false,
+            self.sample_rate,
+        ) {
+            self.sample_pos = at;
+        }
+    }
+
+    /// Maximum frames before a transport edge (declick completion or loop end).
+    pub fn frames_until_edge(&self, max: usize) -> usize {
+        let mut edge = max;
+        if self.fsm.declick_remaining() != 0 {
+            edge = edge.min(self.fsm.declick_remaining() as usize);
+        }
+        if self.fsm.motion() == Motion::Rolling && self.loop_on {
+            if let Some((_, end)) = self.loop_range {
+                let distance = end.saturating_sub(self.sample_pos) as usize;
+                edge = edge.min(distance);
+            }
+        }
+        edge
+    }
+
+    /// Gain one rendered master frame during declick states.
+    pub fn next_master_gain(&mut self) -> f32 {
+        match self.fsm.motion() {
+            Motion::DeclickToStop | Motion::DeclickToLocate => self.fsm.next_declick_gain(),
+            _ => 1.0,
+        }
+    }
+
+    /// Advance timeline time after rendering a span.
     pub fn advance(&mut self, nframes: usize) {
-        if self.playing {
+        if self.fsm.is_rolling() {
             self.sample_pos = self.sample_pos.wrapping_add(nframes as u64);
         }
     }
 
-    /// The current musical position derived from the sample playhead.
-    ///
-    /// `bar`/`beat` are zero-based; `phase` is the fractional progress through
-    /// the current beat in `[0, 1)`. Pure arithmetic — RT-safe.
-    pub fn position(&self) -> TransportPos {
-        let spb = self.samples_per_beat();
-        let beats_total = (self.sample_pos as f64) / spb;
-        // `libm::floor` keeps this `no_std` (the std `f64::floor` is unavailable
-        // without `std`).
-        let beat_index = libm::floor(beats_total);
-        let phase = (beats_total - beat_index) as f32;
-        let beat_index = beat_index as u64;
-        let per_bar = self.beats_per_bar.max(1) as u64;
-        let bar = (beat_index / per_bar) as u32;
-        let beat = (beat_index % per_bar) as u32;
-        TransportPos {
-            bar,
-            beat,
-            // Clamp away any float fuzz so `phase` is always a clean `[0, 1)`.
-            phase: phase.clamp(0.0, 0.999_999_9),
-            sample: self.sample_pos,
+    /// Apply an edge reached after a rendered span.
+    pub fn finish_edge(&mut self) {
+        if self.fsm.declick_remaining() == 0 {
+            if let Some(at) = self.fsm.finish_declick(self.sample_rate) {
+                self.sample_pos = at;
+            }
         }
+        if self.fsm.motion() == Motion::Rolling && self.loop_on {
+            if let Some((start, end)) = self.loop_range {
+                if self.sample_pos >= end {
+                    if let Some(at) =
+                        self.fsm
+                            .locate(start, Disposition::MustRoll, true, self.sample_rate)
+                    {
+                        self.sample_pos = at;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Derive the current musical coordinates through `map`.
+    pub fn position(&self, map: &TempoMapRt, cursor: &mut MetricCursor) -> TransportPos {
+        self.position_at(self.sample_pos, map, cursor)
+    }
+
+    /// Derive musical coordinates for an explicit timeline sample. PDC keeps
+    /// the internal engine clock ahead of this value by `preroll`.
+    pub fn position_at(
+        &self,
+        sample: u64,
+        map: &TempoMapRt,
+        cursor: &mut MetricCursor,
+    ) -> TransportPos {
+        let tick = map.tick_at_sample_with_cursor(sample, cursor);
+        let metric = map.meter_at_sample_with_cursor(sample, cursor);
+        TransportPos {
+            bar: metric.bar,
+            beat: metric.beat,
+            phase: metric.phase,
+            tick,
+            sample,
+        }
+    }
+}
+
+fn valid_sample_rate(sample_rate: f32) -> f32 {
+    if sample_rate.is_finite() && sample_rate > 0.0 {
+        sample_rate
+    } else {
+        48_000.0
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ojproto::{MeterPoint, TempoMap, TempoPoint, PPQ};
 
     const SR: f32 = 48_000.0;
 
-    #[test]
-    fn default_is_120_bpm_4_4_stopped() {
-        let t = Transport::new(SR);
-        assert_eq!(t.tempo_bpm, 120.0);
-        assert_eq!(t.beats_per_bar, 4);
-        assert_eq!(t.beat_unit, 4);
-        assert!(!t.playing);
-        assert_eq!(t.sample_pos, 0);
+    fn map(beats_per_bar: u8) -> TempoMapRt {
+        TempoMapRt::from_wire(&TempoMap {
+            ppq: PPQ,
+            sample_rate: SR as u32,
+            tempos: alloc::vec![TempoPoint {
+                tick: 0,
+                sample: 0,
+                bpm_start: 120.0,
+                bpm_end: 120.0,
+                continuing: false,
+            }],
+            meters: alloc::vec![MeterPoint {
+                tick: 0,
+                sample: 0,
+                bar: 1,
+                divisions_per_bar: beats_per_bar,
+                note_value: 4,
+            }],
+        })
     }
 
     #[test]
-    fn samples_per_beat_matches_tempo() {
-        let mut t = Transport::new(SR);
-        // 120 BPM => 0.5 s per beat => 24000 samples at 48 kHz.
-        assert!((t.samples_per_beat() - 24_000.0).abs() < 1e-6);
-        t.set_tempo(60.0); // one beat per second => 48000 samples.
-        assert!((t.samples_per_beat() - 48_000.0).abs() < 1e-6);
+    fn one_point_map_drives_position() {
+        let mut transport = Transport::new(SR);
+        transport.locate(96_000 + 48_000);
+        let pos = transport.position(&map(4), &mut MetricCursor::default());
+        assert_eq!((pos.bar, pos.beat, pos.tick), (2, 3, 5_760));
+        assert!(pos.phase < 1e-6);
     }
 
     #[test]
-    fn paused_transport_does_not_advance() {
-        let mut t = Transport::new(SR);
-        t.advance(512);
-        assert_eq!(t.sample_pos, 0, "paused clock is frozen");
-        t.playing = true;
-        t.advance(512);
-        assert_eq!(t.sample_pos, 512);
+    fn stop_declicks_then_stops() {
+        let mut transport = Transport::new(SR);
+        transport.play();
+        transport.pause();
+        assert_eq!(transport.motion(), Motion::DeclickToStop);
+        let len = DeclickAmp::length(SR) as usize;
+        for _ in 0..len {
+            let _ = transport.next_master_gain();
+        }
+        transport.advance(len);
+        transport.finish_edge();
+        assert_eq!(transport.motion(), Motion::Stopped);
+        assert_eq!(transport.sample_pos(), len as u64);
     }
 
     #[test]
-    fn bar_beat_advance_correctly() {
-        // 120 BPM, 4/4: 24000 samples/beat, 96000 samples/bar.
-        let mut t = Transport::new(SR);
-        t.playing = true;
-
-        // Start of timeline: bar 0, beat 0, phase 0.
-        let p = t.position();
-        assert_eq!((p.bar, p.beat), (0, 0));
-        assert!(p.phase < 1e-6);
-
-        // Half a beat in.
-        t.sample_pos = 12_000;
-        let p = t.position();
-        assert_eq!((p.bar, p.beat), (0, 0));
-        assert!((p.phase - 0.5).abs() < 1e-4, "phase {}", p.phase);
-
-        // Exactly beat 1.
-        t.sample_pos = 24_000;
-        let p = t.position();
-        assert_eq!((p.bar, p.beat), (0, 1));
-        assert!(p.phase < 1e-4);
-
-        // Beat 3 (last beat of bar 0).
-        t.sample_pos = 24_000 * 3;
-        let p = t.position();
-        assert_eq!((p.bar, p.beat), (0, 3));
-
-        // First beat of bar 1 (after 4 beats == one bar).
-        t.sample_pos = 96_000;
-        let p = t.position();
-        assert_eq!((p.bar, p.beat), (1, 0));
-        assert!(p.phase < 1e-4);
-
-        // Beat 2 of bar 2.
-        t.sample_pos = 96_000 * 2 + 24_000 * 2;
-        let p = t.position();
-        assert_eq!((p.bar, p.beat), (2, 2));
+    fn rolling_locate_defers_jump_until_declick_finishes() {
+        let mut transport = Transport::new(SR);
+        transport.play();
+        transport.advance(64);
+        transport.locate(48_000);
+        assert_eq!(transport.motion(), Motion::DeclickToLocate);
+        assert_eq!(transport.sample_pos(), 64);
+        let len = DeclickAmp::length(SR) as usize;
+        for _ in 0..len - 1 {
+            let _ = transport.next_master_gain();
+        }
+        transport.finish_edge();
+        assert_eq!(transport.sample_pos(), 64);
+        let _ = transport.next_master_gain();
+        transport.advance(len);
+        transport.finish_edge();
+        assert_eq!(transport.sample_pos(), 48_000);
+        assert_eq!(transport.motion(), Motion::Rolling);
     }
 
     #[test]
-    fn time_signature_changes_bar_length() {
-        // 3/4 at 120 BPM: 3 beats == one bar.
-        let mut t = Transport::new(SR);
-        t.playing = true;
-        t.set_time_signature(3, 4);
-        // After 3 beats we should be at bar 1, beat 0.
-        t.sample_pos = 24_000 * 3;
-        let p = t.position();
-        assert_eq!((p.bar, p.beat), (1, 0));
+    fn transport_set_toggles_and_locks_punch_against_loop() {
+        let mut transport = Transport::new(SR);
+        transport.set_flag(ojproto::transport_flag::LOOP_ENABLE, true);
+        assert!(transport.loop_on());
+        transport.set_flag(ojproto::transport_flag::PUNCH_ENABLE, true);
+        assert!(transport.punch_on());
+        assert!(!transport.loop_on());
+        transport.set_flag(ojproto::transport_flag::RECORD_ARM, true);
+        transport.set_flag(ojproto::transport_flag::CLICK, true);
+        assert!(transport.record_armed());
+        assert!(transport.click_on());
     }
 
     #[test]
-    fn guards_against_zero_tempo_and_rate() {
-        let mut t = Transport::new(0.0);
-        t.set_tempo(0.0); // rejected; stays at 120.
-        assert_eq!(t.tempo_bpm, 120.0);
-        // Falls back to safe constants rather than dividing by zero.
-        assert!(t.samples_per_beat().is_finite());
-        assert!(t.samples_per_beat() > 0.0);
+    fn loop_wrap_edge_is_sample_exact() {
+        let mut transport = Transport::new(SR);
+        transport.set_ranges(Some((10, 14)), None);
+        transport.set_flag(ojproto::transport_flag::LOOP_ENABLE, true);
+        transport.locate(12);
+        transport.play();
+
+        let mut observed = [0u64; 6];
+        for sample in &mut observed {
+            *sample = transport.sample_pos();
+            transport.advance(1);
+            transport.finish_edge();
+        }
+        assert_eq!(observed, [12, 13, 10, 11, 12, 13]);
     }
 }

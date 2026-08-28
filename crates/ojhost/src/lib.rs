@@ -19,7 +19,7 @@
 //!
 //! * `--features clap-host` — pure-Rust CLAP hosting via `clack` (MIT, no C++).
 //!   The recommended path to host a real plugin in a CMake-less environment.
-//! * `--features juce` — the bundled C++ JUCE 8 host (VST3 + CLAP, + AU on
+//! * `--features juce` — the bundled C++ JUCE 8 host (VST3, + AU on
 //!   macOS), built by `build.rs` via CMake FetchContent.
 //!
 //! See `README.md` for the founder setup steps and the licensing posture.
@@ -40,27 +40,34 @@ mod error;
 mod node;
 mod scan;
 
-pub use descriptor::{HostedParam, PluginDescriptor, PluginFormat, PortCounts};
+pub use backend::take_latency_rescan_request;
+pub use backend::{HostedEvent, ParamGesture};
+pub use descriptor::{
+    HostedAudioPort, HostedParam, HostedPortConfig, PluginDescriptor, PluginFormat, PortCounts,
+};
 pub use error::HostError;
 pub use node::{
-    hosted_plugin_id, HostedPlugin, PluginEditor, PluginHostLoader, PluginHostNode, PLUGIN_HOST_ID,
+    hosted_plugin_id, HostedPlugin, HostedStateBlob, PluginEditor, PluginHostLoader,
+    PluginHostNode, PLUGIN_HOST_ID,
 };
 pub use scan::{
-    candidate_paths, clap_plugin_dirs, default_plugin_dirs, probe_candidate, scan, scan_with,
-    Blacklist, ProbeHelperResponse, ScanCache,
+    candidate_paths, clap_plugin_dirs, clear_crash_marker, default_plugin_dirs,
+    default_reliability_dir, probe_candidate, recover_crash_marker, scan, scan_with,
+    set_scan_helper_path, write_crash_marker, Blacklist, ProbeHelperResponse, QuarantineEntry,
+    ScanCache,
 };
 
 use ojcore::PluginRegistry;
 
 /// Which hosting backend this build was compiled with — reported to the UI so it
-/// can show "CLAP only" vs "VST3/CLAP/AU" vs "no hosting".
+/// can show "CLAP only" vs "VST3/AU" vs "no hosting".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HostingBackend {
     /// No backend (default scaffold): scanning is empty, loading is unavailable.
     None,
     /// Pure-Rust CLAP host via `clack`. CLAP only.
     ClapOnly,
-    /// JUCE C++ host: VST2 (when owner-provisioned) + VST3 + CLAP (+ AU on macOS).
+    /// JUCE C++ host: VST2 (when owner-provisioned) + VST3 (+ AU on macOS).
     Juce,
 }
 
@@ -99,14 +106,9 @@ impl HostingBackend {
             HostingBackend::None => &[],
             HostingBackend::ClapOnly => &[PluginFormat::Clap],
             #[cfg(target_os = "macos")]
-            HostingBackend::Juce => &[
-                PluginFormat::Vst2,
-                PluginFormat::Vst3,
-                PluginFormat::Clap,
-                PluginFormat::Au,
-            ],
+            HostingBackend::Juce => &[PluginFormat::Vst2, PluginFormat::Vst3, PluginFormat::Au],
             #[cfg(not(target_os = "macos"))]
-            HostingBackend::Juce => &[PluginFormat::Vst2, PluginFormat::Vst3, PluginFormat::Clap],
+            HostingBackend::Juce => &[PluginFormat::Vst2, PluginFormat::Vst3],
         }
     }
 }
@@ -180,10 +182,15 @@ mod tests {
             path: "/p/AcmeReverb.clap".into(),
             format: PluginFormat::Clap,
             is_instrument: false,
+            features: vec!["audio-effect".into(), "reverb".into()],
+            has_gui: false,
             ports: PortCounts {
                 audio_in: 2,
                 audio_out: 2,
             },
+            audio_ports: Vec::new(),
+            port_configs: Vec::new(),
+            note_ports: PortCounts::default(),
             param_count: 5,
             params: Vec::new(),
             latency_samples: 0,

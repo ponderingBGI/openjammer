@@ -2,7 +2,7 @@
  * OpenJammer - Node-based music generation tool
  */
 
-import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react';
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, lazy, Suspense } from 'react';
 import { Toaster, toast } from 'sonner';
 import { NodeCanvas } from './components/Canvas/NodeCanvas';
 import { Toolbar } from './components/Toolbar/Toolbar';
@@ -30,6 +30,7 @@ import { AudioHealthPanel } from './components/AudioHealth/AudioHealthPanel';
 import { useEngineHealthToast } from './components/EngineHealthDot/useEngineHealthToast';
 import { PwaUpdatePrompt } from './components/PwaUpdatePrompt';
 import { NativeUpdaterRunner } from './components/NativeUpdaterRunner';
+import { Bench } from './components/Bench/Bench';
 const PluginsPanel = lazy(() =>
     import('./components/Plugins/PluginsPanel').then((module) => ({
       default: module.PluginsPanel,
@@ -37,7 +38,6 @@ const PluginsPanel = lazy(() =>
 );
 import { CollabControl } from './components/Collab/CollabControl';
 import { MIDIIntegration } from './components/MIDI';
-import { LatencyWarningBanner } from './components/LatencyWarningBanner';
 import { initAudioContext, isAudioReady } from './audio/audioContext';
 import { getExecutor, isTauri } from './audio/executor';
 import type { GraphNode, Connection } from './engine/types';
@@ -45,17 +45,27 @@ import { initMidiVoiceRouting, disposeMidiVoiceRouting } from './midi';
 import { useAudioStore } from './store/audioStore';
 import { useGraphStore } from './store/graphStore';
 import { useProjectStore } from './store/projectStore';
-import { useCanvasStore } from './store/canvasStore';
-import { useKeybindingsStore } from './store/keybindingsStore';
 import { useEngineHealthStore, setEngineLive } from './store/engineHealthStore';
 import { useCrashRecovery } from './persistence/recovery/useCrashRecovery';
 import { useUsbLowLatencyDefault } from './hooks/useUsbLowLatencyDefault';
 import { useAutoDetectedSampleRate } from './hooks/useAutoDetectedSampleRate';
 import { writeEmergencyBackup } from './persistence/recovery';
+import { collectSaveData } from './persistence/collectSaveData';
+import { useArrangementStore } from './store/arrangementStore';
 import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens';
-import { isEditableTarget } from './utils/editableTarget';
+import { useUiViewStore, type SurfaceId } from './store/uiViewStore';
+import { useBindingSet, useKeymapArbiter, useModalKeymap } from './keymap/useKeymap';
+import { ArrangementSurface } from './components/Arrangement/ArrangementSurface';
+import { SharedSurfaceChrome } from './components/Arrangement/SharedSurfaceChrome';
+import { ExportHost } from './components/Export';
+import { PianoRollSurfaceHost } from './components/PianoRoll';
 import { logger } from './utils/log';
+import { getInvoke } from './ai/tauri';
 import './styles/global.css';
+
+function getDocumentVersion(): string {
+  return `${useGraphStore.getState().version}:${useArrangementStore.getState().docVersion}`;
+}
 
 /**
  * Keep native plugin discovery out of the browser's first-paint bundle. The host
@@ -65,36 +75,46 @@ import './styles/global.css';
  */
 function PluginsPanelHost() {
   const [requested, setRequested] = useState(false);
+  const [context, setContext] = useState<'browse' | 'pick' | 'insert'>('browse');
+
+  useBindingSet(useMemo(() => ({
+    id: 'plugins-panel-toggle',
+    scope: 'global' as const,
+    entries: [{
+      actionId: 'panel.plugins',
+      run: () => {
+        if (requested) window.dispatchEvent(new CustomEvent('openjammer:toggle-plugins'));
+        else setRequested(true);
+        return true;
+      },
+    }],
+  }), [requested]));
 
   useEffect(() => {
     if (requested) return;
-    const request = () => setRequested(true);
-    const onKey = (event: KeyboardEvent) => {
-      const hit =
-        (event.ctrlKey || event.metaKey) &&
-        event.shiftKey &&
-        event.key.toLowerCase() === 'p';
-      if (!hit) return;
-      event.preventDefault();
-      request();
+    const request = (event: Event) => {
+      const requestedContext = (event as CustomEvent<{ context?: 'browse' | 'pick' | 'insert' }>).detail?.context;
+      if (requestedContext) setContext(requestedContext);
+      setRequested(true);
     };
-    window.addEventListener('keydown', onKey);
     window.addEventListener('openjammer:toggle-plugins', request);
+    window.addEventListener('openjammer:open-browser', request);
     return () => {
-      window.removeEventListener('keydown', onKey);
       window.removeEventListener('openjammer:toggle-plugins', request);
+      window.removeEventListener('openjammer:open-browser', request);
     };
   }, [requested]);
 
   if (!requested) return null;
   return (
     <Suspense fallback={null}>
-      <PluginsPanel initiallyOpen />
+      <PluginsPanel initiallyOpen context={context} />
     </Suspense>
   );
 }
 
 function App() {
+  useKeymapArbiter();
   // Native (Tauri) boots straight into a live canvas — no autoplay gate exists
   // there because sound comes from the Rust/cpal engine over IPC, not Web Audio.
   // The browser tier still shows the welcome screen (its gesture resumes Web Audio).
@@ -103,6 +123,24 @@ function App() {
   const setAudioContextReady = useAudioStore((s) => s.setAudioContextReady);
   const audioConfig = useAudioStore((s) => s.audioConfig);
   const updateAudioMetrics = useAudioStore((s) => s.updateAudioMetrics);
+  const surface = useUiViewStore((s) => s.surface);
+  const songNodeId = useUiViewStore((s) => s.songNodeId);
+  const setSurface = useUiViewStore((s) => s.setSurface);
+  const previousSurface = useRef<SurfaceId>(surface);
+  const [exitingSurface, setExitingSurface] = useState<SurfaceId | null>(null);
+
+  useLayoutEffect(() => {
+    if (previousSurface.current === surface) return;
+    const outgoing = previousSurface.current;
+    previousSurface.current = surface;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setExitingSurface(null);
+      return;
+    }
+    setExitingSurface(outgoing);
+    const timer = window.setTimeout(() => setExitingSurface(null), 120);
+    return () => window.clearTimeout(timer);
+  }, [surface]);
 
   // Calm, deduped engine-dead toast (Phase 2). The ONLY toast the health store
   // raises — DEGRADED stays ambient; a fault storm yields one signal, not many.
@@ -120,6 +158,7 @@ function App() {
   // shutdown — or, after repeated crashes, drop to Safe Mode rather than reopening
   // into a deadly crash cycle. Runs once, before the autosave effects engage.
   const recovery = useCrashRecovery();
+  useModalKeymap('welcome', Boolean(showActivation || recovery.safeMode));
 
   // Initialize theme
   useEffect(() => {
@@ -229,7 +268,7 @@ function App() {
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Initialize to null to defer initialization until after hydration (inside useEffect)
-  const lastVersionRef = useRef<number | null>(null);
+  const lastVersionRef = useRef<string | null>(null);
   const isSavingRef = useRef(false);
 
   // Autosave when graph changes (debounced) - using version counter for efficient change detection
@@ -239,13 +278,13 @@ function App() {
 
     // Initialize version ref with current state (after hydration is complete)
     if (lastVersionRef.current === null) {
-      lastVersionRef.current = useGraphStore.getState().version;
+      lastVersionRef.current = getDocumentVersion();
     }
 
     // Subscribe to graph changes
-    const unsubscribe = useGraphStore.subscribe((state) => {
+    const scheduleSave = () => {
       // Skip if version hasn't changed (efficient O(1) check vs O(n) JSON.stringify)
-      if (state.version === lastVersionRef.current) return;
+      if (getDocumentVersion() === lastVersionRef.current) return;
 
       // Clear existing timeout
       if (saveTimeoutRef.current) {
@@ -256,21 +295,12 @@ function App() {
       saveTimeoutRef.current = setTimeout(async () => {
         if (isSavingRef.current) return;
 
-        const currentVersion = useGraphStore.getState().version;
+        const currentVersion = getDocumentVersion();
         if (currentVersion === lastVersionRef.current) return;
 
         isSavingRef.current = true;
         try {
-          const graphData = {
-            nodes: Array.from(useGraphStore.getState().nodes.values()),
-            edges: Array.from(useGraphStore.getState().connections.values()),
-            viewport: {
-              x: useCanvasStore.getState().pan.x,
-              y: useCanvasStore.getState().pan.y,
-              zoom: useCanvasStore.getState().zoom,
-            },
-          };
-          await saveProject(graphData);
+          await saveProject(collectSaveData());
           lastVersionRef.current = currentVersion;
         } catch (err) {
           console.error('[Autosave] Failed:', err);
@@ -278,10 +308,13 @@ function App() {
           isSavingRef.current = false;
         }
       }, 3000);
-    });
+    };
+    const unsubscribeGraph = useGraphStore.subscribe(scheduleSave);
+    const unsubscribeArrangement = useArrangementStore.subscribe(scheduleSave);
 
     return () => {
-      unsubscribe();
+      unsubscribeGraph();
+      unsubscribeArrangement();
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
@@ -295,23 +328,14 @@ function App() {
     const interval = setInterval(async () => {
       if (isSavingRef.current) return;
 
-      const currentVersion = useGraphStore.getState().version;
+      const currentVersion = getDocumentVersion();
 
       // Skip if nothing changed since last save
       if (currentVersion === lastVersionRef.current) return;
 
       isSavingRef.current = true;
       try {
-        const graphData = {
-          nodes: Array.from(useGraphStore.getState().nodes.values()),
-          edges: Array.from(useGraphStore.getState().connections.values()),
-          viewport: {
-            x: useCanvasStore.getState().pan.x,
-            y: useCanvasStore.getState().pan.y,
-            zoom: useCanvasStore.getState().zoom,
-          },
-        };
-        await saveProject(graphData);
+        await saveProject(collectSaveData());
         lastVersionRef.current = currentVersion;
       } catch (err) {
         console.error('[Autosave] Periodic backup failed:', err);
@@ -332,7 +356,7 @@ function App() {
         // Set flag immediately to prevent race conditions
         isSavingRef.current = true;
 
-        const currentVersion = useGraphStore.getState().version;
+        const currentVersion = getDocumentVersion();
 
         // Skip if nothing changed since last save
         if (currentVersion === lastVersionRef.current) {
@@ -342,16 +366,7 @@ function App() {
 
         // Save immediately when tab is hidden
         try {
-          const graphData = {
-            nodes: Array.from(useGraphStore.getState().nodes.values()),
-            edges: Array.from(useGraphStore.getState().connections.values()),
-            viewport: {
-              x: useCanvasStore.getState().pan.x,
-              y: useCanvasStore.getState().pan.y,
-              zoom: useCanvasStore.getState().zoom,
-            },
-          };
-          await saveProject(graphData);
+          await saveProject(collectSaveData());
           lastVersionRef.current = currentVersion;
         } catch (err) {
           console.error('[Autosave] Failed on tab switch:', err);
@@ -374,25 +389,27 @@ function App() {
   // when a folder was connected AND never read it back on boot.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    let lastBackupVersion = useGraphStore.getState().version;
+    let lastBackupVersion = getDocumentVersion();
 
     const flush = () => {
-      const s = useGraphStore.getState();
+      const saveData = collectSaveData();
       // Nothing meaningful to back up — don't clobber a good backup with empty.
-      if (s.nodes.size === 0 && s.connections.size === 0) return;
+      if (saveData.nodes.length === 0 && saveData.edges.length === 0 && !saveData.arrangement) return;
       writeEmergencyBackup({
-        nodes: Array.from(s.nodes.values()),
-        edges: Array.from(s.connections.values()),
+        ...saveData,
         projectName: useProjectStore.getState().name,
       });
     };
 
-    const unsubscribe = useGraphStore.subscribe((state) => {
-      if (state.version === lastBackupVersion) return;
-      lastBackupVersion = state.version;
+    const scheduleBackup = () => {
+      const currentVersion = getDocumentVersion();
+      if (currentVersion === lastBackupVersion) return;
+      lastBackupVersion = currentVersion;
       if (timer) clearTimeout(timer);
       timer = setTimeout(flush, 2000);
-    });
+    };
+    const unsubscribeGraph = useGraphStore.subscribe(scheduleBackup);
+    const unsubscribeArrangement = useArrangementStore.subscribe(scheduleBackup);
 
     // Final flush on page hide (the hook marks the clean exit separately). No
     // "leave site?" prompt: with durable autosave the work is recoverable, so we
@@ -401,56 +418,60 @@ function App() {
     window.addEventListener('pagehide', onPageHide);
 
     return () => {
-      unsubscribe();
+      unsubscribeGraph();
+      unsubscribeArrangement();
       window.removeEventListener('pagehide', onPageHide);
       if (timer) clearTimeout(timer);
     };
   }, []);
 
-  // Global keyboard shortcut for save (Ctrl+S / Cmd+S)
-  useEffect(() => {
-    const { matchesAction } = useKeybindingsStore.getState();
-
-    const handleKeyDown = async (e: KeyboardEvent) => {
-      // Skip if typing in an editable control.
-      if (isEditableTarget(e.target)) return;
-
-      // Handle Ctrl+S / Cmd+S - Save project
-      if (matchesAction(e, 'file.save')) {
-        e.preventDefault();
-
-        // Only save if a project is open
-        if (!projectName || !projectHandleKey) {
-          // Dispatch event to trigger new project creation in Toolbar
-          window.dispatchEvent(new CustomEvent('openjammer:new-project'));
-          return;
-        }
-
-        // Check if already saving
-        if (useProjectStore.getState().isSaving) return;
-
-        try {
-          const graphData = {
-            nodes: Array.from(useGraphStore.getState().nodes.values()),
-            edges: Array.from(useGraphStore.getState().connections.values()),
-            viewport: {
-              x: useCanvasStore.getState().pan.x,
-              y: useCanvasStore.getState().pan.y,
-              zoom: useCanvasStore.getState().zoom,
-            },
-          };
-          await saveProject(graphData);
-          toast.success('Project saved');
-        } catch (err) {
-          console.error('[Save] Failed:', err);
-          toast.error(`Failed to save project: ${(err as Error).message}`);
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [projectName, projectHandleKey, saveProject]);
+  useBindingSet(useMemo(() => ({
+    id: 'app-global',
+    scope: 'global' as const,
+    entries: [
+      {
+        actionId: 'file.save',
+        run: () => {
+          if (!projectName || !projectHandleKey) {
+            window.dispatchEvent(new CustomEvent('openjammer:new-project'));
+            return true;
+          }
+          if (useProjectStore.getState().isSaving) return true;
+          void saveProject(collectSaveData())
+            .then(() => toast.success('Project saved'))
+            .catch((err: Error) => {
+              console.error('[Save] Failed:', err);
+              toast.error(`Failed to save project: ${err.message}`);
+            });
+          return true;
+        },
+      },
+      {
+        actionId: 'window.focusHost',
+        run: () => { void getInvoke()?.('plugin_window_focus_host'); return true; },
+      },
+      {
+        actionId: 'view.toggleArrangement',
+        run: () => {
+          const current = useUiViewStore.getState().surface;
+          const next = current === 'canvas' ? 'arrangement' : current === 'pianoroll' ? 'arrangement' : 'canvas';
+          if (current === 'pianoroll') useUiViewStore.getState().closePianoRoll();
+          else useUiViewStore.getState().toggle();
+          requestAnimationFrame(() => {
+            document.querySelector<HTMLElement>(`[data-surface-root="${next}"]`)?.focus({ preventScroll: true });
+          });
+          return true;
+        },
+      },
+      ...Array.from({ length: 9 }, (_, index) => ({
+        actionId: `mode.${index + 1}`,
+        run: () => {
+          useAudioStore.getState().setCurrentMode(index + 1);
+          return true;
+        },
+      })),
+    ],
+  }), [projectName, projectHandleKey, saveProject]));
 
   // Initialize audio context on user gesture
   const handleActivate = useCallback(async () => {
@@ -469,6 +490,7 @@ function App() {
         if (!localStorage.getItem('oj-first-run-done')) {
           localStorage.setItem('oj-first-run-done', '1');
           toast('🎹 Make your first sound', {
+            id: 'first-sound-hint',
             description:
               'Right-click the canvas → add a Keyboard and an Instrument, connect them to a Speaker, then press the Q–P keys. Press ? for help, or Ctrl/Cmd+K to ask the AI to build it for you.',
             duration: 12000,
@@ -497,6 +519,10 @@ function App() {
       });
     }
   }, [setAudioContextReady, audioConfig]);
+
+  useEffect(() => {
+    if (surface === 'arrangement') toast.dismiss('first-sound-hint');
+  }, [surface]);
 
   // Native (Tauri) auto-start: no autoplay gate. Run the same activation sequence
   // on mount so the Rust engine wires up (the App-init effect keyed on
@@ -628,13 +654,39 @@ function App() {
         </div>
       )}
 
-      {/* Main Canvas */}
-      <NodeCanvas />
+      <div
+        className={`surface-layer ${surface === 'canvas' ? 'surface-transition-in' : exitingSurface === 'canvas' ? 'surface-transition-out' : ''}`}
+        data-surface-root="canvas"
+        tabIndex={-1}
+        hidden={surface !== 'canvas' && exitingSurface !== 'canvas'}
+        inert={surface !== 'canvas' ? true : undefined}
+        aria-hidden={surface !== 'canvas'}
+      >
+        <NodeCanvas />
+      </div>
+
+      <ArrangementSurface
+        active={surface === 'arrangement'}
+        visible={surface === 'arrangement' || exitingSurface === 'arrangement'}
+        transition={surface === 'arrangement' ? 'in' : exitingSurface === 'arrangement' ? 'out' : undefined}
+        songNodeId={songNodeId}
+        onOpenSettings={() => setShowSettings(true)}
+      />
+      <PianoRollSurfaceHost
+        active={surface === 'pianoroll'}
+        visible={surface === 'pianoroll' || exitingSurface === 'pianoroll'}
+        transition={surface === 'pianoroll' ? 'in' : exitingSurface === 'pianoroll' ? 'out' : undefined}
+      />
+
+      <div className="sr-only" aria-live="polite">
+        {surface === 'canvas' ? 'Canvas surface active' : surface === 'pianoroll' ? 'Piano roll surface active' : 'Arrangement surface active'}
+      </div>
 
       {/* Toolbar + Breadcrumbs */}
       <div className="toolbar-wrapper">
         <Toolbar />
         <Breadcrumbs />
+        <SharedSurfaceChrome surface={surface} setSurface={setSurface} />
       </div>
 
       {/* Settings Panel */}
@@ -647,9 +699,13 @@ function App() {
       {/* Command Bar (Ctrl/Cmd+K) - host stays eager; heavy palette UI loads on demand. */}
       <CommandBarHost />
 
+      {/* One export surface shared by transport, Ctrl/Cmd+Shift+E, palette, and agent. */}
+      <ExportHost />
+
       {/* DevLog panel (L4) — the on-device structured-log surface; the AI agent
           reads the same store. Toggled via the command palette / openjammer:toggle-devlog. */}
       <DevLogPanel />
+      <Bench />
 
       {/* L5 one-click "report a problem" reporter — captures a redacted log bundle. */}
       <IssueReporter />
@@ -671,13 +727,10 @@ function App() {
       <CollabControl />
 
       {/* Help Panel */}
-      <HelpPanel />
+      {surface === 'canvas' && <HelpPanel />}
 
       {/* MIDI Integration - device detection, browser, and node creation */}
       <MIDIIntegration />
-
-      {/* Latency Warning Banner - shows when latency is too high */}
-      <LatencyWarningBanner onOpenSettings={() => setShowSettings(true)} />
 
       {/* Toast Notifications */}
       <Toaster

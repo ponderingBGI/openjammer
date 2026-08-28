@@ -32,7 +32,7 @@ struct OscVoice {
 }
 
 /// A polyphonic sine instrument. Voice DSP state lives in `voices`; the
-/// [`VoiceAlloc`] tracks which slot plays which note.
+/// `VoiceAlloc` tracks which slot plays which note.
 pub struct OscInstrument {
     sample_rate: f32,
     gain: f32,
@@ -166,6 +166,9 @@ fn osc_manifest() -> PluginManifest {
         ui: UiKind::Auto,
         params: vec![
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: param::GAIN,
                 name: String::from("gain"),
                 min: 0.0,
@@ -173,6 +176,9 @@ fn osc_manifest() -> PluginManifest {
                 default: 0.3,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: param::ATTACK,
                 name: String::from("attack"),
                 min: 0.0,
@@ -180,6 +186,9 @@ fn osc_manifest() -> PluginManifest {
                 default: 0.005,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: param::DECAY,
                 name: String::from("decay"),
                 min: 0.0,
@@ -187,6 +196,9 @@ fn osc_manifest() -> PluginManifest {
                 default: 0.080,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: param::SUSTAIN,
                 name: String::from("sustain"),
                 min: 0.0,
@@ -194,6 +206,9 @@ fn osc_manifest() -> PluginManifest {
                 default: 0.7,
             },
             ParamDecl {
+                module: String::new(),
+                unit: String::new(),
+                flags: 0,
                 id: param::RELEASE,
                 name: String::from("release"),
                 min: 0.0,

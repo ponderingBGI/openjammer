@@ -18,6 +18,8 @@ import { useUIFeedbackStore } from './uiFeedbackStore';
 import { useCanvasNavigationStore } from './canvasNavigationStore';
 import { useMIDIStore } from './midiStore';
 import type { InstrumentRow, InstrumentNodeData, SamplerRow, SamplerNodeData } from '../engine/types';
+import { applyGraphVerbs, diffGraph, type GraphStateSlice } from './graphVerbs';
+import { isApplyingHistory, registerHistoryDriver, useHistoryStore, type EditVerb } from './historyStore';
 
 // ============================================================================
 // Constants
@@ -138,17 +140,6 @@ export interface NodeBounds {
 }
 
 // ============================================================================
-// History Types
-// ============================================================================
-
-interface HistoryState {
-    nodes: [string, GraphNode][];
-    connections: [string, Connection][];
-}
-
-const MAX_HISTORY_SIZE = 50;
-
-// ============================================================================
 // Store Interface
 // ============================================================================
 
@@ -173,10 +164,6 @@ interface GraphStore {
 
     // Clipboard
     clipboard: ClipboardData | null;
-
-    // History
-    history: HistoryState[];
-    historyIndex: number;
 
     // Node Actions
     addNode: (type: NodeType, position: Position, parentId?: string | null, initialData?: Record<string, unknown>) => string;
@@ -230,7 +217,6 @@ interface GraphStore {
     // History Actions
     undo: () => void;
     redo: () => void;
-    pushHistory: () => void;
     /** Begin a user gesture: brackets the following param mutations into ONE undo
      *  entry (pre-gesture state is snapshotted on the first mutation). Nestable;
      *  pair every call with {@link endGesture}. Mutations outside a gesture are
@@ -294,20 +280,25 @@ function rebuildConnectionIndex(connections: Map<string, Connection>): Map<strin
 // endGesture(). Module-scoped: transient (never persisted) and correct for the
 // process-wide singleton store.
 // ---------------------------------------------------------------------------
-let _gestureDepth = 0;
-let _gestureSnapshotted = false;
-
-/** Snapshot history ONCE, before the first mutation of an active gesture. */
-function gestureSnapshot(get: () => GraphStore): void {
-    if (_gestureDepth > 0 && !_gestureSnapshotted) {
-        _gestureSnapshotted = true;
-        get().pushHistory();
-    }
-}
-
 export const useGraphStore = create<GraphStore>()(
     persist(
-        (set, get) => ({
+        (rawSet, get) => {
+            const set: typeof rawSet = (partial, replace) => {
+                const current = get();
+                const before: GraphStateSlice = { nodes: current.nodes, connections: current.connections, rootNodeIds: current.rootNodeIds };
+                rawSet(partial as never, replace as never);
+                if (isApplyingHistory()) return;
+                const changed = get();
+                const after: GraphStateSlice = { nodes: changed.nodes, connections: changed.connections, rootNodeIds: changed.rootNodeIds };
+                const { verbs, inverse } = diffGraph(before, after);
+                if (verbs.length) useHistoryStore.getState().record(
+                    verbs.map((verb): EditVerb => ({ domain: 'graph', verb })),
+                    inverse.map((verb): EditVerb => ({ domain: 'graph', verb })),
+                    'Edit graph',
+                    'graph',
+                );
+            };
+            return ({
             // Initial State (flat normalized structure)
             nodes: new Map(),
             connections: new Map(),
@@ -317,104 +308,30 @@ export const useGraphStore = create<GraphStore>()(
             selectedConnectionIds: new Set(),
             version: 0,  // Incremented on every graph mutation for efficient change detection
             clipboard: null,
-            history: [],
-            historyIndex: -1,
 
             // Helper: Rebuild connection index from connections Map
             _rebuildConnectionIndex: rebuildConnectionIndex,
 
-            // Push current state to history (called before mutations)
-            pushHistory: () => {
-                const state = get();
-                const historyState: HistoryState = {
-                    nodes: Array.from(state.nodes.entries()),
-                    connections: Array.from(state.connections.entries())
-                };
-
-                // Remove any future history if we're not at the end
-                const newHistory = state.history.slice(0, state.historyIndex + 1);
-                newHistory.push(historyState);
-
-                // Limit history size
-                if (newHistory.length > MAX_HISTORY_SIZE) {
-                    newHistory.shift();
-                }
-
-                set({
-                    history: newHistory,
-                    historyIndex: newHistory.length - 1
-                });
-            },
-
             beginGesture: () => {
-                _gestureDepth += 1;
+                useHistoryStore.getState().begin('Edit graph', 'graph');
             },
 
             endGesture: () => {
-                if (_gestureDepth > 0) _gestureDepth -= 1;
-                if (_gestureDepth === 0) _gestureSnapshotted = false;
+                useHistoryStore.getState().commit();
             },
 
             // Undo
             undo: () => {
-                // A jump through history ends any in-flight gesture cleanly.
-                _gestureDepth = 0;
-                _gestureSnapshotted = false;
-                const state = get();
-                if (state.historyIndex < 0) return;
-
-                // Save current state if we're at the end
-                if (state.historyIndex === state.history.length - 1) {
-                    const currentState: HistoryState = {
-                        nodes: Array.from(state.nodes.entries()),
-                        connections: Array.from(state.connections.entries())
-                    };
-                    const newHistory = [...state.history, currentState];
-                    set({ history: newHistory });
-                }
-
-                const prevState = state.history[state.historyIndex];
-                if (!prevState) return;
-
-                const restoredConnections = new Map(prevState.connections);
-                set((s) => ({
-                    nodes: new Map(prevState.nodes),
-                    connections: restoredConnections,
-                    connectionsByNode: rebuildConnectionIndex(restoredConnections),
-                    historyIndex: state.historyIndex - 1,
-                    selectedNodeIds: new Set(),
-                    selectedConnectionIds: new Set(),
-                    version: s.version + 1
-                }));
+                useHistoryStore.getState().undo();
             },
 
             // Redo
             redo: () => {
-                _gestureDepth = 0;
-                _gestureSnapshotted = false;
-                const state = get();
-                if (state.historyIndex >= state.history.length - 1) return;
-
-                const nextIndex = state.historyIndex + 2;
-                const nextState = state.history[nextIndex];
-                if (!nextState) return;
-
-                const restoredConnections = new Map(nextState.connections);
-                set((s) => ({
-                    nodes: new Map(nextState.nodes),
-                    connections: restoredConnections,
-                    connectionsByNode: rebuildConnectionIndex(restoredConnections),
-                    historyIndex: nextIndex - 1,
-                    selectedNodeIds: new Set(),
-                    selectedConnectionIds: new Set(),
-                    version: s.version + 1
-                }));
+                useHistoryStore.getState().redo();
             },
 
             // Node Actions
             addNode: (type, position, parentId = null, initialData = {}) => {
-                get().pushHistory();
-
                 const definition = getNodeDefinition(type);
                 const id = generateId();
 
@@ -562,8 +479,6 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             removeNode: (nodeId) => {
-                get().pushHistory();
-
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
@@ -647,7 +562,6 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             updateNodeData: (nodeId, data) => {
-                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
@@ -708,7 +622,6 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             updateNodePorts: (nodeId, ports) => {
-                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
@@ -720,7 +633,6 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             updateNodeType: (nodeId, type) => {
-                gestureSnapshot(get);
                 const definition = getNodeDefinition(type);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
@@ -751,7 +663,6 @@ export const useGraphStore = create<GraphStore>()(
 
             // Instrument Row Actions
             updateInstrumentRow: (nodeId, rowId, updates) => {
-                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
@@ -785,7 +696,6 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             updateKeyGain: (nodeId, rowId, keyIndex, gain) => {
-                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
@@ -815,7 +725,6 @@ export const useGraphStore = create<GraphStore>()(
 
             // Sampler Row Actions
             updateSamplerRow: (nodeId, rowId, updates) => {
-                gestureSnapshot(get);
                 set((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node || node.type !== 'sampler') return state;
@@ -881,8 +790,6 @@ export const useGraphStore = create<GraphStore>()(
                         conn.targetPortId === targetPortId
                 );
                 if (existingConnection) return existingConnection.id;
-
-                get().pushHistory();
 
                 // For audio inputs, remove existing connection (only one allowed)
                 // Note: We don't call removeConnection() here because it also pushes history,
@@ -1321,7 +1228,6 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             removeConnection: (connectionId) => {
-                get().pushHistory();  // Enable undo for connection deletion
                 set((state) => {
                     const connection = state.connections.get(connectionId);
                     const newConnections = new Map(state.connections);
@@ -1576,7 +1482,7 @@ export const useGraphStore = create<GraphStore>()(
                     return;
                 }
 
-                get().pushHistory();
+                useHistoryStore.getState().begin('Delete selection', 'graph');
 
                 // Capture IDs as arrays to avoid stale closure issues
                 // (state changes after each removeNode call, but we want to process all originally selected items)
@@ -1622,10 +1528,10 @@ export const useGraphStore = create<GraphStore>()(
 
                 // Clear selection after deletion
                 get().clearSelection();
+                useHistoryStore.getState().commit();
             },
 
             clearGraph: () => {
-                get().pushHistory();
                 set((state) => ({
                     nodes: new Map(),
                     connections: new Map(),
@@ -1638,7 +1544,6 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             loadGraph: (nodes, connections) => {
-                get().pushHistory();
                 const newNodes = new Map<string, GraphNode>();
                 const newConnections = new Map<string, Connection>();
                 const newRootNodeIds: string[] = [];
@@ -1661,6 +1566,7 @@ export const useGraphStore = create<GraphStore>()(
                     selectedConnectionIds: new Set(),
                     version: state.version + 1
                 }));
+                useHistoryStore.getState().clear();
             },
 
             // Copy selected nodes and their connections to clipboard
@@ -1700,8 +1606,7 @@ export const useGraphStore = create<GraphStore>()(
                 const state = get();
                 if (!state.clipboard || state.clipboard.nodes.length === 0) return;
 
-                get().pushHistory();
-
+                useHistoryStore.getState().begin('Paste nodes', 'graph');
                 const oldToNewIds = new Map<string, string>();
                 const newNodes = new Map(state.nodes);
 
@@ -1758,6 +1663,7 @@ export const useGraphStore = create<GraphStore>()(
                     selectedNodeIds: newSelectedIds,
                     version: state.version + 1
                 }));
+                useHistoryStore.getState().commit();
             },
 
             // Getters
@@ -1860,7 +1766,7 @@ export const useGraphStore = create<GraphStore>()(
                     nodeIdsAtLevel.has(conn.sourceNodeId) && nodeIdsAtLevel.has(conn.targetNodeId)
                 );
             }
-        }),
+        }); },
         {
             name: 'openjammer-graph-v2',  // New version to avoid loading old incompatible data
             // Custom serialization for Map and Set (flat normalized structure)
@@ -1926,9 +1832,7 @@ export const useGraphStore = create<GraphStore>()(
                                 connectionsByNode: rebuildConnectionIndex(connections),
                                 rootNodeIds,
                                 selectedNodeIds: new Set(Array.isArray(parsed.state.selectedNodeIds) ? parsed.state.selectedNodeIds : []),
-                                selectedConnectionIds,
-                                history: Array.isArray(parsed.state.history) ? parsed.state.history : [],
-                                historyIndex: typeof parsed.state.historyIndex === 'number' ? parsed.state.historyIndex : -1
+                                selectedConnectionIds
                             }
                         };
                     } catch (error) {
@@ -1948,36 +1852,12 @@ export const useGraphStore = create<GraphStore>()(
                                 connections: Array.from(value.state.connections.entries()),
                                 rootNodeIds: value.state.rootNodeIds,
                                 selectedNodeIds: Array.from(value.state.selectedNodeIds),
-                                selectedConnectionIds: Array.from(value.state.selectedConnectionIds),
-                                history: value.state.history,
-                                historyIndex: value.state.historyIndex
+                                selectedConnectionIds: Array.from(value.state.selectedConnectionIds)
                             }
                         };
                         localStorage.setItem(name, JSON.stringify(serialized));
                     } catch (error) {
-                        // Handle QuotaExceededError by clearing history and retrying
-                        if (error instanceof DOMException && error.name === 'QuotaExceededError') {
-                            console.warn('localStorage quota exceeded, clearing history');
-                            try {
-                                const serializedWithoutHistory = {
-                                    state: {
-                                        ...value.state,
-                                        nodes: nodesArray,
-                                        connections: Array.from(value.state.connections.entries()),
-                                        rootNodeIds: value.state.rootNodeIds,
-                                        selectedNodeIds: Array.from(value.state.selectedNodeIds),
-                                        selectedConnectionIds: Array.from(value.state.selectedConnectionIds),
-                                        history: [],
-                                        historyIndex: -1
-                                    }
-                                };
-                                localStorage.setItem(name, JSON.stringify(serializedWithoutHistory));
-                            } catch (retryError) {
-                                console.error('Failed to save graph store even after clearing history:', retryError);
-                            }
-                        } else {
-                            console.error('Failed to save graph store to localStorage:', error);
-                        }
+                        console.error('Failed to save graph store to localStorage:', error);
                     }
                 },
                 removeItem: (name) => {
@@ -1991,3 +1871,22 @@ export const useGraphStore = create<GraphStore>()(
         }
     )
 );
+
+registerHistoryDriver((verbs) => {
+    const graphVerbs = verbs
+        .filter((item): item is Extract<EditVerb, { domain: 'graph' }> => item.domain === 'graph')
+        .map((item) => item.verb);
+    if (!graphVerbs.length) return;
+    const state = useGraphStore.getState();
+    const { next } = applyGraphVerbs(
+        { nodes: state.nodes, connections: state.connections, rootNodeIds: state.rootNodeIds },
+        graphVerbs,
+    );
+    useGraphStore.setState({
+        ...next,
+        connectionsByNode: rebuildConnectionIndex(next.connections),
+        selectedNodeIds: new Set(),
+        selectedConnectionIds: new Set(),
+        version: state.version + 1,
+    });
+});

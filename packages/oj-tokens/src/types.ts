@@ -53,6 +53,26 @@ export interface ThemeColors {
     // Universal connections (adapts to connected type)
     universalPort: string;
     universalConnection: string;
+
+    // Arrangement timeline
+    timelineBg: string;
+    timelineChromeBg: string;
+    timelineLaneBg: string;
+    timelineLaneAltBg: string;
+    timelineGridBar: string;
+    timelineGridBeat: string;
+    timelineGridSub: string;
+    timelineLaneDivider: string;
+    timelineClipBg: string;
+    timelineClipBorder: string;
+    timelineClipMutedBg: string;
+    timelineNoteFill: string;
+    timelineWaveformFill: string;
+    timelineAutomationLine: string;
+    timelinePlayhead: string;
+    timelineSectionMarker: string;
+    timelineLoopRange: string;
+    timelineSelection: string;
 }
 
 export interface Theme {

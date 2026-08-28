@@ -15,5 +15,25 @@
     "../../public/fonts/jetbrains-mono-regular.woff2",
     "../../public/fonts/jetbrains-mono-medium.woff2"
   ],
-  "readmeHeader": ".design-sync/conventions.md"
+  "readmeHeader": ".design-sync/conventions.md",
+  "overrides": {
+    "Banner": {
+      "cardMode": "column"
+    },
+    "Cable": {
+      "cardMode": "column"
+    },
+    "Marquee": {
+      "cardMode": "column"
+    },
+    "NodeShell": {
+      "cardMode": "column"
+    },
+    "Waveform": {
+      "cardMode": "column"
+    }
+  },
+  "dtsPropsFor": {
+    "TimeRuler": "/** Tick marks, each positioned by `x` in px from the ruler's left edge. */\n  marks: { id: string | number; x: number; label?: string; level: \"bar\" | \"beat\" | \"sub\" }[];\n  /** Ruler width in px — matches the timeline surface it sits above. */\n  width: number;\n  className?: string;"
+  }
 }

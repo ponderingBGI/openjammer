@@ -29,6 +29,8 @@
 pub mod analysis;
 pub mod asset;
 pub mod backend;
+pub mod bounce;
+pub mod butler;
 pub mod device;
 pub mod device_listener;
 pub mod fs;
@@ -48,6 +50,11 @@ pub mod update_gate;
 pub use analysis::{analyze_stereo, AudioReport, ChannelReport};
 pub use asset::{AssetError, AssetStore, Pcm};
 pub use backend::{supervise_once, AudioBackend};
+pub use bounce::{
+    bounce, bounce_to_file, bounce_to_file_with_assets, bounce_to_file_with_registry_and_assets,
+    bounce_with_assets, bounce_with_registry_and_assets, write_audio_file, BitDepth, BounceError,
+    BounceProgress, BounceResult, BounceSpec, BounceStats, ExportFormat, TailSpec,
+};
 pub use device::{
     classify as classify_device_fault, device_fault_channel, probe_default_output, DeviceFault,
     DeviceFaultRx, DeviceFaultTx, DeviceIdentity, DeviceWatcher,

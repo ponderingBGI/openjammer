@@ -272,11 +272,8 @@ export const InstrumentNode = memo(function InstrumentNode({
         return getAllowedCategories(node.type);
     }, [node.type]);
 
-    // Handle keyboard shortcuts for popup
-    useEffect(() => {
-        if (!showPopup) return;
-
-        const handleKeyDown = (e: KeyboardEvent) => {
+    // The focus-contained instrument picker owns its navigation keys locally.
+    const handlePopupKeyDown = useCallback((e: React.KeyboardEvent) => {
             if (e.key === 'Escape') {
                 e.preventDefault();
                 setShowPopup(false);
@@ -294,11 +291,7 @@ export const InstrumentNode = memo(function InstrumentNode({
                 const newType = INSTRUMENT_NODE_TYPES[newIndex];
                 updateNodeType(node.id, newType);
             }
-        };
-
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [showPopup, node.type, node.id, updateNodeType]);
+    }, [node.type, node.id, updateNodeType]);
 
     // Click outside to close popup
     useEffect(() => {
@@ -692,6 +685,7 @@ export const InstrumentNode = memo(function InstrumentNode({
                     className="instrument-selector-dropdown"
                     style={dropdownStyle}
                     onClick={(e) => e.stopPropagation()}
+                    onKeyDown={handlePopupKeyDown}
                 >
                     <input
                         className="instrument-search"

@@ -27,6 +27,8 @@ everything else is the way it is.
   [creating-resizable-nodes.md](creating-resizable-nodes.md): author a new node.
 - [node-standards.md](node-standards.md): the conventions every node follows.
 - [code-node-abi.md](code-node-abi.md): the `.wasm` ABI for code nodes.
+- [plugins-hosting.md](plugins-hosting.md): supported third-party formats, the
+  published reliability contract, quarantine/Bench behavior, and the verified OSS matrix.
 - [TESTING.md](TESTING.md): the test lanes and how to run them.
 
 ## Decision records

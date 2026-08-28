@@ -25,13 +25,16 @@
 use ojcore::effects::{biquad_param, delay_param};
 use ojcore::{
     compile, compile_with_assets, pan_param, AssetPcm, AssetResolver, Engine, PluginRegistry,
-    BIQUAD_ID, DELAY_ID, PAN_ID, SPEAKER_OUT_ID,
+    TempoMapRt, TimelineRt, BIQUAD_ID, DELAY_ID, PAN_ID, SPEAKER_OUT_ID,
 };
-use ojcore_native::{analyze_stereo, AssetStore, AudioReport, OfflineDriver, Pcm};
+use ojcore_native::{
+    analyze_stereo, bounce, write_audio_file, AssetStore, AudioReport, BitDepth, BounceSpec,
+    ExportFormat, OfflineDriver, Pcm, TailSpec,
+};
 use ojinstrument::{param as ip, register_all, RegisterOpts, OSC_ID};
 use ojproto::{
     AssetId, AssetRef, ConnectionType, IrEdge, IrNode, NodeIdx, OjGraph, Param, PrimitiveKind,
-    RtCommand,
+    RtCommand, TempoMap, Timeline,
 };
 use serde::Deserialize;
 
@@ -71,8 +74,8 @@ fn edge(from: u32, to: u32) -> IrEdge {
 }
 
 /// The built-in demo graph: Osc -> Biquad(lowpass 3 kHz) -> Delay -> Pan -> Speaker.
-fn demo_graph() -> OjGraph {
-    let mut g = OjGraph::empty(SR, BLOCK as u32);
+fn demo_graph_at(sample_rate: u32) -> OjGraph {
+    let mut g = OjGraph::empty(sample_rate, BLOCK as u32);
     g.nodes.push(node(
         1,
         OSC_ID,
@@ -121,6 +124,10 @@ fn demo_graph() -> OjGraph {
     g.edges.push(edge(3, 5));
     g.edges.push(edge(5, 4));
     g
+}
+
+fn demo_graph() -> OjGraph {
+    demo_graph_at(SR)
 }
 
 fn registry() -> PluginRegistry {
@@ -194,14 +201,15 @@ fn make_registry(code_nodes: &[(String, String)]) -> PluginRegistry {
 /// Render the built-in demo: a C-major arpeggio swept across the stereo field, with
 /// a delay/release tail. The schedule lives in this per-block hook (the second
 /// clock's transport). Returns the planar L/R buffers.
-fn render_demo(seconds: f32) -> (Vec<f32>, Vec<f32>, u32) {
-    let engine = Engine::new(compile(&demo_graph(), &registry()).expect("compile demo graph"));
+fn render_demo(seconds: f32, sample_rate: u32, tail: TailSpec) -> (Vec<f32>, Vec<f32>, u32) {
+    let engine =
+        Engine::new(compile(&demo_graph_at(sample_rate), &registry()).expect("compile demo graph"));
     let mut driver = OfflineDriver::new(engine, BLOCK);
 
     let notes: [u8; 6] = [60, 64, 67, 72, 67, 64];
-    let note_frames = SR as usize / 4;
-    let play_frames = (seconds * SR as f32) as usize;
-    let tail_frames = SR as usize / 2;
+    let note_frames = sample_rate as usize / 4;
+    let play_frames = (seconds * sample_rate as f32) as usize;
+    let tail_frames = tail_render_frames(tail, sample_rate);
 
     let mut playing: Option<u8> = None;
     let (left, right) = driver.render_stereo(play_frames + tail_frames, |engine, frame| {
@@ -234,7 +242,8 @@ fn render_demo(seconds: f32) -> (Vec<f32>, Vec<f32>, u32) {
             value: pos.clamp(-1.0, 1.0),
         });
     });
-    (left, right, SR)
+    let (left, right) = trim_legacy_tail(left, right, play_frames, tail, sample_rate);
+    (left, right, sample_rate)
 }
 
 // ---------------------------------------------------------------------------
@@ -314,12 +323,17 @@ impl AssetResolver for CliAssets {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_graph(
     path: &str,
     schedule: Option<&str>,
+    timeline_path: Option<&str>,
+    tempo_map_path: Option<&str>,
     seconds: f32,
     assets: &[(u32, String)],
     code_nodes: &[(String, String)],
+    requested_rate: Option<u32>,
+    tail: TailSpec,
 ) -> (Vec<f32>, Vec<f32>, u32) {
     let json =
         std::fs::read_to_string(path).unwrap_or_else(|e| fail(&format!("read graph {path}: {e}")));
@@ -343,6 +357,9 @@ fn render_graph(
         pcms.push(pcm);
     }
 
+    if let Some(rate) = requested_rate {
+        g.sample_rate = rate;
+    }
     let sample_rate = g.sample_rate.max(1);
     let block = (g.block_size as usize).max(1);
     let resolver = CliAssets { pcms };
@@ -356,8 +373,42 @@ fn render_graph(
     let engine = Engine::new(program);
     let mut driver = OfflineDriver::new(engine, block);
 
+    if let Some(path) = tempo_map_path {
+        let bytes =
+            std::fs::read(path).unwrap_or_else(|e| fail(&format!("read tempo map {path}: {e}")));
+        let map: TempoMap = serde_json::from_slice(&bytes)
+            .unwrap_or_else(|e| fail(&format!("parse tempo map {path}: {e}")));
+        driver
+            .engine_mut()
+            .install_tempo_map(TempoMapRt::from_wire(&map));
+    }
+    if let Some(path) = timeline_path {
+        let bytes =
+            std::fs::read(path).unwrap_or_else(|e| fail(&format!("read timeline {path}: {e}")));
+        let timeline: Timeline = serde_json::from_slice(&bytes)
+            .unwrap_or_else(|e| fail(&format!("parse timeline {path}: {e}")));
+        // The timeline is already in absolute frames. A one-point map is enough
+        // when no explicit map was supplied; with a map, the engine has already
+        // installed the matching publication above.
+        let compile_map = tempo_map_path.map_or_else(
+            || TempoMapRt::one_point(sample_rate, 120.0, 4, 4),
+            |map_path| {
+                let bytes = std::fs::read(map_path)
+                    .unwrap_or_else(|e| fail(&format!("read tempo map {map_path}: {e}")));
+                let map: TempoMap = serde_json::from_slice(&bytes)
+                    .unwrap_or_else(|e| fail(&format!("parse tempo map {map_path}: {e}")));
+                TempoMapRt::from_wire(&map)
+            },
+        );
+        driver
+            .engine_mut()
+            .install_timeline(TimelineRt::from_wire(&timeline, &compile_map));
+        driver.engine_mut().apply(RtCommand::TransportPlay);
+    }
+
     let events = load_schedule(schedule, sample_rate);
-    let frames = (seconds.max(0.0) * sample_rate as f32) as usize;
+    let authored_frames = (seconds.max(0.0) * sample_rate as f32) as usize;
+    let frames = authored_frames.saturating_add(tail_render_frames(tail, sample_rate));
     let mut idx = 0usize;
     let (left, right) = driver.render_stereo(frames, |engine, frame| {
         // Apply every not-yet-applied event whose frame falls in this block.
@@ -366,7 +417,59 @@ fn render_graph(
             idx += 1;
         }
     });
+    let (left, right) = trim_legacy_tail(left, right, authored_frames, tail, sample_rate);
     (left, right, sample_rate)
+}
+
+fn tail_render_frames(tail: TailSpec, sample_rate: u32) -> usize {
+    let seconds = match tail {
+        TailSpec::Fixed { seconds } => seconds.max(0.0),
+        TailSpec::Auto => 30.0,
+    };
+    (seconds * f64::from(sample_rate)).round() as usize
+}
+
+/// Legacy demo/schedule mode renders the possible tail in one driver call, then
+/// applies the same auto-tail rule as the reusable arrangement bouncer.
+fn trim_legacy_tail(
+    mut left: Vec<f32>,
+    mut right: Vec<f32>,
+    authored_frames: usize,
+    tail: TailSpec,
+    sample_rate: u32,
+) -> (Vec<f32>, Vec<f32>) {
+    let wanted = match tail {
+        TailSpec::Fixed { seconds } => authored_frames
+            .saturating_add((seconds.max(0.0) * f64::from(sample_rate)).round() as usize),
+        TailSpec::Auto => {
+            let quiet_needed = (0.250 * f64::from(sample_rate)).round() as usize;
+            let mut quiet = 0usize;
+            let mut end = left.len().min(right.len());
+            let total = end;
+            let mut frame = authored_frames;
+            while frame < total {
+                let block_end = (frame + BLOCK).min(total);
+                let peak = left[frame..block_end]
+                    .iter()
+                    .chain(&right[frame..block_end])
+                    .fold(0.0f32, |peak, sample| peak.max(sample.abs()));
+                if peak < 0.000_063_095_73 {
+                    quiet += block_end - frame;
+                } else {
+                    quiet = 0;
+                }
+                if quiet >= quiet_needed {
+                    end = block_end;
+                    break;
+                }
+                frame = block_end;
+            }
+            end
+        }
+    };
+    left.truncate(wanted.min(left.len()));
+    right.truncate(wanted.min(right.len()));
+    (left, right)
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +481,8 @@ struct Opts {
     secs: Option<f32>,
     graph: Option<String>,
     schedule: Option<String>,
+    timeline: Option<String>,
+    tempo_map: Option<String>,
     report: Option<String>,
     dump_graph: Option<String>,
     asserts: Vec<String>,
@@ -385,6 +490,10 @@ struct Opts {
     /// Agent-authored faust code nodes: (manifest_id, faust_source_path). Each is
     /// compiled to a native .dll and hosted as a real WasmHost node (author-host).
     code_nodes: Vec<(String, String)>,
+    rate: Option<u32>,
+    bits: Option<BitDepth>,
+    format: Option<ExportFormat>,
+    tail: Option<TailSpec>,
     quiet: bool,
 }
 
@@ -394,11 +503,17 @@ fn parse_args() -> Opts {
         secs: None,
         graph: None,
         schedule: None,
+        timeline: None,
+        tempo_map: None,
         report: None,
         dump_graph: None,
         asserts: Vec::new(),
         assets: Vec::new(),
         code_nodes: Vec::new(),
+        rate: None,
+        bits: None,
+        format: None,
+        tail: None,
         quiet: false,
     };
     let mut positional: Vec<String> = Vec::new();
@@ -407,10 +522,48 @@ fn parse_args() -> Opts {
         match a.as_str() {
             "--graph" => o.graph = it.next(),
             "--schedule" => o.schedule = it.next(),
+            "--timeline" => o.timeline = it.next(),
+            "--tempo-map" => o.tempo_map = it.next(),
             "--out" => o.out = it.next(),
             "--report" => o.report = it.next(),
             "--dump-graph" => o.dump_graph = it.next(),
             "--secs" => o.secs = it.next().and_then(|s| s.parse().ok()),
+            "--rate" => {
+                let value = it.next().unwrap_or_else(|| fail("--rate needs a value"));
+                o.rate = value.parse().ok();
+                if o.rate.is_none() {
+                    fail("--rate must be 44100, 48000, 88200, or 96000");
+                }
+            }
+            "--bits" => {
+                o.bits = Some(match it.next().as_deref() {
+                    Some("16") => BitDepth::Pcm16,
+                    Some("24") => BitDepth::Pcm24,
+                    Some("32f") | Some("32") => BitDepth::Float32,
+                    _ => fail("--bits must be 16, 24, or 32f"),
+                });
+            }
+            "--format" => {
+                o.format = Some(match it.next().as_deref() {
+                    Some("wav") => ExportFormat::Wav,
+                    Some("flac") => ExportFormat::Flac,
+                    _ => fail("--format must be wav or flac"),
+                });
+            }
+            "--tail" => {
+                let value = it
+                    .next()
+                    .unwrap_or_else(|| fail("--tail needs auto or seconds"));
+                o.tail = Some(if value == "auto" {
+                    TailSpec::Auto
+                } else {
+                    TailSpec::Fixed {
+                        seconds: value.parse::<f64>().unwrap_or_else(|_| {
+                            fail("--tail must be auto or non-negative seconds")
+                        }),
+                    }
+                });
+            }
             "--assert" => {
                 if let Some(e) = it.next() {
                     o.asserts.push(e);
@@ -552,6 +705,15 @@ fn check_assert(rep: &AudioReport, expr: &str) -> AssertOutcome {
     ))
 }
 
+fn bounce_spec(opts: &Opts, sample_rate: u32) -> BounceSpec {
+    BounceSpec {
+        sample_rate: opts.rate.unwrap_or(sample_rate),
+        bit_depth: opts.bits.unwrap_or(BitDepth::Float32),
+        format: opts.format.unwrap_or(ExportFormat::Wav),
+        tail: opts.tail.unwrap_or(TailSpec::Fixed { seconds: 0.0 }),
+    }
+}
+
 fn finish(left: &[f32], right: &[f32], sample_rate: u32, opts: &Opts, default_out: &str) -> ! {
     let out = opts.out.clone().unwrap_or_else(|| default_out.to_string());
 
@@ -562,14 +724,8 @@ fn finish(left: &[f32], right: &[f32], sample_rate: u32, opts: &Opts, default_ou
         buf[i * 2] = lv;
         buf[i * 2 + 1] = rv;
     }
-    let pcm = Pcm {
-        samples: buf,
-        channels: 2,
-        sample_rate,
-    };
-    AssetStore
-        .write_wav_file(&out, &pcm)
-        .unwrap_or_else(|e| fail(&format!("write wav {out}: {e}")));
+    write_audio_file(&out, &buf, bounce_spec(opts, sample_rate))
+        .unwrap_or_else(|e| fail(&format!("write audio {out}: {e}")));
 
     let report = analyze_stereo(left, right, sample_rate);
     if !opts.quiet {
@@ -636,17 +792,71 @@ fn main() {
         return;
     }
 
-    let (left, right, sample_rate, default_out) = if let Some(gp) = opts.graph.clone() {
+    let (left, right, sample_rate, default_out) = if let (
+        Some(gp),
+        Some(timeline_path),
+        Some(tempo_path),
+    ) = (
+        opts.graph.as_deref(),
+        opts.timeline.as_deref(),
+        opts.tempo_map.as_deref(),
+    ) {
+        if opts.schedule.is_some() || !opts.assets.is_empty() || !opts.code_nodes.is_empty() {
+            fail("arrangement bounce (--graph + --timeline + --tempo-map) cannot be combined with --schedule, --asset, or --code-node");
+        }
+        let graph: OjGraph = serde_json::from_slice(
+            &std::fs::read(gp).unwrap_or_else(|e| fail(&format!("read graph {gp}: {e}"))),
+        )
+        .unwrap_or_else(|e| fail(&format!("parse graph {gp}: {e}")));
+        let timeline: Timeline = serde_json::from_slice(
+            &std::fs::read(timeline_path)
+                .unwrap_or_else(|e| fail(&format!("read timeline {timeline_path}: {e}"))),
+        )
+        .unwrap_or_else(|e| fail(&format!("parse timeline {timeline_path}: {e}")));
+        let tempo_map: TempoMap = serde_json::from_slice(
+            &std::fs::read(tempo_path)
+                .unwrap_or_else(|e| fail(&format!("read tempo map {tempo_path}: {e}"))),
+        )
+        .unwrap_or_else(|e| fail(&format!("parse tempo map {tempo_path}: {e}")));
+        let spec = bounce_spec(&opts, graph.sample_rate);
+        let rendered = bounce(graph, timeline, tempo_map, spec, |progress| {
+            if !opts.quiet {
+                eprint!(
+                    "\r  rendering block {}/{}",
+                    progress.blocks_rendered, progress.total_blocks_estimate
+                );
+            }
+        })
+        .unwrap_or_else(|e| fail(&e.to_string()));
+        if !opts.quiet {
+            eprintln!();
+        }
+        let mut left = Vec::with_capacity(rendered.interleaved.len() / 2);
+        let mut right = Vec::with_capacity(rendered.interleaved.len() / 2);
+        for stereo in rendered.interleaved.as_chunks::<2>().0 {
+            left.push(stereo[0]);
+            right.push(stereo[1]);
+        }
+        (left, right, spec.sample_rate, "openjammer-render.wav")
+    } else if let Some(gp) = opts.graph.clone() {
         let (l, r, sr) = render_graph(
             &gp,
             opts.schedule.as_deref(),
+            opts.timeline.as_deref(),
+            opts.tempo_map.as_deref(),
             opts.secs.unwrap_or(2.0),
             &opts.assets,
             &opts.code_nodes,
+            opts.rate,
+            opts.tail.unwrap_or(TailSpec::Fixed { seconds: 0.0 }),
         );
         (l, r, sr, "openjammer-render.wav")
     } else {
-        let (l, r, sr) = render_demo(opts.secs.unwrap_or(4.0));
+        let (l, r, sr) = render_demo(
+            opts.secs.unwrap_or(4.0),
+            opts.rate.unwrap_or(SR),
+            opts.tail.unwrap_or(TailSpec::Fixed { seconds: 0.5 }),
+        );
         (l, r, sr, "openjammer-demo.wav")
     };
     finish(&left, &right, sample_rate, &opts, default_out);

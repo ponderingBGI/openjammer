@@ -18,7 +18,7 @@
 //! mock engine and a real command ring — no audio device required.
 
 use std::mem::ManuallyDrop;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -29,7 +29,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{BufferSize, DeviceId, SampleFormat, Stream, StreamConfig};
 use rtrb::{Consumer, Producer, RingBuffer};
 
-use ojcore::{CommandConsumer, Engine, ProgramSwapRx};
+use ojcore::{CommandConsumer, Engine, ProgramSwapRx, TimedCommandConsumer};
 use ojproto::NodeIdx;
 
 use crate::asset::Pcm;
@@ -43,6 +43,8 @@ use crate::recorder::{Recorder, RecorderSink};
 pub trait BlockProcessor: Send {
     /// Drain every pending command from the UI->RT ring (block start).
     fn drain_commands(&mut self, rx: &mut CommandConsumer);
+    /// Drain the independent timestamped command ring at block start.
+    fn drain_timed_commands(&mut self, _rx: &mut TimedCommandConsumer) {}
     /// Render `nframes` of mono audio into `out`.
     fn render(&mut self, out: &mut [f32], nframes: usize);
     /// Render `nframes` into each of `outs.len()` PLANAR device channels. Default:
@@ -75,6 +77,10 @@ impl BlockProcessor for Engine {
     #[inline]
     fn drain_commands(&mut self, rx: &mut CommandConsumer) {
         self.drain(rx);
+    }
+    #[inline]
+    fn drain_timed_commands(&mut self, rx: &mut TimedCommandConsumer) {
+        self.drain_timed(rx);
     }
     #[inline]
     fn render(&mut self, out: &mut [f32], nframes: usize) {
@@ -126,6 +132,10 @@ impl BlockProcessor for MicFedEngine<'_> {
         self.engine.drain(rx);
     }
     #[inline]
+    fn drain_timed_commands(&mut self, rx: &mut TimedCommandConsumer) {
+        self.engine.drain_timed(rx);
+    }
+    #[inline]
     fn render(&mut self, out: &mut [f32], nframes: usize) {
         if let Some(buf) = self.engine.input_mut(self.mic_node, 0) {
             let n = nframes.min(buf.len());
@@ -165,10 +175,38 @@ pub fn render_block<P: BlockProcessor>(
     data: &mut [f32],
     channels: usize,
     scratch: &mut [f32],
+    capture: Option<&mut RecorderSink>,
+    looper_capture: Option<&mut LooperCaptureSink>,
+) {
+    render_block_timed(
+        proc,
+        rx,
+        None,
+        data,
+        channels,
+        scratch,
+        capture,
+        looper_capture,
+    );
+}
+
+/// Timestamp-aware sibling of [`render_block`]. Existing immediate-command
+/// callers keep the original API; the live DAW host supplies the second ring.
+#[allow(clippy::too_many_arguments)]
+pub fn render_block_timed<P: BlockProcessor>(
+    proc: &mut P,
+    rx: &mut CommandConsumer,
+    mut timed_rx: Option<&mut TimedCommandConsumer>,
+    data: &mut [f32],
+    channels: usize,
+    scratch: &mut [f32],
     mut capture: Option<&mut RecorderSink>,
     mut looper_capture: Option<&mut LooperCaptureSink>,
 ) {
     proc.drain_commands(rx);
+    if let Some(rx) = timed_rx.as_mut() {
+        proc.drain_timed_commands(rx);
+    }
 
     if channels == 0 {
         data.fill(0.0);
@@ -445,7 +483,7 @@ fn map_cpal(err: cpal::Error, fallback: impl FnOnce(String) -> HostError) -> Hos
 /// A cheap, shared "the output stream faulted" flag. The cpal `err_fn` runs on
 /// cpal's OWN error thread (NOT the audio render thread) when a running stream
 /// errors — a yanked/disabled/reconfigured device hands us a
-/// [`cpal::StreamError`] here. The contract for that callback is strict: it does
+/// cpal stream error here. The contract for that callback is strict: it does
 /// a SINGLE atomic store and nothing else — no allocation, no lock, no blocking
 /// I/O, no stream teardown. The control thread (which already ticks
 /// `drain_events`/`poll_meters`) polls [`StreamFault::take`] each tick and does
@@ -530,6 +568,11 @@ pub struct AudioHost {
     /// take's true samples on its commit edge. The RT thread owns only the sink
     /// half (moved into the callback); this `Mutex` is contended off-RT only.
     looper_capture: Arc<Mutex<LooperCapture>>,
+    /// Monotonic completed-callback heartbeat. The control side compares
+    /// snapshots; if it stops advancing for multiple device periods, the RT
+    /// callback is wedged. This detects but cannot preempt foreign in-process
+    /// code—the recovery action is an off-RT graph/stream replacement.
+    heartbeat: Arc<AtomicU64>,
 }
 
 impl Drop for AudioHost {
@@ -623,6 +666,8 @@ struct StartOptions {
     /// The lock-free graph hot-swap mailbox the callback adopts at each block
     /// boundary (the live UI-edit path).
     swap_rx: Option<ProgramSwapRx>,
+    /// Dedicated timestamped command-ring consumer.
+    timed_rx: Option<TimedCommandConsumer>,
     /// The cpal [`DeviceId`] string to open the OUTPUT stream on; `None` (or an
     /// unknown id) falls back to the system default output device.
     device_id: Option<String>,
@@ -632,6 +677,10 @@ struct StartOptions {
 }
 
 impl AudioHost {
+    /// Completed audio-callback count for off-RT liveness supervision.
+    pub fn heartbeat(&self) -> u64 {
+        self.heartbeat.load(Ordering::Acquire)
+    }
     /// The negotiated output [`StreamConfig`] (channels / sample rate / buffer).
     pub fn config(&self) -> &StreamConfig {
         &self.config
@@ -804,6 +853,31 @@ impl AudioHost {
         )
     }
 
+    /// Live DAW path with graph swap plus the independent timestamped command
+    /// ring. Immediate [`ojproto::RtCommand`] behavior remains unchanged.
+    pub fn start_with_swap_timing_on_device(
+        req: StreamRequest,
+        engine: Engine,
+        rx: CommandConsumer,
+        timed_rx: TimedCommandConsumer,
+        swap_rx: ProgramSwapRx,
+        device_id: Option<String>,
+        mic_node: Option<NodeIdx>,
+    ) -> Result<Self, HostError> {
+        Self::start_inner(
+            req,
+            engine,
+            rx,
+            StartOptions {
+                swap_rx: Some(swap_rx),
+                timed_rx: Some(timed_rx),
+                device_id,
+                mic_node,
+                ..StartOptions::default()
+            },
+        )
+    }
+
     /// Like [`start`](Self::start) but the duplex input is captured into
     /// `capture` (a [`RecorderSink`]) on the RT thread — the seam the loopback
     /// latency harness uses to record the round-trip impulse on real hardware.
@@ -863,6 +937,7 @@ impl AudioHost {
         let StartOptions {
             input_capture,
             swap_rx,
+            mut timed_rx,
             device_id,
             mic_node,
         } = opts;
@@ -973,13 +1048,16 @@ impl AudioHost {
             Recorder::with_default_ring(1, config.sample_rate);
         let capture_armed = Arc::new(AtomicBool::new(false));
         let cap_armed_cb = Arc::clone(&capture_armed);
+        let heartbeat = Arc::new(AtomicU64::new(0));
+        let heartbeat_cb = Arc::clone(&heartbeat);
         // Per-looper PCM capture (Stage 3): the SINK (RT producer) moves into the
         // callback and streams each recording looper's block; the demuxer is
         // drained off-RT by the same `drain_thread` below. Unlike the master
         // recorder this is ALWAYS streaming — each looper self-gates via
         // `last_captured_block` (only a mid-take looper pushes), so there is no
         // arm flag to check on the RT path.
-        let (looper_capture, mut looper_sink) = LooperCapture::with_default_ring();
+        let (looper_capture, looper_sink) = LooperCapture::with_default_ring();
+        engine.attach_capture_sink(Some(looper_sink));
         // Promote-once guard for realtime priority.
         let mut promoted = false;
 
@@ -1046,26 +1124,29 @@ impl AudioHost {
                                 mic,
                                 mic_node: node,
                             };
-                            render_block(
+                            render_block_timed(
                                 &mut fed,
                                 &mut rx,
+                                timed_rx.as_mut(),
                                 data,
                                 ch,
                                 &mut scratch,
                                 cap,
-                                Some(&mut looper_sink),
+                                None,
                             );
                         }
-                        _ => render_block(
+                        _ => render_block_timed(
                             &mut engine,
                             &mut rx,
+                            timed_rx.as_mut(),
                             data,
                             ch,
                             &mut scratch,
                             cap,
-                            Some(&mut looper_sink),
+                            None,
                         ),
                     }
+                    heartbeat_cb.fetch_add(1, Ordering::Release);
                 },
                 err_fn,
                 None,
@@ -1122,6 +1203,7 @@ impl AudioHost {
             drain_stop,
             drain_thread: Some(drain_thread),
             looper_capture,
+            heartbeat,
         })
     }
 

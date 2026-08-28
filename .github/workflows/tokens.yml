@@ -15,6 +15,10 @@ on:
     paths:
       - 'packages/oj-tokens/**'
       - 'packages/oj-ui/oj-tokens.css'
+      # The token compiler is selected from the root toolchain. Keep dependency
+      # updates from bypassing the only check that exercises Style Dictionary.
+      - 'package.json'
+      - 'bun.lock'
 
 permissions:
   contents: write
@@ -62,6 +66,6 @@ jobs:
           git add packages/oj-tokens/dist/variables.css \
                   packages/oj-tokens/src/generated/themes.ts \
                   packages/oj-ui/oj-tokens.css
-          git commit -m "chore(tokens): auto-rebuild from DTCG [skip ci]"
+          git commit --signoff -m "chore(tokens): auto-rebuild from DTCG [skip ci]"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
           echo "Pushed the rebuilt token artifacts to this PR."

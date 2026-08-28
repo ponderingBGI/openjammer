@@ -24,7 +24,7 @@ import { useAudioClipStore } from '../../store/audioClipStore';
 import { useLibraryStore, getSampleFile } from '../../store/libraryStore';
 import { createClipFromSample, generateWaveformPeaksAsync } from '../../utils/clipUtils';
 import { getAudioContext } from '../../audio/audioContext';
-import { hasNativeTextSelection, isEditableTarget } from '../../utils/editableTarget';
+import { isEditableTarget } from '../../utils/editableTarget';
 import { AudioClipVisual } from '../Clips/AudioClipVisual';
 import { ClipDragLayer } from '../Clips/ClipDragLayer';
 // The waveform editor is a heavy, on-demand modal (canvas rendering + clip DSP)
@@ -38,15 +38,8 @@ const WaveformEditorModal = lazy(() =>
     })),
 );
 import { PresenceOverlay } from '../Collab/PresenceOverlay';
-// The timeline editor is only needed after entering a Song node. Keeping it behind
-// a dynamic import avoids charging the full arrangement UI to the canvas's initial
-// production chunk while preserving the same store-backed editing surface.
-const SongInterior = lazy(() =>
-    import('../Song/SongInterior').then((module) => ({
-        default: module.SongInterior,
-    })),
-);
-import { useArrangementStore } from '../../store/arrangementStore';
+import { registerBindingSet } from '../../keymap/registry';
+import { useUiViewStore } from '../../store/uiViewStore';
 import { useCollabStore } from '../../store/collabStore';
 import './NodeCanvas.css';
 
@@ -120,16 +113,6 @@ export function NodeCanvas() {
         return new Map(connArray.map(c => [c.id, c]));
         // eslint-disable-next-line react-hooks/exhaustive-deps -- allConnections is the reactivity trigger: getConnectionsAtLevel reads the store via get(), so this memo must recompute when the connections Map identity changes
     }, [currentViewNodeId, getConnectionsAtLevel, allConnections]);
-    // What kind of interior the current view is: 'timeline' when we have entered a
-    // song node (render the hand-drawn SongInterior instead of the node graph),
-    // 'graph' otherwise (the ordinary node sub-canvas).
-    const interiorMode = useMemo<'graph' | 'timeline'>(() => {
-        if (!currentViewNodeId) return 'graph';
-        const viewNode = allNodes.get(currentViewNodeId);
-        if (!viewNode) return 'graph';
-        return resolveNodeDefinition(viewNode).interior ?? 'graph';
-    }, [currentViewNodeId, allNodes]);
-
     const selectedConnectionIds = useGraphStore((s) => s.selectedConnectionIds);
     const selectConnection = useGraphStore((s) => s.selectConnection);
     const clearSelection = useGraphStore((s) => s.clearSelection);
@@ -145,6 +128,7 @@ export function NodeCanvas() {
     const zoom = useCanvasStore((s) => s.zoom);
     const isPanning = useCanvasStore((s) => s.isPanning);
     const setPanning = useCanvasStore((s) => s.setPanning);
+    const setDragging = useCanvasStore((s) => s.setDragging);
     const panBy = useCanvasStore((s) => s.panBy);
     const zoomTo = useCanvasStore((s) => s.zoomTo);
     const screenToCanvas = useCanvasStore((s) => s.screenToCanvas);
@@ -289,8 +273,9 @@ export function NodeCanvas() {
                 currentX: canvasPos.x,
                 currentY: canvasPos.y
             });
+            setDragging(true);
         }
-    }, [setPanning, clearSelection, stopConnecting, screenToCanvas]);
+    }, [setPanning, setDragging, clearSelection, stopConnecting, screenToCanvas]);
 
     // Throttle presence cursor broadcasts to one per animation frame.
     const cursorPublishScheduled = useRef(false);
@@ -328,6 +313,7 @@ export function NodeCanvas() {
             // If moved more than threshold, it's a drag (pan the canvas)
             if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
                 rightClickMoved.current = true;
+                setDragging(true);
                 panBy({ x: dx, y: dy });
                 setRightClickStart({ x: e.clientX, y: e.clientY });
             }
@@ -362,11 +348,12 @@ export function NodeCanvas() {
                 });
             }
         }
-    }, [isPanning, panBy, selectionBox, screenToCanvas, rightClickStart, selectNodesInRect, clipDragState.isDragging, updateClipDrag, isConnecting, collabActive, publishCursor]);
+    }, [isPanning, panBy, setDragging, selectionBox, screenToCanvas, rightClickStart, selectNodesInRect, clipDragState.isDragging, updateClipDrag, isConnecting, collabActive, publishCursor]);
 
     // Handle mouse up
     const handleMouseUp = useCallback(() => {
         setPanning(false);
+        setDragging(false);
 
         // Right-click release - show context menu if no drag
         if (rightClickStart) {
@@ -454,7 +441,7 @@ export function NodeCanvas() {
                 }
             });
         }
-    }, [setPanning, selectionBox, selectNodesInRect, rightClickStart, isConnecting, stopConnecting, nodes, startConnecting, getPortCanvasPositionForSelection, clipDragState, endClipDrag, setClipPosition, screenToCanvas]);
+    }, [setPanning, setDragging, selectionBox, selectNodesInRect, rightClickStart, isConnecting, stopConnecting, nodes, startConnecting, getPortCanvasPositionForSelection, clipDragState, endClipDrag, setClipPosition, screenToCanvas]);
 
     // Handle drag over for library items
     const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -565,21 +552,6 @@ export function NodeCanvas() {
         const { emitKeyboardSignal, releaseKeyboardSignal } = useAudioStore.getState();
 
         function handleKeyDown(e: KeyboardEvent) {
-            // Skip if typing in an editable control. Backspace/Delete must edit text,
-            // not delete canvas nodes, while focus is in the AI composer or any textarea.
-            if (isEditableTarget(e.target)) return;
-
-            // Selected prose/labels/help text own the OS clipboard. The canvas has
-            // an internal node clipboard, so Ctrl/Cmd+C must yield whenever the
-            // browser has a text selection (Settings, guides, agent answers, etc.).
-            if (
-                (e.ctrlKey || e.metaKey) &&
-                e.key.toLowerCase() === 'c' &&
-                hasNativeTextSelection()
-            ) {
-                return;
-            }
-
             // ESC Key - Unified escape behavior (works in all modes)
             if (e.key === 'Escape') {
                 e.preventDefault();
@@ -647,49 +619,6 @@ export function NodeCanvas() {
                 e.preventDefault();
                 setCurrentMode(keyNum);
                 return;
-            }
-
-            // TIMELINE KEYMAP: inside a Song interior, the DAW muscle-memory keys must
-            // drive the ARRANGEMENT, not the node graph (the covenant's plain-Ctrl+Z
-            // promise). Read fresh state so there is no stale closure. We intercept only
-            // play/undo/redo/delete; everything else (Q to exit, mode keys) falls through.
-            {
-                const viewId = useCanvasNavigationStore.getState().currentViewNodeId;
-                const viewNode = viewId ? useGraphStore.getState().nodes.get(viewId) : null;
-                const inTimeline = viewNode
-                    ? resolveNodeDefinition(viewNode).interior === 'timeline'
-                    : false;
-                if (inTimeline) {
-                    const arr = useArrangementStore.getState();
-                    if (e.code === 'Space' && !e.repeat) {
-                        e.preventDefault();
-                        if (arr.isPlaying) arr.stop();
-                        else arr.play();
-                        return;
-                    }
-                    if (matchesAction(e, 'edit.undo')) {
-                        e.preventDefault();
-                        arr.undo();
-                        return;
-                    }
-                    if (matchesAction(e, 'edit.redo')) {
-                        e.preventDefault();
-                        arr.redo();
-                        return;
-                    }
-                    if (matchesAction(e, 'edit.delete') || e.key === 'Backspace') {
-                        e.preventDefault();
-                        if (arr.selectedNoteIds.length > 0) {
-                            // Delete the selected note(s) as ONE undoable step.
-                            arr.apply(arr.selectedNoteIds.map((noteId) => ({ kind: 'removeNote', noteId })));
-                            arr.selectNotes([]);
-                        } else if (arr.selectedClipId) {
-                            arr.apply({ kind: 'removeClip', clipId: arr.selectedClipId });
-                            arr.selectClip(null);
-                        }
-                        return;
-                    }
-                }
             }
 
             // Delete/Backspace always works - delete nodes and clips
@@ -887,11 +816,9 @@ export function NodeCanvas() {
                     const definition = resolveNodeDefinition(selectedNode);
                     const canEnter = definition.canEnter !== false;
                     const hasChildren = selectedNode.childIds && selectedNode.childIds.length > 0;
-                    // A timeline interior (the song node) has NO graph children — it is
-                    // entered on its `interior` flag alone, not on childIds.
-                    const isTimelineInterior = definition.interior === 'timeline';
-
-                    if (canEnter && (isTimelineInterior || hasChildren)) {
+                    if (selectedNode.type === 'song') {
+                        useUiViewStore.getState().setSurface('arrangement', selectedNode.id);
+                    } else if (canEnter && hasChildren) {
                         enterNode(selectedNode.id);
                     } else {
                         // Flash node for ANY failure reason (canEnter=false OR no children)
@@ -965,10 +892,45 @@ export function NodeCanvas() {
             }
         }
 
-        window.addEventListener('keydown', handleKeyDown);
+        const regularActions = [
+            'canvas.escape', 'edit.delete', 'canvas.deleteBackspace', 'canvas.exitLevel',
+            'canvas.transport', 'view.ghostMode', 'edit.undo', 'edit.redo',
+            'canvas.copy', 'canvas.paste', 'canvas.multiConnect', 'canvas.enterNode',
+        ];
+        const noteActions = Object.values(ROW_KEYS).flat().map((key) => `note.${key}`);
+        const unregister = registerBindingSet({
+            id: 'node-canvas',
+            scope: 'surface',
+            surface: 'canvas',
+            entries: [
+                ...noteActions.map((actionId) => ({
+                    actionId,
+                    guard: () => useAudioStore.getState().currentMode > 1,
+                    run: (event: KeyboardEvent) => {
+                        handleKeyDown(event);
+                        return event.defaultPrevented;
+                    },
+                })),
+                {
+                    actionId: 'note.controlSpace',
+                    guard: () => useAudioStore.getState().currentMode > 1,
+                    run: (event: KeyboardEvent) => {
+                        handleKeyDown(event);
+                        return event.defaultPrevented;
+                    },
+                },
+                ...regularActions.map((actionId) => ({
+                    actionId,
+                    run: (event: KeyboardEvent) => {
+                        handleKeyDown(event);
+                        return event.defaultPrevented;
+                    },
+                })),
+            ],
+        });
         window.addEventListener('keyup', handleKeyUp);
         return () => {
-            window.removeEventListener('keydown', handleKeyDown);
+            unregister();
             window.removeEventListener('keyup', handleKeyUp);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps -- stable window listeners by design: ROW_KEYS (recreated each render), contextMenu/selectionBox (frequently-changing local state read via closure) intentionally omitted so the handlers are not torn down/re-added mid-keystroke; clearSelection/stopConnecting are stable Zustand actions
@@ -1252,15 +1214,7 @@ export function NodeCanvas() {
                 backgroundSize: `${20 * zoom}px ${20 * zoom}px`
             }} />
 
-            {interiorMode === 'timeline' && currentViewNodeId ? (
-                /* TIMELINE INTERIOR — entered a song node. The hand-drawn DAW timeline
-                   replaces the node/connection/clip layers (its own full-bleed paper
-                   surface + scroll); breadcrumbs/exit/Esc still navigate out of it. */
-                <Suspense fallback={null}>
-                    <SongInterior songNodeId={currentViewNodeId} />
-                </Suspense>
-            ) : (
-                <div
+            <div
                     className="node-canvas-content"
                     style={{
                         transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`
@@ -1307,7 +1261,6 @@ export function NodeCanvas() {
                     {/* Selection Box */}
                     {renderSelectionBox()}
                 </div>
-            )}
 
             {/* Context Menu */}
             {contextMenu && (

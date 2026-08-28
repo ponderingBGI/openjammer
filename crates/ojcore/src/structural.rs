@@ -100,6 +100,9 @@ impl StructuralLoader {
         let params = match kind {
             PrimitiveKind::SpeakerOut | PrimitiveKind::GraphOut => vec![
                 ParamDecl {
+                    module: String::new(),
+                    unit: String::new(),
+                    flags: 0,
                     id: master_param::VOLUME,
                     name: String::from("volume"),
                     min: 0.0,
@@ -107,6 +110,9 @@ impl StructuralLoader {
                     default: 1.0,
                 },
                 ParamDecl {
+                    module: String::new(),
+                    unit: String::new(),
+                    flags: 0,
                     id: master_param::MUTE,
                     name: String::from("mute"),
                     min: 0.0,
@@ -120,6 +126,9 @@ impl StructuralLoader {
             // seam clamps the live value, the kernel itself accepts any float.
             PrimitiveKind::Multiply => vec![
                 ParamDecl {
+                    module: String::new(),
+                    unit: String::new(),
+                    flags: 0,
                     id: multiply_param::FACTOR,
                     name: String::from("factor"),
                     min: 0.0,
@@ -127,6 +136,9 @@ impl StructuralLoader {
                     default: 1.0,
                 },
                 ParamDecl {
+                    module: String::new(),
+                    unit: String::new(),
+                    flags: 0,
                     id: multiply_param::FACTOR_ACTIVE,
                     name: String::from("factor_active"),
                     min: 0.0,
