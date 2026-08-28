@@ -1,7 +1,4 @@
-/**
- * Instrument Visual Node - Compact design with per-key ports
- * Matches mockup: rows of ports with offset numbers below
- */
+
 
 .instrument-visual-node.compact {
     position: absolute;
@@ -10,7 +7,7 @@
     border-radius: 8px;
     min-width: 200px;
     font-family: var(--font-sans);
-    box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.1);
+    box-shadow: var(--shadow-raised);
     display: flex;
     flex-direction: column;
 }
@@ -127,7 +124,7 @@
     padding: 4px 0;
 }
 
-/* Individual key column (port + offset label) */
+
 .key-column {
     display: flex;
     flex-direction: column;
@@ -166,7 +163,7 @@
     background: #e0e0e0;
 }
 
-/* Offset label below port */
+
 .key-offset {
     font-size: 11px;
     color: #555;

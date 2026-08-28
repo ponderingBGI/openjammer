@@ -1,6 +1,4 @@
-/**
- * DropdownMenu.css - Photoshop-style dropdown menus with sketch theme
- */
+
 
 .dropdown-menu {
     position: relative;
@@ -22,7 +20,7 @@
     color: var(--text-primary);
     background: transparent;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     white-space: nowrap;
 }
 
@@ -46,7 +44,7 @@
 .dropdown-chevron {
     font-size: var(--text-xs);
     color: var(--text-muted);
-    transition: transform var(--transition-fast);
+    transition: transform var(--motion-fast);
 }
 
 .dropdown-trigger-open .dropdown-chevron {
@@ -61,9 +59,9 @@
     margin-top: var(--space-xs);
     min-width: 180px;
     background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
     z-index: 1000;
     animation: dropdownFadeIn 0.1s ease;
     overflow: hidden;
@@ -91,7 +89,7 @@
     font-size: var(--text-sm);
     color: var(--text-primary);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     outline: none;
 }
 
@@ -127,7 +125,7 @@
     font-size: var(--text-xs);
     color: var(--text-muted);
     opacity: 0;
-    transition: opacity var(--transition-fast);
+    transition: opacity var(--motion-fast);
 }
 
 .dropdown-item:hover .dropdown-item-shortcut,
@@ -165,9 +163,9 @@
     margin-left: 2px;
     min-width: 180px;
     background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
     z-index: 1001;
     animation: dropdownFadeIn 0.1s ease;
     overflow: hidden;

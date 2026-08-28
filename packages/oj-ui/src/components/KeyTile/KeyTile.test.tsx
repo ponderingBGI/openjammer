@@ -16,7 +16,7 @@ describe('KeyTile', () => {
         expect(container.querySelector('.oj-key-tile__label')!.textContent).toBe('C');
         const port = container.querySelector('.oj-key-tile__port')!;
         expect(port.className).toContain('oj-port');
-        expect(port.className).toContain('oj-port--control-output');
+        expect(port.className).toContain('oj-port--control');
     });
 
     it('omits the label span when no label is given', () => {

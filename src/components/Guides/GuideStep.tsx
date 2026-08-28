@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import './Guide.css';
+import type { StepStatus } from './guideTypes';
 
-export type StepStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+export type { StepStatus } from './guideTypes';
 
 interface GuideStepProps {
   stepNumber: number;

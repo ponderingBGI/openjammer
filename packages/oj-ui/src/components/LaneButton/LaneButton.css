@@ -5,13 +5,13 @@
     border-radius: var(--radius-sm);
     background: var(--timeline-lane-bg);
     color: var(--text-muted);
-    box-shadow: var(--shadow-sketch);
+    box-shadow: var(--shadow-raised);
     font-family: var(--font-sans);
     font-size: 13px;
     font-weight: 700;
 }
 .oj-lane-button--mute[aria-pressed="true"] { color: var(--text-primary); background: var(--timeline-clip-muted-bg); text-decoration: line-through; }
-.oj-lane-button--solo[aria-pressed="true"] { color: var(--text-on-accent); background: var(--accent-success); box-shadow: inset 0 0 0 1px var(--border-strong), var(--shadow-sketch); }
+.oj-lane-button--solo[aria-pressed="true"] { color: var(--text-on-accent); background: var(--accent-success); box-shadow: inset 0 0 0 1px var(--border-strong), var(--shadow-raised); }
 .oj-lane-button--armed[aria-pressed="true"] { color: var(--accent-success); }
 .oj-lane-button--recording[aria-pressed="true"] { color: var(--timeline-playhead); }
 .oj-lane-button:focus-visible { outline: 2px solid var(--accent-primary); outline-offset: 2px; }

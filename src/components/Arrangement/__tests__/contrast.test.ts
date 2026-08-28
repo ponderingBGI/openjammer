@@ -1,31 +1,67 @@
 import { describe, expect, it } from 'vitest';
-import cream from '../../../../packages/oj-tokens/tokens/themes/cream.json';
+import Color from 'colorjs.io';
+import light from '../../../../packages/oj-tokens/tokens/themes/light.json';
+import dark from '../../../../packages/oj-tokens/tokens/themes/dark.json';
 
 type RGB = [number, number, number];
-const hex = (value: string): RGB => [1, 3, 5].map((index) => parseInt(value.slice(index, index + 2), 16)) as RGB;
+type ThemeFile = typeof light;
+const rgb = (value: string): RGB => {
+    const color = new Color(value).to('srgb');
+    return color.coords.map((channel) => Math.max(0, Math.min(1, channel)) * 255) as RGB;
+};
+const blend = (foreground: RGB, background: RGB, alpha: number): RGB => foreground.map((channel, index) => channel * alpha + background[index]! * (1 - alpha)) as RGB;
+const parse = (source: string, background: RGB): RGB => {
+    const mix = source.match(/^color-mix\(in oklab,\s*(#[\da-f]{3,8}|rgba?\([^)]+\)|oklch\([^)]+\))\s+([\d.]+)%,\s*transparent\)$/i);
+    return mix ? blend(rgb(mix[1]!), background, Number(mix[2]) / 100) : rgb(source);
+};
 const luminance = ([r, g, b]: RGB) => [r, g, b].map((channel) => channel / 255).map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4).reduce((sum, channel, index) => sum + channel * [0.2126, 0.7152, 0.0722][index]!, 0);
 const ratio = (a: RGB, b: RGB) => (Math.max(luminance(a), luminance(b)) + 0.05) / (Math.min(luminance(a), luminance(b)) + 0.05);
-const blend = (foreground: RGB, background: RGB, alpha: number): RGB => foreground.map((channel, index) => channel * alpha + background[index]! * (1 - alpha)) as RGB;
-const value = (key: keyof typeof cream.color) => cream.color[key].$value;
+const value = (theme: ThemeFile, key: keyof ThemeFile['color']) => theme.color[key].$value;
+const contrast = (theme: ThemeFile, foreground: keyof ThemeFile['color'], background: keyof ThemeFile['color']) => {
+    const ground = rgb(value(theme, background));
+    return ratio(parse(value(theme, foreground), ground), ground);
+};
 
-describe('Cream arrangement contrast floors', () => {
+describe.each([['light', light], ['dark', dark]] as const)('%s arrangement contrast floors', (_name, theme) => {
     it.each([
+        ['textPrimary', 'timelineLaneBg', 4.5],
         ['textSecondary', 'timelineChromeBg', 4.5],
+        ['textMuted', 'timelineClipMutedBg', 4.5],
+        ['timelineClipBorder', 'timelineLaneBg', 3],
         ['timelineClipBorder', 'timelineClipBg', 3],
+        ['timelineNoteFill', 'timelineLaneBg', 3],
         ['timelineNoteFill', 'timelineClipBg', 3],
         ['timelinePlayhead', 'timelineLaneBg', 3],
         ['timelinePlayhead', 'timelineClipBg', 3],
+        ['timelineSelection', 'timelineClipBg', 3],
+        ['textPrimary', 'timelineClipBg', 3],
     ] as const)('%s clears its floor against %s', (foreground, background, floor) => {
-        expect(ratio(hex(value(foreground)), hex(value(background)))).toBeGreaterThanOrEqual(floor);
-    });
-
-    it('keeps selection at the signed-off near-3:1 value and supplies an ink structural cue', () => {
-        expect(ratio(hex(value('timelineSelection')), hex(value('timelineClipBg')))).toBeGreaterThanOrEqual(2.9);
-        expect(ratio(hex(value('sketchBlack')), hex(value('timelineClipBg')))).toBeGreaterThanOrEqual(3);
+        expect(contrast(theme, foreground, background)).toBeGreaterThanOrEqual(floor);
     });
 
     it('keeps the bar rhythm at 1.5:1 against the lane', () => {
-        const bar = blend(hex('#1A1A1A'), hex(value('timelineLaneBg')), 0.24);
-        expect(ratio(bar, hex(value('timelineLaneBg')))).toBeGreaterThanOrEqual(1.5);
+        expect(contrast(theme, 'timelineGridBar', 'timelineLaneBg')).toBeGreaterThanOrEqual(1.5);
+    });
+
+    it.each(['bgTertiary', 'bgCanvas', 'bgNode', 'bgNodeHeader'] as const)(
+        'keeps danger ink readable on %s',
+        (background) => {
+            expect(contrast(theme, 'dangerInk', background)).toBeGreaterThanOrEqual(4.5);
+        },
+    );
+
+    it.each(['bgTertiary', 'bgCanvas', 'bgNode'] as const)(
+        'keeps control boundaries visible on %s',
+        (background) => {
+            expect(contrast(theme, 'borderControl', background)).toBeGreaterThanOrEqual(3);
+        },
+    );
+});
+
+describe('theme token schema', () => {
+    it('declares the same digit-free key set in both themes', () => {
+        const keys = Object.keys(light.color).sort();
+        expect(Object.keys(dark.color).sort()).toEqual(keys);
+        expect(keys.filter((key) => /\d/.test(key))).toEqual([]);
     });
 });

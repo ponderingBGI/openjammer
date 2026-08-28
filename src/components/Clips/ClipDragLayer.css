@@ -26,8 +26,8 @@
     border-radius: var(--radius-md);
     background: transparent;
     transition:
-        border-color var(--transition-fast),
-        background-color var(--transition-fast);
+        border-color var(--motion-fast),
+        background-color var(--motion-fast);
     display: flex;
     align-items: center;
     justify-content: center;

@@ -1,16 +1,10 @@
-/*
- * Button — DESIGN.md §5. 2px ink border, 10px radius, Caveat label; lifts on
- * hover, presses on click. Styled only via semantic tokens (no literal colors),
- * so it follows the active theme. Text on filled variants uses --text-on-accent
- * (the token meant for exactly this), which is correct per-theme rather than a
- * hardcoded white.
- */
+
 .oj-btn {
     display: flex;
     align-items: center;
     justify-content: center;
     padding: var(--space-xs) var(--space-sm);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
     font-family: var(--font-sans);
     font-size: var(--text-sm);
@@ -18,8 +12,8 @@
     background: var(--bg-node);
     color: var(--text-primary);
     cursor: pointer;
-    transition: background var(--transition-fast), transform var(--transition-fast),
-        box-shadow var(--transition-fast);
+    transition: background var(--motion-fast), transform var(--motion-fast),
+        box-shadow var(--motion-fast);
 }
 
 .oj-btn:hover {
@@ -46,7 +40,7 @@
 }
 
 .oj-btn--secondary:hover {
-    background: var(--bg-canvas-alt);
+    background: var(--bg-tertiary);
     color: var(--text-primary);
 }
 

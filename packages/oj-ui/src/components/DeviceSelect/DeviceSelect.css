@@ -1,11 +1,4 @@
-/*
- * DeviceSelect — DESIGN.md §5. An audio-device picker: a node-fill Button
- * trigger over a Surface-backed popover list. Styled only via semantic tokens
- * (no literal colors), so it follows the active theme. The list rides the
- * popover layer and lifts on the hard, blur-free menu shadow (Hard-Shadow).
- * A low-latency device carries a lightning bolt beside its name, never on the
- * surface itself (Signal-Not-Brand).
- */
+
 .oj-device-select {
     position: relative;
     display: inline-flex;

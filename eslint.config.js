@@ -20,6 +20,7 @@ export default defineConfig([
     'apps/docs/dist/**',
     'pi-openjammer-graph/**',
     '.claude/**',
+    'plans/**',
     // Ladle catalog config/provider — dev tooling, not app source.
     '.ladle/**',
     // Persisted use_figma build snippets — pasted into the Figma plugin runtime

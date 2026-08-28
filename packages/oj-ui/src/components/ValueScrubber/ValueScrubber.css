@@ -1,10 +1,4 @@
-/*
- * ValueScrubber — an exact numeric value (mono) that opens an inline editor on
- * click. The parent owns the value and wires drag/wheel scrubbing; this only
- * styles the display + editor. No blurred shadow, no layout shift on hover
- * (DESIGN.md Hard-Shadow / No-Surprise) — feedback is background + border only.
- * Mono on the value enforces Mono-Means-Exact. Theme-agnostic via tokens.
- */
+
 .oj-value-scrubber {
     display: inline-flex;
     align-items: baseline;
@@ -20,7 +14,7 @@
 /* The exact value, read digit-by-digit. */
 .oj-value-scrubber__value {
     padding: var(--space-xs) var(--space-sm);
-    border: var(--border-sketch-width) solid transparent;
+    border: 1px solid transparent;
     border-radius: var(--radius-sm);
     background: var(--bg-canvas);
     color: var(--text-primary);
@@ -34,7 +28,7 @@
 /* Editable: scrub affordance + a hover/focus cue, no movement. */
 .oj-value-scrubber--editable .oj-value-scrubber__value {
     cursor: ew-resize;
-    transition: background var(--transition-fast), border-color var(--transition-fast);
+    transition: background var(--motion-fast), border-color var(--motion-fast);
 }
 
 .oj-value-scrubber--editable .oj-value-scrubber__value:hover {

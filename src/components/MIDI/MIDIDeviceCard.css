@@ -10,10 +10,10 @@
     gap: var(--space-sm, 12px);
     padding: var(--space-lg, 20px) var(--space-md, 16px);
     background: var(--bg-node);
-    border: var(--border-sketch-width, 2px) solid var(--border-sketch);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md, 8px);
     cursor: pointer;
-    transition: all var(--transition-fast, 0.15s);
+    transition: all var(--motion-fast, 0.15s);
     text-align: center;
 }
 

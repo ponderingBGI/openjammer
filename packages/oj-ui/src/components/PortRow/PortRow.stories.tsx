@@ -10,7 +10,7 @@ const column: React.CSSProperties = {
     width: 'var(--node-min-width)',
     padding: 'var(--space-sm)',
     background: 'var(--bg-node)',
-    border: 'var(--border-sketch-width) solid var(--sketch-black)',
+    border: '1px solid var(--text-primary)',
     borderRadius: 'var(--radius-md)',
 };
 

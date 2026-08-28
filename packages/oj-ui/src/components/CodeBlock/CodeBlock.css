@@ -7,7 +7,7 @@
 .oj-code {
     margin: 0;
     padding: var(--space-sm);
-    border: var(--border-sketch-width) solid var(--border-subtle);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     background: var(--bg-tertiary);
     color: var(--text-primary);

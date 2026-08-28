@@ -21,7 +21,7 @@ There is **one source of truth per concern**, fanned out to the three surfaces:
 
 ### Tokens → one source: the repo's DTCG files (`packages/oj-tokens/tokens/`)
 - **→ code**: Style Dictionary (`bun run tokens`) → `dist/variables.css` + `themes.ts`.
-- **→ claude.ai/design**: the design-sync (a static cream snapshot ships in the bundle).
+- **→ claude.ai/design**: the design-sync (a static Light snapshot ships in the bundle).
 - **→ Figma**: **Tokens Studio** plugin Git-syncs those exact DTCG files → **Figma Variables**.
   On the **free** tier this leg is **one-way (pull-only)**: Tokens Studio's multi-file *folder*
   sync — which is what our `tokens/` directory uses (`$metadata.json` / `$themes.json`) — supports
@@ -29,7 +29,7 @@ There is **one source of truth per concern**, fanned out to the three surfaces:
   **Applies** them; they **cannot push token edits back from Figma**. Tokens are authored in the
   repo as PRs (a true Figma → repo write-back would need **Tokens Studio Pro** *and* tokens to be
   authored in Figma — neither is our path today).
-- *(Already seeded:* I built the Figma Variables directly — 2 collections, 69 variables, 3 theme
+- *(Already seeded:* I built the Figma Variables directly — 2 collections, 2 theme
   modes. Tokens Studio then keeps them in step by pulling from the repo going forward.)*
 
 ### Components → one source: the code (`packages/oj-ui`)
@@ -52,13 +52,13 @@ linked to code via Code Connect.
 
 The OpenJammer file currently runs on **Education = Professional**, with a **Dev seat** (not a
 View seat). On that tier **Dev Mode, library publishing, and up to 10 variable modes all work** —
-verified: the file, the 69 variables, and the 3 theme modes were all created fine. The **only**
+verified: the file and the 2 theme modes were created fine. The **only**
 things OpenJammer wants that Professional does *not* grant are **Code Connect** (Dev-Mode code
 snippets), **native branching**, and the **REST Variables write API** — all Organization/Enterprise.
 
 Education is a **personal** student/educator grant (SheerID, re-verified annually); it is **not**
 available to an open-source project as an entity. The system is built to **degrade, not break**:
-if the grant lapses the file drops to **Starter**, the three Theme modes become **read-only** (the
+if the grant lapses the file drops to **Starter**, the two Theme modes become **read-only** (the
 data is safe, editing is frozen), and the code-first token path keeps working untouched — it never
 depended on Figma writing anything. A durable **paid Professional Dev seat (~$12/mo, re-check
 [figma.com/pricing](https://www.figma.com/pricing/))** restores the same capabilities permanently
@@ -84,15 +84,15 @@ Dev $25; Ent Full $90 / Dev $35; View seats free. Pricing changes periodically �
    Figma* plugin → Settings → Sync providers → **GitHub** → PAT (Code **read** access is enough on
    the free path) → **folder** path `packages/oj-tokens/tokens`, branch `canari`, **token format:
    W3C DTCG**. Pull. The repo already has `$metadata.json` + `$themes.json` defining the sets/themes,
-   so the plugin creates: a **Primitives** collection + a **Theme** collection with **Cream /
-   Cyberpunk / Midnight** modes. *(The 69 variables + 3 modes already exist in the file — Pull just
+   so the plugin creates: a **Primitives** collection + a **Theme** collection with **Light / Dark**
+   modes. *(The variables + 2 modes already exist in the file — Pull just
    to confirm the mapping matches; reconcile rather than duplicate. "Export to Figma Variables" is a
    Tokens Studio **Pro** action and isn't needed on the free path.)* Remember the folder sync is
    **read-only on free** — Pull and Apply themes here; you don't push token edits back (those are
    repo PRs).
 2. **Components → Figma.** For each component: build the master with auto-layout, **bind every
    visual property to the variables** (fills → `color/*`, padding/gap → `space/*`, radius →
-   `radius/*`, type → `text/*` + `font/*`, border → `border/sketch-width` + `color/sketch-black`),
+   `radius/*`, type → `text/*` + `font/*`, borders → the semantic `color/border-*` variables),
    and create its variant set. Use the **live previews at the claude.ai/design project** as the
    visual spec, and each component's `.d.ts` (in the repo / synced) as the prop contract.
 3. **Find the code (no Code Connect on free).** Code Connect (live code snippets in Dev Mode) needs

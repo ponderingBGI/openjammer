@@ -31,7 +31,7 @@
     font-size: var(--text-sm);
     color: var(--text-secondary);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
 }
 
 .keybindings-reset-all:hover:not(:disabled) {
@@ -76,11 +76,11 @@
     padding: var(--space-sm) var(--space-md);
     background: var(--bg-tertiary);
     border-radius: var(--radius-sm);
-    transition: background var(--transition-fast);
+    transition: background var(--motion-fast);
 }
 
 .keybindings-row:hover {
-    background: var(--bg-canvas-alt);
+    background: var(--bg-tertiary);
 }
 
 .keybindings-row-editing {
@@ -112,7 +112,7 @@
     color: var(--text-secondary);
     text-align: center;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
 }
 
 .keybindings-shortcut:hover {
@@ -154,7 +154,7 @@
     font-size: var(--text-md);
     color: var(--text-muted);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -170,7 +170,7 @@
 .keybindings-conflict-overlay {
     position: fixed;
     inset: 0;
-    background: color-mix(in srgb, var(--sketch-black) 50%, transparent);
+    background: var(--overlay-scrim);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -179,12 +179,12 @@
 
 .keybindings-conflict-dialog {
     background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
     padding: var(--space-lg);
     max-width: 400px;
     width: 90%;
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
 }
 
 .keybindings-conflict-title {
@@ -271,7 +271,7 @@
     font-size: var(--text-sm);
     color: white;
     cursor: pointer;
-    transition: background var(--transition-fast);
+    transition: background var(--motion-fast);
 }
 
 .keybindings-error button:hover {

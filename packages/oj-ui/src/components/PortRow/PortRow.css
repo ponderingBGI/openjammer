@@ -1,10 +1,4 @@
-/*
- * PortRow — DESIGN.md §5. A port dot beside its name inside a node body.
- * `input` reads [dot][label] left-aligned; `output` reverses to [label][dot]
- * right-aligned so the dot always hugs the node edge it wires to. Caveat label,
- * --space-xs gap. Styled only via semantic tokens (no literal colors), so it
- * follows the active theme.
- */
+
 .oj-port-row {
     display: flex;
     align-items: center;
@@ -23,7 +17,7 @@
     text-align: right;
 }
 
-/* Caveat voice — the friendly label naming what the dot wires. */
+
 .oj-port-row__label {
     font-family: var(--font-sans);
     font-size: var(--text-sm);
@@ -44,8 +38,7 @@
     border: 0;
 }
 
-/* A live connection nudges the label to the primary ink — a quiet confirm
-   that pairs with the Port's brighten/glow rather than standing alone. */
+
 .oj-port-row.is-connected .oj-port-row__label {
     color: var(--text-primary);
 }

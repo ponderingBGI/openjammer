@@ -12,7 +12,7 @@ function Stage({ children }: { children: React.ReactNode }) {
             height={220}
             style={{
                 background: 'var(--bg-canvas)',
-                border: 'var(--border-sketch-width) solid var(--border-subtle)',
+                border: '1px solid var(--border-subtle)',
                 borderRadius: 'var(--radius-lg)',
             }}
         >

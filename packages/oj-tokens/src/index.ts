@@ -16,13 +16,13 @@
 import type { Theme } from './types';
 import { generatedThemes } from './generated/themes';
 
-export type { Theme, ThemeColors } from './types';
+export type { Theme, ThemeValues } from './types';
 
 /** All built-in themes, generated from `tokens/themes/*.json`. */
 export const themes: Theme[] = generatedThemes;
 
 const STORAGE_KEY = 'openjammer-theme';
-const DEFAULT_THEME_ID = 'cream';
+const DEFAULT_THEME_ID = 'light';
 
 /** `bgPrimary` -> `bg-primary`. The color keys map 1:1 to `--kebab` CSS vars. */
 function camelToKebab(key: string): string {
@@ -65,6 +65,7 @@ export function saveThemeId(id: string): void {
             return;
         }
         localStorage.setItem(STORAGE_KEY, id);
+        window.dispatchEvent(new CustomEvent('openjammer:theme-change', { detail: id }));
     } catch (error) {
         console.error('Failed to save theme to localStorage:', error);
     }

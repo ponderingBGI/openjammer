@@ -9,7 +9,7 @@
 .panel-separator {
   background: var(--border-subtle, #e5e5e5);
   flex-shrink: 0;
-  transition: background var(--transition-fast, 0.15s ease);
+  transition: background var(--motion-fast, 0.15s ease);
   position: relative;
 }
 
@@ -23,7 +23,7 @@
   background: var(--text-muted, #666);
   border-radius: 1px;
   opacity: 0.6;
-  transition: opacity var(--transition-fast, 0.15s ease);
+  transition: opacity var(--motion-fast, 0.15s ease);
 }
 
 .panel-separator:hover,

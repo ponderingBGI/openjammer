@@ -1,9 +1,4 @@
-/**
- * ResizeHandles - Styles for node resize handles
- *
- * Supports all 8 handles: 4 corners and 4 edges.
- * Follows the sketch aesthetic with diagonal border marks for corners.
- */
+
 
 .resize-handles {
   /* Container is transparent, handles positioned absolutely */
@@ -15,7 +10,7 @@
   position: absolute;
   pointer-events: auto;
   opacity: 0.4;
-  transition: opacity var(--transition-fast, 0.15s ease);
+  transition: opacity var(--motion-fast, 0.15s ease);
   z-index: 10;
 }
 
@@ -119,7 +114,7 @@
   position: absolute;
   background: var(--text-muted, #666);
   opacity: 0;
-  transition: opacity var(--transition-fast, 0.15s ease);
+  transition: opacity var(--motion-fast, 0.15s ease);
 }
 
 .resize-handle.edge:hover::before,

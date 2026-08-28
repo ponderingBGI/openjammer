@@ -1,29 +1,21 @@
-/*
- * Surface — DESIGN.md §5. An inked, lifted card: white node fill, 2px ink
- * border, hard (blur-free) shadow. The chrome behind dropdown-content, the
- * help panel, and the various *-panel cards. Styled only via semantic tokens
- * (no literal colors), so it follows the active theme. Depth is a blur-0
- * offset in the ink color — the Hard-Shadow Rule.
- */
+
 .oj-surface {
     background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     color: var(--text-primary);
 }
 
-/* Elevation — every value is blur-free (Hard-Shadow). `rest` and `menu` reuse
-   the shared shadow tokens; `lifted` is a slightly heavier hard offset in the
-   ink color for the topmost panels. */
+
 .oj-surface--elevation-rest {
-    box-shadow: var(--shadow-node);
+    box-shadow: var(--shadow-raised);
 }
 
 .oj-surface--elevation-menu {
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
 }
 
 .oj-surface--elevation-lifted {
-    box-shadow: 4px 5px 0 var(--sketch-black);
+    box-shadow: var(--shadow-raised);
 }
 
 /* Radius — corner softness from the token scale. */

@@ -1,16 +1,8 @@
-/*
- * Spinner — an indeterminate loading ring. The ring is a circle whose border
- * is the subtle sketch line, with the top arc tinted --accent-primary so the
- * rotation reads as motion. Border width follows --border-sketch-width (the
- * same ink weight as the rest of the system) and the box scales with the
- * inline `width`/`height` set from the `size` prop. No blur, no fill, no shadow
- * (DESIGN.md Hard-Shadow): only color + rotation. Styled solely via semantic
- * tokens, so it follows the active theme.
- */
+
 .oj-spinner {
     display: inline-block;
     box-sizing: border-box;
-    border: var(--border-sketch-width) solid var(--border-subtle);
+    border: 1px solid var(--border-subtle);
     border-top-color: var(--accent-primary);
     border-radius: var(--radius-pill);
     animation: oj-spinner-rotate var(--transition-slow) linear infinite;

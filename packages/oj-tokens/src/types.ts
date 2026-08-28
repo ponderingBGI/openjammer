@@ -5,14 +5,13 @@
  * group authored in `tokens/themes/*.json`.
  */
 
-export interface ThemeColors {
+export interface ThemeValues {
     // Background colors
     bgPrimary: string;
     bgSecondary: string;
     bgNode: string;
     bgTertiary: string;
     bgCanvas: string;
-    bgCanvasAlt: string;
     bgNodeHeader: string;
 
     // Text colors
@@ -24,12 +23,7 @@ export interface ThemeColors {
     // Border colors
     borderSubtle: string;
     borderStrong: string;
-    borderSketch: string;
-
-    // Sketch / drawing colors
-    sketchBlack: string;
-    sketchGray: string;
-    sketchLight: string;
+    borderControl: string;
 
     // Accent colors
     accentPrimary: string;
@@ -39,14 +33,10 @@ export interface ThemeColors {
     accentDanger: string;
 
     // Audio connections (blue, directional)
-    audioInput: string;
-    audioOutput: string;
     audioConnection: string;
     audioConnected: string;
 
     // Control connections (grey, bidirectional)
-    controlInput: string;
-    controlOutput: string;
     controlConnection: string;
     controlConnected: string;
 
@@ -73,10 +63,23 @@ export interface ThemeColors {
     timelineSectionMarker: string;
     timelineLoopRange: string;
     timelineSelection: string;
+
+    // Elevation, focus, accessible semantic ink, and overlays
+    shadowRaised: string;
+    shadowOverlay: string;
+    shadowInset: string;
+    shadowPressed: string;
+    focusRing: string;
+    accentInk: string;
+    successInk: string;
+    warningInk: string;
+    dangerInk: string;
+    audioInk: string;
+    overlayScrim: string;
 }
 
 export interface Theme {
     id: string;
     name: string;
-    colors: ThemeColors;
+    colors: ThemeValues;
 }

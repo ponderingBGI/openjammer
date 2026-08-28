@@ -10,7 +10,7 @@ export const Default: Story = () => (
             width: 360,
             height: 220,
             background: 'var(--bg-canvas)',
-            border: 'var(--border-sketch-width) solid var(--border-subtle)',
+            border: '1px solid var(--border-subtle)',
             borderRadius: 'var(--radius-md)',
         }}
     >
@@ -25,7 +25,7 @@ export const Sizes: Story = () => (
             width: 360,
             height: 220,
             background: 'var(--bg-canvas)',
-            border: 'var(--border-sketch-width) solid var(--border-subtle)',
+            border: '1px solid var(--border-subtle)',
             borderRadius: 'var(--radius-md)',
         }}
     >

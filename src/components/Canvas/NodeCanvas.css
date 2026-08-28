@@ -151,24 +151,24 @@
     gap: var(--space-sm);
     padding: var(--space-lg);
     background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     z-index: 100;
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
     animation: back-to-action-fade-in 0.3s ease-out;
 }
 
 .back-to-action:hover {
     transform: translate(-50%, -50%) scale(1.05);
-    box-shadow: var(--shadow-menu), 0 0 20px color-mix(in srgb, var(--accent-primary) 20%, transparent);
+    box-shadow: var(--shadow-overlay), 0 0 20px color-mix(in srgb, var(--accent-primary) 20%, transparent);
 }
 
 .back-to-action-arrow {
     font-size: 48px;
     transform: rotate(var(--arrow-rotation));
-    transition: transform var(--transition-fast);
+    transition: transform var(--motion-fast);
     line-height: 1;
 }
 

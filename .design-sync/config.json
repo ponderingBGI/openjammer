@@ -6,10 +6,7 @@
   "cssEntry": "oj-tokens.css",
   "extraFonts": [
     "../../.design-sync/fonts.css",
-    "../../public/fonts/outfit-regular.woff2",
-    "../../public/fonts/outfit-medium.woff2",
-    "../../public/fonts/outfit-semibold.woff2",
-    "../../public/fonts/outfit-bold.woff2",
+    "../../public/fonts/outfit-variable.woff2",
     "../../public/fonts/jetbrains-mono-regular.woff2",
     "../../public/fonts/jetbrains-mono-medium.woff2"
   ],

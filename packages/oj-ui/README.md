@@ -13,6 +13,7 @@ and carry no app state.
 raw pixel value, and they never import from the app's `store/`, `audio/`,
 `engine/`, or `hooks/`. That is what lets one component restyle across every
 theme and render identically in the app, in Ladle, and in Figma.
+The shipped catalog previews both built-in modes: Light (default) and Dark.
 
 ## Consuming it
 

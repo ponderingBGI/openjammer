@@ -1,12 +1,4 @@
-/*
- * Slider — a range control drawn in the sketchbook hand. The track is a thin
- * tokenized rail (`--bg-tertiary`) with a `--sketch-light` filled edge; the
- * thumb is an `--accent-primary` disc carrying a 2px `--sketch-black` ink
- * border, the same drawn line as every node. Styled only via semantic tokens
- * (no literal colors, no raw px outside the scale), so it follows the active
- * theme. Per the No-Surprise Rule, interaction never reflows: feedback is
- * color and a ≤2px lift/press on the thumb, with no blurred shadow.
- */
+
 .oj-slider {
     -webkit-appearance: none;
     appearance: none;
@@ -15,7 +7,7 @@
     margin: 0;
     background: transparent;
     cursor: pointer;
-    transition: opacity var(--transition-fast);
+    transition: opacity var(--motion-fast);
 }
 
 /* Track — WebKit */
@@ -23,7 +15,7 @@
     height: var(--space-xs);
     border-radius: var(--radius-pill);
     background: var(--bg-tertiary);
-    border: var(--border-sketch-width) solid var(--sketch-light);
+    border: 1px solid var(--text-muted);
 }
 
 /* Track — Firefox */
@@ -31,14 +23,14 @@
     height: var(--space-xs);
     border-radius: var(--radius-pill);
     background: var(--bg-tertiary);
-    border: var(--border-sketch-width) solid var(--sketch-light);
+    border: 1px solid var(--text-muted);
 }
 
 /* Filled portion — Firefox only (WebKit has no equivalent pseudo) */
 .oj-slider::-moz-range-progress {
     height: var(--space-xs);
     border-radius: var(--radius-pill);
-    background: var(--sketch-light);
+    background: var(--text-muted);
 }
 
 /* Thumb — WebKit */
@@ -51,10 +43,10 @@
     margin-top: calc((var(--space-md) - var(--space-xs)) / -2);
     border-radius: var(--radius-pill);
     background: var(--accent-primary);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    box-shadow: var(--shadow-sketch);
+    border: 1px solid var(--border-control);
+    box-shadow: var(--shadow-raised);
     cursor: grab;
-    transition: background var(--transition-fast), transform var(--transition-fast);
+    transition: background var(--motion-fast), transform var(--motion-fast);
 }
 
 /* Thumb — Firefox */
@@ -63,13 +55,13 @@
     height: var(--space-md);
     border-radius: var(--radius-pill);
     background: var(--accent-primary);
-    border: var(--border-sketch-width) solid var(--sketch-black);
-    box-shadow: var(--shadow-sketch);
+    border: 1px solid var(--border-control);
+    box-shadow: var(--shadow-raised);
     cursor: grab;
-    transition: background var(--transition-fast), transform var(--transition-fast);
+    transition: background var(--motion-fast), transform var(--motion-fast);
 }
 
-/* Hover/press feedback: color + ≤2px transform only (No-Surprise). */
+
 .oj-slider:hover::-webkit-slider-thumb {
     background: var(--accent-secondary);
     transform: translateY(-1px);

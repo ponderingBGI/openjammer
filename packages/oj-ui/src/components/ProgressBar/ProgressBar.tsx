@@ -20,7 +20,7 @@ export interface ProgressBarProps extends HTMLAttributes<HTMLDivElement> {
 
 /**
  * A determinate progress bar. Track is `--bg-tertiary` hairlined with
- * `--sketch-light`; the fill is a solid tone token at `--radius-sm`. Renders as
+ * `--text-muted`; the fill is a solid tone token at `--radius-sm`. Renders as
  * a `role=progressbar` with `aria-valuenow/min/max`, and reads the theme's
  * semantic tokens only — no literal colors, no gradient, no blur.
  */

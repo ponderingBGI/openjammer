@@ -11,13 +11,10 @@
     z-index: 3000; /* above settings (2000) — palette is the topmost surface */
 }
 
-/* ONE centred ink wash for BOTH modes (stickers on paper, never soft ambient
-   glow: the Hard-Shadow ethos applied to the scrim). Tab morphs the content in
-   place — never a reposition — so the AI reads as an extension of the SAME
-   window, not a different one. */
+/* Both modes share the theme scrim; Tab swaps content without moving the panel. */
 .command-bar-overlay[data-mode='search'],
 .command-bar-overlay[data-mode='ai'] {
-    background: color-mix(in srgb, var(--sketch-black) 28%, transparent);
+    background: var(--overlay-scrim);
 }
 
 /* ONE width for BOTH modes — there is no resize to animate, which is exactly why
@@ -26,9 +23,9 @@
     width: 620px;
     max-width: calc(100vw - var(--space-xl));
     background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
     color: var(--text-primary);
     overflow: hidden;
 }
@@ -67,7 +64,7 @@
     box-sizing: border-box;
     padding: var(--space-lg);
     border: none;
-    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
+    border-bottom: 1px solid var(--border-strong);
     background: transparent;
     color: var(--text-primary);
     font-family: var(--font-sans);
@@ -119,17 +116,14 @@
 .command-bar-item__hint { font-size: var(--text-xs); font-weight: 400; }
 
 .command-bar-item[data-selected='true'] {
-    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 14%, transparent);
+    background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
 }
 
 .command-bar-item-ai {
     font-weight: 600;
 }
 
-/* ── AI half — the chat (redesign) ──────────────────────────────────────────
-   A conversation-first surface: header · scrolling transcript · bottom composer ·
-   sandbox footer. Caveat is the voice (chrome, the user's prompt); Inter does the
-   assistant's dense prose; JetBrains Mono is for the exact (ids, code, keycaps). */
+
 
 .command-bar-ai {
     position: relative; /* anchor for the YOLO confirm bottom-sheet */
@@ -144,7 +138,7 @@
     justify-content: space-between;
     gap: var(--space-sm);
     padding: var(--space-sm) var(--space-lg);
-    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
+    border-bottom: 1px solid var(--border-strong);
 }
 
 .command-bar-ai-back {
@@ -174,7 +168,7 @@
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-muted);
-    border: var(--border-sketch-width) solid var(--text-muted);
+    border: 1px solid var(--text-muted);
     border-radius: var(--radius-sm);
     padding: 1px var(--space-xs);
 }
@@ -227,8 +221,8 @@
 
 .command-bar-rewind-row[data-selected='true'],
 .command-bar-rewind-row:hover {
-    border-color: color-mix(in srgb, var(--accent, var(--sketch-black)) 35%, transparent);
-    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 10%, transparent);
+    border-color: color-mix(in srgb, var(--accent-primary) 35%, transparent);
+    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
 }
 
 /* The conversation: turns separated by generous rhythm, auto-stick to bottom. */
@@ -263,7 +257,7 @@
 .command-bar-ai-welcome-body code {
     font-family: var(--font-mono);
     font-size: 0.9em;
-    background: color-mix(in srgb, var(--sketch-black) 8%, transparent);
+    background: color-mix(in srgb, var(--text-primary) 8%, transparent);
     padding: 1px 4px;
     border-radius: var(--radius-sm);
 }
@@ -280,21 +274,21 @@
     font-family: var(--font-sans);
     font-size: var(--text-sm);
     padding: 2px var(--space-md);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-pill);
     background: var(--bg-node);
     color: var(--text-primary);
     cursor: pointer;
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+    transition: transform var(--motion-fast), box-shadow var(--motion-fast);
 }
 
 .command-bar-ai-welcome-chip:hover {
     transform: translateY(-1px);
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
 }
 
 .command-bar-ai-welcome-chip:focus-visible {
-    outline: var(--border-sketch-width) solid var(--accent, var(--sketch-black));
+    outline: 1px solid var(--accent-primary);
     outline-offset: 2px;
 }
 
@@ -319,13 +313,13 @@
     align-items: flex-end;
 }
 
-/* The user's prompt — the hand-drawn voice, a small inked bubble. */
+
 .command-bar-msg-user-text {
     margin: 0;
     max-width: 85%;
     padding: var(--space-xs) var(--space-md);
     background: var(--bg-tertiary);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg, 14px);
     font-family: var(--font-sans);
     font-size: var(--text-lg);
@@ -417,7 +411,7 @@
 }
 
 .command-bar-md a {
-    color: var(--accent, var(--sketch-black));
+    color: var(--accent-primary);
     text-decoration: underline;
     cursor: pointer;
 }
@@ -425,7 +419,7 @@
 .command-bar-md code {
     font-family: var(--font-mono);
     font-size: 0.9em;
-    background: color-mix(in srgb, var(--sketch-black) 8%, transparent);
+    background: color-mix(in srgb, var(--text-primary) 8%, transparent);
     padding: 1px 4px;
     border-radius: var(--radius-sm);
 }
@@ -434,7 +428,7 @@
     margin: 0 0 var(--space-sm);
     padding: var(--space-sm) var(--space-md);
     background: var(--bg-tertiary);
-    border: var(--border-sketch-width) solid var(--border-subtle);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     overflow-x: auto;
 }
@@ -497,12 +491,12 @@
 .command-bar-chip[data-self] {
     color: var(--text-secondary);
     border-style: dashed;
-    border-color: color-mix(in srgb, var(--accent, var(--sketch-black)) 45%, var(--border-subtle));
-    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 7%, var(--bg-tertiary));
+    border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border-subtle));
+    background: color-mix(in srgb, var(--accent-primary) 7%, var(--bg-tertiary));
 }
 
 .command-bar-chip[data-self] .command-bar-chip-glyph {
-    color: var(--accent, var(--sketch-black));
+    color: var(--accent-primary);
     opacity: 1;
 }
 
@@ -549,7 +543,7 @@
     flex-direction: column;
     gap: var(--space-xs);
     padding: var(--space-sm) var(--space-md);
-    border-top: var(--border-sketch-width) solid var(--sketch-black);
+    border-top: 1px solid var(--border-strong);
     background: var(--bg-node);
 }
 
@@ -579,10 +573,10 @@
     max-height: 260px;
     overflow-y: auto;
     padding: var(--space-xs);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
     background: var(--bg-node);
-    box-shadow: var(--shadow-sketch);
+    box-shadow: var(--shadow-raised);
 }
 
 .command-bar-ai-slash-head,
@@ -613,8 +607,8 @@
 
 .command-bar-ai-slash-item[data-selected='true'],
 .command-bar-ai-slash-item:hover {
-    border-color: color-mix(in srgb, var(--accent, var(--sketch-black)) 35%, transparent);
-    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 10%, transparent);
+    border-color: color-mix(in srgb, var(--accent-primary) 35%, transparent);
+    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
 }
 
 .command-bar-ai-slash-main {
@@ -709,12 +703,12 @@
 
 .command-bar-model-row[data-selected='true'],
 .command-bar-model-row:hover {
-    border-color: color-mix(in srgb, var(--accent, var(--sketch-black)) 35%, transparent);
-    background: color-mix(in srgb, var(--accent, var(--sketch-black)) 10%, transparent);
+    border-color: color-mix(in srgb, var(--accent-primary) 35%, transparent);
+    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
 }
 
 .command-bar-model-row[data-current='true'] {
-    border-color: color-mix(in srgb, var(--accent-success) 65%, var(--sketch-black));
+    border-color: color-mix(in srgb, var(--accent-success) 65%, var(--text-primary));
 }
 
 .command-bar-model-row:disabled {
@@ -759,7 +753,7 @@
 .command-bar-model-meta span,
 .command-bar-model-meta strong {
     padding: 1px 6px;
-    border: 1px solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-pill);
     background: var(--bg-node);
     color: inherit;
@@ -798,7 +792,7 @@
 }
 
 .command-bar-session-current {
-    color: var(--accent, var(--text-secondary));
+    color: var(--accent-primary);
     font-size: var(--text-xs);
 }
 
@@ -851,9 +845,9 @@
     gap: var(--space-sm);
     margin: var(--space-sm) var(--space-lg);
     padding: var(--space-xs) var(--space-sm);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--accent-success, var(--accent)) 12%, var(--bg-node));
+    background: color-mix(in srgb, var(--accent-success) 12%, var(--bg-node));
     color: var(--text-primary);
     font-size: var(--text-sm);
     line-height: 1.35;
@@ -882,10 +876,10 @@
 
 .command-bar-auth-configured-mark {
     padding: 1px 6px;
-    border: 1px solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-pill);
     background: var(--bg-node);
-    color: var(--accent-success, var(--accent));
+    color: var(--accent-success);
     font-family: var(--font-sans);
     font-size: var(--text-xs);
 }
@@ -901,7 +895,7 @@
     background: none;
     border: none;
     padding: 0;
-    color: var(--accent, var(--sketch-black));
+    color: var(--accent-primary);
     font-family: var(--font-sans);
     font-size: var(--text-md);
     text-decoration: underline;
@@ -912,7 +906,7 @@
 .command-bar-auth-notice {
     margin: var(--space-sm) var(--space-lg);
     padding: var(--space-sm);
-    border: var(--border-sketch-width) solid var(--accent-danger);
+    border: 1px solid var(--accent-danger);
     border-radius: var(--radius-md);
     color: var(--accent-danger);
     background: color-mix(in srgb, var(--accent-danger) 8%, transparent);
@@ -929,7 +923,7 @@
 .command-bar-auth-input {
     margin: var(--space-sm) var(--space-lg);
     width: auto;
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
 }
 
@@ -941,7 +935,7 @@
     font-size: var(--text-xs);
     line-height: 1;
     padding: 2px 5px;
-    border: 1px solid var(--sketch-light);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     background: var(--bg-tertiary);
     color: var(--text-secondary);
@@ -958,16 +952,16 @@
     align-items: center;
     gap: 2px;
     padding: 1px 6px;
-    border: 1px solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-pill);
-    background: color-mix(in srgb, var(--bg-node) 88%, var(--accent, var(--sketch-black)) 12%);
+    background: color-mix(in srgb, var(--bg-node) 88%, var(--accent-primary) 12%);
     color: var(--text-muted);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     white-space: nowrap;
     appearance: none;
     cursor: pointer;
-    transition: transform var(--transition-fast), color var(--transition-fast);
+    transition: transform var(--motion-fast), color var(--motion-fast);
 }
 
 button.command-bar-ai-thinking:hover {
@@ -976,7 +970,7 @@ button.command-bar-ai-thinking:hover {
 }
 
 button.command-bar-ai-thinking:focus-visible {
-    outline: var(--border-sketch-width) solid var(--accent, var(--sketch-black));
+    outline: 1px solid var(--accent-primary);
     outline-offset: 2px;
 }
 
@@ -1003,7 +997,7 @@ button.command-bar-ai-thinking:focus-visible {
     justify-content: space-between;
     gap: var(--space-sm);
     padding: var(--space-sm) var(--space-lg);
-    border-top: var(--border-sketch-width) solid var(--sketch-black);
+    border-top: 1px solid var(--border-strong);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: var(--text-muted);
@@ -1045,7 +1039,7 @@ button.command-bar-ai-thinking:focus-visible {
     height: 6px;
     margin-right: 4px;
     border-radius: 50%;
-    background: var(--accent, var(--sketch-black));
+    background: var(--accent-primary);
     vertical-align: middle;
 }
 
@@ -1054,17 +1048,17 @@ button.command-bar-ai-thinking:focus-visible {
     font-size: var(--text-xs);
     letter-spacing: 0.04em;
     padding: 2px var(--space-sm);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     background: var(--bg-node);
     color: var(--text-secondary);
     cursor: pointer;
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+    transition: transform var(--motion-fast), box-shadow var(--motion-fast);
 }
 
 .command-bar-ai-yolo-toggle:hover {
     transform: translateY(-1px);
-    box-shadow: var(--shadow-sketch);
+    box-shadow: var(--shadow-raised);
 }
 
 .command-bar-ai-yolo-toggle[data-mode='yolo'] {

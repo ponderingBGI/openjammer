@@ -3,7 +3,7 @@
     background: var(--bg-node);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
     min-width: 180px;
     z-index: 1000;
     animation: menuFadeIn 0.1s ease;
@@ -34,7 +34,7 @@
     color: var(--text-primary);
     font-weight: 500;
     cursor: pointer;
-    transition: background var(--transition-fast);
+    transition: background var(--motion-fast);
 }
 
 .context-menu-category-header:hover {
@@ -57,7 +57,7 @@
     background: var(--bg-node);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
     min-width: 160px;
     z-index: 1001;
     opacity: 0;
@@ -78,7 +78,7 @@
     padding: var(--space-sm) var(--space-md);
     color: var(--text-secondary);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
 }
 
 .context-menu-item:hover {

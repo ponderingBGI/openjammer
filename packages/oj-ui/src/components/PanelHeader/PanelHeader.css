@@ -1,10 +1,4 @@
-/*
- * PanelHeader — a panel/dialog title strip. A space-between row with a Caveat
- * title (Caveat-Is-the-Voice) and an Inter subtitle for the dense second line.
- * Styled only via semantic tokens (no literal colors, no blurred shadow), so it
- * follows the active theme. The bottom hairline is the divider that the node
- * header and panel headers it replaces all carry.
- */
+
 .oj-panel-header {
     display: flex;
     flex-direction: column;

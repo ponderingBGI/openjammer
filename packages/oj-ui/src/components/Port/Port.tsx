@@ -46,7 +46,7 @@ export function Port({
         'oj-port',
         colorKind === 'universal'
             ? 'oj-port--universal'
-            : direction && `oj-port--${colorKind}-${direction}`,
+            : direction && `oj-port--${colorKind}`,
         connected && 'is-connected',
         placeholder && 'is-placeholder',
         active && 'is-active',

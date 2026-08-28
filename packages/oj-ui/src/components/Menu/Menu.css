@@ -1,11 +1,4 @@
-/*
- * Menu — DESIGN.md §5. The consolidation of the toolbar dropdown and the canvas
- * context-menu into one keyboard-navigable panel, backed by a Surface (white
- * node fill, 2px ink border, hard blur-free menu shadow). Styled only via
- * semantic tokens (no literal colors), so it follows the active theme. Hover/
- * focus fills a row with the accent and flips text to --text-on-accent (the
- * per-theme token for text on a fill — never a hardcoded white).
- */
+
 .oj-menu {
     display: flex;
     flex-direction: column;
@@ -25,7 +18,7 @@
     cursor: pointer;
     outline: none;
     /* No-Surprise: feedback is color only, no motion/reflow on hover. */
-    transition: background var(--transition-fast), color var(--transition-fast);
+    transition: background var(--motion-fast), color var(--motion-fast);
 }
 
 .oj-menu-item:hover,

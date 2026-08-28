@@ -5,13 +5,13 @@ import { Port } from './Port';
 describe('Port', () => {
     it('colors by kind + direction', () => {
         const { container } = render(<Port kind="audio" direction="input" />);
-        expect(container.querySelector('span')!.className).toContain('oj-port--audio-input');
+        expect(container.querySelector('span')!.className).toContain('oj-port--audio');
     });
 
     it('marks a connected port', () => {
         const { container } = render(<Port kind="control" direction="output" connected />);
         const cls = container.querySelector('span')!.className;
-        expect(cls).toContain('oj-port--control-output');
+        expect(cls).toContain('oj-port--control');
         expect(cls).toContain('is-connected');
     });
 
@@ -25,7 +25,7 @@ describe('Port', () => {
     it('resolvedKind overrides a universal port color', () => {
         const { container } = render(<Port kind="universal" resolvedKind="audio" direction="output" />);
         const cls = container.querySelector('span')!.className;
-        expect(cls).toContain('oj-port--audio-output');
+        expect(cls).toContain('oj-port--audio');
         expect(cls).not.toContain('oj-port--universal');
     });
 

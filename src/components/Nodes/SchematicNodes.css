@@ -1,8 +1,4 @@
-/**
- * SchematicNodes.css - Hand-drawn schematic styling for special nodes
- *
- * Uses variables from variables.css for consistency with the sketch theme.
- */
+
 
 /* ============================================
  * Schematic Node Base
@@ -10,25 +6,25 @@
 .schematic-node {
     position: absolute;
     background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
     color: var(--text-primary);
     min-width: 140px;
     overflow: visible;
     user-select: none;
     z-index: 1;
-    transition: box-shadow var(--transition-fast);
+    transition: box-shadow var(--motion-fast);
 }
 
 .schematic-node.selected {
     z-index: 10;
-    box-shadow: 0 0 0 2px var(--accent-primary), var(--shadow-sketch);
+    box-shadow: 0 0 0 2px var(--accent-primary), var(--shadow-raised);
 }
 
 .schematic-node.dragging {
     z-index: 100;
     cursor: grabbing;
-    box-shadow: 0 0 0 2px var(--accent-primary), 6px 6px 0 var(--sketch-black);
+    box-shadow: 0 0 0 2px var(--accent-primary), 6px 6px 0 var(--text-primary);
 }
 
 /* Audio clip drop target feedback */
@@ -37,7 +33,7 @@
 }
 
 .schematic-header {
-    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
+    border-bottom: 1px solid var(--border-strong);
     padding: var(--space-sm) var(--space-md);
     font-family: var(--font-sans);
     font-weight: 600;
@@ -97,7 +93,7 @@
     border-radius: var(--radius-md);
     background: transparent;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     color: var(--text-primary);
 }
 
@@ -127,6 +123,11 @@
 
 .speaker-volume-slider {
     width: 100%;
+    height: var(--space-md);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
     cursor: pointer;
     accent-color: var(--accent-primary);
 }
@@ -159,7 +160,7 @@
 
 .device-select-trigger {
     width: 100%;
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-pill);
     background: var(--bg-canvas);
     padding: var(--space-xs) var(--space-sm);
@@ -170,7 +171,7 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
 }
 
 .device-select-trigger:hover {
@@ -183,12 +184,12 @@
     left: 0;
     width: 100%;
     background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
     z-index: 100;
     max-height: 200px;
     overflow-y: auto;
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
 }
 
 .device-item {
@@ -197,7 +198,7 @@
     font-family: var(--font-sans);
     font-size: var(--text-sm);
     cursor: pointer;
-    transition: background var(--transition-fast);
+    transition: background var(--motion-fast);
 }
 
 .device-item:last-child {
@@ -255,7 +256,7 @@
 .keyboard-node.active {
     border-width: 4px;
     border-color: var(--accent-success);
-    box-shadow: 0 0 0 2px var(--bg-canvas), 0 0 12px color-mix(in srgb, var(--accent-success) 40%, transparent), var(--shadow-sketch);
+    box-shadow: 0 0 0 2px var(--bg-canvas), 0 0 12px color-mix(in srgb, var(--accent-success) 40%, transparent), var(--shadow-raised);
 }
 
 .keyboard-node .schematic-header {
@@ -267,7 +268,7 @@
     font-size: var(--text-md);
     font-weight: 600;
     background: var(--bg-tertiary);
-    border: 1px solid var(--sketch-light);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     padding: 2px var(--space-sm);
     user-select: none;
@@ -321,7 +322,7 @@
     padding: 0;
 }
 
-/* Simplified instrument body layout - matching sketch */
+
 .instrument-schematic-body.simple {
     display: flex;
     align-items: center;
@@ -386,11 +387,11 @@
 .instrument-output-port {
     width: 16px;
     height: 16px;
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: 50%;
-    background: var(--audio-output);
+    background: var(--audio-connection);
     cursor: crosshair;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     flex-shrink: 0;
 }
 
@@ -422,11 +423,11 @@
 .bundle-input-port {
     width: 12px;
     height: 12px;
-    border: 2px solid var(--sketch-black);
+    border: 2px solid var(--text-primary);
     border-radius: 50%;
-    background: var(--control-input);
+    background: var(--control-connection);
     cursor: crosshair;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     flex-shrink: 0;
 }
 
@@ -446,7 +447,7 @@
 }
 
 .bundle-input-port.empty:hover {
-    background: var(--control-input);
+    background: var(--control-connection);
     border-style: solid;
 }
 
@@ -501,9 +502,9 @@
     min-width: 250px;
     min-height: 150px;
     background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
     z-index: 2000;
     flex-direction: column;
     overflow: hidden;
@@ -590,13 +591,13 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     background: var(--bg-canvas);
 }
 
 .instrument-card:hover {
     background: var(--bg-tertiary);
-    border-color: var(--sketch-light);
+    border-color: var(--border-strong);
     transform: translateY(-2px);
 }
 
@@ -658,7 +659,7 @@
     cursor: ns-resize;
     padding: 2px 4px;
     border-radius: var(--radius-sm);
-    transition: background var(--transition-fast);
+    transition: background var(--motion-fast);
     user-select: none;
 }
 
@@ -709,7 +710,7 @@
     cursor: pointer;
     padding: 0 6px;
     border-radius: var(--radius-sm);
-    transition: background var(--transition-fast);
+    transition: background var(--motion-fast);
     user-select: none;
     min-width: 24px;
     line-height: 24px;
@@ -732,7 +733,7 @@
     font-weight: 600;
     color: var(--text-primary);
     background: var(--bg-tertiary);
-    border: 1px solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     padding: 2px 4px;
     width: 36px;
@@ -827,7 +828,7 @@
     border-radius: 4px;
     border: 1px solid var(--border-subtle);
     overflow: hidden;
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
 }
 
 /* Draggable loop item hover state */
@@ -924,12 +925,12 @@
     width: 100%;
     max-width: 200px;
     height: 28px;
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
     background: var(--accent-danger);
     cursor: pointer;
     position: relative;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     margin: 0 var(--space-md);
 }
 
@@ -1092,7 +1093,7 @@
     align-items: center;
     justify-content: center;
     color: #000;
-    border: 1px solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
 }
 
 .mic-content {
@@ -1125,14 +1126,14 @@
     width: 36px;
     height: 36px;
     border-radius: var(--radius-sm);
-    border: 2px solid var(--sketch-black);
+    border: 2px solid var(--text-primary);
     background: var(--bg-canvas);
     color: var(--text-primary);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
 }
 
 .mic-source-btn:hover {
@@ -1144,12 +1145,12 @@
     width: 36px;
     height: 36px;
     border-radius: var(--radius-sm);
-    border: 2px solid var(--sketch-black);
+    border: 2px solid var(--text-primary);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     position: relative;
 }
 
@@ -1275,7 +1276,7 @@
     color: var(--text-primary);
     border: 2px solid transparent;
     border-radius: var(--radius-sm);
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
 }
 
 .canvas-io-node .name-text:hover {
@@ -1332,11 +1333,11 @@
 }
 
 .keyboard-visual-node .keyboard-row.row-2 {
-    margin-left: 25px; /* Offset for A row */
+    margin-left: 25px;
 }
 
 .keyboard-visual-node .keyboard-row.row-3 {
-    margin-left: 50px; /* Offset for Z row */
+    margin-left: 50px;
 }
 
 .keyboard-visual-node .keyboard-row.row-space {
@@ -1350,12 +1351,12 @@
     width: 50px;
     height: 50px;
     background: var(--bg-canvas);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     user-select: none;
     cursor: crosshair;
 }
@@ -1406,15 +1407,15 @@
     position: absolute;
     width: 140px;
     background: var(--bg-node);
-    border: 2px solid var(--sketch-black);
+    border: 2px solid var(--text-primary);
     border-radius: var(--radius-sm);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-raised);
     cursor: default;
-    transition: box-shadow var(--transition-fast);
+    transition: box-shadow var(--motion-fast);
 }
 
 .output-panel-node:hover {
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--shadow-overlay);
 }
 
 .output-panel-node.selected {
@@ -1431,7 +1432,7 @@
 .output-panel-header {
     padding: var(--space-xs) var(--space-sm);
     background: var(--bg-tertiary);
-    border-bottom: 2px solid var(--sketch-black);
+    border-bottom: 2px solid var(--text-primary);
     cursor: grab;
 }
 
@@ -1470,12 +1471,12 @@
     align-items: center;
     gap: var(--space-sm);
     padding: var(--space-xs) var(--space-xs);
-    border-radius: var(--radius-xs);
-    transition: background var(--transition-fast);
+    border-radius: var(--radius-sm);
+    transition: background var(--motion-fast);
 }
 
 .output-panel-port-row:hover {
-    background: var(--sketch-grid);
+    background: var(--border-subtle);
 }
 
 
@@ -1490,8 +1491,8 @@
     color: var(--text-primary);
     cursor: text;
     padding: 2px 4px;
-    border-radius: var(--radius-xs);
-    transition: background var(--transition-fast);
+    border-radius: var(--radius-sm);
+    transition: background var(--motion-fast);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1510,14 +1511,14 @@
     color: var(--text-primary);
     padding: 2px 4px;
     border: none;
-    border-radius: var(--radius-xs);
+    border-radius: var(--radius-sm);
     background: rgba(0, 0, 0, 0.05);
     outline: none;
     caret-color: var(--accent-primary);
 }
 
 .output-panel-label-input::selection {
-    background: var(--accent-primary-alpha);
+    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
 }
 
 /* Focus styles for accessibility */
@@ -1536,15 +1537,15 @@
     position: absolute;
     width: 140px;
     background: var(--bg-node);
-    border: 2px solid var(--sketch-black);
+    border: 2px solid var(--text-primary);
     border-radius: var(--radius-sm);
-    box-shadow: var(--shadow-md);
+    box-shadow: var(--shadow-raised);
     cursor: default;
-    transition: box-shadow var(--transition-fast);
+    transition: box-shadow var(--motion-fast);
 }
 
 .input-panel-node:hover {
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--shadow-overlay);
 }
 
 .input-panel-node.selected {
@@ -1561,7 +1562,7 @@
 .input-panel-header {
     padding: var(--space-xs) var(--space-sm);
     background: var(--bg-tertiary);
-    border-bottom: 2px solid var(--sketch-black);
+    border-bottom: 2px solid var(--text-primary);
     cursor: grab;
 }
 
@@ -1601,8 +1602,8 @@
     justify-content: space-between;
     gap: var(--space-sm);
     padding: var(--space-xs) var(--space-xs);
-    border-radius: var(--radius-xs);
-    transition: background var(--transition-fast);
+    border-radius: var(--radius-sm);
+    transition: background var(--motion-fast);
 }
 
 .input-panel-port-row:hover {
@@ -1621,8 +1622,8 @@
     color: var(--text-primary);
     cursor: text;
     padding: 2px 4px;
-    border-radius: var(--radius-xs);
-    transition: background var(--transition-fast);
+    border-radius: var(--radius-sm);
+    transition: background var(--motion-fast);
     text-align: left;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1642,7 +1643,7 @@
     color: var(--text-primary);
     padding: 2px 4px;
     border: none;
-    border-radius: var(--radius-xs);
+    border-radius: var(--radius-sm);
     background: rgba(0, 0, 0, 0.05);
     outline: none;
     caret-color: var(--accent-primary);
@@ -1650,7 +1651,7 @@
 }
 
 .input-panel-label-input::selection {
-    background: var(--accent-primary-alpha);
+    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
 }
 
 /* Focus styles for accessibility */
@@ -1666,7 +1667,7 @@
 .input-panel-port-row.empty-slot,
 .output-panel-port-row.empty-slot {
     opacity: 0.6;
-    border-top: 1px dashed var(--border-color, rgba(0, 0, 0, 0.1));
+    border-top: 1px dashed var(--border-subtle);
     margin-top: var(--space-xs);
     padding-top: var(--space-xs);
 }
@@ -1694,7 +1695,7 @@
 .container-header {
     padding: var(--space-sm) var(--space-md);
     background: var(--bg-node-header);
-    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
+    border-bottom: 1px solid var(--border-strong);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     cursor: grab;
     display: flex;
@@ -1712,7 +1713,7 @@
     font-weight: 600;
     color: var(--text-primary);
     cursor: text;
-    transition: background var(--transition-fast);
+    transition: background var(--motion-fast);
     padding: 2px 4px;
     border-radius: var(--radius-sm);
 }
@@ -1760,7 +1761,7 @@
 .math-header {
     padding: var(--space-xs) var(--space-sm);
     background: var(--bg-node-header);
-    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
+    border-bottom: 1px solid var(--border-strong);
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
     cursor: grab;
     display: flex;
@@ -1841,11 +1842,11 @@
     right: -7px;
     top: 50%;
     transform: translateY(-50%);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: 50%;
-    background: var(--audio-output);
+    background: var(--audio-connection);
     cursor: crosshair;
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+    transition: transform var(--motion-fast), box-shadow var(--motion-fast);
     z-index: 10;
 }
 
@@ -1894,7 +1895,7 @@
     align-items: center;
     gap: var(--space-xs);
     padding: var(--space-sm) var(--space-md);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
     background: var(--accent-primary);
     color: white;
@@ -1902,7 +1903,7 @@
     font-size: var(--text-md);
     font-weight: 600;
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
 }
 
 .library-link-btn:hover:not(:disabled) {
@@ -2045,7 +2046,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
 }
 
 .add-tag-btn:hover {
@@ -2079,7 +2080,7 @@
 
 /* Drag-over state for pinned section */
 .library-tags-section.pinned.drag-over {
-    background: var(--accent-primary-alpha);
+    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
     outline: 2px dashed var(--accent-primary);
     outline-offset: -2px;
 }
@@ -2136,7 +2137,7 @@
     padding: var(--space-xs) var(--space-sm);
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: background var(--transition-fast);
+    transition: background var(--motion-fast);
     position: relative;
 }
 
@@ -2217,7 +2218,7 @@
     font-size: 12px;
     cursor: pointer;
     opacity: 0;
-    transition: opacity var(--transition-fast);
+    transition: opacity var(--motion-fast);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2243,7 +2244,7 @@
     font-size: 12px;
     cursor: pointer;
     opacity: 0;
-    transition: opacity var(--transition-fast);
+    transition: opacity var(--motion-fast);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2296,7 +2297,7 @@
     display: flex;
     align-items: center;
     gap: 2px;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     white-space: nowrap;
 }
 
@@ -2362,7 +2363,7 @@
     padding: var(--space-xs) var(--space-sm);
     border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: background var(--transition-fast);
+    transition: background var(--motion-fast);
 }
 
 .library-file-row:hover {
@@ -2412,7 +2413,7 @@
     align-items: center;
     justify-content: center;
     font-size: 10px;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
 }
 
 .file-preview-btn:hover {
@@ -2484,7 +2485,7 @@
     color: var(--tag-text, #000);
     white-space: nowrap;
     cursor: pointer;
-    transition: filter var(--transition-fast), transform var(--transition-fast), padding var(--transition-fast);
+    transition: filter var(--motion-fast), transform var(--motion-fast), padding var(--motion-fast);
     max-width: 100px;
 }
 
@@ -2511,7 +2512,7 @@
     font-weight: bold;
     line-height: 1;
     cursor: pointer;
-    transition: background var(--transition-fast);
+    transition: background var(--motion-fast);
     flex-shrink: 0;
 }
 
@@ -2568,7 +2569,7 @@
     font-size: 14px;
     font-weight: bold;
     opacity: 0;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     flex-shrink: 0;
 }
 
@@ -2646,7 +2647,7 @@
     align-items: center;
     justify-content: center;
     font-size: 14px;
-    transition: all var(--transition-fast);
+    transition: all var(--motion-fast);
     flex-shrink: 0;
 }
 
@@ -2675,7 +2676,7 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
     margin-left: auto;
-    transition: background var(--transition-fast), opacity var(--transition-fast);
+    transition: background var(--motion-fast), opacity var(--motion-fast);
 }
 
 .empty-trash-btn:hover:not(:disabled) {
@@ -2760,10 +2761,10 @@
     position: absolute;
     width: 14px;
     height: 14px;
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: 50%;
     cursor: crosshair;
-    transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+    transition: transform var(--motion-fast), box-shadow var(--motion-fast);
     z-index: 10;
 }
 
@@ -2781,7 +2782,7 @@
 .sampler-side-port.input {
     left: -7px;
     top: 22px;
-    background: var(--control-input);
+    background: var(--control-connection);
 }
 
 .sampler-side-port.input:hover {
@@ -2797,7 +2798,7 @@
 .sampler-side-port.output {
     right: -7px;
     top: 22px;
-    background: var(--audio-output);
+    background: var(--audio-connection);
 }
 
 .sampler-side-port.output:hover {
@@ -2818,7 +2819,7 @@
     border-radius: var(--radius-sm);
     border: 1px dashed var(--border-subtle);
     overflow: hidden;
-    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
     display: flex;
     flex-direction: column;
     align-items: stretch;
@@ -2852,8 +2853,8 @@
    confused with an empty or a working slot. Non-modal: it never steals focus. */
 .sampler-sample-area.load-error {
     border-style: dashed;
-    border-color: var(--status-warning, #e0a458);
-    background: color-mix(in srgb, var(--status-warning, #e0a458) 8%, transparent);
+    border-color: var(--accent-warning);
+    background: color-mix(in srgb, var(--accent-warning) 8%, transparent);
 }
 
 .sampler-sample-area.load-error .sampler-waveform-path {
@@ -2873,7 +2874,7 @@
     font-weight: 700;
     line-height: 1;
     color: var(--bg-primary, #1a1a1a);
-    background: var(--status-warning, #e0a458);
+    background: var(--accent-warning);
 }
 
 /* ERR-1: per-node "!" badge when an instrument's built-in default voice failed to
@@ -2892,7 +2893,7 @@
     font-weight: 700;
     line-height: 1;
     color: var(--bg-primary, #1a1a1a);
-    background: var(--status-warning, #e0a458);
+    background: var(--accent-warning);
     cursor: help;
 }
 
@@ -2969,10 +2970,10 @@
     color: var(--accent-primary);
     background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
     padding: 1px 4px;
-    border-radius: var(--radius-xs);
+    border-radius: var(--radius-sm);
     cursor: ns-resize;
     user-select: none;
-    transition: background var(--transition-fast);
+    transition: background var(--motion-fast);
 }
 
 .sampler-root-note:hover {
@@ -2985,7 +2986,7 @@
     height: 14px;
     padding: 0;
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-xs);
+    border-radius: var(--radius-sm);
     background: var(--bg-node);
     cursor: pointer;
     display: flex;
@@ -3029,8 +3030,8 @@
     cursor: ns-resize;
     user-select: none;
     padding: 2px 4px;
-    border-radius: var(--radius-xs);
-    transition: background var(--transition-fast);
+    border-radius: var(--radius-sm);
+    transition: background var(--motion-fast);
     white-space: nowrap;
 }
 

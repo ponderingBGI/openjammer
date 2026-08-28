@@ -8,15 +8,15 @@
     align-items: center;
     justify-content: center;
     padding: var(--space-lg, 24px);
-    background: color-mix(in srgb, var(--sketch-black, #1a1a1a) 40%, transparent);
+    background: color-mix(in srgb, var(--text-primary, #1a1a1a) 40%, transparent);
 }
 
 .app-error-card {
     width: min(420px, calc(100vw - 48px));
     background: var(--bg-node, #fdfcf7);
-    border: var(--border-sketch-width, 2px) solid var(--sketch-black, #1a1a1a);
+    border: 1px solid var(--text-primary, #1a1a1a);
     border-radius: var(--radius-lg, 14px);
-    box-shadow: var(--shadow-menu, 0 8px 28px rgba(0, 0, 0, 0.25));
+    box-shadow: var(--shadow-overlay, 0 8px 28px rgba(0, 0, 0, 0.25));
     color: var(--text-primary, #1a1a1a);
     padding: var(--space-lg, 24px);
     text-align: center;
@@ -50,7 +50,7 @@
 .app-error-btn {
     font-family: var(--font-sans, sans-serif);
     padding: var(--space-xs, 6px) var(--space-md, 16px);
-    border: var(--border-sketch-width, 2px) solid var(--sketch-black, #1a1a1a);
+    border: 1px solid var(--text-primary, #1a1a1a);
     border-radius: var(--radius-sm, 8px);
     background: var(--bg-node, #fdfcf7);
     color: var(--text-primary, #1a1a1a);
@@ -58,7 +58,7 @@
 }
 
 .app-error-btn.primary {
-    background: var(--accent, var(--sketch-black, #1a1a1a));
+    background: var(--accent-primary);
     color: var(--text-on-accent, #fff);
 }
 

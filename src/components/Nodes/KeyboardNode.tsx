@@ -120,7 +120,7 @@ export const KeyboardNode = memo(function KeyboardNode({
                         height: 16,
                         borderRadius: '50%',
                         background: 'var(--accent-success)',
-                        border: '2px solid var(--sketch-black)',
+                        border: '2px solid var(--text-primary)',
                         boxShadow: '0 0 8px var(--accent-success)'
                     }}
                 />

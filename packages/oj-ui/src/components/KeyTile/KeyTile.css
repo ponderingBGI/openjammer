@@ -1,40 +1,32 @@
-/*
- * KeyTile — DESIGN.md §5. A playable key/pad that is itself a port. Ink border,
- * hard blur-free offset shadow that shrinks on press (Press-Is-Physical). The
- * embedded control Port (grey — keys send numbers/triggers, not sound) pins to
- * a corner as the connection anchor. `active` brightens with the accent (no
- * blur, no reflow — No-Surprise). Styled only via semantic tokens, so it
- * follows the active theme.
- */
+
 .oj-key-tile {
     position: relative;
     display: flex;
     align-items: flex-end;
     justify-content: center;
     padding: var(--space-xs);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     background: var(--bg-node);
     color: var(--text-primary);
     font-family: var(--font-sans);
     font-size: var(--text-sm);
     line-height: 1.2;
     cursor: pointer;
-    box-shadow: var(--shadow-sketch);
-    transition: background var(--transition-fast), transform var(--transition-fast),
-        box-shadow var(--transition-fast), color var(--transition-fast);
+    box-shadow: var(--shadow-raised);
+    transition: background var(--motion-fast), transform var(--motion-fast),
+        box-shadow var(--motion-fast), color var(--motion-fast);
 }
 
-/* Press is physical: lift on hover, depress on click; the hard shadow grows
-   and shrinks with the motion (<=4px transform, blur radius 0). */
+
 .oj-key-tile:hover {
     transform: translateY(-1px);
-    box-shadow: 3px 4px 0 var(--sketch-black);
+    box-shadow: var(--shadow-raised);
 }
 
 .oj-key-tile:active,
 .oj-key-tile.is-active {
     transform: translateY(1px);
-    box-shadow: 1px 1px 0 var(--sketch-black);
+    box-shadow: var(--shadow-raised);
 }
 
 /* Lit/pressed: brighten with the accent. State color travels with the key's
@@ -53,7 +45,7 @@
     right: var(--space-xs);
 }
 
-/* Caveat voice — the key/pad's name (note, drum, or glyph). */
+
 .oj-key-tile__label {
     pointer-events: none;
 }
@@ -68,12 +60,12 @@
     background: var(--bg-node);
 }
 
-/* Black key — tall, ink-fill, shorter and narrower; sits proud above whites. */
+
 .oj-key-tile--black {
     width: var(--space-lg);
     height: calc(var(--space-xl) * 2 + var(--space-md));
     border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-    background: var(--sketch-black);
+    background: var(--text-primary);
     color: var(--text-on-accent);
 }
 

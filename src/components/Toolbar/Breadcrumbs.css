@@ -22,14 +22,14 @@
 }
 
 .breadcrumb-separator {
-    color: var(--text-tertiary);
+    color: var(--text-muted);
     font-weight: 400;
     user-select: none;
 }
 
 .breadcrumb-item {
     color: var(--text-secondary);
-    transition: color var(--transition-fast);
+    transition: color var(--motion-fast);
 }
 
 

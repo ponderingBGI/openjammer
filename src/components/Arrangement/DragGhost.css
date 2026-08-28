@@ -13,7 +13,7 @@
     border: 2px solid var(--timeline-selection);
     border-radius: var(--radius-sm);
     background: var(--timeline-clip-bg);
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
     opacity: .96;
     will-change: transform;
 }

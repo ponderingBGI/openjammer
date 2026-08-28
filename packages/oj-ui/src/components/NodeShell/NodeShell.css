@@ -1,37 +1,30 @@
-/*
- * NodeShell — DESIGN.md §5 The Node. White card, 2px ink border, 14px radius,
- * hard node-rest shadow; paper-panel header with a grab cursor. Positioning is
- * the canvas's job, so this shell is deliberately NOT absolutely positioned.
- */
+
 .oj-node {
     min-width: var(--node-min-width);
     background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-node);
+    box-shadow: var(--shadow-raised);
     user-select: none;
-    transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+    transition: box-shadow var(--motion-fast), border-color var(--motion-fast);
 }
 
 .oj-node.is-selected {
     border-color: var(--accent-primary);
-    box-shadow: var(--shadow-node),
+    box-shadow: var(--shadow-raised),
         0 0 0 3px color-mix(in srgb, var(--accent-primary) 25%, transparent);
 }
 
 .oj-node.is-dragging {
     opacity: 0.95;
     cursor: grabbing;
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
 }
 
-/* Agent-pending — the AI just added this node (not yet undone), shown on the
-   live canvas. An audio-blue HARD ring (spread only, blur 0 — Hard-Shadow),
-   without moving the node (No-Surprise). The breath is a state pulse, stilled
-   for reduced motion. */
+
 .oj-node.is-agent-pending {
     border-color: var(--audio-connected);
-    box-shadow: var(--shadow-node),
+    box-shadow: var(--shadow-raised),
         0 0 0 3px color-mix(in srgb, var(--audio-connected) 45%, transparent);
     animation: oj-agent-pending 1.2s ease-in-out infinite;
 }
@@ -39,11 +32,11 @@
 @keyframes oj-agent-pending {
     0%,
     100% {
-        box-shadow: var(--shadow-node),
+        box-shadow: var(--shadow-raised),
             0 0 0 2px color-mix(in srgb, var(--audio-connected) 28%, transparent);
     }
     50% {
-        box-shadow: var(--shadow-node),
+        box-shadow: var(--shadow-raised),
             0 0 0 4px color-mix(in srgb, var(--audio-connected) 55%, transparent);
     }
 }
@@ -77,12 +70,12 @@
     color: var(--text-muted);
 }
 .oj-node__window { flex: 0 0 28px; width: 28px; height: 28px; margin-left: 4px; padding: 0; border: 0; background: transparent; color: var(--text-muted); font: 600 15px/1 var(--font-sans); }
-.oj-node__window[aria-pressed="true"] { background: var(--sketch-black); color: var(--text-on-accent); }
-.oj-node.is-window-open .oj-node__header { box-shadow: inset 0 -2px 0 var(--sketch-black); }
+.oj-node__window[aria-pressed="true"] { background: var(--text-primary); color: var(--text-on-accent); }
+.oj-node.is-window-open .oj-node__header { box-shadow: inset 0 -2px 0 var(--text-primary); }
 .oj-node.is-bypassed { background: var(--bg-tertiary); }
 .oj-node.is-bypassed .oj-node__title { text-decoration: line-through; }
-.oj-node.is-bypassed .oj-node__content::after { content: ''; position: absolute; right: 0; left: 0; top: 50%; height: 1px; background: var(--sketch-black); pointer-events: none; }
-.oj-node.is-watchdog-bypassed { box-shadow: var(--shadow-node), inset 0 0 0 1px var(--accent-warning); }
+.oj-node.is-bypassed .oj-node__content::after { content: ''; position: absolute; right: 0; left: 0; top: 50%; height: 1px; background: var(--text-primary); pointer-events: none; }
+.oj-node.is-watchdog-bypassed { box-shadow: var(--shadow-raised), inset 0 0 0 1px var(--accent-warning); }
 
 .oj-node__content {
     position: relative;

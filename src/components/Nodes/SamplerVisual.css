@@ -23,7 +23,7 @@
     min-width: 160px;
     max-width: 240px;
     background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
     overflow: visible;
     color: var(--text-primary);
@@ -139,10 +139,10 @@
     padding: 1px 4px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-xs);
+    border-radius: var(--radius-sm);
     cursor: ns-resize;
     user-select: none;
-    transition: background var(--transition-fast), border-color var(--transition-fast);
+    transition: background var(--motion-fast), border-color var(--motion-fast);
     white-space: nowrap;
 }
 
@@ -169,13 +169,13 @@
     height: 12px;
     border-radius: 50%;
     background: var(--bg-tertiary);
-    border: 1px dashed var(--control-input);
+    border: 1px dashed var(--control-connection);
     cursor: crosshair;
-    transition: background var(--transition-fast), border var(--transition-fast), transform var(--transition-fast);
+    transition: background var(--motion-fast), border var(--motion-fast), transform var(--motion-fast);
 }
 
 .sampler-placeholder-port:hover {
-    background: var(--control-input);
+    background: var(--control-connection);
     border-style: solid;
     transform: scale(1.2);
 }
@@ -183,7 +183,7 @@
 .sampler-placeholder-port:focus-visible {
     outline: 2px solid var(--accent-primary);
     outline-offset: 2px;
-    background: var(--control-input);
+    background: var(--control-connection);
     border-style: solid;
 }
 
@@ -208,10 +208,10 @@
     width: 12px;
     height: 12px;
     border-radius: 50%;
-    background: var(--control-input);
-    border: 1px solid var(--sketch-black);
+    background: var(--control-connection);
+    border: 1px solid var(--border-strong);
     cursor: crosshair;
-    transition: transform var(--transition-fast), filter var(--transition-fast);
+    transition: transform var(--motion-fast), filter var(--motion-fast);
 }
 
 .sampler-key-port:hover {

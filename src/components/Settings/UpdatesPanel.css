@@ -1,8 +1,4 @@
-/* Settings → Updates.
-   One emphasized "hero" surface for the current state, everything else flat on
-   the panel ground and separated by hairline dividers — so the whole tab reads
-   as one calm screen with no scroll, instead of a stack of bordered boxes.
-   Living Sketchbook: Caveat for labels, JetBrains Mono for versions. */
+
 
 .oj-upd {
     display: flex;

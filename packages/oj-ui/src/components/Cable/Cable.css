@@ -22,7 +22,7 @@
     opacity: calc(0.7 + var(--oj-cable-signal) * 0.3);
     filter: drop-shadow(0 0 calc(var(--oj-cable-signal) * 6px) currentColor);
     transition: stroke-width 0.03s ease-out, opacity 0.03s ease-out,
-        filter 0.03s ease-out, stroke var(--transition-fast);
+        filter 0.03s ease-out, stroke var(--motion-fast);
 }
 
 /* Wiring colors — the legend. The type is the source of truth. */

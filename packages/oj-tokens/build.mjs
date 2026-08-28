@@ -4,7 +4,7 @@
  *
  *   dist/variables.css         the theme-invariant primitives, on :root
  *   src/generated/themes.ts    the per-theme color registry (typed)
- *   ../oj-ui/oj-tokens.css      the default (cream) theme as a STATIC :root block
+ *   ../oj-ui/oj-tokens.css      the default (light) theme as a STATIC :root block
  *                              (primitives + semantic colors) — design-sync's
  *                              preview cards render statically, so they need the
  *                              colors applyTheme would otherwise inject at runtime.
@@ -29,9 +29,8 @@ const r = (...p) => join(__dirname, ...p);
 
 /** id -> human name. Order here is the order themes appear in the UI picker. */
 const THEMES = [
-    { id: 'cream', name: 'Cream' },
-    { id: 'cyberpunk', name: 'Cyberpunk' },
-    { id: 'midnight', name: 'Midnight Blue' },
+    { id: 'light', name: 'Light' },
+    { id: 'dark', name: 'Dark' },
 ];
 
 const CSS_HEADER =
@@ -116,23 +115,23 @@ await fs.writeFile(r('src/generated/themes.ts'), ts, 'utf8');
 // 3) Design-sync static snapshot -> ../oj-ui/oj-tokens.css -------------------
 // The semantic colors are applied at runtime by applyTheme, so they live in no
 // static stylesheet. design-sync's preview cards render statically and need them,
-// so emit the default (cream) theme's colors as a :root block appended to the
+// so emit the default (light) theme's values as a :root block appended to the
 // primitives. Regenerated here so a single `bun run tokens` keeps it in lockstep
 // with the rest — the CI drift guard then makes a stale snapshot impossible.
 const camelToKebab = (s) => s.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
-const creamRoot =
+const lightRoot =
     ':root {\n' +
-    Object.entries(themeColors.cream)
+    Object.entries(themeColors.light)
         .map(([k, v]) => `    --${camelToKebab(k)}: ${v};`)
         .join('\n') +
     '\n}\n';
 const ojTokensCss =
     CSS_HEADER +
     css.trimStart().trimEnd() +
-    '\n\n/* Default "cream" theme semantic colors as a static :root block — the app\n' +
+    '\n\n/* Default "light" theme semantic values as a static :root block — the app\n' +
     '   applies these at runtime via applyTheme; design-sync preview cards need them\n' +
     '   statically (wired via cfg.cssEntry). */\n' +
-    creamRoot;
+    lightRoot;
 await fs.writeFile(r('../oj-ui/oj-tokens.css'), ojTokensCss, 'utf8');
 
 console.log(

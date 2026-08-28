@@ -13,7 +13,7 @@
     width: 100%;
     background: var(--bg-tertiary);
     color: var(--text-primary);
-    border: var(--border-sketch-width, 2px) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md, 6px);
     padding: 8px 20px;
     font-family: var(--font-sans);
@@ -25,7 +25,7 @@
 }
 
 .midi-connect-btn:hover {
-    background: var(--bg-hover);
+    background: var(--bg-tertiary);
     transform: scale(1.02);
 }
 
@@ -44,14 +44,14 @@
     align-items: center;
     gap: 4px;
     padding: 16px;
-    color: var(--sketch-gray, #666);
+    color: var(--text-secondary, #666);
     font-size: 11px;
     text-align: center;
 }
 
 .midi-browser-hint {
     font-size: 9px;
-    color: var(--sketch-gray, #999);
+    color: var(--text-secondary, #999);
 }
 
 /* Rename input in header */
@@ -59,7 +59,7 @@
     width: 100%;
     background: var(--bg-secondary);
     color: var(--text-primary);
-    border: 1px solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm, 4px);
     padding: 2px 6px;
     font-family: var(--font-sans);
@@ -70,6 +70,6 @@
 }
 
 .midi-rename-input:focus {
-    border-color: var(--color-primary, #4a9eff);
-    box-shadow: 0 0 0 1px var(--color-primary, #4a9eff);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px var(--accent-primary);
 }

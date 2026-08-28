@@ -1,5 +1,5 @@
 .plugin-browser, .plugin-window-shell {
-    --hatch-benched: repeating-linear-gradient(45deg, color-mix(in srgb, var(--sketch-black) 12%, transparent) 0 1px, transparent 1px 6px);
+    --hatch-benched: repeating-linear-gradient(45deg, color-mix(in srgb, var(--text-primary) 12%, transparent) 0 1px, transparent 1px 6px);
     --plugin-strip-h: 28px;
 }
 .plugin-browser { width: 720px; height: 560px; display: grid; grid-template-rows: 44px 40px 32px minmax(0, 1fr) 48px; overflow: hidden; background: var(--bg-node); }
@@ -24,7 +24,7 @@
 .plugin-browser__none { margin: 24px 12px; opacity: .5; font: 400 15px/1.4 var(--font-sans); }
 .plugin-browser__status { position: relative; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-top: 1px solid var(--border-subtle); background: var(--bg-node-header); color: var(--text-secondary); font: 400 14px/1.2 var(--font-sans); }
 .plugin-browser__status button { padding: 0; border: 0; background: transparent; color: var(--text-primary); font: inherit; text-decoration: underline; cursor: pointer; }
-.plugin-browser__ruler { position: absolute; right: 0; bottom: 0; left: 0; height: 1px; background: color-mix(in srgb, var(--sketch-black) 35%, transparent); transform-origin: left; transition: transform 120ms linear; }
+.plugin-browser__ruler { position: absolute; right: 0; bottom: 0; left: 0; height: 1px; background: color-mix(in srgb, var(--text-primary) 35%, transparent); transform-origin: left; transition: transform 120ms linear; }
 .plugin-browser__quarantine { position: absolute; right: 0; bottom: 48px; left: 0; z-index: 1; height: 220px; padding: 12px 16px; overflow: auto; border-top: 2px solid var(--border-strong); background: var(--bg-node); }
 .plugin-browser__quarantine h3 { margin: 0; font: 600 18px/1.2 var(--font-sans); }
 .plugin-browser__quarantine p { margin: 4px 0 8px; max-width: 65ch; color: var(--text-secondary); font: 400 14px/1.4 var(--font-sans); }

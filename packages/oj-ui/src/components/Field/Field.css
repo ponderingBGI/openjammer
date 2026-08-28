@@ -1,4 +1,4 @@
-/* Field — labeled control group. Label uses the Caveat voice (DESIGN.md §3). */
+
 .oj-field {
     display: flex;
     flex-direction: column;

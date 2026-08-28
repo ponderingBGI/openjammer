@@ -38,7 +38,7 @@
     align-items: center;
     gap: var(--space-sm);
     padding: var(--space-sm) var(--space-md);
-    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
+    border-bottom: 1px solid var(--border-strong);
 }
 
 .devlog-chips {
@@ -69,7 +69,7 @@
     font-size: var(--text-xs);
     color: var(--text-primary);
     background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
-    border-bottom: var(--border-sketch-width) solid var(--sketch-black);
+    border-bottom: 1px solid var(--border-strong);
 }
 
 /* ── Log list (windowed) ─────────────────────────────────────────────────── */
@@ -108,7 +108,7 @@
     padding: 0 var(--space-md);
     box-sizing: border-box;
     white-space: nowrap;
-    border-bottom: 1px solid color-mix(in srgb, var(--sketch-black) 8%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--text-primary) 8%, transparent);
 }
 
 .devlog-row[data-clickable='true'] {

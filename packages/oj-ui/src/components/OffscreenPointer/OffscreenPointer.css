@@ -1,25 +1,18 @@
-/*
- * OffscreenPointer — a floating, inked "jump back" affordance. Replicates the
- * Button look (2px ink border, Caveat label, hard offset shadow) without
- * importing Button. Styled only via semantic tokens (no literal colours, no
- * raw px). Per DESIGN.md Hard-Shadow the shadow never blurs, and per No-Surprise
- * hover/press feedback is colour/border + a <=4px transform — the box never
- * resizes or reflows. The arrow alone rotates to face the offscreen content.
- */
+
 .oj-offscreen-pointer {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: var(--space-sm);
     padding: var(--space-lg);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
     background: var(--bg-node);
     color: var(--text-primary);
     cursor: pointer;
-    box-shadow: var(--shadow-menu);
-    transition: background var(--transition-fast), border-color var(--transition-fast),
-        transform var(--transition-fast);
+    box-shadow: var(--shadow-overlay);
+    transition: background var(--motion-fast), border-color var(--motion-fast),
+        transform var(--motion-fast);
 }
 
 .oj-offscreen-pointer:hover {

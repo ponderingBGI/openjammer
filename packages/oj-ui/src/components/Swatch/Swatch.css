@@ -1,21 +1,15 @@
-/*
- * Swatch — a theme preview card. 2px ink border, lg radius, Caveat name; the
- * selected swatch gains a hard 0-blur --accent-primary ring (Hard-Shadow Rule).
- * Frame/border/radius/ring read semantic tokens only — the bg/node colors are
- * theme DATA applied inline by the component, never literals in CSS. No layout
- * shift on hover/select (No-Surprise): feedback is border + ring + <=1px lift.
- */
+
 .oj-swatch {
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
     padding: var(--space-xs);
-    border: var(--border-sketch-width) solid var(--border-strong);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
     background: var(--bg-node);
     cursor: pointer;
-    transition: border-color var(--transition-fast), transform var(--transition-fast),
-        box-shadow var(--transition-fast);
+    transition: border-color var(--motion-fast), transform var(--motion-fast),
+        box-shadow var(--motion-fast);
 }
 
 .oj-swatch:hover {
@@ -27,7 +21,7 @@
     transform: translateY(1px);
 }
 
-/* Selected — accent border plus a hard (0-blur) accent ring (DESIGN.md §Node). */
+
 .oj-swatch.is-selected {
     border-color: var(--accent-primary);
     box-shadow: 0 0 0 3px var(--accent-primary);
@@ -40,7 +34,7 @@
     justify-content: center;
     height: var(--space-xl);
     border-radius: var(--radius-sm);
-    border: var(--border-sketch-width) solid var(--border-subtle);
+    border: 1px solid var(--border-subtle);
 }
 
 /* The inset node chip — fills with the theme node color (inline data). */
@@ -48,10 +42,10 @@
     width: var(--space-lg);
     height: var(--space-md);
     border-radius: var(--radius-sm);
-    border: var(--border-sketch-width) solid var(--border-subtle);
+    border: 1px solid var(--border-subtle);
 }
 
-/* The theme name — Caveat voice (Caveat-Is-the-Voice). */
+
 .oj-swatch__name {
     font-family: var(--font-sans);
     font-size: var(--text-sm);

@@ -33,7 +33,7 @@ const frame = (label: string, children: ReactNode) => (
                 width: 360,
                 padding: 'var(--space-sm)',
                 background: 'var(--bg-node)',
-                border: 'var(--border-sketch-width) solid var(--border-subtle)',
+                border: '1px solid var(--border-subtle)',
                 borderRadius: 'var(--radius-md)',
             }}
         >

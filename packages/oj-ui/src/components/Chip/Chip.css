@@ -1,25 +1,19 @@
-/*
- * Chip — a small pill/badge. Rounded (--radius-pill), Caveat voice, compact.
- * Styled only via semantic tokens (no literal colors), so it follows the active
- * theme. Toned variants tint border + text via the state accent tokens and
- * always travel with a label or glyph (Signal-Not-Brand) — the color reports
- * state, it never becomes the surface's brand.
- */
+
 .oj-chip {
     display: inline-flex;
     align-items: center;
     gap: var(--space-xs);
     max-width: 100%;
     padding: var(--space-xs) var(--space-sm);
-    border: var(--border-sketch-width) solid var(--border-subtle);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-pill);
     font-family: var(--font-sans);
     font-size: var(--text-sm);
     line-height: 1;
     background: var(--bg-tertiary);
     color: var(--text-secondary);
-    transition: background var(--transition-fast), border-color var(--transition-fast),
-        color var(--transition-fast);
+    transition: background var(--motion-fast), border-color var(--motion-fast),
+        color var(--motion-fast);
 }
 
 /* Toned variants — state color on border + text, surface stays neutral
@@ -39,8 +33,7 @@
     color: var(--accent-danger);
 }
 
-/* Pressed — a toggled filter chip. Color/border feedback only, no transform
-   or reflow (No-Surprise): the stronger border + ink text read as "on". */
+
 .oj-chip.is-pressed {
     background: var(--bg-secondary);
     border-color: var(--border-strong);

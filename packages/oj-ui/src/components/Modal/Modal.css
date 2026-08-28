@@ -1,9 +1,4 @@
-/*
- * Modal — the single overlay dialog (replaces the hand-rolled overlays). A
- * fixed full-viewport scrim washes the canvas with --overlay-scrim (no blur —
- * the Hard-Shadow Rule forbids backdrop-filter) and flex-aligns a lifted
- * Surface panel. Styled only via semantic tokens, so it follows the theme.
- */
+
 .oj-modal__scrim {
     position: fixed;
     inset: 0;

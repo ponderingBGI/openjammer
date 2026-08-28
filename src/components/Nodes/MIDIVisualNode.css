@@ -3,8 +3,8 @@
  */
 
 .midi-visual-node {
-    background: var(--sketch-paper, #fafafa);
-    border: 3px solid var(--sketch-black, #1a1a1a);
+    background: var(--bg-node);
+    border: 3px solid var(--text-primary, #1a1a1a);
     border-radius: 8px;
     min-width: 400px;
     position: absolute;
@@ -34,14 +34,14 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: var(--sketch-gray, #666);
+    color: var(--text-secondary, #666);
 }
 
 /* Keyboard visualization */
 .midi-visual-keyboard {
     display: flex;
     height: 60px;
-    border: 2px solid var(--sketch-black, #1a1a1a);
+    border: 2px solid var(--text-primary, #1a1a1a);
     border-radius: 4px;
     overflow: hidden;
 }
@@ -51,7 +51,7 @@
     min-width: 12px;
     cursor: pointer;
     transition: background 0.1s;
-    border-right: 1px solid var(--sketch-gray, #ccc);
+    border-right: 1px solid var(--text-secondary, #ccc);
 }
 
 .midi-key:last-child {
@@ -63,15 +63,15 @@
 }
 
 .midi-key.white:hover {
-    background: var(--sketch-paper, #f0f0f0);
+    background: var(--bg-tertiary);
 }
 
 .midi-key.white.connected {
-    background: var(--accent-success-light, #dcfce7);
+    background: color-mix(in srgb, var(--accent-success) 14%, var(--bg-node));
 }
 
 .midi-key.black {
-    background: var(--sketch-black, #1a1a1a);
+    background: var(--text-primary, #1a1a1a);
     flex: 0.6;
     height: 65%;
     margin-left: -4px;
@@ -97,12 +97,12 @@
 
 .midi-pad {
     aspect-ratio: 1;
-    background: var(--sketch-black, #1a1a1a);
+    background: var(--text-primary, #1a1a1a);
     border-radius: 6px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--sketch-paper, #fafafa);
+    color: var(--bg-node);
     font-size: 10px;
     font-weight: 500;
     cursor: pointer;
@@ -138,8 +138,8 @@
     width: 32px;
     height: 32px;
     border-radius: 50%;
-    background: var(--sketch-black, #1a1a1a);
-    border: 3px solid var(--sketch-gray, #666);
+    background: var(--text-primary, #1a1a1a);
+    border: 3px solid var(--text-secondary, #666);
     position: relative;
     transition: border-color 0.15s;
 }
@@ -157,7 +157,7 @@
 }
 
 .midi-knob:hover .midi-knob-dial {
-    border-color: var(--sketch-black, #1a1a1a);
+    border-color: var(--text-primary, #1a1a1a);
 }
 
 .midi-knob.connected .midi-knob-dial {
@@ -166,7 +166,7 @@
 
 .midi-knob-label {
     font-size: 10px;
-    color: var(--sketch-gray, #666);
+    color: var(--text-secondary, #666);
 }
 
 /* Fader row */
@@ -187,8 +187,8 @@
 .midi-fader-track {
     width: 12px;
     height: 60px;
-    background: var(--sketch-gray, #ddd);
-    border: 2px solid var(--sketch-black, #1a1a1a);
+    background: var(--text-secondary, #ddd);
+    border: 2px solid var(--text-primary, #1a1a1a);
     border-radius: 6px;
     position: relative;
 }
@@ -200,7 +200,7 @@
     left: -4px;
     top: 50%;
     transform: translateY(-50%);
-    background: var(--sketch-black, #1a1a1a);
+    background: var(--text-primary, #1a1a1a);
     border-radius: 3px;
 }
 
@@ -210,7 +210,7 @@
 
 .midi-fader-label {
     font-size: 10px;
-    color: var(--sketch-gray, #666);
+    color: var(--text-secondary, #666);
 }
 
 /* Touch strips */
@@ -231,8 +231,8 @@
 .midi-strip-track {
     width: 100%;
     height: 24px;
-    background: var(--sketch-gray, #ddd);
-    border: 2px solid var(--sketch-black, #1a1a1a);
+    background: var(--text-secondary, #ddd);
+    border: 2px solid var(--text-primary, #1a1a1a);
     border-radius: 4px;
     position: relative;
 }
@@ -243,7 +243,7 @@
     height: 100%;
     left: 50%;
     transform: translateX(-50%);
-    background: var(--sketch-black, #1a1a1a);
+    background: var(--text-primary, #1a1a1a);
 }
 
 .midi-strip.connected .midi-strip-track {
@@ -252,7 +252,7 @@
 
 .midi-strip-label {
     font-size: 10px;
-    color: var(--sketch-gray, #666);
+    color: var(--text-secondary, #666);
 }
 
 /* Port list on right side */
@@ -261,7 +261,7 @@
     flex-direction: column;
     gap: 4px;
     margin-top: 8px;
-    border-top: 1px solid var(--sketch-gray, #ccc);
+    border-top: 1px solid var(--text-secondary, #ccc);
     padding-top: 8px;
 }
 
@@ -289,8 +289,8 @@
     right: -120px;
     top: 50%;
     transform: translateY(-50%);
-    background: var(--sketch-paper, #fafafa);
-    border: 2px solid var(--sketch-black, #1a1a1a);
+    background: var(--bg-node);
+    border: 2px solid var(--text-primary, #1a1a1a);
     border-radius: 6px;
     padding: 8px;
     margin: 0;
@@ -306,7 +306,7 @@
 
 .midi-visual-node.minilab3-wrapper .minilab3-ports .port-label {
     font-size: 10px;
-    color: var(--sketch-gray, #666);
+    color: var(--text-secondary, #666);
     white-space: nowrap;
 }
 
@@ -331,7 +331,7 @@
     align-items: center;
     padding: var(--space-sm, 8px) var(--space-md, 16px);
     background: var(--bg-node-header);
-    border: var(--border-sketch-width, 2px) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-bottom: none;
     border-radius: var(--radius-lg, 8px) var(--radius-lg, 8px) 0 0;
     margin-bottom: -2px;
@@ -357,7 +357,7 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: var(--bg-overlay, rgba(250, 250, 250, 0.9));
+    background: var(--overlay-scrim);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -369,7 +369,7 @@
 .minilab3-connect-btn {
     background: var(--bg-tertiary);
     color: var(--text-primary);
-    border: var(--border-sketch-width, 2px) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md, 8px);
     padding: 12px 24px;
     font-family: var(--font-sans);
@@ -380,7 +380,7 @@
 }
 
 .minilab3-connect-btn:hover {
-    background: var(--bg-hover);
+    background: var(--bg-tertiary);
     transform: scale(1.05);
 }
 
@@ -402,7 +402,7 @@
 }
 
 .midi-status-dot.disconnected {
-    background: var(--sketch-gray, #666);
+    background: var(--text-secondary, #666);
 }
 
 /* Unsupported message */
@@ -412,23 +412,23 @@
     align-items: center;
     gap: 4px;
     padding: 20px;
-    background: var(--sketch-paper, #fafafa);
-    border: 2px solid var(--sketch-gray, #ccc);
+    background: var(--bg-node);
+    border: 2px solid var(--text-secondary, #ccc);
     border-radius: 8px;
-    color: var(--sketch-gray, #666);
+    color: var(--text-secondary, #666);
     font-size: 12px;
 }
 
 .midi-browser-hint {
     font-size: 10px;
-    color: var(--sketch-gray, #999);
+    color: var(--text-secondary, #999);
 }
 
 /* Connect button within keyboard-schematic-body */
 .minilab3-node .schematic-connect-btn {
     background: var(--bg-secondary, #f0f0f0);
     color: var(--text-primary);
-    border: 2px solid var(--sketch-black);
+    border: 2px solid var(--text-primary);
     border-radius: var(--radius-md, 6px);
     padding: var(--space-sm, 8px) var(--space-md, 16px);
     font-family: var(--font-sans);
@@ -440,7 +440,7 @@
 }
 
 .minilab3-node .schematic-connect-btn:hover {
-    background: var(--bg-hover, #e0e0e0);
+    background: var(--bg-tertiary);
     transform: scale(1.02);
 }
 

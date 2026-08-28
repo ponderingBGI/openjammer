@@ -9,12 +9,11 @@ consumes. This package replaces the old hand-maintained `src/styles/themes.ts` +
 ## Token tiers
 
 1. **Primitive** (`tokens/primitive.json`) — theme-invariant scales: spacing,
-   radius, type sizes, font families, motion, shadows, border width. These
+   radius, type sizes, font families, and motion. These
    compile to `:root` CSS custom properties.
-2. **Theme** (`tokens/themes/<id>.json`) — the per-theme color sets. Each theme
-   provides values for the **semantic** color contract: the `--bg-*`, `--text-*`,
-   `--accent-*`, `--audio-*`, `--control-*`, `--universal-*`, `--sketch-*`, and
-   `--border-*` custom properties that every component reads. A theme is just a
+2. **Theme** (`tokens/themes/<id>.json`) — the Light and Dark value sets. Each theme
+   provides the **semantic** contract: colors plus theme-sensitive shadows, focus,
+   and overlay values. A theme is just a
    swappable set of these values — built-in themes and any user skin are the same
    shape.
 
@@ -30,8 +29,8 @@ consumes. This package replaces the old hand-maintained `src/styles/themes.ts` +
 - `src/generated/themes.ts` — the typed `Theme[]` registry used by the runtime
   engine (`applyTheme`, `getThemeById`, `getSavedThemeId`, `saveThemeId`).
 
-Output is deterministic (no timestamps), so CI drift-guards it with
-`git diff --exit-code`. Both artifacts are committed.
+The build also emits `../oj-ui/oj-tokens.css`, a static Light snapshot for design
+previews. Output is deterministic (no timestamps), so all three artifacts are committed.
 
 ## Consuming it
 
@@ -48,6 +47,6 @@ custom properties onto `:root` (pure DOM style writes — never the audio path).
 - **A theme** → add `tokens/themes/<id>.json` (mirror an existing file's `color`
   group) and register its `{ id, name }` in `build.mjs`'s `THEMES` list.
 - **A semantic color token** → add the key to every `tokens/themes/*.json` and to
-  the `ThemeColors` interface in `src/types.ts`.
+  the `ThemeValues` interface in `src/types.ts`.
 
 Then `bun run tokens` and commit the regenerated outputs.

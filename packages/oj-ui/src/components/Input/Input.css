@@ -3,7 +3,7 @@
     width: 100%;
     padding: var(--space-xs) var(--space-sm);
     background: var(--bg-canvas);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-size: var(--text-sm);

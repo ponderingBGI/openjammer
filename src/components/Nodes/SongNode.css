@@ -1,5 +1,4 @@
-/* Song Node — collapsed on-canvas card (Living Sketchbook: paper, ink, Outfit,
-   a hard blur-free offset shadow). Mirrors the instrument-visual node's voice. */
+
 
 .song-node {
     position: absolute;
@@ -8,7 +7,7 @@
     border-radius: 8px;
     min-width: 200px;
     font-family: var(--font-sans);
-    box-shadow: 3px 3px 0 rgba(0, 0, 0, 0.12);
+    box-shadow: var(--shadow-raised);
     display: flex;
     flex-direction: column;
     user-select: none;

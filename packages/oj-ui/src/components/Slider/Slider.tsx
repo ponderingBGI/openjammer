@@ -19,8 +19,8 @@ export interface SliderProps
 
 /**
  * The OpenJammer range slider. A token-driven track (`--bg-tertiary` rail,
- * `--sketch-light` fill) with a hand-drawn thumb (`--accent-primary` fill, 2px
- * `--sketch-black` ink border). Stateless: render from `value`, report through
+ * `--text-muted` fill) with a hand-drawn thumb (`--accent-primary` fill, 2px
+ * `--text-primary` ink border). Stateless: render from `value`, report through
  * `onChange`. No layout shift on interaction (DESIGN.md No-Surprise) — feedback
  * is color and a ≤2px transform only. Theme-agnostic; styled entirely via
  * semantic CSS variables.

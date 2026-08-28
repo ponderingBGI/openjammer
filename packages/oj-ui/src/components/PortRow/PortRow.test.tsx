@@ -13,7 +13,7 @@ describe('PortRow', () => {
     it('renders a Port with the row direction and kind color', () => {
         const { container } = render(<PortRow side="output" kind="audio" label="Out" />);
         const port = container.querySelector('.oj-port')!;
-        expect(port.className).toContain('oj-port--audio-output');
+        expect(port.className).toContain('oj-port--audio');
     });
 
     it('reverses to output layout', () => {
@@ -31,7 +31,7 @@ describe('PortRow', () => {
         const { container } = render(
             <PortRow side="output" kind="universal" label="R" connected resolvedKind="audio" />,
         );
-        expect(container.querySelector('.oj-port')!.className).toContain('oj-port--audio-output');
+        expect(container.querySelector('.oj-port')!.className).toContain('oj-port--audio');
     });
 
     it('marks a placeholder row and Port', () => {

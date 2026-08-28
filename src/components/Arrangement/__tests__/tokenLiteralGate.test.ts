@@ -38,3 +38,22 @@ describe('Plugin component color gate', () => {
         expect(offenders).toEqual([]);
     });
 });
+
+describe('S2b CSS invariants', () => {
+    it('keeps every port state free of glow shadows', () => {
+        const port = readFileSync(join(process.cwd(), 'packages/oj-ui/src/components/Port/Port.css'), 'utf8');
+        expect(port).not.toContain('box-shadow');
+    });
+
+    it('removes the Speaker range input outer track', () => {
+        const nodes = readFileSync(join(process.cwd(), 'src/components/Nodes/SchematicNodes.css'), 'utf8');
+        expect(nodes).toMatch(/\.speaker-volume-slider\s*{[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
+    });
+
+    it('uses the single fast-motion token in CSS', () => {
+        const roots = ['src', 'packages/oj-ui/src'].map((root) => join(process.cwd(), root));
+        const sources = roots.flatMap(cssFiles).map((path) => readFileSync(path, 'utf8'));
+        expect(sources.some((source) => source.includes('--transition-fast'))).toBe(false);
+        expect(sources.some((source) => source.includes('--motion-fast'))).toBe(true);
+    });
+});

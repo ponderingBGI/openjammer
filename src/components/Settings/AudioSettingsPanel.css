@@ -154,7 +154,7 @@
     font-weight: 600;
     color: var(--text-secondary);
     padding: var(--space-xs) 0;
-    transition: color var(--transition-fast);
+    transition: color var(--motion-fast);
 }
 
 .oj-aud-advanced > summary:hover {

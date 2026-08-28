@@ -31,7 +31,7 @@
     min-width: 0;
     margin: 0;
     padding: var(--space-sm);
-    border: 2px solid var(--sketch-black);
+    border: 2px solid var(--text-primary);
     border-radius: var(--radius-sm);
 }
 
@@ -79,10 +79,10 @@
     flex-wrap: wrap;
     gap: var(--space-sm) var(--space-md);
     padding: var(--space-md);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-md);
     background: var(--bg-node);
-    box-shadow: 2px 2px 0 var(--sketch-black);
+    box-shadow: var(--shadow-raised);
 }
 
 .export-stats > div {

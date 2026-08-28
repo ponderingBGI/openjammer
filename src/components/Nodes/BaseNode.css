@@ -1,6 +1,4 @@
-/**
- * BaseNode.css - Hand-drawn sketch theme for nodes
- */
+
 
 /* The node card (container + selected/dragging/agent-pending states), its header
    (title/type), content, and the left/right port rails are now the oj-ui
@@ -52,7 +50,7 @@
     flex: 1;
     padding: var(--space-xs) var(--space-sm);
     background: var(--bg-canvas);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     color: var(--text-primary);
     font-family: var(--font-sans);
@@ -80,7 +78,7 @@
     justify-content: space-between;
     padding: var(--space-xs) var(--space-sm);
     background: var(--bg-canvas);
-    border: 1px solid var(--sketch-light);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     margin-bottom: var(--space-xs);
     font-family: var(--font-sans);
@@ -109,10 +107,10 @@
 }
 
 .loop-list::-webkit-scrollbar-thumb {
-    background: var(--sketch-light);
+    background: var(--text-muted);
     border-radius: 3px;
 }
 
 .loop-list::-webkit-scrollbar-thumb:hover {
-    background: var(--sketch-gray);
+    background: var(--text-secondary);
 }

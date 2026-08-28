@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Button, Tabs } from '@openjammer/oj-ui';
+import { useEffect, useRef, useState } from 'react';
+import { Button, Swatch, Tabs } from '@openjammer/oj-ui';
 import { themes, applyTheme, getThemeById, getSavedThemeId, saveThemeId } from '@openjammer/oj-tokens';
 import { KeybindingsPanelSafe } from './KeybindingsPanel';
 import { AudioSettingsPanel } from './AudioSettingsPanel';
@@ -20,7 +20,19 @@ const TABS = [
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
     const [activeTab, setActiveTab] = useState('graphics');
     const [selectedTheme, setSelectedTheme] = useState(getSavedThemeId());
+    const themeGroupRef = useRef<HTMLDivElement>(null);
     useModalKeymap('settings', true);
+
+    useEffect(() => {
+        const syncTheme = () => setSelectedTheme(getSavedThemeId());
+        window.addEventListener('openjammer:theme-change', syncTheme);
+        window.addEventListener('storage', syncTheme);
+        syncTheme();
+        return () => {
+            window.removeEventListener('openjammer:theme-change', syncTheme);
+            window.removeEventListener('storage', syncTheme);
+        };
+    }, []);
 
     const handleThemeChange = (themeId: string) => {
         setSelectedTheme(themeId);
@@ -66,28 +78,33 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                         {activeTab === 'graphics' && (
                             <div className="settings-section">
                                 <h3 style={{ marginTop: 0, marginBottom: '24px' }}>Interface Theme</h3>
-                                <div className="minimal-theme-grid">
-                                    {themes.map(theme => (
-                                        <div
+                                <div className="minimal-theme-grid" role="radiogroup" aria-label="Interface theme" ref={themeGroupRef}>
+                                    {themes.map((theme, index) => (
+                                        <Swatch
                                             key={theme.id}
-                                            className={`minimal-theme-card ${selectedTheme === theme.id ? 'active' : ''}`}
-                                            onClick={() => handleThemeChange(theme.id)}
-                                        >
-                                            <div
-                                                style={{
-                                                    height: '60px',
-                                                    background: theme.colors.bgPrimary,
-                                                    borderRadius: '4px',
-                                                    marginBottom: '8px',
-                                                    display: 'flex',
-                                                    alignItems: 'center',
-                                                    justifyContent: 'center'
-                                                }}
-                                            >
-                                                <div style={{ width: '30px', height: '20px', background: theme.colors.bgNode, borderRadius: '2px' }} />
-                                            </div>
-                                            <div style={{ fontSize: '0.9rem', fontWeight: 500 }}>{theme.name}</div>
-                                        </div>
+                                            role="radio"
+                                            aria-checked={selectedTheme === theme.id}
+                                            aria-pressed={undefined}
+                                            tabIndex={selectedTheme === theme.id ? 0 : -1}
+                                            bg={theme.colors.bgPrimary}
+                                            node={theme.colors.bgNode}
+                                            name={theme.name}
+                                            selected={selectedTheme === theme.id}
+                                            onSelect={() => handleThemeChange(theme.id)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === ' ') {
+                                                    event.preventDefault();
+                                                    handleThemeChange(theme.id);
+                                                    return;
+                                                }
+                                                const delta = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0;
+                                                if (!delta) return;
+                                                event.preventDefault();
+                                                const next = themes[(index + delta + themes.length) % themes.length]!;
+                                                handleThemeChange(next.id);
+                                                requestAnimationFrame(() => themeGroupRef.current?.querySelector<HTMLButtonElement>(`[role="radio"][aria-checked="true"]`)?.focus());
+                                            }}
+                                        />
                                     ))}
                                 </div>
                             </div>

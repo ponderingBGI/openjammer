@@ -1,6 +1,4 @@
-/**
- * Toolbar.css - Compact Photoshop-style toolbar with sketch theme
- */
+
 
 /* Wrapper to position toolbar + breadcrumbs together */
 .toolbar-wrapper {
@@ -25,7 +23,7 @@
     background: var(--bg-node);
     border: none;
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
     white-space: nowrap;
 }
 
@@ -49,7 +47,7 @@
     flex-shrink: 0;
     width: 1px;
     height: 24px;
-    background: var(--sketch-light);
+    background: var(--text-muted);
     margin: 0 var(--space-xs);
 }
 
@@ -65,7 +63,7 @@
 .toolbar.toolbar-focused {
     border-width: 3px;
     border-color: var(--accent-primary);
-    box-shadow: 0 0 0 2px var(--bg-canvas), 0 0 12px color-mix(in srgb, var(--accent-primary) 40%, transparent), var(--shadow-menu);
+    box-shadow: 0 0 0 2px var(--bg-canvas), 0 0 12px color-mix(in srgb, var(--accent-primary) 40%, transparent), var(--shadow-overlay);
 }
 
 /* ============================================
@@ -78,9 +76,9 @@
     right: var(--space-md);
     padding: var(--space-md);
     background: var(--bg-node);
-    border: var(--border-sketch-width) solid var(--sketch-black);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-menu);
+    box-shadow: var(--shadow-overlay);
     max-width: 300px;
     font-family: var(--font-sans);
     font-size: var(--text-sm);
@@ -107,7 +105,7 @@
     display: inline-block;
     padding: 2px var(--space-sm);
     background: var(--bg-tertiary);
-    border: 1px solid var(--sketch-light);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
@@ -158,7 +156,7 @@
 /* Warning state when no keyboard assigned */
 .help-panel.help-panel-warning {
     border-color: var(--accent-warning);
-    box-shadow: 0 0 0 2px var(--bg-canvas), 0 0 8px color-mix(in srgb, var(--accent-warning) 30%, transparent), var(--shadow-menu);
+    box-shadow: 0 0 0 2px var(--bg-canvas), 0 0 8px color-mix(in srgb, var(--accent-warning) 30%, transparent), var(--shadow-overlay);
 }
 
 .help-mode-warning {

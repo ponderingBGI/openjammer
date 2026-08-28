@@ -64,5 +64,5 @@
   display: flex;
   justify-content: flex-end;
   padding: var(--space-md) var(--space-lg);
-  border-top: var(--border-sketch-width) solid var(--sketch-black);
+  border-top: 1px solid var(--border-strong);
 }

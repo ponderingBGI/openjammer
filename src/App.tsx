@@ -52,7 +52,7 @@ import { useAutoDetectedSampleRate } from './hooks/useAutoDetectedSampleRate';
 import { writeEmergencyBackup } from './persistence/recovery';
 import { collectSaveData } from './persistence/collectSaveData';
 import { useArrangementStore } from './store/arrangementStore';
-import { applyTheme, getSavedThemeId, getThemeById } from '@openjammer/oj-tokens';
+import { getSavedThemeId } from '@openjammer/oj-tokens';
 import { useUiViewStore, type SurfaceId } from './store/uiViewStore';
 import { useBindingSet, useKeymapArbiter, useModalKeymap } from './keymap/useKeymap';
 import { ArrangementSurface } from './components/Arrangement/ArrangementSurface';
@@ -120,6 +120,9 @@ function App() {
   // The browser tier still shows the welcome screen (its gesture resumes Web Audio).
   const [showActivation, setShowActivation] = useState(() => !isTauri());
   const [showSettings, setShowSettings] = useState(false);
+  const [toastTheme, setToastTheme] = useState<'light' | 'dark'>(() =>
+    getSavedThemeId() === 'dark' ? 'dark' : 'light',
+  );
   const setAudioContextReady = useAudioStore((s) => s.setAudioContextReady);
   const audioConfig = useAudioStore((s) => s.audioConfig);
   const updateAudioMetrics = useAudioStore((s) => s.updateAudioMetrics);
@@ -160,11 +163,16 @@ function App() {
   const recovery = useCrashRecovery();
   useModalKeymap('welcome', Boolean(showActivation || recovery.safeMode));
 
-  // Initialize theme
   useEffect(() => {
-    const savedId = getSavedThemeId();
-    const theme = getThemeById(savedId);
-    if (theme) applyTheme(theme);
+    const syncToastTheme = () => {
+      setToastTheme(getSavedThemeId() === 'dark' ? 'dark' : 'light');
+    };
+    window.addEventListener('openjammer:theme-change', syncToastTheme);
+    window.addEventListener('storage', syncToastTheme);
+    return () => {
+      window.removeEventListener('openjammer:theme-change', syncToastTheme);
+      window.removeEventListener('storage', syncToastTheme);
+    };
   }, []);
 
   // Check if audio is already ready
@@ -734,8 +742,8 @@ function App() {
 
       {/* Toast Notifications */}
       <Toaster
+        theme={toastTheme}
         position="top-left"
-        richColors
         expand={true}
         visibleToasts={5}
         gap={12}

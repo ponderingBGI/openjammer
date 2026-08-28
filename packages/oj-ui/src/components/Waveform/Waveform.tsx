@@ -33,7 +33,7 @@ const CENTER_Y = VIEW_H / 2;
 
 /**
  * A pure-SVG waveform trace. Reads only semantic tokens: the stroke is
- * `--audio-output` (or `--accent-danger` while `recording`), the playhead is a
+ * `--audio-connection` (or `--accent-danger` while `recording`), the playhead is a
  * thin `--accent-primary` line, the optional center axis is `--border-subtle`.
  * No literal colors, no gradient, no blur. Replaces the inline waveform SVGs in
  * the Looper, Sampler, and Microphone nodes.
