@@ -590,6 +590,7 @@ export const LooperNode = memo(function LooperNode({
                         style={{ width: '14px', height: '14px' }}
                         data-node-id={node.id}
                         data-port-id={inputPortId}
+                        data-port-type={inputPort?.type ?? 'audio'}
                         onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(inputPortId, e); }}
                         onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(inputPortId, e); }}
                         onMouseEnter={() => handlePortMouseEnter?.(inputPortId)}
@@ -629,6 +630,7 @@ export const LooperNode = memo(function LooperNode({
                         style={{ width: '14px', height: '14px' }}
                         data-node-id={node.id}
                         data-port-id={outputPortId}
+                        data-port-type={outputPort?.type ?? 'audio'}
                         onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(outputPortId, e); }}
                         onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(outputPortId, e); }}
                         onMouseEnter={() => handlePortMouseEnter?.(outputPortId)}

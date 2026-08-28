@@ -7,7 +7,6 @@ import type { Position, Connection } from '../../engine/types';
 import { useGraphStore, getNodeDimensions, type NodeBounds } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useAudioStore } from '../../store/audioStore';
-import { useKeybindingsStore } from '../../store/keybindingsStore';
 import { useCanvasNavigationStore } from '../../store/canvasNavigationStore';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
 import { useTransportStore } from '../../store/transportStore';
@@ -71,6 +70,7 @@ export function NodeCanvas() {
     const [signalLevels, setSignalLevels] = useState<Map<string, number>>(new Map());
     const signalLevelsRef = useRef<Map<string, number>>(new Map());
     const signalUpdateScheduled = useRef(false);
+    const signalUpdateFrame = useRef<number | null>(null);
 
     // Subscribe to signal level updates from the audio executor
     // Throttle state updates to ~30fps to reduce re-renders while keeping smooth animation
@@ -81,13 +81,16 @@ export function NodeCanvas() {
             // Throttle state updates using requestAnimationFrame
             if (!signalUpdateScheduled.current) {
                 signalUpdateScheduled.current = true;
-                requestAnimationFrame(() => {
+                signalUpdateFrame.current = requestAnimationFrame(() => {
                     setSignalLevels(new Map(signalLevelsRef.current));
                     signalUpdateScheduled.current = false;
                 });
             }
         });
-        return unsubscribe;
+        return () => {
+            unsubscribe();
+            if (signalUpdateFrame.current !== null) cancelAnimationFrame(signalUpdateFrame.current);
+        };
     }, []);
 
     // Canvas navigation store (simplified - just track which node we're viewing)
@@ -122,6 +125,7 @@ export function NodeCanvas() {
     const redo = useGraphStore((s) => s.redo);
     const copySelected = useGraphStore((s) => s.copySelected);
     const pasteClipboard = useGraphStore((s) => s.pasteClipboard);
+    const duplicateSelected = useGraphStore((s) => s.duplicateSelected);
 
     // Canvas store
     const pan = useCanvasStore((s) => s.pan);
@@ -139,6 +143,44 @@ export function NodeCanvas() {
     const ghostMode = useCanvasStore((s) => s.ghostMode);
     const toggleGhostMode = useCanvasStore((s) => s.toggleGhostMode);
     const fitToNodes = useCanvasStore((s) => s.fitToNodes);
+    const setCanvasRect = useCanvasStore((s) => s.setCanvasRect);
+    const canvasRect = useCanvasStore((s) => s.canvasRect);
+
+    const refreshCanvasRect = useCallback(() => {
+        const element = canvasRef.current;
+        if (!element) return useCanvasStore.getState().canvasRect;
+        const rect = element.getBoundingClientRect();
+        const next = { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+        const current = useCanvasStore.getState().canvasRect;
+        if (current.left !== next.left || current.top !== next.top ||
+            current.width !== next.width || current.height !== next.height) {
+            setCanvasRect(next);
+        }
+        return next;
+    }, [setCanvasRect]);
+
+    useEffect(() => {
+        const element = canvasRef.current;
+        if (!element) return;
+        const updateRect = () => { refreshCanvasRect(); };
+        const surfaceRoot = element.closest('[data-surface-root]');
+        updateRect();
+        const frame = requestAnimationFrame(updateRect);
+        const observer = new ResizeObserver(updateRect);
+        observer.observe(element);
+        window.addEventListener('resize', updateRect);
+        window.addEventListener('scroll', updateRect, true);
+        surfaceRoot?.addEventListener('transitionend', updateRect);
+        surfaceRoot?.addEventListener('animationend', updateRect);
+        return () => {
+            cancelAnimationFrame(frame);
+            observer.disconnect();
+            window.removeEventListener('resize', updateRect);
+            window.removeEventListener('scroll', updateRect, true);
+            surfaceRoot?.removeEventListener('transitionend', updateRect);
+            surfaceRoot?.removeEventListener('animationend', updateRect);
+        };
+    }, [refreshCanvasRect]);
 
     // Audio clip store
     const allClips = useAudioClipStore((s) => s.clips);
@@ -175,8 +217,7 @@ export function NodeCanvas() {
     const publishSelection = useCollabStore((s) => s.setSelection);
     const publishViewNode = useCollabStore((s) => s.setViewNode);
 
-    // Mouse position: ref for zoom (always updated), state for temp connection (only when connecting)
-    const mousePosRef = useRef<Position>({ x: 0, y: 0 });
+    // Mouse position state is updated only while connecting for the temporary cable.
     const [mousePos, setMousePos] = useState<Position>({ x: 0, y: 0 });
     const lastPanPos = useRef<Position>({ x: 0, y: 0 });
 
@@ -184,8 +225,8 @@ export function NodeCanvas() {
     // Used for box selection of ports
     const getPortCanvasPositionForSelection = useCallback((node: { id: string; position: Position; ports: { id: string; position?: { x: number; y: number } }[] }, portId: string): Position | null => {
         // First try DOM query for actual port position (more accurate)
-        const portElement = document.querySelector(
-            `[data-node-id="${node.id}"][data-port-id="${portId}"]`
+        const portElement = canvasRef.current?.querySelector(
+            `[data-node-id="${CSS.escape(node.id)}"][data-port-id="${CSS.escape(portId)}"]`
         ) as HTMLElement | null;
 
         if (portElement && canvasRef.current) {
@@ -204,8 +245,9 @@ export function NodeCanvas() {
         // Fallback: calculate from node position + port.position
         const port = node.ports.find(p => p.id === portId);
         if (port?.position) {
-            const nodeWidth = 180;
-            const nodeHeight = 120;
+            const graphNode = useGraphStore.getState().nodes.get(node.id);
+            if (!graphNode) return null;
+            const { width: nodeWidth, height: nodeHeight } = getNodeDimensions(graphNode);
             return {
                 x: node.position.x + port.position.x * nodeWidth,
                 y: node.position.y + port.position.y * nodeHeight
@@ -279,17 +321,18 @@ export function NodeCanvas() {
 
     // Throttle presence cursor broadcasts to one per animation frame.
     const cursorPublishScheduled = useRef(false);
+    const cursorPublishFrame = useRef<number | null>(null);
+    useEffect(() => () => {
+        if (cursorPublishFrame.current !== null) cancelAnimationFrame(cursorPublishFrame.current);
+    }, []);
 
     // Handle mouse move
     const handleMouseMove = useCallback((e: React.MouseEvent) => {
-        // Always update ref for zoom operations
-        mousePosRef.current = { x: e.clientX, y: e.clientY };
-
         // Broadcast cursor position (in canvas coords) to collaborators, throttled.
         if (collabActive && !cursorPublishScheduled.current) {
             cursorPublishScheduled.current = true;
             const screen = { x: e.clientX, y: e.clientY };
-            requestAnimationFrame(() => {
+            cursorPublishFrame.current = requestAnimationFrame(() => {
                 cursorPublishScheduled.current = false;
                 publishCursor(screenToCanvas(screen));
             });
@@ -339,7 +382,7 @@ export function NodeCanvas() {
             // Live selection - select nodes as the box changes
             const width = newBox.currentX - newBox.startX;
             const height = newBox.currentY - newBox.startY;
-            if (Math.abs(width) > 5 || Math.abs(height) > 5) {
+            if (Math.abs(width * zoom) > 5 || Math.abs(height * zoom) > 5) {
                 selectNodesInRect({
                     x: Math.min(newBox.startX, newBox.currentX),
                     y: Math.min(newBox.startY, newBox.currentY),
@@ -348,7 +391,7 @@ export function NodeCanvas() {
                 });
             }
         }
-    }, [isPanning, panBy, setDragging, selectionBox, screenToCanvas, rightClickStart, selectNodesInRect, clipDragState.isDragging, updateClipDrag, isConnecting, collabActive, publishCursor]);
+    }, [isPanning, panBy, setDragging, selectionBox, screenToCanvas, rightClickStart, selectNodesInRect, clipDragState.isDragging, updateClipDrag, isConnecting, collabActive, publishCursor, zoom]);
 
     // Handle mouse up
     const handleMouseUp = useCallback(() => {
@@ -372,7 +415,7 @@ export function NodeCanvas() {
             const height = selectionBox.currentY - selectionBox.startY;
 
             // Only select if dragged more than 5 pixels
-            if (Math.abs(width) > 5 || Math.abs(height) > 5) {
+            if (Math.abs(width * zoom) > 5 || Math.abs(height * zoom) > 5) {
                 const rect = {
                     minX: Math.min(selectionBox.startX, selectionBox.currentX),
                     maxX: Math.max(selectionBox.startX, selectionBox.currentX),
@@ -441,7 +484,7 @@ export function NodeCanvas() {
                 }
             });
         }
-    }, [setPanning, setDragging, selectionBox, selectNodesInRect, rightClickStart, isConnecting, stopConnecting, nodes, startConnecting, getPortCanvasPositionForSelection, clipDragState, endClipDrag, setClipPosition, screenToCanvas]);
+    }, [setPanning, setDragging, selectionBox, selectNodesInRect, rightClickStart, isConnecting, stopConnecting, nodes, startConnecting, getPortCanvasPositionForSelection, clipDragState, endClipDrag, setClipPosition, screenToCanvas, zoom]);
 
     // Handle drag over for library items
     const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -496,7 +539,8 @@ export function NodeCanvas() {
             const clipData = createClipFromSample(item, waveformPeaks, itemData.sourceNodeId);
 
             // Calculate canvas position from drop coordinates
-            const canvasPos = screenToCanvas({ x: e.clientX - 60, y: e.clientY - 20 });
+            refreshCanvasRect();
+            const canvasPos = useCanvasStore.getState().screenToCanvas({ x: e.clientX - 60, y: e.clientY - 20 });
 
             // Add clip with position
             const { id: _id, createdAt: _ca, lastModifiedAt: _lm, ...clipWithoutMeta } = clipData;
@@ -510,24 +554,27 @@ export function NodeCanvas() {
         } catch (err) {
             console.error('Failed to create clip from dropped item:', err);
         }
-    }, [libraryItems, screenToCanvas, addClip, selectClip]);
+    }, [libraryItems, refreshCanvasRect, addClip, selectClip]);
 
     // Handle wheel for zoom and two-finger trackpad pan
     // Uses standardized scroll capture to prevent propagation and handle touchpad/mouse correctly
     const handleCanvasScroll = useCallback((data: ScrollData) => {
         // Pinch-to-zoom gesture (ctrlKey/metaKey set by browser for pinch gestures)
         if (data.isPinch) {
+            const liveRect = refreshCanvasRect();
             const delta = data.scrollingDown ? 0.9 : 1.1;
             const newZoom = zoom * delta;
-            // Use tracked mouse position ref for zoom-toward-cursor (avoids re-render dependency)
-            zoomTo(newZoom, mousePosRef.current);
+            zoomTo(newZoom, {
+                x: data.clientX - liveRect.left,
+                y: data.clientY - liveRect.top,
+            });
             return;
         }
 
         // Two-finger trackpad pan - pans in all directions (horizontal, vertical, diagonal)
         // This allows natural panning with two fingers on laptop trackpads
         panBy({ x: -data.deltaX, y: -data.deltaY });
-    }, [zoom, zoomTo, panBy]);
+    }, [zoom, zoomTo, panBy, refreshCanvasRect]);
 
     // Attach scroll capture to canvas
     const { ref: scrollCaptureRef } = useScrollCapture<HTMLDivElement>({
@@ -545,15 +592,39 @@ export function NodeCanvas() {
     // Track active keyboard keys with their source keyboard ID
     // This prevents stuck notes when mode changes between keydown and keyup
     const activeKeyboardKeys = useRef<Map<string, { keyboardId: string; row: number; keyIndex: number }>>(new Map());
+    const flushActiveNotesRef = useRef<() => void>(() => {});
+
+    useEffect(() => {
+        const flush = () => flushActiveNotesRef.current();
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') flush();
+        };
+        window.addEventListener('blur', flush);
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            flush();
+            window.removeEventListener('blur', flush);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, []);
 
     // Handle keyboard shortcuts using keybindings store
     useEffect(() => {
-        const { matchesAction } = useKeybindingsStore.getState();
         const { emitKeyboardSignal, releaseKeyboardSignal } = useAudioStore.getState();
 
-        function handleKeyDown(e: KeyboardEvent) {
+        const flushActiveNotes = () => {
+            for (const active of activeKeyboardKeys.current.values()) {
+                releaseKeyboardSignal(active.keyboardId, active.row, active.keyIndex);
+            }
+            activeKeyboardKeys.current.clear();
+            const audio = useAudioStore.getState();
+            if (audio.controlDown && audio.activeKeyboardId) audio.emitControlUp(audio.activeKeyboardId);
+        };
+        flushActiveNotesRef.current = flushActiveNotes;
+
+        function handleKeyDown(e: KeyboardEvent, actionId?: string) {
             // ESC Key - Unified escape behavior (works in all modes)
-            if (e.key === 'Escape') {
+            if (actionId === 'canvas.escape') {
                 e.preventDefault();
 
                 // Priority 1: Close MIDI browser
@@ -622,7 +693,7 @@ export function NodeCanvas() {
             }
 
             // Delete/Backspace always works - delete nodes and clips
-            if (matchesAction(e, 'edit.delete') || e.key === 'Backspace') {
+            if (actionId === 'edit.delete' || actionId === 'canvas.deleteBackspace') {
                 e.preventDefault();
                 deleteSelected();
                 // Also delete selected audio clips
@@ -633,7 +704,7 @@ export function NodeCanvas() {
             // Mode 1 only shortcuts (config mode)
             if (currentMode === 1) {
                 // Q key - Go back up one level in hierarchical canvas (only in mode 1)
-                if (e.key === 'q' || e.key === 'Q') {
+                if (actionId === 'canvas.exitLevel') {
                     e.preventDefault();  // Always prevent default for consistency
                     if (currentViewNodeId !== null) {
                         exitToParent();
@@ -643,45 +714,75 @@ export function NodeCanvas() {
                 }
 
                 // Spacebar in config mode - toggle global play/pause for continuous sources
-                if (e.code === 'Space' && !e.repeat) {
+                if (actionId === 'canvas.transport' && !e.repeat) {
                     e.preventDefault();
                     useTransportStore.getState().toggleGlobalPause();
                     return;
                 }
 
-                if (matchesAction(e, 'view.ghostMode')) {
+                if (actionId === 'view.ghostMode') {
                     e.preventDefault();
                     toggleGhostMode();
                     return;
                 }
 
-                if (matchesAction(e, 'edit.undo')) {
+                if (actionId === 'edit.undo') {
                     e.preventDefault();
                     undo();
                     return;
                 }
 
-                if (matchesAction(e, 'edit.redo')) {
+                if (actionId === 'edit.redo') {
                     e.preventDefault();
                     redo();
                     return;
                 }
 
                 // Ctrl+C / Cmd+C - Copy
-                if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+                if (actionId === 'canvas.copy') {
                     e.preventDefault();
                     copySelected();
                     return;
                 }
 
                 // Ctrl+V / Cmd+V - Paste
-                if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+                if (actionId === 'canvas.paste') {
                     e.preventDefault();
                     pasteClipboard();
                     return;
                 }
 
-                if (matchesAction(e, 'canvas.multiConnect')) {
+                if (actionId === 'canvas.selectAll') {
+                    e.preventDefault();
+                    useGraphStore.getState().selectNodes(
+                        useGraphStore.getState().getNodesAtLevel(currentViewNodeId).map(node => node.id),
+                    );
+                    return;
+                }
+
+                if (actionId === 'canvas.duplicate') {
+                    e.preventDefault();
+                    duplicateSelected();
+                    return;
+                }
+
+                if (actionId === 'view.zoomIn' || actionId === 'view.zoomOut') {
+                    e.preventDefault();
+                    const state = useCanvasStore.getState();
+                    state.zoomTo(state.zoom * (actionId === 'view.zoomIn' ? 1.1 : 0.9), {
+                        x: state.canvasRect.width / 2,
+                        y: state.canvasRect.height / 2,
+                    });
+                    return;
+                }
+
+                if (actionId === 'view.resetView') {
+                    e.preventDefault();
+                    useCanvasStore.getState().resetView();
+                    return;
+                }
+
+                if (actionId === 'canvas.multiConnect') {
                     // Ctrl+A while hovering over a port - select all ports of same type on that node
                     const hoverTarget = useCanvasStore.getState().hoverTarget;
 
@@ -802,7 +903,7 @@ export function NodeCanvas() {
                 }
 
                 // E key - Dive into selected node's internal canvas
-                if (e.key === 'e' || e.key === 'E') {
+                if (actionId === 'canvas.enterNode') {
                     e.preventDefault();
                     const selectedIds = Array.from(useGraphStore.getState().selectedNodeIds);
                     if (selectedIds.length !== 1) return;
@@ -841,7 +942,9 @@ export function NodeCanvas() {
                     }
 
                     // Check all three rows for the pressed key
-                    const key = e.key.toLowerCase();
+                    const key = actionId?.startsWith('note.')
+                        ? actionId.slice('note.'.length)
+                        : e.key.toLowerCase();
                     for (let row = 1; row <= 3; row++) {
                         const rowKeys = ROW_KEYS[row];
                         const keyIndex = rowKeys?.indexOf(key);
@@ -850,7 +953,7 @@ export function NodeCanvas() {
                             e.preventDefault();
                             // Store keyboardId at press time for reliable release
                             // This prevents stuck notes if mode changes between keydown and keyup
-                            activeKeyboardKeys.current.set(key, { keyboardId: activeKeyboardId, row, keyIndex });
+                            activeKeyboardKeys.current.set(e.key.toLowerCase(), { keyboardId: activeKeyboardId, row, keyIndex });
                             emitKeyboardSignal(activeKeyboardId, row, keyIndex);
                             break; // Only one row can match per key
                         }
@@ -860,9 +963,6 @@ export function NodeCanvas() {
         }
 
         function handleKeyUp(e: KeyboardEvent) {
-            // Skip if typing in an editable control.
-            if (isEditableTarget(e.target)) return;
-
             const key = e.key.toLowerCase();
 
             // First check if this key was pressed in keyboard mode (stored in activeKeyboardKeys)
@@ -874,6 +974,9 @@ export function NodeCanvas() {
                 activeKeyboardKeys.current.delete(key);
                 return;
             }
+
+            // Releases for active sources must win over editable-target routing.
+            if (isEditableTarget(e.target)) return;
 
             const currentMode = useAudioStore.getState().currentMode;
 
@@ -896,6 +999,7 @@ export function NodeCanvas() {
             'canvas.escape', 'edit.delete', 'canvas.deleteBackspace', 'canvas.exitLevel',
             'canvas.transport', 'view.ghostMode', 'edit.undo', 'edit.redo',
             'canvas.copy', 'canvas.paste', 'canvas.multiConnect', 'canvas.enterNode',
+            'canvas.selectAll', 'canvas.duplicate', 'view.zoomIn', 'view.zoomOut', 'view.resetView',
         ];
         const noteActions = Object.values(ROW_KEYS).flat().map((key) => `note.${key}`);
         const unregister = registerBindingSet({
@@ -907,7 +1011,7 @@ export function NodeCanvas() {
                     actionId,
                     guard: () => useAudioStore.getState().currentMode > 1,
                     run: (event: KeyboardEvent) => {
-                        handleKeyDown(event);
+                        handleKeyDown(event, actionId);
                         return event.defaultPrevented;
                     },
                 })),
@@ -915,14 +1019,14 @@ export function NodeCanvas() {
                     actionId: 'note.controlSpace',
                     guard: () => useAudioStore.getState().currentMode > 1,
                     run: (event: KeyboardEvent) => {
-                        handleKeyDown(event);
+                        handleKeyDown(event, 'note.controlSpace');
                         return event.defaultPrevented;
                     },
                 },
                 ...regularActions.map((actionId) => ({
                     actionId,
                     run: (event: KeyboardEvent) => {
-                        handleKeyDown(event);
+                        handleKeyDown(event, actionId);
                         return event.defaultPrevented;
                     },
                 })),
@@ -934,7 +1038,7 @@ export function NodeCanvas() {
             window.removeEventListener('keyup', handleKeyUp);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps -- stable window listeners by design: ROW_KEYS (recreated each render), contextMenu/selectionBox (frequently-changing local state read via closure) intentionally omitted so the handlers are not torn down/re-added mid-keystroke; clearSelection/stopConnecting are stable Zustand actions
-    }, [deleteSelected, toggleGhostMode, undo, redo, startConnecting, setCurrentMode, enterNode, exitToParent, allNodes, currentViewNodeId, copySelected, pasteClipboard, selectedClipIds, removeClip]);
+    }, [deleteSelected, toggleGhostMode, undo, redo, startConnecting, setCurrentMode, enterNode, exitToParent, allNodes, currentViewNodeId, copySelected, pasteClipboard, duplicateSelected, selectedClipIds, removeClip]);
 
     // Collaboration presence (U23): publish current view level + node selection
     // whenever they change. No-op when no session is active.
@@ -981,6 +1085,30 @@ export function NodeCanvas() {
         return () => window.cancelAnimationFrame(frame);
     }, [nodes, connections.size]);
 
+    // Cable anchors can move without a graph mutation when a node's content or
+    // loaded font changes its measured box. Observe the rendered node roots and
+    // republish the cached layout after either event.
+    useEffect(() => {
+        const invalidate = () => {
+            portPositionCache.current.clear();
+            setPortLayoutVersion((version) => version + 1);
+        };
+        const observer = new ResizeObserver(invalidate);
+        canvasRef.current?.querySelectorAll('[data-canvas-node-root]').forEach((element) => {
+            // Schematic nodes use a display:contents marker; observe their actual,
+            // resizable visual root. NodeFrame roots are observed directly.
+            observer.observe(element.firstElementChild ?? element);
+        });
+        let cancelled = false;
+        void document.fonts?.ready.then(() => {
+            if (!cancelled) invalidate();
+        });
+        return () => {
+            cancelled = true;
+            observer.disconnect();
+        };
+    }, [nodes]);
+
     // Get port position for connection rendering
     // Uses cached positions or DOM query for accurate positions, falls back to math calculation
     const getPortPosition = useCallback((nodeId: string, portId: string): Position | null => {
@@ -993,8 +1121,8 @@ export function NodeCanvas() {
         }
 
         // Try DOM query for actual port position (more accurate for schematic nodes)
-        const portElement = document.querySelector(
-            `[data-node-id="${nodeId}"][data-port-id="${portId}"]`
+        const portElement = canvasRef.current?.querySelector(
+            `[data-node-id="${CSS.escape(nodeId)}"][data-port-id="${CSS.escape(portId)}"]`
         ) as HTMLElement | null;
 
         if (portElement && canvasRef.current) {
@@ -1074,7 +1202,7 @@ export function NodeCanvas() {
                         <Cable
                             key={`${source.nodeId}-${source.portId}`}
                             temp
-                            kind="control"
+                            kind={allNodes.get(source.nodeId)?.ports.find(port => port.id === source.portId)?.type ?? 'control'}
                             start={startPos}
                             end={{ x: endPos.x, y: targetY }}
                         />
@@ -1117,8 +1245,8 @@ export function NodeCanvas() {
         const bounds = getCurrentLevelBounds();
         if (!bounds) return { visible: true, direction: null };
 
-        const viewportWidth = window.innerWidth;
-        const viewportHeight = window.innerHeight;
+        const viewportWidth = canvasRect.width;
+        const viewportHeight = canvasRect.height;
 
         // Convert bounds to screen coordinates
         const screenLeft = bounds.x * zoom + pan.x;
@@ -1156,15 +1284,15 @@ export function NodeCanvas() {
             visible: visible && !tooSmall,
             direction
         };
-    }, [nodes.size, pan.x, pan.y, zoom, getCurrentLevelBounds]);
+    }, [nodes.size, pan.x, pan.y, zoom, getCurrentLevelBounds, canvasRect.width, canvasRect.height]);
 
     // Handle back to action navigation
     const handleBackToAction = useCallback(() => {
         const bounds = getCurrentLevelBounds();
         if (bounds) {
-            fitToNodes(bounds, window.innerWidth, window.innerHeight);
+            fitToNodes(bounds, canvasRect.width, canvasRect.height);
         }
-    }, [getCurrentLevelBounds, fitToNodes]);
+    }, [getCurrentLevelBounds, fitToNodes, canvasRect.width, canvasRect.height]);
 
     // Render selection box
     const renderSelectionBox = () => {

@@ -46,12 +46,14 @@ export function LowLatencyGuide() {
   // Initialize on mount - auto-detect platform and devices
   useEffect(() => {
     if (!guide.isOpen) return;
+    let cancelled = false;
 
     const initialize = async () => {
       setIsInitializing(true);
 
       // Detect platform
       const detectedPlatform = detectPlatform();
+      if (cancelled) return;
       setPlatform(detectedPlatform);
 
       // Auto-complete platform step
@@ -63,6 +65,7 @@ export function LowLatencyGuide() {
       // Try to get devices (may need permission)
       try {
         const devices = await getExternalAudioDevices();
+        if (cancelled) return;
         setExternalDevices(devices);
 
         if (devices.length > 0) {
@@ -76,15 +79,17 @@ export function LowLatencyGuide() {
       // Get latency info
       try {
         const latency = getLatencyInfo();
+        if (cancelled) return;
         setLatencyInfo(latency);
       } catch {
         // Will handle in latency check step
       }
 
-      setIsInitializing(false);
+      if (!cancelled) setIsInitializing(false);
     };
 
     initialize();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs only when the panel opens; `guide` is a fresh object each render, so depending on it would re-run device enumeration / mic-permission requests on every store change
   }, [guide.isOpen]);
 
@@ -679,4 +684,3 @@ function ExternalLinkIcon() {
   );
 }
 
-export default LowLatencyGuide;

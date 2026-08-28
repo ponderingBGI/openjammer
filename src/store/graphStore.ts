@@ -11,7 +11,7 @@ import type {
     NodeType,
     PortDefinition
 } from '../engine/types';
-import { getNodeDefinition, canConnect } from '../engine/registry';
+import { getNodeDefinition, resolveNodeDefinition, canConnect } from '../engine/registry';
 import { createDefaultInternalStructure } from '../utils/nodeInternals';
 import { syncPortsWithInternalNodes, checkDynamicPortAddition, checkDynamicPortRemoval, isInstrumentNode, detectBundleInfo, expandTargetForBundleWithInfo } from '../utils/portSync';
 import { useUIFeedbackStore } from './uiFeedbackStore';
@@ -20,34 +20,6 @@ import { useMIDIStore } from './midiStore';
 import type { InstrumentRow, InstrumentNodeData, SamplerRow, SamplerNodeData } from '../engine/types';
 import { applyGraphVerbs, diffGraph, type GraphStateSlice } from './graphVerbs';
 import { isApplyingHistory, registerHistoryDriver, useHistoryStore, type EditVerb } from './historyStore';
-
-// ============================================================================
-// Constants
-// ============================================================================
-
-/** Node dimension constants - extracted for maintainability */
-const NODE_DIMENSIONS = {
-    // Keyboard node
-    KEYBOARD_WIDTH: 160,
-    KEYBOARD_HEIGHT: 120,
-
-    // Speaker node
-    SPEAKER_WIDTH: 140,
-    SPEAKER_HEIGHT: 160,
-
-    // Looper node
-    LOOPER_WIDTH: 240,
-    LOOPER_HEIGHT: 120,
-
-    // Instrument nodes (dynamic height)
-    INSTRUMENT_WIDTH: 180,
-    INSTRUMENT_BASE_HEIGHT: 60,
-    INSTRUMENT_PORT_HEIGHT: 28,
-
-    // Default/standard nodes
-    DEFAULT_WIDTH: 200,
-    DEFAULT_HEIGHT: 150,
-} as const;
 
 // ============================================================================
 // Utility Functions
@@ -87,47 +59,23 @@ function connectionPortsExist(conn: Connection, nodes: Map<string, GraphNode>): 
 }
 
 /**
- * Get approximate dimensions for a node based on its type
+ * Return the one authoritative geometry for a node. Resizable/measured nodes
+ * persist their dimensions in data; every other node uses its registry shape.
  */
 export function getNodeDimensions(node: GraphNode): { width: number; height: number } {
-    switch (node.type) {
-        case 'keyboard':
-            return {
-                width: NODE_DIMENSIONS.KEYBOARD_WIDTH,
-                height: NODE_DIMENSIONS.KEYBOARD_HEIGHT
-            };
-        case 'speaker':
-            return {
-                width: NODE_DIMENSIONS.SPEAKER_WIDTH,
-                height: NODE_DIMENSIONS.SPEAKER_HEIGHT
-            };
-        case 'looper':
-            return {
-                width: NODE_DIMENSIONS.LOOPER_WIDTH,
-                height: NODE_DIMENSIONS.LOOPER_HEIGHT
-            };
-        case 'piano':
-        case 'cello':
-        case 'electricCello':
-        case 'violin':
-        case 'saxophone':
-        case 'strings':
-        case 'keys':
-        case 'winds': {
-            // Instrument nodes: height varies by number of input ports
-            const inputPorts = node.ports.filter(p => p.direction === 'input').length;
-            return {
-                width: NODE_DIMENSIONS.INSTRUMENT_WIDTH,
-                height: NODE_DIMENSIONS.INSTRUMENT_BASE_HEIGHT + (inputPorts * NODE_DIMENSIONS.INSTRUMENT_PORT_HEIGHT)
-            };
-        }
-        default:
-            // Standard nodes (microphone, effect, multiplier, recorder)
-            return {
-                width: NODE_DIMENSIONS.DEFAULT_WIDTH,
-                height: NODE_DIMENSIONS.DEFAULT_HEIGHT
-            };
-    }
+    const data = node.data as { width?: unknown; height?: unknown };
+    const definition = resolveNodeDefinition(node);
+    // Library is currently the sole resizable node and the sole owner of persisted
+    // pixel dimensions. Other nodes may use width/height as DSP parameters.
+    const usesMeasuredDimensions = node.type === 'library';
+    return {
+        width: usesMeasuredDimensions && typeof data.width === 'number' && data.width > 0
+            ? data.width
+            : definition.dimensions?.width ?? 200,
+        height: usesMeasuredDimensions && typeof data.height === 'number' && data.height > 0
+            ? data.height
+            : definition.dimensions?.height ?? 150,
+    };
 }
 
 export interface NodeBounds {
@@ -169,8 +117,10 @@ interface GraphStore {
     addNode: (type: NodeType, position: Position, parentId?: string | null, initialData?: Record<string, unknown>) => string;
     removeNode: (nodeId: string) => void;
     updateNodePosition: (nodeId: string, position: Position) => void;
+    moveNodes: (positions: Map<string, Position>) => void;
     updateNodeData: <T extends object>(nodeId: string, data: Partial<T>) => void;
     updateNodePorts: (nodeId: string, ports: import('../engine/types').PortDefinition[]) => void;
+    renamePort: (nodeId: string, portId: string, name: string) => void;
     updateNodeType: (nodeId: string, type: NodeType) => void;
     /**
      * Stamp a node's OPEN identity (M5) — the dynamic plugin id carried alongside
@@ -188,6 +138,16 @@ interface GraphStore {
 
     // Connection Actions
     addConnection: (
+        sourceNodeId: string,
+        sourcePortId: string,
+        targetNodeId: string,
+        targetPortId: string,
+        /** Internal reconnect seam: validate and publish against the graph with
+         * this edge removed, so replacement is one atomic store write. */
+        replacingConnectionId?: string,
+    ) => string | null;
+    reconnectConnection: (
+        connectionId: string,
         sourceNodeId: string,
         sourcePortId: string,
         targetNodeId: string,
@@ -212,7 +172,8 @@ interface GraphStore {
 
     // Clipboard Actions
     copySelected: () => void;
-    pasteClipboard: (position?: Position) => void;
+    pasteClipboard: (position?: Position, sourceClipboard?: ClipboardData) => void;
+    duplicateSelected: () => void;
 
     // History Actions
     undo: () => void;
@@ -752,7 +713,7 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             // Connection Actions
-            addConnection: (sourceNodeId, sourcePortId, targetNodeId, targetPortId) => {
+            addConnection: (sourceNodeId, sourcePortId, targetNodeId, targetPortId, replacingConnectionId) => {
                 const state = get();
                 const sourceNode = state.nodes.get(sourceNodeId);
                 const targetNode = state.nodes.get(targetNodeId);
@@ -765,7 +726,8 @@ export const useGraphStore = create<GraphStore>()(
                 // If target port not found (e.g., placeholder was replaced by previous connection),
                 // try to find any available control input port on instruments
                 if (!targetPort && isInstrumentNode(targetNode)) {
-                    const existingConnections = Array.from(state.connections.values());
+                    const existingConnections = Array.from(state.connections.values())
+                        .filter(connection => connection.id !== replacingConnectionId);
                     const connectedTargetPorts = new Set(
                         existingConnections
                             .filter(c => c.targetNodeId === targetNodeId)
@@ -784,6 +746,7 @@ export const useGraphStore = create<GraphStore>()(
                 // Check if connection already exists
                 const existingConnection = Array.from(state.connections.values()).find(
                     conn =>
+                        conn.id !== replacingConnectionId &&
                         conn.sourceNodeId === sourceNodeId &&
                         conn.sourcePortId === sourcePortId &&
                         conn.targetNodeId === targetNodeId &&
@@ -798,6 +761,7 @@ export const useGraphStore = create<GraphStore>()(
                 if (targetPort.type === 'audio' && targetPort.direction === 'input') {
                     const existingInput = Array.from(state.connections.values()).find(
                         conn =>
+                            conn.id !== replacingConnectionId &&
                             conn.targetNodeId === targetNodeId &&
                             conn.targetPortId === targetPortId
                     );
@@ -820,6 +784,13 @@ export const useGraphStore = create<GraphStore>()(
 
                 set((state) => {
                     const newConnections = new Map(state.connections);
+
+                    // Reconnects remove the old edge in the SAME publication that
+                    // installs the accepted replacement. Subscribers (including the
+                    // audio executor) can never observe both cables at once.
+                    if (replacingConnectionId) {
+                        newConnections.delete(replacingConnectionId);
+                    }
 
                     // Remove existing connection if replacing (for audio inputs)
                     if (existingInputToRemove) {
@@ -1227,6 +1198,63 @@ export const useGraphStore = create<GraphStore>()(
                 return id;
             },
 
+            moveNodes: (positions) => {
+                if (positions.size === 0) return;
+                set((state) => {
+                    const newNodes = new Map(state.nodes);
+                    let changed = false;
+                    for (const [nodeId, position] of positions) {
+                        const node = state.nodes.get(nodeId);
+                        if (!node || (node.position.x === position.x && node.position.y === position.y)) continue;
+                        newNodes.set(nodeId, { ...node, position });
+                        changed = true;
+                    }
+                    return changed ? { nodes: newNodes, version: state.version + 1 } : state;
+                });
+            },
+
+            renamePort: (nodeId, portId, name) => {
+                set((state) => {
+                    const node = state.nodes.get(nodeId);
+                    if (!node || !node.ports.some(port => port.id === portId)) return state;
+                    const newNodes = new Map(state.nodes);
+                    const labels = (node.data.portLabels as Record<string, string> | undefined) ?? {};
+                    newNodes.set(nodeId, {
+                        ...node,
+                        ports: node.ports.map(port => port.id === portId ? { ...port, name } : port),
+                        data: { ...node.data, portLabels: { ...labels, [portId]: name } },
+                    });
+                    return { nodes: newNodes, version: state.version + 1 };
+                });
+            },
+
+            reconnectConnection: (connectionId, sourceNodeId, sourcePortId, targetNodeId, targetPortId) => {
+                const original = get().connections.get(connectionId);
+                if (!original) return null;
+                if (
+                    original.sourceNodeId === sourceNodeId &&
+                    original.sourcePortId === sourcePortId &&
+                    original.targetNodeId === targetNodeId &&
+                    original.targetPortId === targetPortId
+                ) {
+                    return connectionId;
+                }
+                useHistoryStore.getState().begin('Reconnect cable', 'graph');
+                try {
+                    return get().addConnection(
+                        sourceNodeId,
+                        sourcePortId,
+                        targetNodeId,
+                        targetPortId,
+                        connectionId,
+                    );
+                } finally {
+                    // A plugin/bundle expansion may throw. Never leave history open:
+                    // that would disable undo/redo for the rest of the performance.
+                    useHistoryStore.getState().commit();
+                }
+            },
+
             removeConnection: (connectionId) => {
                 set((state) => {
                     const connection = state.connections.get(connectionId);
@@ -1397,7 +1425,11 @@ export const useGraphStore = create<GraphStore>()(
                     const newSelectedNodes = addToSelection
                         ? new Set(state.selectedNodeIds)
                         : new Set<string>();
-                    newSelectedNodes.add(nodeId);
+                    if (addToSelection && newSelectedNodes.has(nodeId)) {
+                        newSelectedNodes.delete(nodeId);
+                    } else {
+                        newSelectedNodes.add(nodeId);
+                    }
                     return {
                         selectedNodeIds: newSelectedNodes,
                         selectedConnectionIds: new Set()
@@ -1577,19 +1609,28 @@ export const useGraphStore = create<GraphStore>()(
                 const nodesToCopy: [string, GraphNode][] = [];
                 const connectionsToCopy: Connection[] = [];
 
-                // Copy selected nodes
-                state.selectedNodeIds.forEach(nodeId => {
+                const copiedIds = new Set(state.selectedNodeIds);
+                const includeDescendants = (nodeId: string) => {
                     const node = state.nodes.get(nodeId);
-                    if (node) {
-                        nodesToCopy.push([nodeId, node]);
+                    if (!node) return;
+                    for (const childId of node.childIds) {
+                        if (!copiedIds.has(childId)) {
+                            copiedIds.add(childId);
+                            includeDescendants(childId);
+                        }
                     }
+                };
+                state.selectedNodeIds.forEach(includeDescendants);
+
+                copiedIds.forEach(nodeId => {
+                    const node = state.nodes.get(nodeId);
+                    if (node) nodesToCopy.push([nodeId, structuredClone(node)]);
                 });
 
                 // Copy connections between selected nodes
                 state.connections.forEach(conn => {
-                    if (state.selectedNodeIds.has(conn.sourceNodeId) &&
-                        state.selectedNodeIds.has(conn.targetNodeId)) {
-                        connectionsToCopy.push(conn);
+                    if (copiedIds.has(conn.sourceNodeId) && copiedIds.has(conn.targetNodeId)) {
+                        connectionsToCopy.push(structuredClone(conn));
                     }
                 });
 
@@ -1602,9 +1643,10 @@ export const useGraphStore = create<GraphStore>()(
             },
 
             // Paste clipboard contents at specified position or offset from original
-            pasteClipboard: (position?: Position) => {
+            pasteClipboard: (position?: Position, sourceClipboard?: ClipboardData) => {
                 const state = get();
-                if (!state.clipboard || state.clipboard.nodes.length === 0) return;
+                const clipboard = sourceClipboard ?? state.clipboard;
+                if (!clipboard || clipboard.nodes.length === 0) return;
 
                 useHistoryStore.getState().begin('Paste nodes', 'graph');
                 const oldToNewIds = new Map<string, string>();
@@ -1613,19 +1655,19 @@ export const useGraphStore = create<GraphStore>()(
                 // Calculate paste offset
                 let offsetX = 50;
                 let offsetY = 50;
-                if (position && state.clipboard.nodes.length > 0) {
-                    const firstNode = state.clipboard.nodes[0][1];
+                if (position && clipboard.nodes.length > 0) {
+                    const firstNode = clipboard.nodes[0][1];
                     offsetX = position.x - firstNode.position.x;
                     offsetY = position.y - firstNode.position.y;
                 }
 
                 // Create new nodes with new IDs
-                state.clipboard.nodes.forEach(([oldId, node]) => {
+                clipboard.nodes.forEach(([oldId, node]) => {
                     const newId = generateId();
                     oldToNewIds.set(oldId, newId);
 
                     const newNode: GraphNode = {
-                        ...node,
+                        ...structuredClone(node),
                         id: newId,
                         position: {
                             x: node.position.x + offsetX,
@@ -1636,9 +1678,43 @@ export const useGraphStore = create<GraphStore>()(
                     newNodes.set(newId, newNode);
                 });
 
+                for (const [oldId, node] of clipboard.nodes) {
+                    const newId = oldToNewIds.get(oldId);
+                    if (!newId) continue;
+                    const pasted = newNodes.get(newId);
+                    if (!pasted) continue;
+                    const remapOwned = (ids: string[]) => ids.flatMap((id) => {
+                        const remapped = oldToNewIds.get(id);
+                        return remapped ? [remapped] : [];
+                    });
+                    newNodes.set(newId, {
+                        ...pasted,
+                        parentId: node.parentId && oldToNewIds.has(node.parentId)
+                            ? oldToNewIds.get(node.parentId) ?? null
+                            : useCanvasNavigationStore.getState().currentViewNodeId,
+                        childIds: remapOwned(node.childIds),
+                        specialNodes: remapOwned(node.specialNodes ?? []),
+                    });
+                }
+
+                const destinationParentId = useCanvasNavigationStore.getState().currentViewNodeId;
+                if (destinationParentId) {
+                    const destinationParent = newNodes.get(destinationParentId);
+                    if (destinationParent) {
+                        const templateById = new Map(clipboard.nodes);
+                        const pastedRoots = Array.from(oldToNewIds.entries())
+                            .filter(([oldId]) => !oldToNewIds.has(templateById.get(oldId)?.parentId ?? ''))
+                            .map(([, newId]) => newId);
+                        newNodes.set(destinationParentId, {
+                            ...destinationParent,
+                            childIds: [...destinationParent.childIds, ...pastedRoots],
+                        });
+                    }
+                }
+
                 // Create new connections with updated IDs
                 const newConnections = new Map(state.connections);
-                state.clipboard.connections.forEach(conn => {
+                clipboard.connections.forEach(conn => {
                     const newSourceId = oldToNewIds.get(conn.sourceNodeId);
                     const newTargetId = oldToNewIds.get(conn.targetNodeId);
 
@@ -1660,10 +1736,40 @@ export const useGraphStore = create<GraphStore>()(
                     nodes: newNodes,
                     connections: newConnections,
                     connectionsByNode: rebuildConnectionIndex(newConnections),
+                    rootNodeIds: [
+                        ...state.rootNodeIds,
+                        ...Array.from(newSelectedIds).filter(id => newNodes.get(id)?.parentId === null),
+                    ],
                     selectedNodeIds: newSelectedIds,
                     version: state.version + 1
                 }));
                 useHistoryStore.getState().commit();
+            },
+
+            duplicateSelected: () => {
+                const state = get();
+                if (state.selectedNodeIds.size === 0) return;
+                const copiedIds = new Set(state.selectedNodeIds);
+                const includeDescendants = (nodeId: string) => {
+                    const node = state.nodes.get(nodeId);
+                    if (!node) return;
+                    node.childIds.forEach((childId) => {
+                        if (copiedIds.has(childId)) return;
+                        copiedIds.add(childId);
+                        includeDescendants(childId);
+                    });
+                };
+                state.selectedNodeIds.forEach(includeDescendants);
+                const duplicateData: ClipboardData = {
+                    nodes: Array.from(copiedIds).flatMap((id) => {
+                        const node = state.nodes.get(id);
+                        return node ? [[id, structuredClone(node)] as [string, GraphNode]] : [];
+                    }),
+                    connections: Array.from(state.connections.values())
+                        .filter((connection) => copiedIds.has(connection.sourceNodeId) && copiedIds.has(connection.targetNodeId))
+                        .map((connection) => structuredClone(connection)),
+                };
+                get().pasteClipboard(undefined, duplicateData);
             },
 
             // Getters
@@ -1819,6 +1925,11 @@ export const useGraphStore = create<GraphStore>()(
                         }
 
                         const connections = new Map<string, Connection>(migratedConnections);
+                        const selectedNodeIds = new Set(
+                            Array.isArray(parsed.state.selectedNodeIds)
+                                ? parsed.state.selectedNodeIds.filter((id: string) => nodes.has(id))
+                                : []
+                        );
                         const selectedConnectionIds = new Set(
                             Array.isArray(parsed.state.selectedConnectionIds)
                                 ? parsed.state.selectedConnectionIds.filter((id: string) => connections.has(id))
@@ -1831,7 +1942,7 @@ export const useGraphStore = create<GraphStore>()(
                                 connections,
                                 connectionsByNode: rebuildConnectionIndex(connections),
                                 rootNodeIds,
-                                selectedNodeIds: new Set(Array.isArray(parsed.state.selectedNodeIds) ? parsed.state.selectedNodeIds : []),
+                                selectedNodeIds,
                                 selectedConnectionIds
                             }
                         };

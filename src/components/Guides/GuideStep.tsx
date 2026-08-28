@@ -10,8 +10,10 @@ interface GuideStepProps {
   status: StepStatus;
   children?: React.ReactNode;
   defaultExpanded?: boolean;
-  onStatusChange?: (status: StepStatus) => void;
 }
+
+const stepStatusClass = (status: StepStatus): string =>
+  status === 'in_progress' ? 'in-progress' : status;
 
 /**
  * GuideStep - An individual step in a guide
@@ -39,8 +41,13 @@ export function GuideStep({
   };
 
   return (
-    <div className={`guide-step ${status}`}>
-      <div className="guide-step-header" onClick={toggleExpanded}>
+    <div className={`guide-step ${stepStatusClass(status)}`}>
+      <button
+        type="button"
+        className="guide-step-header"
+        onClick={toggleExpanded}
+        aria-expanded={children ? isExpanded : undefined}
+      >
         <StepStatusIndicator status={status} stepNumber={stepNumber} />
 
         <div className="guide-step-info">
@@ -55,7 +62,7 @@ export function GuideStep({
             <ChevronDownIcon />
           </div>
         )}
-      </div>
+      </button>
 
       {children && isExpanded && (
         <div className="guide-step-content">
@@ -84,7 +91,7 @@ function StepStatusIndicator({ status, stepNumber }: { status: StepStatus; stepN
   };
 
   return (
-    <div className={`guide-step-status ${status}`}>
+    <div className={`guide-step-status ${stepStatusClass(status)}`}>
       {content()}
     </div>
   );
@@ -132,4 +139,3 @@ function ChevronDownIcon() {
   );
 }
 
-export default GuideStep;

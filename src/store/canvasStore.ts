@@ -22,6 +22,7 @@ interface CanvasStore {
     // Transform State
     pan: Position;
     zoom: number;
+    canvasRect: { left: number; top: number; width: number; height: number };
 
     // Interaction State
     isDragging: boolean;
@@ -43,6 +44,7 @@ interface CanvasStore {
     panBy: (delta: Position) => void;
     zoomTo: (zoom: number, center?: Position) => void;
     resetView: () => void;
+    setCanvasRect: (rect: { left: number; top: number; width: number; height: number }) => void;
 
     // Interaction Actions
     setDragging: (isDragging: boolean) => void;
@@ -71,6 +73,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     // Initial State
     pan: { x: 0, y: 0 },
     zoom: DEFAULT_ZOOM,
+    canvasRect: { left: 0, top: 0, width: 0, height: 0 },
     isDragging: false,
     isPanning: false,
     isConnecting: false,
@@ -111,6 +114,7 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
     },
 
     resetView: () => set({ pan: { x: 0, y: 0 }, zoom: DEFAULT_ZOOM }),
+    setCanvasRect: (canvasRect) => set({ canvasRect }),
 
     // Interaction Actions
     setDragging: (isDragging) => set({ isDragging }),
@@ -164,18 +168,18 @@ export const useCanvasStore = create<CanvasStore>((set, get) => ({
 
     // Coordinate Transforms
     screenToCanvas: (screenPos) => {
-        const { pan, zoom } = get();
+        const { pan, zoom, canvasRect } = get();
         return {
-            x: (screenPos.x - pan.x) / zoom,
-            y: (screenPos.y - pan.y) / zoom
+            x: (screenPos.x - canvasRect.left - pan.x) / zoom,
+            y: (screenPos.y - canvasRect.top - pan.y) / zoom
         };
     },
 
     canvasToScreen: (canvasPos) => {
-        const { pan, zoom } = get();
+        const { pan, zoom, canvasRect } = get();
         return {
-            x: canvasPos.x * zoom + pan.x,
-            y: canvasPos.y * zoom + pan.y
+            x: canvasPos.x * zoom + pan.x + canvasRect.left,
+            y: canvasPos.y * zoom + pan.y + canvasRect.top
         };
     },
 

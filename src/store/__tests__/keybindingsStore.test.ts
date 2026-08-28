@@ -330,8 +330,6 @@ describe('keybindingsStore', () => {
     describe('keybindingActions', () => {
         it('should have all required actions defined', () => {
             const requiredActions = [
-                'file.new',
-                'file.import',
                 'file.export',
                 'edit.delete',
                 'edit.undo',
@@ -349,6 +347,21 @@ describe('keybindingsStore', () => {
                 expect(action?.label).toBeTruthy();
                 expect(action?.category).toBeTruthy();
                 expect(action?.defaultBinding).toBeDefined();
+            }
+        });
+
+        it('matches macOS Option zoom keys by physical code', () => {
+            const event = new KeyboardEvent('keydown', { key: '≠', code: 'Equal', altKey: true });
+            expect(matchesKeyCombo(event, { key: '=', alt: true })).toBe(true);
+            expect(matchesKeyCombo(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', altKey: true }), { key: 'a', alt: true })).toBe(true);
+        });
+
+        it('uses browser-cancellable defaults for the canvas zoom trio', () => {
+            for (const id of ['view.zoomIn', 'view.zoomOut', 'view.resetView']) {
+                const binding = keybindingActions.find((action) => action.id === id)?.defaultBinding;
+                expect(binding?.alt).toBe(true);
+                expect(binding?.ctrl).not.toBe(true);
+                expect(binding?.meta).not.toBe(true);
             }
         });
     });

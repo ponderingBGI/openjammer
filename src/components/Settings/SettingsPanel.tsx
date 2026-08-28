@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Button, Tabs } from '@openjammer/oj-ui';
 import { themes, applyTheme, getThemeById, getSavedThemeId, saveThemeId } from '@openjammer/oj-tokens';
-import { KeybindingsPanel } from './KeybindingsPanel';
+import { KeybindingsPanelSafe } from './KeybindingsPanel';
 import { AudioSettingsPanel } from './AudioSettingsPanel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { AboutPanel } from './AboutPanel';
@@ -93,7 +93,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                             </div>
                         )}
                         {activeTab === 'keybindings' && (
-                            <KeybindingsPanel />
+                            <KeybindingsPanelSafe />
                         )}
                         {activeTab === 'audio' && (
                             <AudioSettingsPanel />

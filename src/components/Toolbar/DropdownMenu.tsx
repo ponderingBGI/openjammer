@@ -89,20 +89,16 @@ export function DropdownMenu({ label, items, disabled = false }: DropdownMenuPro
     useEffect(() => {
         if (!isOpen) return;
 
-        function handleClickOutside(e: MouseEvent) {
-            if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        function handleClickOutside(e: PointerEvent) {
+            if (!menuRef.current?.contains(e.target as Node) &&
+                !triggerRef.current?.contains(e.target as Node)) {
                 close();
             }
         }
-
-        // Small delay to prevent immediate close when clicking trigger
-        const timeoutId = setTimeout(() => {
-            document.addEventListener('mousedown', handleClickOutside);
-        }, 0);
+        document.addEventListener('pointerdown', handleClickOutside);
 
         return () => {
-            clearTimeout(timeoutId);
-            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('pointerdown', handleClickOutside);
         };
     }, [isOpen, close]);
 

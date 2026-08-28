@@ -49,7 +49,7 @@ export const InputPanelNode = memo(function InputPanelNode({
     const [editingPort, setEditingPort] = useState<string | null>(null);
     const [editValue, setEditValue] = useState('');
 
-    const updateNodeData = useGraphStore((s) => s.updateNodeData);
+    const renamePort = useGraphStore((s) => s.renamePort);
     const updateNodePorts = useGraphStore((s) => s.updateNodePorts);
     const flashingNodes = useUIFeedbackStore((s) => s.flashingNodes);
     const isFlashing = flashingNodes.has(node.id);
@@ -128,20 +128,11 @@ export const InputPanelNode = memo(function InputPanelNode({
         }
 
         const newName = editValue || port.name;
-        const newLabels = { ...portLabels, [portId]: newName };
-
-        // Update node data with new labels
-        updateNodeData(node.id, { portLabels: newLabels });
-
-        // Also update the port name in the ports array
-        const newPorts = node.ports.map(p =>
-            p.id === portId ? { ...p, name: newName } : p
-        );
-        updateNodePorts(node.id, newPorts);
+        renamePort(node.id, portId, newName);
 
         setEditingPort(null);
         setEditValue('');
-    }, [node.id, node.ports, portLabels, editValue, updateNodeData, updateNodePorts]);
+    }, [node.id, node.ports, editValue, renamePort]);
 
     // Handle keyboard events in edit mode
     const handleKeyDown = useCallback((portId: string, e: React.KeyboardEvent) => {

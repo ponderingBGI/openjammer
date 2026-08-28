@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { useGraphStore } from '../graphStore';
+import { getNodeDimensions, useGraphStore } from '../graphStore';
 import { useHistoryStore } from '../historyStore';
+import { useCanvasNavigationStore } from '../canvasNavigationStore';
 
 // The localStorage key used by the store
 const STORAGE_KEY = 'openjammer-graph-v2';
@@ -22,6 +23,7 @@ describe('graphStore', () => {
             version: 0,
         });
         useHistoryStore.getState().clear();
+        useCanvasNavigationStore.setState({ currentViewNodeId: null, rootViewState: null, viewStates: new Map() });
         vi.clearAllMocks();
     });
 
@@ -431,6 +433,250 @@ describe('graphStore', () => {
             expect(useHistoryStore.getState().cursor).toBe(idx + 1);
             useGraphStore.getState().undo();
             expect(volOf(id)).toBe(before);
+        });
+    });
+
+    describe('canvas reliability verbs', () => {
+        it('does not confuse the width DSP parameter with pixel geometry', () => {
+            const id = useGraphStore.getState().addNode('width', { x: 0, y: 0 });
+            const node = useGraphStore.getState().nodes.get(id)!;
+
+            expect(node.data.width).toBe(1);
+            expect(getNodeDimensions(node).width).toBeGreaterThan(100);
+        });
+
+        it('uses persisted dimensions only for the resizable library node', () => {
+            const id = useGraphStore.getState().addNode('library', { x: 0, y: 0 });
+            useGraphStore.getState().updateNodeData(id, { width: 612, height: 455 });
+
+            expect(getNodeDimensions(useGraphStore.getState().nodes.get(id)!)).toEqual({
+                width: 612,
+                height: 455,
+            });
+        });
+
+        it('falls back for an unknown plugin node without throwing', () => {
+            const unknown = {
+                id: 'plugin-node', type: 'future-plugin', category: 'effects',
+                position: { x: 0, y: 0 }, data: {}, ports: [], parentId: null,
+                childIds: [], specialNodes: [],
+            } as unknown as Parameters<typeof getNodeDimensions>[0];
+
+            expect(() => getNodeDimensions(unknown)).not.toThrow();
+            expect(getNodeDimensions(unknown)).toEqual({ width: 160, height: 100 });
+        });
+
+        it('moves a selected group in one store publication', () => {
+            const firstId = useGraphStore.getState().addNode('speaker', { x: 0, y: 0 });
+            const secondId = useGraphStore.getState().addNode('speaker', { x: 100, y: 0 });
+            let publications = 0;
+            const unsubscribe = useGraphStore.subscribe(() => { publications += 1; });
+
+            useGraphStore.getState().moveNodes(new Map([
+                [firstId, { x: 20, y: 30 }],
+                [secondId, { x: 120, y: 30 }],
+            ]));
+            unsubscribe();
+
+            expect(publications).toBe(1);
+            expect(useGraphStore.getState().nodes.get(firstId)?.position).toEqual({ x: 20, y: 30 });
+            expect(useGraphStore.getState().nodes.get(secondId)?.position).toEqual({ x: 120, y: 30 });
+        });
+
+        it('rejects a reconnect without touching the original cable', () => {
+            const store = useGraphStore.getState();
+            const keyboardId = store.addNode('keyboard', { x: 0, y: 0 });
+            const pianoId = store.addNode('piano', { x: 200, y: 0 });
+            const keyboard = useGraphStore.getState().nodes.get(keyboardId)!;
+            const piano = useGraphStore.getState().nodes.get(pianoId)!;
+            const source = keyboard.ports.find(port => port.direction === 'output')!;
+            const target = piano.ports.find(port => port.direction === 'input')!;
+            const originalId = useGraphStore.getState().addConnection(keyboardId, source.id, pianoId, target.id)!;
+            const connectionCount = useGraphStore.getState().connections.size;
+
+            const rejected = useGraphStore.getState().reconnectConnection(
+                originalId,
+                keyboardId,
+                source.id,
+                pianoId,
+                piano.ports.find(port => port.direction === 'output')!.id,
+            );
+
+            expect(rejected).toBeNull();
+            expect(useGraphStore.getState().connections.has(originalId)).toBe(true);
+            expect(useGraphStore.getState().connections).toHaveLength(connectionCount);
+            expect(useHistoryStore.getState().open).toBeNull();
+        });
+
+        it('closes reconnect history when connection creation throws', () => {
+            const store = useGraphStore.getState();
+            const keyboardId = store.addNode('keyboard', { x: 0, y: 0 });
+            const pianoId = store.addNode('piano', { x: 200, y: 0 });
+            const keyboard = useGraphStore.getState().nodes.get(keyboardId)!;
+            const piano = useGraphStore.getState().nodes.get(pianoId)!;
+            const source = keyboard.ports.find(port => port.direction === 'output')!;
+            const target = piano.ports.find(port => port.direction === 'input')!;
+            const originalId = store.addConnection(keyboardId, source.id, pianoId, target.id)!;
+            const originalAdd = useGraphStore.getState().addConnection;
+            useGraphStore.setState({ addConnection: () => { throw new Error('plugin expansion failed'); } });
+
+            try {
+                expect(() => useGraphStore.getState().reconnectConnection(
+                    originalId, keyboardId, source.id, pianoId, target.id + '-other',
+                )).toThrow('plugin expansion failed');
+                expect(useHistoryStore.getState().open).toBeNull();
+                expect(useGraphStore.getState().connections.has(originalId)).toBe(true);
+            } finally {
+                useGraphStore.setState({ addConnection: originalAdd });
+            }
+        });
+
+        it('reconnects an audio source end in one atomic store update without losing the cable', () => {
+            const store = useGraphStore.getState();
+            const firstId = store.addNode('piano', { x: 0, y: 0 });
+            const secondId = store.addNode('piano', { x: 200, y: 0 });
+            const speakerId = store.addNode('speaker', { x: 400, y: 0 });
+            const first = useGraphStore.getState().nodes.get(firstId)!;
+            const second = useGraphStore.getState().nodes.get(secondId)!;
+            const speaker = useGraphStore.getState().nodes.get(speakerId)!;
+            const firstOut = first.ports.find(port => port.direction === 'output' && port.type === 'audio')!;
+            const secondOut = second.ports.find(port => port.direction === 'output' && port.type === 'audio')!;
+            const input = speaker.ports.find(port => port.direction === 'input')!;
+            const originalId = store.addConnection(firstId, firstOut.id, speakerId, input.id)!;
+            const observed: string[][] = [];
+            const unsubscribe = useGraphStore.subscribe(state => {
+                observed.push(Array.from(state.connections.keys()));
+            });
+
+            const replacementId = useGraphStore.getState().reconnectConnection(
+                originalId, secondId, secondOut.id, speakerId, input.id,
+            )!;
+            unsubscribe();
+
+            expect(observed).toHaveLength(1);
+            expect(observed[0]).toContain(replacementId);
+            expect(observed[0]).not.toContain(originalId);
+        });
+
+        it('treats a same-port reconnect as a no-op with no history entry', () => {
+            const store = useGraphStore.getState();
+            const keyboardId = store.addNode('keyboard', { x: 0, y: 0 });
+            const pianoId = store.addNode('piano', { x: 200, y: 0 });
+            const keyboard = useGraphStore.getState().nodes.get(keyboardId)!;
+            const piano = useGraphStore.getState().nodes.get(pianoId)!;
+            const source = keyboard.ports.find(port => port.direction === 'output')!;
+            const target = piano.ports.find(port => port.direction === 'input')!;
+            const originalId = store.addConnection(keyboardId, source.id, pianoId, target.id)!;
+            const original = useGraphStore.getState().connections.get(originalId)!;
+            const cursor = useHistoryStore.getState().cursor;
+
+            expect(store.reconnectConnection(
+                originalId,
+                original.sourceNodeId,
+                original.sourcePortId,
+                original.targetNodeId,
+                original.targetPortId,
+            )).toBe(originalId);
+            expect(useHistoryStore.getState().cursor).toBe(cursor);
+            expect(useHistoryStore.getState().open).toBeNull();
+        });
+
+        it('reconnects as one undoable graph gesture', () => {
+            const store = useGraphStore.getState();
+            const keyboardId = store.addNode('keyboard', { x: 0, y: 0 });
+            const firstId = store.addNode('piano', { x: 200, y: 0 });
+            const secondId = store.addNode('piano', { x: 400, y: 0 });
+            const keyboard = useGraphStore.getState().nodes.get(keyboardId)!;
+            const first = useGraphStore.getState().nodes.get(firstId)!;
+            const second = useGraphStore.getState().nodes.get(secondId)!;
+            const sourceId = keyboard.ports.find(port => port.direction === 'output')!.id;
+            const originalId = useGraphStore.getState().addConnection(
+                keyboardId, sourceId, firstId, first.ports.find(port => port.direction === 'input')!.id,
+            )!;
+
+            const replacementId = useGraphStore.getState().reconnectConnection(
+                originalId,
+                keyboardId,
+                sourceId,
+                secondId,
+                second.ports.find(port => port.direction === 'input')!.id,
+            )!;
+            expect(replacementId).not.toBe(originalId);
+            expect(useGraphStore.getState().connections.has(originalId)).toBe(false);
+
+            useGraphStore.getState().undo();
+            expect(useGraphStore.getState().connections.has(originalId)).toBe(true);
+            expect(useGraphStore.getState().connections.has(replacementId)).toBe(false);
+        });
+
+        it('deep-clones a selected container subtree and remaps hierarchy ids', () => {
+            const store = useGraphStore.getState();
+            const containerId = store.addNode('container', { x: 0, y: 0 });
+            const childId = store.addNode('speaker', { x: 20, y: 20 }, containerId);
+            store.selectNode(containerId);
+            store.copySelected();
+            store.pasteClipboard();
+
+            const pastedRootId = Array.from(useGraphStore.getState().selectedNodeIds)
+                .find(id => useGraphStore.getState().nodes.get(id)?.parentId === null)!;
+            const pastedRoot = useGraphStore.getState().nodes.get(pastedRootId)!;
+            expect(pastedRootId).not.toBe(containerId);
+            const pastedSpeakerId = pastedRoot.childIds.find(
+                id => useGraphStore.getState().nodes.get(id)?.type === 'speaker',
+            )!;
+            expect(pastedSpeakerId).not.toBe(childId);
+            expect(useGraphStore.getState().nodes.get(pastedSpeakerId)?.parentId).toBe(pastedRootId);
+        });
+
+        it('duplicates selected nodes without changing the clipboard', () => {
+            const store = useGraphStore.getState();
+            const clipboardNode = store.addNode('speaker', { x: 0, y: 0 });
+            store.selectNode(clipboardNode);
+            store.copySelected();
+            const clipboard = useGraphStore.getState().clipboard;
+            const selectedNode = store.addNode('piano', { x: 200, y: 0 });
+            store.selectNode(selectedNode);
+            const observedClipboards: unknown[] = [];
+            const unsubscribe = useGraphStore.subscribe((state) => observedClipboards.push(state.clipboard));
+
+            useGraphStore.getState().duplicateSelected();
+            unsubscribe();
+
+            expect(useGraphStore.getState().clipboard).toBe(clipboard);
+            expect(observedClipboards.every((value) => value === clipboard)).toBe(true);
+            expect(Array.from(useGraphStore.getState().selectedNodeIds).some(
+                (id) => useGraphStore.getState().nodes.get(id)?.type === 'piano',
+            )).toBe(true);
+        });
+
+        it('pastes roots into the current container and drops references to uncloned children', () => {
+            const store = useGraphStore.getState();
+            const destinationId = store.addNode('container', { x: 0, y: 0 });
+            const sourceId = store.addNode('container', { x: 300, y: 0 });
+            const childId = store.addNode('speaker', { x: 20, y: 20 }, sourceId);
+            const source = useGraphStore.getState().nodes.get(sourceId)!;
+            useGraphStore.setState({
+                nodes: new Map(useGraphStore.getState().nodes).set(sourceId, {
+                    ...source, childIds: [...source.childIds, 'external-not-copied'],
+                }),
+            });
+            store.selectNode(sourceId);
+            store.copySelected();
+            useCanvasNavigationStore.setState({ currentViewNodeId: destinationId });
+
+            useGraphStore.getState().pasteClipboard();
+
+            const pastedRootId = Array.from(useGraphStore.getState().selectedNodeIds)
+                .find((id) => useGraphStore.getState().nodes.get(id)?.type === 'container')!;
+            const pastedRoot = useGraphStore.getState().nodes.get(pastedRootId)!;
+            expect(pastedRoot.parentId).toBe(destinationId);
+            expect(useGraphStore.getState().nodes.get(destinationId)?.childIds).toContain(pastedRootId);
+            expect(pastedRoot.childIds).not.toContain('external-not-copied');
+            const pastedSpeakerId = pastedRoot.childIds.find(
+                (id) => useGraphStore.getState().nodes.get(id)?.type === 'speaker',
+            );
+            expect(pastedSpeakerId).toBeTruthy();
+            expect(pastedSpeakerId).not.toBe(childId);
         });
     });
 });

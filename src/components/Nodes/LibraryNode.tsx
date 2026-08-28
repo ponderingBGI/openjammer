@@ -292,24 +292,8 @@ export const LibraryNode = memo(function LibraryNode({
 
       setLoadingItemId(itemId);
 
-      // Get fresh itemRefs from current node data (nodes is a Map)
-      const currentNode = useGraphStore.getState().nodes.get(node.id);
-      const currentItemRefs = (currentNode?.data as LibraryNodeData | undefined)?.itemRefs || [];
-
-      updateNodeData<LibraryNodeData>(node.id, {
-        currentItemId: itemId,
-        itemRefs: [
-          ...currentItemRefs.filter((r: LibraryItemRef) => r.id !== itemId),
-          {
-            id: itemId,
-            relativePath: freshItem.relativePath,
-            displayName: freshItem.fileName,
-            libraryId: freshItem.libraryId,
-          },
-        ],
-      });
-
-      // Load and send buffer to connected samplers
+      // Decode and deliver first. The visible/persisted selection is the last-good
+      // sample and must not move to a missing or corrupt item.
       try {
         const file = await getSampleFile(itemId);
         if (!file) {
@@ -324,6 +308,21 @@ export const LibraryNode = memo(function LibraryNode({
         const arrayBuffer = await file.arrayBuffer();
         const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
         getExecutor().sendSampleBuffer(node.id, audioBuffer);
+
+        const currentNode = useGraphStore.getState().nodes.get(node.id);
+        const currentItemRefs = (currentNode?.data as LibraryNodeData | undefined)?.itemRefs || [];
+        updateNodeData<LibraryNodeData>(node.id, {
+          currentItemId: itemId,
+          itemRefs: [
+            ...currentItemRefs.filter((r: LibraryItemRef) => r.id !== itemId),
+            {
+              id: itemId,
+              relativePath: freshItem.relativePath,
+              displayName: freshItem.fileName,
+              libraryId: freshItem.libraryId,
+            },
+          ],
+        });
       } catch (err) {
         console.error('Failed to load item for sampler:', err);
         toast.error('Failed to load audio file');

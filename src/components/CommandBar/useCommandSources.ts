@@ -50,9 +50,10 @@ const CATEGORY_LABEL: Record<NodeCategory, string> = {
 
 /** The canvas-space centre of the current viewport (the palette's spawn point). */
 function viewportCenter(): Position {
+  const rect = useCanvasStore.getState().canvasRect;
   const screenCenter: Position = {
-    x: window.innerWidth / 2,
-    y: window.innerHeight / 2,
+    x: rect.left + rect.width / 2,
+    y: rect.top + rect.height / 2,
   };
   return useCanvasStore.getState().screenToCanvas(screenCenter);
 }

@@ -177,6 +177,7 @@ export const SamplerVisualNode = memo(function SamplerVisualNode({
                         style={{ width: 12, height: 12 }}
                         data-node-id={node.id}
                         data-port-id={placeholderPortId}
+                        data-port-type="control"
                         onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(placeholderPortId, e)}
                         onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(placeholderPortId, e)}
                         onMouseEnter={() => handlePortMouseEnter?.(placeholderPortId)}
@@ -288,6 +289,7 @@ const RowWithPorts = memo(function RowWithPorts({
                             style={{ width: 12, height: 12 }}
                             data-node-id={nodeId}
                             data-port-id={portId}
+                            data-port-type="control"
                             onMouseDown={(e: React.MouseEvent) => handlePortMouseDown?.(portId, e)}
                             onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(portId, e)}
                             onMouseEnter={() => handlePortMouseEnter?.(portId)}

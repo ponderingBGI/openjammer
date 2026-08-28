@@ -73,7 +73,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     const [isDragging, setIsDragging] = useState(false);
     const [pluginWindowOpen, setPluginWindowOpen] = useState(false);
     const dragStart = useRef<Position>({ x: 0, y: 0 });
-    const nodeStart = useRef<Position>({ x: 0, y: 0 });
+    const nodeStarts = useRef<Map<string, Position>>(new Map());
 
     // Store cleanup function for drag handlers to prevent memory leaks on unmount
     const dragCleanupRef = useRef<(() => void) | null>(null);
@@ -90,11 +90,12 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
 
     const selectedNodeIds = useGraphStore((s) => s.selectedNodeIds);
     const selectNode = useGraphStore((s) => s.selectNode);
-    const updateNodePosition = useGraphStore((s) => s.updateNodePosition);
+    const moveNodes = useGraphStore((s) => s.moveNodes);
     const beginGesture = useGraphStore((s) => s.beginGesture);
     const endGesture = useGraphStore((s) => s.endGesture);
     const connections = useGraphStore((s) => s.connections);
     const addConnection = useGraphStore((s) => s.addConnection);
+    const reconnectConnection = useGraphStore((s) => s.reconnectConnection);
 
     const zoom = useCanvasStore((s) => s.zoom);
     const startConnecting = useCanvasStore((s) => s.startConnecting);
@@ -152,21 +153,42 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
         if (e.button !== 0) return;
         e.stopPropagation();
 
-        selectNode(node.id, e.shiftKey);
-        setIsDragging(true);
-        setCanvasDragging(true);
+        if (e.shiftKey) {
+            selectNode(node.id, true);
+            return;
+        }
+        const graph = useGraphStore.getState();
+        if (!graph.selectedNodeIds.has(node.id)) selectNode(node.id);
         dragStart.current = { x: e.clientX, y: e.clientY };
-        nodeStart.current = { ...node.position };
-        beginGesture();
+        const dragIds = graph.selectedNodeIds.has(node.id)
+            ? graph.selectedNodeIds
+            : new Set([node.id]);
+        nodeStarts.current = new Map(
+            Array.from(dragIds).flatMap((id) => {
+                const selectedNode = graph.nodes.get(id);
+                return selectedNode ? [[id, { ...selectedNode.position }] as const] : [];
+            }),
+        );
+        let gestureStarted = false;
 
         const handleMouseMove = (e: MouseEvent) => {
-            const dx = (e.clientX - dragStart.current.x) / zoom;
-            const dy = (e.clientY - dragStart.current.y) / zoom;
-
-            updateNodePosition(node.id, {
-                x: nodeStart.current.x + dx,
-                y: nodeStart.current.y + dy
-            });
+            const screenDx = e.clientX - dragStart.current.x;
+            const screenDy = e.clientY - dragStart.current.y;
+            if (!gestureStarted && Math.hypot(screenDx, screenDy) < 4) return;
+            if (!gestureStarted) {
+                gestureStarted = true;
+                setIsDragging(true);
+                setCanvasDragging(true);
+                beginGesture();
+            }
+            const positions = new Map<string, Position>();
+            for (const [id, start] of nodeStarts.current) {
+                positions.set(id, {
+                    x: start.x + screenDx / zoom,
+                    y: start.y + screenDy / zoom,
+                });
+            }
+            moveNodes(positions);
         };
 
         const cleanup = () => {
@@ -175,10 +197,14 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
             window.removeEventListener('mousemove', handleMouseMove);
             window.removeEventListener('mouseup', handleMouseUp);
             dragCleanupRef.current = null;
-            endGesture();
+            window.removeEventListener('blur', cleanup);
+            if (gestureStarted) endGesture();
         };
 
         const handleMouseUp = () => {
+            if (!gestureStarted && useGraphStore.getState().selectedNodeIds.size > 1) {
+                selectNode(node.id);
+            }
             cleanup();
         };
 
@@ -187,7 +213,8 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
 
         window.addEventListener('mousemove', handleMouseMove);
         window.addEventListener('mouseup', handleMouseUp);
-    }, [beginGesture, endGesture, node.id, node.position, zoom, selectNode, setCanvasDragging, updateNodePosition]);
+        window.addEventListener('blur', cleanup);
+    }, [beginGesture, endGesture, moveNodes, node.id, zoom, selectNode, setCanvasDragging]);
 
     // Handle port mouse down - start connection dragging (with pending disconnect)
     const handlePortMouseDown = useCallback((portId: string, e: React.MouseEvent) => {
@@ -246,6 +273,12 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
             // Check if clicking on a ghost port (not yet persisted)
             const isGhostPort = portId.startsWith('ghost-input-');
             let actualFirstPortId = portId;
+
+            // Inventing a ghost port and attaching/reconnecting its cable is one
+            // reversible gesture. Nesting with reconnectConnection's defensive
+            // history bracket is intentional; historyStore commits at depth zero.
+            if (isGhostPort) beginGesture();
+            try {
 
             if (isGhostPort && isInstrument) {
                 // Extract the ghost port index
@@ -316,6 +349,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
             const finalNode = useGraphStore.getState().nodes.get(node.id) || updatedNode;
             const finalInputs = finalNode.ports.filter(p => p.direction === 'input' && p.type === 'control');
 
+            const pendingDisconnect = useCanvasStore.getState().pendingDisconnect;
             sources.forEach((source, index) => {
                 let actualTargetPortId = actualFirstPortId;
 
@@ -329,21 +363,26 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
                 }
 
                 if (targetPort.direction === 'input') {
-                    addConnection(source.nodeId, source.portId, node.id, actualTargetPortId);
+                    if (pendingDisconnect && index === 0) {
+                        reconnectConnection(pendingDisconnect, source.nodeId, source.portId, node.id, actualTargetPortId);
+                    } else {
+                        addConnection(source.nodeId, source.portId, node.id, actualTargetPortId);
+                    }
                 } else {
-                    addConnection(node.id, actualTargetPortId, source.nodeId, source.portId);
+                    if (pendingDisconnect && index === 0) {
+                        reconnectConnection(pendingDisconnect, node.id, actualTargetPortId, source.nodeId, source.portId);
+                    } else {
+                        addConnection(node.id, actualTargetPortId, source.nodeId, source.portId);
+                    }
                 }
             });
 
-            // Remove pending disconnect connection now that new connection is confirmed
-            const pendingDisconnect = useCanvasStore.getState().pendingDisconnect;
-            if (pendingDisconnect) {
-                useGraphStore.getState().removeConnection(pendingDisconnect);
-            }
-
             stopConnecting();
+            } finally {
+                if (isGhostPort) endGesture();
+            }
         }
-    }, [node, addConnection, stopConnecting]);
+    }, [node, addConnection, reconnectConnection, stopConnecting, beginGesture, endGesture]);
 
     // Handle port hover for connection targeting and 'A' key selection
     const handlePortMouseEnter = useCallback((portId: string) => {
@@ -396,21 +435,24 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
 
     // For schematic nodes, render the component directly without wrapper
     if (isSchematic) {
+        const nodeRoot = (child: ReactNode) => (
+            <div data-canvas-node-root={node.id} style={{ display: 'contents' }}>{child}</div>
+        );
         switch (node.type) {
             case 'keyboard':
-                return <KeyboardNode {...schematicProps} />;
+                return nodeRoot(<KeyboardNode {...schematicProps} />);
             case 'keyboard-visual':
-                return <KeyboardVisualNode {...schematicProps} />;
+                return nodeRoot(<KeyboardVisualNode {...schematicProps} />);
             case 'instrument-visual':
-                return <InstrumentVisualNode {...schematicProps} />;
+                return nodeRoot(<InstrumentVisualNode {...schematicProps} />);
             case 'midi':
-                return <MIDINode {...schematicProps} />;
+                return nodeRoot(<MIDINode {...schematicProps} />);
             case 'midi-visual':
-                return <MIDIVisualNode {...schematicProps} />;
+                return nodeRoot(<MIDIVisualNode {...schematicProps} />);
             case 'minilab-3':
-                return <MiniLab3Node {...schematicProps} />;
+                return nodeRoot(<MiniLab3Node {...schematicProps} />);
             case 'minilab3-visual':
-                return <MiniLab3VisualNode {...schematicProps} />;
+                return nodeRoot(<MiniLab3VisualNode {...schematicProps} />);
             case 'piano':
             case 'cello':
             case 'electricCello':
@@ -419,33 +461,33 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
             case 'strings':
             case 'keys':
             case 'winds':
-                return <InstrumentNode {...schematicProps} />;
+                return nodeRoot(<InstrumentNode {...schematicProps} />);
             case 'speaker':
-                return <SpeakerNode {...schematicProps} />;
+                return nodeRoot(<SpeakerNode {...schematicProps} />);
             case 'looper':
-                return <LooperNode {...schematicProps} />;
+                return nodeRoot(<LooperNode {...schematicProps} />);
             case 'microphone':
-                return <MicrophoneNode {...schematicProps} />;
+                return nodeRoot(<MicrophoneNode {...schematicProps} />);
             case 'canvas-input':
             case 'canvas-output':
-                return <CanvasIONode {...schematicProps} />;
+                return nodeRoot(<CanvasIONode {...schematicProps} />);
             case 'output-panel':
-                return <OutputPanelNode {...schematicProps} />;
+                return nodeRoot(<OutputPanelNode {...schematicProps} />);
             case 'input-panel':
-                return <InputPanelNode {...schematicProps} />;
+                return nodeRoot(<InputPanelNode {...schematicProps} />);
             case 'container':
-                return <ContainerNode {...schematicProps} />;
+                return nodeRoot(<ContainerNode {...schematicProps} />);
             case 'add':
             case 'subtract':
-                return <MathNode {...schematicProps} />;
+                return nodeRoot(<MathNode {...schematicProps} />);
             case 'library':
-                return <LibraryNode {...schematicProps} />;
+                return nodeRoot(<LibraryNode {...schematicProps} />);
             case 'sampler':
-                return <SamplerNode {...schematicProps} />;
+                return nodeRoot(<SamplerNode {...schematicProps} />);
             case 'sampler-visual':
-                return <SamplerVisualNode {...schematicProps} />;
+                return nodeRoot(<SamplerVisualNode {...schematicProps} />);
             case 'song':
-                return <SongNode {...schematicProps} />;
+                return nodeRoot(<SongNode {...schematicProps} />);
         }
     }
 
@@ -575,6 +617,7 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
 
     return (
         <NodeFrame
+            data-canvas-node-root={node.id}
             position={node.position}
             dragging={isDragging}
             className={`node ${node.type}${bypassed ? ' is-bypassed' : ''}${(node.data as Record<string, unknown>).pluginFaultKind === 'AutoBypassed' ? ' is-watchdog-bypassed' : ''}${pluginWindowOpen ? ' is-window-open' : ''}`}

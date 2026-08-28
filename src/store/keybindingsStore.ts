@@ -41,21 +41,8 @@ export interface KeybindingAction {
 // ============================================================================
 
 export const keybindingActions: KeybindingAction[] = [
-    // File actions
-    {
-        id: 'file.new',
-        label: 'New Workflow',
-        category: 'File',
-        defaultBinding: { key: 'n', ctrl: true },
-        scope: 'global',
-    },
-    {
-        id: 'file.import',
-        label: 'Import Workflow',
-        category: 'File',
-        defaultBinding: { key: 'o', ctrl: true },
-        scope: 'global',
-    },
+    // New/import remain menu-driven until their destructive/file-picker flows have
+    // real keymap consumers. Do not advertise shortcuts that silently do nothing.
     {
         id: 'file.save',
         label: 'Save Project',
@@ -99,21 +86,22 @@ export const keybindingActions: KeybindingAction[] = [
         id: 'view.zoomIn',
         label: 'Zoom In',
         category: 'View',
-        defaultBinding: { key: '=', ctrl: true },
+        // Alt is cancellable by Chromium; Ctrl/Cmd +/-/0 are reserved browser zoom.
+        defaultBinding: { key: '=', alt: true },
         scope: 'surface', surface: 'canvas',
     },
     {
         id: 'view.zoomOut',
         label: 'Zoom Out',
         category: 'View',
-        defaultBinding: { key: '-', ctrl: true },
+        defaultBinding: { key: '-', alt: true },
         scope: 'surface', surface: 'canvas',
     },
     {
         id: 'view.resetView',
         label: 'Reset View',
         category: 'View',
-        defaultBinding: { key: '0', ctrl: true },
+        defaultBinding: { key: '0', alt: true },
         scope: 'surface', surface: 'canvas',
     },
     {
@@ -132,6 +120,8 @@ export const keybindingActions: KeybindingAction[] = [
         defaultBinding: { key: 'a' },
         scope: 'surface', surface: 'canvas',
     },
+    { id: 'canvas.selectAll', label: 'Select All Nodes', category: 'Canvas', defaultBinding: { key: 'a', ctrl: true }, scope: 'surface', surface: 'canvas' },
+    { id: 'canvas.duplicate', label: 'Duplicate Nodes', category: 'Canvas', defaultBinding: { key: 'd', ctrl: true }, scope: 'surface', surface: 'canvas' },
     { id: 'view.toggleArrangement', label: 'Toggle Arrangement', category: 'View', defaultBinding: { key: 'Tab' }, scope: 'global' },
     { id: 'window.focusHost', label: 'Return to OpenJammer', category: 'View', defaultBinding: { key: 'F6' }, scope: 'global' },
     { id: 'commandBar.toggle', label: 'Open Command Bar', category: 'View', defaultBinding: { key: 'k', ctrl: true }, scope: 'global' },
@@ -217,8 +207,17 @@ export function matchesKeyCombo(e: KeyboardEvent, combo: KeyCombo): boolean {
     if (Boolean(combo.alt) !== e.altKey) return false;
 
     // Check main key (case-insensitive for letters)
-    const eventKey = e.key.toLowerCase();
     const comboKey = combo.key.toLowerCase();
+
+    // Option modifies the produced character on macOS (for example Alt+= is ≠),
+    // while the physical key code remains stable across keyboard layouts.
+    if (combo.alt) {
+        const codeForKey: Record<string, string> = { '=': 'Equal', '-': 'Minus', '0': 'Digit0' };
+        const expectedCode = codeForKey[comboKey];
+        if (expectedCode) return e.code === expectedCode;
+    }
+
+    const eventKey = e.key.toLowerCase();
 
     return eventKey === comboKey;
 }

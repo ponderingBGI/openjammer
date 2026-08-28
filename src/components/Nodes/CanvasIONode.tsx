@@ -72,7 +72,9 @@ export function CanvasIONode({
     };
 
     // Get the port ID for connections
-    const portId = node.ports[0]?.id || (isInput ? 'out' : 'in');
+    const renderedPort = node.ports.find((port) => port.direction === (isInput ? 'output' : 'input'))
+        ?? node.ports[0];
+    const portId = renderedPort?.id || (isInput ? 'out' : 'in');
 
     return (
         <div
@@ -90,6 +92,7 @@ export function CanvasIONode({
                     style={{ width: '20px', height: '20px' }}
                     data-node-id={node.id}
                     data-port-id={portId}
+                    data-port-type={renderedPort?.type ?? 'control'}
                     onMouseDown={(e: React.MouseEvent) => {
                         e.stopPropagation();
                         handlePortMouseDown?.(portId, e);

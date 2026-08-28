@@ -2,7 +2,7 @@
  * Effect Node - Audio effects processor
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { GraphNode, EffectNodeData, EffectType } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { Select, Slider } from '@openjammer/oj-ui';
@@ -39,6 +39,26 @@ const PARAM_CONFIG: Record<string, { min: number; max: number; step: number; def
 export function EffectNode({ node }: EffectNodeProps) {
     const data = node.data as EffectNodeData;
     const updateNodeData = useGraphStore((s) => s.updateNodeData);
+    const beginGesture = useGraphStore((s) => s.beginGesture);
+    const endGesture = useGraphStore((s) => s.endGesture);
+    const gestureOpenRef = useRef(false);
+    const startGesture = useCallback(() => {
+        if (gestureOpenRef.current) return;
+        gestureOpenRef.current = true;
+        beginGesture();
+    }, [beginGesture]);
+    const closeGesture = useCallback(() => {
+        if (!gestureOpenRef.current) return;
+        gestureOpenRef.current = false;
+        endGesture();
+    }, [endGesture]);
+    useEffect(() => {
+        window.addEventListener('blur', closeGesture);
+        return () => {
+            window.removeEventListener('blur', closeGesture);
+            closeGesture();
+        };
+    }, [closeGesture]);
 
     const effectType = data.effectType || 'distortion';
     const params = useMemo(() => data.params || {}, [data.params]);
@@ -106,6 +126,10 @@ export function EffectNode({ node }: EffectNodeProps) {
                             step={config?.step ?? 0.1}
                             value={value}
                             onChange={(v) => handleParamChange(param, v)}
+                            onPointerDown={startGesture}
+                            onPointerUp={closeGesture}
+                            onPointerCancel={closeGesture}
+                            onBlur={closeGesture}
                             style={{ width: '100%' }}
                         />
                     </div>

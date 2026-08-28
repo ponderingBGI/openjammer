@@ -27,6 +27,9 @@ const SCROLL_NORMALIZATION_FACTOR = 100;
  * Scroll event data with normalized values and gesture detection
  */
 export interface ScrollData {
+    /** Wheel position in viewport client coordinates. */
+    clientX: number;
+    clientY: number;
     /** Raw horizontal delta (negative = left, positive = right) */
     deltaX: number;
     /** Raw vertical delta (negative = up, positive = down for mouse wheel) */
@@ -221,8 +224,9 @@ export function useScrollCapture<T extends HTMLElement = HTMLElement>(
             // Detect pinch gesture (browsers report trackpad pinch as ctrl+wheel)
             const isPinch = e.ctrlKey || e.metaKey;
 
-            // Direction helpers - deltaY > 0 means "scroll down" gesture (content moves up)
-            // For zoom: "scroll up" (deltaY > 0 with natural scrolling) should zoom in
+            // Historical OpenJammer semantics are intentionally gesture-oriented:
+            // positive deltaY is `scrollingUp`. Eight value-scrubber consumers rely
+            // on this contract, so changing it would reverse their stage controls.
             const scrollingUp = e.deltaY > 0;
             const scrollingDown = e.deltaY < 0;
             const scrollingRight = e.deltaX > 0;
@@ -230,6 +234,8 @@ export function useScrollCapture<T extends HTMLElement = HTMLElement>(
 
             // Build normalized scroll data
             const scrollData: ScrollData = {
+                clientX: e.clientX,
+                clientY: e.clientY,
                 deltaX: e.deltaX,
                 deltaY: e.deltaY,
                 normalizedDeltaX: Math.max(-1, Math.min(1,
@@ -255,8 +261,10 @@ export function useScrollCapture<T extends HTMLElement = HTMLElement>(
             onScrollRef.current?.(scrollData);
 
             // Reset capturing state after a brief delay
-            requestAnimationFrame(() => setIsCapturing(false));
+            resetFrame = requestAnimationFrame(() => setIsCapturing(false));
         };
+
+        let resetFrame: number | null = null;
 
         // CRITICAL: Use { passive: false } to allow preventDefault()
         // React's synthetic onWheel events are passive by default
@@ -264,6 +272,7 @@ export function useScrollCapture<T extends HTMLElement = HTMLElement>(
 
         return () => {
             element.removeEventListener('wheel', handleWheel);
+            if (resetFrame !== null) cancelAnimationFrame(resetFrame);
         };
     }, [element, enabled]);
 
@@ -271,4 +280,3 @@ export function useScrollCapture<T extends HTMLElement = HTMLElement>(
     return { ref: setRef, isCapturing };
 }
 
-export default useScrollCapture;

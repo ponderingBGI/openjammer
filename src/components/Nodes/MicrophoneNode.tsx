@@ -75,6 +75,7 @@ export const MicrophoneNode = memo(function MicrophoneNode({
     const [devices, setDevices] = useState<AudioDevice[]>([]);
     const [showDevices, setShowDevices] = useState(false);
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>(data.deviceId || 'default');
+    const deviceSelectorRef = useRef<HTMLDivElement>(null);
 
     // Smoothed rolling history of the engine meter level, fed into the bars so the
     // line scrolls like a scope instead of flat-lining (VIS-1 driven by the REAL
@@ -91,8 +92,11 @@ export const MicrophoneNode = memo(function MicrophoneNode({
     useEffect(() => {
         if (!navigator.mediaDevices?.enumerateDevices) return;
 
-        const updateDevices = () => {
-            navigator.mediaDevices.enumerateDevices().then(devs => {
+        let cancelled = false;
+        const updateDevices = async () => {
+            try {
+                const devs = await navigator.mediaDevices.enumerateDevices();
+                if (cancelled) return;
                 const inputs = devs
                     .filter(d => d.kind === 'audioinput')
                     .map(d => ({
@@ -120,7 +124,9 @@ export const MicrophoneNode = memo(function MicrophoneNode({
                         updateNodeData<MicrophoneNodeData>(node.id, { deviceId: 'default' });
                     }
                 }
-            });
+            } catch {
+                if (!cancelled) setDevices([]);
+            }
         };
 
         // Initial fetch
@@ -130,6 +136,7 @@ export const MicrophoneNode = memo(function MicrophoneNode({
         navigator.mediaDevices.addEventListener('devicechange', updateDevices);
 
         return () => {
+            cancelled = true;
             navigator.mediaDevices.removeEventListener('devicechange', updateDevices);
         };
     }, [setDeviceInfo, selectedDeviceId, node.id, updateNodeData]);
@@ -138,23 +145,15 @@ export const MicrophoneNode = memo(function MicrophoneNode({
     useEffect(() => {
         if (!showDevices) return;
 
-        const handleClickOutside = (e: MouseEvent) => {
-            const dropdown = document.querySelector('.mic-device-selector .device-dropdown');
-            const button = document.querySelector('.mic-device-selector .mic-source-btn');
-            if (dropdown && !dropdown.contains(e.target as Node) &&
-                button && !button.contains(e.target as Node)) {
+        const handleClickOutside = (e: PointerEvent) => {
+            if (!deviceSelectorRef.current?.contains(e.target as Node)) {
                 setShowDevices(false);
             }
         };
-
-        // Delay adding listener to avoid immediate trigger from the click that opened the dropdown
-        const timeoutId = setTimeout(() => {
-            document.addEventListener('mousedown', handleClickOutside);
-        }, 0);
+        document.addEventListener('pointerdown', handleClickOutside);
 
         return () => {
-            clearTimeout(timeoutId);
-            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('pointerdown', handleClickOutside);
         };
     }, [showDevices]);
 
@@ -263,7 +262,7 @@ export const MicrophoneNode = memo(function MicrophoneNode({
                     </button>
 
                     {/* Device Selector */}
-                    <div className="mic-device-selector">
+                    <div ref={deviceSelectorRef} className="mic-device-selector">
                         <button
                             className="mic-source-btn"
                             onClick={(e) => {
@@ -317,6 +316,7 @@ export const MicrophoneNode = memo(function MicrophoneNode({
                         style={{ marginLeft: 'auto' }}
                         data-node-id={node.id}
                         data-port-id={outputPortId}
+                        data-port-type={outputPort?.type ?? 'audio'}
                         onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(outputPortId, e); }}
                         onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(outputPortId, e); }}
                         onMouseEnter={() => handlePortMouseEnter?.(outputPortId)}

@@ -148,9 +148,10 @@ export function createGraphStoreApi(): GraphStoreApi {
         },
 
         viewportCenter: () => {
+            const rect = useCanvasStore.getState().canvasRect;
             const screenCenter: Position = {
-                x: typeof window !== 'undefined' ? window.innerWidth / 2 : 0,
-                y: typeof window !== 'undefined' ? window.innerHeight / 2 : 0,
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
             };
             return useCanvasStore.getState().screenToCanvas(screenCenter);
         },

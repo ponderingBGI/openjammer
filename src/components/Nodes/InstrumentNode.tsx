@@ -297,22 +297,16 @@ export const InstrumentNode = memo(function InstrumentNode({
     useEffect(() => {
         if (!showPopup) return;
 
-        const handleClickOutside = (e: MouseEvent) => {
-            const dropdown = document.querySelector('.instrument-selector-dropdown');
-            if (dropdown && !dropdown.contains(e.target as Node)) {
+        const handleClickOutside = (e: PointerEvent) => {
+            if (!nodeRef.current?.contains(e.target as Node)) {
                 setShowPopup(false);
                 setSearchQuery('');
             }
         };
-
-        // Delay adding listener to avoid immediate trigger from the click that opened the popup
-        const timeoutId = setTimeout(() => {
-            document.addEventListener('mousedown', handleClickOutside);
-        }, 0);
+        document.addEventListener('pointerdown', handleClickOutside);
 
         return () => {
-            clearTimeout(timeoutId);
-            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('pointerdown', handleClickOutside);
         };
     }, [showPopup]);
 
@@ -567,6 +561,7 @@ export const InstrumentNode = memo(function InstrumentNode({
                                     style={{ width: '12px', height: '12px' }}
                                     data-node-id={node.id}
                                     data-port-id={emptyStatePort.id}
+                                    data-port-type={emptyStatePort.type}
                                     onMouseDown={(e) => handlePortMouseDown?.(emptyStatePort.id, e)}
                                     onMouseUp={(e) => handlePortMouseUp?.(emptyStatePort.id, e)}
                                     onMouseEnter={() => handlePortMouseEnter?.(emptyStatePort.id)}
@@ -593,6 +588,7 @@ export const InstrumentNode = memo(function InstrumentNode({
                                             style={{ width: '12px', height: '12px' }}
                                             data-node-id={node.id}
                                             data-port-id={rowPort?.id || 'bundle-in'}
+                                            data-port-type={rowPort?.type ?? 'control'}
                                             onMouseDown={(e) => handlePortMouseDown?.(rowPort?.id || 'bundle-in', e)}
                                             onMouseUp={(e) => handlePortMouseUp?.(rowPort?.id || 'bundle-in', e)}
                                             onMouseEnter={() => handlePortMouseEnter?.(rowPort?.id || 'bundle-in')}
@@ -648,6 +644,7 @@ export const InstrumentNode = memo(function InstrumentNode({
                                         style={{ width: '12px', height: '12px' }}
                                         data-node-id={node.id}
                                         data-port-id={availableNewRowPort.id}
+                                        data-port-type={availableNewRowPort.type}
                                         onMouseDown={(e) => handlePortMouseDown?.(availableNewRowPort.id, e)}
                                         onMouseUp={(e) => handlePortMouseUp?.(availableNewRowPort.id, e)}
                                         onMouseEnter={() => handlePortMouseEnter?.(availableNewRowPort.id)}
@@ -670,6 +667,7 @@ export const InstrumentNode = memo(function InstrumentNode({
                         style={{ width: '16px', height: '16px' }}
                         data-node-id={node.id}
                         data-port-id={outputPort.id}
+                        data-port-type={outputPort.type}
                         onMouseDown={(e) => handlePortMouseDown?.(outputPort.id, e)}
                         onMouseUp={(e) => handlePortMouseUp?.(outputPort.id, e)}
                         onMouseEnter={() => handlePortMouseEnter?.(outputPort.id)}

@@ -18,6 +18,7 @@ import { DropdownMenu, type MenuItemOrSeparator } from './DropdownMenu';
 import { useOnlineStatus } from '../../hooks/usePWA';
 import { Button } from '@openjammer/oj-ui';
 import { EngineHealthDot } from '../EngineHealthDot/EngineHealthDot';
+import { keyComboToString, useKeybindingsStore } from '../../store/keybindingsStore';
 import './Toolbar.css';
 
 export function Toolbar() {
@@ -36,6 +37,12 @@ export function Toolbar() {
     const zoomTo = useCanvasStore((s) => s.zoomTo);
     const ghostMode = useCanvasStore((s) => s.ghostMode);
     const toggleGhostMode = useCanvasStore((s) => s.toggleGhostMode);
+    const customBindings = useKeybindingsStore((s) => s.customBindings);
+    const shortcutFor = (actionId: string) => {
+        void customBindings;
+        const binding = useKeybindingsStore.getState().getBinding(actionId);
+        return binding ? keyComboToString(binding) : undefined;
+    };
 
     const isAudioContextReady = useAudioStore((s) => s.isAudioContextReady);
     const currentMode = useAudioStore((s) => s.currentMode);
@@ -294,13 +301,11 @@ export function Toolbar() {
         {
             id: 'new',
             label: 'New Canvas',
-            shortcut: projectIsSupported ? undefined : `${cmdKey}+N`,
             onClick: handleNew,
         },
         {
             id: 'import',
             label: 'Import Workflow...',
-            shortcut: projectIsSupported ? undefined : `${cmdKey}+O`,
             onClick: handleImport,
         },
         {
@@ -329,19 +334,19 @@ export function Toolbar() {
         {
             id: 'zoom-in',
             label: 'Zoom In',
-            shortcut: `${cmdKey}+=`,
+            shortcut: shortcutFor('view.zoomIn'),
             onClick: handleZoomIn,
         },
         {
             id: 'zoom-out',
             label: 'Zoom Out',
-            shortcut: `${cmdKey}+-`,
+            shortcut: shortcutFor('view.zoomOut'),
             onClick: handleZoomOut,
         },
         {
             id: 'reset-view',
             label: 'Reset View',
-            shortcut: `${cmdKey}+0`,
+            shortcut: shortcutFor('view.resetView'),
             onClick: handleResetView,
         },
         { type: 'separator' },
