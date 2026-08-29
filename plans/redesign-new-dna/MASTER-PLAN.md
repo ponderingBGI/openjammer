@@ -119,6 +119,6 @@ Gate (Wave 6): a coverage matrix `plans/redesign-new-dna/COVERAGE.md` listing ev
    styling; in the New DNA green (`--success`) means *healthy*, not *selected*.
 
 ### Follow-ups found by Wave 5 P6 (2026-08-29)
-- **Browser-tier level stream emits no frames** — neither the Speaker meter nor the transport pill's master meter moves in the browser (headless AND headed with a real device). The writers are proven; the source (`OjcoreWasmExecutor.subscribeSignalLevels` / `__master__`) needs a dedicated executor lane (diagnosis requested from the P6 gate). Native path unverified — founder listening pass.
+- ~~Browser-tier level stream emits no frames~~ — **RETRACTED by the P6 gate (2026-08-30)**: 4,511 worklet meter frames measured, the Speaker meter reads `-29.3 dB` on a held key; the lane's zeros were an un-wired rig at −75.6 dBFS reported honestly. No executor lane needed. Native path still needs the founder listening pass.
 - `pan` and `width` node types are in no `nodeCategories` entry, so no user can place them — registry fix (P10 scope).
 - UI-017 (keyboard port activation rejected by `e.button !== 0`) was live in production until P6 — pinned now.
