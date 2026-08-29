@@ -9,7 +9,7 @@ core (`ojcore`) runs native on the desktop and compiled to WebAssembly in your b
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
 [![Version](https://img.shields.io/badge/version-0.0.0-orange.svg)](package.json)
-[![Docs](https://img.shields.io/badge/docs-living%20reference-4A7C59.svg)](https://ponderingbgi.github.io/openjammer/)
+[![Docs](https://img.shields.io/badge/docs-living%20reference-17a750.svg)](https://ponderingbgi.github.io/openjammer/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 [![CodSpeed](https://img.shields.io/endpoint?url=https://codspeed.io/badge.json)](https://app.codspeed.io/ponderingBGI/openjammer?utm_source=badge)
 
@@ -33,7 +33,8 @@ core (`ojcore`) runs native on the desktop and compiled to WebAssembly in your b
 ### The first three taps
 
 Opening OpenJammer for the first time asks three questions, one tap each (or the number
-keys `1`–`3`, or `Esc` to skip with sensible defaults):
+keys `1`–`3`, or `Esc` / **Skip, take me in** to finish with sensible defaults,
+keeping whatever you already answered):
 
 1. **Have you made music with a computer before?** — sets how much the instrument shows
    you by default. Nothing is ever taken away; it only decides what is in the way.
@@ -79,8 +80,26 @@ What you get:
   automate tracks, record, and export 24-bit WAV or FLAC from the same Song document.
 - 📴 **Offline-capable PWA** — works after first visit, no external API calls.
 
-For who plays this and why, see **[PRODUCT.md](PRODUCT.md)**; for the visual system, the
-"Living Sketchbook," see **[DESIGN.md](DESIGN.md)**.
+## The look
+
+OpenJammer is meant to read as **a real instrument**, not a dashboard. The canvas is a
+calm warm neutral under a faint dot grid; nodes are white cards with hairline edges and
+soft layered depth, and their ports are recessed **socket wells inside the body** — the
+same shape your hand already knows from a patchbay — labelled in small uppercase mono.
+Colour is spent only on signal, state and selection, so the loudest thing on screen is
+always the patch. Controls have weight: buttons compress, knobs resist, keys spring back.
+And **only live audio glows** — cables thicken and brighten with the signal actually
+passing through them, meters read the real level, and nothing else in the interface glows,
+ever.
+
+Two themes ship, **Light** and **Dark**, and they are pure value swaps of the same tokens —
+so a community skin is exactly the same shape as a built-in one. Type is **Outfit** for the
+UI and **JetBrains Mono** for anything exact; UI text never goes below 13px, and both themes
+are held to WCAG contrast floors by a test that reads the token files directly.
+
+For who plays this and why, see **[PRODUCT.md](PRODUCT.md)**; for the visual system in
+full — tokens, components, named rules, and the measured accessibility floors — see
+**[DESIGN.md](DESIGN.md)**.
 
 ## The DAW
 

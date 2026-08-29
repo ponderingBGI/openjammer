@@ -1,121 +1,473 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-06-17T00:00:00Z",
+  "generatedAt": "2026-08-29T00:00:00Z",
   "title": "Design System: OpenJammer",
   "extensions": {
+    "themes": [
+      {
+        "id": "light",
+        "name": "Light",
+        "default": true,
+        "canvas": "#F4F3F0",
+        "surface": "#FFFFFF"
+      },
+      {
+        "id": "dark",
+        "name": "Dark",
+        "default": false,
+        "canvas": "#161510",
+        "surface": "#201F19"
+      }
+    ],
     "colorMeta": {
-      "ink": { "role": "primary", "displayName": "Ink", "canonical": "#1A1A1A", "tonalRamp": ["#1A1A1A", "#3A3A37", "#5A5A55", "#7A7A73", "#9A9A91", "#BEBAB0", "#D4CFC6", "#F5F0E8"] },
-      "paper": { "role": "neutral", "displayName": "Paper", "canonical": "#F5F0E8", "tonalRamp": ["#5B564D", "#7A746A", "#9A9388", "#B8B1A5", "#D4CFC6", "#E8E3DA", "#F5F0E8", "#FBF8F2"] },
-      "walnut": { "role": "secondary", "displayName": "Walnut", "canonical": "#6B5B4F", "tonalRamp": ["#2E2620", "#43382F", "#574940", "#6B5B4F", "#86756A", "#A18F84", "#BCA99F", "#D8C8BE"] },
-      "pine": { "role": "tertiary", "displayName": "Pine (success)", "canonical": "#4A7C59", "tonalRamp": ["#1C2F22", "#2A4733", "#385E44", "#4A7C59", "#5F9670", "#7FB08C", "#A6CBAE", "#CFE3D4"] },
-      "ochre": { "role": "tertiary", "displayName": "Ochre (warning)", "canonical": "#C68B3F", "tonalRamp": ["#4D3415", "#6E4A1F", "#8F602A", "#B07738", "#C68B3F", "#D6A567", "#E4C194", "#F0DCC0"] },
-      "clay": { "role": "tertiary", "displayName": "Clay (danger)", "canonical": "#A65353", "tonalRamp": ["#3F1B1B", "#5C2828", "#7A3636", "#974545", "#A65353", "#BC7373", "#D09898", "#E4C0C0"] },
-      "audio-blue": { "role": "functional", "displayName": "Audio Blue", "canonical": "#4A90C2", "tonalRamp": ["#16344B", "#1F4F70", "#2C5F88", "#3B79A6", "#4A90C2", "#7EB3D8", "#A6CDE6", "#CFE3F2"] },
-      "control-grey": { "role": "functional", "displayName": "Control Grey", "canonical": "#808080", "tonalRamp": ["#262626", "#3D3D3D", "#545454", "#6B6B6B", "#808080", "#A0A0A0", "#C0C0C0", "#E0E0E0"] },
-      "universal-violet": { "role": "functional", "displayName": "Universal Violet", "canonical": "#9B59B6", "tonalRamp": ["#3A1F45", "#522C61", "#6B397D", "#84479A", "#9B59B6", "#B27FC9", "#CCA6DC", "#E4CDEE"] }
+      "accent-primary": {
+        "role": "primary",
+        "displayName": "Signal Accent",
+        "canonical": "oklch(0.66 0.19 40)",
+        "canonicalHex": "#EE5E23",
+        "tonalRamp": [
+          "#300F04",
+          "#612005",
+          "#963304",
+          "#CE4600",
+          "#E56637",
+          "#F9926D",
+          "#FFBB9F",
+          "#FFE0D0"
+        ]
+      },
+      "accent-secondary": {
+        "role": "secondary",
+        "displayName": "Accent Hover (lifts in light)",
+        "canonical": "oklch(0.71 0.19 40)",
+        "canonicalHex": "#FF6E37",
+        "tonalRamp": [
+          "#300F04",
+          "#612005",
+          "#963304",
+          "#CE4600",
+          "#E56637",
+          "#F9926D",
+          "#FFBB9F",
+          "#FFE0D0"
+        ]
+      },
+      "text-primary": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#1D1C18",
+        "canonicalHex": "#1D1C18",
+        "tonalRamp": [
+          "#1B1B19",
+          "#383836",
+          "#595854",
+          "#7B7A75",
+          "#93928E",
+          "#B2B1AD",
+          "#D2D1CE",
+          "#ECEBE9"
+        ]
+      },
+      "bg-canvas": {
+        "role": "neutral",
+        "displayName": "Canvas",
+        "canonical": "#F4F3F0",
+        "canonicalHex": "#F4F3F0",
+        "tonalRamp": [
+          "#1B1B1A",
+          "#383837",
+          "#595856",
+          "#7B7A78",
+          "#939290",
+          "#B2B1AF",
+          "#D1D1CF",
+          "#EBEBEA"
+        ]
+      },
+      "bg-tertiary": {
+        "role": "neutral",
+        "displayName": "Inset",
+        "canonical": "#ECEAE4",
+        "canonicalHex": "#ECEAE4",
+        "tonalRamp": [
+          "#1B1B19",
+          "#393835",
+          "#595854",
+          "#7C7A75",
+          "#94928D",
+          "#B2B1AD",
+          "#D2D1CE",
+          "#ECEBE9"
+        ]
+      },
+      "accent-success": {
+        "role": "tertiary",
+        "displayName": "Success",
+        "canonical": "oklch(0.64 0.17 150)",
+        "canonicalHex": "#17A750",
+        "tonalRamp": [
+          "#04210D",
+          "#05441D",
+          "#006B2E",
+          "#009441",
+          "#3CAB5E",
+          "#75C788",
+          "#A7E2B2",
+          "#CDF8D5"
+        ]
+      },
+      "accent-warning": {
+        "role": "tertiary",
+        "displayName": "Warning",
+        "canonical": "oklch(0.72 0.15 80)",
+        "canonicalHex": "#D59800",
+        "tonalRamp": [
+          "#261800",
+          "#4D3200",
+          "#784F00",
+          "#A56E00",
+          "#BD870E",
+          "#D5A95E",
+          "#EDCC96",
+          "#FFE8C1"
+        ]
+      },
+      "accent-danger": {
+        "role": "tertiary",
+        "displayName": "Danger",
+        "canonical": "oklch(0.58 0.21 25)",
+        "canonicalHex": "#DB2B33",
+        "tonalRamp": [
+          "#330B0A",
+          "#651718",
+          "#9D2427",
+          "#D83236",
+          "#EF5854",
+          "#FF8880",
+          "#FFB8B0",
+          "#FFDEDA"
+        ]
+      },
+      "audio-connection": {
+        "role": "functional",
+        "displayName": "Audio Teal",
+        "canonical": "oklch(0.6 0.12 200)",
+        "canonicalHex": "#00959C",
+        "tonalRamp": [
+          "#002021",
+          "#004145",
+          "#00666C",
+          "#008E95",
+          "#1EA5AC",
+          "#6AC2C6",
+          "#A0DEE1",
+          "#C8F5F7"
+        ]
+      },
+      "control-connection": {
+        "role": "functional",
+        "displayName": "Control Grey",
+        "canonical": "#8F8C82",
+        "canonicalHex": "#8F8C82",
+        "tonalRamp": [
+          "#1B1B18",
+          "#393833",
+          "#5A5851",
+          "#7D7A71",
+          "#959289",
+          "#B3B1AA",
+          "#D3D1CB",
+          "#ECEBE7"
+        ]
+      },
+      "universal-connection": {
+        "role": "functional",
+        "displayName": "Universal Violet",
+        "canonical": "oklch(0.66 0.19 300)",
+        "canonicalHex": "#A670F3",
+        "tonalRamp": [
+          "#1F1331",
+          "#412963",
+          "#65409A",
+          "#8D59D4",
+          "#A376E9",
+          "#BE9CFA",
+          "#DBC2FF",
+          "#F1E3FF"
+        ]
+      }
     },
     "typographyMeta": {
-      "display": { "displayName": "Display", "purpose": "Largest sketch headings (Caveat 700)." },
-      "title": { "displayName": "Title", "purpose": "Node titles and panel headings (Caveat 600)." },
-      "body": { "displayName": "Body / Voice", "purpose": "Default UI voice — labels, menus, descriptions (Caveat). Deliberately the hand-drawn face." },
-      "work": { "displayName": "Work / Data", "purpose": "Dense settings and forms where scanning speed matters (Inter)." },
-      "mono": { "displayName": "Exact", "purpose": "Numeric values meant to be read, typed, or compared (JetBrains Mono)." }
+      "display": {
+        "displayName": "Display",
+        "purpose": "The onboarding question and Safe Mode (Outfit 700, 30px). The only 30px on screen."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Panel and dialog headings (Outfit 600, 22px)."
+      },
+      "node-title": {
+        "displayName": "Node Title",
+        "purpose": "NodeShell titles (Outfit 600, 15px)."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "The default UI voice — buttons, menu items, inputs, list rows (Outfit 500, 14px)."
+      },
+      "small": {
+        "displayName": "Small",
+        "purpose": "Segmented labels, callout body, scrubber labels (Outfit 500-600, 13px). The floor for functional sans text."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Keycaps, type chips, knob labels and values (JetBrains Mono 500, 11px). Exact values only."
+      },
+      "micro": {
+        "displayName": "Micro",
+        "purpose": "Socket labels, ruler marks, unit labels (JetBrains Mono 600, 9.5px, uppercase, 0.08em). Held to the full 4.5:1 body-text bar."
+      }
     },
     "shadows": [
-      { "name": "node-rest", "value": "2px 3px 0 rgba(0,0,0,0.1)", "purpose": "Default lift of a node off the paper. Blur radius is always 0." },
-      { "name": "menu-lifted", "value": "3px 4px 0 rgba(0,0,0,0.15)", "purpose": "Context menus, dragging nodes, raised surfaces." },
-      { "name": "sketch-button", "value": "2px 2px 0 #1A1A1A", "purpose": "Inked buttons and cards — a hard ink shadow in the line color." },
-      { "name": "port-connected-glow", "value": "0 0 8px var(--audio-connected)", "purpose": "The one allowed soft glow — signals a live connection, which is meaning not decoration." }
+      {
+        "name": "shadow-raised",
+        "value": "0 1px 2px rgba(24,22,16,.05), 0 2px 6px rgba(24,22,16,.06)",
+        "purpose": "On the ground: key tiles, the selected segment, callouts, banners, the knob dial."
+      },
+      {
+        "name": "shadow-overlay",
+        "value": "0 2px 6px rgba(24,22,16,.07), 0 12px 28px rgba(24,22,16,.11)",
+        "purpose": "Above the ground: node cards, menus, modals, popovers, the transport pill."
+      },
+      {
+        "name": "shadow-inset",
+        "value": "inset 0 1px 3px rgba(0,0,0,.22)",
+        "purpose": "Recessed into the ground: the port socket well."
+      },
+      {
+        "name": "shadow-pressed",
+        "value": "inset 0 2px 6px rgba(0,0,0,.28)",
+        "purpose": "Being hit right now: a lit key tile."
+      },
+      {
+        "name": "focus-ring",
+        "value": "0 0 0 3px color-mix(in oklab, var(--accent-primary) 28%, transparent)",
+        "purpose": "The ONE focus ring. :focus-visible only; stacks over the element own shadow."
+      },
+      {
+        "name": "cable-signal-glow",
+        "value": "drop-shadow(0 0 calc(var(--oj-cable-signal) * 7px) currentColor)",
+        "purpose": "The only glow in the system, and only in proportion to live audio. Ports never glow."
+      }
     ],
     "motion": [
-      { "name": "transition-fast", "value": "0.15s ease", "purpose": "Hover, press, port scale — the physical feel of a control." },
-      { "name": "transition-normal", "value": "0.25s ease", "purpose": "Default state transitions on buttons and panels." },
-      { "name": "transition-slow", "value": "0.4s ease", "purpose": "Larger reveals; kept organic, never choreographed page-loads." },
-      { "name": "press-lift", "value": "translateY(-2px) on hover, translateY(1px) on active", "purpose": "The Press-Is-Physical rule: shadow grows on lift, shrinks on press." }
+      {
+        "name": "motion-fast",
+        "value": "120ms cubic-bezier(.2,.8,.3,1)",
+        "purpose": "Colour, background, border, box-shadow."
+      },
+      {
+        "name": "motion-spring",
+        "value": "260ms cubic-bezier(.34,1.56,.64,1)",
+        "purpose": "transform ONLY. The overshoot is the weight."
+      },
+      {
+        "name": "press-scale-btn",
+        "value": "scale(0.96)",
+        "purpose": "Button press. The box never moves."
+      },
+      {
+        "name": "press-scale-pad",
+        "value": "scale(0.94)",
+        "purpose": "Pad and key press."
+      },
+      {
+        "name": "hover-lift",
+        "value": "translateY(-2px)",
+        "purpose": "Hover lift, pads and keys only."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "one blanket rule in src/styles/global.css",
+        "purpose": "Exactly two exemptions: .oj-cable and .oj-meter — they are meters, not decoration."
+      }
     ],
     "breakpoints": [
-      { "name": "laptop", "value": "1280px" },
-      { "name": "desktop", "value": "1680px" }
+      {
+        "name": "laptop",
+        "value": "1280px"
+      },
+      {
+        "name": "desktop",
+        "value": "1920px"
+      }
     ]
   },
   "components": [
     {
       "name": "Node",
       "kind": "card",
-      "refersTo": "node",
-      "description": "The signature surface: a hand-drawn white card on dot-grid paper, draggable from its header. Used as-is or opened (press e) to rewire its insides.",
-      "html": "<div class=\"ds-node\"><div class=\"ds-node-header\"><span class=\"ds-node-title\">Sampler</span><span class=\"ds-node-type\">instrument</span></div><div class=\"ds-node-body\"><span class=\"ds-port ds-port-audio\"></span><label class=\"ds-node-label\">out</label></div></div>",
-      "css": ".ds-node { display: inline-block; min-width: 180px; background: #FFFFFF; border: 2px solid #1A1A1A; border-radius: 14px; box-shadow: 2px 3px 0 rgba(0,0,0,0.1); font-family: 'Caveat', cursive; color: #1A1A1A; transition: box-shadow 0.15s ease, border-color 0.15s ease; } .ds-node:hover { box-shadow: 3px 4px 0 rgba(0,0,0,0.15); } .ds-node-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: #EDE8E0; border-bottom: 1px solid #D4CFC6; border-radius: 14px 14px 0 0; cursor: grab; } .ds-node-title { font-weight: 600; font-size: 22px; } .ds-node-type { font-size: 16px; color: #8A8A8A; } .ds-node-body { display: flex; align-items: center; gap: 8px; padding: 16px; } .ds-node-label { font-size: 16px; color: #8A8A8A; }"
+      "refersTo": "node-card",
+      "description": "The signature surface: a white card with a 1px hairline and soft layered depth, draggable from its header. Ports are recessed socket wells in the FIRST ROW OF THE BODY — inputs left, outputs right. Used as-is or opened (press E) to rewire its insides.",
+      "html": "<div class=\"ds-node\"><div class=\"ds-node-header\"><span class=\"ds-node-grip\"><i></i><i></i><i></i><i></i></span><span class=\"ds-node-title\">Sampler</span><span class=\"ds-node-type\">instrument</span></div><div class=\"ds-node-body\"><div class=\"ds-port-row\"><span class=\"ds-port\"><i></i></span><label class=\"ds-port-label\">audio in</label></div></div></div>",
+      "css": ".ds-node { display: inline-block; min-width: 190px; background: #FFFFFF; border: 1px solid #E3E1DA; border-radius: 14px; box-shadow: 0 2px 6px rgba(24,22,16,.07), 0 12px 28px rgba(24,22,16,.11); font-family: Outfit, system-ui, sans-serif; color: #1D1C18; } .ds-node-header { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #FAF9F6; border-bottom: 1px solid #E3E1DA; border-radius: 14px 14px 0 0; cursor: grab; } .ds-node-grip { display: inline-grid; grid-template-columns: 1fr 1fr; gap: 2.5px; } .ds-node-grip i { width: 3px; height: 3px; border-radius: 50%; background: #C8C5BB; } .ds-node-title { font-weight: 600; font-size: 15px; line-height: 1.2; } .ds-node-type { margin-left: auto; font-family: \"JetBrains Mono\", monospace; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .08em; color: #6C695F; background: #ECEAE4; padding: 4px 7px; border-radius: 6px; } .ds-node-body { display: flex; flex-direction: column; gap: 12px; padding: 12px 14px; } .ds-port-row { display: flex; align-items: center; gap: 7px; min-height: 24px; }"
+    },
+    {
+      "name": "Port socket",
+      "kind": "custom",
+      "refersTo": "port-socket",
+      "description": "A typed connection point, rendered as an 18px RECESSED WELL inside the node body with an 8px core dot. Idle sockets of every kind read identically; the core takes the wiring colour only when connected. Hover recolours the ring. Ports NEVER glow and never scale.",
+      "html": "<span class=\"ds-port\"><i></i></span><label class=\"ds-port-label\">audio in</label>",
+      "css": ".ds-port { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: #ECEAE4; border: 1px solid #89867C; box-shadow: inset 0 1px 3px rgba(0,0,0,.22); cursor: crosshair; transition: border-color 120ms cubic-bezier(.2,.8,.3,1); } .ds-port i { width: 8px; height: 8px; border-radius: 50%; background: #6C695F; } .ds-port:hover { border-color: oklch(0.66 0.19 40); } .ds-port.is-connected-audio i { background: oklch(0.6 0.12 200); } .ds-port.is-connected-control i { background: #8F8C82; } .ds-port-label { font-family: \"JetBrains Mono\", monospace; font-size: 9.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: #6C695F; }"
     },
     {
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Ink-filled primary action. Lifts on hover (to walnut), depresses on click — a physical sticker press.",
-      "html": "<button class=\"ds-btn-primary\">Add node</button>",
-      "css": ".ds-btn-primary { font-family: 'Caveat', cursive; font-weight: 500; font-size: 16px; color: #FFFFFF; background: #1A1A1A; border: 2px solid #1A1A1A; border-radius: 10px; padding: 6px 14px; box-shadow: 2px 2px 0 #1A1A1A; cursor: pointer; transition: background 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease; } .ds-btn-primary:hover { background: #6B5B4F; transform: translateY(-2px); box-shadow: 4px 4px 0 #1A1A1A; } .ds-btn-primary:active { transform: translateY(1px); box-shadow: 1px 1px 0 #1A1A1A; } .ds-btn-primary:focus-visible { outline: 2px solid #1A1A1A; outline-offset: 2px; }"
+      "description": "Accent-filled primary action with DARK INK label (white on the accent measures 3.36:1). Flat inset construction: no border, no shadow. Compresses to scale(.96) on press; the hover LIFTS the accent rather than darkening it.",
+      "html": "<button class=\"ds-btn-primary\">Play</button>",
+      "css": ".ds-btn-primary { font-family: Outfit, system-ui, sans-serif; font-weight: 600; font-size: 14px; line-height: 1; color: #1D1C18; background: oklch(0.66 0.19 40); border: 0; border-radius: 10px; padding: 9px 16px; cursor: pointer; transition: background 120ms cubic-bezier(.2,.8,.3,1), transform 260ms cubic-bezier(.34,1.56,.64,1); } .ds-btn-primary:hover { background: oklch(0.71 0.19 40); } .ds-btn-primary:active { transform: scale(0.96); } .ds-btn-primary:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in oklab, oklch(0.66 0.19 40) 28%, transparent); }"
     },
     {
       "name": "Node Button",
       "kind": "button",
       "refersTo": "button-node",
-      "description": "Default white button inside a node. Fills with sand on hover.",
-      "html": "<button class=\"ds-btn-node\">Record</button>",
-      "css": ".ds-btn-node { font-family: 'Caveat', cursive; font-weight: 500; font-size: 16px; color: #1A1A1A; background: #FFFFFF; border: 2px solid #1A1A1A; border-radius: 10px; padding: 4px 8px; cursor: pointer; transition: background 0.15s ease, transform 0.15s ease; } .ds-btn-node:hover { background: #E8E3DA; transform: translateY(-1px); } .ds-btn-node:active { transform: translateY(1px); } .ds-btn-node:focus-visible { outline: 2px solid #1A1A1A; outline-offset: 2px; }"
+      "description": "The default button: a flat inset fill, no border, no shadow. Hover mixes 8% ink into the fill; press compresses.",
+      "html": "<button class=\"ds-btn\">Add node</button>",
+      "css": ".ds-btn { font-family: Outfit, system-ui, sans-serif; font-weight: 600; font-size: 14px; line-height: 1; color: #1D1C18; background: #ECEAE4; border: 0; border-radius: 10px; padding: 9px 16px; cursor: pointer; transition: background 120ms cubic-bezier(.2,.8,.3,1), transform 260ms cubic-bezier(.34,1.56,.64,1); } .ds-btn:hover { background: color-mix(in oklab, #1D1C18 8%, #ECEAE4); } .ds-btn:active { transform: scale(0.96); } .ds-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px color-mix(in oklab, oklch(0.66 0.19 40) 28%, transparent); }"
     },
     {
-      "name": "Numeric Input",
+      "name": "Input",
       "kind": "input",
-      "refersTo": "input-field",
-      "description": "Exact numeric field — monospace, because the value is meant to be read and typed precisely.",
-      "html": "<input class=\"ds-input\" value=\"440.0\" />",
-      "css": ".ds-input { font-family: 'JetBrains Mono', monospace; font-size: 16px; color: #1A1A1A; background: #F5F0E8; border: 2px solid #1A1A1A; border-radius: 6px; padding: 4px 8px; width: 96px; } .ds-input:focus { outline: none; border-color: #6B5B4F; } .ds-input:focus-visible { outline: 2px solid #1A1A1A; outline-offset: 2px; }"
+      "refersTo": "input",
+      "description": "Card-fill field with a 1px interactive outline. Focus swaps the border to the accent AND adds the one focus ring. Numeric fields add the mono modifier with tabular-nums.",
+      "html": "<input class=\"ds-input\" value=\"120.00\" />",
+      "css": ".ds-input { font-family: Outfit, system-ui, sans-serif; font-size: 14px; font-weight: 500; line-height: 1.3; color: #1D1C18; background: #FFFFFF; border: 1px solid #C8C5BB; border-radius: 10px; padding: 9px 12px; transition: border-color 120ms cubic-bezier(.2,.8,.3,1), box-shadow 120ms cubic-bezier(.2,.8,.3,1); } .ds-input:hover { border-color: #89867C; } .ds-input:focus { outline: none; border-color: oklch(0.66 0.19 40); box-shadow: 0 0 0 3px color-mix(in oklab, oklch(0.66 0.19 40) 28%, transparent); } .ds-input--mono { font-family: \"JetBrains Mono\", monospace; font-variant-numeric: tabular-nums; }"
     },
     {
-      "name": "Port",
+      "name": "Knob",
       "kind": "custom",
-      "refersTo": "port-audio",
-      "description": "A typed connection point. Audio is blue, control is grey; the color IS the legend. Hover scales up; a live connection glows.",
-      "html": "<span class=\"ds-port ds-port-audio\"></span><span class=\"ds-port ds-port-control\"></span>",
-      "css": ".ds-port { display: inline-block; width: 16px; height: 16px; border-radius: 50%; border: 2px solid #1A1A1A; cursor: crosshair; transition: transform 0.15s ease, box-shadow 0.15s ease; } .ds-port:hover { transform: scale(1.25); } .ds-port-audio { background: #4A90C2; } .ds-port-audio:hover { box-shadow: 0 0 8px #5B9FD4; } .ds-port-control { background: #808080; margin-left: 8px; }"
+      "refersTo": "knob",
+      "description": "The standard faceplate control. A 52px dial with a top-left light gradient and an accent tick sweeping -135deg..+135deg. The tick has NO transition — it must track the finger exactly. Vertical drag over 150px is a full sweep; it is a real role=\"slider\" with keyboard stepping.",
+      "html": "<div class=\"ds-knob-wrap\"><div class=\"ds-knob\" role=\"slider\" aria-label=\"Cutoff\"></div><div class=\"ds-knob-label\">cutoff</div><div class=\"ds-knob-value\">440 Hz</div></div>",
+      "css": ".ds-knob { width: 52px; height: 52px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #FFFFFF, #ECEAE4); border: 1px solid #89867C; box-shadow: 0 1px 2px rgba(24,22,16,.05), 0 2px 6px rgba(24,22,16,.06); position: relative; cursor: grab; } .ds-knob::after { content: \"\"; position: absolute; top: 4px; left: calc(50% - 1.5px); width: 3px; height: 15px; border-radius: 2px; background: oklch(0.66 0.19 40); transform-origin: 50% 22px; transform: rotate(var(--rot, -135deg)); } .ds-knob:hover, .ds-knob:focus-visible { outline: none; box-shadow: 0 1px 2px rgba(24,22,16,.05), 0 2px 6px rgba(24,22,16,.06), 0 0 0 3px color-mix(in oklab, oklch(0.66 0.19 40) 28%, transparent); } .ds-knob-label, .ds-knob-value { font-family: \"JetBrains Mono\", monospace; font-size: 11px; font-weight: 500; text-align: center; } .ds-knob-label { color: #6C695F; text-transform: uppercase; letter-spacing: .08em; } .ds-knob-value { color: #5A5850; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Key Tile",
+      "kind": "custom",
+      "refersTo": "key-tile",
+      "description": "The playable surface. Rest lifts on hover (-2px), compresses on press (.94), and while HELD fills solid accent with a dark-ink legend, translateY(1px) and the pressed inset shadow — pressed INTO the instrument. No glow.",
+      "html": "<button class=\"ds-key\">C</button><button class=\"ds-key is-active\">D</button>",
+      "css": ".ds-key { width: 48px; height: 48px; border: 1px solid #89867C; border-radius: 10px; background: #FFFFFF; color: #6C695F; box-shadow: 0 1px 2px rgba(24,22,16,.05), 0 2px 6px rgba(24,22,16,.06); font: 600 10px/1 \"JetBrains Mono\", monospace; cursor: pointer; transition: background 120ms cubic-bezier(.2,.8,.3,1), transform 260ms cubic-bezier(.34,1.56,.64,1); } .ds-key:hover:not(.is-active) { transform: translateY(-2px); } .ds-key:active:not(.is-active) { transform: scale(0.94); } .ds-key.is-active { border-color: transparent; background: oklch(0.66 0.19 40); color: #1D1C18; box-shadow: inset 0 2px 6px rgba(0,0,0,.28); transform: translateY(1px); }"
+    },
+    {
+      "name": "Chip",
+      "kind": "custom",
+      "refersTo": "chip",
+      "description": "A pill on the inset. The tone recolours the TEXT only, via the matching ink token. There is NO dot inside a chip — the component strips a bullet glyph or a nested StatusDot.",
+      "html": "<span class=\"ds-chip\">offline</span><span class=\"ds-chip ds-chip--danger\">clipping</span>",
+      "css": ".ds-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid #E3E1DA; border-radius: 99px; background: #ECEAE4; color: #5A5850; font-family: Outfit, system-ui, sans-serif; font-size: 12px; font-weight: 600; line-height: 1; } .ds-chip--danger { color: oklch(0.491 0.21 25); } .ds-chip--success { color: oklch(0.459 0.17 150); } .ds-chip--warning { color: oklch(0.497 0.15 80); } .ds-chip.is-pressed { background: #FFFFFF; color: #1D1C18; box-shadow: 0 1px 2px rgba(24,22,16,.05), 0 2px 6px rgba(24,22,16,.06); }"
+    },
+    {
+      "name": "Cable",
+      "kind": "custom",
+      "refersTo": "cable",
+      "description": "The ONE thing in the system allowed to glow, and only in proportion to live audio. The app writes --oj-cable-signal (0-1) from the shared animation frame; width, opacity and drop-shadow all derive from it. Quiet is 2.5px at 45% with no filter.",
+      "html": "<svg><path class=\"ds-cable ds-cable--audio\" d=\"M0 0 C 40 0, 60 40, 100 40\" /></svg>",
+      "css": ".ds-cable { --oj-cable-signal: 0; fill: none; stroke-linecap: round; stroke-width: calc(2.5px + var(--oj-cable-signal) * 2.5px); opacity: calc(0.5 + var(--oj-cable-signal) * 0.5); filter: drop-shadow(0 0 calc(var(--oj-cable-signal) * 7px) currentColor); transition: stroke-width .03s linear, opacity .03s linear; } .ds-cable--audio { stroke: oklch(0.6 0.12 200); color: oklch(0.6 0.12 200); } .ds-cable--control { stroke: #8F8C82; color: #8F8C82; } .ds-cable.is-quiet { stroke-width: 2.5px; opacity: .45; filter: none; }"
     }
   ],
   "narrative": {
-    "northStar": "The Living Sketchbook",
-    "overview": "OpenJammer looks like a sketchbook that makes sound. The canvas is warm paper printed with a faint dot grid; nodes are hand-drawn boxes in Caveat's friendly line, bordered in ink and lifted off the page by hard, blur-free shadows like stickers pressed onto a notebook. It is deliberately not a piece of pro-audio equipment. The system is crafted, immediate, and deep: a beginner is making sound in seconds, and the same warm surface lets an expert drop inside a node and rewire its guts. There is no ceiling. The aesthetic carries the product's two beliefs — perception is the medium, and a minimal core is made infinite by everyone, including the look, which is pure CSS variables anyone can reskin.",
+    "northStar": "A Real Instrument",
+    "overview": "OpenJammer reads the way a well-made piece of hardware reads on a table in front of a room: quiet where it is quiet, loud exactly where the signal is. The canvas is a calm warm neutral under a faint dot grid; nodes are white cards with a single hairline edge, soft layered depth, and ports that are recessed socket wells sunk into the body of the card. Colour is spent only on signal, state and selection, so the loudest thing on screen is always the patch. The system is crafted, immediate and deep: a beginner is making sound in seconds, and the same surface lets an expert drop inside a node and rewire its guts. The whimsy that used to live in a handwritten line now lives in motion, physics and sound-reactive light — a button compresses, a knob resists, a key lights solid accent while it is held, and a cable thickens and glows in proportion to the audio actually passing through it.",
     "keyCharacteristics": [
-      "Warm dot-grid paper canvas; nodes are hand-drawn ink boxes on white.",
-      "Caveat (hand-drawn) is the voice; Inter does the dense work; JetBrains Mono means exact.",
-      "Hard, blur-free offset shadows — stickers on paper, never soft ambient glow.",
-      "2px ink borders and generously rounded corners (6-20px) on everything.",
-      "Port color is meaning: audio is blue, control is grey, universal is violet.",
-      "Three themes (Cream default, Cyberpunk, Midnight Blue) re-map the same token roles."
+      "Calm ground, loud signal: warm-neutral surfaces, saturated colour only for signal, state and selection.",
+      "Everything has weight: buttons compress (.96), pads compress (.94), hover lifts -2px, one spring curve everywhere.",
+      "Sound is visible: only cables and meters may glow or pulse. Nothing else glows, ever.",
+      "Legible always: UI sans text >= 13px, AA contrast enforced by a test over the token files, mono for exact values.",
+      "1px hairline borders and soft layered shadows — no 2px ink, no hard blur-free offset shadow.",
+      "Outfit is the one UI voice at every size; JetBrains Mono means exact. No display font in functional UI.",
+      "Ports are 18px recessed socket wells INSIDE the node body, in labelled rows: inputs left, outputs right.",
+      "Port colour is meaning: audio = teal, control = grey, universal = violet.",
+      "Exactly two themes — Light (default) and Dark — as pure value swaps of the same 53 semantic tokens."
     ],
     "rules": [
-      { "name": "The Port-Color-Is-Meaning Rule", "body": "Port and cable color is never decoration. Blue means audio, grey means control, violet means universal — the type is the source of truth and the color follows. Do not spend these colors on anything that isn't a port or a cable.", "section": "colors" },
-      { "name": "The Signal-Not-Brand Rule", "body": "Pine/ochre/clay report machine state and always travel with a label or icon. Ink and walnut are the brand. Never style a heading or a surface in a state color.", "section": "colors" },
-      { "name": "The Caveat-Is-the-Voice Rule", "body": "The hand-drawn face is the identity; it is allowed in UI labels and buttons here precisely because the sketchbook is the product. It is the only display font allowed, and it never sets exact data.", "section": "typography" },
-      { "name": "The Mono-Means-Exact Rule", "body": "If a value is monospace, it can be copied, typed, or compared character by character. Never use mono for emphasis or decoration.", "section": "typography" },
-      { "name": "The Hard-Shadow Rule", "body": "Shadows never blur. box-shadow blur radius is always 0. Depth is an offset, not a glow. A blurred shadow anywhere in this system is a bug.", "section": "elevation" },
-      { "name": "The Press-Is-Physical Rule", "body": "Interactive elements lift on hover (translateY -1 to -2px with a larger offset shadow) and depress on click (translateY 1px with a smaller shadow), so a control feels like a real object being pressed.", "section": "elevation" }
+      {
+        "name": "The Port-Color-Is-Meaning Rule",
+        "body": "Port and cable colour is never decoration. Teal means audio, grey means control, violet means universal — the port type is the source of truth and the colour follows. Do not spend these colours on anything that is not a port or a cable.",
+        "section": "colors"
+      },
+      {
+        "name": "The Signal-Not-Brand Rule",
+        "body": "Success / warning / danger report machine state and always travel with a label or icon. The accent is the brand and the selection. Never style a heading, a surface or a decoration in a state colour, and never use success to mean \"selected\".",
+        "section": "colors"
+      },
+      {
+        "name": "The Ink-For-Text Rule",
+        "body": "A saturated colour is a fill; its *-ink sibling is the text. Fill with accent-danger, write with danger-ink. In BOTH themes --text-on-accent is dark ink #1D1C18, not white: white on the accent measures 3.36:1, dark ink measures 5.08:1 light / 6.27:1 dark. This is why the light accent hover LIFTS instead of darkening.",
+        "section": "colors"
+      },
+      {
+        "name": "The Outfit-Is-the-Voice Rule",
+        "body": "One sans does everything at every size in both themes. Weight and size carry hierarchy; a second face never does. There is no display font in functional UI — Caveat is retired and does not return for empty states.",
+        "section": "typography"
+      },
+      {
+        "name": "The Mono-Means-Exact Rule",
+        "body": "If a value is monospace it can be read, typed, copied or compared character by character, and it carries tabular-nums. Never use mono for emphasis or decoration, and never set an exact value in the sans.",
+        "section": "typography"
+      },
+      {
+        "name": "The 13px Floor",
+        "body": "No functional sans text below 13px. The 11px and 9.5px steps exist only for uppercase mono micro-labels with .08em tracking, and they are held to the full 4.5:1 body-text bar rather than a large-text exemption.",
+        "section": "typography"
+      },
+      {
+        "name": "The Nothing-Glows-Except-Live-Signal Rule",
+        "body": "drop-shadow and soft coloured halos exist in exactly one component: Cable, driven by the real signal level. Meters brighten and clip-latch. Ports never glow — not on hover, not on connect, not when active. If it glows and it is not carrying audio right now, it is a bug.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Press-Has-Weight Rule",
+        "body": "A control answers the hand within 120ms and compresses: scale down on press, spring back on release, on the one spring curve. Weight is scale and shadow, never a jump in position.",
+        "section": "elevation"
+      },
+      {
+        "name": "The No-Surprise Rule",
+        "body": "A control never moves, resizes or reflows under the cursor. Hover feedback is colour, border and — on pads only — a 2px lift. A hit target never oscillates.",
+        "section": "elevation"
+      },
+      {
+        "name": "The One-Ring Rule",
+        "body": "Focus is --focus-ring on :focus-visible, stacked over whatever shadow the element already has. Not an outline, not a colour change alone, not a second ring style for important controls.",
+        "section": "elevation"
+      }
     ],
     "dos": [
-      "Do keep shadows hard and blur-free (2px 3px 0, blur radius 0). Depth is an offset.",
-      "Do make controls feel physical: lift on hover, depress on click, shadow growing and shrinking.",
-      "Do use Caveat for the voice, Inter for dense data, and JetBrains Mono for exact numeric values only.",
-      "Do color ports and cables strictly by type: audio = blue, control = grey, universal = violet.",
-      "Do keep the depth there but out of the way — a beginner sees a simple node; the expert presses e to go inside.",
-      "Do keep every accent reskinnable: all color is CSS variables, so any user can build a high-contrast or color-blind-safe theme without forking."
+      "Do keep the ground calm and spend colour on signal, state and selection only.",
+      "Do use the four depth roles — raised / overlay / inset / pressed — and let them mean what they say: on it, above it, into it, being hit.",
+      "Do give every control weight: motion-fast for colour, motion-spring for transform, press .96 (buttons) or .94 (pads), hover lift -2px on pads and keys.",
+      "Do let live audio be the only thing that lights up — cables scale with --oj-cable-signal, meters with --oj-meter-signal.",
+      "Do colour ports and cables strictly by type: audio = teal, control = grey, universal = violet.",
+      "Do fill with a state colour and write with its *-ink sibling.",
+      "Do use one focus ring, on :focus-visible, stacked over the element own shadow.",
+      "Do put exact values in JetBrains Mono with tabular-nums, and keep functional sans text at 13px or larger.",
+      "Do be honest about state — a transport glyph that waits for the engine, an honest ~15-25ms browser tier, a failure that never hides behind a hopeful spinner.",
+      "Do prefer a held, believable sound over a visible glitch when something fails mid-set, and report it without stealing focus.",
+      "Do keep every value in a token so the community can reskin the instrument without forking a component."
     ],
     "donts": [
-      "Don't build a generic SaaS dashboard: no flat corporate cards, no hero-metric tiles, no cool-grey chrome.",
-      "Don't drift into sterile pro-DAW chrome — dense joyless grey, engineer-first density for its own sake.",
-      "Don't make it a toy: hand-drawn must read as crafted and trustworthy, not cute.",
-      "Don't reach for the sci-fi / AI-tool cliché: no glassmorphism, no glowing gradients, no neon-on-black as a default.",
-      "Don't add a blurred box-shadow anywhere. If it has a blur radius, it's wrong.",
-      "Don't use a state color (pine/ochre/clay) to style a heading, button, or surface.",
-      "Don't put a display font on exact data, or spend wiring colors on anything that isn't a port or a cable.",
-      "Don't ever present a wall — no pro ceiling, no dead end. The instrument is infinitely deep."
+      "Don't put a glow on a port — not on hover, not on connect, not when active. Nor on a button, a selection, a node border, or anything not carrying audio right now.",
+      "Don't draw a side stripe. The only sanctioned left edge is a timeline clip's track-colour identity, because that stripe is data. Callouts, banners, list rows, menu items and panels get none.",
+      "Don't put a dot inside a chip. A chip's tone recolours its text; StatusDot stands beside a label, never inside a pill.",
+      "Don't express selection as a fill drench. Selection is an accent edge, plus at most an inset ring or an ink label.",
+      "Don't use a display font in functional UI. There is one sans and one mono; Caveat is retired.",
+      "Don't write a hard offset shadow (2px 3px 0). Depth is soft and layered; zero-blur offsets are the retired language.",
+      "Don't draw a 2px ink border. Borders are 1px hairlines; 1.5px is the maximum, and only on an interactive outline.",
+      "Don't use #fff (or any literal) on an accent fill — --text-on-accent is dark ink in both themes for a measured reason.",
+      "Don't style a heading, a surface or a decoration in a state colour, and don't use success to mean selected.",
+      "Don't ship a component with its own prefers-reduced-motion block — the blanket rule in global.css owns that, with exactly two exemptions.",
+      "Don't let a control move, resize or reflow on hover or press.",
+      "Don't ever present a wall — no pro ceiling, no dead end. The instrument is infinitely deep and should look like it at every depth."
     ]
   }
 }

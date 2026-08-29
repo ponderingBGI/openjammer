@@ -225,35 +225,51 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
 
 Create `src/components/Nodes/MyNewNode.tsx`:
 
+**Render the body, not the card.** `NodeWrapper` already wraps every node in the oj-ui
+`NodeFrame` + `NodeShell`, which draws the card, the header (grip, title, type chip),
+the selection and drag states, and the socket rows. Your component returns the *contents*
+and builds them from oj-ui primitives — never a hand-rolled header, border or shadow. See
+[DESIGN.md](../DESIGN.md) and `docs/node-standards.md` § CSS Class Conventions.
+
 ```typescript
-import { memo } from 'react';
+import { useCallback } from 'react';
+import { ValueScrubber, Chip } from '@openjammer/oj-ui';
 import type { GraphNode } from '../../engine/types';
+import { useGraphStore } from '../../store/graphStore';
 import './MyNewNode.css';
 
 interface MyNewNodeProps {
     node: GraphNode;
-    isSelected?: boolean;
-    // Port handlers passed from NodeWrapper
-    handlePortMouseDown?: (portId: string, e: React.MouseEvent) => void;
-    handlePortMouseUp?: (portId: string, e: React.MouseEvent) => void;
 }
 
-export const MyNewNode = memo(function MyNewNode({
-    node,
-    isSelected
-}: MyNewNodeProps) {
+export function MyNewNode({ node }: MyNewNodeProps) {
+    const updateNodeData = useGraphStore((s) => s.updateNodeData);
     const gain = (node.data.gain as number) ?? 1.0;
 
+    const setGain = useCallback(
+        (next: number) => updateNodeData(node.id, { gain: Math.max(0, next) }),
+        [node.id, updateNodeData],
+    );
+
     return (
-        <div className={`my-new-node ${isSelected ? 'selected' : ''}`}>
-            <div className="node-header">My New Node</div>
-            <div className="node-body">
-                <label>Gain: {gain.toFixed(2)}</label>
-            </div>
+        <div className="my-new-node">
+            <ValueScrubber
+                label="gain"
+                value={gain}
+                display={`× ${gain.toFixed(2)}`}
+                editable
+                onCommit={setGain}
+            />
+            {gain === 0 && <Chip tone="warning">muted</Chip>}
         </div>
     );
-});
+}
 ```
+
+`MyNewNode.css` then styles **only** `.my-new-node` and its children, in semantic tokens
+(`--bg-tertiary`, `--border-subtle`, `--space-sm`, `--radius-sm`, `--font-mono`, …). If
+you find yourself writing `border: 2px`, a hard offset `box-shadow`, a literal hex, or a
+`prefers-reduced-motion` block, stop — all four are bans in DESIGN.md.
 
 ### Step 4: Register the Component
 
@@ -956,12 +972,26 @@ function AudioVisualization({ analyserNode }) {
 Before considering your node complete, verify:
 
 #### Visual Testing
+
+Screenshot the node in **Light and Dark**, and once with
+`prefers-reduced-motion: reduce`. The system is [DESIGN.md](../DESIGN.md).
+
 - [ ] Node renders correctly on the canvas
-- [ ] Node looks correct when selected vs unselected
-- [ ] Node looks correct while being dragged
-- [ ] Ports are visible and positioned correctly
-- [ ] Labels are readable and not clipped
+- [ ] Node looks correct when selected vs unselected, and while being dragged —
+      **without your CSS touching `.oj-node`**; `NodeShell` owns the card and its states
+- [ ] Socket rows are the **first row of the body**: inputs left, outputs right, labelled
+      in uppercase micro mono
+- [ ] Labels are readable and not clipped; every sans label is **≥13px**
+- [ ] Both themes read at **≥4.5:1** for text and ≥3:1 for meaningful marks
 - [ ] Node respects canvas zoom levels
+- [ ] **Nothing glows** — no `drop-shadow`, no coloured halo, no port glow. Only cables
+      and meters light up, and only from live signal
+- [ ] No literal colours, no `var(--x, #hex)` fallbacks, no hard offset shadow, no 2px
+      border, no side stripe, no dot inside a chip, no display font
+- [ ] Focus is the one `--focus-ring` on `:focus-visible`, and every control is reachable
+      by keyboard
+- [ ] Under reduced motion nothing animates and every state is still readable — and you
+      did **not** add a `prefers-reduced-motion` block of your own
 
 #### Interaction Testing
 - [ ] Can create connections from output ports

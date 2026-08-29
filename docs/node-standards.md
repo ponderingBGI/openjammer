@@ -64,9 +64,12 @@ by everyone** (ojcore stays tiny; when in doubt, it is a plugin).
 
 Optimistic render then reconcile-to-truth · one shared value-editor primitive
 (scroll/click/Enter/Escape) · legible empty/armed/active/error in peripheral
-vision (colour always paired with label/icon) · No-Surprise/Hard-Shadow motion +
-`prefers-reduced-motion` · keyboard + Ctrl+K reachable, ≥14 px, ≥4.5:1, oj-tokens
-only · honest latency-tier badge.
+vision (colour always paired with label/icon) · No-Surprise motion on the two
+shared curves, and **no per-node `prefers-reduced-motion` block** — the blanket
+rule in `global.css` owns it · keyboard + Ctrl+K reachable, **≥13 px** sans
+(9.5/11 px only for uppercase mono micro-labels), ≥4.5:1 in both themes, one
+`--focus-ring`, oj-tokens only · **nothing glows but live signal** · honest
+latency-tier badge.
 
 ### P3 — Docs, Extensibility, Self-enforcement
 
@@ -527,58 +530,95 @@ interface StandardNodeProps {
 
 ### Base Structure
 
+A node owns **only the inside of the body**. The card, header, grip, title, type chip,
+selection, drag and port rows all belong to `NodeShell` / `PortRow` — do not restyle them
+from a node stylesheet.
+
 ```css
-.my-node {
-    /* Container styles */
-}
+/* Yours: the body's own layout and its controls. */
+.my-node__body { }
+.my-node__row { }
+.my-node__value { }
+.my-node__readout.is-clipping { }
 
-.my-node.selected {
-    /* Selected state */
-}
-
-.my-node.dragging {
-    /* Dragging state */
-}
-
-.my-node .node-header {
-    /* Header/title area */
-}
-
-.my-node .node-body {
-    /* Content area */
-}
-
-.my-node .my-node-port {
-    /* Port styling */
-}
-
-.my-node .my-node-port.connected {
-    /* Connected port state */
-}
+/* NOT yours — owned by oj-ui, never overridden from a node:
+   .oj-node, .oj-node__header, .oj-node__grip, .oj-node__title, .oj-node__type,
+   .oj-node.is-selected, .oj-node.is-dragging, .oj-port, .oj-port-row      */
 ```
 
-### Schematic Style
+Use `__element` / `.is-state` naming, matching the library.
 
-Most nodes use the "schematic" style for consistency:
+### The card language (New DNA)
+
+**Do not hand-roll a card.** Every faceplate is a `NodeShell` from `@openjammer/oj-ui`,
+which owns the border, radius, shadow, header, grip, title, type chip and the port rows.
+A node's own CSS styles the *contents* of the body and nothing else. The system is
+[DESIGN.md](../DESIGN.md); the rules below are the parts a node author breaks most often.
+
+```tsx
+<NodeShell
+    title={data.label}
+    nodeType="effect"
+    selected={selected}
+    inputs={<PortRow side="input" kind="audio" label="audio in" connected={…} />}
+    outputs={<PortRow side="output" kind="audio" label="audio out" connected={…} />}
+>
+    {/* body: your controls */}
+</NodeShell>
+```
+
+What that gives you, for free and identically on every node: a `--bg-node` card with a
+**1px** `--border-subtle` edge, `--radius-lg`, `--shadow-overlay`; a `--bg-node-header`
+header with the 2×2 grip, a 15px/600 title and a right-aligned mono type chip; and the
+socket rows as the **first row of the body** — inputs left, outputs right.
+
+**Semantic tokens only.** A node stylesheet never names a literal colour, and never
+invents a variable. There is no `--node-bg`, `--node-border`, `--header-bg` or
+`--selection-color`; a `var(--x, #hex)` fallback in a node is a bug, because it hides a
+missing token behind a colour that no theme can change.
+
+| Need | Use |
+|---|---|
+| Card / panel ground | `--bg-node` |
+| Recessed control ground (chips, wells, tracks, value pills) | `--bg-tertiary` |
+| Divider inside the body | `1px solid var(--border-subtle)` |
+| Interactive outline (an input, a tile) | `1px solid var(--border-strong)` |
+| A control boundary with no fill behind it (socket ring, thumb ring) | `1px solid var(--border-control)` |
+| Depth | `--shadow-raised` / `--shadow-overlay` / `--shadow-inset` / `--shadow-pressed` |
+| Focus | `--focus-ring` on `:focus-visible`, stacked over the element's own shadow |
+| Colour / transform transitions | `--motion-fast` / `--motion-spring` |
+
+**Selection is `NodeShell`'s job.** Do not write a `.selected` rule that repaints the
+card. `NodeShell` renders `.is-selected` as an accent border plus a 0.5px inset ring — an
+edge, never a fill wash, and never a size change.
+
+**Build the body from the shared vocabulary**, not from bespoke markup: `Knob` for a
+continuous parameter (`AutoParamPanel` already does this), `ValueScrubber` / `ParamRow`
+for a labelled value, `SegmentedControl` for a small mode switch, `Select` for a list,
+`KeyTile` for anything playable, `Meter` for a level, `Chip` for a status word.
+
+**The bans that apply to every node** (see DESIGN.md § Do's and Don'ts): no glow on a
+port or anywhere else that is not carrying live audio; no side stripe; no dot inside a
+chip; no display font; no hard offset shadow; no 2px border; no `prefers-reduced-motion`
+block of your own — the blanket rule in `src/styles/global.css` owns that.
 
 ```css
-.schematic-node {
-    background: var(--node-bg, #1a1a2e);
-    border: 1px solid var(--node-border, #2a2a4e);
-    border-radius: 4px;
+/* A node stylesheet, in full. */
+.effect-node__row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding-block: var(--space-xs);
+    border-top: 1px solid var(--border-subtle);
 }
 
-.schematic-node.selected {
-    border-color: var(--selection-color, #4a9eff);
-    box-shadow: 0 0 0 1px var(--selection-color, #4a9eff);
-}
-
-.schematic-header {
-    padding: 4px 8px;
-    background: var(--header-bg, #252540);
-    border-bottom: 1px solid var(--node-border, #2a2a4e);
-    font-size: 11px;
-    font-weight: 500;
+.effect-node__value {
+    padding: 3px 7px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font: 500 12px/1.4 var(--font-mono);
+    font-variant-numeric: tabular-nums;
 }
 ```
 

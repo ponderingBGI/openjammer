@@ -20,6 +20,14 @@ So when the designer said "create a Figma jam," it's one of two things — **con
 There is **one source of truth per concern**, fanned out to the three surfaces:
 
 ### Tokens → one source: the repo's DTCG files (`packages/oj-tokens/tokens/`)
+
+**What is in there today (New DNA, counted from the files):** **37 primitive** tokens
+(`primitive.json`) + **53 semantic** tokens per theme, in **exactly two theme modes —
+Light (default) and Dark**. The three sketchbook themes (`cream` / `cyberpunk` /
+`midnight`) are retired; there is no third mode to bind. Both themes declare the *same*
+53 keys — key-set parity and a no-digits-in-key-names rule are both asserted by a test —
+so a mode switch is a pure value swap. That is **143 token entries / 90 distinct CSS
+custom properties** in play.
 - **→ code**: Style Dictionary (`bun run tokens`) → `dist/variables.css` + `themes.ts`.
 - **→ claude.ai/design**: the design-sync (a static Light snapshot ships in the bundle).
 - **→ Figma**: **Tokens Studio** plugin Git-syncs those exact DTCG files → **Figma Variables**.
@@ -33,8 +41,9 @@ There is **one source of truth per concern**, fanned out to the three surfaces:
   modes. Tokens Studio then keeps them in step by pulling from the repo going forward.)*
 
 ### Components → one source: the code (`packages/oj-ui`)
-- **→ claude.ai/design**: done — **53 components** synced, live + browsable (32 of them also have
-  a Ladle story today; the rest are covered by the claude.ai/design previews).
+- **→ claude.ai/design**: **60 exported React components** (48 named components + 12 icons,
+  from 44 component folders in `packages/oj-ui/src/index.ts`) — synced, live + browsable.
+  Ladle stories cover most of them; the rest are covered by the claude.ai/design previews.
 - **→ Figma**: the **designer builds the Figma components** (the visual masters), using the
   claude.ai/design previews + the variables as reference. There is **no reliable automatic
   code→Figma component generation** — Figma components are design artifacts. (A plugin like
@@ -103,36 +112,61 @@ Dev $25; Ent Full $90 / Dev $35; View seats free. Pricing changes periodically �
    (`packages/oj-figma-plugin/`) — run it once to write each component's import line + source/live
    links into its Figma description, visible in the Assets panel **without Dev Mode**.
 
-## Component inventory (53 — the build list)
+## Component inventory (60 — the build list)
 
 Primitives: Button (variant: node/primary/secondary/success/danger/ghost/link · iconOnly · active),
-Input, Textarea, Select, Field, Slider, Toggle, ProgressBar, Spinner, StatusDot, Chip, Kbd,
-Callout, Surface, Swatch, Marquee, OffscreenPointer, SegmentedControl, Tabs, List, ListRow,
-CodeBlock, + 12 Icons (Apple/Bolt/Check/ChevronDown/ChevronRight/Close/Download/Linux/Mute/
-Speaker/Warning/Windows).
-Composites: Port (kind audio/control/universal · direction · connected · active · placeholder),
-PortRow, NodeShell, NodeFrame, KeyTile, Cable, Waveform, WaveformView, DeviceSelect, Modal,
-PanelHeader, IconButton, Banner, EditableLabel, ValueScrubber, Menu (+ MenuItem/MenuCategory/
-MenuSeparator).
+IconButton, Input, Textarea, Select, Field, Slider, Toggle, **Knob**, ProgressBar, Spinner,
+StatusDot, Chip, Kbd, Callout, Banner, Surface, Swatch, Marquee, OffscreenPointer,
+SegmentedControl, Tabs, List, ListRow, CodeBlock, ValueScrubber, ParamRow, + 12 Icons
+(Apple/Bolt/Check/ChevronDown/ChevronRight/Close/Download/Linux/Mute/Speaker/Warning/Windows).
 
-Port-color meaning is load-bearing: **audio = blue, control = grey, universal = violet**.
+Composites: Port (kind audio/control/universal · direction · connected · active · placeholder),
+PortRow, NodeShell, NodeFrame, KeyTile, Cable, **Meter**, **TransportPill**, TimeRuler,
+LaneButton, Waveform, WaveformView, WaveformCanvas, DeviceSelect, Modal, PanelHeader,
+EditableLabel, Menu (+ MenuItem/MenuCategory/MenuSeparator).
+
+Three components are new with the New DNA and have **no Figma master yet**: **Knob**
+(52px dial, accent tick sweeping −135°…+135°), **Meter** (six bars driven per-frame by
+`--oj-meter-signal`), **TransportPill** (the one floating transport). Build those first —
+they are the most visible new objects in the product.
+
+Two things about the **Port** master changed and are load-bearing:
+
+- Ports are now **recessed socket wells living inside the node body** as labelled rows —
+  inputs left, outputs right, first row of the body. They no longer float on the card edge.
+  **Ports never glow.**
+- Port-colour meaning is still the legend a player learns in seconds, but audio is now
+  **teal** (`color/audio-connection`), not the old blue: **audio = teal, control = grey,
+  universal = violet**.
 
 ## Current status (what's built vs the designer's part)
 
-- ✅ Figma file created + **69 Variables** (Primitives + Theme×3 modes), scoped + `var()` code syntax.
+- ⏳ Figma file created + Variables (Primitives + Theme modes), scoped + `var()` code syntax —
+  **but seeded from the retired sketchbook tokens.** The New DNA changed every semantic value,
+  removed the third theme mode, and added the `*-ink` / `border-control` / four-shadow /
+  `focus-ring` / `overlay-scrim` roles. **Day-one action: Pull in Tokens Studio and reconcile
+  to 37 primitives + 53 semantic × 2 modes, then delete the orphaned third mode.**
 - ✅ Tokens Studio sync files committed (`$metadata.json`, `$themes.json`) — token leg ready.
-- ✅ claude.ai/design has all 53 components (the visual spec).
-- ✅ **All 53 Figma component masters built** — across pages Primitives / Composites / Icons,
+- ✅ claude.ai/design has the component set (the visual spec) — **60 exported React components**
+  as of the New DNA.
+- ⏳ **53 Figma component masters built** against the *sketchbook* look — across pages Primitives / Composites / Icons,
   every fill, padding, radius, stroke, and font-size **bound to the Variables above** (so a
   Theme-mode switch in Figma restyles them, exactly like the app). Build scripts are committed
-  under `.design-sync/figma-scripts/` (re-runnable). **The designer's job is now polish, not
-  build**: a few tall variant-sets overlap their neighbours (fixed-grid placement — just drag
-  apart), `IconLinux` / `IconWindows` have approximated glyph paths to redraw, and a handful of
-  state-fills (e.g. Surface "lifted") want an eye. Everything is real, named, and token-bound.
+  under `.design-sync/figma-scripts/` (re-runnable). Because every property is variable-bound,
+  re-pulling the New DNA tokens re-skins them for free — but **construction** changed in ways a
+  value swap cannot express, and those masters need rebuilding: flat inset Buttons (no border,
+  no shadow), socket-well Ports inside the node body, Chips with **no dot glyph**,
+  Callout/Banner with **no left accent bar**, and hairline (never 2px) borders throughout.
+  Also still open from the first build: a few tall variant-sets overlap their neighbours
+  (fixed-grid placement — just drag apart), and `IconLinux` / `IconWindows` have approximated
+  glyph paths to redraw.
 - ✅ **Code Connect mappings written + automated** — **53 mappings across 37 committed
   `.figma.tsx` files** (`packages/oj-ui/src/components/**`; multi-export files like Menu/Icons hold
   several), parse-validated, snippets → `@openjammer/oj-ui`. PRs validate them; merges to `canari`
   publish via `code-connect.yml`.
+  ⚠️ **7 of the 44 component folders have no `.figma.tsx` yet**: `Knob`, `Meter`, `TransportPill`,
+  `ParamRow`, `LaneButton`, `TimeRuler`, `WaveformCanvas`. They need a mapping when their Figma
+  masters exist.
   ⏳ Three one-time human steps before snippets show in Dev Mode, all at the **Organization/
   Enterprise** rung: **publish the oj-ui library** in Figma, an **Org/Enterprise plan** (Code
   Connect isn't on Starter/Professional/Education), and the **`FIGMA_ACCESS_TOKEN`** repo secret.

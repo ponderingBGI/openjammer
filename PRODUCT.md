@@ -36,17 +36,27 @@ feels like the same trustworthy thing.
 
 ## Brand Personality
 
-**Hand-drawn, warm, alive.** Three words: crafted, immediate, deep.
+**A real instrument.** Three words, unchanged: crafted, immediate, deep.
 
-The aesthetic is a sketchbook that makes sound — Caveat's hand-drawn line, warm paper,
-sticker-flat offset shadows, rounded organic nodes. It is deliberately *not* a piece of
-pro-audio chrome; it is an instrument you want to touch. The voice is a maker's, not a
-SaaS dashboard's: plain, specific, encouraging, never breezy or jargon-heavy. The
-feeling to evoke is **quiet confidence and play** — a warm, legible instrument that
-invites a beginner to mess around and rewards an expert who goes spelunking. Joy is
-never decoration here; on a live instrument every flourish must also be clear, and
-anything that costs the performer a beat of "wait, what is happening" is cut, however
-pretty.
+The aesthetic is a well-made piece of hardware you would be happy to put on a table
+in front of a room: a calm warm-neutral ground, hairline edges, soft layered depth, and
+saturated colour spent *only* on signal, state and selection. Nothing is decorative —
+every surface is either something you play or something that tells you the truth about
+what is playing. It is deliberately not pro-audio chrome and deliberately not a
+dashboard; it is an object with weight. Buttons compress, knobs resist, keys spring
+back, and the only things that glow are the things carrying live audio — cables and
+meters. The warmth that used to live in a handwritten line now lives in **motion,
+physics, and sound-reactive light**, which is where a performer actually feels it.
+
+The voice is a maker's, not a SaaS dashboard's: plain, specific, encouraging, never
+breezy or jargon-heavy. The feeling to evoke is **quiet confidence and play** — a calm,
+legible instrument that invites a beginner to mess around and rewards an expert who goes
+spelunking. Joy is never decoration here; on a live instrument every flourish must also
+be clear, and anything that costs the performer a beat of "wait, what is happening" is
+cut, however pretty.
+
+The full visual system — tokens, components, named rules, accessibility floors — is
+[DESIGN.md](DESIGN.md).
 
 ## Anti-references
 
@@ -54,14 +64,20 @@ OpenJammer is an **instrument, not a dashboard.** It should explicitly NOT look 
 like:
 
 - **A generic SaaS dashboard** — flat corporate cards, hero-metric tiles, cool-grey
-  chrome. The opposite of hand-drawn warmth.
+  chrome. Calm is not the same as corporate: our ground is warm and our signal is loud.
 - **Sterile pro-DAW chrome** — the dense, joyless grey of Ableton / Logic / Pro Tools,
   engineer-first and intimidating on stage.
-- **A toy** — cute, gamified, unserious. Hand-drawn must read as *crafted and
-  trustworthy*, something you'd stake a performance on, not a kids' app.
+- **A toy** — cute, gamified, unserious. This must read as *crafted and trustworthy*,
+  something you'd stake a performance on, not a kids' app.
 - **A sci-fi / AI-tool cliché** — glowing gradients, glassmorphism, neon-on-black as the
-  baseline. (The Cyberpunk theme is a deliberate, opt-in costume, never the default
-  posture.)
+  baseline. Glow is reserved for live signal; anything else that glows is a bug.
+- **The cream sketchbook we retired.** The hand-drawn "Living Sketchbook" — Caveat in
+  functional UI, 2px ink outlines, hard blur-free offset shadows, cream paper — was a
+  real identity and it is now a deliberate **non-goal**. It made a beginner smile and it
+  made an expert squint: a display face on exact values, 14px floors to keep a script
+  legible, and outlines heavy enough to shout over the patch. Charm is not worth a
+  misread number on stage. Do not reintroduce any of it, including "just for empty
+  states."
 - **A wall.** No dead end, no "pro version," no moment where the interface says *you
   can't go further than this.* If a beginner can be overwhelmed by depth shown too early,
   that is also a failure — the depth must be *there* but not *in the way*.
@@ -91,7 +107,7 @@ craft underneath them, become design decisions:
    cursor mid-set — each says nobody was paying attention. Detail is a promise to a pair of
    hands trusting you in front of a room. So the tool *disappears into the play*: consistent
    affordances, a node grammar the hand learns once, strangeness only where it has a purpose
-   (the hand-drawn character is the purpose; gratuitous flourish is not).
+   (weight and sound-reactive light are the purpose; gratuitous flourish is not).
 5. **Match the musician's mental model.** Our users are patchers and players, not compiler
    engineers. The interface works the way they already think — cables carry signal, a node
    is a box that does one thing, the graph *is* the patch (modular synth / pedalboard /
@@ -132,11 +148,18 @@ The core guarantees the things a performer cannot build for themselves in the mo
 
 - **Keyboard- and Ctrl+K-reachable everything.** The instrument is fully drivable without
   the mouse — hands stay near the music, not hunting through menus. This is first-class
-  and non-negotiable.
-- **Reduced motion is honored.** Every animation has a `prefers-reduced-motion`
-  alternative; no meaning is ever carried by motion alone.
-- **Legible defaults.** Shipped themes aim for the WCAG body-text contrast bar (≥4.5:1)
-  so the out-of-box instrument reads in a real room, including low light.
+  and non-negotiable. There is exactly **one focus ring** (`--focus-ring`) so a
+  keyboard-only player never has to learn a second visual language.
+- **Reduced motion is honored.** One blanket `prefers-reduced-motion` rule covers the
+  whole app; the only exemptions are the cable and the meter, because those are
+  *instruments reading out live signal*, not decoration. No meaning is ever carried by
+  motion alone.
+- **Legible floors, enforced in CI.** Both shipped themes (Light and Dark) are asserted
+  against the WCAG bars by a real test over the token files — body text ≥4.5:1, non-text
+  boundaries ≥3:1 — so the out-of-box instrument reads in a real room, including low
+  light and on a projector. UI text never goes below 13px, and exact values are always
+  monospace. The measured table and the exact floors live in
+  [DESIGN.md](DESIGN.md#accessibility-floors).
 
 Beyond that baseline, accessibility is **extensible by design**, the same belief as the
 rest of the instrument: the theme system is pure CSS variables, so any user (with the Pi
