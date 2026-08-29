@@ -37,7 +37,7 @@ export const SOCKET_ROW_STEP_PX = 26;
  * Normalized x of the socket column for a node `width` px wide. Clamped at 30%
  * so the two columns of a very narrow card can never cross in the middle — a
  * few node types declare nominal boxes far smaller than the card they actually
- * render (`keyboard-key` says 50x50), and a fallback that puts the input on top
+ * render (`canvas-input` says 80x40), and a fallback that puts the input on top
  * of the output would be worse than the edge it replaced.
  */
 export function socketColumnX(width: number, side: 'input' | 'output'): number {

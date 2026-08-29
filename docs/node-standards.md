@@ -317,7 +317,7 @@ interface InstrumentNodeData {
 }
 ```
 
-Examples: `piano`, `cello`, `violin`, `strings`, `keys`, `sampler`
+Examples: `strings`, `keys`, `winds`, `instrument`, `sampler`
 
 ### Effect Nodes
 

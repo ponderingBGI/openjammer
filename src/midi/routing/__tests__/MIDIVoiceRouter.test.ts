@@ -415,7 +415,7 @@ describe('MIDIVoiceRouter', () => {
         it('ignores non-input node types entirely', () => {
             const instrument: GraphNode = {
                 id: 'piano-1',
-                type: 'piano',
+                type: 'instrument',
                 category: 'instruments',
                 position: { x: 0, y: 0 },
                 data: { deviceId: 'dev-A', isConnected: true },

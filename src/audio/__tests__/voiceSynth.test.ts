@@ -179,9 +179,9 @@ describe('getVoiceForInstrumentNode — executor seam', () => {
     });
 
     it('keys on the node type (not its family) when there is no instrumentId', () => {
-        expect(getVoiceForInstrumentNode('cello', undefined).key).toBe('type:cello');
-        expect(getVoiceForInstrumentNode('saxophone', undefined).key).toBe('type:saxophone');
-        expect(getVoiceForInstrumentNode('piano', {}).key).toBe('type:piano');
+        expect(getVoiceForInstrumentNode('strings', undefined).key).toBe('type:strings');
+        expect(getVoiceForInstrumentNode('winds', undefined).key).toBe('type:winds');
+        expect(getVoiceForInstrumentNode('keys', {}).key).toBe('type:keys');
     });
 
     it('returns a stable key for re-bind comparison', () => {

@@ -77,12 +77,8 @@ const INSTRUMENT_LABELS: Record<string, string> = {};
 InstrumentLoader.getAllDefinitions().forEach(def => {
     INSTRUMENT_LABELS[def.id] = def.name;
 });
-// Add legacy labels for backwards compatibility
-INSTRUMENT_LABELS['piano'] = 'Grand Piano';
-INSTRUMENT_LABELS['cello'] = 'Cello';
-INSTRUMENT_LABELS['electricCello'] = 'Cello';
-INSTRUMENT_LABELS['violin'] = 'Violin';
-INSTRUMENT_LABELS['saxophone'] = 'Alto Saxophone';
+// The three FAMILY node types are labels too: a family node with no picker
+// selection yet shows its family name rather than a raw id.
 INSTRUMENT_LABELS['strings'] = 'Strings';
 INSTRUMENT_LABELS['keys'] = 'Keys';
 INSTRUMENT_LABELS['winds'] = 'Winds';
@@ -90,13 +86,8 @@ INSTRUMENT_LABELS['winds'] = 'Winds';
 // Map node types to allowed instrument categories
 const NODE_TYPE_TO_CATEGORIES: Record<string, string[]> = {
     'strings': ['strings', 'bass'],
-    'cello': ['strings'],
-    'violin': ['strings'],
     'keys': ['piano'],
-    'piano': ['piano'],
     'winds': ['woodwinds', 'brass', 'world'],
-    'saxophone': ['woodwinds', 'brass'],
-    'guitar': ['guitar', 'bass'],
     'instrument': ['piano', 'strings', 'guitar', 'bass', 'woodwinds', 'brass', 'synth', 'percussion', 'world']
 };
 

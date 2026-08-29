@@ -175,11 +175,6 @@ export function createDefaultInternalStructure(parentNode: GraphNode): InternalS
         case 'keyboard':
             return createKeyboardInternals();
 
-        case 'piano':
-        case 'cello':
-        case 'electricCello':
-        case 'violin':
-        case 'saxophone':
         case 'strings':
         case 'keys':
         case 'winds':

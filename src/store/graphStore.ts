@@ -12,6 +12,7 @@ import type {
     PortDefinition
 } from '../engine/types';
 import { getNodeDefinition, resolveNodeDefinition, canConnect } from '../engine/registry';
+import { migrateLegacyInstrumentNode } from '../engine/nodeTypeMigrations';
 import { createDefaultInternalStructure } from '../utils/nodeInternals';
 import { syncPortsWithInternalNodes, checkDynamicPortAddition, checkDynamicPortRemoval, isInstrumentNode, detectBundleInfo, expandTargetForBundleWithInfo } from '../utils/portSync';
 import { useUIFeedbackStore } from './uiFeedbackStore';
@@ -1597,6 +1598,9 @@ export const useGraphStore = create<GraphStore>()(
                     if (fixed !== undefined) {
                         node = { ...node, data: { ...node.data, assignedKey: fixed } };
                     }
+                    // The door for every document that does NOT come through
+                    // zustand-persist — see engine/nodeTypeMigrations.
+                    node = migrateLegacyInstrumentNode(node);
                     newNodes.set(node.id, node);
                     // Collect root nodes
                     if (node.parentId === null || node.parentId === undefined) {
@@ -1932,7 +1936,12 @@ export const useGraphStore = create<GraphStore>()(
                                 if (!Array.isArray(node.childIds)) node.childIds = [];
                                 if (!Array.isArray(node.specialNodes)) node.specialNodes = [];
 
-                                return [id, migrateNodePorts(node)] as [string, GraphNode];
+                                // Type first, then ports; persisted ports (and so
+                                // the cables) survive — see engine/nodeTypeMigrations.
+                                return [
+                                    id,
+                                    migrateNodePorts(migrateLegacyInstrumentNode(node)),
+                                ] as [string, GraphNode];
                             })
                         );
 
@@ -1979,6 +1988,29 @@ export const useGraphStore = create<GraphStore>()(
                                 ? parsed.state.selectedConnectionIds.filter((id: string) => connections.has(id))
                                 : []
                         );
+                        // The CLIPBOARD is persisted too — this store has no
+                        // `partialize`, so `setItem` writes the whole state and
+                        // `pasteClipboard` clones a copied node's `type` and `ports`
+                        // verbatim. Without this, Ctrl+C then reload then Ctrl+V
+                        // pastes a legacy type (an inert Unknown stub) or dead ports.
+                        // Same two migrations, same order, as the `nodes` path above.
+                        const rawClipboard = parsed.state.clipboard as
+                            | { nodes?: unknown; connections?: unknown }
+                            | null
+                            | undefined;
+                        const clipboard = rawClipboard && Array.isArray(rawClipboard.nodes)
+                            ? {
+                                ...rawClipboard,
+                                nodes: (rawClipboard.nodes as [string, GraphNode][]).map(
+                                    ([nodeId, node]) =>
+                                        [
+                                            nodeId,
+                                            migrateNodePorts(migrateLegacyInstrumentNode(node)),
+                                        ] as [string, GraphNode],
+                                ),
+                            }
+                            : rawClipboard ?? null;
+
                         return {
                             state: {
                                 ...parsed.state,
@@ -1987,7 +2019,8 @@ export const useGraphStore = create<GraphStore>()(
                                 connectionsByNode: rebuildConnectionIndex(connections),
                                 rootNodeIds,
                                 selectedNodeIds,
-                                selectedConnectionIds
+                                selectedConnectionIds,
+                                clipboard
                             }
                         };
                     } catch (error) {

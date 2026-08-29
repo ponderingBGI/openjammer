@@ -287,6 +287,67 @@ describe('open node identity (M5)', () => {
         expect(expectedId).toBe(dspPluginIdFor(FAUST));
     });
 
+    // W6-P11: the five legacy fixed-voice instrument types are DELETED. On the
+    // pre-P11 code this test could not exist; on POST-P11 code WITHOUT the
+    // migration a saved piano would resolve to MISSING_DEFINITION and open as an
+    // inert "Unknown" stub — silent, with a dead faceplate.
+    it('migrates a legacy fixed-voice instrument node to `instrument`, keeping its ports and cables', () => {
+        const workflow: SerializedWorkflow = {
+            version: '1.0.0',
+            name: 'Legacy piano workflow',
+            createdAt: '2026-06-15T00:00:00.000Z',
+            nodes: [
+                {
+                    id: 'piano-1',
+                    type: 'piano' as never,
+                    category: 'instruments',
+                    position: { x: 0, y: 0 },
+                    data: { offsets: { 'input-1': 0 }, activeInputs: ['input-1'] },
+                    ports: [
+                        { id: 'input-panel-1:key-in', name: 'Input', type: 'control', direction: 'input' },
+                        { id: 'output-panel-1:audio-out', name: 'Audio', type: 'audio', direction: 'output' },
+                    ],
+                },
+                {
+                    id: 'speaker-1',
+                    type: 'speaker',
+                    category: 'output',
+                    position: { x: 300, y: 0 },
+                    data: { isMuted: false, volume: 1 },
+                    ports: [
+                        { id: 'audio-in', name: 'Audio In', type: 'audio', direction: 'input' },
+                    ],
+                },
+            ],
+            connections: [
+                {
+                    id: 'c-1',
+                    sourceNodeId: 'piano-1',
+                    sourcePortId: 'output-panel-1:audio-out',
+                    targetNodeId: 'speaker-1',
+                    targetPortId: 'audio-in',
+                    type: 'audio',
+                },
+            ],
+        };
+
+        const imported = importWorkflow(workflow);
+        const migrated = imported.nodes.find((n) => n.id === 'piano-1')!;
+
+        expect(migrated.type).toBe('instrument');
+        expect((migrated.data as Record<string, unknown>).instrumentId).toBe('gm-acoustic-grand-piano');
+        expect((migrated.data as Record<string, unknown>).offsets).toEqual({ 'input-1': 0 });
+        // It resolves to the REAL instrument definition, not the inert stub.
+        expect(resolveNodeDefinition(migrated).name).toBe('Instrument');
+        // Persisted per-instance ports are preferred over defaultPorts, so the
+        // cable that references them survives the import filter.
+        expect(migrated.ports.map((p) => p.id)).toEqual([
+            'input-panel-1:key-in',
+            'output-panel-1:audio-out',
+        ]);
+        expect(imported.connections.map((c) => c.id)).toEqual(['c-1']);
+    });
+
     it('does NOT drop a node whose identity is a registered dynamic id (no-orphan)', () => {
         const pluginId = dspPluginIdFor(FAUST);
         registerDynamicPlugin(pluginId, makeDspNodeDefinition({ name: 'Echo', faustSource: FAUST }));

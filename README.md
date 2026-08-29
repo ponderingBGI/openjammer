@@ -142,8 +142,8 @@ For the browser tier, open the printed URL and click **Start OpenJammer**. For t
 tier, `bun native` opens the app window on its own with the fast scaffold plugin host (no
 JUCE/CMake build); use `bun native --clap` for CLAP or `bun native --all` for the heavy JUCE
 VST3 path (+ AU on macOS). `bun native --plugins` remains an alias for the JUCE host.
-First workflow: right-click the canvas → add a Keyboard node and an Instrument (e.g. Classic
-Piano), connect them, and play the Q–P row — or press **Ctrl/Cmd+K** and ask the AI to build it
+First workflow: right-click the canvas → add a Keyboard node and an Instrument (Keys,
+Strings or Winds), connect them, and play the Q–P row — or press **Ctrl/Cmd+K** and ask the AI to build it
 for you. Native setup + prerequisites: **[CONTRIBUTING.md](CONTRIBUTING.md#native-desktop-tauri)**.
 
 > OpenJammer uses **`bun`** for every package operation — never `npm`, `yarn`, or `pnpm`

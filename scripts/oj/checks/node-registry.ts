@@ -272,7 +272,6 @@ const NAME_KIND_STANDINS = new Set<string>(['recorder->SpeakerOut']);
  * mistake the absence of a lowering for drift. (Detection only; not a fix.)
  */
 const PURELY_VISUAL = new Set<string>([
-  'keyboard-key',
   'keyboard-visual',
   'instrument-visual',
   'midi-visual',
@@ -372,8 +371,8 @@ export function evaluate(model: CouplingModel): Finding[] {
   return findings;
 }
 
-/** `looper` -> `Looper`, `electricCello` -> `Electriccello` (we only compare the
- *  simple Title-cased form against the SSOT, which is enough for the
+/** `looper` -> `Looper`, `minilab-3` -> `Minilab-3` (we only compare the simple
+ *  Title-cased form against the SSOT, which is enough for the
  *  same-named-primitive heuristic: Looper, Recorder, Add, Subtract, etc.). */
 function titleCase(type: string): string {
   if (type.length === 0) return type;

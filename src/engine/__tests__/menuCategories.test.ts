@@ -48,28 +48,19 @@ const INTERNAL_ONLY: Record<string, string> = {
     // ── Hardware identity, added by the device browser ───────────────────────
     'minilab-3': 'a MIDI device preset — reached by picking the hardware in the MIDI browser, not by name',
 
-    // ── Programmatic / legacy identities kept so old documents still load ────
+    // ── Programmatic identity the rigs place directly ───────────────────────
     // `instrument` is the generic voice-by-id node the RIGS build directly
     // (`src/rigs/presets.ts`); the menu offers the three family aliases
     // (Strings / Keys / Winds) instead so there is one obvious "add an
     // instrument" row rather than two. Not the agent: its add-a-node vocabulary
     // is this same `menuCategories` list, so it cannot place `instrument` either.
     instrument: 'generic voice-by-instrumentId; placed by the rigs, fronted in the menu by strings|keys|winds',
-    // `keyboard-key` has no producer at all: a keyboard container's interior is
-    // ONE `keyboard-visual` carrying 31 per-key ports (`nodeInternals
-    // .createKeyboardInternals`), not 31 nodes. Nothing in the app has ever
-    // minted one — a stronger covenant-#8 case than the five voices below,
-    // which at least deserialize from old saves.
-    'keyboard-key': 'dead type — nothing produces one: the keyboard container mints a single keyboard-visual with 31 per-key PORTS; deletion candidate (covenant #8)',
-    // The five fixed-voice types predate the family aliases. They stay
-    // registered ONLY so a workflow saved before the alias migration still
-    // deserializes. Covenant #8 says a type nobody can reach and nothing
-    // produces should be deleted — flagged for the owner (COVERAGE.md).
-    piano: 'legacy fixed voice — load-only, superseded by keys; deletion candidate (covenant #8)',
-    cello: 'legacy fixed voice — load-only, superseded by strings; deletion candidate (covenant #8)',
-    electricCello: 'legacy fixed voice — load-only, superseded by strings; deletion candidate (covenant #8)',
-    violin: 'legacy fixed voice — load-only, superseded by strings; deletion candidate (covenant #8)',
-    saxophone: 'legacy fixed voice — load-only, superseded by winds; deletion candidate (covenant #8)',
+    // W6-P11 DELETED the six types this list used to excuse: `keyboard-key`
+    // (nothing ever minted one — a keyboard container's interior is ONE
+    // `keyboard-visual` carrying 31 per-key PORTS) and the five fixed voices
+    // `piano`/`cello`/`electricCello`/`violin`/`saxophone` (byte-for-byte
+    // `instrument` aliases). Old documents still open: the five are rewritten
+    // to `instrument` on load by `engine/nodeTypeMigrations`.
 };
 
 /** Menu bucket name -> the `NodeCategory` its members must all declare. */

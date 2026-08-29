@@ -84,7 +84,7 @@ The redesign covers **every surface, every node, every setting, everything** in 
 |---|---|
 | Shell | topbar, transport pill, breadcrumbs, surface switcher/sky band, onboarding (3 steps), help panel, toasts, PWA update prompt, latency banner, engine-health dot, offline chip, project chip, collab control + presence overlay, error boundary, safe-mode screen, plugin window shell |
 | Canvas | dot grid, marquee, offscreen pointer, cables (audio/control/universal/temp/bundled), ghost mode, context menu (→ oj-ui Menu), node frames/selection/agent-pending, resize handles, bundle port groups |
-| Every node faceplate (40 registered types) | keyboard, keyboard-key, keyboard-visual, instrument, instrument-visual, microphone, midi, midi-visual, minilab-3, minilab3-visual, piano, cello, electricCello, violin, saxophone, strings, keys, winds, looper, effect, pan, width, multiplier, speaker, recorder, canvas-input, canvas-output, output-panel, input-panel, container, add, subtract, library (incl. the two-panel file browser), sampler, sampler-visual, song, audio-in, audio-out — plus `AutoParamPanel` (Knob) and every in-node control |
+| Every node faceplate (30 registered types) | keyboard, keyboard-visual, instrument, instrument-visual, microphone, midi, midi-visual, minilab-3, minilab3-visual, strings, keys, winds, looper, effect, pan, width, multiplier, speaker, recorder, canvas-input, canvas-output, output-panel, input-panel, container, add, subtract, library (incl. the two-panel file browser), sampler, sampler-visual, song — plus `AutoParamPanel` (Knob) and every in-node control. *(The old "40" miscounted `audio-in`/`audio-out`, which are PORT ids, not types; W6-P11 then deleted six real types — see the follow-up below.)* |
 | Timeline | arrangement (ruler, headers, field, clips, playhead, loop/punch, markers, selection, readouts), mixer drawer, automation lanes, piano roll (toolbar, key bed, field, velocity lane, scroomer), record ghost, empty states, export dialog |
 | Command bar | palette, AI panel/composer, model picker, sessions, slash items, rewind rows, auth chooser |
 | Settings | panel shell + sidebar tabs, audio settings (devices, latency, guide), keybindings (editor, conflicts), updates/channels, about, theme picker, MIDI device browser |
@@ -122,3 +122,28 @@ Gate (Wave 6): a coverage matrix `plans/redesign-new-dna/COVERAGE.md` listing ev
 - ~~Browser-tier level stream emits no frames~~ — **RETRACTED by the P6 gate (2026-08-30)**: 4,511 worklet meter frames measured, the Speaker meter reads `-29.3 dB` on a held key; the lane's zeros were an un-wired rig at −75.6 dBFS reported honestly. No executor lane needed. Native path still needs the founder listening pass.
 - `pan` and `width` node types are in no `nodeCategories` entry, so no user can place them — registry fix (P10 scope).
 - UI-017 (keyboard port activation rejected by `e.button !== 0`) was live in production until P6 — pinned now.
+
+### Decision recorded by Wave 6 P11 (2026-08-29) — FU7 closed
+The W6-P10 review flagged six registry types as covenant-#8 deletion candidates and left the
+call to the owner. **Decision: delete all six.** Executed in W6-P11.
+
+- **`keyboard-key` — deleted outright, no migration.** Nothing in the app ever minted one: a
+  keyboard container's interior is ONE `keyboard-visual` carrying 31 per-key **ports**, not
+  31 nodes (`nodeInternals.createKeyboardInternals`). It was unreachable AND unproduced, so
+  no saved document can contain one. (The `keys` PORT id on the keyboard survives — that is
+  a port, not this type.)
+- **`piano`, `cello`, `electricCello`, `violin`, `saxophone` — deleted, migrated on load.**
+  They were byte-for-byte `instrument` aliases: same `PrimitiveKind`, same internals, same
+  predicates in `portSync` / `noteRouting` / `defaultInstrument`, same faceplate. They
+  differed only by a `defaultData.offsets` integer and by which keyword `resolveVoiceFamily`
+  hit on the type string — both of which `data.instrumentId` already expresses better.
+  (`electricCello`'s advertised "saturation and chorus" was implemented nowhere.)
+  Every seam that reads a saved document now rewrites the type to `instrument` and seeds the
+  catalogue id that reproduces the same voice family; persisted ports (and therefore cables)
+  are untouched. The alias→instrumentId map lives once, in
+  `src/engine/nodeTypeMigrations.ts`.
+- **`strings`, `keys`, `winds` stay** — they are the three live Instruments menu rows and the
+  three targets Ctrl+←/→ cycles between. Their capture debt moves forward in COVERAGE.md.
+- Same change fixed a real bug: `NodeWrapper`'s ghost-port instrument list named the eight
+  legacy aliases but NOT `instrument`, so the generic voice every preset rig installs could
+  not grow an input by dropping a cable on its ghost port.

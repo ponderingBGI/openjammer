@@ -65,29 +65,6 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         }
     },
 
-    'keyboard-key': {
-        type: 'keyboard-key',
-        category: 'input',
-        name: 'Key',
-        description: 'Individual keyboard key signal generator',
-        ui: 'auto', // no bespoke NodeWrapper branch -> AutoParamPanel
-        defaultPorts: [
-            {
-                id: 'out',
-                name: 'Out',
-                type: 'control',
-                direction: 'output',
-                position: { x: 1, y: 0.5 }
-            }
-        ],
-        defaultData: {
-            keyLabel: 'Q',
-            row: 1,
-            keyIndex: 0
-        },
-        dimensions: { width: 50, height: 50 }
-    },
-
     'keyboard-visual': {
         type: 'keyboard-visual',
         category: 'input',
@@ -306,105 +283,12 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         canEnter: false  // Cannot enter this internal visual node
     },
 
-    // Instruments - all share similar layout: inputs on left, audio out on right
-    piano: {
-        type: 'piano',
-        category: 'instruments',
-        name: 'Classic Piano',
-        description: 'Grand piano instrument',
-        ui: 'react', // InstrumentNode (schematic switch)
-        defaultPorts: [], // Ports generated from internal canvas-input/output nodes
-        defaultData: {
-            offsets: { 'input-1': 0 },
-            activeInputs: ['input-1']
-        },
-        dimensions: { width: 180, height: 100 },
-        portLayout: {
-            direction: 'vertical',
-            inputArea: { x: 0, startY: 0.2, endY: 0.8 },
-            outputArea: { x: 1, startY: 0.4, endY: 0.6 }  // Audio out centered
-        }
-    },
-
-    cello: {
-        type: 'cello',
-        category: 'instruments',
-        name: 'Cello',
-        description: 'Orchestral cello',
-        ui: 'react', // InstrumentNode (schematic switch)
-        defaultPorts: [], // Ports generated from internal canvas-input/output nodes
-        defaultData: {
-            offsets: { 'input-1': -12 }, // Default octaves lower
-            activeInputs: ['input-1']
-        },
-        dimensions: { width: 180, height: 100 },
-        portLayout: {
-            direction: 'vertical',
-            inputArea: { x: 0, startY: 0.2, endY: 0.8 },
-            outputArea: { x: 1, startY: 0.4, endY: 0.6 }
-        }
-    },
-
-    electricCello: {
-        type: 'electricCello',
-        category: 'instruments',
-        name: 'Electric Cello',
-        description: 'Modern electric cello with saturation and chorus',
-        ui: 'react', // InstrumentNode (schematic switch)
-        defaultPorts: [], // Ports generated from internal canvas-input/output nodes
-        defaultData: {
-            offsets: { 'input-1': -12 }, // Same range as acoustic cello
-            activeInputs: ['input-1']
-        },
-        dimensions: { width: 180, height: 100 },
-        portLayout: {
-            direction: 'vertical',
-            inputArea: { x: 0, startY: 0.2, endY: 0.8 },
-            outputArea: { x: 1, startY: 0.4, endY: 0.6 }
-        }
-    },
-
-    violin: {
-        type: 'violin',
-        category: 'instruments',
-        name: 'Violin',
-        description: 'Orchestral violin',
-        ui: 'react', // InstrumentNode (schematic switch)
-        defaultPorts: [], // Ports generated from internal canvas-input/output nodes
-        defaultData: {
-            offsets: { 'input-1': 12 }, // Higher pitch
-            activeInputs: ['input-1']
-        },
-        dimensions: { width: 180, height: 100 },
-        portLayout: {
-            direction: 'vertical',
-            inputArea: { x: 0, startY: 0.2, endY: 0.8 },
-            outputArea: { x: 1, startY: 0.4, endY: 0.6 }
-        }
-    },
-
-    saxophone: {
-        type: 'saxophone',
-        category: 'instruments',
-        name: 'Saxophone',
-        description: 'Jazz saxophone',
-        ui: 'react', // InstrumentNode (schematic switch)
-        defaultPorts: [], // Ports generated from internal canvas-input/output nodes
-        defaultData: {
-            offsets: { 'input-1': 0 },
-            activeInputs: ['input-1']
-        },
-        dimensions: { width: 180, height: 100 },
-        portLayout: {
-            direction: 'vertical',
-            inputArea: { x: 0, startY: 0.2, endY: 0.8 },
-            outputArea: { x: 1, startY: 0.4, endY: 0.6 }
-        }
-    },
-
-    // Category Aliases / Defaults - inherit layout from their base type
+    // Instrument FAMILIES — the three rows the Instruments menu offers and the
+    // three Ctrl+<-/-> cycles through. Each is the generic sampled instrument
+    // pre-tuned to a family (octave offset + the picker categories it browses);
+    // `instrument` below is the same node with the whole catalogue open.
     strings: {
-        type: 'strings', // Category alias for string instruments (defaults to cello sampler)
+        type: 'strings', // String family: browses the strings/bass catalogue
         category: 'instruments',
         name: 'Strings',
         description: 'String Ensemble',
@@ -426,7 +310,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         }
     },
     keys: {
-        type: 'keys', // Category alias for keyboard instruments (defaults to piano sampler)
+        type: 'keys', // Keyboard family: browses the piano catalogue
         category: 'instruments',
         name: 'Keys',
         description: 'Keyboards',
@@ -448,7 +332,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         }
     },
     winds: {
-        type: 'winds', // Category alias for wind instruments (defaults to saxophone sampler)
+        type: 'winds', // Wind family: browses the woodwind/brass/world catalogue
         category: 'instruments',
         name: 'Winds',
         description: 'Wind Instruments',

@@ -11,6 +11,7 @@ import type {
     PortDefinition
 } from './types';
 import { get as getNodeDefinition } from './registry';
+import { migrateLegacyInstrumentNode } from './nodeTypeMigrations';
 import {
     HOSTED_PLUGIN_DESCRIPTOR_KEY,
     HOSTED_PLUGIN_ID_PREFIX,
@@ -147,7 +148,11 @@ export function importWorkflow(
     //   identity resolves after a fresh load (clears MISSING_DEFINITION).
     // - Prefer persisted per-instance ports over the static defaultPorts, so
     //   dynamically-grown ports (and an unknown node's topology) survive a round-trip.
-    const nodes: GraphNode[] = workflow.nodes.map((serialized) => {
+    const nodes: GraphNode[] = workflow.nodes.map((raw) => {
+        // Load-time type migration, and it MUST run before the definition lookup
+        // below or an old project's piano opens as an inert MISSING_DEFINITION
+        // stub — see engine/nodeTypeMigrations.
+        const serialized = migrateLegacyInstrumentNode(raw);
         selfHealDynamicPlugin(serialized);
         const definition = getNodeDefinition(serialized.type);
         const ports: PortDefinition[] =

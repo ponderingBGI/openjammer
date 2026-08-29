@@ -20,11 +20,6 @@ import type { GraphNode, Connection, InstrumentNodeData, SamplerNodeData } from 
 
 /** Instrument node types that respond to keyboard note triggers. */
 const INSTRUMENT_NODE_TYPES = new Set<string>([
-    'piano',
-    'cello',
-    'electricCello',
-    'violin',
-    'saxophone',
     'strings',
     'keys',
     'winds',

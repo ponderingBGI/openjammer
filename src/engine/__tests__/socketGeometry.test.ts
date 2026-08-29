@@ -45,8 +45,9 @@ describe('socket geometry constants', () => {
     });
 
     it('never lets the two socket columns cross on a narrow card', () => {
-        // keyboard-key declares a 50px nominal box; an un-clamped 23px inset
-        // would put its input and output within 4px of each other.
+        // A 50px nominal box (narrower than any card actually renders): an
+        // un-clamped 23px inset would put its input and output within 4px of
+        // each other.
         expect(socketColumnX(50, 'input')).toBeLessThan(socketColumnX(50, 'output'));
         expect(socketColumnX(50, 'output') - socketColumnX(50, 'input')).toBeGreaterThan(0.35);
     });

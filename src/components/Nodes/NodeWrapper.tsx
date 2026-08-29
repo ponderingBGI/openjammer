@@ -75,8 +75,7 @@ const SCHEMATIC_TYPES = [
     'midi-visual',
     'minilab-3',
     'minilab3-visual',
-    'instrument',
-    'piano', 'cello', 'electricCello', 'violin', 'saxophone', 'strings', 'keys', 'winds',
+    'instrument', 'strings', 'keys', 'winds',
     'speaker',
     'looper',
     'microphone',
@@ -298,7 +297,12 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
             }
 
             const updateNodePorts = useGraphStore.getState().updateNodePorts;
-            const isInstrument = ['piano', 'cello', 'electricCello', 'violin', 'saxophone', 'strings', 'keys', 'winds', 'sampler'].includes(node.type);
+            // `instrument` is the GENERIC voice every preset rig installs. It was
+            // missing from this list, so the one instrument most players meet first
+            // could not grow an input by dropping a cable on its ghost port — the
+            // gesture silently did nothing. It is the same node as the three family
+            // aliases; it grows ports the same way.
+            const isInstrument = ['instrument', 'strings', 'keys', 'winds', 'sampler'].includes(node.type);
 
             // Check if clicking on a ghost port (not yet persisted)
             const isGhostPort = portId.startsWith('ghost-input-');
@@ -488,11 +492,6 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
             // simply never dispatched here, so a rig's instrument rendered as an
             // anonymous fallback card with no voice picker.
             case 'instrument':
-            case 'piano':
-            case 'cello':
-            case 'electricCello':
-            case 'violin':
-            case 'saxophone':
             case 'strings':
             case 'keys':
             case 'winds':

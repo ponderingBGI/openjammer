@@ -154,7 +154,6 @@ export type UiKind = 'auto' | 'react';
 
 export type NodeType =
     | 'keyboard'
-    | 'keyboard-key'    // Individual keyboard key (signal generator)
     | 'keyboard-visual' // Visual keyboard with per-key outputs (internal node)
     | 'instrument-visual' // Visual instrument with row configuration (internal node)
     | 'microphone'
@@ -162,11 +161,6 @@ export type NodeType =
     | 'midi-visual'     // Visual MIDI device representation (internal node)
     | 'minilab-3'       // Arturia MiniLab 3 with per-control outputs
     | 'minilab3-visual' // Visual MiniLab 3 with per-control outputs (internal node)
-    | 'piano'
-    | 'cello'
-    | 'electricCello'
-    | 'violin'
-    | 'saxophone'
     | 'strings'
     | 'keys'
     | 'winds'
@@ -213,7 +207,6 @@ export type PluginId = NodeType & { readonly __brand: 'PluginId' };
  */
 export const KNOWN_PLUGIN_IDS = [
     'keyboard',
-    'keyboard-key',
     'keyboard-visual',
     'instrument-visual',
     'microphone',
@@ -221,11 +214,6 @@ export const KNOWN_PLUGIN_IDS = [
     'midi-visual',
     'minilab-3',
     'minilab3-visual',
-    'piano',
-    'cello',
-    'electricCello',
-    'violin',
-    'saxophone',
     'strings',
     'keys',
     'winds',

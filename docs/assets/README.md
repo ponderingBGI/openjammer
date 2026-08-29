@@ -13,11 +13,11 @@ Use **OBS Studio** or similar screen recording software to capture a workflow de
 **Recommended workflow to capture:**
 1. Start the app (show "Start Audio" button click)
 2. Right-click canvas → Add Keyboard Node
-3. Right-click canvas → Instruments → Keyboard → Classic Piano
-4. Connect Keyboard output to Piano input
+3. Right-click canvas → Input → Keyboard, then Instruments → Keys
+4. Connect Keyboard output to the Keys input
 5. Press a few keys (Q-W-E-R-T) to play notes
 6. Add a Speaker node
-7. Connect Piano to Speaker
+7. Connect Keys to Speaker
 8. Optionally: Add a Looper and demonstrate layer stacking
 
 **Recording Settings:**

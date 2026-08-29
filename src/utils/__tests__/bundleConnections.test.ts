@@ -456,7 +456,7 @@ describe('detectBundleInfo', () => {
 // ============================================================================
 
 describe('isInstrumentNode', () => {
-    const instrumentTypes = ['piano', 'cello', 'electricCello', 'violin', 'saxophone', 'strings', 'keys', 'winds', 'instrument'];
+    const instrumentTypes = ['strings', 'keys', 'winds', 'instrument', 'sampler'];
     const nonInstrumentTypes = ['keyboard', 'microphone', 'output', 'effect', 'looper'];
 
     instrumentTypes.forEach(type => {
@@ -522,10 +522,10 @@ describe('checkDynamicPortAddition', () => {
         const nodes = new Map<string, GraphNode>();
         const connections = new Map<string, Connection>();
 
-        const node = createTestNode({ id: 'piano', type: 'piano' });
-        nodes.set('piano', node);
+        const node = createTestNode({ id: 'inst', type: 'instrument' });
+        nodes.set('inst', node);
 
-        const result = checkDynamicPortAddition('piano', nodes, connections);
+        const result = checkDynamicPortAddition('inst', nodes, connections);
         expect(result.newNode).toBeNull();
         expect(result.updatedNode).toBeNull();
     });
@@ -590,10 +590,10 @@ describe('checkDynamicPortRemoval', () => {
         const nodes = new Map<string, GraphNode>();
         const connections = new Map<string, Connection>();
 
-        const node = createTestNode({ id: 'piano', type: 'piano' });
-        nodes.set('piano', node);
+        const node = createTestNode({ id: 'inst', type: 'instrument' });
+        nodes.set('inst', node);
 
-        const result = checkDynamicPortRemoval('piano', nodes, connections);
+        const result = checkDynamicPortRemoval('inst', nodes, connections);
         expect(result.updatedNode).toBeNull();
     });
 

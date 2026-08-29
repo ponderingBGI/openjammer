@@ -89,7 +89,12 @@ afterEach(() => {
 
 describe('port DOM contract', () => {
     it('covers every registered node type', () => {
-        expect(TYPES.length).toBeGreaterThan(30);
+        // A SMOKE bound, not a count: it only proves the registry import resolved
+        // and the `it.each` walk below is really walking the whole thing. The
+        // registry↔NodeType equality is pinned once, in menuCategories.test.ts —
+        // pinning a literal here just made every legitimate deletion (W6-P11 took
+        // six dead types out) look like a failure.
+        expect(TYPES.length).toBeGreaterThan(20);
     });
 
     it.each(TYPES)('%s renders', (type) => {

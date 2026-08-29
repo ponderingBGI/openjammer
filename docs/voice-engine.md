@@ -47,8 +47,8 @@ non-silent, so a silent recipe fails CI.
 The thin executor-facing seam over the synth.
 
 - `DEFAULT_VOICE_INSTRUMENTS` — the node types that receive a built-in voice
-  (the category aliases + the generic `instrument` picker). Raw `sampler` /
-  `library` nodes are excluded (they own their PCM).
+  (the three family nodes `keys` / `strings` / `winds` + the generic `instrument`
+  picker). Raw `sampler` / `library` nodes are excluded (they own their PCM).
 - `getVoiceForInstrumentNode(nodeType, data)` — resolves a node's voice from
   `data.instrumentId` (the picker) or, absent one, the node type; returns the
   PCM `voice` plus a stable `key` (the resolved family).

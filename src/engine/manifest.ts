@@ -138,11 +138,6 @@ export interface PluginManifest {
  */
 const KIND_BY_TYPE: Partial<Record<NodeType, PrimitiveKind>> = {
     // generators / instruments → Sampler (the sampled-instrument primitive)
-    piano: 'Sampler',
-    cello: 'Sampler',
-    electricCello: 'Sampler',
-    violin: 'Sampler',
-    saxophone: 'Sampler',
     strings: 'Sampler',
     keys: 'Sampler',
     winds: 'Sampler',

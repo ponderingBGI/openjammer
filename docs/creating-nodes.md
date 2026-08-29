@@ -96,7 +96,7 @@ Use this checklist to verify your node is complete and follows best practices:
 
 interface GraphNode {
     id: string;                    // Unique node ID
-    type: NodeType;                // Node type (e.g., 'keyboard', 'piano')
+    type: NodeType;                // Node type (e.g., 'keyboard', 'instrument')
     category: NodeCategory;        // Category for toolbox
     position: Position;            // Position in canvas
     data: NodeData;                // Custom data for the node
@@ -191,7 +191,7 @@ Add to `src/engine/types.ts`:
 ```typescript
 export type NodeType =
     | 'keyboard'
-    | 'piano'
+    | 'instrument'
     // ... existing types
     | 'my-new-node';  // Add your type
 ```

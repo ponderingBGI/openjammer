@@ -33,7 +33,7 @@ Commit map for the "Lane / commit" column:
 | W5-P6 | `79c71b4` | node faceplates: speaker, mic, math, panels, container, song, effect, recorder |
 | **W4-TB** | *uncommitted* | arrangement + piano roll redesign (working tree) |
 | **W5-P7** | *not started* | Looper / Sampler / Library |
-| **W5-P8** | *uncommitted* | keyboard / instrument / MIDI / MiniLab family (working tree) |
+| **W5-P8** | `ab23a31` | keyboard / instrument / MIDI / MiniLab family |
 | **W5-P10** | *not started* | canvas/app defects + dead code |
 | **W6-E2E** | *not started* | acceptance tests + visual-regression baselines |
 
@@ -105,36 +105,38 @@ ids**, not node types — corrected here.
 | `output-panel` | W5-P6 `79c71b4` | `w5-p6/output-panel-light.png` | `w5-p6/output-panel-dark.png` | DONE |
 | `canvas-input` | W5-P6 `79c71b4` | `w5-p6-gate/01-container-inside-light.png` *(incidental)* | `w5-p6-gate/01-container-inside-dark.png` *(incidental)* | DONE — no dedicated capture |
 | `canvas-output` | W5-P6 `79c71b4` | `w5-p6-gate/01-container-inside-light.png` *(incidental)* | `w5-p6-gate/01-container-inside-dark.png` *(incidental)* | DONE — no dedicated capture |
-| `keyboard` | W5-P8 *(uncommitted)* | `w5-p8-gate/g-d1-keyboard-light.png` | `w5-p8-gate/g-d1-keyboard-dark.png` | IN-FLIGHT: P8 (gate running) |
-| `keyboard-visual` | W5-P8 *(uncommitted)* | `w5-p8-gate/g-d1-keyboard-visual-light.png` | `w5-p8-gate/g-d1-keyboard-visual-dark.png` | IN-FLIGHT: P8 (gate running) |
-| `keyboard-key` | W5-P8 *(uncommitted)* | `w5-p8-gate/g-d2-keys-2x-light.png` *(incidental)* | `w5-p8-gate/g-d2-keys-2x-dark.png` *(incidental)* | IN-FLIGHT: P8 |
-| `instrument` | W5-P8 *(uncommitted)* | `w5-p8-gate/g-d1-instrument-light.png` | `w5-p8-gate/g-d1-instrument-dark.png` | IN-FLIGHT: P8 (gate running) |
-| `instrument-visual` | W5-P8 *(uncommitted)* | `w5-p8-gate/g-i3-instrument-visual-light.png` | `w5-p8-gate/g-i3-instrument-visual-dark.png` | IN-FLIGHT: P8 (gate running) |
-| `midi` | W5-P8 *(uncommitted)* | `w5-p8-gate/g-i1-midi-light.png` | `w5-p8-gate/g-i1-midi-dark.png` | IN-FLIGHT: P8 (gate running) |
-| `midi-visual` | W5-P8 *(uncommitted)* | `w5-p8-gate/g-i3-midi-visual-light.png` | `w5-p8-gate/g-i3-midi-visual-dark.png` | IN-FLIGHT: P8 (gate running) |
-| `minilab-3` | W5-P8 *(uncommitted)* | `w5-p8-gate/g-i1-minilab-3-light.png` | `w5-p8-gate/g-i1-minilab-3-dark.png` | IN-FLIGHT: P8 (gate running) |
-| `minilab3-visual` | W5-P8 *(uncommitted)* | `w5-p8-gate/g-j1-minilab3-body-light.png`, `g-j1-minilab3-panel-light.png` | `w5-p8-gate/g-j1-minilab3-body-dark.png`, `g-j1-minilab3-panel-dark.png` | IN-FLIGHT: P8 (gate running) |
+| `keyboard` | W5-P8 `ab23a31` | `w5-p8-gate/g-d1-keyboard-light.png` | `w5-p8-gate/g-d1-keyboard-dark.png` | DONE |
+| `keyboard-visual` | W5-P8 `ab23a31` | `w5-p8-gate/g-d1-keyboard-visual-light.png` | `w5-p8-gate/g-d1-keyboard-visual-dark.png` | DONE |
+| `instrument` | W5-P8 `ab23a31` | `w5-p8-gate/g-d1-instrument-light.png` | `w5-p8-gate/g-d1-instrument-dark.png` | DONE |
+| `instrument-visual` | W5-P8 `ab23a31` | `w5-p8-gate/g-i3-instrument-visual-light.png` | `w5-p8-gate/g-i3-instrument-visual-dark.png` | DONE |
+| `midi` | W5-P8 `ab23a31` | `w5-p8-gate/g-i1-midi-light.png` | `w5-p8-gate/g-i1-midi-dark.png` | DONE |
+| `midi-visual` | W5-P8 `ab23a31` | `w5-p8-gate/g-i3-midi-visual-light.png` | `w5-p8-gate/g-i3-midi-visual-dark.png` | DONE |
+| `minilab-3` | W5-P8 `ab23a31` | `w5-p8-gate/g-i1-minilab-3-light.png` | `w5-p8-gate/g-i1-minilab-3-dark.png` | DONE |
+| `minilab3-visual` | W5-P8 `ab23a31` | `w5-p8-gate/g-j1-minilab3-body-light.png`, `g-j1-minilab3-panel-light.png` | `w5-p8-gate/g-j1-minilab3-body-dark.png`, `g-j1-minilab3-panel-dark.png` | DONE |
 | `looper` | W5-P7 | MISSING | MISSING | **NOT STARTED** (P7) |
 | `sampler` | W5-P7 | MISSING | MISSING | **NOT STARTED** (P7) |
 | `sampler-visual` | W5-P7 | MISSING | MISSING | **NOT STARTED** (P7) |
 | `library` (two-panel browser) | W5-P7 | MISSING | MISSING | **NOT STARTED** (P7) |
 | `pan` | — | MISSING | MISSING | **NOT STARTED** — and unplaceable: in no `nodeCategories` entry (MASTER-PLAN follow-up, P10 scope) |
 | `width` | — | MISSING | MISSING | **NOT STARTED** — same registry gap as `pan` |
-| `piano` | — | MISSING | MISSING | **NOT STARTED** — legacy fixed-instrument type |
-| `cello` | — | MISSING | MISSING | **NOT STARTED** — legacy fixed-instrument type |
-| `electricCello` | — | MISSING | MISSING | **NOT STARTED** — legacy fixed-instrument type |
-| `violin` | — | MISSING | MISSING | **NOT STARTED** — legacy fixed-instrument type |
-| `saxophone` | — | MISSING | MISSING | **NOT STARTED** — legacy fixed-instrument type |
-| `strings` | — | MISSING | MISSING | **NOT STARTED** — legacy fixed-instrument type |
-| `keys` | — | MISSING | MISSING | **NOT STARTED** — legacy fixed-instrument type |
-| `winds` | — | MISSING | MISSING | **NOT STARTED** — legacy fixed-instrument type |
+| `strings` | — | MISSING | MISSING | **NOT STARTED** — live Instruments menu row + Ctrl+←/→ cycle target |
+| `keys` | — | MISSING | MISSING | **NOT STARTED** — live Instruments menu row + Ctrl+←/→ cycle target |
+| `winds` | — | MISSING | MISSING | **NOT STARTED** — live Instruments menu row + Ctrl+←/→ cycle target |
 | `AutoParamPanel` (in-node Knob rack) | W5-P6 `79c71b4` | `w5-p6/07-autoparam-light.png` | `w5-p6/07-autoparam-dark.png` | DONE |
 | Node states — selected / refusal / hover-connect | W5-P6 `79c71b4` | `w5-p6-gate/state-selected-speaker-light.png`, `state-refusal-math-light.png`, `w5-p6/state-hover-connecting-math-light.png` | `w5-p6-gate/state-selected-speaker-dark.png`, `state-refusal-math-dark.png`, `w5-p6/state-hover-connecting-math-dark.png` | DONE |
 
-> **The eight legacy fixed-instrument types** (`piano` … `winds`) plus `keyboard-key` were
-> never assigned a taste-pass owner in any wave. They are either live surfaces that must be
-> redesigned, or dead types that covenant #8 says to delete. **Decide before the gate
-> closes; do not let them pass by omission.**
+> **Decided and executed (W6-P11).** Six of those rows are gone from this table because the
+> types are gone from the registry: `keyboard-key` (nothing ever minted one — a keyboard's
+> interior is ONE `keyboard-visual` carrying 31 per-key PORTS) was **deleted outright**, and
+> the five fixed voices `piano` / `cello` / `electricCello` / `violin` / `saxophone` were
+> **deleted and migrated on load** — every seam that reads a saved document rewrites them to
+> `instrument` and seeds the catalogue `instrumentId` that reproduces the same voice
+> (`src/engine/nodeTypeMigrations.ts`). Covenant #7/#8.
+>
+> **Still owed:** `strings` / `keys` / `winds` are LIVE — the three Instruments menu rows and
+> the three targets Ctrl+←/→ cycles between. They render through `InstrumentNode`, which had
+> its taste pass, but they have no dedicated capture. That is real capture debt, not a
+> deletion candidate.
 
 ## 4. Timeline
 
@@ -201,8 +203,8 @@ are dirty in the working tree.
 | Audio health | W4-P9 `a554c99` | `w4-p9-gate/light-audiohealth.png` | `w4-p9-gate/dark-audiohealth.png` | DONE |
 | Issue reporter | W4-P9 `a554c99` | `w4-p9-gate/light-issuereporter.png` | `w4-p9-gate/dark-issuereporter.png` | DONE |
 | Panels — reduced motion | W4-P9 `a554c99` | `w4-p9-gate/reduced-motion-devlog.png`, `reduced-motion-keybindings.png` | MISSING | DONE |
-| MIDI device browser | W5-P8 *(uncommitted)* | `w5-p8-gate/g-h1-midi-browser.png` | MISSING | IN-FLIGHT: P8 (gate running) |
-| MIDI device card + connection toast | W5-P8 *(uncommitted)* | `w5-p8-gate/g-h2-after-card-click.png`, `g-h1-add-midi-nowebmidi.png` | MISSING | IN-FLIGHT: P8 |
+| MIDI device browser | W5-P8 `ab23a31` | `w5-p8-gate/g-h1-midi-browser.png` | MISSING | DONE |
+| MIDI device card + connection toast | W5-P8 `ab23a31` | `w5-p8-gate/g-h2-after-card-click.png`, `g-h1-add-midi-nowebmidi.png` | MISSING | DONE |
 | Bench | W4-P9 `a554c99` | MISSING | MISSING | DONE — unverified |
 | Relink-samples dialog | W4-P9 `a554c99` | MISSING | MISSING | DONE — unverified |
 
@@ -293,32 +295,33 @@ Work straight down this list. Each line is one capture (or one decision).
 4. `library` faceplate incl. the two-panel file browser — light + dark *(P7)*
 5. `pan` faceplate — light + dark *(also unplaceable; registry fix first)*
 6. `width` faceplate — light + dark *(same)*
-7. `piano`, `cello`, `electricCello`, `violin`, `saxophone`, `strings`, `keys`, `winds` —
-   **8 node types, 16 captures**, no owner in any wave. **Decide first: redesign or delete.**
-8. `keyboard-key` faceplate — light + dark *(only visible inside a keys grid today)*
-9. Universal-kind cable — light + dark
-10. Node frame `.is-agent-pending` — light + dark
-11. Export dialog — light + dark
-12. Waveform editor modal + `AudioClipVisual` + `ClipDragLayer` — light + dark
-13. Piano-roll velocity lane + scroomer — light + dark
-14. Timeline record ghost — light + dark
-15. Bench panel — light + dark
-16. Relink-samples dialog — light + dark
-17. Command bar: model picker — light + dark
-18. Command bar: sessions list — light + dark
-19. Command bar: slash items — light + dark
-20. Command bar: rewind rows — light + dark
-21. PWA update prompt — light + dark
-22. Offline chip — light + dark
-23. `AppErrorBoundary` — light + dark
-24. Safe-mode screen — light + dark
-25. Plugin window shell — light + dark
-26. Icons (all 12, one sheet) — light + dark
-27. Ladle catalog + its theme switcher — light + dark
-28. `public/download` page — light + dark
-29. `apps/docs` site (hero + a docs page) — light + dark
-30. `.design-sync` preview cards — light + dark
-31. Visual-regression baselines, both themes *(W6-E2E)*
+7. `strings`, `keys`, `winds` — **3 node types, 6 captures**, still no owner in any wave.
+   *(W6-P11 answered the "redesign or delete" question for the other six: `keyboard-key`
+   and the five fixed voices are deleted, the five migrated on load. These three are live
+   menu rows and stay.)*
+8. Universal-kind cable — light + dark
+9. Node frame `.is-agent-pending` — light + dark
+10. Export dialog — light + dark
+11. Waveform editor modal + `AudioClipVisual` + `ClipDragLayer` — light + dark
+12. Piano-roll velocity lane + scroomer — light + dark
+13. Timeline record ghost — light + dark
+14. Bench panel — light + dark
+15. Relink-samples dialog — light + dark
+16. Command bar: model picker — light + dark
+17. Command bar: sessions list — light + dark
+18. Command bar: slash items — light + dark
+19. Command bar: rewind rows — light + dark
+20. PWA update prompt — light + dark
+21. Offline chip — light + dark
+22. `AppErrorBoundary` — light + dark
+23. Safe-mode screen — light + dark
+24. Plugin window shell — light + dark
+25. Icons (all 12, one sheet) — light + dark
+26. Ladle catalog + its theme switcher — light + dark
+27. `public/download` page — light + dark
+28. `apps/docs` site (hero + a docs page) — light + dark
+29. `.design-sync` preview cards — light + dark
+30. Visual-regression baselines, both themes *(W6-E2E)*
 
 ### Half-covered — one theme, or only an incidental shot
 

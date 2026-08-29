@@ -52,32 +52,37 @@ describe('NodeWrapper reconnect gesture', () => {
         expect(container.querySelector(`[data-canvas-node-root="${framedId}"]`)).not.toBeNull();
     });
 
-    it('undoes ghost-port creation and cable reconnect together with one Ctrl+Z step', () => {
+    // The node under test is the GENERIC `instrument` — the voice every preset rig
+    // installs and the one most players meet first. It was missing from
+    // NodeWrapper's ghost-port instrument list (which named the eight legacy
+    // aliases but not `instrument`), so dropping a cable on its ghost port grew no
+    // port and silently did nothing. This test fails on that code.
+    it('grows a ghost port on the generic instrument and undoes the whole gesture with one Ctrl+Z', () => {
         const graph = useGraphStore.getState();
         const keyboardId = graph.addNode('keyboard', { x: 0, y: 0 });
-        const pianoId = graph.addNode('piano', { x: 200, y: 0 });
+        const instrumentId = graph.addNode('instrument', { x: 200, y: 0 });
         const keyboard = useGraphStore.getState().nodes.get(keyboardId)!;
-        const piano = useGraphStore.getState().nodes.get(pianoId)!;
+        const instrument = useGraphStore.getState().nodes.get(instrumentId)!;
         const source = keyboard.ports.find(port => port.direction === 'output')!;
-        const originalTarget = piano.ports.find(port => port.direction === 'input')!;
-        const originalId = graph.addConnection(keyboardId, source.id, pianoId, originalTarget.id)!;
-        const originalPortIds = useGraphStore.getState().nodes.get(pianoId)!.ports.map(port => port.id);
+        const originalTarget = instrument.ports.find(port => port.direction === 'input')!;
+        const originalId = graph.addConnection(keyboardId, source.id, instrumentId, originalTarget.id)!;
+        const originalPortIds = useGraphStore.getState().nodes.get(instrumentId)!.ports.map(port => port.id);
         const cursorBeforeReconnect = useHistoryStore.getState().cursor;
 
         useCanvasStore.getState().startConnecting(keyboardId, source.id, originalId);
-        render(<NodeWrapper node={useGraphStore.getState().nodes.get(pianoId)!} />);
+        render(<NodeWrapper node={useGraphStore.getState().nodes.get(instrumentId)!} />);
         act(() => fireEvent.mouseUp(screen.getByTestId('ghost-port')));
 
         const after = useGraphStore.getState();
         expect(after.connections.has(originalId)).toBe(false);
-        expect(after.nodes.get(pianoId)!.ports.length).toBeGreaterThan(originalPortIds.length);
+        expect(after.nodes.get(instrumentId)!.ports.length).toBeGreaterThan(originalPortIds.length);
         expect(useHistoryStore.getState().cursor).toBe(cursorBeforeReconnect + 1);
         expect(useHistoryStore.getState().open).toBeNull();
 
         act(() => useGraphStore.getState().undo());
         const restored = useGraphStore.getState();
         expect(restored.connections.has(originalId)).toBe(true);
-        expect(restored.nodes.get(pianoId)!.ports.map(port => port.id)).toEqual(originalPortIds);
+        expect(restored.nodes.get(instrumentId)!.ports.map(port => port.id)).toEqual(originalPortIds);
     });
 
     it('keeps clicks history-neutral, toggles with Shift, and closes one group-drag gesture on blur', () => {
