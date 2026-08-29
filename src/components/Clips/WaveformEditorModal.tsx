@@ -93,6 +93,26 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
     // Minimap drag state
     const [minimapDragging, setMinimapDragging] = useState(false);
 
+    /*
+     * The canvas is the ONE surface in OpenJammer that CSS cannot restyle: its
+     * colours are baked into pixels at draw time. So a theme switch has to be a
+     * draw trigger, not just a variable change. Bumping this counter is that
+     * trigger — it is in both draw effects' dependency lists, so light↔dark
+     * repaints the waveform instead of leaving the old palette stranded until
+     * the next zoom or drag. `storage` covers a theme changed in another tab.
+     */
+    const [paletteVersion, setPaletteVersion] = useState(0);
+
+    useEffect(() => {
+        const repaint = () => setPaletteVersion((version) => version + 1);
+        window.addEventListener('openjammer:theme-change', repaint);
+        window.addEventListener('storage', repaint);
+        return () => {
+            window.removeEventListener('openjammer:theme-change', repaint);
+            window.removeEventListener('storage', repaint);
+        };
+    }, []);
+
     const clip = editingClipId ? clips.get(editingClipId) : null;
 
     // Load audio when clip changes
@@ -295,7 +315,7 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
             }
         }
 
-    }, [audioBuffer, zoom, scrollOffset, startHandle, endHandle]);
+    }, [audioBuffer, zoom, scrollOffset, startHandle, endHandle, paletteVersion]);
 
     // Draw minimap
     useEffect(() => {
@@ -363,7 +383,7 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
             ctx.strokeRect(viewportX + 0.5, 0.5, viewportWidth - 1, height - 1);
         }
 
-    }, [audioBuffer, zoom, scrollOffset]);
+    }, [audioBuffer, zoom, scrollOffset, paletteVersion]);
 
     // Minimap mouse handlers
     const handleMinimapMouseDown = useCallback((e: React.MouseEvent) => {

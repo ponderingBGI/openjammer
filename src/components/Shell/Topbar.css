@@ -72,10 +72,39 @@
 }
 
 .oj-topbar__menus {
+    position: relative;
     display: inline-flex;
     align-items: center;
     gap: 2px;
     flex: none;
+}
+
+/*
+ * The menu bar's in-UI confirm (`role="alertdialog"`), where a native confirm()
+ * used to blank the instrument. It hangs from the bar it was asked in, so the
+ * answer never arrives detached from the question.
+ */
+.oj-menu-confirm {
+    position: absolute;
+    top: calc(100% + var(--space-xs));
+    left: 0;
+    z-index: var(--z-popover);
+    width: 320px;
+    text-align: left;
+}
+
+.oj-menu-confirm__body {
+    margin: 0;
+    font-size: var(--text-sm);
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.oj-menu-confirm__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-xs);
+    margin-top: var(--space-sm);
 }
 
 .file-input-hidden {
@@ -99,20 +128,12 @@
 }
 
 /*
- * The collaboration control still styles itself as a floating island (lane P9
- * owns its redesign). Sit it back down on the rule from here rather than
- * reaching into a file this lane does not own; when P9 restyles it, these three
- * declarations are the only thing to delete.
+ * NOTE — do not re-add a `.oj-topbar .collab-control` override here. P9 restyled
+ * the control to `position: relative` so its popover anchors to the TRIGGER;
+ * forcing `position: static` from the topbar sends the popover's `absolute`
+ * anchor up to `.oj-topbar` (full window width) and pins it flush to the window
+ * edge with no gap under the button. The control owns its own placement now.
  */
-.oj-topbar .collab-control {
-    position: static;
-    display: inline-flex;
-}
-
-.oj-topbar .collab-control .collab-panel {
-    top: calc(var(--oj-topbar-height) - 4px);
-    right: 0;
-}
 
 @media (max-width: 900px) {
     .oj-topbar__brand {

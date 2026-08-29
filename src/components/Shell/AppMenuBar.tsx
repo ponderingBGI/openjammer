@@ -8,7 +8,7 @@
  * from the LIVE keymap, so a rebound key is never advertised wrong.
  */
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useGraphStore } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
@@ -21,9 +21,46 @@ import { exportWorkflow, downloadWorkflow, loadWorkflowFromFile, importWorkflow 
 import { getExecutor } from '../../audio/executor';
 import { DropdownMenu, type MenuItemOrSeparator } from '../Toolbar/DropdownMenu';
 import { keyComboToString, useKeybindingsStore } from '../../store/keybindingsStore';
+import { Button, Callout } from '@openjammer/oj-ui';
+import { useConfirmFocus } from './confirmFocus';
+
+/**
+ * A question the menu bar has to ask before it does something irreversible.
+ *
+ * Never a native `confirm()`. That dialog blocks the main thread, cannot be
+ * styled or Escaped like the rest of the app, and — the reason it matters here —
+ * rips the keyboard away from an instrument that may be sounding. This is the
+ * same in-UI grammar Settings uses: a Callout carrying `role="alertdialog"`,
+ * two real Buttons, the safe one first and the focused one.
+ */
+interface MenuConfirm {
+    /** Identity, so swapping one question for another remounts the dialog. */
+    id: string;
+    tone: 'danger' | 'info';
+    title: string;
+    body: string;
+    /** The word on the consequential button — always a verb, never "OK". */
+    confirmLabel: string;
+    confirmVariant: 'danger' | 'primary';
+    onConfirm: () => void;
+}
 
 export function AppMenuBar() {
     const fileInputRef = useRef<HTMLInputElement>(null);
+
+    /*
+     * The one in-UI confirm this bar can raise. `DropdownMenu` closes on
+     * activation without restoring focus, so the dialog takes focus on open and
+     * hands it back to the File trigger on close — never to `<body>`.
+     */
+    const [confirming, setConfirming] = useState<MenuConfirm | null>(null);
+    const menusRef = useRef<HTMLDivElement>(null);
+    const confirmCancelRef = useRef<HTMLButtonElement>(null);
+    useConfirmFocus(
+        confirming !== null,
+        confirmCancelRef,
+        () => menusRef.current?.querySelector<HTMLElement>('.dropdown-trigger') ?? null,
+    );
 
     const nodes = useGraphStore((s) => s.nodes);
     const connections = useGraphStore((s) => s.connections);
@@ -109,13 +146,23 @@ export function AppMenuBar() {
 
     // New Canvas — the project-less workflow: just clears the canvas.
     const handleNew = useCallback(() => {
-        if (nodes.size > 0) {
-            if (!confirm('Clear current workflow? This cannot be undone.')) {
-                return;
-            }
+        if (nodes.size === 0) {
+            clearGraph();
+            resetView();
+            return;
         }
-        clearGraph();
-        resetView();
+        setConfirming({
+            id: 'new-canvas',
+            tone: 'danger',
+            title: 'Clear this canvas?',
+            body: `${nodes.size} node${nodes.size === 1 ? '' : 's'} and every cable between them go. Ctrl+Z will not bring them back.`,
+            confirmLabel: 'Clear canvas',
+            confirmVariant: 'danger',
+            onConfirm: () => {
+                clearGraph();
+                resetView();
+            },
+        });
     }, [nodes.size, clearGraph, resetView]);
 
     // Project handlers
@@ -166,14 +213,17 @@ export function AppMenuBar() {
                 const message = (err as Error).message;
                 // Offer to create a new project if folder is empty
                 if (message.includes('No project.openjammer found')) {
-                    const create = confirm(
-                        'This folder doesn\'t contain an OpenJammer project.\n\n' +
-                        'Would you like to create a new project here instead?'
-                    );
-                    if (create) {
-                        handleNewProject();
-                        return;
-                    }
+                    setConfirming({
+                        id: 'create-project-here',
+                        tone: 'info',
+                        title: 'No project in that folder',
+                        body: 'That folder has no OpenJammer project in it. Create a new one there instead?',
+                        confirmLabel: 'Create project',
+                        confirmVariant: 'primary',
+                        // The click on this button IS the user gesture the folder
+                        // picker needs, so nothing is lost against the native flow.
+                        onConfirm: () => { void handleNewProject(); },
+                    });
                 } else {
                     console.error('Failed to open project:', err);
                     toast.error(`Failed to open project: ${message}`);
@@ -370,10 +420,48 @@ export function AppMenuBar() {
     ];
 
     return (
-        <div className="oj-topbar__menus">
+        <div className="oj-topbar__menus" ref={menusRef}>
             <DropdownMenu label="File" items={fileMenuItems} />
             <DropdownMenu label="Edit" items={editMenuItems} />
             <DropdownMenu label="View" items={viewMenuItems} />
+
+            {confirming && (
+                <Callout
+                    key={confirming.id}
+                    variant={confirming.tone}
+                    title={confirming.title}
+                    className="oj-menu-confirm"
+                    role="alertdialog"
+                    aria-label={confirming.title}
+                    onKeyDown={(event) => {
+                        if (event.key !== 'Escape') return;
+                        event.stopPropagation();
+                        setConfirming(null);
+                    }}
+                >
+                    <p className="oj-menu-confirm__body">{confirming.body}</p>
+                    <div className="oj-menu-confirm__actions">
+                        <Button
+                            ref={confirmCancelRef}
+                            variant="secondary"
+                            data-autofocus="true"
+                            onClick={() => setConfirming(null)}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant={confirming.confirmVariant}
+                            onClick={() => {
+                                const pending = confirming;
+                                setConfirming(null);
+                                pending.onConfirm();
+                            }}
+                        >
+                            {confirming.confirmLabel}
+                        </Button>
+                    </div>
+                </Callout>
+            )}
 
             {/* Hidden File Input */}
             <input

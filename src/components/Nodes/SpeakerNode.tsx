@@ -21,6 +21,8 @@ import { useGraphStore } from '../../store/graphStore';
 import { useAudioStore } from '../../store/audioStore';
 import { getExecutor } from '../../audio/executor';
 import { registerTimelineLevelWriter } from '../Arrangement/timelineSignalLevels';
+// The meter's dB scale lives ONCE, next to the master meter that defines it.
+import { meterScale } from '../Shell/masterSignal';
 import {
     type EnhancedAudioDevice,
     enhanceAudioDevices,
@@ -69,17 +71,6 @@ function formatDb(level: number): string {
     if (!Number.isFinite(level) || level <= 0) return '-∞ dB';
     const db = 20 * Math.log10(level);
     return db <= FLOOR_DB + 0.5 ? '-∞ dB' : `${db.toFixed(1)} dB`;
-}
-
-/**
- * The meter's own scale: -60…0 dBFS mapped onto 0…1, so 0 dBFS stays exactly
- * 1.0 and the clip latch keeps meaning what it says. A linear meter is a lie
- * dressed as precision. Mirrors `Shell/masterSignal`.
- */
-function meterScale(level: number): number {
-    if (!Number.isFinite(level) || level <= 0) return 0;
-    const db = 20 * Math.log10(level);
-    return Math.max(0, Math.min(1, 1 + db / -FLOOR_DB));
 }
 
 export const SpeakerNode = memo(function SpeakerNode({

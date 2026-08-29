@@ -360,30 +360,7 @@
   flex: none;
 }
 
-/* ── Inline code, code blocks and external links ───────────────────────── */
-
-.guide-code {
-  padding: 1px 5px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  background: var(--bg-tertiary);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  color: var(--text-primary);
-}
-
-.guide-code-block {
-  margin: 0;
-  padding: var(--space-sm) var(--space-md);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-tertiary);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  line-height: 1.6;
-  color: var(--text-primary);
-  overflow-x: auto;
-}
+/* ── External links ─────────────────────────────────────── */
 
 .guide-external-link {
   display: inline-flex;
@@ -452,9 +429,4 @@
 
 .guide-latency-value.bad {
   color: var(--danger-ink);
-}
-
-.guide-latency-unit {
-  font-size: var(--text-xs);
-  color: var(--text-muted);
 }

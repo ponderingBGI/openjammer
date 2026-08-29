@@ -13,9 +13,16 @@
  *     a conflict is a danger Callout INSIDE the row it belongs to.
  *   • The keycap is the control. Clicking it starts capture; the same box then
  *     shows what you are holding, and Escape cancels.
+ *
+ * Both of those only hold if FOCUS follows them. A confirm nobody is focused on
+ * announces into nothing; a capture box nobody is focused on leaves the player
+ * with no focus ring and `<body>` holding the keyboard for the whole gesture.
+ * So the confirms go through {@link useConfirmFocus}, and the capture box is a
+ * `tabIndex={-1}` target that takes focus on mount and hands it back to its own
+ * keycap when the gesture ends.
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
     useKeybindingsStore,
     keybindingActions,
@@ -24,6 +31,7 @@ import {
     type KeybindingAction,
 } from '../../store/keybindingsStore';
 import { KeybindingsErrorBoundary } from './KeybindingsErrorBoundary';
+import { useConfirmFocus } from '../Shell/confirmFocus';
 import { Button, Callout, Chip, IconButton, Input, Kbd, List, ListRow, SegmentedControl } from '@openjammer/oj-ui';
 import './KeybindingsPanel.css';
 
@@ -89,6 +97,23 @@ export function KeybindingsPanel() {
     const [confirmingResetAll, setConfirmingResetAll] = useState(false);
 
     const customCount = Object.keys(customBindings).length;
+
+    // Focus anchors. One of each is enough: only one row captures and only one
+    // conflict is open at a time, so the refs always point at the live element.
+    const panelRef = useRef<HTMLDivElement>(null);
+    const searchRef = useRef<HTMLInputElement>(null);
+    const captureRef = useRef<HTMLSpanElement>(null);
+    const resetAllTriggerRef = useRef<HTMLButtonElement>(null);
+    const resetAllCancelRef = useRef<HTMLButtonElement>(null);
+    const conflictCancelRef = useRef<HTMLButtonElement>(null);
+
+    /** The keycap button for an action, by the marker the row stamps on it. */
+    const keycapFor = useCallback((actionId: string | null | undefined) => {
+        if (!actionId) return null;
+        return panelRef.current?.querySelector<HTMLElement>(
+            `[data-keycap="${actionId}"]`,
+        ) ?? null;
+    }, []);
 
     // Category groups, in catalogue order, after the search + surface filters.
     const groups = useMemo(() => {
@@ -214,10 +239,55 @@ export function KeybindingsPanel() {
         resetBinding(actionId);
     }, [resetBinding]);
 
+    /*
+     * The capture box holds the keyboard for the length of the gesture.
+     * Activating a keycap with Enter unmounts the Button and mounts the capture
+     * span in its place; without this, `document.activeElement` is `<body>` for
+     * the whole capture — no focus ring, no focused control, and Tab restarts at
+     * the top of the page. On mount the box takes focus; when the gesture ends
+     * it hands focus back to the keycap it came from, unless a conflict Callout
+     * opened in its place — that dialog owns focus next, and gives it back.
+     */
+    const editingId = editing?.actionId ?? null;
+    const conflictId = conflict?.actionId ?? null;
+    const capturedFrom = useRef<string | null>(null);
+
+    useEffect(() => {
+        if (editingId) {
+            capturedFrom.current = editingId;
+            captureRef.current?.focus();
+            return;
+        }
+        const returning = capturedFrom.current;
+        capturedFrom.current = null;
+        if (!returning || conflictId) return;
+        keycapFor(returning)?.focus();
+    }, [editingId, conflictId, keycapFor]);
+
+    /*
+     * The two `role="alertdialog"` confirms. Focus lands on the SAFE action, and
+     * comes back on close: to the keycap for a conflict, and to the reset-all
+     * trigger — or, once "Reset all" has disabled that trigger, to the search
+     * field, because focus must stay in the panel and never fall to `<body>`.
+     */
+    // The conflict is already null by the time the close runs, so the row it
+    // belongs to is latched while the dialog is up.
+    const conflictFrom = useRef<string | null>(null);
+    useEffect(() => {
+        if (conflictId) conflictFrom.current = conflictId;
+    }, [conflictId]);
+
+    useConfirmFocus(Boolean(conflictId), conflictCancelRef, () => keycapFor(conflictFrom.current));
+    useConfirmFocus(confirmingResetAll, resetAllCancelRef, () => {
+        const trigger = resetAllTriggerRef.current;
+        return trigger && !trigger.disabled ? trigger : searchRef.current;
+    });
+
     return (
-        <div className="keybindings-panel">
+        <div className="keybindings-panel" ref={panelRef}>
             <div className="keybindings-toolbar">
                 <Input
+                    ref={searchRef}
                     type="search"
                     className="keybindings-search"
                     aria-label="Search shortcuts"
@@ -246,6 +316,7 @@ export function KeybindingsPanel() {
                         </Chip>
                     )}
                     <Button
+                        ref={resetAllTriggerRef}
                         variant="danger"
                         className="keybindings-reset-all"
                         onClick={() => setConfirmingResetAll(true)}
@@ -271,12 +342,16 @@ export function KeybindingsPanel() {
                         the factory keys. Nothing else changes.
                     </p>
                     <div className="keybindings-confirm__actions">
-                        <Button variant="secondary" onClick={() => setConfirmingResetAll(false)}>
+                        <Button
+                            ref={resetAllCancelRef}
+                            variant="secondary"
+                            data-autofocus="true"
+                            onClick={() => setConfirmingResetAll(false)}
+                        >
                             Keep mine
                         </Button>
                         <Button
                             variant="danger"
-                            data-autofocus="true"
                             onClick={() => {
                                 resetAllBindings();
                                 setConfirmingResetAll(false);
@@ -320,9 +395,11 @@ export function KeybindingsPanel() {
                                             <>
                                                 {isEditing ? (
                                                     <span
+                                                        ref={captureRef}
                                                         className="keybindings-capture"
                                                         role="status"
                                                         aria-live="polite"
+                                                        tabIndex={-1}
                                                     >
                                                         {editing.pressedKeys
                                                             ? keyComboToString(editing.pressedKeys)
@@ -332,6 +409,7 @@ export function KeybindingsPanel() {
                                                     <Button
                                                         variant="ghost"
                                                         className="keybindings-shortcut"
+                                                        data-keycap={action.id}
                                                         onClick={() => startEditing(action.id)}
                                                         aria-label={`Change the shortcut for ${action.label}`}
                                                     >
@@ -384,10 +462,19 @@ export function KeybindingsPanel() {
                                                 the keys to <strong>{action.label}</strong>?
                                             </p>
                                             <div className="keybindings-conflict-buttons">
-                                                <Button variant="secondary" onClick={handleCancelConflict}>
+                                                <Button
+                                                    ref={conflictCancelRef}
+                                                    variant="secondary"
+                                                    data-autofocus="true"
+                                                    onClick={handleCancelConflict}
+                                                >
                                                     Cancel
                                                 </Button>
-                                                <Button variant="primary" onClick={handleConfirmConflict}>
+                                                {/* Unbinding someone else's shortcut is the
+                                                    consequential choice, inside a danger card — it
+                                                    wears the danger tint, not the inviting accent
+                                                    fill. Same grammar as the reset-all confirm. */}
+                                                <Button variant="danger" onClick={handleConfirmConflict}>
                                                     Replace
                                                 </Button>
                                             </div>
