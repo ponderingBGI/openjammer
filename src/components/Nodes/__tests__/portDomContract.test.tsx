@@ -25,19 +25,18 @@ import { useCanvasStore } from '../../../store/canvasStore';
 const TYPES = Object.keys(nodeDefinitions) as NodeType[];
 
 /**
- * Types whose faceplate legitimately renders something OTHER than its ports in
- * this environment, so there is no socket to find and that is the correct
- * behaviour, not a defect:
- *  - `midi` / `minilab-3` show the honest "Web MIDI unavailable" card when
- *    `navigator.requestMIDIAccess` is missing, which it is under jsdom.
- *  - `instrument-visual` is an internal node whose input sockets are one per
- *    configured row; a freshly added one has no rows yet.
+ * Types whose faceplate legitimately renders something OTHER than its ports.
+ *
+ * The set is EMPTY, and that is the finding: it used to hold `midi`,
+ * `minilab-3` and `instrument-visual`, and none of those exemptions were really
+ * about ports. The two MIDI nodes replaced their whole body with a "Web MIDI
+ * unavailable" card, so a graph you had already wired lost every visible socket
+ * the moment you opened it in a browser without a MIDI bridge; and
+ * `instrument-visual` advertised a `row-in` port it never drew. W5-P8 fixed the
+ * behaviour rather than the assertion: the node, its ports and its cables are
+ * all still real when the hardware is missing.
  */
-const NO_SOCKETS_HERE = new Set<NodeType>([
-    'midi',
-    'minilab-3',
-    'instrument-visual',
-] as NodeType[]);
+const NO_SOCKETS_HERE = new Set<NodeType>([] as NodeType[]);
 
 /**
  * Faceplates that DO place a findable marker but have not been rebuilt on the
@@ -46,16 +45,15 @@ const NO_SOCKETS_HERE = new Set<NodeType>([
  * them; what is missing is the one visual language. Wave 5 owns these files and
  * this list must only ever shrink.
  *
- *  - `add` / `subtract` (`MathNode.tsx:52-62`): renders a real `<Port>`, just
- *    without `data-port-type`.
- *  - `minilab3-visual` (`MiniLab3Visual.tsx:284-312`): `.minilab3-key-port` is a
- *    bare div, not a `<Port>`, and omits `data-port-type`.
+ * `add` / `subtract` left this list in W5-P6: the Math faceplate is built on
+ * `PortRow` now and emits `data-port-type` like everything else.
+ *
+ * `minilab3-visual` left it in W5-P8 — the last one. Its `.minilab3-key-port`
+ * bare divs are gone: keys and pads are `KeyTile`s (which embed the shared
+ * well), and every knob, fader and strip carries a real `Port`. The set is now
+ * empty, which is the only acceptable end state; it may never gain a member.
  */
-const NOT_YET_ON_THE_SHARED_SOCKET = new Set<NodeType>([
-    'add',
-    'subtract',
-    'minilab3-visual',
-] as NodeType[]);
+const NOT_YET_ON_THE_SHARED_SOCKET = new Set<NodeType>([] as NodeType[]);
 
 function renderType(type: NodeType) {
     const nodeId = useGraphStore.getState().addNode(type, { x: 0, y: 0 });
@@ -137,10 +135,7 @@ describe('port DOM contract', () => {
     it('the not-yet-migrated list only ever shrinks', () => {
         // A guard on the guard: if a faceplate is fixed, delete it from the set;
         // if a NEW one appears here, that is a regression, not a backlog item.
-        expect([...NOT_YET_ON_THE_SHARED_SOCKET].sort()).toEqual([
-            'add',
-            'minilab3-visual',
-            'subtract',
-        ]);
+        expect([...NOT_YET_ON_THE_SHARED_SOCKET].sort()).toEqual([]);
+        expect([...NO_SOCKETS_HERE].sort()).toEqual([]);
     });
 });

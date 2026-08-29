@@ -88,10 +88,22 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
     'keyboard-visual': {
         type: 'keyboard-visual',
         category: 'input',
-        name: 'Keyboard',
-        description: 'Visual keyboard with per-key outputs',
+        // Distinct from the `keys` INSTRUMENT (also named 'Keys') — two menu rows
+        // reading "Add Keys" would be a coin toss in the palette.
+        name: 'On-Screen Keys',
+        description: 'Playable on-screen keyboard — click a key or type Q-P / A-L / Z-/',
         ui: 'react', // KeyboardVisualNode (schematic switch)
         defaultPorts: [
+            // The three ROW bundles + the PEDAL. These are what a rig plugs into
+            // an instrument: `resolveKeyboardNotes` / `connectionActivity` resolve a
+            // keyboard's source port for row N by NAME ("Row N"), and the pedal by
+            // the id `pedal`. Without them a top-level visual keyboard could light
+            // up but never sound (master-plan Wave-5 follow-up #1). The per-key
+            // ports below stay: a player may still wire one key anywhere.
+            { id: 'row-1', name: 'Row 1', type: 'control', direction: 'output', position: { x: 1, y: 0.05 } },
+            { id: 'row-2', name: 'Row 2', type: 'control', direction: 'output', position: { x: 1, y: 0.30 } },
+            { id: 'row-3', name: 'Row 3', type: 'control', direction: 'output', position: { x: 1, y: 0.53 } },
+            { id: 'pedal', name: 'Pedal', type: 'control', direction: 'output', position: { x: 1, y: 0.85 } },
             // Row 1 (Q-P): 10 keys - ports on right edge, y: 0.05-0.22
             { id: 'key-q', name: 'Q', type: 'control', direction: 'output', position: { x: 1, y: 0.05 } },
             { id: 'key-w', name: 'W', type: 'control', direction: 'output', position: { x: 1, y: 0.07 } },
@@ -127,8 +139,21 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
             // Spacebar - y: 0.85
             { id: 'key-space', name: 'Space', type: 'control', direction: 'output', position: { x: 1, y: 0.85 } }
         ],
-        defaultData: {},
-        dimensions: { width: 660, height: 280 }
+        // A playable keyboard, not a mirror: `rowOctaves` is the octave each row
+        // sounds at when no instrument row overrides it, exactly as on `keyboard`.
+        // `assignedKey` is deliberately ABSENT — a fixed default would give every
+        // visual keyboard mode 2; `KeyboardVisualNode` derives a free number from
+        // the graph instead (see `deriveKeyboardNumber`).
+        defaultData: {
+            activeRow: null,
+            // Three rows, three octaves — the top QWERTY row is the high one, the
+            // way a two-manual split reads. `keyboard` keeps [4,4,4] because its
+            // rows are re-tuned per instrument ROW once a bundle lands; a leaf
+            // visual keyboard has no row to re-tune, so its default has to be
+            // musical on its own.
+            rowOctaves: [5, 4, 3]
+        },
+        dimensions: { width: 580, height: 320 }
     },
 
     'instrument-visual': {
@@ -867,7 +892,7 @@ export const menuCategories: MenuCategory[] = [
     {
         name: 'Input',
         icon: '⌨️',
-        items: ['keyboard', 'midi', 'microphone', 'library']
+        items: ['keyboard-visual', 'keyboard', 'midi', 'microphone', 'library']
     },
     {
         name: 'Instruments',

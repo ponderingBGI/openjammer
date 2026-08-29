@@ -1,43 +1,61 @@
-/* KeyboardNode — Keyboard faceplate: the card, the focused-mode ring and the octave chip.
-   (The former "Bundle Mode"/"Advanced Mode" banners held no rules once S3 moved
-   the port rows into `_sockets.css`, so they are not carried over.)
+/*
+ * KeyboardNode — the compact keyboard: four socket rows and one line of prose.
+ *
+ * What this file no longer contains is the point of it. The 4px GREEN border and
+ * the 12px green halo that marked the focused keyboard are gone (W4-S4 review
+ * finding #2): in the New DNA green is HEALTHY, and a node cannot be allowed to
+ * borrow a state colour for "selected". The mode now reads as a mono chip in the
+ * header — an exact machine fact, in the voice this system uses for exact facts.
+ * The `.keyboard-octave` chip is gone with it; `NodeShell`'s type chip is the
+ * same object, defined once.
+ */
 
-   Split verbatim out of the former SchematicNodes.css (L253-292) in W5-S5. */
+.oj-node-frame.kb-frame.is-selected {
+    z-index: calc(var(--z-node) + 10);
+}
 
-/* ============================================
- * Keyboard Node
- * ============================================ */
+.oj-node-frame.kb-frame.is-dragging {
+    z-index: calc(var(--z-node) + 90);
+}
+
 .keyboard-node {
-    min-width: 160px;
+    min-width: 208px;
 }
 
-/* Keyboard node active (Mode 2-9 focused on this keyboard) */
-.keyboard-node.active {
-    border-width: 4px;
-    border-color: var(--accent-success);
-    box-shadow: 0 0 0 2px var(--bg-canvas), 0 0 12px color-mix(in srgb, var(--accent-success) 40%, transparent), var(--shadow-raised);
+/* MODE n — accent ink on an accent-tinted inset when this keyboard has the
+   number keys. A tint, not a ring; nothing on a node glows. */
+.keyboard-node.is-mode-active .oj-node__type {
+    color: var(--accent-ink);
+    background: color-mix(in oklab, var(--accent-primary) 14%, var(--bg-tertiary));
 }
 
-.keyboard-node .schematic-header {
-    padding: var(--space-sm) var(--space-md);
+/* A row label is [name][count]: the identity, then how many keys ride the
+   cable. The count is the exact number, so it keeps the mono chip voice while
+   the name stays the micro label PortRow already gives it. */
+.keyboard-node .kb-row-name {
+    white-space: nowrap;
 }
 
-.keyboard-octave {
-    font-family: var(--font-mono);
-    font-size: var(--text-md);
-    font-weight: 600;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-strong);
+.keyboard-node .kb-row-count {
+    padding: 1px 5px;
     border-radius: var(--radius-sm);
-    padding: 2px var(--space-sm);
-    user-select: none;
-    pointer-events: none;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
-.keyboard-schematic-body {
-    padding: var(--space-md);
-    display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: var(--space-sm);
+/* One calm line saying what to do next. Secondary ink, never a callout — the
+   node is an instrument, not a dialog. */
+.keyboard-node .kb-hint {
+    margin: 0;
+    max-width: 30ch;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+    color: var(--text-secondary);
+}
+
+.keyboard-node .kb-hint.is-sustaining {
+    color: var(--accent-ink);
 }

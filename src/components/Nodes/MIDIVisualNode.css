@@ -1,449 +1,125 @@
-/**
- * MIDI Visual Node Styles
+/*
+ * MIDIVisualNode — the generic controller map: a key bed, a pad bank, and the
+ * continuous controls as named sockets.
+ *
+ * The file this replaces was 449 lines carrying 28 `--sketch-*` aliases and 46
+ * literals (00-design-gap-audit §4), and three whole blocks of MiniLab CSS the
+ * current markup stopped emitting long ago (03-canvas-app-reliability-audit,
+ * dead-code table: `MIDIVisualNode.css:287-315, 328-351, 354-387`). Those are
+ * deleted, not carried. The MiniLab 3's own chrome moved to `MiniLab3Visual.css`,
+ * beside the component that draws it.
+ *
+ * Nothing here paints a key, a pad or a socket: `KeyTile` and `Port` do. This
+ * file places them.
  */
 
-.midi-visual-node {
-    background: var(--bg-node);
-    border: 3px solid var(--text-primary, #1a1a1a);
-    border-radius: 8px;
-    min-width: 400px;
-    position: absolute;
+.oj-node-frame.mv-frame.is-selected {
+    z-index: calc(var(--z-node) + 10);
 }
 
-.midi-visual-node.selected {
-    border-color: var(--accent-primary, #3b82f6);
-    box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+.oj-node-frame.mv-frame.is-dragging {
+    z-index: calc(var(--z-node) + 90);
 }
 
-.midi-visual-body {
-    padding: 12px;
+.midi-visual-node.oj-node {
+    min-width: 420px;
+    max-width: 560px;
+}
+
+/* A section is one kind of control. The label is the micro mono voice used for
+   every machine name on a node. */
+.mv-section {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 7px;
 }
 
-/* Section styling */
-.midi-visual-section {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.midi-visual-section-label {
-    font-size: 11px;
+.mv-section__label {
+    margin: 0;
+    font-family: var(--font-mono);
     font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-secondary, #666);
+    color: var(--text-muted);
 }
 
-/* Keyboard visualization */
-.midi-visual-keyboard {
-    display: flex;
-    height: 60px;
-    border: 2px solid var(--text-primary, #1a1a1a);
-    border-radius: 4px;
-    overflow: hidden;
+/* ============================================
+ * Key bed
+ * ============================================
+ * White keys tile the row; black keys ride above them, so the geometry is the
+ * one a player already knows. Widths and offsets come from the component (they
+ * depend on how many keys the device declares), heights from here.
+ */
+/* The bed scrolls rather than compressing: 22px is the narrowest a white key can
+   be and still leave its black neighbour wide enough for a 12px socket. A 25-key
+   controller never reaches that floor and simply fills the card; the 'generic'
+   preset's full 0-127 range does, and scrolls. */
+.mv-keybed-scroll {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    border-radius: var(--radius-sm);
 }
 
-.midi-key {
-    flex: 1;
-    min-width: 12px;
-    cursor: pointer;
-    transition: background 0.1s;
-    border-right: 1px solid var(--text-secondary, #ccc);
-}
-
-.midi-key:last-child {
-    border-right: none;
-}
-
-.midi-key.white {
-    background: white;
-}
-
-.midi-key.white:hover {
+.mv-keybed {
+    position: relative;
+    height: 84px;
+    width: max(100%, calc(var(--mv-white-count, 15) * 22px));
+    border-radius: var(--radius-sm);
     background: var(--bg-tertiary);
 }
 
-.midi-key.white.connected {
-    background: color-mix(in srgb, var(--accent-success) 14%, var(--bg-node));
+.midi-visual-node .mv-key {
+    position: absolute;
+    top: 0;
+    box-sizing: border-box;
 }
 
-.midi-key.black {
-    background: var(--text-primary, #1a1a1a);
-    flex: 0.6;
-    height: 65%;
-    margin-left: -4px;
-    margin-right: -4px;
+.midi-visual-node .mv-key--white {
+    height: 84px;
     z-index: 1;
-    border-radius: 0 0 3px 3px;
 }
 
-.midi-key.black:hover {
-    background: #333;
+.midi-visual-node .mv-key--black {
+    height: 54px;
+    z-index: 2;
 }
 
-.midi-key.black.connected {
-    background: var(--accent-primary, #3b82f6);
-}
-
-/* Pad grid */
-.midi-visual-pad-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
-}
-
-.midi-pad {
-    aspect-ratio: 1;
-    background: var(--text-primary, #1a1a1a);
-    border-radius: 6px;
+/* ============================================
+ * Pads
+ * ============================================ */
+.mv-pads {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--bg-node);
-    font-size: 10px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.15s;
-    min-height: 40px;
-}
-
-.midi-pad:hover {
-    background: #333;
-    transform: scale(0.95);
-}
-
-.midi-pad.connected {
-    background: var(--accent-primary, #3b82f6);
-}
-
-/* Knob row */
-.midi-visual-knob-row {
-    display: flex;
-    gap: 12px;
     flex-wrap: wrap;
+    gap: 6px;
 }
 
-.midi-knob {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    cursor: pointer;
+/* ============================================
+ * Continuous controls
+ * ============================================
+ * Knobs, faders and touch strips have no live value on the generic faceplate —
+ * only the MiniLab map is subscribed to hardware. A dial frozen at zero would
+ * be a value that lies, so these are named sockets instead: exactly what they
+ * are, which is somewhere to plug a cable.
+ */
+.mv-controls {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+    gap: var(--space-xs) var(--space-md);
 }
 
-.midi-knob-dial {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    background: var(--text-primary, #1a1a1a);
-    border: 3px solid var(--text-secondary, #666);
-    position: relative;
-    transition: border-color 0.15s;
-}
-
-.midi-knob-dial::after {
-    content: '';
-    position: absolute;
-    width: 3px;
-    height: 10px;
-    background: white;
-    top: 3px;
-    left: 50%;
-    transform: translateX(-50%);
-    border-radius: 2px;
-}
-
-.midi-knob:hover .midi-knob-dial {
-    border-color: var(--text-primary, #1a1a1a);
-}
-
-.midi-knob.connected .midi-knob-dial {
-    border-color: var(--accent-primary, #3b82f6);
-}
-
-.midi-knob-label {
-    font-size: 10px;
-    color: var(--text-secondary, #666);
-}
-
-/* Fader row */
-.midi-visual-fader-row {
-    display: flex;
-    gap: 16px;
-    align-items: flex-end;
-}
-
-.midi-fader {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    cursor: pointer;
-}
-
-.midi-fader-track {
-    width: 12px;
-    height: 60px;
-    background: var(--text-secondary, #ddd);
-    border: 2px solid var(--text-primary, #1a1a1a);
-    border-radius: 6px;
-    position: relative;
-}
-
-.midi-fader-thumb {
-    position: absolute;
-    width: 16px;
-    height: 12px;
-    left: -4px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: var(--text-primary, #1a1a1a);
-    border-radius: 3px;
-}
-
-.midi-fader.connected .midi-fader-track {
-    border-color: var(--accent-primary, #3b82f6);
-}
-
-.midi-fader-label {
-    font-size: 10px;
-    color: var(--text-secondary, #666);
-}
-
-/* Touch strips */
-.midi-visual-strip-row {
-    display: flex;
-    gap: 12px;
-}
-
-.midi-strip {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    cursor: pointer;
-}
-
-.midi-strip-track {
-    width: 100%;
-    height: 24px;
-    background: var(--text-secondary, #ddd);
-    border: 2px solid var(--text-primary, #1a1a1a);
-    border-radius: 4px;
-    position: relative;
-}
-
-.midi-strip-center {
-    position: absolute;
-    width: 2px;
-    height: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--text-primary, #1a1a1a);
-}
-
-.midi-strip.connected .midi-strip-track {
-    border-color: var(--accent-primary, #3b82f6);
-}
-
-.midi-strip-label {
-    font-size: 10px;
-    color: var(--text-secondary, #666);
-}
-
-/* Port list on right side */
-.midi-visual-ports {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin-top: 8px;
-    border-top: 1px solid var(--text-secondary, #ccc);
-    padding-top: 8px;
-}
-
-/* ============================================================================
- * MiniLab 3 specific styles
- * ============================================================================ */
-
+/* ============================================
+ * MiniLab 3 wrapper
+ * ============================================
+ * The hardware faceplate is its own card, so the canvas slot around it carries
+ * no chrome at all.
+ */
 .midi-visual-node.minilab3-wrapper {
-    min-width: auto;
+    position: absolute;
     width: auto;
+    min-width: auto;
+    padding: 0;
     background: transparent;
     border: none;
-    display: flex;
-    flex-direction: row;
-    align-items: stretch;
-    padding: 0;
-}
-
-.midi-visual-node.minilab3-wrapper.selected {
-    box-shadow: none;
-}
-
-.midi-visual-node.minilab3-wrapper .minilab3-ports {
-    position: absolute;
-    right: -120px;
-    top: 50%;
-    transform: translateY(-50%);
-    background: var(--bg-node);
-    border: 2px solid var(--text-primary, #1a1a1a);
-    border-radius: 6px;
-    padding: 8px;
-    margin: 0;
-    border-top: none;
-}
-
-.midi-visual-node.minilab3-wrapper .minilab3-ports .port-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 2px 0;
-}
-
-.midi-visual-node.minilab3-wrapper .minilab3-ports .port-label {
-    font-size: 10px;
-    color: var(--text-secondary, #666);
-    white-space: nowrap;
-}
-
-/* ============================================================================
- * MiniLab 3 Node (standalone) styles
- * ============================================================================ */
-
-.minilab3-node {
-    position: absolute;
-    display: flex;
-    flex-direction: column;
-    /* Uses background from .schematic-node (var(--bg-node)) */
-}
-
-.minilab3-node.selected .minilab3-visual .minilab3-body {
-    box-shadow: 0 0 20px rgba(59, 130, 246, 0.5);
-}
-
-.minilab3-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--space-sm, 8px) var(--space-md, 16px);
-    background: var(--bg-node-header);
-    border: 1px solid var(--border-strong);
-    border-bottom: none;
-    border-radius: var(--radius-lg, 8px) var(--radius-lg, 8px) 0 0;
-    margin-bottom: -2px;
-    z-index: 5;
-    cursor: grab;
-}
-
-.minilab3-header:active {
-    cursor: grabbing;
-}
-
-.minilab3-header .schematic-title {
-    color: var(--text-primary);
-    font-family: var(--font-sans);
-    font-weight: 600;
-    font-size: var(--text-lg, 14px);
-}
-
-/* Connect overlay - shown when device not connected */
-.minilab3-connect-overlay {
-    position: absolute;
-    top: 40px; /* Below header */
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: var(--overlay-scrim);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-    border-radius: 0 0 12px 12px;
-    backdrop-filter: blur(2px);
-}
-
-.minilab3-connect-btn {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md, 8px);
-    padding: 12px 24px;
-    font-family: var(--font-sans);
-    font-size: var(--text-md, 14px);
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.minilab3-connect-btn:hover {
-    background: var(--bg-tertiary);
-    transform: scale(1.05);
-}
-
-.minilab3-connect-btn:active {
-    transform: scale(0.98);
-}
-
-/* Status dot */
-.midi-status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    transition: all 0.2s;
-}
-
-.midi-status-dot.connected {
-    background: var(--accent-success, #22c55e);
-    box-shadow: 0 0 6px var(--accent-success, #22c55e);
-}
-
-.midi-status-dot.disconnected {
-    background: var(--text-secondary, #666);
-}
-
-/* Unsupported message */
-.midi-unsupported-message {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    padding: 20px;
-    background: var(--bg-node);
-    border: 2px solid var(--text-secondary, #ccc);
-    border-radius: 8px;
-    color: var(--text-secondary, #666);
-    font-size: 12px;
-}
-
-.midi-browser-hint {
-    font-size: 10px;
-    color: var(--text-secondary, #999);
-}
-
-/* Connect button within keyboard-schematic-body */
-.minilab3-node .schematic-connect-btn {
-    background: var(--bg-secondary, #f0f0f0);
-    color: var(--text-primary);
-    border: 2px solid var(--text-primary);
-    border-radius: var(--radius-md, 6px);
-    padding: var(--space-sm, 8px) var(--space-md, 16px);
-    font-family: var(--font-sans);
-    font-size: var(--text-sm, 12px);
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
-    margin-bottom: var(--space-sm, 8px);
-}
-
-.minilab3-node .schematic-connect-btn:hover {
-    background: var(--bg-tertiary);
-    transform: scale(1.02);
-}
-
-.minilab3-node .schematic-connect-btn:active {
-    transform: scale(0.98);
+    z-index: var(--z-node);
 }

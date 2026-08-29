@@ -1,305 +1,231 @@
-/* InstrumentNode — Instrument faceplate: body layout, row divider, empty state and pedal row;
-   the instrument-selector dropdown (grid, groups, cards, shortcut hints); and
-   the inline editable value chip. NOTE: `.editable-value*` is also used by
-   InstrumentVisualNode and LooperNode.
+/*
+ * InstrumentNode — the voice, its sockets, the tuning of each row, and the
+ * picker that changes what it sounds like.
+ *
+ * Gone from the split file (W5-S5, formerly SchematicNodes.css L293-599):
+ *  · `@keyframes ghost-fade-in` — defined once, referenced nowhere, in any file
+ *    or component, since before the split (03-canvas-app-reliability-audit, dead
+ *    code table). Deleted, not carried.
+ *  · The bespoke `.instrument-selector-dropdown` grid of `.instrument-card`
+ *    tiles. It is now the shared `Menu`, so the panel, rows, hover fill, category
+ *    headers and focus ring are all defined once in oj-ui.
+ *  · `.instrument-node.hover-connecting`'s accent HALO. Nothing on this canvas
+ *    glows except a cable carrying signal; a drop target says so with its edge.
+ *
+ * `.editable-value` / `.editable-value:hover` stay: `LooperNode` (lane P7) is
+ * still their consumer. When P7 moves the looper onto `ValueScrubber`, delete
+ * the last block in this file with it.
+ */
 
-   Split verbatim out of the former SchematicNodes.css (L293-426, L427-585, L586-599) in W5-S5. */
+.oj-node-frame.inst-frame.is-selected {
+    z-index: calc(var(--z-node) + 10);
+}
+
+.oj-node-frame.inst-frame.is-dragging {
+    z-index: calc(var(--z-node) + 90);
+}
+
+/* The picker is positioned against this, not against the viewport: it is part
+   of the node, so it pans and zooms with the canvas like everything else. */
+.inst-anchor {
+    position: relative;
+}
+
+.instrument-node {
+    min-width: 232px;
+}
+
+/* A cable is in the air and this node is under it. An accent EDGE, no halo. */
+.instrument-node.is-drop-target {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-overlay), inset 0 0 0 1px var(--accent-primary);
+}
 
 /* ============================================
- * Instrument Node
+ * Header — the name is the control
  * ============================================ */
-.instrument-node {
-    min-width: 180px;
-}
 
-/* Hover state when dragging connections over instrument node */
-.instrument-node.hover-connecting {
-    box-shadow: 0 0 0 2px var(--accent-primary), 0 0 12px color-mix(in srgb, var(--accent-primary) 30%, transparent);
-}
-
-.instrument-node .schematic-header {
-    cursor: grab;
-}
-
-.instrument-node .schematic-header:active {
-    cursor: grabbing;
-}
-
-.instrument-schematic-body {
+/* The whole point of this header: press the name, change the voice. So it is a
+   real button, in the tab order, with the one focus ring — not a `div` with a
+   click handler and an underline. */
+.instrument-node .inst-name {
     padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: color var(--motion-fast);
 }
 
-
-.instrument-schematic-body.simple {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--space-sm) var(--space-md);
-    gap: var(--space-md);
+.instrument-node .inst-name:hover {
+    color: var(--accent-ink);
 }
 
-.instrument-rows-simple {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-    flex: 1;
+.instrument-node .inst-name:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
 }
 
-.instrument-row-simple {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-xs) 0;
+/* The built-in voice failed to load. Never a toast, never a modal: a held note
+   beats a glitch, so the node keeps playing whatever it has and says this
+   quietly until the player chooses to act. */
+.instrument-node .inst-voice-error {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    margin-left: 2px;
+    border-radius: 50%;
+    background: color-mix(in oklab, var(--accent-danger) 14%, var(--bg-tertiary));
+    color: var(--danger-ink);
+    font: 700 12px/18px var(--font-sans);
+    text-align: center;
 }
 
-/* Row divider - horizontal line between rows */
-.instrument-row-simple.with-divider {
-    border-top: 1px solid var(--border-subtle);
-    margin-top: 2px;
-    padding-top: var(--space-xs);
-}
-
-/* Empty state - centered input port */
-.instrument-row-simple.empty-state {
-    min-height: 32px;
-    justify-content: flex-start;
-}
-
-
-.row-value {
+/* ============================================
+ * Body — one line per connected row
+ * ============================================ */
+.inst-empty {
+    margin: 0;
+    max-width: 28ch;
     font-family: var(--font-sans);
-    font-size: var(--text-md);
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.row-value.note-value {
-    min-width: 16px;
-}
-
-.row-value.octave-value {
-    min-width: 12px;
-}
-
-.row-value.offset-value {
-    min-width: 28px;
-    text-align: right;
-    font-family: var(--font-mono);
     font-size: var(--text-sm);
+    line-height: 1.35;
     color: var(--text-secondary);
 }
 
-
-
-/* Pedal row */
-.pedal-row {
-    margin-top: var(--space-xs);
-    padding-top: var(--space-xs);
-    border-top: 1px dashed var(--border-subtle);
+.inst-tune {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
 }
 
+.inst-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-xs) var(--space-sm);
+}
 
-.pedal-label {
+.inst-row + .inst-row {
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+}
+
+/* The cable's own name, in the micro mono voice port labels use — this row and
+   the socket above it are the same object seen twice. */
+.inst-row__name {
+    flex: 1 1 100%;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.inst-row__pedal {
+    font-family: var(--font-mono);
+    font-weight: 500;
     font-size: var(--text-xs);
+    letter-spacing: var(--tracking-micro);
+    color: var(--text-secondary);
+}
+
+/* ValueScrubber's label is 13px Outfit by default (it lives in panels). On a
+   node it is a port-sized micro label, so it takes the micro mono voice. */
+.inst-row .oj-value-scrubber__label {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
     color: var(--text-muted);
-    font-family: var(--font-sans);
 }
-
-
-.empty-row {
-    opacity: 0.6;
-}
-
-
-/* Pedal row styling */
-.instrument-row-simple.pedal-row {
-    border-top: 1px dashed var(--border-subtle);
-    margin-top: var(--space-xs);
-    padding-top: var(--space-xs);
-}
-
-.instrument-row-simple .pedal-label {
-    font-size: var(--text-sm);
-    color: var(--text-muted);
-    font-style: italic;
-    margin-left: var(--space-sm);
-}
-
-
-
-@keyframes ghost-fade-in {
-    from {
-        opacity: 0;
-        transform: translateX(-4px);
-    }
-    to {
-        opacity: 0.6;
-        transform: translateX(0);
-    }
-}
-
 
 /* ============================================
- * Instrument Selector Dropdown (no overlay)
+ * Instrument picker
  * ============================================ */
-.instrument-selector-dropdown {
+.inst-picker {
     position: absolute;
-    /* Dimensions controlled by JS for dynamic viewport fitting */
-    min-width: 250px;
-    min-height: 150px;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: var(--z-popover);
+    display: flex;
+    flex-direction: column;
+    width: 320px;
+    max-height: 360px;
+    padding: var(--space-sm);
+    gap: var(--space-sm);
     background: var(--bg-node);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-overlay);
-    z-index: 2000;
-    flex-direction: column;
-    overflow: hidden;
 }
 
-.instrument-search {
-    width: 100%;
-    padding: var(--space-sm) var(--space-md);
-    border: none;
-    border-bottom: 1px solid var(--border-subtle);
-    font-family: var(--font-sans);
-    font-size: var(--text-md);
-    background: var(--bg-canvas);
-    color: var(--text-primary);
-    box-sizing: border-box;
-    flex-shrink: 0;
+.inst-picker__search {
+    flex: 0 0 auto;
 }
 
-.instrument-search:focus {
-    outline: none;
-    background: var(--bg-node);
-}
-
-/* Instrument grid container */
-.instrument-grid-container {
-    flex: 1;
+.inst-picker__list {
+    flex: 1 1 auto;
+    min-height: 0;
     overflow-y: auto;
-    padding: var(--space-sm);
 }
 
-
-/* Grouped instrument layout */
-.instrument-grid-grouped {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
+/* The Menu is the whole list here, so it drops the panel chrome it would carry
+   as a floating popover — one card, not a card inside a card. */
+.inst-picker__list .oj-menu {
+    padding: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
 }
 
-.instrument-group {
-    display: flex;
-    flex-direction: column;
-}
-
-.instrument-group-separator {
-    height: 1px;
-    background: var(--border-subtle);
-    margin: var(--space-sm) 0;
-}
-
-.instrument-group-label {
+.inst-picker__empty {
+    margin: 0;
+    padding: var(--space-md) var(--space-sm);
     font-family: var(--font-sans);
-    font-size: var(--text-xs);
-    font-weight: 600;
-    color: var(--text-muted);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.inst-picker__hint {
+    flex: 0 0 auto;
+    margin: 0;
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: var(--space-xs);
-    padding-left: var(--space-xs);
-}
-
-.instrument-group-items {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
-    gap: var(--space-sm);
-}
-
-/* Keyboard shortcut hint */
-.category-nav-hint {
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
     color: var(--text-muted);
     text-align: center;
-    padding: var(--space-xs) var(--space-sm);
-    border-top: 1px solid var(--border-subtle);
-    flex-shrink: 0;
 }
 
-/* Instrument card with icon on top */
-.instrument-card {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: var(--space-sm);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    cursor: pointer;
-    transition: all var(--motion-fast);
-    background: var(--bg-canvas);
+.inst-item__icon {
+    display: block;
+    width: 18px;
+    height: 18px;
 }
 
-.instrument-card:hover {
-    background: var(--bg-tertiary);
-    border-color: var(--border-strong);
-    transform: translateY(-2px);
-}
-
-.instrument-card.selected {
-    background: var(--accent-primary);
-    color: white;
-    border-color: var(--accent-primary);
-}
-
-/* Instrument icon container */
-.instrument-icon {
-    width: 48px;
-    height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: var(--space-xs);
-}
-
-.instrument-icon svg {
+.inst-item__icon svg {
     width: 100%;
     height: 100%;
 }
 
-/* Instrument name label */
-.instrument-name {
-    font-family: var(--font-sans);
-    font-size: var(--text-sm);
-    font-weight: 500;
-    text-align: center;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 100%;
-}
-
-.no-results {
-    text-align: center;
-    color: var(--text-secondary);
-    font-family: var(--font-sans);
-    padding: var(--space-lg);
-}
-
-/* Clickable instrument name in header */
-.instrument-name-clickable {
-    cursor: pointer;
-    display: inline-block;
-    width: fit-content;
-}
-
-.instrument-name-clickable:hover {
-    text-decoration: underline;
+/* The voice this node is playing right now. Ink and weight, no fill — the fill
+   belongs to hover/focus, which must stay the strongest thing in the list. */
+.inst-item.is-current:not(:hover):not(:focus) .oj-menu-item__label {
+    color: var(--accent-ink);
+    font-weight: 600;
 }
 
 /* ============================================
- * Inline Editable Values
+ * Inline editable values — LooperNode's, until lane P7 moves it
  * ============================================ */
 .editable-value {
     cursor: ns-resize;

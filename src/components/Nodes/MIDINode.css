@@ -1,75 +1,79 @@
-/**
- * MIDI Node Styles
- * Extends schematic-node base styles from SchematicNodes.css
- * Only contains MIDI-specific styling (connect button)
+/*
+ * MIDINode — a hardware controller as a graph citizen.
+ *
+ * Everything this file used to paint by hand is now a shared component: the
+ * connect button is `Button`, the rename field is `EditableLabel`, the socket
+ * rows are `PortRow`. What it kept is one line of state — device present,
+ * device missing, Web MIDI missing — and that line is TEXT, never a lone
+ * coloured dot (New DNA: a state colour always carries a label).
+ *
+ * Dropped with the rewrite: `.midi-connect-btn` (its own border, its own hover
+ * `scale(1.02)`, its own transition), `.midi-rename-input`, and the
+ * literal grey fallbacks behind `var(--text-secondary, …)` that the audit flagged as
+ * permanent because the alias they guarded no longer exists.
  */
 
+.oj-node-frame.midi-frame.is-selected {
+    z-index: calc(var(--z-node) + 10);
+}
+
+.oj-node-frame.midi-frame.is-dragging {
+    z-index: calc(var(--z-node) + 90);
+}
+
 .midi-node {
-    min-width: 160px;
+    min-width: 204px;
 }
 
-/* Connect button - styled consistently with theme */
-.midi-connect-btn {
-    width: 100%;
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md, 6px);
-    padding: 8px 20px;
+/* The device line. Secondary by default; success INK when the hardware is
+   really there — the one place this node is allowed a state colour, and it is
+   attached to the device's own name. */
+.midi-state {
+    margin: 0;
+    max-width: 30ch;
     font-family: var(--font-sans);
-    font-size: var(--text-sm, 12px);
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
-    margin-bottom: var(--space-sm);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+    color: var(--text-secondary);
 }
 
-.midi-connect-btn:hover {
-    background: var(--bg-tertiary);
-    transform: scale(1.02);
+.midi-state.is-live {
+    color: var(--success-ink);
+    font-weight: 500;
 }
 
-.midi-connect-btn:active {
-    transform: scale(0.98);
+/* No hardware bridge at all. Muted, not alarming: nothing here is broken, the
+   browser simply cannot reach a MIDI port. */
+.midi-state.is-blocked {
+    color: var(--text-muted);
 }
 
-/* Unsupported message */
-.midi-node.midi-unsupported {
-    opacity: 0.7;
-}
-
-.midi-unsupported-message {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    padding: 16px;
-    color: var(--text-secondary, #666);
-    font-size: 11px;
-    text-align: center;
-}
-
-.midi-browser-hint {
-    font-size: 9px;
-    color: var(--text-secondary, #999);
-}
-
-/* Rename input in header */
-.midi-rename-input {
+.midi-node .midi-connect {
     width: 100%;
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm, 4px);
+}
+
+/* The rename field sits in the header, so it takes the title's own type rather
+   than the Input's panel sizing. */
+.midi-node .midi-name .oj-input {
     padding: 2px 6px;
-    font-family: var(--font-sans);
-    font-size: var(--text-sm, 12px);
+    font-size: var(--text-lg);
     font-weight: 600;
-    text-align: center;
-    outline: none;
 }
 
-.midi-rename-input:focus {
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 0 1px var(--accent-primary);
+/* The channel filter. One exact number in the mono voice, beside its micro
+   mono label — the same pair every node uses for an exact value. */
+.midi-params {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-xs) var(--space-md);
+}
+
+.midi-params .oj-value-scrubber__label {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-micro);
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
 }
