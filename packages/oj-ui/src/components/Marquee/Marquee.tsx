@@ -13,8 +13,8 @@ export interface MarqueeProps extends HTMLAttributes<HTMLDivElement> {
 }
 
 /**
- * The drag-to-select rectangle overlay. A dashed accent border with a faint
- * accent fill, absolutely positioned and non-interactive (`pointer-events:
+ * The drag-to-select rectangle overlay. A neutral dashed border with a faint
+ * ink wash, absolutely positioned and non-interactive (`pointer-events:
  * none`) so it never steals a drag from the canvas underneath. Theme-agnostic:
  * styled entirely via semantic CSS variables. Replaces `.selection-box`.
  */

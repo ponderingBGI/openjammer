@@ -7,17 +7,19 @@ export const Variants: Story = () => (
     <div style={{ display: 'flex', gap: 'var(--space-lg)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
         <KeyTile variant="white" label="C" />
         <KeyTile variant="black" label="C#" />
-        <KeyTile variant="key" label="A" />
+        <KeyTile variant="key" label="C4" hint="A" />
         <KeyTile variant="pad" label="Kick" />
+        <KeyTile variant="pad" label="34" size={34} />
     </div>
 );
 
 export const States: Story = () => (
     <div style={{ display: 'flex', gap: 'var(--space-lg)', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-        <KeyTile variant="key" label="rest" />
-        <KeyTile variant="key" label="lit" active />
-        <KeyTile variant="key" label="wired" connected />
+        <KeyTile variant="key" label="C4" hint="A" />
+        <KeyTile variant="key" label="D4" hint="S" active />
+        <KeyTile variant="key" label="E4" hint="D" connected />
         <KeyTile variant="pad" label="hit" active connected />
+        <KeyTile variant="pad" label="off" disabled />
     </div>
 );
 
@@ -46,5 +48,18 @@ export const PadGrid: Story = () => (
         {Array.from({ length: 8 }, (_, i) => (
             <KeyTile key={i} variant="pad" label={`P${i + 1}`} active={i === 2} connected={i === 5} />
         ))}
+    </div>
+);
+
+/**
+ * Exactly what KeyboardVisualNode renders: `variant="key"` with an inline
+ * 50x50 (and 300x50 spacebar) override and no hint chip. The socket keeps its
+ * own reserved band here too, so the letter stays readable.
+ */
+export const Inline50: Story = () => (
+    <div style={{ display: 'flex', gap: 'var(--space-sm)', alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <KeyTile variant="key" label="C4" style={{ width: 50, height: 50 }} />
+        <KeyTile variant="key" label="D4" active style={{ width: 50, height: 50 }} />
+        <KeyTile variant="key" label="SPACE" style={{ width: 300, height: 50 }} />
     </div>
 );

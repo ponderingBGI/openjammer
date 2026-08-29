@@ -10,5 +10,6 @@ export const Directions: Story = () => (
         <OffscreenPointer rotation={180} label="Left" onClick={() => {}} />
         <OffscreenPointer rotation={-90} label="Above" onClick={() => {}} />
         <OffscreenPointer rotation={135} label="Down &amp; left" onClick={() => {}} />
+        <OffscreenPointer rotation={0} label="Unavailable" disabled onClick={() => {}} />
     </div>
 );

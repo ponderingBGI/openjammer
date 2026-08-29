@@ -10,11 +10,11 @@
 }
 
 .oj-status-dot--ok {
-    background: var(--accent-success);
+    background: var(--success-ink);
 }
 
 .oj-status-dot--warn {
-    background: var(--accent-warning);
+    background: var(--warning-ink);
 }
 
 .oj-status-dot--bad {

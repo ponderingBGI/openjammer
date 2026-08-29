@@ -9,7 +9,7 @@ export interface OffscreenPointerProps
      * so the affordance stays put while it tells the player which way to jump.
      */
     rotation: number;
-    /** Caption under the arrow — the Caveat voice naming where it leads. */
+    /** Caption naming where the jump leads. */
     label: ReactNode;
     /** Invoked when the player jumps back toward the offscreen content. */
     onClick: () => void;
@@ -17,11 +17,8 @@ export interface OffscreenPointerProps
 
 /**
  * OffscreenPointer — a floating "jump back" affordance that points offscreen
- * when the action has scrolled out of view. An inked sketch button (the same
- * hand-drawn border + Caveat label as Button, replicated rather than imported)
- * with a single arrow glyph rotated to face the content. Theme-agnostic:
- * styled entirely via semantic CSS variables, hard shadows only (DESIGN.md
- * Hard-Shadow), and feedback is colour + a <=4px lift (No-Surprise).
+ * when the action has scrolled out of view. The arrow consumes a rotation value
+ * without animating direction; the surface pill keeps a stable hit target.
  */
 export function OffscreenPointer({
     rotation,

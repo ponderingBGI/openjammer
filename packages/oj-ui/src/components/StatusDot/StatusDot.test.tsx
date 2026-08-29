@@ -1,8 +1,16 @@
 import { render } from '@testing-library/react';
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { StatusDot } from './StatusDot';
 
+const statusDotCss = readFileSync('packages/oj-ui/src/components/StatusDot/StatusDot.css', 'utf8');
+
 describe('StatusDot', () => {
+    it('uses the contrast-safe ink tokens for ok and warn dots', () => {
+        expect(statusDotCss).toMatch(/--ok\s*\{[\s\S]*?var\(--success-ink\)/);
+        expect(statusDotCss).toMatch(/--warn\s*\{[\s\S]*?var\(--warning-ink\)/);
+    });
+
     it('renders the base class and the status modifier', () => {
         const { container } = render(<StatusDot status="ok" />);
         const dot = container.querySelector('span')!;

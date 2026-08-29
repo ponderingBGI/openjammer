@@ -1,5 +1,5 @@
-import type { HTMLAttributes } from 'react';
-import { Button } from '../Button/Button';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { HTMLAttributes, KeyboardEvent } from 'react';
 import { Surface } from '../Surface/Surface';
 import { IconBolt, IconChevronDown } from '../Icons/Icons';
 import './DeviceSelect.css';
@@ -9,46 +9,22 @@ export interface DeviceSelectItem {
     id: string;
     /** Human-readable device name shown in the trigger and the list. */
     label: string;
-    /**
-     * Marks a fast-path device — gets a trailing lightning bolt. The bolt rides
-     * alongside its label (Signal-Not-Brand: the mark sits with a name, never on
-     * the surface itself).
-     */
+    /** Marks a fast-path device with both a bolt and visible "low latency" text. */
     lowLatency?: boolean;
 }
 
-export interface DeviceSelectProps
-    extends Omit<HTMLAttributes<HTMLDivElement>, 'onSelect'> {
-    /** Devices to choose from. */
+export interface DeviceSelectProps extends Omit<HTMLAttributes<HTMLDivElement>, 'onSelect'> {
     items: DeviceSelectItem[];
-    /** The selected device `id` (controlled). */
     value: string;
-    /** Whether the popover list is open (controlled by the parent). */
     open: boolean;
-    /** Fired when the trigger is clicked — the parent flips `open`. */
     onToggle: () => void;
-    /** Fired with the chosen device `id` when a list row is clicked. */
     onSelect: (id: string) => void;
-    /**
-     * Accessible name for the picker (e.g. "Microphone" / "Speaker"). Surfaces
-     * as `aria-label` on the trigger so the control announces what it picks.
-     */
     ariaLabel: string;
-    /** Shown on the trigger when no item matches `value`. Defaults to "Select device". */
     placeholder?: string;
+    disabled?: boolean;
 }
 
-/**
- * An audio-device picker with a low-latency badge — the replacement for the
- * Microphone/Speaker device dropdowns. The trigger is a node `Button` showing
- * the selected label; when `open`, a `Surface` (menu elevation, popover layer)
- * lists each device as a row button, marking the fast-path ones with an
- * `IconBolt`.
- *
- * Pure presentation: selection and open/close are controlled by the parent
- * (props in, callbacks out). Theme-agnostic — styled entirely via semantic
- * tokens, so it follows the active theme.
- */
+/** Controlled audio-device picker with arrow, Enter, Escape, and typeahead support. */
 export function DeviceSelect({
     items,
     value,
@@ -57,69 +33,161 @@ export function DeviceSelect({
     onSelect,
     ariaLabel,
     placeholder = 'Select device',
+    disabled = false,
     className,
     ...rest
 }: DeviceSelectProps) {
-    const selected = items.find((item) => item.id === value);
-    const classes = ['oj-device-select', className].filter(Boolean).join(' ');
+    const selectedIndex = items.findIndex((item) => item.id === value);
+    const selected = selectedIndex >= 0 ? items[selectedIndex] : undefined;
+    const itemContext = `${value}\u0000${items.map((item) => item.id).join('\u0001')}`;
+    const [activeItem, setActiveItem] = useState<{ context: string; id: string } | null>(null);
+    const storedActiveIndex = activeItem?.context === itemContext
+        ? items.findIndex((item) => item.id === activeItem.id)
+        : -1;
+    const activeIndex = storedActiveIndex >= 0 ? storedActiveIndex : Math.max(selectedIndex, 0);
+    const typeahead = useRef('');
+    const typeaheadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const reactId = useId().replace(/:/g, '');
+    const listId = `oj-device-select-${reactId}`;
+
+    useEffect(() => () => {
+        if (typeaheadTimer.current) clearTimeout(typeaheadTimer.current);
+    }, []);
+
+    const optionId = (index: number) => `${listId}-option-${index}`;
+    const activateIndex = (index: number) => {
+        const item = items[index];
+        if (item) setActiveItem({ context: itemContext, id: item.id });
+    };
+    const moveActive = (delta: number) => {
+        if (items.length === 0) return;
+        activateIndex((activeIndex + delta + items.length) % items.length);
+    };
+    const openFromKeyboard = () => {
+        if (!open) onToggle();
+    };
+    const runTypeahead = (key: string) => {
+        typeahead.current += key.toLocaleLowerCase();
+        if (typeaheadTimer.current) clearTimeout(typeaheadTimer.current);
+        typeaheadTimer.current = setTimeout(() => {
+            typeahead.current = '';
+        }, 500);
+        const match = items.findIndex((item) =>
+            item.label.toLocaleLowerCase().startsWith(typeahead.current),
+        );
+        if (match >= 0) {
+            activateIndex(match);
+            openFromKeyboard();
+        }
+    };
+    const handleKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
+        if (disabled) return;
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            if (!open) {
+                const nextIndex = Math.max(selectedIndex, 0);
+                activateIndex(nextIndex);
+                onToggle();
+            } else {
+                moveActive(event.key === 'ArrowDown' ? 1 : -1);
+            }
+        } else if (event.key === 'Home' && open) {
+            event.preventDefault();
+            activateIndex(0);
+        } else if (event.key === 'End' && open) {
+            event.preventDefault();
+            activateIndex(Math.max(items.length - 1, 0));
+        } else if ((event.key === 'Enter' || event.key === ' ') && open) {
+            event.preventDefault();
+            const item = items[activeIndex];
+            if (item) onSelect(item.id);
+        } else if (event.key === 'Escape' && open) {
+            event.preventDefault();
+            activateIndex(Math.max(selectedIndex, 0));
+            onToggle();
+        } else if (
+            event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey
+        ) {
+            runTypeahead(event.key);
+        }
+    };
+
+    const classes = ['oj-device-select', open && 'is-open', className]
+        .filter(Boolean)
+        .join(' ');
 
     return (
         <div className={classes} {...rest}>
-            <Button
-                variant="node"
+            <button
+                type="button"
+                role="combobox"
                 className="oj-device-select__trigger"
                 aria-label={ariaLabel}
                 aria-haspopup="listbox"
                 aria-expanded={open}
-                onClick={onToggle}
+                aria-controls={listId}
+                aria-activedescendant={open && items[activeIndex] ? optionId(activeIndex) : undefined}
+                disabled={disabled}
+                onClick={() => {
+                    activateIndex(Math.max(selectedIndex, 0));
+                    onToggle();
+                }}
+                onKeyDown={handleKeyDown}
             >
                 <span className="oj-device-select__label">
                     {selected ? selected.label : placeholder}
                 </span>
-                {selected?.lowLatency && (
-                    <IconBolt size={14} className="oj-device-select__trigger-bolt" />
-                )}
-                <IconChevronDown
-                    size={14}
-                    className="oj-device-select__caret"
-                />
-            </Button>
+                {selected?.lowLatency && <LowLatencyMark className="oj-device-select__trigger-bolt" />}
+                <IconChevronDown size={14} className="oj-device-select__caret" aria-hidden="true" />
+            </button>
 
             {open && (
                 <Surface
-                    elevation="menu"
+                    id={listId}
+                    elevation="overlay"
                     radius="md"
                     className="oj-device-select__list"
                     role="listbox"
                     aria-label={ariaLabel}
-                    style={{ zIndex: 'var(--z-popover)' }}
                 >
-                    {items.map((item) => {
+                    {items.map((item, index) => {
                         const isSelected = item.id === value;
+                        const isActive = index === activeIndex;
                         return (
-                            <Button
+                            <button
+                                id={optionId(index)}
                                 key={item.id}
-                                variant="ghost"
+                                type="button"
                                 role="option"
+                                tabIndex={-1}
                                 aria-selected={isSelected}
-                                active={isSelected}
-                                className="oj-device-select__option"
-                                onClick={() => onSelect(item.id)}
+                                className={[
+                                    'oj-device-select__option',
+                                    isSelected && 'is-selected',
+                                    isActive && 'is-active',
+                                ].filter(Boolean).join(' ')}
+                                onPointerMove={() => activateIndex(index)}
+                                onClick={() => {
+                                    activateIndex(index);
+                                    onSelect(item.id);
+                                }}
                             >
-                                <span className="oj-device-select__label">
-                                    {item.label}
-                                </span>
-                                {item.lowLatency && (
-                                    <IconBolt
-                                        size={14}
-                                        className="oj-device-select__option-bolt"
-                                    />
-                                )}
-                            </Button>
+                                <span className="oj-device-select__label">{item.label}</span>
+                                {item.lowLatency && <LowLatencyMark className="oj-device-select__option-bolt" />}
+                            </button>
                         );
                     })}
                 </Surface>
             )}
         </div>
+    );
+}
+
+function LowLatencyMark({ className }: { className: string }) {
+    return (
+        <span className={['oj-device-select__latency', className].join(' ')}>
+            <IconBolt size={13} aria-hidden="true" />
+            <span>low latency</span>
+        </span>
     );
 }

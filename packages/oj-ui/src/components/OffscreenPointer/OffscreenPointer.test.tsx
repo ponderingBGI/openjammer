@@ -1,8 +1,19 @@
 import { render } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { OffscreenPointer } from './OffscreenPointer';
 
+const pointerCss = readFileSync(
+    'packages/oj-ui/src/components/OffscreenPointer/OffscreenPointer.css',
+    'utf8',
+);
+
 describe('OffscreenPointer', () => {
+    it('pins the surface-pill treatment and rotation as a value-only transform', () => {
+        expect(pointerCss).toMatch(/\.oj-offscreen-pointer\s*\{[\s\S]*?var\(--shadow-overlay\)/);
+        expect(pointerCss).toMatch(/__arrow[\s\S]*?rotate\(var\(--oj-pointer-rotation/);
+        expect(pointerCss).not.toMatch(/__arrow[\s\S]*?animation:/);
+    });
     it('renders the base class and defaults to type=button', () => {
         const { container } = render(
             <OffscreenPointer rotation={0} label="Back to nodes" onClick={() => {}} />,

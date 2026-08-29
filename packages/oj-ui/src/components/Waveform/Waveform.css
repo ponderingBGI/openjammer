@@ -11,7 +11,7 @@
     overflow: visible;
 }
 
-/* The waveform itself: audio-out blue, the signal that carries sound. */
+/* The waveform itself: shared audio teal, the signal that carries sound. */
 .oj-waveform__trace {
     fill: none;
     stroke: var(--audio-connection);
@@ -27,13 +27,28 @@
 
 .oj-waveform.is-recording .oj-waveform__trace {
     stroke: var(--accent-danger);
+    animation: oj-waveform-recording 1200ms ease-in-out infinite;
+}
+
+@keyframes oj-waveform-recording {
+    50% {
+        opacity: 0.55;
+    }
 }
 
 /* Playhead: a thin accent line marking the playback position. */
 .oj-waveform__playhead {
     stroke: var(--accent-primary);
-    stroke-width: 1;
+    stroke-width: 1.5;
     vector-effect: non-scaling-stroke;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .oj-waveform.is-recording .oj-waveform__trace {
+        animation: none;
+        stroke: var(--accent-danger);
+        opacity: 1;
+    }
 }
 
 /* Center axis: faint hairline, the zero-crossing reference. */

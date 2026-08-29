@@ -1,6 +1,9 @@
 import { render } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { List, ListRow } from './ListRow';
+
+const listRowCss = readFileSync('packages/oj-ui/src/components/ListRow/ListRow.css', 'utf8');
 
 describe('List', () => {
     it('renders the base class and defaults to role=list', () => {
@@ -24,6 +27,12 @@ describe('List', () => {
 });
 
 describe('ListRow', () => {
+    it('pins the shared 8px menu-row radius and contrast-safe current dot', () => {
+        expect(listRowCss).toMatch(/\.oj-list-row\s*\{[\s\S]*?border-radius:\s*8px;/);
+        expect(listRowCss).toMatch(/\.is-current[\s\S]*?background:\s*var\(--accent-ink\)/);
+        expect(listRowCss).not.toMatch(/\.is-current[\s\S]*?background:\s*var\(--accent-secondary\)/);
+    });
+
     it('renders the base class and wraps children in the body slot', () => {
         const { container } = render(<ListRow>Row</ListRow>);
         const row = container.querySelector('.oj-list-row')!;

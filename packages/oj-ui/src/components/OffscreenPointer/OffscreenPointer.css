@@ -1,40 +1,50 @@
 
 .oj-offscreen-pointer {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
     gap: var(--space-sm);
-    padding: var(--space-lg);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-lg);
+    padding: 7px 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
     background: var(--bg-node);
     color: var(--text-primary);
     cursor: pointer;
     box-shadow: var(--shadow-overlay);
     transition: background var(--motion-fast), border-color var(--motion-fast),
-        transform var(--motion-fast);
+        transform var(--motion-spring);
 }
 
-.oj-offscreen-pointer:hover {
+.oj-offscreen-pointer:hover:not(:disabled) {
     background: var(--bg-tertiary);
-    border-color: var(--accent-primary);
-    transform: translateY(-2px);
+    transform: translateY(var(--hover-lift));
 }
 
-.oj-offscreen-pointer:active {
-    transform: translateY(1px);
+.oj-offscreen-pointer:active:not(:disabled) {
+    transform: scale(var(--press-scale-btn));
+}
+
+.oj-offscreen-pointer:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-overlay), var(--focus-ring);
+}
+
+.oj-offscreen-pointer:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
 }
 
 /* The glyph is the only thing that turns — the box stays fixed (No-Surprise). */
 .oj-offscreen-pointer__arrow {
     font-family: var(--font-sans);
-    font-size: var(--text-2xl);
+    font-size: var(--text-md);
     line-height: 1;
     transform: rotate(var(--oj-pointer-rotation, 0deg));
 }
 
 .oj-offscreen-pointer__label {
     font-family: var(--font-sans);
-    font-size: var(--text-md);
-    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
 }

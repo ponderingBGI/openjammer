@@ -151,7 +151,7 @@ export { LaneButton } from './components/LaneButton/LaneButton';
 export type { LaneButtonProps, LaneButtonTone } from './components/LaneButton/LaneButton';
 
 export { TimeRuler } from './components/TimeRuler/TimeRuler';
-export type { TimeRulerMark } from './components/TimeRuler/TimeRuler';
+export type { TimeRulerMark, TimeRulerProps } from './components/TimeRuler/TimeRuler';
 
 export { DeviceSelect } from './components/DeviceSelect/DeviceSelect';
 export type { DeviceSelectProps, DeviceSelectItem } from './components/DeviceSelect/DeviceSelect';

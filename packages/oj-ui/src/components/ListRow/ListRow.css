@@ -13,7 +13,7 @@
     gap: var(--space-sm);
     padding: var(--space-xs) var(--space-sm);
     border: 1px solid transparent;
-    border-radius: var(--radius-md);
+    border-radius: 8px;
     background: transparent;
     color: var(--text-primary);
     font-family: var(--font-sans);
@@ -47,7 +47,7 @@
     height: 6px;
     margin-right: var(--space-sm);
     border-radius: var(--radius-pill);
-    background: var(--accent-secondary);
+    background: var(--accent-ink);
     vertical-align: middle;
 }
 

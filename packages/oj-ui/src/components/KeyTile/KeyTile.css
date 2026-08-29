@@ -1,91 +1,173 @@
-
+/*
+ * KeyTile — a key or pad that is itself a port.
+ *
+ * The one geometry rule this file exists to keep: THE SOCKET NEVER SITS ON THE
+ * LABEL. A performer reads the letter on a key mid-set; a well printed over it
+ * is the whole tile failing at its job. So the socket gets a *reserved lane* —
+ * a top band as tall as the well itself — and the label stack lives strictly
+ * below it, anchored to the bottom of the tile like the legend on a real
+ * keycap. The band is expressed as `padding-top`, not as a flex rule, so it
+ * survives a consumer class that re-centres the tile's own flex box
+ * (`.keyboard-visual-key` in the app does exactly that).
+ *
+ * The band is size-relative. The shared 18px well is kept down to the default
+ * 48px tile and scales below it, because a 34px canvas vignette cannot spend
+ * 22 of its 34 pixels on a socket and still show a glyph.
+ */
 .oj-key-tile {
+    --oj-key-tile-sizing-axis: var(--oj-key-tile-size, var(--key-tile-size));
+    /* The shared 18px well at 48px and up; smaller tiles get a smaller well
+       rather than a hidden label. 48 x 0.375 = 18 exactly, so the default pad
+       is untouched. */
+    --port-size: clamp(12px, calc(var(--oj-key-tile-sizing-axis) * 0.375), 18px);
+    --oj-key-tile-socket-inset: clamp(
+        1px,
+        calc(var(--oj-key-tile-sizing-axis) * 0.05),
+        5px
+    );
+    --oj-key-tile-gap: clamp(2px, calc(var(--oj-key-tile-sizing-axis) * 0.084), 4px);
+    /* The handoff's 5px pad baseline at 48px (48 x 0.105 = 5.04, clamped), and
+       proportionally tighter on a vignette. */
+    --oj-key-tile-base: min(5px, calc(var(--oj-key-tile-sizing-axis) * 0.105));
+    /* The reserved socket lane: inset + well + the gap that keeps the label
+       clear of it. Nothing in the label stack may enter this band. */
+    --oj-key-tile-socket-band: calc(
+        var(--oj-key-tile-socket-inset) + var(--port-size) + var(--oj-key-tile-gap)
+    );
     position: relative;
+    box-sizing: border-box;
     display: flex;
     align-items: flex-end;
     justify-content: center;
-    padding: var(--space-xs);
-    border: 1px solid var(--border-strong);
+    gap: var(--oj-key-tile-gap);
+    padding: var(--oj-key-tile-socket-band) var(--oj-key-tile-socket-inset)
+        var(--oj-key-tile-base);
+    border: 1px solid var(--border-control);
+    border-radius: var(--radius-md);
     background: var(--bg-node);
-    color: var(--text-primary);
-    font-family: var(--font-sans);
-    font-size: var(--text-sm);
-    line-height: 1.2;
+    color: var(--text-muted);
+    box-shadow: var(--shadow-raised);
+    font: 600 10px/1 var(--font-mono);
     cursor: pointer;
-    box-shadow: var(--shadow-raised);
-    transition: background var(--motion-fast), transform var(--motion-fast),
-        box-shadow var(--motion-fast), color var(--motion-fast);
+    user-select: none;
+    transition: background var(--motion-fast), border-color var(--motion-fast),
+        color var(--motion-fast), box-shadow var(--motion-fast),
+        transform var(--motion-spring);
 }
 
-
-.oj-key-tile:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-raised);
+.oj-key-tile:hover:not(:disabled):not(.is-active) {
+    transform: translateY(var(--hover-lift));
 }
 
-.oj-key-tile:active,
+.oj-key-tile:active:not(:disabled):not(.is-active) {
+    transform: scale(var(--press-scale-pad));
+}
+
+.oj-key-tile:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-raised), var(--focus-ring);
+}
+
 .oj-key-tile.is-active {
-    transform: translateY(1px);
-    box-shadow: var(--shadow-raised);
-}
-
-/* Lit/pressed: brighten with the accent. State color travels with the key's
-   own label, never on a heading or bare surface (Signal-Not-Brand is honored —
-   this IS the control reporting its pressed state). */
-.oj-key-tile.is-active {
+    border-color: transparent;
     background: var(--accent-primary);
     color: var(--text-on-accent);
+    box-shadow: var(--shadow-pressed);
+    transform: translateY(1px);
 }
 
-/* The embedded control Port — the connection anchor, pinned to a corner so it
-   hugs the tile edge without disturbing the label's layout. */
+.oj-key-tile.is-active:focus-visible {
+    box-shadow: var(--shadow-pressed), var(--focus-ring);
+}
+
+.oj-key-tile:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+/* The well sits in its own reserved band, out of flow — so no `align-items` or
+   `justify-content` a consumer sets on the tile can move the label into it. */
 .oj-key-tile__port {
     position: absolute;
-    top: var(--space-xs);
-    right: var(--space-xs);
+    top: var(--oj-key-tile-socket-inset);
+    right: var(--oj-key-tile-socket-inset);
 }
 
-
-.oj-key-tile__label {
+.oj-key-tile__label,
+.oj-key-tile__hint {
     pointer-events: none;
 }
 
-/* ── Piano keys ──────────────────────────────────────────────────────────── */
-
-/* White key — tall, white-fill, label anchored at the bottom like a real key. */
-.oj-key-tile--white {
-    width: calc(var(--space-lg) + var(--space-xs));
-    height: calc(var(--space-xl) * 4);
-    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-    background: var(--bg-node);
+.oj-key-tile__label {
+    order: 2;
 }
 
+.oj-key-tile__hint {
+    order: 1;
+    padding: 2px 4px;
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    font: 500 9px/1 var(--font-mono);
+}
+
+/* Hit — the chip stays a physical inset legend on the lit face instead of a
+   translucent wash of the on-accent ink, which measured 3.81:1 in light. The
+   surface/ink pair is the one the whole library already uses for small text on
+   a card, so it clears AA in both themes (6.4:1 / 7.4:1). */
+.oj-key-tile.is-active .oj-key-tile__hint {
+    background: var(--bg-node);
+    color: var(--accent-ink);
+}
+
+.oj-key-tile--pad {
+    width: var(--oj-key-tile-size, var(--key-tile-size));
+    height: var(--oj-key-tile-size, var(--key-tile-size));
+}
+
+/* The handoff `.key`: a keycap, so the legend sits at the BOTTOM — below the
+   reserved socket band, never centred into it. */
+.oj-key-tile--key {
+    width: 34px;
+    height: 74px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-end;
+    /* the handoff's 4px / 6px at the default 48px axis, proportional below it
+       so `size={34}` keeps its clearance under the socket band too */
+    gap: min(4px, calc(var(--oj-key-tile-sizing-axis) * 0.084));
+    padding-bottom: min(6px, calc(var(--oj-key-tile-sizing-axis) * 0.125));
+    /* 11px at the default 48px axis; a vignette-sized key scales its legend
+       with everything else so the reserved socket band always has room. */
+    font: 600 min(11px, calc(var(--oj-key-tile-sizing-axis) * 0.23))/1 var(--font-sans);
+    color: var(--text-secondary);
+}
+
+/*
+ * Piano faces. A piano key is a physical object: the white face is ALWAYS the
+ * lighter one and the black face ALWAYS the darker one. Deriving them from
+ * `--bg-node` / `--text-primary` alone inverts the keyboard in dark, so both
+ * faces are mixed toward literal white/black — with a whisper of the theme's
+ * own surface so they still belong to the canvas. The ink of one face is the
+ * face of the other, which is exactly how a real keyboard is printed.
+ */
+.oj-key-tile--white,
+.oj-key-tile--black {
+    --oj-piano-white: color-mix(in oklab, var(--bg-node) 22%, white);
+    --oj-piano-black: color-mix(in oklab, var(--text-primary) 18%, black);
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.oj-key-tile--white {
+    width: 34px;
+    height: 96px;
+    background: var(--oj-piano-white);
+    color: var(--oj-piano-black);
+}
 
 .oj-key-tile--black {
-    width: var(--space-lg);
-    height: calc(var(--space-xl) * 2 + var(--space-md));
-    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-    background: var(--text-primary);
-    color: var(--text-on-accent);
-}
-
-.oj-key-tile--black .oj-key-tile__label {
-    color: var(--text-on-accent);
-}
-
-/* ── Square computer key ─────────────────────────────────────────────────── */
-.oj-key-tile--key {
-    width: calc(var(--space-xl) + var(--space-sm));
-    height: calc(var(--space-xl) + var(--space-sm));
-    border-radius: var(--radius-sm);
-    align-items: center;
-}
-
-/* ── Rounded drum pad ────────────────────────────────────────────────────── */
-.oj-key-tile--pad {
-    width: calc(var(--space-xl) * 2);
-    height: calc(var(--space-xl) * 2);
-    border-radius: var(--radius-lg);
-    background: var(--bg-tertiary);
-    align-items: center;
+    width: 24px;
+    height: 64px;
+    background: var(--oj-piano-black);
+    color: var(--oj-piano-white);
 }

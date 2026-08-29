@@ -1,5 +1,60 @@
-.oj-time-ruler { position: relative; height: 100%; color: var(--text-secondary); font: 500 14px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
-.oj-time-ruler__mark { position: absolute; bottom: 3px; border-left: 1px solid var(--timeline-grid-sub); }
-.oj-time-ruler__mark.is-bar { height: 6px; padding-left: 4px; border-left-color: var(--timeline-grid-bar); }
-.oj-time-ruler__mark.is-beat { height: 3px; border-left-color: var(--timeline-grid-beat); }
-.oj-time-ruler__mark.is-sub { height: 1px; }
+.oj-time-ruler {
+    /* The tick ladder is anchored to the bottom of the band; the bar number
+       rides on its own line directly above its tick. */
+    --oj-ruler-floor: 3px;
+    --oj-ruler-bar-tick: 7px;
+    position: relative;
+    height: 100%;
+    color: var(--text-muted);
+    font: 600 var(--text-micro)/1 var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+}
+
+.oj-time-ruler__mark {
+    position: absolute;
+    bottom: var(--oj-ruler-floor);
+    box-sizing: border-box;
+    --oj-ruler-tick: var(--timeline-grid-sub);
+}
+
+.oj-time-ruler__mark::before {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0.5px;
+    width: 1px;
+    height: 100%;
+    background: var(--oj-ruler-tick);
+}
+
+/*
+ * A bar mark carries a number, so its box IS the label's line — it sits above
+ * the tick rather than sharing the 7px tick box with it. (Sharing made the 9.5px
+ * line box straddle the tick and hang 1px below the ruler band.) The tick is
+ * drawn hanging off the bottom of that line, so the whole mark still ends
+ * `--oj-ruler-floor` above the band's floor.
+ */
+.oj-time-ruler__mark.is-bar {
+    bottom: calc(var(--oj-ruler-floor) + var(--oj-ruler-bar-tick));
+    padding-left: 3px;
+    line-height: 1;
+    --oj-ruler-tick: var(--timeline-grid-bar);
+}
+
+.oj-time-ruler__mark.is-bar::before {
+    top: 100%;
+    bottom: auto;
+    height: var(--oj-ruler-bar-tick);
+}
+
+.oj-time-ruler__mark.is-beat {
+    height: 4px;
+    --oj-ruler-tick: var(--timeline-grid-beat);
+}
+
+.oj-time-ruler__mark.is-sub {
+    height: 2px;
+    --oj-ruler-tick: var(--timeline-grid-sub);
+}

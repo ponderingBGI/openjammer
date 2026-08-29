@@ -97,3 +97,17 @@ export const Placeholder: Story = () => {
         </div>
     );
 };
+
+export const Disabled: Story = () => (
+    <div style={{ width: 280 }}>
+        <DeviceSelect
+            ariaLabel="Microphone"
+            items={INPUTS}
+            value="focusrite"
+            open={false}
+            disabled
+            onToggle={() => {}}
+            onSelect={() => {}}
+        />
+    </div>
+);

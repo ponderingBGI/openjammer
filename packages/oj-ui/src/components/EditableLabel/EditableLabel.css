@@ -1,6 +1,7 @@
 
 .oj-editable-label {
-    display: inline-flex;
+    position: relative;
+    display: inline-grid;
     min-width: 0;
 }
 
@@ -12,12 +13,15 @@
 
 .oj-editable-label__text {
     display: inline-block;
+    box-sizing: border-box;
     max-width: 100%;
-    padding: var(--space-xs) var(--space-sm);
+    padding: 9px 12px;
     border: 1px solid transparent;
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     font-family: var(--font-sans);
     font-size: var(--text-md);
+    font-weight: 500;
+    line-height: 1.3;
     color: var(--text-primary);
     cursor: text;
     overflow: hidden;
@@ -34,6 +38,7 @@
 .oj-editable-label__text:focus-visible {
     outline: none;
     border-color: var(--accent-primary);
+    box-shadow: var(--focus-ring);
 }
 
 .oj-editable-label--center .oj-editable-label__text {
@@ -43,15 +48,36 @@
 /* Empty value — the placeholder hint reads as muted, never as a real name. */
 .oj-editable-label__text.is-placeholder {
     color: var(--text-muted);
-    font-style: italic;
 }
 
-
 .oj-editable-label__input {
-    font-family: var(--font-sans);
-    font-size: var(--text-md);
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
 }
 
 .oj-editable-label--center .oj-editable-label__input {
     text-align: center;
+}
+
+.oj-editable-label.is-editing .oj-editable-label__text {
+    visibility: hidden;
+}
+
+.oj-editable-label--mono .oj-editable-label__text {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.oj-editable-label.is-disabled {
+    opacity: 0.55;
+}
+
+.oj-editable-label.is-disabled .oj-editable-label__text {
+    cursor: not-allowed;
+}
+
+.oj-editable-label.is-disabled .oj-editable-label__text:hover {
+    background: transparent;
 }

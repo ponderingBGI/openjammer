@@ -10,11 +10,15 @@
     cursor: grab;
     user-select: none;
     transition: border-color var(--motion-fast), box-shadow var(--motion-fast),
-        opacity var(--motion-fast);
+        color var(--motion-fast), transform var(--motion-spring);
 }
 
 .oj-waveform-view:active {
     cursor: grabbing;
+}
+
+.oj-waveform-view:hover {
+    border-color: var(--border-strong);
 }
 
 /* The waveform sits on the canvas tone; the duration/crop badges overlay it. */
@@ -42,14 +46,17 @@
     border-radius: var(--radius-sm);
 }
 
-/* Cropped marker — a quiet warning glyph, label-bearing (Signal-Not-Brand). */
+/* Cropped marker — a quiet, Chip-like inset status badge. */
 .oj-waveform-view__crop {
     position: absolute;
     bottom: var(--space-xs);
     left: var(--space-xs);
-    font-size: var(--text-xs);
-    line-height: 1;
-    color: var(--accent-warning);
+    padding: 3px 7px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    background: var(--bg-tertiary);
+    color: var(--warning-ink);
+    font: 600 var(--text-xs)/1 var(--font-sans);
 }
 
 
@@ -58,6 +65,7 @@
     border-top: 1px solid var(--border-subtle);
     font-family: var(--font-sans);
     font-size: var(--text-sm);
+    font-weight: 500;
     color: var(--text-secondary);
     text-align: center;
     white-space: nowrap;
@@ -67,22 +75,23 @@
 
 
 .oj-waveform-view.is-selected {
-    border-color: var(--audio-connected);
-    box-shadow: 0 0 0 2px var(--audio-connected);
+    outline: 1.5px solid var(--accent-primary);
+    outline-offset: -1.5px;
 }
 
 .oj-waveform-view.is-selected .oj-waveform-view__name {
-    color: var(--audio-connected);
+    color: var(--accent-ink);
 }
 
 
 .oj-waveform-view.is-drop-target {
-    border-color: var(--accent-success);
-    box-shadow: 0 0 0 2px var(--accent-success);
+    outline: 1.5px dashed var(--accent-primary);
+    outline-offset: -1.5px;
 }
 
 /* Dragging — dim the source so the drag layer reads as the live copy. */
 .oj-waveform-view.is-dragging {
-    opacity: 0.6;
+    box-shadow: var(--shadow-overlay);
+    transform: scale(0.96);
     cursor: grabbing;
 }
