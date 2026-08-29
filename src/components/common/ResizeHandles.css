@@ -1,4 +1,19 @@
-
+/**
+ * ResizeHandles — the eight grips around a resizable node.
+ *
+ * Corners draw an L of two 1.5px strokes; edges are invisible hit areas that
+ * reveal a short bar on hover. Tokens only (the file carried nine literal grey
+ * fallbacks, so a node being resized in a broken theme drew grey marks on grey).
+ *
+ * DEAD-CODE NOTE (audit §4.1 flagged 8 of 14 selectors as unreferenced):
+ * verified as a FALSE POSITIVE and deliberately kept. The detector is a plain
+ * substring match over `.ts`/`.tsx`, and this component builds its class names
+ * with a template literal — `resize-handle-${handle}` — so no direction class
+ * ever appears as a literal in the source. All eight are reachable: `handles`
+ * is a public prop whose DEFAULT is all eight (`ALL_HANDLES`), and the one
+ * caller today (`LibraryNode`) passes `['se', 'e', 's']`. Deleting the other
+ * five would make the component's own default render unstyled grips.
+ */
 
 .resize-handles {
   /* Container is transparent, handles positioned absolutely */
@@ -9,8 +24,8 @@
 .resize-handle {
   position: absolute;
   pointer-events: auto;
-  opacity: 0.4;
-  transition: opacity var(--motion-fast, 0.15s ease);
+  opacity: 0.35;
+  transition: opacity var(--motion-fast);
   z-index: 10;
 }
 
@@ -19,7 +34,7 @@
   opacity: 1;
 }
 
-/* When resizing, keep all handles visible */
+/* While resizing, keep every handle legible so the shape reads as "in hand". */
 .resize-handles.resizing .resize-handle {
   opacity: 0.6;
 }
@@ -29,7 +44,7 @@
 }
 
 /* ============================================
- * Corner handles - Visual diagonal marks
+ * Corner handles — an L of two hairlines
  * ============================================ */
 
 .resize-handle.corner {
@@ -44,6 +59,11 @@
   height: 8px;
 }
 
+.resize-handle.corner:hover::before,
+.resize-handle.corner.active::before {
+  border-color: var(--accent-primary);
+}
+
 /* Southeast corner (bottom-right) - default/most common */
 .resize-handle-se {
   right: 0;
@@ -54,8 +74,8 @@
 .resize-handle-se::before {
   right: 3px;
   bottom: 3px;
-  border-right: 2px solid var(--text-muted, #666);
-  border-bottom: 2px solid var(--text-muted, #666);
+  border-right: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
 }
 
 /* Northwest corner (top-left) */
@@ -68,8 +88,8 @@
 .resize-handle-nw::before {
   left: 3px;
   top: 3px;
-  border-left: 2px solid var(--text-muted, #666);
-  border-top: 2px solid var(--text-muted, #666);
+  border-left: 1.5px solid var(--border-strong);
+  border-top: 1.5px solid var(--border-strong);
 }
 
 /* Northeast corner (top-right) */
@@ -82,8 +102,8 @@
 .resize-handle-ne::before {
   right: 3px;
   top: 3px;
-  border-right: 2px solid var(--text-muted, #666);
-  border-top: 2px solid var(--text-muted, #666);
+  border-right: 1.5px solid var(--border-strong);
+  border-top: 1.5px solid var(--border-strong);
 }
 
 /* Southwest corner (bottom-left) */
@@ -96,30 +116,31 @@
 .resize-handle-sw::before {
   left: 3px;
   bottom: 3px;
-  border-left: 2px solid var(--text-muted, #666);
-  border-bottom: 2px solid var(--text-muted, #666);
+  border-left: 1.5px solid var(--border-strong);
+  border-bottom: 1.5px solid var(--border-strong);
 }
 
 /* ============================================
- * Edge handles - Invisible hit areas with hover indicator
+ * Edge handles — invisible hit areas with a hover bar
  * ============================================ */
 
 .resize-handle.edge {
   background: transparent;
 }
 
-/* Show subtle indicator on hover */
 .resize-handle.edge::before {
   content: '';
   position: absolute;
-  background: var(--text-muted, #666);
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
   opacity: 0;
-  transition: opacity var(--motion-fast, 0.15s ease);
+  transition: opacity var(--motion-fast), background var(--motion-fast);
 }
 
 .resize-handle.edge:hover::before,
 .resize-handle.edge.active::before {
-  opacity: 0.5;
+  opacity: 1;
+  background: var(--accent-primary);
 }
 
 /* North edge (top) */
@@ -136,7 +157,6 @@
   right: 20%;
   top: 2px;
   height: 2px;
-  border-radius: 1px;
 }
 
 /* South edge (bottom) */
@@ -153,7 +173,6 @@
   right: 20%;
   bottom: 2px;
   height: 2px;
-  border-radius: 1px;
 }
 
 /* East edge (right) */
@@ -170,7 +189,6 @@
   bottom: 20%;
   right: 2px;
   width: 2px;
-  border-radius: 1px;
 }
 
 /* West edge (left) */
@@ -187,5 +205,4 @@
   bottom: 20%;
   left: 2px;
   width: 2px;
-  border-radius: 1px;
 }

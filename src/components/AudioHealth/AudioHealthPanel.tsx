@@ -16,8 +16,8 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Modal, PanelHeader, Button, StatusDot } from '@openjammer/oj-ui';
-import type { StatusDotStatus } from '@openjammer/oj-ui';
+import { Modal, PanelHeader, Button, Callout, List, ListRow, StatusDot } from '@openjammer/oj-ui';
+import type { CalloutVariant, StatusDotStatus } from '@openjammer/oj-ui';
 import { useAudioStore } from '../../store/audioStore';
 import { isTauri } from '../../audio/executor';
 import { gatherDiagnostics } from '../../utils/diagnostics';
@@ -26,14 +26,13 @@ import { useBindingSet, useModalKeymap } from '../../keymap/useKeymap';
 
 type Status = StatusDotStatus;
 
-/** One readout row. */
+/** One readout row: a dot, the thing, and its exact value in mono. */
 function Row({ label, value, status, hint }: { label: string; value: string; status: Status; hint?: string }) {
     return (
-        <div className="ah-row" title={hint}>
+        <ListRow className="ah-row" title={hint} actions={<span className="ah-value">{value}</span>}>
             <StatusDot status={status} />
             <span className="ah-label">{label}</span>
-            <span className="ah-value">{value}</span>
-        </div>
+        </ListRow>
     );
 }
 
@@ -96,11 +95,58 @@ export function AudioHealthPanel() {
         window.dispatchEvent(new CustomEvent('openjammer:toggle-settings'));
     };
 
-    return (
-        <Modal open={open} onClose={close} ariaLabel="Audio health" size="sm">
-            <PanelHeader title="Audio health" onClose={close} />
+    // One honest sentence before the table. It never says "all good" while the
+    // engine is stopped, and it never hides a bad latency behind a green tick.
+    const verdict: { variant: CalloutVariant; title: string; subtitle: string; detail: string } = (() => {
+        if (!ready) {
+            return {
+                variant: 'info',
+                title: 'Audio has not started yet',
+                subtitle: 'Nothing is wrong — the engine is simply idle.',
+                detail: isTauri()
+                    ? 'The desktop engine unlocks on launch; if this stays idle, check the output device below.'
+                    : 'Browsers only start audio after a gesture. Press play once and this fills in.',
+            };
+        }
+        const latency = latencyStatus(metrics.classification);
+        if (latency === 'bad') {
+            return {
+                variant: 'danger',
+                title: `${Math.round(rtMs)} ms round-trip is too much to play against`,
+                subtitle: 'Running, but the delay is audible.',
+                detail: 'Turn on Low latency in Settings → Audio, use wired headphones, and prefer a USB interface.',
+            };
+        }
+        if (latency === 'warn' || !coi) {
+            return {
+                variant: 'warning',
+                title: 'Playable, with room to improve',
+                subtitle: 'Everything works; one thing is slower than it could be.',
+                detail: coi
+                    ? 'The round-trip is usable but not tight. Settings → Audio has the fastest path.'
+                    : 'Cross-origin isolation is off, so the low-latency control ring falls back to a slower path.',
+            };
+        }
+        return {
+            variant: 'success',
+            title: `${Math.round(rtMs)} ms round-trip — tight enough to play`,
+            subtitle: 'Everything the agent reads says this is healthy.',
+            detail: 'Nothing needs fixing. The rows below are the same numbers the AI assistant sees.',
+        };
+    })();
 
-            <div className="ah-rows">
+    return (
+        <Modal open={open} onClose={close} ariaLabel="Audio health" size="md">
+            <PanelHeader title="Audio health" subtitle={verdict.subtitle} onClose={close} />
+
+            {/* The one-sentence verdict first — the rows below are the evidence. */}
+            <div className="ah-verdict">
+                <Callout variant={verdict.variant} title={verdict.title}>
+                    {verdict.detail}
+                </Callout>
+            </div>
+
+            <List aria-label="Audio diagnostics" className="ah-rows">
                 <Row
                     label="Audio engine"
                     value={ready ? 'running' : 'not started'}
@@ -131,7 +177,7 @@ export function AudioHealthPanel() {
                     hint="Required for the SharedArrayBuffer zero-latency control ring."
                 />
                 <Row label="OpenJammer" value={`${env.version} (${env.channel})`} status="ok" />
-            </div>
+            </List>
 
             <footer className="ah-footer">
                 <Button variant="secondary" className="ah-footer__btn" onClick={openSettings}>

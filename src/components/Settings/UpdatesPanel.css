@@ -1,25 +1,29 @@
-
+/*
+ * Settings -> Updates.
+ *
+ * Rows, sections and notes come from the shared `.oj-set-*` vocabulary in
+ * SettingsPanel.css. This file owns only the status hero, the mono version
+ * stamp and the rollback-confirm layout.
+ */
 
 .oj-upd {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-md);
-    color: var(--text-primary);
-    font-family: var(--font-sans);
-    animation: oj-upd-fade var(--transition-normal) ease-out;
+    animation: oj-upd-fade var(--motion-fast);
 }
-/* ── Mono version stamp (Mono-Means-Exact) ── */
+
+/* ── Mono version stamp (Mono-Means-Exact) ─────────────────────────────── */
+
 .oj-upd-ver {
-    font-family: var(--font-mono);
-    font-size: var(--text-sm);
-    background: var(--bg-tertiary);
+    padding: 1px 6px;
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    padding: 1px 6px;
+    background: var(--bg-tertiary);
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
     color: var(--text-primary);
 }
 
-/* ── Status hero (the one lifted surface) ── */
+/* ── Status hero (the one lifted surface on this tab) ──────────────────── */
+
 .oj-upd-hero {
     display: flex;
     align-items: center;
@@ -32,7 +36,7 @@
 .oj-upd-hero-main {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--space-sm);
     flex: 1 1 auto;
     min-width: 0;
 }
@@ -47,7 +51,7 @@
     font-family: var(--font-sans);
     font-size: var(--text-lg);
     font-weight: 600;
-    line-height: 1.1;
+    line-height: 1.2;
     color: var(--text-primary);
 }
 
@@ -58,66 +62,22 @@
     flex-wrap: wrap;
 }
 
-/* Transient line under the hero — "audio is playing", "no backup found". */
-.oj-upd-note {
-    margin: calc(-1 * var(--space-xs)) 0 0;
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    line-height: 1.4;
+.oj-upd-progress {
+    max-width: 280px;
 }
 
-/* ── Flat control groups, divided by a hairline ── */
-.oj-upd-group {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-md);
-    padding-top: var(--space-md);
-    border-top: 1px solid var(--border-subtle);
-}
+/* ── Download button: glyph + label on one baseline ────────────────────── */
 
-.oj-upd-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-md);
-    flex-wrap: wrap;
-}
-
-.oj-upd-row-text {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    flex: 1 1 240px;
-    min-width: 0;
-}
-
-.oj-upd-row-label {
-    font-family: var(--font-sans);
-    font-size: var(--text-md);
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.oj-upd-row-desc {
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-    line-height: 1.4;
-    max-width: 60ch;
-}
-
-/* Download button: glyph + label on one baseline. */
 .oj-upd-dl {
     display: inline-flex;
     align-items: center;
     gap: var(--space-xs);
 }
 
-/* ── Rollback confirm (inline swap, kept short so it never forces a scroll) ── */
-.oj-upd-confirm {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-    width: 100%;
+/* ── Rollback confirm (in-panel Callout, never a native dialog) ────────── */
+
+.oj-upd-confirm-body {
+    margin: 0 0 var(--space-sm);
 }
 
 .oj-upd-confirm-actions {
@@ -126,7 +86,8 @@
     flex-wrap: wrap;
 }
 
-/* ── Callouts (pinned / error) reuse the oj-ui Callout; just lay out the row ── */
+/* ── Pinned callout: message and the resume action on one line ─────────── */
+
 .oj-upd-callout-row {
     display: flex;
     align-items: center;

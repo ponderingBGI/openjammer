@@ -10,18 +10,60 @@
  */
 
 import { useState, useRef, useEffect, useCallback, memo } from 'react';
-import { createPortal } from 'react-dom';
 import { useAudioClipStore, getClipBuffer } from '../../store/audioClipStore';
 import { getSampleFile } from '../../store/libraryStore';
 import { getAudioContext } from '../../audio/audioContext';
 import { useScrollCapture } from '../../hooks/useScrollCapture';
 import type { ScrollData } from '../../hooks/useScrollCapture';
-import { Button, Slider } from '@openjammer/oj-ui';
+import { Button, Chip, Modal, PanelHeader, Slider, Spinner } from '@openjammer/oj-ui';
 import { useModalKeymap } from '../../keymap/useKeymap';
 import './WaveformEditorModal.css';
 
 // Preview audio state
 let previewSource: AudioBufferSourceNode | null = null;
+
+/**
+ * The palette the Canvas-2D editor draws with, read from the LIVE theme.
+ *
+ * The DSP and the geometry below are untouched — only the colours moved. They
+ * used to be hard-coded — a near-black slab, a fixed teal trace, a fixed blue
+ * handle — which meant the one surface in OpenJammer you cannot restyle with
+ * CSS was also the one surface that ignored the theme entirely: a dark panel of
+ * cyberpunk ink sitting inside a warm light dialog.
+ *
+ * Resolved once per render pass from `getComputedStyle(document.documentElement)`
+ * — not per pixel column — so a 800px waveform costs one style read, not 800.
+ */
+interface WavePalette {
+    ground: string;
+    axis: string;
+    wave: string;
+    dim: string;
+    edge: string;
+    handle: string;
+    handleInk: string;
+    tick: string;
+    text: string;
+}
+
+function readWavePalette(): WavePalette {
+    const style = getComputedStyle(document.documentElement);
+    const token = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
+    return {
+        ground: token('--bg-tertiary', 'transparent'),
+        axis: token('--border-subtle', 'transparent'),
+        wave: token('--audio-connection', 'currentColor'),
+        // The cropped-away region is dimmed with the panel ground at low alpha
+        // rather than a black wash, so it darkens in dark mode and lightens in
+        // light mode instead of always going to soot.
+        dim: token('--bg-node', 'transparent'),
+        edge: token('--accent-primary', 'currentColor'),
+        handle: token('--accent-primary', 'currentColor'),
+        handleInk: token('--text-on-accent', 'currentColor'),
+        tick: token('--border-strong', 'transparent'),
+        text: token('--text-muted', 'currentColor'),
+    };
+}
 
 export const WaveformEditorModal = memo(function WaveformEditorModal() {
     const editingClipId = useAudioClipStore((s) => s.editingClipId);
@@ -114,13 +156,16 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
         const width = canvas.width;
         const height = canvas.height;
         const channelData = audioBuffer.getChannelData(0);
+        // One style read per render — the theme, not a literal.
+        const palette = readWavePalette();
 
-        // Clear canvas with dark background
-        ctx.fillStyle = '#1a1a1a';
+        // Ground
+        ctx.fillStyle = palette.ground;
         ctx.fillRect(0, 0, width, height);
 
         // Draw center line
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = palette.axis;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(0, height / 2);
@@ -157,15 +202,17 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
             const minY = middleY + min * middleY * 0.9;
             const maxY = middleY + max * middleY * 0.9;
 
-            // Color based on amplitude - brighter for louder parts
-            const brightness = 0.4 + amplitude * 0.6;
-            ctx.strokeStyle = `rgba(0, 212, 170, ${brightness})`;
+            // Louder columns read stronger — alpha on the one wiring colour,
+            // never a second hue (the amplitude IS the signal here).
+            ctx.globalAlpha = 0.45 + amplitude * 0.55;
+            ctx.strokeStyle = palette.wave;
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(x, minY);
             ctx.lineTo(x, maxY);
             ctx.stroke();
         }
+        ctx.globalAlpha = 1;
 
         // Convert handles from absolute (0-1) to view-relative coordinates
         const handleToViewX = (handle: number) => {
@@ -175,18 +222,21 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
         const startX = handleToViewX(startHandle);
         const endX = handleToViewX(endHandle);
 
-        // Draw 50% opacity overlay on cropped regions (clipped to visible area)
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        // Wash the cropped-away region back toward the panel ground (not black),
+        // so it dims in dark mode and lightens in light mode.
+        ctx.globalAlpha = 0.62;
+        ctx.fillStyle = palette.dim;
         if (startX > 0) {
             ctx.fillRect(0, 0, Math.max(0, startX), height);
         }
         if (endX < width) {
             ctx.fillRect(Math.min(width, endX), 0, width - Math.min(width, endX), height);
         }
+        ctx.globalAlpha = 1;
 
         // Draw selection border (only if visible)
         if (startX < width && endX > 0) {
-            ctx.strokeStyle = 'rgba(0, 212, 170, 0.5)';
+            ctx.strokeStyle = palette.edge;
             ctx.lineWidth = 1;
             ctx.strokeRect(
                 Math.max(0, startX),
@@ -198,39 +248,30 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
 
         // Draw handles with larger grab area visual
         const handleWidth = 6;
-        const handleColor = '#3b82f6';
 
-        // Start handle (only if visible)
-        if (startX >= -handleWidth && startX <= width + handleWidth) {
-            ctx.fillStyle = handleColor;
-            ctx.fillRect(startX - handleWidth / 2, 0, handleWidth, height);
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        /** The accent bar plus its on-accent grip lines — one handle, both edges. */
+        const drawHandle = (atX: number) => {
+            if (atX < -handleWidth || atX > width + handleWidth) return;
+            ctx.fillStyle = palette.handle;
+            ctx.fillRect(atX - handleWidth / 2, 0, handleWidth, height);
+            ctx.globalAlpha = 0.65;
+            ctx.strokeStyle = palette.handleInk;
             ctx.lineWidth = 1;
-            for (let i = -2; i <= 2; i++) {
+            for (let i = -1; i <= 1; i++) {
                 ctx.beginPath();
-                ctx.moveTo(startX + i, height * 0.3);
-                ctx.lineTo(startX + i, height * 0.7);
+                ctx.moveTo(atX + i, height * 0.35);
+                ctx.lineTo(atX + i, height * 0.65);
                 ctx.stroke();
             }
-        }
+            ctx.globalAlpha = 1;
+        };
 
-        // End handle (only if visible)
-        if (endX >= -handleWidth && endX <= width + handleWidth) {
-            ctx.fillStyle = handleColor;
-            ctx.fillRect(endX - handleWidth / 2, 0, handleWidth, height);
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.lineWidth = 1;
-            for (let i = -2; i <= 2; i++) {
-                ctx.beginPath();
-                ctx.moveTo(endX + i, height * 0.3);
-                ctx.lineTo(endX + i, height * 0.7);
-                ctx.stroke();
-            }
-        }
+        drawHandle(startX);
+        drawHandle(endX);
 
         // Draw time markers at bottom (adjusted for view)
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-        ctx.font = '10px monospace';
+        ctx.fillStyle = palette.text;
+        ctx.font = '10px "JetBrains Mono", monospace';
         const duration = audioBuffer.duration;
         const viewDuration = visibleRange * duration;
         const viewStartTime = viewStart * duration;
@@ -246,7 +287,7 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
             const markerX = ((t - viewStartTime) / viewDuration) * width;
             if (markerX >= 0 && markerX <= width) {
                 ctx.fillText(`${t.toFixed(1)}s`, markerX + 2, height - 4);
-                ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+                ctx.strokeStyle = palette.tick;
                 ctx.beginPath();
                 ctx.moveTo(markerX, height - 15);
                 ctx.lineTo(markerX, height);
@@ -267,6 +308,7 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
         const width = canvas.width;
         const height = canvas.height;
         const channelData = audioBuffer.getChannelData(0);
+        const palette = readWavePalette();
 
         // Clear canvas
         ctx.clearRect(0, 0, width, height);
@@ -289,13 +331,15 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
             const minY = middleY + min * middleY * 0.85;
             const maxY = middleY + max * middleY * 0.85;
 
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.globalAlpha = 0.55;
+            ctx.strokeStyle = palette.wave;
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(x, minY);
             ctx.lineTo(x, maxY);
             ctx.stroke();
         }
+        ctx.globalAlpha = 1;
 
         // Draw viewport indicator (only when zoomed)
         if (zoom > 1) {
@@ -306,15 +350,17 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
             const viewportX = clampedScroll * width;
             const viewportWidth = visibleRange * width;
 
-            // Draw viewport box
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-            ctx.lineWidth = 1;
-            ctx.strokeRect(viewportX + 0.5, 0.5, viewportWidth - 1, height - 1);
-
-            // Dim areas outside viewport
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+            // Dim what is off-screen back toward the panel ground…
+            ctx.globalAlpha = 0.55;
+            ctx.fillStyle = palette.dim;
             ctx.fillRect(0, 0, viewportX, height);
             ctx.fillRect(viewportX + viewportWidth, 0, width - viewportX - viewportWidth, height);
+            ctx.globalAlpha = 1;
+
+            // …then draw the viewport box on top so its edge is never washed out.
+            ctx.strokeStyle = palette.edge;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(viewportX + 0.5, 0.5, viewportWidth - 1, height - 1);
         }
 
     }, [audioBuffer, zoom, scrollOffset]);
@@ -542,15 +588,18 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
         return null;
     }
 
-    return createPortal(
-        <div className="waveform-editor-overlay" onClick={handleCancel}>
+    const selectionLabel = audioBuffer
+        ? `${((endHandle - startHandle) * audioBuffer.duration).toFixed(2)} s of ${audioBuffer.duration.toFixed(2)} s`
+        : '—';
+
+    return (
+        <Modal open onClose={handleCancel} ariaLabel={`Edit clip ${clip.sampleName}`} align="center" size="auto">
             <div
                 ref={containerRef}
                 className="waveform-editor-modal"
-                onClick={(e) => e.stopPropagation()}
                 onKeyDown={(event) => {
-                    if (event.key === 'Escape') handleCancel();
-                    else if (event.code === 'Space') {
+                    // Escape is the Modal's; Space previews and Enter applies.
+                    if (event.code === 'Space') {
                         event.preventDefault();
                         handlePreview();
                     } else if (event.key === 'Enter') {
@@ -559,21 +608,19 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
                     }
                 }}
             >
-                <div className="waveform-editor-header">
-                    <span className="waveform-editor-title">
-                        Edit Clip: {clip.sampleName}
-                    </span>
-                    <Button variant="ghost" iconOnly onClick={handleCancel}>
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-                            <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                        </svg>
-                    </Button>
-                </div>
+                <PanelHeader
+                    title={clip.sampleName}
+                    subtitle="Drag to select, drag the edges to trim. Nothing is destroyed."
+                    badge={<Chip title="Selected region">{selectionLabel}</Chip>}
+                    onClose={handleCancel}
+                />
 
                 <div className="waveform-editor-content">
                     <div ref={scrollContainerRef} className="waveform-editor-canvas-container">
                         {isLoading ? (
-                            <div className="waveform-editor-loading">Loading audio...</div>
+                            <div className="waveform-editor-loading">
+                                <Spinner size={16} /> Loading audio…
+                            </div>
                         ) : (
                             <>
                                 <canvas
@@ -612,10 +659,10 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
                         onClick={handlePreview}
                         title="Space to play/stop"
                     >
-                        {isPlaying ? '■ Stop' : '▶ Play'}
+                        {isPlaying ? 'Stop' : 'Play selection'}
                     </Button>
                     <div className="waveform-editor-zoom-track">
-                        <span className="waveform-editor-zoom-label">−</span>
+                        <span className="waveform-editor-zoom-label" aria-hidden="true">−</span>
                         <Slider
                             aria-label="Zoom"
                             min={1}
@@ -632,11 +679,13 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
                                 setZoom(newZoom);
                             }}
                             className="waveform-editor-zoom"
-                            title="Ctrl+scroll to zoom"
+                            title="Scroll over the waveform to zoom"
                         />
-                        <span className="waveform-editor-zoom-label">+</span>
+                        <span className="waveform-editor-zoom-label" aria-hidden="true">+</span>
+                        <span className="waveform-editor-zoom-value">{zoom.toFixed(1)}×</span>
                     </div>
-                    <Button variant="secondary" onClick={handleCancel}>
+                    <span className="waveform-editor-spacer" />
+                    <Button variant="ghost" onClick={handleCancel}>
                         Cancel
                     </Button>
                     <Button variant="primary" onClick={handleApply}>
@@ -644,8 +693,7 @@ export const WaveformEditorModal = memo(function WaveformEditorModal() {
                     </Button>
                 </div>
             </div>
-        </div>,
-        document.body
+        </Modal>
     );
 });
 

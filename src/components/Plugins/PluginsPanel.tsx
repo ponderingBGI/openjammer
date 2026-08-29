@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Button, Callout, Chip, Input, Modal, PanelHeader, SegmentedControl } from '@openjammer/oj-ui';
+import { Button, Callout, Chip, CodeBlock, Input, List, ListRow, Modal, PanelHeader, ProgressBar, SegmentedControl, Spinner, StatusDot } from '@openjammer/oj-ui';
 import { getInvoke, isTauri } from '../../ai/tauri';
 import { getExecutor } from '../../audio/executor';
 import {
@@ -144,34 +144,162 @@ export function PluginsPanel({ initiallyOpen = false, context = 'browse' }: { in
         else if (event.key === ' ' && visible[focused]) { event.preventDefault(); setExpandedId((id) => id === visible[focused]!.id ? null : visible[focused]!.id); }
     };
 
+    // The honest empty state depends on WHY the list is empty: a filtered search
+    // that matched nothing, a build that cannot host plugins at all, or a scan
+    // that genuinely found none. Never one vague shrug for all three.
+    const emptyState = (() => {
+        if (visible.length > 0) return null;
+        if (scanning) return null;
+        if (query.trim() || families.length > 0 || source !== 'all') {
+            return (
+                <Callout variant="info" title="Nothing matches that">
+                    Try fewer letters, or clear the family and source filters.
+                </Callout>
+            );
+        }
+        if (backend?.backend === 'none') {
+            return (
+                <Callout variant="info" title="This build hosts built-ins only">
+                    Plugin hosting is a desktop feature. Everything OpenJammer ships with is
+                    still here.
+                </Callout>
+            );
+        }
+        return (
+            <Callout variant="info" title="No plugins found">
+                {folderCount > 0
+                    ? `Read ${folderCount} folder${folderCount === 1 ? '' : 's'} and found nothing to load. Re-scan after installing one.`
+                    : 'No plugin folders are configured yet.'}
+            </Callout>
+        );
+    })();
+
     return (
         <Modal open={open} onClose={close} ariaLabel="Browser" align="top" size="auto">
             <div className={`plugin-browser plugin-browser--${browserContext}`}>
-                <PanelHeader title="Browser" onClose={close} actions={<Button onClick={() => void scan()}>Re-scan</Button>} />
+                <PanelHeader
+                    title="Browser"
+                    onClose={close}
+                    actions={
+                        <Button variant="ghost" disabled={scanning} onClick={() => void scan()}>
+                            {scanning ? <><Spinner size={14} /> Scanning…</> : 'Re-scan'}
+                        </Button>
+                    }
+                />
                 <div className="plugin-browser__search">
-                    <Input ref={searchRef} data-autofocus="true" aria-label="Search plugins" placeholder="search…" value={query} onChange={(event) => { setQuery(event.target.value); setFocused(0); }} />
-                    <SegmentedControl aria-label="Plugin source" value={source} options={[{ value: 'all', label: 'All' }, { value: 'built-in', label: 'Built-in' }, { value: 'installed', label: 'Installed' }]} onChange={setSource} />
+                    <Input ref={searchRef} data-autofocus="true" type="search" aria-label="Search plugins" placeholder="Search sounds and effects…" value={query} onChange={(event) => { setQuery(event.target.value); setFocused(0); }} />
+                    <SegmentedControl aria-label="Plugin source" className="plugin-browser__source" value={source} options={[{ value: 'all', label: 'All' }, { value: 'built-in', label: 'Built-in' }, { value: 'installed', label: 'Installed' }]} onChange={setSource} />
                 </div>
-                <div className="plugin-browser__families" aria-label="Plugin families">
-                    {availableFamilies.map((family) => <Chip key={family} pressed={families.includes(family)} onClick={() => setFamilies((current) => current.includes(family) ? current.filter((value) => value !== family) : [...current, family])}>{family}</Chip>)}
+                <div className="plugin-browser__families" role="group" aria-label="Plugin families">
+                    {availableFamilies.map((family) => (
+                        <Chip
+                            key={family}
+                            role="button"
+                            tabIndex={0}
+                            className="plugin-browser__family"
+                            pressed={families.includes(family)}
+                            aria-pressed={families.includes(family)}
+                            onClick={() => setFamilies((current) => current.includes(family) ? current.filter((value) => value !== family) : [...current, family])}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') {
+                                    event.preventDefault();
+                                    setFamilies((current) => current.includes(family) ? current.filter((value) => value !== family) : [...current, family]);
+                                }
+                            }}
+                        >
+                            {family}
+                        </Chip>
+                    ))}
                 </div>
-                {scanError && <Callout variant="danger" title="Scan failed">{scanError}</Callout>}
-                <div className="plugin-browser__results" role="listbox" aria-label="Sounds and effects" tabIndex={0} onKeyDown={onListKeyDown}>
-                    {visible.map((item, index) => {
-                        const provenance = [item.vendor, item.family, item.format, item.reliability].filter(Boolean).join(' · ');
-                        return <div key={item.id} className={`plugin-browser__row${item.benched ? ' is-benched' : ''}`} role="option" aria-selected={index === focused} aria-label={[item.name, provenance].filter(Boolean).join(', ')} onMouseEnter={() => setFocused(index)} onClick={() => choose(item)}>
-                            <div className="plugin-browser__identity"><strong>{item.name}</strong><span>{provenance}</span></div>
-                            <Button onClick={(event) => { event.stopPropagation(); choose(item); }}>{item.benched ? 'Un-bench' : action}</Button>
-                            {expandedId === item.id && <div className="plugin-browser__detail"><span>{item.descriptor ? `${item.descriptor.ports.audio_in}→${item.descriptor.ports.audio_out} ch · ${item.descriptor.param_count} params` : 'OpenJammer built-in'}</span>{item.path && <code>{item.path}</code>}</div>}
-                        </div>;
-                    })}
-                    {visible.length === 0 && <p className="plugin-browser__none">nothing matches that — try fewer letters.</p>}
+                <div className="plugin-browser__results oj-scroll">
+                    {scanError && <Callout variant="danger" title="Scan failed">{scanError}</Callout>}
+                    {emptyState}
+                    <List role="listbox" aria-label="Sounds and effects" className="plugin-browser__list" tabIndex={0} onKeyDown={onListKeyDown}>
+                        {visible.map((item, index) => (
+                            <div key={item.id} className="plugin-browser__entry">
+                                <ListRow
+                                    className={`plugin-browser__row${item.benched ? ' is-benched' : ''}`}
+                                    role="option"
+                                    aria-selected={index === focused}
+                                    aria-label={[item.name, item.vendor, item.format, item.benched ? 'benched' : ''].filter(Boolean).join(', ')}
+                                    selected={index === focused}
+                                    onMouseEnter={() => setFocused(index)}
+                                    onClick={() => choose(item)}
+                                    actions={
+                                        <Button variant={item.benched ? 'secondary' : 'node'} onClick={(event) => { event.stopPropagation(); choose(item); }}>
+                                            {item.benched ? 'Un-bench' : action}
+                                        </Button>
+                                    }
+                                >
+                                    <span className="plugin-browser__identity">
+                                        <strong>{item.name}</strong>
+                                        <span className="plugin-browser__meta">
+                                            <span className="plugin-browser__vendor">{item.vendor}</span>
+                                            {item.family && <Chip>{item.family}</Chip>}
+                                            {item.format && <Chip>{item.format}</Chip>}
+                                            {/* State is shown only when there IS one. A green
+                                                "Ready" on every healthy row is decoration, and
+                                                decoration in a state colour is exactly what the
+                                                Signal-Not-Brand rule forbids. */}
+                                            {item.benched && (
+                                                <span className="plugin-browser__status-text">
+                                                    <StatusDot status="warn" />
+                                                    {item.reliability ?? 'Sat out after a crash'}
+                                                </span>
+                                            )}
+                                            {!item.benched && item.reliability && (
+                                                <span className="plugin-browser__status-text">
+                                                    <StatusDot status="warn" />
+                                                    {item.reliability}
+                                                </span>
+                                            )}
+                                        </span>
+                                    </span>
+                                </ListRow>
+                                {expandedId === item.id && (
+                                    <div className="plugin-browser__detail">
+                                        <span>{item.descriptor ? `${item.descriptor.ports.audio_in}→${item.descriptor.ports.audio_out} ch · ${item.descriptor.param_count} params` : 'OpenJammer built-in'}</span>
+                                        {item.path && <CodeBlock text={item.path} />}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </List>
                 </div>
-                {quarantineOpen && <section className="plugin-browser__quarantine"><h3>{quarantine.length} plugins sat out this scan</h3><p>They crashed while being read, so we stopped asking and finished without them. Nothing else was affected.</p><Button onClick={() => void getInvoke()?.('plugin_quarantine_reset').then(scan)}>Try them again</Button>{quarantine.map((entry) => <div className="plugin-browser__quarantine-row" key={entry.path}><code>{entry.path.split(/[\\/]/).pop()}</code><span>{entry.reason}</span><Button onClick={() => void getInvoke()?.('plugin_quarantine_pardon', { path: entry.path }).then(scan)}>Try again</Button></div>)}</section>}
+                {quarantineOpen && (
+                    <section className="plugin-browser__quarantine" aria-label="Plugins that sat out">
+                        <Callout variant="warning" title={`${quarantine.length} plugins sat out this scan`}>
+                            They crashed while being read, so we stopped asking and finished without
+                            them. Nothing else was affected.
+                        </Callout>
+                        <div className="plugin-browser__quarantine-actions">
+                            <Button variant="secondary" onClick={() => void getInvoke()?.('plugin_quarantine_reset').then(scan)}>Try them again</Button>
+                        </div>
+                        <List role="list" aria-label="Quarantined plugins">
+                            {quarantine.map((entry) => (
+                                <ListRow
+                                    key={entry.path}
+                                    className="plugin-browser__quarantine-row"
+                                    actions={<Button variant="ghost" onClick={() => void getInvoke()?.('plugin_quarantine_pardon', { path: entry.path }).then(scan)}>Try again</Button>}
+                                >
+                                    <span className="plugin-browser__quarantine-name">{entry.path.split(/[\\/]/).pop()}</span>
+                                    <span className="plugin-browser__quarantine-reason">
+                                        <StatusDot status="bad" />
+                                        {entry.reason}
+                                    </span>
+                                </ListRow>
+                            ))}
+                        </List>
+                    </section>
+                )}
                 <footer className="plugin-browser__status">
-                    <span>{scanning ? `Reading ${folderCount ? 1 : 0} of ${folderCount} folders — ${plugins.length} plugins so far.` : backend?.backend === 'none' ? "This build doesn't host plugins — built-ins only." : `Read ${folderCount} folders — ${plugins.length} plugins.`}</span>
-                    {quarantine.length > 0 && <button type="button" onClick={() => setQuarantineOpen((value) => !value)}>{quarantine.length} sat out ›</button>}
-                    <span className="plugin-browser__ruler" style={{ transform: `scaleX(${scanning && folderCount ? 1 / folderCount : 1})` }} />
+                    <span>{scanning ? `Reading ${folderCount} folder${folderCount === 1 ? '' : 's'} — ${plugins.length} plugins so far.` : backend?.backend === 'none' ? "This build doesn't host plugins — built-ins only." : `Read ${folderCount} folder${folderCount === 1 ? '' : 's'} — ${plugins.length} plugins.`}</span>
+                    {quarantine.length > 0 && (
+                        <Button variant="link" onClick={() => setQuarantineOpen((value) => !value)}>
+                            {quarantine.length} sat out
+                        </Button>
+                    )}
+                    {scanning && <ProgressBar indeterminate className="plugin-browser__ruler" aria-label="Scanning plugin folders" />}
                 </footer>
             </div>
         </Modal>

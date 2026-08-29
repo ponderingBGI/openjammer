@@ -1,10 +1,23 @@
+/*
+ * Export dialog.
+ *
+ * A two-column form of oj-ui Fields, a mono preflight chip, one primary action,
+ * and an honest result Callout whose variant IS the verdict (clipped -> danger,
+ * hot -> warning, clean -> success). Every exact number is mono.
+ *
+ * In the tokenLiteralGate's scope: no literal colour of any kind, and every
+ * custom property read here must be declared in the token sheet.
+ */
+
 .export-dialog {
     display: flex;
     flex-direction: column;
     gap: var(--space-md);
     padding: var(--space-md);
+    font-family: var(--font-sans);
     color: var(--text-primary);
 }
+
 .export-dialog__intro,
 .export-dialog__advice,
 .export-dialog__destination-note,
@@ -14,45 +27,37 @@
 }
 
 .export-dialog__intro {
-    font: 400 16px/1.5 var(--font-sans);
+    font-size: var(--text-md);
+    line-height: 1.5;
+    color: var(--text-secondary);
 }
+
+/* ── Form ──────────────────────────────────────────────────────────────── */
 
 .export-dialog__form {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: var(--space-md);
+}
+
+/* A field that owns the whole row (name, rate, tail, destination). */
+.export-dialog__wide {
+    grid-column: 1 / -1;
+}
+
+/* A decision the tier has already made for you: the value, stated. */
+.export-dialog__fixed {
+    display: inline-flex;
+    align-items: center;
 }
 
 .export-dialog__tail {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
     gap: var(--space-sm);
+    flex-wrap: wrap;
     min-width: 0;
-    margin: 0;
-    padding: var(--space-sm);
-    border: 2px solid var(--text-primary);
-    border-radius: var(--radius-sm);
 }
-
-.export-dialog__tail legend { font: 500 14px/1 var(--font-sans); }
-.export-dialog__tail-options { border-radius: var(--radius-sm); }
-.export-dialog__tail-options .oj-seg__btn { padding: var(--space-xs) var(--space-sm); font: 500 14px/1 var(--font-sans); }
-
-.export-dialog__tail .oj-input {
-    width: 5rem;
-}
-
-.export-dialog__unit,
-.export-dialog__destination-note,
-.export-dialog__advice,
-.export-dialog__cancel-note {
-    color: var(--text-secondary);
-    font-size: var(--text-sm);
-}
-
-.export-dialog__filename .oj-input { font-family: var(--font-sans); }
-.export-dialog__preflight { margin: 0; color: var(--text-secondary); font: 500 13px/1.4 var(--font-mono); }
 
 .export-dialog__destination {
     display: flex;
@@ -64,64 +69,107 @@
     flex: 1;
 }
 
-.export-dialog__progress {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
+/* ── Preflight + advice ────────────────────────────────────────────────── */
+
+/* An estimate is an exact-ish number: mono, on the quiet inset chip. */
+.export-dialog__preflight .oj-chip {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.export-dialog__advice,
+.export-dialog__destination-note,
+.export-dialog__cancel-note {
+    font-size: var(--text-sm);
+    line-height: 1.45;
+    color: var(--text-secondary);
 }
 
 .export-dialog__cancel-note {
     max-width: 65ch;
 }
 
-.export-stats {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-sm) var(--space-md);
-    padding: var(--space-md);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
-    background: var(--bg-node);
-    box-shadow: var(--shadow-raised);
-}
+/* ── Progress ──────────────────────────────────────────────────────────── */
 
-.export-stats > div {
+.export-dialog__progress {
     display: flex;
-    flex: 1 1 7rem;
     flex-direction: column;
     gap: var(--space-xs);
 }
 
-.export-stats span {
-    font-family: var(--font-sans);
+.export-dialog__progress-line {
     font-size: var(--text-sm);
+    color: var(--text-secondary);
 }
 
-.export-stats strong,
-.export-stats__path {
+.export-dialog__mono {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
     font-family: var(--font-mono);
-    font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-primary);
 }
 
-.export-stats .is-warning strong { color: var(--accent-warning); }
-.export-stats .is-danger strong,
-.export-stats__hint { color: var(--accent-danger); }
+/* ── Result ────────────────────────────────────────────────────────────── */
 
-.export-stats__hint,
-.export-stats__path {
-    flex-basis: 100%;
+.export-stats__grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm) var(--space-lg);
+    margin-bottom: var(--space-sm);
+}
+
+.export-stats__cell {
+    display: flex;
+    flex: 1 1 8rem;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.export-stats__cell span {
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.export-stats__cell strong {
+    font-size: var(--text-md);
+    font-weight: 600;
+}
+
+.export-stats__hint {
+    margin-bottom: var(--space-sm);
 }
 
 .export-stats__path {
+    margin-bottom: var(--space-sm);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
     overflow-wrap: anywhere;
 }
+
+.export-stats__actions {
+    display: flex;
+    gap: var(--space-sm);
+    flex-wrap: wrap;
+}
+
+/* ── Footer actions ────────────────────────────────────────────────────── */
 
 .export-dialog__actions {
     display: flex;
     justify-content: flex-end;
     gap: var(--space-sm);
+    padding-top: var(--space-xs);
 }
 
 @media (max-width: 560px) {
-    .export-dialog__form { grid-template-columns: 1fr; }
+    .export-dialog__form {
+        grid-template-columns: 1fr;
+    }
 }

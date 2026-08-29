@@ -1,73 +1,45 @@
-/**
- * WaveformEditorModal - Styling for the audio clip editor
+/*
+ * WaveformEditorModal — the non-destructive clip trimmer.
+ *
+ * The overlay, the scrim, Escape, the focus trap, the header strip and the
+ * zoom slider are oj-ui parts now (Modal / PanelHeader / Slider / Spinner /
+ * Chip). This file lays out the panel and frames the two canvases. The seven
+ * dead selectors that survived from an older info-bar layout
+ * (`.waveform-editor-info`, `-info-row`, `-label`, `-value`, `-hint`,
+ * `-btn-small`, and the duplicate `.waveform-editor-zoom` block above it) are
+ * gone — nothing in the TSX has referenced them since the actions row replaced
+ * that bar.
+ *
+ * Tokens only. The colours the CANVAS draws with are read from these same
+ * tokens at render time (see `readWavePalette` in the TSX) — the one surface
+ * CSS cannot reach must still follow the theme.
  */
 
-/* ============================================
- * Overlay
- * ============================================ */
-
-.waveform-editor-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.7);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10000;
-}
-
-/* ============================================
- * Modal Container
- * ============================================ */
-
 .waveform-editor-modal {
-    background: var(--bg-node);
-    border: 2px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    min-width: 640px;
-    max-width: 90vw;
-    overflow: hidden;
-}
-
-/* ============================================
- * Header
- * ============================================ */
-
-.waveform-editor-header {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: var(--space-md);
-    border-bottom: 1px solid var(--border-subtle);
-    background: var(--bg-node-header);
-}
-
-.waveform-editor-title {
+    flex-direction: column;
+    width: min(880px, calc(100vw - 2 * var(--space-lg)));
     font-family: var(--font-sans);
-    font-size: var(--text-lg);
-    font-weight: 600;
     color: var(--text-primary);
 }
 
-
-/* ============================================
- * Content Area
- * ============================================ */
+/* ── Canvas area ───────────────────────────────────────────────────────── */
 
 .waveform-editor-content {
     padding: var(--space-md);
-    background: var(--bg-canvas);
 }
 
 .waveform-editor-loading {
-    height: 200px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--text-muted);
-    font-family: var(--font-sans);
+    gap: var(--space-sm);
+    height: 200px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
     font-size: var(--text-md);
+    color: var(--text-muted);
 }
 
 .waveform-editor-canvas-container {
@@ -78,91 +50,34 @@
     display: block;
     width: 100%;
     height: 200px;
-    border-radius: var(--radius-sm);
     border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    /* The recessed well the waveform sits in — the same inset depth as a socket. */
+    box-shadow: var(--shadow-inset);
 }
 
+/* The minimap is a hover affordance: it only exists while zoomed, and only
+   shows itself when the pointer is over the waveform it belongs to. */
 .waveform-editor-minimap {
     position: absolute;
-    bottom: 8px;
-    left: 8px;
-    right: 8px;
-    width: calc(100% - 16px);
+    right: var(--space-sm);
+    bottom: var(--space-sm);
+    left: var(--space-sm);
+    width: calc(100% - 2 * var(--space-sm));
     height: 24px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-node);
     opacity: 0;
     transition: opacity var(--motion-fast);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border-subtle);
-    background: transparent;
 }
 
-.waveform-editor-canvas-container:hover .waveform-editor-minimap {
+.waveform-editor-canvas-container:hover .waveform-editor-minimap,
+.waveform-editor-minimap:focus-visible {
     opacity: 1;
 }
 
-/* ============================================
- * Info Bar
- * ============================================ */
-
-.waveform-editor-info {
-    display: flex;
-    flex-direction: column;
-    padding: var(--space-sm) var(--space-md);
-    background: var(--bg-tertiary);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-    gap: var(--space-xs);
-}
-
-.waveform-editor-info-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-}
-
-.waveform-editor-label {
-    color: var(--text-muted);
-}
-
-.waveform-editor-value {
-    color: var(--text-primary);
-    margin-right: var(--space-md);
-}
-
-.waveform-editor-value.highlight {
-    color: var(--audio-connected);
-    font-weight: 600;
-}
-
-.waveform-editor-zoom {
-    width: 80px;
-    height: 4px;
-    margin: 0 var(--space-sm);
-    cursor: pointer;
-    accent-color: var(--accent-primary);
-}
-
-.waveform-editor-btn-small {
-    padding: 2px 8px;
-    font-size: var(--text-xs);
-    font-family: var(--font-sans);
-    background: var(--bg-canvas);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: background var(--motion-fast), color var(--motion-fast);
-}
-
-.waveform-editor-btn-small:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-}
-
-/* ============================================
- * Actions
- * ============================================ */
+/* ── Actions ───────────────────────────────────────────────────────────── */
 
 .waveform-editor-actions {
     display: flex;
@@ -172,103 +87,37 @@
     border-top: 1px solid var(--border-subtle);
 }
 
-.waveform-editor-hint {
-    font-size: var(--text-xs);
-    font-family: var(--font-mono);
-    color: var(--text-muted);
-    margin-left: var(--space-sm);
-}
-
 .waveform-editor-spacer {
     flex: 1;
 }
 
-
-/* ============================================
- * Zoom Track in Actions
- * ============================================ */
-
 .waveform-editor-zoom-track {
-    flex: 1;
     display: flex;
     align-items: center;
-    position: relative;
-    height: 36px;
-    margin: 0 var(--space-md);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    background: transparent;
+    gap: var(--space-sm);
+    flex: 0 1 280px;
+    min-width: 0;
+    padding: 0 var(--space-sm);
 }
 
 .waveform-editor-zoom-label {
-    position: absolute;
-    top: 50%;
-    transform: translateY(-55%);
-    color: var(--text-muted);
-    font-size: 24px;
-    font-weight: 300;
+    font-family: var(--font-mono);
+    font-size: var(--text-md);
     line-height: 1;
-    pointer-events: none;
+    color: var(--text-muted);
     user-select: none;
 }
 
-.waveform-editor-zoom-label:first-of-type {
-    left: 14px;
-}
-
-.waveform-editor-zoom-label:last-of-type {
-    right: 14px;
+.waveform-editor-zoom-value {
+    min-width: 5ch;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+    text-align: right;
 }
 
 .waveform-editor-zoom {
     flex: 1;
-    height: 100%;
-    cursor: pointer;
-    -webkit-appearance: none;
-    appearance: none;
-    background: transparent;
-    margin: 0;
-}
-
-.waveform-editor-zoom::-webkit-slider-runnable-track {
-    height: 100%;
-    background: transparent;
-}
-
-.waveform-editor-zoom::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    appearance: none;
-    width: 2px;
-    height: 22px;
-    background: var(--text-muted);
-    border-radius: 0;
-    cursor: grab;
-    transition: background var(--motion-fast);
-}
-
-.waveform-editor-zoom::-webkit-slider-thumb:hover {
-    background: var(--text-primary);
-}
-
-.waveform-editor-zoom::-webkit-slider-thumb:active {
-    cursor: grabbing;
-    background: var(--accent-primary);
-}
-
-.waveform-editor-zoom::-moz-range-track {
-    height: 100%;
-    background: transparent;
-}
-
-.waveform-editor-zoom::-moz-range-thumb {
-    width: 2px;
-    height: 28px;
-    background: var(--text-muted);
-    border-radius: 0;
-    border: none;
-    cursor: grab;
-}
-
-.waveform-editor-zoom::-moz-range-thumb:hover {
-    background: var(--text-primary);
+    min-width: 0;
 }

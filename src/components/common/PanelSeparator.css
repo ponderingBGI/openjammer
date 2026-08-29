@@ -1,39 +1,44 @@
 /**
- * PanelSeparator - Styles for draggable panel separators
+ * PanelSeparator — the draggable rule between two panels.
  *
- * Two orientations:
- * - horizontal: separates top/bottom panels (cursor: row-resize)
- * - vertical: separates left/right panels (cursor: col-resize)
+ * A hairline at rest, the accent while you are on it or dragging it, with a
+ * short grip mark in the middle so it reads as a handle rather than a border.
+ * Tokens only (the file used to carry three literal fallbacks — a grey rule, a
+ * grey grip and a blue accent — so a broken theme silently produced a blue grip
+ * from the old sketchbook palette).
+ *
+ * BOTH orientations are kept even though `LibraryNode` only mounts the
+ * horizontal one today: `direction` is a public prop of a shared component, and
+ * removing the other half would make the API lie.
  */
 
 .panel-separator {
-  background: var(--border-subtle, #e5e5e5);
-  flex-shrink: 0;
-  transition: background var(--motion-fast, 0.15s ease);
   position: relative;
+  flex-shrink: 0;
+  background: var(--border-subtle);
+  transition: background var(--motion-fast);
 }
 
-/* Drag indicator in center */
+/* Grip mark in the centre. */
 .panel-separator::before {
   content: '';
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  background: var(--text-muted, #666);
-  border-radius: 1px;
-  opacity: 0.6;
-  transition: opacity var(--motion-fast, 0.15s ease);
+  border-radius: var(--radius-pill);
+  background: var(--border-strong);
+  transition: background var(--motion-fast);
 }
 
 .panel-separator:hover,
 .panel-separator.dragging {
-  background: var(--accent-primary, #3b82f6);
+  background: var(--accent-primary);
 }
 
 .panel-separator:hover::before,
 .panel-separator.dragging::before {
-  opacity: 1;
+  background: var(--text-on-accent);
 }
 
 /* ============================================

@@ -8,6 +8,15 @@
  * transient error) or reload. The audio engine runs in the AudioWorklet / native
  * host, off the React tree, so sound usually keeps playing through a UI crash —
  * the card says so, so a performer doesn't panic.
+ *
+ * STYLING: this is the ONE surface that must not use oj-ui components or design
+ * tokens. It is what renders when the app has failed, and that failure may BE
+ * the theme layer — `applyTheme()` writes the `--bg-node` / `--text-primary`
+ * custom properties onto `document.documentElement` at runtime, so a crash
+ * before or during that call leaves every `var(--x)` empty. So the markup is
+ * plain elements and `AppErrorBoundary.css` is literal-only by design, with a
+ * `prefers-color-scheme: dark` block the OS answers without any of our JS. See
+ * the header comment in that file for the palette it transcribes.
  */
 
 import { Component, type ErrorInfo, type ReactNode } from 'react';

@@ -70,7 +70,12 @@ describe('UpdatesPanel', () => {
         expect(screen.getByRole('tab', { name: 'Stable' })).toHaveAttribute('aria-selected', 'true');
         expect(screen.getByRole('tab', { name: 'Canari' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Download Stable/i })).toBeInTheDocument();
-        expect(screen.getByText(/Browser\/PWA updates apply on reload/i)).toBeInTheDocument();
+        // The hero carries the headline; the sentence that explains the tier sits
+        // on the row it belongs to, so neither one has to be both.
+        expect(screen.getByText('Updates apply on reload')).toBeInTheDocument();
+        expect(
+            screen.getByText(/browser version updates on reload; desktop channels are manual downloads/i),
+        ).toBeInTheDocument();
     });
 
     it('keeps channel and manual download controls visible on unsupported native installs', () => {

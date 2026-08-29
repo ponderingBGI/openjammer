@@ -1,0 +1,17 @@
+/**
+ * ScrollContainer — the one place a scrollbar is themed for Firefox.
+ *
+ * `global.css` already carries the WebKit/Blink rules (`::-webkit-scrollbar*`,
+ * unqualified, so they apply everywhere) and they are NOT duplicated here.
+ * What global.css cannot express is the standard `scrollbar-color` property,
+ * which Firefox uses instead — without it every ScrollContainer in the app
+ * renders an OS-grey scrollbar on a warm surface, which is the one bit of
+ * chrome that gives the theme away.
+ *
+ * `thin` rather than `auto`: the same 8px weight the WebKit rules ask for.
+ */
+
+.oj-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: var(--text-muted) var(--bg-tertiary);
+}

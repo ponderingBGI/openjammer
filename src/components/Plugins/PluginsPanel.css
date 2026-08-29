@@ -1,33 +1,268 @@
-.plugin-browser, .plugin-window-shell {
-    --hatch-benched: repeating-linear-gradient(45deg, color-mix(in srgb, var(--text-primary) 12%, transparent) 0 1px, transparent 1px 6px);
-    --plugin-strip-h: 28px;
+/*
+ * Plugins / Browser.
+ *
+ * Rows are oj-ui ListRows, badges are Chips, the state is a StatusDot beside
+ * its own words, the empty states are Callouts and the scan progress is a
+ * ProgressBar. This file lays the panel out and draws the one thing there is no
+ * part for: the hatch that marks a benched plugin.
+ *
+ * In the tokenLiteralGate's scope — no literal colours, and every custom
+ * property read here must be declared (in the token sheet or in this file).
+ */
+
+.plugin-browser,
+.plugin-window-shell {
+    /* A benched plugin is hatched, not tinted: the row still has to read as a
+       row, and the hatch says "set aside" without spending a state colour. */
+    --hatch-benched: repeating-linear-gradient(
+        45deg,
+        color-mix(in oklab, var(--text-primary) 10%, transparent) 0 1px,
+        transparent 1px 7px
+    );
+    --plugin-strip-h: 32px;
 }
-.plugin-browser { width: 720px; height: 560px; display: grid; grid-template-rows: 44px 40px 32px minmax(0, 1fr) 48px; overflow: hidden; background: var(--bg-node); }
-.plugin-browser--pick, .plugin-browser--insert { width: 320px; height: 420px; grid-template-rows: 44px 72px 32px minmax(0, 1fr) 48px; }
-.plugin-browser--pick .plugin-browser__search, .plugin-browser--insert .plugin-browser__search { flex-direction: column; }
-.plugin-browser > .oj-panel-header { min-height: 44px; }
-.plugin-browser__search { display: flex; gap: 8px; padding: 4px 12px; }
-.plugin-browser__search .oj-input { flex: 1; font: 400 15px/1 var(--font-sans); }
-.plugin-browser__search .oj-segmented-control { flex: 0 0 200px; }
-.plugin-browser__families { display: flex; gap: 6px; padding: 4px 12px; overflow-x: auto; white-space: nowrap; }
-.plugin-browser__families .oj-chip { height: 24px; }
-.plugin-browser__results { min-height: 0; overflow-y: auto; outline: none; }
-.plugin-browser__row { position: relative; min-height: 56px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 5px 12px; cursor: default; transition: background-color 90ms linear, opacity 120ms linear; }
-.plugin-browser__row:hover { background: var(--bg-tertiary); }
-.plugin-browser__row[aria-selected="true"] { outline: 2px solid var(--accent-primary); outline-offset: -2px; }
-.plugin-browser__row.is-benched { background-image: var(--hatch-benched); }
-.plugin-browser__identity { min-width: 0; display: flex; flex-direction: column; }
-.plugin-browser__identity strong { overflow: hidden; color: var(--text-primary); font: 600 18px/22px var(--font-sans); text-overflow: ellipsis; white-space: nowrap; }
-.plugin-browser__identity span { overflow: hidden; color: var(--text-secondary); font: 400 13px/18px var(--font-sans); text-overflow: ellipsis; white-space: nowrap; }
-.plugin-browser__detail { grid-column: 1 / -1; min-height: 72px; display: flex; flex-direction: column; justify-content: center; gap: 4px; color: var(--text-secondary); font: 400 12px/1.4 var(--font-mono); }
-.plugin-browser__detail code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plugin-browser__none { margin: 24px 12px; opacity: .5; font: 400 15px/1.4 var(--font-sans); }
-.plugin-browser__status { position: relative; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-top: 1px solid var(--border-subtle); background: var(--bg-node-header); color: var(--text-secondary); font: 400 14px/1.2 var(--font-sans); }
-.plugin-browser__status button { padding: 0; border: 0; background: transparent; color: var(--text-primary); font: inherit; text-decoration: underline; cursor: pointer; }
-.plugin-browser__ruler { position: absolute; right: 0; bottom: 0; left: 0; height: 1px; background: color-mix(in srgb, var(--text-primary) 35%, transparent); transform-origin: left; transition: transform 120ms linear; }
-.plugin-browser__quarantine { position: absolute; right: 0; bottom: 48px; left: 0; z-index: 1; height: 220px; padding: 12px 16px; overflow: auto; border-top: 2px solid var(--border-strong); background: var(--bg-node); }
-.plugin-browser__quarantine h3 { margin: 0; font: 600 18px/1.2 var(--font-sans); }
-.plugin-browser__quarantine p { margin: 4px 0 8px; max-width: 65ch; color: var(--text-secondary); font: 400 14px/1.4 var(--font-sans); }
-.plugin-browser__quarantine-row { min-height: 44px; display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; align-items: center; gap: 8px; border-top: 1px solid var(--border-subtle); font: 400 13px/1.2 var(--font-sans); }
-.plugin-browser__quarantine-row code { overflow: hidden; font-family: var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-@media (max-width: 760px), (max-height: 620px) { .plugin-browser { width: calc(100vw - 48px); height: min(560px, calc(100vh - 48px)); } }
+
+.plugin-browser {
+    display: grid;
+    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    width: min(760px, calc(100vw - 2 * var(--space-lg)));
+    height: min(600px, calc(100vh - 2 * var(--space-lg)));
+    overflow: hidden;
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+}
+
+/* The pick/insert contexts are a narrow column beside a node, not a browser. */
+.plugin-browser--pick,
+.plugin-browser--insert {
+    width: 340px;
+    height: min(460px, calc(100vh - 2 * var(--space-lg)));
+}
+
+.plugin-browser--pick .plugin-browser__search,
+.plugin-browser--insert .plugin-browser__search {
+    flex-direction: column;
+    align-items: stretch;
+}
+
+/* ── Search + source ───────────────────────────────────────────────────── */
+
+.plugin-browser__search {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-md);
+}
+
+.plugin-browser__search .oj-input {
+    flex: 1;
+    min-width: 0;
+}
+
+.plugin-browser__source {
+    flex: 0 0 auto;
+}
+
+/* ── Family filter chips ───────────────────────────────────────────────── */
+
+.plugin-browser__families {
+    display: flex;
+    gap: var(--space-xs);
+    padding: 0 var(--space-md) var(--space-sm);
+    overflow-x: auto;
+    white-space: nowrap;
+}
+
+.plugin-browser__family {
+    cursor: pointer;
+    user-select: none;
+    transition: background var(--motion-fast), border-color var(--motion-fast),
+        box-shadow var(--motion-fast), color var(--motion-fast);
+}
+
+.plugin-browser__family:hover {
+    border-color: var(--border-strong);
+}
+
+.plugin-browser__family:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* ── Results ───────────────────────────────────────────────────────────── */
+
+.plugin-browser__results {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    min-height: 0;
+    padding: 0 var(--space-md) var(--space-sm);
+    overflow-y: auto;
+}
+
+.plugin-browser__results > * {
+    flex: none;
+}
+
+.plugin-browser__list {
+    overflow: visible;
+    outline: none;
+    gap: 2px;
+}
+
+.plugin-browser__list:focus-visible {
+    border-radius: var(--radius-md);
+    box-shadow: var(--focus-ring);
+}
+
+.plugin-browser__row {
+    align-items: center;
+    min-height: 52px;
+    padding: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-md);
+}
+
+.plugin-browser__row.is-benched {
+    background-image: var(--hatch-benched);
+}
+
+.plugin-browser__identity {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.plugin-browser__identity strong {
+    overflow: hidden;
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
+    font-weight: 600;
+    line-height: 1.25;
+    color: var(--text-primary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.plugin-browser__meta {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+    min-width: 0;
+}
+
+.plugin-browser__vendor {
+    max-width: 22ch;
+    overflow: hidden;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The dot never rides alone — the word next to it carries the same meaning. */
+.plugin-browser__status-text {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+.plugin-browser__detail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-sm) var(--space-sm);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+/* ── Quarantine drawer ─────────────────────────────────────────────────── */
+
+.plugin-browser__quarantine {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    max-height: 240px;
+    padding: var(--space-md);
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-secondary);
+    overflow-y: auto;
+}
+
+.plugin-browser__quarantine-actions {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+.plugin-browser__quarantine-row {
+    cursor: default;
+    gap: var(--space-md);
+}
+
+.plugin-browser__quarantine-row .oj-list-row__body {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    min-width: 0;
+}
+
+.plugin-browser__quarantine-name {
+    flex: 0 0 160px;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-primary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.plugin-browser__quarantine-reason {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    min-width: 0;
+    overflow: hidden;
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* ── Status footer ─────────────────────────────────────────────────────── */
+
+.plugin-browser__status {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-height: 44px;
+    padding: 0 var(--space-md);
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-node-header);
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+}
+
+/* The scan indicator is a hairline at the very bottom of the footer, so it
+   reads as the panel filling rather than a control. */
+.plugin-browser__ruler {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    border-radius: 0;
+}
+
+@media (max-width: 800px), (max-height: 660px) {
+    .plugin-browser {
+        width: calc(100vw - 2 * var(--space-md));
+        height: min(600px, calc(100vh - 2 * var(--space-md)));
+    }
+}

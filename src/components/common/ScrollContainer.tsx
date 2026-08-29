@@ -34,6 +34,7 @@
 import React, { forwardRef, useCallback } from 'react';
 import { useScrollCapture } from '../../hooks/useScrollCapture';
 import type { ScrollData, UseScrollCaptureOptions } from '../../hooks/useScrollCapture';
+import './ScrollContainer.css';
 
 /** Re-export ScrollData for convenience */
 export type { ScrollData } from '../../hooks/useScrollCapture';
@@ -134,6 +135,7 @@ export const ScrollContainer = forwardRef<HTMLDivElement, ScrollContainerProps>(
             capture,
             enabled = true,
             sensitivity = 1,
+            className,
             ...divProps
         },
         forwardedRef
@@ -170,8 +172,12 @@ export const ScrollContainer = forwardRef<HTMLDivElement, ScrollContainerProps>(
             }
         }, [scrollRef, forwardedRef]);
 
+        // `oj-scroll` carries the Firefox `scrollbar-color` (the WebKit rules are
+        // global). Caller classes come after so they can still override anything.
+        const classes = ['oj-scroll', className].filter(Boolean).join(' ');
+
         return (
-            <div ref={mergedRef} {...divProps}>
+            <div ref={mergedRef} className={classes} {...divProps}>
                 {children}
             </div>
         );

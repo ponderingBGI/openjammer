@@ -1,167 +1,79 @@
-/**
- * MIDI Connection Toast styles for Sonner custom toast
- * Theme-aware notification for when MIDI devices are connected
+/*
+ * MIDI connection toast.
  *
- * Note: Sonner handles positioning and entry/exit animations.
- * This stylesheet only styles the toast content.
+ * The card, its hairline, its shadow, its tone and its buttons are the oj-ui
+ * Banner; this file only sizes the toast and hangs the auto-dismiss countdown
+ * off its bottom edge as a hairline bar.
+ *
+ * Sonner handles positioning and the enter/exit animation.
  */
 
 .midi-connection-toast {
-    /* Sonner handles positioning - just style the content */
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg, 12px);
-    padding: 0;
-    min-width: 320px;
-    max-width: 420px;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
-    overflow: hidden;
     position: relative;
+    min-width: 340px;
+    max-width: 440px;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    box-shadow: var(--shadow-overlay);
 }
 
-/* Progress bar for auto-dismiss countdown */
-.midi-connection-toast-progress {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    height: 3px;
-    background: var(--accent-primary);
-    transition: width 1s linear;
-    border-radius: 0 0 0 var(--radius-lg, 12px);
+.midi-connection-toast .oj-banner {
+    align-items: flex-start;
+    padding-bottom: 16px;
 }
 
-/* Header section */
-.midi-connection-toast-header {
-    display: flex;
+/* The response cluster stacks under the text on a narrow toast rather than
+   squeezing the device name into two characters. */
+.midi-connection-toast .oj-banner__actions {
     align-items: center;
-    justify-content: space-between;
-    padding: var(--space-sm, 8px) var(--space-md, 12px);
-    background: var(--bg-node-header);
-    border-bottom: 1px solid var(--border-subtle);
+    gap: var(--space-xs);
 }
 
-.midi-connection-toast-header-left {
-    flex: 1;
-}
-
-.midi-connection-toast-dismiss {
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    font-size: 18px;
-    line-height: 1;
-    cursor: pointer;
-    border-radius: var(--radius-sm, 4px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all var(--motion-fast, 0.15s);
-}
-
-.midi-connection-toast-dismiss:hover {
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-}
-
-/* Content area */
-.midi-connection-toast-content {
-    display: flex;
-    gap: var(--space-md, 12px);
-    padding: var(--space-md, 12px) var(--space-md, 12px) var(--space-sm, 8px);
-}
-
-.midi-connection-toast-icon {
-    font-size: 28px;
-    line-height: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 52px;
-    height: 52px;
-    border-radius: var(--radius-md, 8px);
-    flex-shrink: 0;
-    border: 1px solid var(--border-subtle);
-}
-
-.midi-connection-toast-icon.recognized {
-    background: linear-gradient(145deg, var(--bg-tertiary) 0%, var(--bg-secondary) 100%);
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 12px color-mix(in srgb, var(--accent-primary) 20%, transparent);
-}
-
-.midi-connection-toast-icon.generic {
-    background: var(--bg-tertiary);
-}
-
-.midi-connection-toast-text {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    flex: 1;
-    min-width: 0;
-}
-
-.midi-connection-toast-title {
-    font-family: var(--font-sans);
-    font-size: var(--text-md, 14px);
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.midi-connection-toast-device {
-    font-size: var(--text-sm, 13px);
-    color: var(--text-secondary);
-    word-break: break-word;
-    line-height: 1.3;
+.midi-connection-toast-line {
+    display: block;
 }
 
 .midi-connection-toast-assign {
-    font-size: var(--text-xs, 11px);
-    color: var(--text-muted);
-    display: flex;
-    align-items: center;
-    gap: 4px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-primary);
 }
 
-.midi-connection-toast-assign-name {
-    color: var(--accent-primary);
-    font-weight: 600;
+/* The countdown is a hairline along the bottom edge — it is the toast emptying,
+   not a control. 1s linear so it reads as a clock, not an animation. */
+.midi-connection-toast-countdown {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 3px;
+    border-radius: 0;
+    background: transparent;
 }
 
-/* Actions */
-.midi-connection-toast-actions {
-    display: flex;
-    gap: var(--space-sm, 8px);
-    padding: var(--space-sm, 8px) var(--space-md, 12px) calc(var(--space-md, 12px) + 3px);
+.midi-connection-toast-countdown .oj-progress__fill {
+    border-radius: 0;
+    transition: width 1s linear;
 }
 
-.midi-connection-toast-btn {
-    padding: var(--space-sm, 8px) var(--space-md, 12px);
-    font-family: var(--font-sans);
-    font-size: var(--text-sm, 13px);
-    font-weight: 600;
-    border-radius: var(--radius-md, 6px);
-    cursor: pointer;
-    transition: all var(--motion-fast, 0.15s);
-    border: 1px solid transparent;
+@media (prefers-reduced-motion: reduce) {
+    .midi-connection-toast-countdown .oj-progress__fill {
+        transition: none;
+    }
 }
 
-
-/* Responsive */
 @media (max-width: 480px) {
     .midi-connection-toast {
         min-width: auto;
         max-width: none;
     }
 
-    .midi-connection-toast-actions {
-        flex-direction: column;
+    .midi-connection-toast .oj-banner {
+        flex-wrap: wrap;
     }
 
-    .midi-connection-toast-btn {
-        width: 100%;
+    .midi-connection-toast .oj-banner__actions {
+        flex: 1 1 100%;
+        justify-content: flex-end;
     }
 }

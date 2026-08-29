@@ -12,6 +12,7 @@ import {
     Callout,
     Chip,
     IconDownload,
+    ProgressBar,
     SegmentedControl,
     Spinner,
     StatusDot,
@@ -175,8 +176,10 @@ export function UpdatesPanel() {
     const lastGood = native ? (status?.last_good_version ?? null) : null;
     const isCanariBuild = currentVersion.includes('canari') || currentVersion.includes('canary');
 
+    // The hero headline is a HEADLINE — a few words you read at a glance. The
+    // sentence that explains the tier belongs in the row below it, not here.
     const statusText = (() => {
-        if (!native) return 'Browser/PWA updates apply on reload; desktop installers are manual downloads.';
+        if (!native) return 'Updates apply on reload';
         if (!status) return 'Reading updater status…';
         if (!autoUpdateAvailable) return status.manual_reason ?? 'Manual updates are used on this platform.';
         if (checking) return 'Checking…';
@@ -246,11 +249,10 @@ export function UpdatesPanel() {
         ) : null;
 
     return (
-        <div className="oj-upd">
+        <div className="oj-set oj-upd">
             {pinnedVersion && (
                 <Callout
                     variant="warning"
-                    className="oj-upd-callout"
                     title={
                         <>
                             Pinned to <code className="oj-upd-ver">{pinnedVersion}</code>
@@ -268,7 +270,7 @@ export function UpdatesPanel() {
 
             <Surface
                 className="oj-upd-hero"
-                elevation="rest"
+                elevation="raised"
                 radius="lg"
                 role="status"
                 aria-live="polite"
@@ -286,14 +288,31 @@ export function UpdatesPanel() {
                         <code className="oj-upd-ver">{currentVersion}</code>
                         <Chip>{channelLabel(updateChannel)}</Chip>
                         {status?.install_kind && <Chip>{status.install_kind}</Chip>}
+                        {pending && <Chip tone="warning">Staged</Chip>}
                     </div>
+                    {checking && (
+                        <ProgressBar
+                            indeterminate
+                            className="oj-upd-progress"
+                            aria-label="Checking for updates"
+                        />
+                    )}
+                    {!checking && pending && (
+                        <ProgressBar
+                            value={1}
+                            tone="success"
+                            className="oj-upd-progress"
+                            aria-label="Update downloaded and staged"
+                        />
+                    )}
                 </div>
                 {primaryAction}
             </Surface>
 
-            {installNote && <p className="oj-upd-note">{installNote}</p>}
+            {installNote && <p className="oj-set-note">{installNote}</p>}
 
-            <div className="oj-upd-group">
+            <section className="oj-set-section">
+                <h3 className="oj-set-section__title">Channel</h3>
                 {autoUpdateAvailable ? (
                     <Toggle
                         label="Automatic updates"
@@ -303,10 +322,10 @@ export function UpdatesPanel() {
                         onChange={setAutoUpdateEnabled}
                     />
                 ) : (
-                    <div className="oj-upd-row">
-                        <div className="oj-upd-row-text">
-                            <span className="oj-upd-row-label">Automatic updates</span>
-                            <span className="oj-upd-row-desc">
+                    <div className="oj-set-row">
+                        <div className="oj-set-row__text">
+                            <span className="oj-set-row__label">Automatic updates</span>
+                            <span className="oj-set-row__desc">
                                 {native
                                     ? status?.manual_reason ?? 'This build uses manual downloads.'
                                     : 'The browser version updates on reload; desktop channels are manual downloads here.'}
@@ -315,91 +334,100 @@ export function UpdatesPanel() {
                     </div>
                 )}
 
-                <div className="oj-upd-row">
-                    <div className="oj-upd-row-text">
-                        <span className="oj-upd-row-label">Release channel</span>
-                        <span className="oj-upd-row-desc">
+                <div className="oj-set-row">
+                    <div className="oj-set-row__text">
+                        <span className="oj-set-row__label">Release channel</span>
+                        <span className="oj-set-row__desc">
                             {updateChannel === 'stable' && isCanariBuild
                                 ? 'You’re ahead of Stable — you’ll move over when it catches up, no downgrade.'
                                 : CHANNEL_BLURB[updateChannel]}
                         </span>
                     </div>
-                    <SegmentedControl
-                        aria-label="Release channel"
-                        options={[
-                            { value: 'stable', label: 'Stable' },
-                            { value: 'canary', label: 'Canari' },
-                        ]}
-                        value={updateChannel}
-                        disabled={!!pinnedVersion}
-                        onChange={(c) => void switchChannel(c)}
-                    />
+                    <div className="oj-set-row__control">
+                        <SegmentedControl
+                            aria-label="Release channel"
+                            options={[
+                                { value: 'stable', label: 'Stable' },
+                                { value: 'canary', label: 'Canari' },
+                            ]}
+                            value={updateChannel}
+                            disabled={!!pinnedVersion}
+                            onChange={(c) => void switchChannel(c)}
+                        />
+                    </div>
                 </div>
-            </div>
+            </section>
 
-            <div className="oj-upd-group">
-                <div className="oj-upd-row">
-                    <div className="oj-upd-row-text">
-                        <span className="oj-upd-row-label">Download installer</span>
-                        <span className="oj-upd-row-desc">
+            <section className="oj-set-section">
+                <h3 className="oj-set-section__title">Installers</h3>
+                <div className="oj-set-row">
+                    <div className="oj-set-row__text">
+                        <span className="oj-set-row__label">Download installer</span>
+                        <span className="oj-set-row__desc">
                             For a clean reinstall, another platform, or a stale shortcut.
                         </span>
                     </div>
-                    <Button
-                        variant="secondary"
-                        className="oj-upd-dl"
-                        disabled={manualOpening}
-                        onClick={() => void handleManualDownload()}
-                    >
-                        <IconDownload size={16} aria-hidden="true" />
-                        {manualOpening ? 'Opening…' : `Download ${channelLabel(updateChannel)}`}
-                    </Button>
+                    <div className="oj-set-row__control">
+                        <Button
+                            variant="secondary"
+                            className="oj-upd-dl"
+                            disabled={manualOpening}
+                            onClick={() => void handleManualDownload()}
+                        >
+                            <IconDownload size={16} aria-hidden="true" />
+                            {manualOpening ? 'Opening…' : `Download ${channelLabel(updateChannel)}`}
+                        </Button>
+                    </div>
                 </div>
 
-                {lastGood && !pinnedVersion && (
-                    <div className="oj-upd-row">
-                        {!confirmingRollback ? (
-                            <>
-                                <div className="oj-upd-row-text">
-                                    <span className="oj-upd-row-label">Roll back</span>
-                                    <span className="oj-upd-row-desc">
-                                        Restore <code className="oj-upd-ver">{lastGood}</code> and your
-                                        projects, settings &amp; AI memory.
-                                    </span>
-                                </div>
-                                <Button variant="danger" onClick={() => setConfirmingRollback(true)}>
-                                    Roll back…
-                                </Button>
-                            </>
-                        ) : (
-                            <div className="oj-upd-confirm">
-                                <p className="oj-upd-row-desc">
-                                    Restores your data from before the last update and turns auto-update
-                                    off. Restart afterwards; to revert the app itself, reinstall from the{' '}
-                                    <Button variant="link" onClick={() => void openExternal(RELEASES_URL)}>
-                                        releases page
-                                    </Button>
-                                    .
-                                </p>
-                                <div className="oj-upd-confirm-actions">
-                                    <Button variant="danger" onClick={() => void handleRollback()}>
-                                        Yes, roll back to <code className="oj-upd-ver">{lastGood}</code>
-                                    </Button>
-                                    <Button
-                                        variant="secondary"
-                                        onClick={() => setConfirmingRollback(false)}
-                                    >
-                                        Cancel
-                                    </Button>
-                                </div>
-                            </div>
-                        )}
+                {lastGood && !pinnedVersion && !confirmingRollback && (
+                    <div className="oj-set-row">
+                        <div className="oj-set-row__text">
+                            <span className="oj-set-row__label">Roll back</span>
+                            <span className="oj-set-row__desc">
+                                Restore <code className="oj-upd-ver">{lastGood}</code> and your
+                                projects, settings &amp; AI memory.
+                            </span>
+                        </div>
+                        <div className="oj-set-row__control">
+                            <Button variant="danger" onClick={() => setConfirmingRollback(true)}>
+                                Roll back…
+                            </Button>
+                        </div>
                     </div>
                 )}
-            </div>
+
+                {/* The confirm is an in-panel Callout, never a native dialog: a
+                    native confirm() steals focus from a live instrument. */}
+                {lastGood && !pinnedVersion && confirmingRollback && (
+                    <Callout
+                        variant="danger"
+                        title="Roll back your data?"
+                        role="alertdialog"
+                        aria-label="Confirm rollback"
+                    >
+                        <p className="oj-upd-confirm-body">
+                            Restores your data from before the last update and turns auto-update
+                            off. Restart afterwards; to revert the app itself, reinstall from the{' '}
+                            <Button variant="link" onClick={() => void openExternal(RELEASES_URL)}>
+                                releases page
+                            </Button>
+                            .
+                        </p>
+                        <div className="oj-upd-confirm-actions">
+                            <Button variant="secondary" onClick={() => setConfirmingRollback(false)}>
+                                Cancel
+                            </Button>
+                            <Button variant="danger" onClick={() => void handleRollback()}>
+                                Yes, roll back to <code className="oj-upd-ver">{lastGood}</code>
+                            </Button>
+                        </div>
+                    </Callout>
+                )}
+            </section>
 
             {checkFailed && (
-                <Callout variant="danger" className="oj-upd-callout">
+                <Callout variant="danger" title="Update check failed">
                     {error}
                 </Callout>
             )}

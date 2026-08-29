@@ -18,7 +18,7 @@ export function Bench() {
     if (ghost) return <button className="plugin-bench__ghost" type="button" aria-label={`${cards.length} plugin reports`}>{cards.length}</button>;
     const visible = cards.slice(0, 3);
     return <aside className="plugin-bench" aria-label="Plugin reports">
-        {visible.map((card) => { const words = copy(card); return <Banner key={card.id} tone="warning" title={words.title} message={words.message} actions={<><Button onClick={() => { setNodePluginLoadError(card.nodeId, false); try { getExecutor().resync(); } catch { /* no executor yet */ } dismissPluginFault(card.id); }}>{words.action}</Button><Button onClick={() => window.dispatchEvent(new CustomEvent('openjammer:toggle-devlog', { detail: { correlation: card.corr } }))}>Details</Button></>} />; })}
+        {visible.map((card) => { const words = copy(card); return <Banner key={card.id} tone="warning" title={words.title} message={words.message} actions={<><Button variant="primary" onClick={() => { setNodePluginLoadError(card.nodeId, false); try { getExecutor().resync(); } catch { /* no executor yet */ } dismissPluginFault(card.id); }}>{words.action}</Button><Button variant="ghost" onClick={() => window.dispatchEvent(new CustomEvent('openjammer:toggle-devlog', { detail: { correlation: card.corr } }))}>Details</Button></>} />; })}
         {cards.length > 3 && <button type="button" className="plugin-bench__more" onClick={() => window.dispatchEvent(new CustomEvent('openjammer:open-browser'))}>{cards.length - 3} more — open the Browser</button>}
         <span className="sr-only" aria-live="polite">{cards.at(-1)?.pluginName} bypassed — audio continues.</span>
     </aside>;

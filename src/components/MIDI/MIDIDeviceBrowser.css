@@ -1,48 +1,68 @@
-/**
+/*
  * MIDI Device Browser — inner-content layout only.
  *
- * The overlay chrome (scrim/panel/header/close) is the oj-ui Modal +
- * PanelHeader, and the search field is an oj-ui Input — those own their own
- * tokens. This file is just the section/grid/empty/footer layout inside the
- * panel.
+ * The overlay chrome (scrim/panel/header/close), the search field, the empty
+ * state and the keycaps are oj-ui parts (Modal / PanelHeader / Input / Callout /
+ * Kbd) and own their tokens. This file lays out the panel: one scroller holding
+ * the two sections, and a quiet keyboard-hint footer.
  */
 
-/* Sections */
-.midi-browser-section {
-    padding: var(--space-md) var(--space-lg);
+.midi-browser {
+    display: flex;
+    flex-direction: column;
+    max-height: min(680px, calc(100vh - 2 * var(--space-lg)));
+    min-height: 0;
+    font-family: var(--font-sans);
+    color: var(--text-primary);
+}
+
+/* One scroller for the whole body — two independent ones made the panel feel
+   like two panels stacked, and neither ever showed its own end. */
+.midi-browser-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+    flex: 1;
+    min-height: 0;
+    padding: var(--space-md) var(--space-lg) var(--space-lg);
     overflow-y: auto;
 }
 
-.midi-browser-section h3 {
-    margin: 0 0 var(--space-md);
-    font-family: var(--font-sans);
-    font-size: var(--text-sm);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    color: var(--text-muted);
+/* Sections keep their height; the scroller is what gives. */
+.midi-browser-body > * {
+    flex: none;
 }
 
-/* Device grid */
-.midi-device-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+.midi-browser-section {
+    display: flex;
+    flex-direction: column;
     gap: var(--space-md);
 }
 
-/* Empty state */
-.midi-browser-empty {
-    text-align: center;
-    padding: var(--space-xl);
+.midi-browser-section h3 {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
     color: var(--text-muted);
-    font-style: italic;
 }
 
-/* Footer */
+.midi-device-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--space-md);
+}
+
 .midi-browser-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-xs);
     padding: var(--space-sm) var(--space-lg);
     border-top: 1px solid var(--border-subtle);
-    text-align: center;
+    background: var(--bg-secondary);
     font-size: var(--text-xs);
     color: var(--text-muted);
 }

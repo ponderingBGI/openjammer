@@ -1,67 +1,187 @@
-/* AppErrorBoundary (§4) — a calm full-screen recovery card, design-token themed. */
+/*
+ * AppErrorBoundary — the one stylesheet in `src/` that is LITERAL-ONLY ON PURPOSE.
+ *
+ * WHY (this is a rule, not an oversight):
+ * `main.tsx` imports this file directly and mounts the boundary OUTSIDE the app
+ * tree, because it is what renders when the app tree has failed. The semantic
+ * tokens (`--bg-node`, `--text-primary`, …) are not in the stylesheet at all —
+ * they are written onto `document.documentElement` at runtime by
+ * `applyTheme()`. Any failure BEFORE or DURING that call — a broken theme
+ * payload, a corrupted `openjammer-theme` value, a crash inside the token
+ * bootstrap, a stylesheet that 404s offline — leaves every `var(--x)` resolving
+ * to nothing. A recovery card that renders as black-on-black, or as an unstyled
+ * wall of text, is not a recovery card. So every value below is a literal, and
+ * the two themes are selected by `prefers-color-scheme`, which the OS answers
+ * without any JavaScript of ours running at all.
+ *
+ * The values ARE the New DNA palette, transcribed:
+ *   light  canvas #F4F3F0 · surface #FFFFFF · inset #ECEAE4
+ *          text #1D1C18 / #5A5850 / #6C695F · lines #E3E1DA / #C8C5BB
+ *          accent #EE5E23 (oklch(0.66 0.19 40)) · danger ink #BB0015
+ *   dark   canvas #161510 · surface #201F19 · inset #2A2822
+ *          text #F1EFE8 / #ABA89C / #928E83 · lines #33312A / #4B473D
+ *          accent #FF723A (oklch(0.72 0.19 40)) · danger #F84B4B
+ * If the palette moves, this file must be updated BY HAND in the same commit —
+ * that cost is the price of a card that always renders, and it is worth paying.
+ *
+ * Shape: a Callout-shaped card (surface fill, 1px hairline, 12px radius, soft
+ * layered shadow, tinted title, secondary body) so the worst moment in the app
+ * still looks like the app.
+ */
 
 .app-error-overlay {
     position: fixed;
     inset: 0;
-    z-index: 2000;
+    z-index: 2147483000;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: var(--space-lg, 24px);
-    background: color-mix(in srgb, var(--text-primary, #1a1a1a) 40%, transparent);
+    padding: 24px;
+    background: rgba(24, 22, 16, 0.45);
+    font-family: 'Outfit', system-ui, 'Segoe UI', -apple-system, sans-serif;
 }
 
 .app-error-card {
-    width: min(420px, calc(100vw - 48px));
-    background: var(--bg-node, #fdfcf7);
-    border: 1px solid var(--text-primary, #1a1a1a);
-    border-radius: var(--radius-lg, 14px);
-    box-shadow: var(--shadow-overlay, 0 8px 28px rgba(0, 0, 0, 0.25));
-    color: var(--text-primary, #1a1a1a);
-    padding: var(--space-lg, 24px);
-    text-align: center;
+    box-sizing: border-box;
+    width: min(440px, calc(100vw - 48px));
+    padding: 20px 22px;
+    border: 1px solid #E3E1DA;
+    border-radius: 12px;
+    background: #FFFFFF;
+    box-shadow: 0 2px 6px rgba(24, 22, 16, 0.07), 0 12px 28px rgba(24, 22, 16, 0.11);
+    color: #1D1C18;
+    text-align: left;
 }
 
+/* Callout physics: the variant tints the TITLE, the body stays neutral. */
 .app-error-title {
-    font-family: var(--font-sans, sans-serif);
-    margin: 0 0 var(--space-sm, 8px);
+    margin: 0 0 6px;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1.2;
+    color: #BB0015;
 }
 
+/* The raw message is machine text, so it is mono, on the inset, and wraps. */
 .app-error-msg {
-    font-family: var(--font-mono, monospace);
-    font-size: var(--text-sm, 13px);
-    color: var(--accent-danger, #e53935);
+    margin: 0 0 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    background: #ECEAE4;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #1D1C18;
     word-break: break-word;
-    margin: 0 0 var(--space-sm, 8px);
 }
 
 .app-error-note {
-    font-size: var(--text-xs, 12px);
-    color: var(--text-muted, #777);
-    margin: 0 0 var(--space-md, 16px);
+    margin: 0 0 16px;
+    font-size: 13px;
+    line-height: 1.45;
+    color: #5A5850;
 }
 
 .app-error-actions {
     display: flex;
-    gap: var(--space-sm, 8px);
-    justify-content: center;
+    gap: 8px;
+    justify-content: flex-end;
 }
 
+/* Flat inset button — no border, no shadow, 0.96 press. */
 .app-error-btn {
-    font-family: var(--font-sans, sans-serif);
-    padding: var(--space-xs, 6px) var(--space-md, 16px);
-    border: 1px solid var(--text-primary, #1a1a1a);
-    border-radius: var(--radius-sm, 8px);
-    background: var(--bg-node, #fdfcf7);
-    color: var(--text-primary, #1a1a1a);
+    padding: 9px 16px;
+    border: 0;
+    border-radius: 10px;
+    background: #ECEAE4;
+    color: #1D1C18;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
     cursor: pointer;
-}
-
-.app-error-btn.primary {
-    background: var(--accent-primary);
-    color: var(--text-on-accent, #fff);
+    transition: background 120ms cubic-bezier(.2, .8, .3, 1),
+        transform 260ms cubic-bezier(.34, 1.56, .64, 1);
 }
 
 .app-error-btn:hover {
-    filter: brightness(1.06);
+    background: #DFDCD4;
+}
+
+.app-error-btn:active {
+    transform: scale(0.96);
+}
+
+.app-error-btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(238, 94, 35, 0.32);
+}
+
+.app-error-btn.primary {
+    background: #EE5E23;
+    color: #1D1C18;
+}
+
+.app-error-btn.primary:hover {
+    background: #D84A00;
+}
+
+/* ── Dark, chosen by the OS — no JS of ours has to have run ─────────────── */
+
+@media (prefers-color-scheme: dark) {
+    .app-error-overlay {
+        background: rgba(0, 0, 0, 0.55);
+    }
+
+    .app-error-card {
+        border-color: #33312A;
+        background: #201F19;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35), 0 14px 32px rgba(0, 0, 0, 0.4);
+        color: #F1EFE8;
+    }
+
+    .app-error-title {
+        color: #F84B4B;
+    }
+
+    .app-error-msg {
+        background: #2A2822;
+        color: #F1EFE8;
+    }
+
+    .app-error-note {
+        color: #ABA89C;
+    }
+
+    .app-error-btn {
+        background: #2A2822;
+        color: #F1EFE8;
+    }
+
+    .app-error-btn:hover {
+        background: #37342C;
+    }
+
+    .app-error-btn:focus-visible {
+        box-shadow: 0 0 0 3px rgba(255, 114, 58, 0.4);
+    }
+
+    .app-error-btn.primary {
+        background: #FF723A;
+        color: #1D1C18;
+    }
+
+    .app-error-btn.primary:hover {
+        background: #FF854F;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-error-btn {
+        transition: none;
+    }
+
+    .app-error-btn:active {
+        transform: none;
+    }
 }

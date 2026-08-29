@@ -166,7 +166,7 @@ export function RelinkSamplesDialog({
 
         {remainingMissing.length === 0 ? (
           <Callout variant="success" className="relink-banner">
-            All samples have been relinked!
+            Every sample is linked again.
           </Callout>
         ) : (
           <>
@@ -184,7 +184,7 @@ export function RelinkSamplesDialog({
                       onClick={() => handleRelinkFile(sample)}
                       disabled={relinkingId === sample.id}
                     >
-                      {relinkingId === sample.id ? 'Browsing...' : 'Browse'}
+                      {relinkingId === sample.id ? 'Browsing…' : 'Browse…'}
                     </Button>
                   }
                 >
@@ -202,7 +202,7 @@ export function RelinkSamplesDialog({
                 onClick={handleRelinkFromFolder}
                 disabled={relinkingId !== null}
               >
-                Browse Folder to Auto-Locate
+                Browse a folder to auto-locate
               </Button>
             </div>
           </>
