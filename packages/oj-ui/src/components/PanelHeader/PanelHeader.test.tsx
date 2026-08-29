@@ -27,7 +27,8 @@ describe('PanelHeader', () => {
         const { container } = render(<PanelHeader title="A" onBack={onBack} backLabel="Go back" />);
         const back = container.querySelector('.oj-panel-header__back') as HTMLButtonElement;
         expect(back).toBeTruthy();
-        expect(back.textContent).toContain('Go back');
+        expect(back.getAttribute('aria-label')).toBe('Go back');
+        expect(back.className).toContain('oj-icon-btn');
         back.click();
         expect(onBack).toHaveBeenCalledTimes(1);
     });

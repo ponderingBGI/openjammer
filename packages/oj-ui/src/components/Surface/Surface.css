@@ -1,21 +1,17 @@
 
 .oj-surface {
     background: var(--bg-node);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-subtle);
     color: var(--text-primary);
 }
 
 
-.oj-surface--elevation-rest {
+.oj-surface--elevation-raised {
     box-shadow: var(--shadow-raised);
 }
 
-.oj-surface--elevation-menu {
+.oj-surface--elevation-overlay {
     box-shadow: var(--shadow-overlay);
-}
-
-.oj-surface--elevation-lifted {
-    box-shadow: var(--shadow-raised);
 }
 
 /* Radius — corner softness from the token scale. */

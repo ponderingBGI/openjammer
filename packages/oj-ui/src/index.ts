@@ -159,6 +159,19 @@ export type { DeviceSelectProps, DeviceSelectItem } from './components/DeviceSel
 export { KeyTile } from './components/KeyTile/KeyTile';
 export type { KeyTileProps, KeyTileVariant } from './components/KeyTile/KeyTile';
 
+export { Meter } from './components/Meter/Meter';
+export type { MeterProps, MeterHandle } from './components/Meter/Meter';
+
+export { TransportPill } from './components/TransportPill/TransportPill';
+export type {
+    TransportPillProps,
+    TransportRecord,
+    TransportPosition,
+    TransportTempo,
+    TransportLoop,
+    TransportMetronome,
+} from './components/TransportPill/TransportPill';
+
 export { Banner } from './components/Banner/Banner';
 export type { BannerProps, BannerTone } from './components/Banner/Banner';
 export { ParamRow } from './components/ParamRow/ParamRow';

@@ -8,6 +8,7 @@ describe('Callout', () => {
         const box = container.querySelector('.oj-callout')!;
         expect(box.className).toContain('oj-callout');
         expect(box.getAttribute('role')).toBe('note');
+        expect(box.className).toContain('oj-surface--elevation-raised');
         expect(box.textContent).toBe('Body');
     });
 

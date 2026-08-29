@@ -6,8 +6,8 @@ import { Chip } from '../Chip/Chip';
 export default { title: 'Composites/PanelHeader' };
 
 const frame = {
-    maxWidth: 'var(--node-min-width)',
-    width: '420px',
+    maxWidth: '100%',
+    width: '480px',
     border: '1px solid var(--border-subtle)',
     borderRadius: 'var(--radius-lg)',
     background: 'var(--bg-node)',

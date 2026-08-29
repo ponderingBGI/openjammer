@@ -26,16 +26,21 @@ describe('Chip', () => {
         expect(cls).toContain('is-pressed');
     });
 
-    it('renders the glyph (aria-hidden) and exact count when provided', () => {
+    it('suppresses dot glyphs but keeps the exact count', () => {
         const { container } = render(
             <Chip glyph="●" count={7}>
                 reverb
             </Chip>,
         );
-        const glyph = container.querySelector('.oj-chip__glyph')!;
-        expect(glyph.textContent).toBe('●');
-        expect(glyph.getAttribute('aria-hidden')).toBe('true');
+        expect(container.querySelector('.oj-chip__glyph')).toBeNull();
         expect(container.querySelector('.oj-chip__count')!.textContent).toBe('7');
+    });
+
+    it('renders a non-dot glyph for compatibility', () => {
+        const { container } = render(<Chip glyph={<span data-testid="bolt">bolt</span>}>x</Chip>);
+        const glyph = container.querySelector('.oj-chip__glyph')!;
+        expect(glyph.getAttribute('aria-hidden')).toBe('true');
+        expect(glyph.querySelector('[data-testid="bolt"]')).not.toBeNull();
     });
 
     it('omits glyph and count slots when not provided', () => {

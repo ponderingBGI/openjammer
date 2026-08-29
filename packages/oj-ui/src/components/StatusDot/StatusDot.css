@@ -3,7 +3,7 @@
     display: inline-block;
     width: var(--space-sm);
     height: var(--space-sm);
-    border: 1px solid var(--border-strong);
+    border: 0;
     border-radius: var(--radius-pill);
     background: var(--text-muted);
     flex-shrink: 0;

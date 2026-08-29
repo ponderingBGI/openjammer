@@ -64,4 +64,12 @@ describe('ProgressBar', () => {
         expect(bar.getAttribute('aria-label')).toBe('loading');
         expect(bar.className).toContain('extra');
     });
+
+    it('renders an aria-correct indeterminate state without a value', () => {
+        const { container } = render(<ProgressBar indeterminate aria-label="loading" />);
+        const bar = container.querySelector('.oj-progress')!;
+        expect(bar.className).toContain('is-indeterminate');
+        expect(bar.getAttribute('aria-valuenow')).toBeNull();
+        expect((container.querySelector('.oj-progress__fill') as HTMLElement).style.width).toBe('');
+    });
 });

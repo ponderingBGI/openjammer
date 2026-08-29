@@ -4,7 +4,7 @@ import './Kbd.css';
 export interface KbdProps extends HTMLAttributes<HTMLElement> {
     /**
      * Marks a remapped binding (a user-customized shortcut). Tints the keycap
-     * with `--accent-secondary` so a custom key reads as deliberately changed,
+     * with `--accent-ink` so a custom key reads as deliberately changed,
      * not stock. Per Mono-Means-Exact the glyph stays in `--font-mono`.
      */
     custom?: boolean;

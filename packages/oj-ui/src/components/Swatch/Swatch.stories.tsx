@@ -5,16 +5,14 @@ export default { title: 'Primitives/Swatch' };
 
 export const Gallery: Story = () => (
     <div style={{ display: 'flex', gap: 'var(--space-sm)', flexWrap: 'wrap', alignItems: 'flex-start' }}>
-        <Swatch bg="#faf6ef" node="#ffffff" name="Sketchbook" selected />
-        <Swatch bg="#1c1c1c" node="#2b2b2b" name="Midnight" />
-        <Swatch bg="#0a1f2b" node="#13384a" name="Deep Sea" />
-        <Swatch bg="#fdf0e6" node="#fff7f0" name="Sunrise" />
+        <Swatch bg="#F4F3F0" node="#FFFFFF" name="Light" selected />
+        <Swatch bg="#161510" node="#201F19" name="Dark" />
     </div>
 );
 
 export const States: Story = () => (
     <div style={{ display: 'flex', gap: 'var(--space-sm)' }}>
-        <Swatch bg="#faf6ef" node="#ffffff" name="Unselected" />
-        <Swatch bg="#faf6ef" node="#ffffff" name="Selected" selected />
+        <Swatch bg="#F4F3F0" node="#FFFFFF" name="Unselected" />
+        <Swatch bg="#F4F3F0" node="#FFFFFF" name="Selected" selected />
     </div>
 );

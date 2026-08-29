@@ -6,10 +6,10 @@ export default { title: 'Primitives/ListRow' };
 export const States: Story = () => (
     <div style={{ maxWidth: 360 }}>
         <List aria-label="Models">
-            <ListRow>Resting row</ListRow>
-            <ListRow selected>Selected (accent ring + fill)</ListRow>
-            <ListRow current>Current (left accent marker)</ListRow>
-            <ListRow selected current>
+            <ListRow tabIndex={0}>Resting row</ListRow>
+            <ListRow tabIndex={0} selected>Selected (inset fill + focus outline)</ListRow>
+            <ListRow tabIndex={0} current>Current (accent dot)</ListRow>
+            <ListRow tabIndex={0} selected current>
                 Selected + current
             </ListRow>
             <ListRow disabled>Disabled</ListRow>

@@ -18,6 +18,7 @@
     color: var(--text-primary);
     font-family: var(--font-sans);
     font-size: var(--text-md);
+    font-weight: 500;
     cursor: pointer;
     user-select: none;
     transition: background var(--motion-fast), border-color var(--motion-fast),
@@ -30,27 +31,28 @@
 
 
 .oj-list-row.is-selected {
-    border-color: var(--accent-primary);
-    background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-primary) 25%, transparent);
+    background: var(--bg-tertiary);
+    color: var(--accent-ink);
 }
 
-.oj-list-row.is-selected:hover {
-    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+.oj-list-row:focus-visible {
+    outline: 1.5px solid var(--accent-primary);
+    outline-offset: 1px;
 }
 
-
-.oj-list-row.is-current {
-    box-shadow: inset 3px 0 0 var(--accent-primary);
-}
-
-.oj-list-row.is-selected.is-current {
-    box-shadow: inset 3px 0 0 var(--accent-primary),
-        0 0 0 3px color-mix(in srgb, var(--accent-primary) 25%, transparent);
+.oj-list-row.is-current .oj-list-row__body::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: var(--space-sm);
+    border-radius: var(--radius-pill);
+    background: var(--accent-secondary);
+    vertical-align: middle;
 }
 
 .oj-list-row.is-disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: default;
     pointer-events: none;
 }

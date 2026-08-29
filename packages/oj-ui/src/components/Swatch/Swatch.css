@@ -5,26 +5,29 @@
     gap: var(--space-xs);
     padding: var(--space-xs);
     border: 1px solid var(--border-strong);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-md);
     background: var(--bg-node);
     cursor: pointer;
-    transition: border-color var(--motion-fast), transform var(--motion-fast),
+    transition: border-color var(--motion-fast), transform var(--motion-spring),
         box-shadow var(--motion-fast);
 }
 
 .oj-swatch:hover {
     border-color: var(--accent-primary);
-    transform: translateY(-1px);
 }
 
 .oj-swatch:active {
-    transform: translateY(1px);
+    transform: scale(var(--press-scale-btn));
 }
 
+.oj-swatch:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
 
 .oj-swatch.is-selected {
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 0 3px var(--accent-primary);
+    border: 1.5px solid var(--accent-primary);
+    box-shadow: var(--focus-ring);
 }
 
 /* The canvas preview — fills with the theme bg color (inline data). */

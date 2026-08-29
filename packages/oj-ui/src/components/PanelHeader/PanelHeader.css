@@ -25,7 +25,6 @@
    glyph rotated), matching the `← Back` step it replaces. */
 .oj-panel-header__back {
     flex-shrink: 0;
-    gap: var(--space-xs);
 }
 
 .oj-panel-header__back-chevron {
@@ -48,7 +47,7 @@
 
 .oj-panel-header__title {
     font-family: var(--font-sans);
-    font-size: var(--text-lg);
+    font-size: var(--text-xl);
     font-weight: 600;
     line-height: 1.2;
     color: var(--text-primary);

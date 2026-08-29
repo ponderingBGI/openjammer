@@ -12,6 +12,7 @@ describe('Menu', () => {
         const menu = container.querySelector('[role="menu"]')!;
         expect(menu.className).toContain('oj-menu');
         expect(menu.getAttribute('aria-label')).toBe('File');
+        expect(menu.className).toContain('oj-surface--elevation-overlay');
     });
 
     it('fires onSelect on click and Enter for a leaf item', () => {
@@ -198,5 +199,12 @@ describe('Menu', () => {
         const item = container.querySelector('.oj-menu-item')!;
         expect(item.className).toContain('oj-menu-item');
         expect(item.className).toContain('extra');
+    });
+
+    it('marks destructive items with the danger modifier', () => {
+        const { container } = render(
+            <Menu ariaLabel="m"><MenuItem label="Delete" danger /></Menu>,
+        );
+        expect(container.querySelector('.oj-menu-item')!.className).toContain('oj-menu-item--danger');
     });
 });
