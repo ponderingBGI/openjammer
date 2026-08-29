@@ -21,7 +21,7 @@ import type { Arrangement } from '../song/types';
 import type { CapturedNote } from '@openjammer/oj-protocol';
 import { captureResultToVerbs, recordBindings, trackRecordKind, wasmTapToCapturedNote, type RecordTrackBinding } from '../song/recording';
 import { logger } from '../utils/log';
-import { registerHistoryDriver, useHistoryStore, type EditVerb } from './historyStore';
+import { isApplyingHistory, registerHistoryDriver, useHistoryStore, type EditVerb, type TransportSnapshot } from './historyStore';
 import { appendMidiRecordJournal, beginMidiRecordJournal, clearMidiRecordJournal } from '../persistence/recovery/midiRecordJournal';
 import type { SurfaceId } from './uiViewStore';
 
@@ -241,8 +241,32 @@ export interface ArrangementStore {
     recordError: string | null;
 
     // ── actions ──
-    /** Load a song (normalized on entry); resets the command-log + transport. */
-    setArrangement: (arr: Arrangement | null) => void;
+    /**
+     * Load a song (normalized on entry); resets the transport — which is also
+     * why `Ctrl+Z` of a preset rig stops playback: taking the Song away is a
+     * document swap, and that is intended (the song being played is gone).
+     *
+     * By default this also CLEARS the command-log: opening a different document
+     * is not an edit to the current one, and an undo across that boundary would
+     * put half of one song inside another.
+     *
+     * `preserveHistory` is the exception, and it exists for one shape: an atomic
+     * graph+arrangement operation — installing a preset rig — where the Song and
+     * the patch the player just asked for are ONE gesture. It keeps the log and
+     * records a `document` entry whose inverse is the arrangement that was open
+     * before, so the whole rig (nodes, cables AND Song) leaves on one `Ctrl+Z`.
+     * Called inside an open history gesture it merges into that single entry;
+     * called OUTSIDE one it mints its own standalone `Load song` / `Close song`
+     * entry (no production caller does that today — `installRig` is the only
+     * one and it always brackets — but the shape is deliberate and pinned).
+     *
+     * `transport` is the loop arm this document should land with. Omitted, the
+     * arm resets to off exactly as it always has; passed, it is applied through
+     * `setLoopEnabled` (so the engine hears it too) and recorded in the
+     * snapshot, which is what makes redo reproduce the do and undo restore the
+     * switch the player had.
+     */
+    setArrangement: (arr: Arrangement | null, options?: { preserveHistory?: boolean; transport?: TransportSnapshot }) => void;
     /** Apply one verb or an atomic batch. Preview applications are transient; the
      * next non-preview application commits one history entry and re-anchors once. */
     apply: (verb: Verb | Verb[], options?: { preview?: boolean; surface?: Extract<SurfaceId, 'arrangement' | 'pianoroll'> }) => ArrangementApplyResult;
@@ -421,9 +445,13 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
         recordingBindings: [],
         recordError: null,
 
-        setArrangement: (arr) => {
+        setArrangement: (arr, options) => {
             // Loading a new song stops any preview of the old one (release + restore).
             stopPreview();
+            const previous = get().arrangement;
+            // Captured BEFORE the reset below: this is the arm the player had,
+            // and the inverse of a preserved swap has to put it back.
+            const previousTransport: TransportSnapshot = { loopEnabled: get().loopEnabled, loopOn: get().loopOn };
             const normalized = arr ? normalizeArrangement(arr) : null;
             previewBase = null;
             previewVerbs = [];
@@ -468,7 +496,30 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 recordingBindings: [],
                 recordError: null,
             });
-            useHistoryStore.getState().clear();
+            // A document can arrive with its loop already armed: the rig
+            // installer asks for it, and undo/redo replay carries the arm in
+            // the snapshot. Routed through `setLoopEnabled` so the executor
+            // hears it, not just the store. Omitted, the reset above stands.
+            if (options?.transport) {
+                get().setLoopEnabled(options.transport.loopEnabled);
+                set({ loopOn: options.transport.loopOn });
+            }
+            if (!options?.preserveHistory) {
+                // The law: opening a document resets the command-log.
+                useHistoryStore.getState().clear();
+                return;
+            }
+            // Part of a larger gesture. Keep the log, and put the swap IN it so
+            // it can be taken back — unless we ARE the undo/redo replaying it,
+            // in which case recording would append the step we just reversed.
+            if (isApplyingHistory()) return;
+            const appliedTransport: TransportSnapshot = { loopEnabled: get().loopEnabled, loopOn: get().loopOn };
+            useHistoryStore.getState().record(
+                [{ domain: 'document', verb: { kind: 'setArrangement', arrangement: normalized, transport: appliedTransport } }],
+                [{ domain: 'document', verb: { kind: 'setArrangement', arrangement: previous, transport: previousTransport } }],
+                normalized ? 'Load song' : 'Close song',
+                'arrangement',
+            );
         },
 
         apply: (verb, options) => {
@@ -834,15 +885,41 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
 });
 
 registerHistoryDriver((verbs) => {
-    const arrangementVerbs = verbs
-        .filter((item): item is Extract<EditVerb, { domain: 'arrangement' }> => item.domain === 'arrangement')
-        .map((item) => item.verb);
-    if (!arrangementVerbs.length) return;
-    const store = useArrangementStore.getState();
-    if (!store.arrangement) return;
-    const { next } = applyVerbs(store.arrangement, arrangementVerbs);
-    useArrangementStore.setState({ arrangement: next, docVersion: store.docVersion + 1 });
-    if (store.isPlaying) republishPreview(next, store.currentTick(), () => useArrangementStore.getState().stop());
+    // Apply in the order recorded. A `document` snapshot replaces the whole
+    // song, so anything around it only makes sense relative to WHERE it sits:
+    // forward, `[document, ...Verbs]` means the verbs edit the song just
+    // loaded; on undo `record` prepends inverses, so the same entry arrives as
+    // `[...invVerbs, document]` and the restore has to come LAST — the inverse
+    // verbs still belong to the song being taken away. Two passes with
+    // documents forced first would restore the old song and then edit it with
+    // verbs meant for the new one. So: batch consecutive arrangement `Verb`s
+    // (one `applyVerbs` per run, one re-publish) and flush that batch before
+    // each swap. `setArrangement` no-ops its own recording while history is
+    // applying, so this cannot re-enter the log.
+    let pending: Verb[] = [];
+    const flush = (): void => {
+        if (!pending.length) return;
+        const batch = pending;
+        pending = [];
+        const store = useArrangementStore.getState();
+        if (!store.arrangement) return;
+        const { next } = applyVerbs(store.arrangement, batch);
+        useArrangementStore.setState({ arrangement: next, docVersion: store.docVersion + 1 });
+        if (store.isPlaying) republishPreview(next, store.currentTick(), () => useArrangementStore.getState().stop());
+    };
+    for (const item of verbs) {
+        if (item.domain === 'arrangement') {
+            pending.push(item.verb);
+            continue;
+        }
+        if (item.domain !== 'document') continue;
+        flush();
+        useArrangementStore.getState().setArrangement(item.verb.arrangement, {
+            preserveHistory: true,
+            transport: item.verb.transport,
+        });
+    }
+    flush();
 });
 
 // Playwright's production-bundle gate cannot instantiate a physical MIDI device.

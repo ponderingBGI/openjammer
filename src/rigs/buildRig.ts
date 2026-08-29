@@ -8,6 +8,13 @@
  * a single `Ctrl+Z` takes it away again. A first-run patch a player cannot undo
  * would be the one edit in the app that is not theirs.
  *
+ * The beat rig's Song is inside that same bracket. It is not a document the
+ * player opened, it is half of the patch they asked for, so it leaves and comes
+ * back with the nodes — and with its loop arm — on one Ctrl+Z / one
+ * Ctrl+Shift+Z; see `arrangementStore.setArrangement`'s `preserveHistory` and
+ * `transport` options. That undo STOPS playback, which is intended: taking the
+ * Song back is a document swap, and the song that was playing is gone.
+ *
  * Wires resolve against the LIVE node after it is created, never against the
  * registry's static `defaultPorts`. That is not a nicety: several types REPLACE
  * their declared ports the moment they are added — a `keyboard`'s outputs become
@@ -103,6 +110,31 @@ export function installRig(spec: RigSpec): InstalledRig {
             const id = state.addConnection(source.id, sourcePortId, target.id, targetPortId);
             if (!id) unwired.push(`${wire.from} -> ${wire.to}`);
         }
+
+        // The song half, INSIDE the same gesture. A rig's Song is not a document
+        // the player opened — it is half of the patch they asked for, so it has
+        // to leave on the same Ctrl+Z as the nodes. `preserveHistory` keeps the
+        // command-log (the default swap CLEARS it, which used to wipe the rig's
+        // own entry a line after making it) and records the arrangement that was
+        // open as the inverse, so undo puts the previous document back.
+        //
+        // The loop arm rides WITH the swap rather than following it. This rig's
+        // whole identity is a looping one-bar pattern, so an arm that did not
+        // travel in the snapshot meant redo gave a different sound than the
+        // action it replayed — one bar, then silence — which a performer reads
+        // as "the app lost my patch". Now the `document` verb carries the arm:
+        // redo comes back armed, undo restores the switch the player had.
+        // Transport is still not an edit — nothing else about it (play, click,
+        // count-in) is in the log; this is one document's loop travelling with
+        // that document, because `setArrangement` is what resets it.
+        if (spec.song === 'beat-loop') {
+            useArrangementStore.getState().setArrangement(buildBeatSong(), {
+                preserveHistory: true,
+                // `loopOn` is the engine's echo of a loop actually running; the
+                // transport is stopped here, so only the arm is true.
+                transport: { loopEnabled: true, loopOn: false },
+            });
+        }
     } finally {
         // Always close the gesture: a half-open history frame would swallow the
         // player's NEXT edit into the rig's undo step.
@@ -110,16 +142,6 @@ export function installRig(spec: RigSpec): InstalledRig {
     }
 
     if (unwired.length) log.warn('rig installed with unwired cables', { rig: spec.id, unwired });
-
-    // The song half. `setArrangement` is the same call the arrangement's own
-    // "Start from …" buttons make, so installing a rig's Song behaves exactly
-    // like choosing a starter — including that it replaces the open song rather
-    // than joining the graph's undo stack.
-    if (spec.song === 'beat-loop') {
-        const arrangement = useArrangementStore.getState();
-        arrangement.setArrangement(buildBeatSong());
-        arrangement.setLoopEnabled(true);
-    }
 
     return { spec, ids, unwired };
 }

@@ -1,12 +1,48 @@
 import { create } from 'zustand';
 import type { Verb } from '../song/verbs';
+import type { Arrangement } from '../song/types';
 import type { GraphVerb } from './graphVerbs';
 import { useEditingContextStore } from './editingContextStore';
 import { useClipboardStore } from './clipboardStore';
 import type { SurfaceId } from './uiViewStore';
 
 export type HistoryScope = 'graph' | 'arrangement' | 'pianoroll' | 'mixed';
-export type EditVerb = { domain: 'graph'; verb: GraphVerb } | { domain: 'arrangement'; verb: Verb };
+
+/**
+ * The transport state a document swap resets, and therefore the state a swap
+ * has to carry if it is to be reversible.
+ *
+ * `setArrangement` hard-resets the loop arm (`arrangementStore`'s `loopOn` /
+ * `loopEnabled`) because a new song's loop location has nothing to do with the
+ * old one's. That is right for opening a document and wrong for replaying one:
+ * without this, a redone beat rig played its bar once instead of looping, and
+ * an undo left the player's own loop switch off. `loopEnabled` is the player's
+ * arm; `loopOn` is the engine's echo of a loop actually running.
+ */
+export type TransportSnapshot = { loopEnabled: boolean; loopOn: boolean };
+
+/**
+ * Replace the WHOLE authoring document in one step.
+ *
+ * `Verb` edits an Arrangement that already exists; this one crosses the
+ * null→song and song→null boundary a `Verb` cannot express, so it carries a
+ * SNAPSHOT rather than a delta. It exists for exactly one thing: an atomic
+ * graph+arrangement operation — installing a preset rig — where the Song and
+ * the patch have to be one entry, one `Ctrl+Z` (see
+ * `arrangementStore.setArrangement`'s `preserveHistory` option). Ordinary
+ * timeline editing must keep using `Verb`s: they are what the agent emits, what
+ * collaboration ships, and what stays small.
+ *
+ * The snapshot is the document AND the loop arm that goes with it, so redo
+ * reproduces the do (an armed rig comes back armed) and undo puts the switch
+ * back where the player had it.
+ */
+export type DocumentVerb = { kind: 'setArrangement'; arrangement: Arrangement | null; transport: TransportSnapshot };
+
+export type EditVerb =
+    | { domain: 'graph'; verb: GraphVerb }
+    | { domain: 'arrangement'; verb: Verb }
+    | { domain: 'document'; verb: DocumentVerb };
 
 export interface HistoryEntry {
     verbs: EditVerb[];

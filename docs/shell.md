@@ -174,7 +174,8 @@ at every density.
 
 `src/rigs/`. Built through the SAME reversible verbs a player drives by hand and the agent
 emits — `graphStore.addNode` / `addConnection` inside ONE gesture, so the whole rig is a
-single history entry and one `Ctrl+Z` takes it away.
+single history entry and one `Ctrl+Z` takes it away. The beat rig's Song is inside that
+same gesture (see below), not a document opened beside it.
 
 | Goal | Real nodes | Sound |
 |---|---|---|
@@ -224,6 +225,21 @@ every mode; only the bare letters are mode-gated, because those are the notes.
 one bar, a loop location, and its own graph spec (drum voice → speaker). It plays on the
 shared transport — pressing Stop stops it, the pill's readout is the truth, and the piano
 roll opens the same notes.
+
+**The Song leaves on the same `Ctrl+Z` as the nodes.** It is installed INSIDE the rig's
+gesture, so nodes, cables and Song are one history entry: one undo takes the whole rig
+away and puts back whatever song was open before, one redo brings all of it back. That
+needs a swap the timeline's ordinary `Verb`s cannot express (a `Verb` edits a song that
+exists; a rig crosses none→song), so the command-log carries one extra shape for exactly
+this case — a `document` snapshot verb (`historyStore.EditVerb`,
+`arrangementStore.setArrangement`'s `preserveHistory` option), applied in the order it was
+recorded: a swap lands before the `Verb`s that edit the song it brought in, and on undo the
+restore comes last, after the inverse verbs that still belong to the song being taken away.
+Opening a document by hand still CLEARS the log, as it must: undo may never reach across
+a document boundary and put half of one song inside another. The snapshot carries the
+**loop arm** with the document, because `setArrangement` resets the transport: a redone beat
+rig comes back looping exactly as the install left it, and an undo puts the loop switch back
+where the player had it. That undo also stops playback — the song being played is gone.
 
 `src/components/Shell/StepGrid.tsx` is a **thin view over that clip**: three rows × eight
 cells, and every toggle goes through `drawNotes` / `eraseNotes` — the same operations a

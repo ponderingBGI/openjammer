@@ -164,6 +164,95 @@ describe('preset rigs', () => {
             expect(state.loopEnabled).toBe(true);
         });
 
+        // ── W6-P10 · the rig is ONE gesture, Song included ───────────────
+        // Before this, `installRig` called the plain `setArrangement` AFTER the
+        // gesture closed. That call clears the command-log, so the rig's own
+        // single entry was wiped a line after it was made: the beat rig was the
+        // one edit in the app the player could not take back, and the Song it
+        // dropped on the timeline stayed there for ever. These pin the fix.
+        it('takes the beat rig SONG away on the same Ctrl+Z as its nodes', () => {
+            const before = useGraphStore.getState().nodes.size;
+            installRig(rigFor('beat', 'some'));
+
+            // One entry — the nodes, the cables and the Song.
+            expect(useHistoryStore.getState().entries).toHaveLength(1);
+            expect(useArrangementStore.getState().arrangement?.sources?.[BEAT_SOURCE_ID]).toBeDefined();
+
+            useHistoryStore.getState().undo();
+            expect(useArrangementStore.getState().arrangement).toBeNull();
+            expect(useGraphStore.getState().nodes.size).toBe(before);
+            expect(useGraphStore.getState().connections.size).toBe(0);
+
+            useHistoryStore.getState().redo();
+            expect(useArrangementStore.getState().arrangement?.sources?.[BEAT_SOURCE_ID]).toBeDefined();
+            expect(useGraphStore.getState().nodes.size).toBeGreaterThan(before);
+        });
+
+        it('puts the song that WAS open back, rather than leaving the timeline empty', () => {
+            // Opening a document clears the log (that law is unchanged), so the
+            // rig's entry is the only one, and its inverse has to carry the
+            // whole previous document — a `Verb` cannot cross song→song.
+            useArrangementStore.getState().setArrangement(buildBeatSong());
+            const previous = structuredClone(useArrangementStore.getState().arrangement);
+            expect(useHistoryStore.getState().entries).toHaveLength(0);
+
+            installRig(rigFor('beat', 'some'));
+            expect(useHistoryStore.getState().entries).toHaveLength(1);
+
+            useHistoryStore.getState().undo();
+            expect(useArrangementStore.getState().arrangement).toEqual(previous);
+        });
+
+        it('does not grow the log while the player undoes and redoes it', () => {
+            installRig(rigFor('beat', 'some'));
+            const nodes = useGraphStore.getState().nodes.size;
+
+            for (let cycle = 0; cycle < 3; cycle += 1) {
+                useHistoryStore.getState().undo();
+                useHistoryStore.getState().redo();
+                // Replaying a document swap must not re-record it: one extra
+                // entry per Ctrl+Z would make the log impossible to wind back.
+                expect(useHistoryStore.getState().entries).toHaveLength(1);
+                expect(useHistoryStore.getState().cursor).toBe(1);
+            }
+            expect(useGraphStore.getState().nodes.size).toBe(nodes);
+            expect(useArrangementStore.getState().arrangement?.sources?.[BEAT_SOURCE_ID]).toBeDefined();
+        });
+
+        // ── W6-P10b · redo reproduces the do, undo restores the switch ───
+        // The rig arms the loop, so a redo that did not would give the player a
+        // different sound than the action it replays: the beat rig's identity
+        // IS the looping bar, and one bar then silence reads as a lost patch.
+        it('brings the loop back ARMED when the player redoes the rig', () => {
+            installRig(rigFor('beat', 'some'));
+            expect(useArrangementStore.getState().loopEnabled).toBe(true);
+
+            useHistoryStore.getState().undo();
+            useHistoryStore.getState().redo();
+            expect(useArrangementStore.getState().arrangement?.sources?.[BEAT_SOURCE_ID]).toBeDefined();
+            expect(useArrangementStore.getState().loopEnabled).toBe(true);
+        });
+
+        it('gives the player back the loop switch they had, armed or not', () => {
+            for (const armedBefore of [true, false]) {
+                useArrangementStore.getState().setArrangement(buildBeatSong());
+                useArrangementStore.getState().setLoopEnabled(armedBefore);
+                expect(useArrangementStore.getState().loopEnabled).toBe(armedBefore);
+
+                installRig(rigFor('beat', 'some'));
+                expect(useArrangementStore.getState().loopEnabled).toBe(true);
+
+                useHistoryStore.getState().undo();
+                expect(useArrangementStore.getState().loopEnabled).toBe(armedBefore);
+            }
+        });
+
+        it('records no document swap for a rig that has no song at all', () => {
+            installRig(rigFor('jam', 'some'));
+            const [entry] = useHistoryStore.getState().entries;
+            expect(entry!.verbs.some((item) => item.domain === 'document')).toBe(false);
+        });
+
         it('leaves the other rigs without a song rather than faking a loop', () => {
             installRig(rigFor('jam', 'some'));
             expect(useArrangementStore.getState().arrangement).toBeNull();

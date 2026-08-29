@@ -476,11 +476,15 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         category: 'instruments',
         name: 'Instrument',
         description: 'Generic sampled instrument',
-        // NodeWrapper has NO bespoke branch for 'instrument' (it is NOT in
-        // SCHEMATIC_TYPES nor a renderNodeContent case) — it falls through to the
-        // FREE AutoParamPanel. The old REACT_UI listed it as react, which was the
-        // single mis-declaration; reality is 'auto'.
-        ui: 'auto',
+        // InstrumentNode (schematic switch). `instrument` used to fall through to
+        // the free AutoParamPanel and this said `'auto'`; the previous commit put
+        // it in NodeWrapper's SCHEMATIC_TYPES and gave it the same
+        // `case 'instrument':` branch as the family aliases — the generic voice
+        // every preset rig installs was rendering as an anonymous card with no
+        // voice picker. `ui` is what the plugin manifest advertises, so leaving
+        // it at 'auto' made the manifest describe a faceplate that is not there
+        // (the `node-registry` doctor gate fails on exactly that mismatch).
+        ui: 'react',
         defaultPorts: [
             { id: 'bundle-in', name: 'Bundle', type: 'control', direction: 'input', isBundled: true },
             { id: 'pedal', name: 'Pedal', type: 'control', direction: 'input' },
@@ -864,6 +868,24 @@ export interface MenuCategory {
     items: NodeType[];
 }
 
+/**
+ * The ONE list of node types a user can add — and the only one.
+ *
+ * Both add-a-node surfaces read it: the Ctrl+K palette mints one
+ * `node.add.<type>` Action per item (`CommandBar/useCommandSources.ts`
+ * `buildNodeActions`) and the canvas right-click menu RENDERS those same
+ * Actions, grouped by `def.category` (`Canvas/ContextMenu.tsx`). The in-app
+ * agent's vocabulary comes from here too (`ai/graphAdapter.ts`). So a
+ * registered type that appears in no bucket is shipped DSP nobody — no player,
+ * no agent — can ever place: that is exactly what happened to `pan` and
+ * `width`, two real stereo stages the rigs already install.
+ *
+ * Two rules keep it honest, both pinned by `__tests__/menuCategories.test.ts`:
+ * every registered type is either in a bucket or in that test's documented
+ * `INTERNAL_ONLY` list with a reason, and a type's bucket must match the
+ * `category` it declares (the palette groups by `category`, the menu orders by
+ * bucket name — when they disagree one node lands in two different places).
+ */
 export const menuCategories: MenuCategory[] = [
     {
         name: 'Input',
@@ -881,9 +903,12 @@ export const menuCategories: MenuCategory[] = [
         items: ['looper']
     },
     {
+        // `pan` and `width` render through the free AutoParamPanel
+        // (`ui: 'auto'`), so they needed no surface of their own — only a
+        // bucket, which is precisely why they were missed.
         name: 'Effects',
         icon: '✨',
-        items: ['effect']
+        items: ['effect', 'pan', 'width']
     },
     {
         name: 'Utility',
