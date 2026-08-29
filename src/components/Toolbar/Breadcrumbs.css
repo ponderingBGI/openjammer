@@ -1,54 +1,61 @@
 /**
- * Breadcrumbs.css - Navigation path styling
- * Positioned next to the toolbar via the toolbar-wrapper
+ * Breadcrumbs — where you are, when you are inside a node.
+ *
+ * They live in the topbar's left cluster and appear ONLY below the root level,
+ * so the rule stays quiet until there is something to say. A leading hairline
+ * separates them from the menus without adding a second visual system.
  */
 
 .breadcrumbs {
     display: flex;
     align-items: center;
-    flex-shrink: 0;
-    gap: var(--space-xs);
-    padding: var(--space-xs) var(--space-sm);
-    background: transparent;
+    flex-shrink: 1;
+    min-width: 0;
+    gap: 2px;
+    padding-left: var(--space-sm);
+    margin-left: var(--space-xs);
+    border-left: 1px solid var(--border-subtle);
     font-family: var(--font-sans);
-    font-size: var(--text-md);
+    font-size: var(--text-sm);
     white-space: nowrap;
 }
 
 .breadcrumb-segment {
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
+    gap: 2px;
+    min-width: 0;
 }
 
 .breadcrumb-separator {
     color: var(--text-muted);
-    font-weight: 400;
     user-select: none;
 }
 
 .breadcrumb-item {
+    padding: 4px 8px;
+    font-size: var(--text-sm);
+    font-weight: 500;
     color: var(--text-secondary);
-    transition: color var(--motion-fast);
+    transition: color var(--motion-fast), background-color var(--motion-fast);
 }
 
+.breadcrumb-item:hover {
+    color: var(--text-primary);
+}
 
 .breadcrumb-current {
     color: var(--text-primary);
-    font-weight: 500;
+    font-weight: 600;
+    max-width: 20ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
-/* Responsive: handled by toolbar-wrapper flex-wrap */
-@media (max-width: 800px) {
-    .breadcrumbs {
-        /* Let wrapper handle wrapping */
-    }
-}
-
-/* Very narrow: truncate long node names */
-@media (max-width: 480px) {
+/* Very narrow: truncate long node names rather than pushing the cluster. */
+@media (max-width: 900px) {
     .breadcrumb-item {
-        max-width: 80px;
+        max-width: 10ch;
         overflow: hidden;
         text-overflow: ellipsis;
     }

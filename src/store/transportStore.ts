@@ -1,12 +1,26 @@
 /**
- * Transport Store - Global transport state for continuous audio sources
+ * Transport Store — the ONE transport gesture, and the continuous-source pause
+ * underneath it.
  *
- * Controls play/pause for continuous audio sources (Loopers) while allowing
- * live instruments to still be played.
+ * There is exactly one place in OpenJammer that answers "is it running?" — the
+ * floating transport pill — and exactly one gesture that changes the answer
+ * (Space, or the pill's play button). Both land here, so the key and the button
+ * can never disagree about what they just did.
+ *
+ * What the gesture MEANS depends, honestly, on whether there is a song:
+ *   • A Song exists → the arrangement IS the transport. Play/stop the song.
+ *   • No Song → there is no timeline to roll, so the gesture is the global
+ *     pause/resume for continuous sources (loopers), which is what it has always
+ *     been on a bare canvas.
+ *
+ * {@link TransportStore.pause} / {@link TransportStore.resume} remain the raw
+ * continuous-source verbs, reachable from the View menu even while a song owns
+ * the transport, so consolidating the gesture never costs a capability.
  */
 
 import { create } from 'zustand';
 import { getExecutor } from '../audio/executor';
+import { useArrangementStore } from './arrangementStore';
 
 // ============================================================================
 // Store Interface
@@ -14,11 +28,19 @@ import { getExecutor } from '../audio/executor';
 
 interface TransportStore {
     // State
+    /** Continuous sources (loopers) are held. Independent of song playback. */
     isGloballyPaused: boolean;
 
     // Actions
+    /**
+     * The one transport gesture. Routes to the arrangement when a song exists,
+     * otherwise toggles the continuous-source pause. Called by the transport
+     * pill AND by Space on the canvas — they are the same act.
+     */
     toggleGlobalPause: () => void;
+    /** Hold continuous sources, whatever the song is doing. */
     pause: () => void;
+    /** Release continuous sources. */
     resume: () => void;
 }
 
@@ -30,12 +52,16 @@ export const useTransportStore = create<TransportStore>((set, get) => ({
     isGloballyPaused: false,
 
     toggleGlobalPause: () => {
-        const { isGloballyPaused } = get();
-        if (isGloballyPaused) {
-            get().resume();
-        } else {
-            get().pause();
+        // A song owns the transport whenever one exists — on every surface,
+        // including the canvas, because a rig with a Song in it is a song.
+        const arrangement = useArrangementStore.getState();
+        if (arrangement.arrangement) {
+            if (arrangement.isPlaying) arrangement.stop();
+            else arrangement.play();
+            return;
         }
+        if (get().isGloballyPaused) get().resume();
+        else get().pause();
     },
 
     pause: () => {
@@ -48,3 +74,17 @@ export const useTransportStore = create<TransportStore>((set, get) => ({
         set({ isGloballyPaused: false });
     },
 }));
+
+/**
+ * Is anything actually rolling right now? The single source the transport pill's
+ * glyph reads, so the button never claims a state the engine is not in.
+ *
+ * With a song: the song's own `isPlaying`. Without one: continuous sources are
+ * running AND audio has actually been unlocked — before the browser's first
+ * gesture nothing is making sound, and the button must say `Play`, not `Stop`.
+ */
+export function transportIsRolling(hasAudio: boolean): boolean {
+    const arrangement = useArrangementStore.getState();
+    if (arrangement.arrangement) return arrangement.isPlaying;
+    return hasAudio && !useTransportStore.getState().isGloballyPaused;
+}

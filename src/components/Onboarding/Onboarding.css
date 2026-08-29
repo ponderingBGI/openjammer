@@ -1,0 +1,460 @@
+/*
+ * Onboarding — the overlay, and the studio ghosted behind it.
+ *
+ * CONTRAST NOTE (why 55%, and why every word on the scrim is primary ink).
+ * The card text sits on a BLURRED, UNKNOWN backdrop — whatever pixels of the
+ * real studio happen to be behind a given word — so the ratio has to hold for
+ * the WORST thing the studio can put there, not the average.
+ *
+ * With `--text-primary` the arithmetic closes at 55%:
+ *   dark  — over 0.55·#161510 + 0.45·(the accent, the brightest large area a
+ *           dark studio can produce) → 4.9:1;
+ *   light — over 0.55·#F4F3F0 + 0.45·(the darkest ink) → 8.3:1.
+ * With `--text-secondary` it does NOT: the same dark worst case gives 2.6:1.
+ * So the brand row and the step counter are primary ink too, and their
+ * subordination is carried by SIZE and WEIGHT — which is how it should have
+ * been carried anyway. The honesty copy is never the dimmest pixel.
+ *
+ * That leaves 45% of the studio showing through a 14px backdrop blur: the peek
+ * the handoff asked for, and a guaranteed read.
+ */
+
+.ob {
+    position: fixed;
+    inset: 0;
+    z-index: var(--z-modal);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-xl);
+    overflow-y: auto;
+    background: color-mix(in oklab, var(--bg-canvas) 55%, transparent);
+    backdrop-filter: blur(14px) saturate(1.05);
+    -webkit-backdrop-filter: blur(14px) saturate(1.05);
+}
+
+/* No backdrop-filter (older engines, some integrated GPUs): go solid. The
+   overlay's job is to be readable, and a transparent scrim with nothing behind
+   it doing the work is the one outcome that fails at both. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .ob {
+        background: var(--bg-canvas);
+    }
+}
+
+/*
+ * The studio behind: blurred and untouchable — a sneak peek of the real product,
+ * not a control surface. Only the SURFACE layers and the chrome are blurred (not
+ * an ancestor of everything), so the compositor promotes four elements rather
+ * than the whole document.
+ */
+body.oj-onboarding-open .surface-layer,
+body.oj-onboarding-open .arrangement-surface,
+body.oj-onboarding-open .oj-topbar,
+body.oj-onboarding-open .oj-transport-host {
+    filter: blur(5px);
+    pointer-events: none;
+    user-select: none;
+}
+
+/* Reduced motion / reduced transparency: no blur anywhere. A full-screen
+   composited blur is exactly the effect these settings exist to switch off, and
+   the overlay reads perfectly well without it. */
+@media (prefers-reduced-motion: reduce), (prefers-reduced-transparency: reduce) {
+    .ob {
+        background: var(--bg-canvas);
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+    }
+
+    body.oj-onboarding-open .surface-layer,
+    body.oj-onboarding-open .arrangement-surface,
+    body.oj-onboarding-open .oj-topbar,
+    body.oj-onboarding-open .oj-transport-host {
+        filter: none;
+    }
+}
+
+/* ── The card ────────────────────────────────────────────────────────────── */
+
+.ob-card {
+    width: min(560px, 92vw);
+    margin: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+    animation: ob-in 340ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes ob-in {
+    from { opacity: 0; transform: translateY(14px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+}
+
+.ob-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.ob-brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-sans);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: var(--text-primary);
+}
+
+.ob-brand i {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+}
+
+.ob-count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: var(--tracking-micro);
+    color: var(--text-primary);
+}
+
+.ob-q {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: 30px;
+    font-weight: 700;
+    line-height: 1.15;
+    text-wrap: pretty;
+    color: var(--text-primary);
+}
+
+.ob-sub {
+    /* Full-strength ink: subordinate through SIZE and WEIGHT, never through a
+       contrast ratio you cannot compute against a live backdrop. */
+    margin: -16px 0 0;
+    font-family: var(--font-sans);
+    font-size: 15px;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--text-primary);
+}
+
+/* ── Options ─────────────────────────────────────────────────────────────── */
+
+.ob-opts,
+.ob-theme {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.ob-theme {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.ob-theme .ob-skip {
+    grid-column: 1 / -1;
+}
+
+.ob-opt {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding: 14px 16px;
+    text-align: left;
+    font-family: var(--font-sans);
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-primary);
+    background: var(--bg-node);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-raised);
+    cursor: pointer;
+    transition: transform var(--motion-spring), border-color var(--motion-fast), background-color var(--motion-fast);
+    animation: ob-in 400ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.ob-opt:hover {
+    border-color: var(--accent-primary);
+    transform: translateX(4px);
+}
+
+.ob-opt:active {
+    transform: scale(0.98);
+}
+
+.ob-opt:focus-visible {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-raised), var(--focus-ring);
+}
+
+.ob-opt__text {
+    flex: 1;
+    min-width: 0;
+}
+
+.ob-opt small {
+    display: block;
+    margin-top: 2px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+
+.ob-key {
+    flex: none;
+    min-width: 14px;
+    padding: 4px 8px;
+    text-align: center;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+
+.ob-skip {
+    align-self: center;
+    margin-top: 4px;
+    padding: 8px 14px;
+    border: none;
+    border-radius: var(--radius-md);
+    background: transparent;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background-color var(--motion-fast);
+    animation: ob-in 400ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.ob-skip:hover {
+    background: var(--bg-tertiary);
+}
+
+.ob-skip:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* ── Glyphs ──────────────────────────────────────────────────────────────── */
+
+.ob-glyph {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    flex: none;
+    width: 66px;
+    height: 46px;
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+}
+
+.ob-glyph__pad,
+.ob-glyph__key {
+    display: inline-block;
+    background: var(--bg-node);
+    border: 1px solid var(--border-control);
+}
+
+.ob-glyph__pad {
+    width: 15px;
+    height: 15px;
+    border-radius: 5px;
+}
+
+.ob-glyph__key {
+    width: 8px;
+    height: 26px;
+    border-radius: 3px;
+}
+
+.ob-glyph__pad.is-lit,
+.ob-glyph__key.is-lit {
+    background: var(--accent-primary);
+    border-color: transparent;
+}
+
+.ob-glyph__knob {
+    position: relative;
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, var(--bg-node), var(--bg-tertiary));
+    border: 1px solid var(--border-control);
+}
+
+.ob-glyph__knob i {
+    position: absolute;
+    left: 50%;
+    top: 2px;
+    width: 2px;
+    height: 7px;
+    margin-left: -1px;
+    border-radius: 2px;
+    background: var(--accent-primary);
+    transform-origin: 50% 8px;
+}
+
+.ob-glyph__value {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+/* ── Theme swatches — each renders in the theme it offers ───────────────── */
+
+.ob-swatch {
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    background: none;
+    cursor: pointer;
+    transition: transform var(--motion-spring), border-color var(--motion-fast);
+    animation: ob-in 400ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.ob-swatch:hover,
+.ob-swatch.is-current {
+    border-color: var(--accent-primary);
+}
+
+.ob-swatch:hover {
+    transform: translateY(-3px);
+}
+
+.ob-swatch:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.ob-swatch__preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 86px;
+}
+
+.ob-swatch__node {
+    width: 46px;
+    height: 30px;
+    border-radius: var(--radius-md);
+}
+
+.ob-swatch__accent {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+}
+
+.ob-swatch__label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px;
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
+    font-weight: 600;
+}
+
+/*
+ * Literal values, on purpose: these two chips are PICTURES of the two themes,
+ * so they must not follow the active one — a dark swatch that turns light while
+ * you hover it is not a choice, it is a magic trick. They are the shipped
+ * `light` / `dark` surface + accent, kept in step with `tokens/themes/*.json`.
+ */
+.ob-swatch--light .ob-swatch__preview { background: #f4f3f0; }
+.ob-swatch--light .ob-swatch__node { background: #ffffff; border: 1px solid #e3e1da; }
+.ob-swatch--light .ob-swatch__accent { background: oklch(0.66 0.19 40); }
+.ob-swatch--light .ob-swatch__label { background: #ffffff; color: #1d1c18; }
+
+.ob-swatch--dark .ob-swatch__preview { background: #161510; }
+.ob-swatch--dark .ob-swatch__node { background: #201f19; border: 1px solid #33312a; }
+.ob-swatch--dark .ob-swatch__accent { background: oklch(0.72 0.19 40); }
+.ob-swatch--dark .ob-swatch__label { background: #201f19; color: #f1efe8; }
+
+.ob-swatch .ob-key {
+    background: color-mix(in oklab, currentColor 12%, transparent);
+    color: inherit;
+}
+
+/* ── Foot ────────────────────────────────────────────────────────────────── */
+
+.ob-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.ob-back {
+    padding: 6px 10px;
+    border: none;
+    border-radius: var(--radius-md);
+    background: transparent;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background-color var(--motion-fast);
+}
+
+.ob-back:hover {
+    background: var(--bg-tertiary);
+}
+
+.ob-back:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.ob-dots {
+    display: flex;
+    gap: 6px;
+}
+
+.ob-dots i {
+    width: 7px;
+    height: 7px;
+    border-radius: var(--radius-pill);
+    background: var(--border-strong);
+    transition: width var(--motion-fast), background-color var(--motion-fast);
+}
+
+.ob-dots i.is-on {
+    width: 20px;
+    background: var(--accent-primary);
+}
+
+/* Reduced motion: the staggered entrance becomes an arrival. */
+@media (prefers-reduced-motion: reduce) {
+    .ob-card,
+    .ob-opt,
+    .ob-skip,
+    .ob-swatch {
+        animation: none;
+    }
+
+    .ob-opt:hover,
+    .ob-swatch:hover {
+        transform: none;
+    }
+}

@@ -117,23 +117,14 @@ test.describe('Timeline live preview', () => {
         );
         test.skip(!hasWebAudio, 'browser has no Web Audio API (Playwright WebKit)');
 
-        // Bring the engine to life.
-        await page.getByRole('button', { name: /play here in your browser/i }).click();
+        // Bring the engine to life: the skip button is the autoplay gesture.
+        await page.getByRole('button', { name: /skip, take me in/i }).click();
         await expect
             .poll(() => page.evaluate(() => (window as { __ojWorkletReady?: boolean }).__ojWorkletReady === true), {
                 timeout: 30_000,
             })
             .toBe(true);
 
-        // Dismiss the latency banner so it doesn't intercept clicks.
-        const dismiss = page.getByRole('button', { name: /^Dismiss$/i });
-        if (await dismiss.count()) {
-            try {
-                await dismiss.first().click({ timeout: 2000 });
-            } catch {
-                /* not present */
-            }
-        }
 
         // Add a Song node (Utility → Add Song), use the global Tab gesture to open
         // its peer arrangement surface, then seed Paper Sketch.

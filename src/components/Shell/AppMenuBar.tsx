@@ -1,12 +1,17 @@
 /**
- * Toolbar - Photoshop-style menu bar with dropdown menus
+ * AppMenuBar — File / Edit / View, the three ghost triggers at the head of the
+ * topbar.
+ *
+ * This is what remains of the old floating toolbar pill once the transport moved
+ * into the {@link TransportPill} and the status cluster moved to the topbar's
+ * right: the document verbs, and nothing else. Every shortcut keycap is read
+ * from the LIVE keymap, so a rebound key is never advertised wrong.
  */
 
 import { useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { useGraphStore } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
-import { useAudioStore } from '../../store/audioStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useTransportStore } from '../../store/transportStore';
 import { useArrangementStore } from '../../store/arrangementStore';
@@ -14,14 +19,10 @@ import { arrangementForExport, readArrangement } from '../../song/project';
 import { collectSaveData } from '../../persistence/collectSaveData';
 import { exportWorkflow, downloadWorkflow, loadWorkflowFromFile, importWorkflow } from '../../engine/serialization';
 import { getExecutor } from '../../audio/executor';
-import { DropdownMenu, type MenuItemOrSeparator } from './DropdownMenu';
-import { useOnlineStatus } from '../../hooks/usePWA';
-import { Button } from '@openjammer/oj-ui';
-import { EngineHealthDot } from '../EngineHealthDot/EngineHealthDot';
+import { DropdownMenu, type MenuItemOrSeparator } from '../Toolbar/DropdownMenu';
 import { keyComboToString, useKeybindingsStore } from '../../store/keybindingsStore';
-import './Toolbar.css';
 
-export function Toolbar() {
+export function AppMenuBar() {
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     const nodes = useGraphStore((s) => s.nodes);
@@ -29,8 +30,6 @@ export function Toolbar() {
     const clearGraph = useGraphStore((s) => s.clearGraph);
     const loadGraph = useGraphStore((s) => s.loadGraph);
     const deleteSelected = useGraphStore((s) => s.deleteSelected);
-    const undo = useGraphStore((s) => s.undo);
-    const redo = useGraphStore((s) => s.redo);
 
     const zoom = useCanvasStore((s) => s.zoom);
     const resetView = useCanvasStore((s) => s.resetView);
@@ -44,10 +43,6 @@ export function Toolbar() {
         return binding ? keyComboToString(binding) : undefined;
     };
 
-    const isAudioContextReady = useAudioStore((s) => s.isAudioContextReady);
-    const currentMode = useAudioStore((s) => s.currentMode);
-    const isToolbarFocused = currentMode === 1;
-
     // Project state
     const projectName = useProjectStore((s) => s.name);
     const projectIsSupported = useProjectStore((s) => s.isSupported);
@@ -59,17 +54,10 @@ export function Toolbar() {
     const saveProject = useProjectStore((s) => s.saveProject);
     const closeProject = useProjectStore((s) => s.closeProject);
 
-    // Online status
-    const isOnline = useOnlineStatus();
-
-    // Global transport state for play/pause (continuous sources like loopers)
+    // Continuous sources (loopers). The transport GESTURE plays the song when one
+    // exists, so this stays reachable here — consolidating the gesture must never
+    // cost the capability.
     const isGloballyPaused = useTransportStore((s) => s.isGloballyPaused);
-    const toggleGlobalPause = useTransportStore((s) => s.toggleGlobalPause);
-
-    // Transport controls
-    const handlePlayStop = useCallback(() => {
-        toggleGlobalPause();
-    }, [toggleGlobalPause]);
 
     // Export workflow
     const handleExport = useCallback(async () => {
@@ -234,17 +222,9 @@ export function Toolbar() {
     }, [openRecentProject, loadGraph, clearGraph, resetView]);
 
     // Zoom controls
-    const handleZoomIn = useCallback(() => {
-        zoomTo(zoom * 1.2);
-    }, [zoom, zoomTo]);
-
-    const handleZoomOut = useCallback(() => {
-        zoomTo(zoom / 1.2);
-    }, [zoom, zoomTo]);
-
-    const handleResetView = useCallback(() => {
-        resetView();
-    }, [resetView]);
+    const handleZoomIn = useCallback(() => zoomTo(zoom * 1.2), [zoom, zoomTo]);
+    const handleZoomOut = useCallback(() => zoomTo(zoom / 1.2), [zoom, zoomTo]);
+    const handleResetView = useCallback(() => resetView(), [resetView]);
 
     // Detect platform for shortcut display
     const isMac = typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0;
@@ -318,9 +298,22 @@ export function Toolbar() {
 
     const editMenuItems: MenuItemOrSeparator[] = [
         {
+            id: 'undo',
+            label: 'Undo',
+            shortcut: shortcutFor('edit.undo'),
+            onClick: () => useGraphStore.getState().undo(),
+        },
+        {
+            id: 'redo',
+            label: 'Redo',
+            shortcut: shortcutFor('edit.redo'),
+            onClick: () => useGraphStore.getState().redo(),
+        },
+        { type: 'separator' },
+        {
             id: 'delete',
             label: 'Delete Selected',
-            shortcut: 'Del',
+            shortcut: shortcutFor('edit.delete') ?? 'Del',
             onClick: deleteSelected,
         },
     ];
@@ -353,9 +346,21 @@ export function Toolbar() {
         {
             id: 'ghost-mode',
             label: ghostMode ? '✓ Ghost Mode' : 'Ghost Mode',
-            shortcut: 'W',
+            shortcut: shortcutFor('view.ghostMode') ?? 'W',
             onClick: toggleGhostMode,
         },
+        {
+            id: 'pause-continuous',
+            // Space plays the SONG when one exists, so the looper hold needs its
+            // own door. Named for what it does, not for what it used to be bound to.
+            label: isGloballyPaused ? 'Resume loopers' : 'Pause loopers',
+            onClick: () => {
+                const transport = useTransportStore.getState();
+                if (transport.isGloballyPaused) transport.resume();
+                else transport.pause();
+            },
+        },
+        { type: 'separator' },
         {
             id: 'help',
             label: 'Help',
@@ -365,75 +370,10 @@ export function Toolbar() {
     ];
 
     return (
-        <div className={`toolbar ${isToolbarFocused ? 'toolbar-focused' : ''}`}>
-            {/* Menu Bar */}
-            <div className="toolbar-menus">
-                <DropdownMenu label="File" items={fileMenuItems} />
-                <DropdownMenu label="Edit" items={editMenuItems} />
-                <DropdownMenu label="View" items={viewMenuItems} />
-            </div>
-
-            <div className="toolbar-separator" />
-
-            {/* Undo/Redo Buttons */}
-            <Button variant="ghost" iconOnly className="toolbar-btn-icon" onClick={undo} title="Undo (Ctrl+Z)">
-                ↶
-            </Button>
-            <Button variant="ghost" iconOnly className="toolbar-btn-icon" onClick={redo} title="Redo (Ctrl+Shift+Z)">
-                ↷
-            </Button>
-
-            <div className="toolbar-separator" />
-
-            {/* Global Play/Pause */}
-            <Button
-                variant="ghost"
-                iconOnly
-                className="toolbar-btn-icon"
-                onClick={handlePlayStop}
-                disabled={!isAudioContextReady}
-                title={isGloballyPaused ? 'Resume All (Space)' : 'Pause All (Space)'}
-            >
-                {isGloballyPaused ? '▶' : '⏸'}
-            </Button>
-
-            <div className="toolbar-separator" />
-
-            {/* Settings */}
-            <Button
-                variant="ghost"
-                iconOnly
-                className="toolbar-btn-icon"
-                onClick={() => window.dispatchEvent(new CustomEvent('openjammer:toggle-settings'))}
-                title="Settings"
-            >
-                ⚙️
-            </Button>
-
-            {/* Spacer to push status to right */}
-            <div style={{ flex: 1 }} />
-
-            {/* Ambient engine-health signal (Phase 2) — one calm tri-state dot,
-                never a dashboard, never a modal. Opens the Audio-health readout. */}
-            <EngineHealthDot />
-
-            {/* Project Status */}
-            {projectName && (
-                <div className="toolbar-status" title={`Project: ${projectName}`}>
-                    <span className="toolbar-status-icon">📁</span>
-                    <span className="toolbar-status-text">
-                        {projectName}
-                    </span>
-                </div>
-            )}
-
-            {/* Online Status */}
-            {!isOnline && (
-                <div className="toolbar-status toolbar-status-offline" title="You are offline">
-                    <span className="toolbar-status-icon">📴</span>
-                    <span className="toolbar-status-text">Offline</span>
-                </div>
-            )}
+        <div className="oj-topbar__menus">
+            <DropdownMenu label="File" items={fileMenuItems} />
+            <DropdownMenu label="Edit" items={editMenuItems} />
+            <DropdownMenu label="View" items={viewMenuItems} />
 
             {/* Hidden File Input */}
             <input

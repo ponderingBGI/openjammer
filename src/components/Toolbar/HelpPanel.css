@@ -1,0 +1,142 @@
+/*
+ * HelpPanel — a quiet card in the bottom-right of the stage.
+ *
+ * A surface card with one hairline and the overlay shadow, mono keycaps beside
+ * plain-language labels. It never grows loud: the mode chip is the only place a
+ * colour appears, and only when a mode has no keyboard behind it — an honest
+ * "this key does nothing right now", which is exactly the moment a player is
+ * confused.
+ */
+
+.oj-help {
+    position: fixed;
+    right: var(--space-lg);
+    bottom: var(--space-lg);
+    z-index: var(--z-panel);
+    width: 268px;
+    max-height: min(60vh, 520px);
+    overflow-y: auto;
+    padding: var(--space-md);
+    background: var(--bg-node);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-overlay);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    color: var(--text-primary);
+}
+
+.oj-help__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-sm);
+}
+
+.oj-help__title {
+    margin: 0;
+    flex: none;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.oj-help__mode {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    font-size: var(--text-xs);
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.oj-help.is-warning {
+    border-color: var(--accent-warning);
+}
+
+.oj-help__warning {
+    margin: 0 0 var(--space-sm);
+    padding: 8px 10px;
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    font-size: var(--text-xs);
+    line-height: 1.4;
+    /* The honesty copy is never the dimmest pixel — contrast-safe warning ink. */
+    color: var(--warning-ink);
+}
+
+.oj-help__list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.oj-help__list li {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-sm);
+}
+
+.oj-help__keys {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    flex: none;
+}
+
+.oj-help__label {
+    margin-left: auto;
+    text-align: right;
+    color: var(--text-secondary);
+}
+
+/* The collapsed state: one 34px round button, out of the way of the patch. */
+.oj-help__minimised {
+    position: fixed;
+    right: var(--space-lg);
+    bottom: var(--space-lg);
+    z-index: var(--z-panel);
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border-subtle);
+    border-radius: 50%;
+    background: var(--bg-node);
+    box-shadow: var(--shadow-raised);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: color var(--motion-fast), border-color var(--motion-fast), transform var(--motion-spring);
+}
+
+.oj-help__minimised:hover {
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+}
+
+.oj-help__minimised:active {
+    transform: scale(var(--press-scale-btn));
+}
+
+.oj-help__minimised:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-raised), var(--focus-ring);
+}
+
+.oj-help__minimised.is-warning {
+    color: var(--warning-ink);
+    border-color: var(--accent-warning);
+}
+
+/* When the beat rig's step grid owns the bottom bar, sit above it. */
+body:has(.oj-step-grid) .oj-help,
+body:has(.oj-step-grid) .oj-help__minimised {
+    bottom: calc(var(--space-lg) + 96px);
+}

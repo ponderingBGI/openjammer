@@ -98,3 +98,22 @@ Gate (Wave 6): a coverage matrix `plans/redesign-new-dna/COVERAGE.md` listing ev
 2. `--text-on-accent` becomes ink in light (D5) — deviates from the handoff's `#FFF` to meet AA.
 3. Disk: C: had 0.9 GB free; freed to ~2.2 GB (stale VS temp, bun cache). WSL (159 GB) / Docker (30 GB) / `.codex/plugins` (12.7 GB) are the real consumers — owner's call.
 4. Spec open questions taken as: attention pulse pre-first-gesture only (never on arrangement while rolling); three new verbs approved for implementation; no return-on-stop preference; page follow default.
+
+## Follow-ups (appended by later reviews — do not reorder)
+
+1. **W5-P8 — the beginner's rig must show something to press.** *(High priority; opened by
+   the W4-S4 review, recorded in `docs/shell.md` and `W4-S4B-REPORT.md`.)* All three preset
+   rigs install the bundle `keyboard`, not `keyboard-visual` as D12 names, because
+   `keyboard-visual` is an internal, undeletable, non-playable **mirror**: only
+   `KeyboardNode` calls `registerKeyboard()`, which is what `audioStore.activeKeyboardId`
+   and the entire typing path resolve against, so a top-level one lights up when some
+   *other* keyboard is played and emits nothing itself. Its 31 outputs are per-key
+   `control` ports with no row bundling, and it is 660 × 280 px. The result today: a
+   first-run beginner is told "press the keys" while looking at a card showing four sockets
+   (`ROW 1 / ROW 2 / ROW 3 / PEDAL`) and no keys, and the beat rig shows no pads at all.
+   **P8 owns the fix**: make `keyboard-visual` a first-class playable node with its own
+   `registerKeyboard` + row bundling, or give the `keyboard` faceplate keys of its own.
+   Until then D12's intent is unmet and the first run under-delivers at exactly the moment
+   it promises the most.
+2. **W5-P8 — retire the Keyboard node's green active-mode ring and badge.** Old faceplate
+   styling; in the New DNA green (`--success`) means *healthy*, not *selected*.

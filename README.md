@@ -30,6 +30,23 @@ core (`ojcore`) runs native on the desktop and compiled to WebAssembly in your b
 > first launch you may need to allow an unsigned app
 > ([install notes](https://ponderingbgi.github.io/openjammer/play/install/)).
 
+### The first three taps
+
+Opening OpenJammer for the first time asks three questions, one tap each (or the number
+keys `1`–`3`, or `Esc` to skip with sensible defaults):
+
+1. **Have you made music with a computer before?** — sets how much the instrument shows
+   you by default. Nothing is ever taken away; it only decides what is in the way.
+2. **What do you want to make right now?** — jam some keys, build a beat, or design a
+   sound. A real rig is wired up for it: actual nodes, actual cables, one `Ctrl+Z` away
+   from gone.
+3. **Light or dark.**
+
+Then you are in, and it is already making sound — press `Q`–`P`, `A`–`L` or `Z`–`/`. In
+the browser that last tap is also what lets audio through (browsers require a click before
+they will play anything). You can re-run the whole thing from **Settings → Graphics → Redo
+setup**. See [docs/shell.md](docs/shell.md) for what each rig is made of.
+
 ---
 
 ## What it is

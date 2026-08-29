@@ -21,44 +21,20 @@ body,
     overflow: hidden;
 }
 
-.surface-switcher {
-    display: flex;
-    padding: 3px;
-    gap: 2px;
-    background: var(--bg-node);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-raised);
-}
-
-.shared-surface-chrome {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    flex-shrink: 0;
-}
-
-.shared-bar-beat {
-    min-width: 96px;
-    padding: var(--space-xs) var(--space-sm);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
-    background: var(--bg-node);
-    box-shadow: var(--shadow-raised);
-    font-family: var(--font-mono);
-    font-size: 22px;
-    font-variant-numeric: tabular-nums;
-    text-align: center;
-}
-
 [data-surface-root="canvas"] {
     width: 100%;
     height: 100%;
 }
 
+/*
+ * The stage starts below the topbar. The canvas takes the whole rest of the
+ * window — the transport pill floats OVER it, which is the point. The ruled
+ * surfaces additionally reserve the pill's lane; that reservation lives beside
+ * them in `Arrangement/ArrangementSurface.css`.
+ */
 .surface-layer {
     position: fixed;
-    inset: 0;
+    inset: var(--oj-topbar-height, 46px) 0 0 0;
     transform-origin: center;
 }
 
@@ -67,16 +43,6 @@ body,
         animation-duration: .01ms !important; animation-iteration-count: 1 !important;
         transition-duration: .01ms !important; scroll-behavior: auto !important;
     }
-}
-
-.surface-switcher button {
-    padding: var(--space-xs) var(--space-sm);
-    border-radius: var(--radius-sm);
-}
-
-.surface-switcher button[aria-pressed="true"] {
-    color: var(--bg-node);
-    background: var(--text-primary);
 }
 
 .sr-only {
@@ -156,170 +122,6 @@ select:focus,
 textarea:focus {
     outline: none;
     border-color: var(--accent-primary);
-}
-
-/* Welcome screen (browser tier entry — The Living Sketchbook, fully theme-var driven) */
-.oj-welcome {
-    position: fixed;
-    inset: 0;
-    z-index: 10000;
-    display: flex;
-    align-items: flex-start;       /* scroll-safe: never clip the card top */
-    justify-content: center;
-    overflow-y: auto;
-    padding: var(--space-xl) var(--space-lg);
-
-    background: color-mix(in srgb, var(--bg-canvas) 97%, transparent);
-}
-
-.oj-welcome-card {
-    margin: auto;                  /* center vertically; scrollable when taller than viewport */
-    width: min(480px, 100%);
-    box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-md);
-    padding: var(--space-xl);
-    background: var(--bg-node);     /* solid, opaque */
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-xl);
-    box-shadow: var(--shadow-raised);
-    animation: oj-welcome-in var(--transition-normal) ease-out;
-}
-
-@keyframes oj-welcome-in {
-    from { opacity: 0; transform: translateY(8px); }
-    to   { opacity: 1; transform: translateY(0); }   /* ends fully opaque */
-}
-
-.oj-welcome-title {
-    margin: 0;
-    font-family: var(--font-sans);
-    font-size: var(--text-2xl);
-    line-height: 1.15;
-    color: var(--text-primary);
-}
-
-.oj-welcome-intro {
-    margin: 0 0 var(--space-sm);
-    font-family: var(--font-sans);
-    font-size: var(--text-sm);
-    color: var(--text-secondary);
-}
-
-.oj-welcome-option {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-    width: 100%;
-    box-sizing: border-box;
-    padding: var(--space-md) var(--space-lg);
-    text-align: left;
-    text-decoration: none;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-raised);
-    transition: transform var(--motion-fast),
-                box-shadow var(--motion-fast);
-    cursor: pointer;
-}
-
-.oj-welcome-option:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-raised);
-}
-
-.oj-welcome-option:active {
-    transform: translateY(1px);
-    box-shadow: var(--shadow-raised);
-}
-
-.oj-welcome-option--primary {
-    background: var(--accent-primary);
-    color: var(--text-on-accent);
-}
-
-.oj-welcome-option--secondary {
-    background: var(--bg-node-header);
-    color: var(--text-primary);
-}
-
-.oj-welcome-option-main {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-    flex: 1 1 auto;
-    min-width: 0;                   /* allow the long VST3/AU/CLAP subline to wrap */
-}
-
-.oj-welcome-option-label {
-    font-family: var(--font-sans);
-    font-size: var(--text-lg);
-    line-height: 1.1;
-}
-
-.oj-welcome-option-sub {
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
-    line-height: 1.3;
-    /* No blanket opacity — honesty copy stays full-strength and AA. */
-}
-
-/* Subline color per variant: full-strength on accent (honesty copy),
-   a real secondary token on the quiet row. */
-.oj-welcome-option--primary .oj-welcome-option-sub {
-    color: var(--text-on-accent);
-}
-.oj-welcome-option--secondary .oj-welcome-option-sub {
-
-    color: var(--text-primary);
-}
-
-.oj-welcome-option-glyph {
-    flex: 0 0 auto;
-    font-size: var(--text-xl);
-    line-height: 1;
-}
-
-/* Safe Mode footer — quiet utility links beneath the two decision cards.
-   Additive: the welcome screen (App.tsx) shares the cards above but not this row,
-   so it stays untouched. */
-.oj-welcome-footer {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-sm);
-    margin-top: var(--space-sm);
-    padding-top: var(--space-md);
-    border-top: 1px solid var(--border-subtle);
-}
-
-.oj-welcome-link {
-
-    background: none;
-    border: none;
-    padding: 0;
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
-    line-height: 1.3;
-    color: var(--text-primary);
-    cursor: pointer;
-}
-
-.oj-welcome-link:hover {
-    text-decoration: underline;
-}
-
-.oj-welcome-footer-sep {
-    color: var(--text-muted);
-    user-select: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .oj-welcome-card { animation: none; }
-    .oj-welcome-option { transition: none; }
-    .oj-welcome-option:hover { transform: none; }
 }
 
 /* Selection highlight */

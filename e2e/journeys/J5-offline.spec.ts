@@ -44,11 +44,11 @@ test('@journey J5 Offline — installed PWA composes, edits, exports, and reload
     expect(outageProbe.status()).toBe(503);
     expect(outageProbe.headers()['x-openjammer-e2e-origin-outage']).toBe('1');
     await reloadFromInstalledPwa(page);
-    await expect(page.getByRole('button', { name: /play here in your browser/i }), `offline startup errors:\n${[...pageErrors, ...failedRequests].join('\n')}`).toBeVisible();
+    await expect(page.getByRole('button', { name: /skip, take me in/i }), `offline startup errors:\n${[...pageErrors, ...failedRequests].join('\n')}`).toBeVisible();
     const hasWebAudio = await page.evaluate(() => typeof AudioContext !== 'undefined');
     test.skip(!hasWebAudio, `${browserName} build has no Web Audio API for offline export`);
 
-    await page.getByRole('button', { name: /play here in your browser/i }).click();
+    await page.getByRole('button', { name: /skip, take me in/i }).click();
     await page.keyboard.press('Tab');
     await page.getByRole('button', { name: /start from 'paper sketch'/i }).click();
     await expect(page.locator('.arrangement-clip')).toHaveCount(3);
@@ -126,5 +126,5 @@ test('@journey J5 Offline — installed PWA composes, edits, exports, and reload
 
     await reloadFromInstalledPwa(page);
     await expect(page.locator('#root')).not.toBeEmpty();
-    await expect(page.getByRole('button', { name: /play here in your browser/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /skip, take me in/i })).toBeVisible();
 });

@@ -1,0 +1,24 @@
+/*
+ * Where the one transport floats.
+ *
+ * Top-centre over the stage, 6px under the topbar rule — the SAME rule on every
+ * surface, so a performer's eye never has to look for it twice. Ruled surfaces
+ * reserve a sky band above their ruler so the pill never occludes a bar; that is
+ * the surface's job, not the pill's.
+ *
+ * The wrapper is pointer-transparent so the canvas underneath still receives a
+ * marquee drag that starts beside the pill; only the pill itself takes input.
+ */
+
+.oj-transport-host {
+    position: fixed;
+    top: calc(var(--oj-topbar-height) + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: var(--z-panel);
+    pointer-events: none;
+}
+
+.oj-transport-host > * {
+    pointer-events: auto;
+}

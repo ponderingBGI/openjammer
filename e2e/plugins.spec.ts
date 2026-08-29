@@ -23,10 +23,24 @@ test('Browser interleaves built-ins and mocked hosted plugins in insert context'
     await installPluginInvokeMock(page);
     await page.goto('/');
     await expect(page.locator('#root')).not.toBeEmpty();
-    await page.evaluate(() => window.dispatchEvent(new CustomEvent('openjammer:open-browser', { detail: { context: 'insert' } })));
 
     const browser = page.getByRole('dialog', { name: 'Browser' });
-    await expect(browser).toBeVisible();
+    /*
+     * `openjammer:open-browser` is only heard once `PluginsPanelHost`'s effect has
+     * attached its listener (App.tsx), and `#root` having content only proves the
+     * first COMMIT — React's passive effects can still be a paint behind. Firing
+     * the event once, immediately, is a race the spec has always had; the app
+     * shell's real mount work (topbar, transport pill, meter subscription) widened
+     * the window enough to lose it about one run in three.
+     *
+     * So ask until it is heard. The handler is idempotent — `setRequested(true)`
+     * then `setOpen(true)`, never a toggle — and this waits on the listener itself
+     * rather than on a guessed delay.
+     */
+    await expect(async () => {
+        await page.evaluate(() => window.dispatchEvent(new CustomEvent('openjammer:open-browser', { detail: { context: 'insert' } })));
+        await expect(browser).toBeVisible({ timeout: 500 });
+    }).toPass({ timeout: 15_000 });
     await expect(browser.getByRole('option', { name: /Velvet.*Acme Audio.*Synth.*CLAP/i })).toBeVisible();
     await expect(browser.getByRole('button', { name: 'Insert', exact: true }).first()).toBeVisible();
     await expect(browser.getByText('1 sat out', { exact: false })).toBeVisible();

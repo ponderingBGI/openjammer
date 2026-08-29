@@ -1,0 +1,127 @@
+/*
+ * Topbar — the app's one rule.
+ *
+ * A 46px band on `--bg-node-header` closed by a single hairline. Everything in
+ * it is quiet: ghost triggers, muted glyphs, chips that tint their TEXT and not
+ * their fill. The loudest thing on screen must always be the patch, and after
+ * that the transport — never the chrome.
+ */
+
+:root {
+    /* Shared with the transport pill and the surface layers, so the stage's
+       ceiling is one number in one place. */
+    --oj-topbar-height: 46px;
+}
+
+.oj-topbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--oj-topbar-height);
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: 0 var(--space-md);
+    background: var(--bg-node-header);
+    border-bottom: 1px solid var(--border-subtle);
+    z-index: var(--z-panel);
+    font-family: var(--font-sans);
+}
+
+.oj-topbar__cluster {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    min-width: 0;
+}
+
+.oj-topbar__cluster--left {
+    flex: 1 1 auto;
+}
+
+.oj-topbar__cluster--centre {
+    flex: 0 0 auto;
+}
+
+.oj-topbar__cluster--right {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+}
+
+/* ── Brand ───────────────────────────────────────────────────────────────── */
+
+.oj-topbar__brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    margin-right: var(--space-sm);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    color: var(--text-primary);
+    user-select: none;
+}
+
+.oj-topbar__brand-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+}
+
+.oj-topbar__menus {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+}
+
+.file-input-hidden {
+    display: none;
+}
+
+/* A hairline grouping the right cluster into "history · state · session". */
+.oj-topbar__rule {
+    width: 1px;
+    height: 20px;
+    flex: none;
+    margin: 0 4px;
+    background: var(--border-subtle);
+}
+
+.oj-topbar__project {
+    max-width: 22ch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/*
+ * The collaboration control still styles itself as a floating island (lane P9
+ * owns its redesign). Sit it back down on the rule from here rather than
+ * reaching into a file this lane does not own; when P9 restyles it, these three
+ * declarations are the only thing to delete.
+ */
+.oj-topbar .collab-control {
+    position: static;
+    display: inline-flex;
+}
+
+.oj-topbar .collab-control .collab-panel {
+    top: calc(var(--oj-topbar-height) - 4px);
+    right: 0;
+}
+
+@media (max-width: 900px) {
+    .oj-topbar__brand {
+        font-size: 0;
+        gap: 0;
+        margin-right: var(--space-xs);
+    }
+
+    .oj-topbar__project {
+        display: none;
+    }
+}

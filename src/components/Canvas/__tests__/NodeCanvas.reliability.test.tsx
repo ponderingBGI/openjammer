@@ -5,6 +5,7 @@ import { resolveKeydown } from '../../../keymap/arbiter';
 import { useAudioStore } from '../../../store/audioStore';
 import { useCanvasStore } from '../../../store/canvasStore';
 import { useGraphStore } from '../../../store/graphStore';
+import { useHistoryStore } from '../../../store/historyStore';
 
 vi.mock('../../../audio/executor', () => ({
     getExecutor: () => ({
@@ -145,5 +146,43 @@ describe('NodeCanvas reliability', () => {
         expect(after.x).toBeCloseTo((anchor.x - rect.left - useCanvasStore.getState().pan.x) / useCanvasStore.getState().zoom, 6);
         expect(after.y).toBeCloseTo((anchor.y - rect.top - useCanvasStore.getState().pan.y) / useCanvasStore.getState().zoom, 6);
         spy.mockRestore();
+    });
+    /*
+     * A rig lands, `focusRig()` switches the app into that rig's keyboard mode so
+     * typing plays — and until this was fixed, `Ctrl+Z` was dead from that moment
+     * on. Chords are not notes: anything carrying Ctrl/Cmd must reach the canvas
+     * in every mode, or the first thing a first-run player ever does is the one
+     * thing they cannot take back.
+     */
+    it.each([
+        ['undo', { key: 'z', ctrlKey: true }, 0, 0],
+        ['redo', { key: 'z', ctrlKey: true, shiftKey: true }, 1, 1],
+    ] as const)('runs %s from a keyboard mode, not only config mode', (which, chord, expectedCursor, expectedNodes) => {
+        useHistoryStore.getState().clear();
+        useAudioStore.setState({ currentMode: 3, activeKeyboardId: 'keyboard-1' });
+        render(<NodeCanvas />);
+
+        act(() => { useGraphStore.getState().addNode('speaker', { x: 10, y: 20 }); });
+        expect(useHistoryStore.getState().cursor).toBe(1);
+        if (which === 'redo') {
+            act(() => resolveKeydown(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true })));
+            expect(useHistoryStore.getState().cursor).toBe(0);
+        }
+
+        act(() => resolveKeydown(new KeyboardEvent('keydown', { ...chord, bubbles: true })));
+
+        expect(useAudioStore.getState().currentMode).toBe(3);
+        expect(useHistoryStore.getState().cursor).toBe(expectedCursor);
+        expect(useGraphStore.getState().rootNodeIds).toHaveLength(expectedNodes);
+    });
+
+    it('still plays a bare note key in a keyboard mode after the chord hoist', () => {
+        const emit = vi.fn();
+        useAudioStore.setState({ currentMode: 3, activeKeyboardId: 'keyboard-1', emitKeyboardSignal: emit });
+        render(<NodeCanvas />);
+
+        act(() => resolveKeydown(new KeyboardEvent('keydown', { key: 'z', bubbles: true })));
+
+        expect(emit).toHaveBeenCalledWith('keyboard-1', 3, 0);
     });
 });

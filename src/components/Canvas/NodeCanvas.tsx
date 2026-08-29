@@ -42,6 +42,14 @@ import { useUiViewStore } from '../../store/uiViewStore';
 import { useCollabStore } from '../../store/collabStore';
 import './NodeCanvas.css';
 
+/**
+ * Editing commands that must reach the canvas in EVERY mode, not just config
+ * mode — they are chords, not notes. See the comment at their handler below.
+ */
+const COMMAND_ACTIONS = new Set([
+    'edit.undo', 'edit.redo', 'canvas.copy', 'canvas.paste', 'canvas.selectAll', 'canvas.duplicate',
+]);
+
 interface SelectionBox {
     startX: number;
     startY: number;
@@ -694,31 +702,26 @@ export function NodeCanvas() {
                 return;
             }
 
-            // Mode 1 only shortcuts (config mode)
-            if (currentMode === 1) {
-                // Q key - Go back up one level in hierarchical canvas (only in mode 1)
-                if (actionId === 'canvas.exitLevel') {
-                    e.preventDefault();  // Always prevent default for consistency
-                    if (currentViewNodeId !== null) {
-                        exitToParent();
-                    }
-                    // At root level, Q silently does nothing (consistent with navigation being unavailable)
-                    return;
-                }
-
-                // Spacebar in config mode - toggle global play/pause for continuous sources
-                if (actionId === 'canvas.transport' && !e.repeat) {
-                    e.preventDefault();
-                    useTransportStore.getState().toggleGlobalPause();
-                    return;
-                }
-
-                if (actionId === 'view.ghostMode') {
-                    e.preventDefault();
-                    toggleGhostMode();
-                    return;
-                }
-
+            /*
+             * Editing commands work in EVERY mode.
+             *
+             * Modes 2–9 are keyboard modes: the bare letters belong to the notes,
+             * which is why note keys stay gated below. But `Ctrl`/`Cmd` is exactly
+             * the modifier that says "this is not a note" — a chord carrying it can
+             * never collide with a key the player is holding, which is why
+             * `edit.delete` has always sat outside the gate too.
+             *
+             * Leaving these inside the gate is what made `Ctrl+Z` dead for every
+             * first-run player: installing a rig switches the app into that rig's
+             * keyboard mode so typing plays immediately, and from that moment the
+             * player's first edit was un-undoable until they pressed `1`. A rig
+             * that promises "one Ctrl+Z away from gone" has to mean it.
+             *
+             * The `currentMode === 1` half of the condition keeps config mode
+             * behaving as before for anyone who has REBOUND one of these actions
+             * onto a bare key — the mode gate is what keeps that rebinding safe.
+             */
+            if (COMMAND_ACTIONS.has(actionId ?? '') && (e.ctrlKey || e.metaKey || currentMode === 1)) {
                 if (actionId === 'edit.undo') {
                     e.preventDefault();
                     undo();
@@ -758,6 +761,36 @@ export function NodeCanvas() {
                     duplicateSelected();
                     return;
                 }
+            }
+
+            // Mode 1 only shortcuts (config mode)
+            if (currentMode === 1) {
+                // Q key - Go back up one level in hierarchical canvas (only in mode 1)
+                if (actionId === 'canvas.exitLevel') {
+                    e.preventDefault();  // Always prevent default for consistency
+                    if (currentViewNodeId !== null) {
+                        exitToParent();
+                    }
+                    // At root level, Q silently does nothing (consistent with navigation being unavailable)
+                    return;
+                }
+
+                // Spacebar in config mode - toggle global play/pause for continuous sources
+                if (actionId === 'canvas.transport' && !e.repeat) {
+                    e.preventDefault();
+                    useTransportStore.getState().toggleGlobalPause();
+                    return;
+                }
+
+                if (actionId === 'view.ghostMode') {
+                    e.preventDefault();
+                    toggleGhostMode();
+                    return;
+                }
+
+                // Undo/redo, copy/paste, select-all and duplicate are handled
+                // ABOVE the gate — they carry Ctrl/Cmd and must survive a keyboard
+                // mode.
 
                 if (actionId === 'view.zoomIn' || actionId === 'view.zoomOut') {
                     e.preventDefault();

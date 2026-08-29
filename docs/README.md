@@ -18,6 +18,8 @@ everything else is the way it is.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): the North star, the `ojcore` crate map, and the
   build/run/test/CI commands.
+- [shell.md](shell.md): the app shell — the topbar, the one floating transport
+  pill, the three-question first run, the preset rigs and the density personas.
 - [timeline.md](timeline.md): the on-canvas DAW — the `Song` node, the shared
   `Arrangement` a human and an agent co-author through reversible verbs, how it plays and
   persists, and the honest roadmap of what's still ahead.

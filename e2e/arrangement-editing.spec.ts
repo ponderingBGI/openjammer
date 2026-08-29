@@ -1,11 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
+import { bootApp } from './journeys/support';
 
 async function openPaperSketch(page: Page) {
-    await page.goto('/');
-    await expect(page.locator('#root')).not.toBeEmpty();
-    await page.getByRole('button', { name: /play here in your browser/i }).click();
-    const dismiss = page.getByRole('button', { name: /^Dismiss$/i });
-    if (await dismiss.count()) await dismiss.first().click().catch(() => {});
+    await bootApp(page);
     const canvas = page.locator('.node-canvas').first();
     const box = (await canvas.boundingBox())!;
     await page.mouse.click(box.x + box.width / 2, box.y + 170, { button: 'right' });
@@ -14,9 +11,6 @@ async function openPaperSketch(page: Page) {
     await page.keyboard.press('Tab');
     await page.getByRole('button', { name: /Start from 'Paper Sketch'/i }).click();
     await expect(page.locator('.arrangement-clip')).toHaveCount(3);
-    // The asynchronous headless-audio latency toast can cover the first lane.
-    // Dismiss it after engine startup so pointer tests hit the ruled field itself.
-    await dismiss.first().waitFor({ state: 'visible', timeout: 2_000 }).then(() => dismiss.first().click()).catch(() => {});
 }
 
 async function dragHorizontally(page: Page, clipIndex: number, delta: number) {
@@ -34,7 +28,9 @@ test.describe('Wave 4a arrangement editing', () => {
     test('surface swap tears down the outgoing arrangement after 300ms', async ({ page }) => {
         await openPaperSketch(page);
         const arrangement = page.locator('[data-surface-root="arrangement"]');
-        await page.getByRole('button', { name: 'Canvas', exact: true }).click();
+        // The surface switcher moved into the topbar as a segmented control, so
+        // its segments are tabs now — the same shape the Settings sidebar uses.
+        await page.getByRole('tab', { name: 'Canvas', exact: true }).click();
         await page.waitForTimeout(300);
         await expect(arrangement).toBeHidden();
         await expect(arrangement).toHaveAttribute('inert');
