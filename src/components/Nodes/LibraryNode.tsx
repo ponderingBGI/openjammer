@@ -1,20 +1,64 @@
 /**
- * Library Node - Two-panel audio library browser with tag management
+ * Library Node — a file browser that lives on the canvas.
  *
- * Layout:
- * - Left panel: Tags (pinned at top, others below, resizable separator)
- * - Right panel: Search bar + file list with tag badges
+ * The audit's verdict on the old build was right: this is not node styling, it
+ * is a file browser (757 lines of it), and it should be built from the same
+ * List / ListRow / Input / Chip the rest of the app browses with. It is now.
  *
- * Features:
- * - Link local folders containing audio files
- * - Tag management with auto-colors
- * - Drag files onto tags to tag them
- * - Drag files to canvas to create clips
- * - Resizable node
+ * What the card is: a NodeShell whose body is two resizable panels — tags on
+ * the left, files on the right — with one live seam out of the header, the
+ * `sample-out` port that feeds a selected sample's PCM to connected Samplers.
+ * It is the ONE resizable node on this canvas, and S3's measured geometry reads
+ * `data.width` / `data.height`, so the resize seam is preserved exactly.
+ *
+ * Three rules this file exists to keep:
+ *
+ *  1. **No native dialog, ever** (UI-021). Deleting a tag, permanently deleting
+ *     a file and emptying the trash all used to call `confirm()`, which steals
+ *     focus from a live instrument and cannot be dismissed the way the rest of
+ *     the app is. They now ask in the card, as one `alertdialog` Callout that
+ *     always appears in the same place so the list never jumps.
+ *  2. **The selection only moves to a sample that actually arrived** (UI-020).
+ *     Decode and deliver first; commit the visible/persisted selection after.
+ *     A file that fails to decode leaves the last good one playing.
+ *  3. **A tag's colour is its identity, never its legibility.** The hue rides in
+ *     on one custom property and is spent on the 8px dot in the left panel —
+ *     and on nothing else. W5-P7 also washed the file-row chips with it, and
+ *     four of four seeded tags then measured 3.46-4.33:1 in dark: `getTagColor`
+ *     hashes an arbitrary tag name into a hue, so a wash under a fixed text
+ *     token has a ratio
+ *     that changes with the tag's NAME and can never be proven AA. The wash is
+ *     gone; every word on this card is a theme token, so a tag can be any hue
+ *     and still read.
+ *  4. **Every player action is one Ctrl+Z, and never the card** (W5-P7b). The
+ *     library is not the graph, so rename / trash / restore / tagging used to
+ *     reach no history at all — and `Ctrl+Z` after one of them replayed the last
+ *     GRAPH entry, which on a fresh canvas is "add the Library node". Those
+ *     gestures now go through `recordLibraryEdit` (`store/libraryVerbs.ts`),
+ *     which puts a metadata-and-references delta on the SAME history stack the
+ *     graph uses. The two that destroy a payload outside the store —
+ *     permanently delete, empty trash — are `recordSealedLibraryEditAsync`: they ask
+ *     first, and their step is consumed by `Ctrl+Z` without resurrecting a row
+ *     whose audio is gone.
+ *
+ * Rebuilt in W5-P7; the undo seam and the tag-chip contrast fix are W5-P7b.
  */
 
 import { useState, useCallback, useEffect, useMemo, useRef, memo } from 'react';
-import { Port } from '@openjammer/oj-ui';
+import {
+  Button,
+  Callout,
+  Chip,
+  IconButton,
+  IconClose,
+  Input,
+  List,
+  ListRow,
+  NodeShell,
+  PortRow,
+  ProgressBar,
+  WaveformView,
+} from '@openjammer/oj-ui';
 import { toast } from 'sonner';
 import type { GraphNode, LibraryNodeData, LibraryItemRef, NodeData } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
@@ -22,9 +66,11 @@ import {
   useLibraryStore,
   getSampleFile,
   getTagColor,
-  getTagColorDark,
+  getWaveform,
   type LibraryItem,
 } from '../../store/libraryStore';
+import { recordLibraryEdit, recordSealedLibraryEditAsync } from '../../store/libraryVerbs';
+import { base64ToPeaks, formatSampleDuration } from '../../utils/audioMetadata';
 import { isFileSystemAccessSupported, selectLibraryFolder } from '../../utils/fileSystemAccess';
 import { getAudioContext } from '../../audio/audioContext';
 import { getExecutor } from '../../audio/executor';
@@ -33,6 +79,7 @@ import { usePanelResize } from '../../hooks/usePanelResize';
 import { ResizeHandles } from '../common/ResizeHandles';
 import { PanelSeparator } from '../common/PanelSeparator';
 import { ScrollContainer } from '../common/ScrollContainer';
+import { useConfirmFocus } from '../Shell/confirmFocus';
 import './LibraryNode.css';
 
 interface LibraryNodeProps {
@@ -42,6 +89,7 @@ interface LibraryNodeProps {
   handleNodeMouseLeave: () => void;
   isSelected: boolean;
   isDragging: boolean;
+  isHoveredWithConnections?: boolean;
   style: React.CSSProperties;
   // Port wiring (SEAM-1): the library declares one live seam — `sample-out` — that
   // feeds a selected sample's PCM into connected Sampler nodes. These come from
@@ -77,6 +125,7 @@ export const LibraryNode = memo(function LibraryNode({
   handleNodeMouseLeave,
   isSelected,
   isDragging,
+  isHoveredWithConnections,
   style,
   handlePortMouseDown,
   handlePortMouseUp,
@@ -158,6 +207,59 @@ export const LibraryNode = memo(function LibraryNode({
   const [pinnedDropIndex, setPinnedDropIndex] = useState<number | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState('');
+  /**
+   * The one file row whose `+N` tag chip is open.
+   *
+   * A row shows one tag inline so the filename keeps its 120px floor, which left
+   * tags 2..N behind an inert count — and since the remove button travels with
+   * the chip, unreachable. One at a time: the disclosure is a detail about the
+   * row under the pointer, not a mode the list stays in.
+   */
+  const [expandedTagsItemId, setExpandedTagsItemId] = useState<string | null>(null);
+
+  /**
+   * The one destructive question this card ever asks, asked IN the card
+   * (UI-021). It always renders in the same strip under the panels, so a
+   * confirm never moves the list out from under the pointer.
+   */
+  const [pendingConfirm, setPendingConfirm] = useState<
+    | { kind: 'delete-tag'; tag: string }
+    | { kind: 'delete-item'; id: string; name: string }
+    | { kind: 'empty-trash'; count: number }
+    | null
+  >(null);
+
+  /* And it takes the keyboard when it opens. An `alertdialog` nobody is focused
+     on announces into nothing and leaves Tab walking the browser behind it —
+     the same defect a native `confirm()` has, only quieter. One rule, one place
+     (`Shell/confirmFocus`), shared with the menu bar and Settings: the SAFE
+     answer is focused on open, and focus returns to the trigger — or to search,
+     when the row that asked has just been deleted — on close. */
+  const keepItRef = useRef<HTMLButtonElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  /** The control that asked, latched by `askToDelete` so the restore can check
+   *  whether it survived the answer. */
+  const confirmOpenerRef = useRef<HTMLButtonElement | null>(null);
+  useConfirmFocus(pendingConfirm !== null, keepItRef, () => {
+    const opener = confirmOpenerRef.current;
+    return opener && opener.isConnected && !opener.disabled ? opener : searchRef.current;
+  });
+
+  /** Ask the question, and remember which control asked it. */
+  const askToDelete = useCallback(
+    (
+      question: NonNullable<typeof pendingConfirm>,
+      event: React.MouseEvent<HTMLButtonElement>,
+    ) => {
+      event.stopPropagation();
+      confirmOpenerRef.current = event.currentTarget;
+      setPendingConfirm(question);
+    },
+    [],
+  );
+
+  /** Peaks for the sample the node is currently feeding — one idb read. */
+  const [previewPeaks, setPreviewPeaks] = useState<number[]>([]);
 
   // Multi-selection state
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
@@ -174,19 +276,22 @@ export const LibraryNode = memo(function LibraryNode({
   const newTagInputRef = useRef<HTMLInputElement>(null);
   const editNameInputRef = useRef<HTMLInputElement>(null);
   const filesContainerRef = useRef<HTMLDivElement>(null);
-  const fileRowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true); // Track mount state for async safety
 
   // Get updateItem from store
   const updateItem = useLibraryStore(s => s.updateItem);
 
+  /** The item this node is feeding, subscribed (so a rename updates the card). */
+  const currentItem = useLibraryStore(s =>
+    data.currentItemId ? s.items[data.currentItemId] : undefined,
+  );
+
   // Node resize hook
   const {
     width: nodeWidth,
     height: nodeHeight,
     handleResizeStart,
-    nodeRef,
     isResizing,
   } = useResize({
     nodeId: node.id,
@@ -497,10 +602,6 @@ export const LibraryNode = memo(function LibraryNode({
           if (process.env.NODE_ENV === 'development') console.warn('Stop failed:', e);
         }
       }
-
-      // Clear file row refs (C2)
-      // eslint-disable-next-line react-hooks/exhaustive-deps -- the live ref map at unmount is exactly what must be cleared; copying to a local at mount would capture a stale set
-      fileRowRefs.current.clear();
     };
   }, []);
 
@@ -538,7 +639,9 @@ export const LibraryNode = memo(function LibraryNode({
 
     // Only update if name changed
     if (newFileName !== item.fileName) {
-      updateItem(editingItemId, { fileName: newFileName });
+      recordLibraryEdit('Rename sample', () => {
+        updateItem(editingItemId, { fileName: newFileName });
+      });
     }
 
     setEditingItemId(null);
@@ -623,22 +726,30 @@ export const LibraryNode = memo(function LibraryNode({
 
           // If no crop (full file), just add tag to existing item
           if (clipData.startFrame === 0 && clipData.endFrame === -1) {
-            addTagToItem(clipData.sampleId, tagName);
+            recordLibraryEdit('Tag sample', () => addTagToItem(clipData.sampleId, tagName));
             toast.success(`Tagged "${clipData.sampleName}"`);
             return;
           }
 
-          // Create virtual item with crop
+          // Create virtual item with crop. One drop is one gesture, so it is one
+          // undo step — and it is a RECORDED one, not a sealed one: a virtual
+          // item is pure metadata (a frame range plus a reference to its parent
+          // file), so undoing it destroys no audio and re-doing it costs nothing.
+          // The tag-only branch above already worked this way; the crop did not,
+          // which made the smaller of the two edits the only reversible one.
           const baseName = clipData.sampleName.replace(/\.\w+$/, '');
           const virtualName = `${baseName} (crop)`;
           const createVirtualItem = useLibraryStore.getState().createVirtualItem;
-          const virtualId = createVirtualItem(
-            clipData.sampleId,
-            clipData.startFrame,
-            clipData.endFrame,
-            virtualName,
-            [tagName]
-          );
+          let virtualId: string | null = null;
+          recordLibraryEdit('Save crop', () => {
+            virtualId = createVirtualItem(
+              clipData.sampleId,
+              clipData.startFrame,
+              clipData.endFrame,
+              virtualName,
+              [tagName]
+            );
+          });
 
           if (virtualId) {
             toast.success(`Saved crop as "${virtualName}"`);
@@ -651,16 +762,19 @@ export const LibraryNode = memo(function LibraryNode({
         }
       }
 
-      // Try to get multiple item IDs first
+      // Try to get multiple item IDs first. One drop is one gesture, however
+      // many files it carried, so the whole batch is ONE undo step.
       const itemIdsStr = e.dataTransfer.getData('application/library-item-ids');
       if (itemIdsStr) {
         const itemIds = itemIdsStr.split(',').filter(Boolean);
-        itemIds.forEach(id => addTagToItem(id, tagName));
+        recordLibraryEdit('Tag samples', () => {
+          itemIds.forEach(id => addTagToItem(id, tagName));
+        });
       } else {
         // Fallback to single item
         const itemId = e.dataTransfer.getData('application/library-item-id');
         if (itemId) {
-          addTagToItem(itemId, tagName);
+          recordLibraryEdit('Tag sample', () => addTagToItem(itemId, tagName));
         }
       }
     },
@@ -731,8 +845,13 @@ export const LibraryNode = memo(function LibraryNode({
 
       const newSelected = new Set<string>();
 
-      // Check each file row's play button against selection box
-      fileRowRefs.current.forEach((rowEl, itemId) => {
+      // Check each file row's play button against the selection box. The rows
+      // are read out of the DOM (one query, only on mouse-up) rather than from
+      // a React ref map mirroring them - one source of truth for what is on
+      // screen, and nothing to keep in sync when the list re-filters.
+      container.querySelectorAll<HTMLElement>('.library-file-row[data-item-id]').forEach((rowEl) => {
+        const itemId = rowEl.dataset.itemId;
+        if (!itemId) return;
         const playBtn = rowEl.querySelector('.file-preview-btn');
         if (!playBtn) return;
 
@@ -825,8 +944,8 @@ export const LibraryNode = memo(function LibraryNode({
   const handleCreateTag = useCallback(() => {
     const name = newTagName.trim();
     if (name) {
-      createTag(name);
       // New tags go to "other tags" first - user can drag to pin
+      recordLibraryEdit('Create tag', () => createTag(name));
     }
     setNewTagName('');
     setIsCreatingTag(false);
@@ -893,7 +1012,7 @@ export const LibraryNode = memo(function LibraryNode({
         const newOrder = [...pinnedTags];
         newOrder.splice(currentIndex, 1);
         newOrder.splice(targetIndex, 0, tagName);
-        reorderPinnedTags(newOrder);
+        recordLibraryEdit('Reorder pinned tags', () => reorderPinnedTags(newOrder));
       }
     } else {
       // Pinning a new tag from other section
@@ -902,9 +1021,9 @@ export const LibraryNode = memo(function LibraryNode({
           // Insert at specific position
           const newOrder = [...pinnedTags];
           newOrder.splice(pinnedDropIndex, 0, tagName);
-          reorderPinnedTags(newOrder);
+          recordLibraryEdit('Pin tag', () => reorderPinnedTags(newOrder));
         } else {
-          pinTag(tagName);
+          recordLibraryEdit('Pin tag', () => pinTag(tagName));
         }
       }
     }
@@ -921,7 +1040,7 @@ export const LibraryNode = memo(function LibraryNode({
 
     // Only unpin if dragging from pinned section
     if (tagName && source === 'pinned' && pinnedTags.includes(tagName)) {
-      unpinTag(tagName);
+      recordLibraryEdit('Unpin tag', () => unpinTag(tagName));
     }
   }, [pinnedTags, unpinTag]);
 
@@ -932,21 +1051,80 @@ export const LibraryNode = memo(function LibraryNode({
     }
   }, [isCreatingTag]);
 
+  /**
+   * The trace for the sample this Library is currently feeding. ONE IndexedDB
+   * read per selection — not one per visible row: a browser meant to scroll
+   * hundreds of files cannot pay a decode per row and still feel instant
+   * (design-for-instant). The waveform you want to see is the one you picked.
+   */
+  useEffect(() => {
+    const itemId = data.currentItemId;
+    if (!itemId) {
+      setPreviewPeaks([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const encoded = await getWaveform(itemId);
+      if (cancelled) return;
+      if (!encoded) {
+        setPreviewPeaks([]);
+        return;
+      }
+      const peaks = base64ToPeaks(encoded);
+      // Downsample to a card-sized envelope; a 2000-point polyline in a 200px
+      // box is 1800 points of nothing.
+      const target = 96;
+      const stride = Math.max(1, Math.floor(peaks.length / target));
+      const out: number[] = [];
+      for (let i = 0; i < peaks.length; i += stride) {
+        let max = 0;
+        for (let j = i; j < Math.min(i + stride, peaks.length); j += 1) {
+          const v = Math.abs(peaks[j]);
+          if (v > max) max = v;
+        }
+        out.push(max);
+      }
+      setPreviewPeaks(out);
+    })();
+    return () => { cancelled = true; };
+  }, [data.currentItemId]);
 
-  // Render tag item
+
+  /**
+   * One tag. A pill you can filter with, pin by dragging, and drop files onto.
+   * The hue is the tag's identity and is spent ONLY on the dot and a faint
+   * wash - the word itself is a theme token, so any hue still reads (D5).
+   */
   const renderTag = (tagName: string, isPinned: boolean, index?: number) => {
     const isActive = activeFilterTag === tagName;
-    const color = getTagColor(tagName);
-    const isDragging = isPinned ? draggingPinnedTag === tagName : draggingTag === tagName;
+    const isTagDragging = isPinned ? draggingPinnedTag === tagName : draggingTag === tagName;
     const showDropBefore = isPinned && pinnedDropIndex === index && (draggingPinnedTag || draggingTag);
     const showDropAfter = isPinned && pinnedDropIndex === (index ?? 0) + 1 && index === pinnedTags.length - 1 && (draggingPinnedTag || draggingTag);
 
+    const classes = [
+      'library-tag',
+      dragOverTag === tagName && 'is-drop-target',
+      isTagDragging && 'is-dragging',
+      showDropBefore && 'drop-before',
+      showDropAfter && 'drop-after',
+    ].filter(Boolean).join(' ');
+
     return (
-      <div
+      <ListRow
         key={tagName}
-        className={`library-tag ${isActive ? 'active' : ''} ${dragOverTag === tagName ? 'drag-over' : ''} ${isDragging ? 'dragging' : ''} ${showDropBefore ? 'drop-before' : ''} ${showDropAfter ? 'drop-after' : ''}`}
-        style={{ '--tag-color': color } as React.CSSProperties}
+        className={classes}
+        selected={isActive}
+        style={{ '--tag-color': getTagColor(tagName) } as React.CSSProperties}
+        role="option"
+        tabIndex={0}
         onClick={() => handleTagClick(tagName)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            handleTagClick(tagName);
+          }
+        }}
         draggable
         onDragStart={(e) => isPinned ? handlePinnedTagDragStart(e, tagName) : handleTagDragStart(e, tagName)}
         onDragEnd={handleTagDragEnd}
@@ -960,37 +1138,32 @@ export const LibraryNode = memo(function LibraryNode({
         }}
         onDragLeave={() => { setDragOverTag(null); }}
         onDrop={(e) => isPinned ? handlePinnedSectionDrop(e) : handleTagDrop(e, tagName)}
-        title={isPinned ? 'Drag to reorder, drag to Other to unpin' : 'Drag to Pinned to pin, click to filter'}
-      >
-        <span className="tag-indicator" style={{ backgroundColor: color }} />
-        <span className="tag-name">{tagName}</span>
-        {isPinned ? (
-          <button
-            className="tag-unpin-btn"
-            onClick={(e) => { e.stopPropagation(); unpinTag(tagName); }}
-            title="Unpin tag"
-          >
-            ×
-          </button>
-        ) : (
-          <button
-            className="tag-delete-btn"
+        title={isPinned ? 'Drag to reorder, or drag into All tags to unpin' : 'Drag into Pinned to pin, click to filter'}
+        actions={
+          <IconButton
+            variant="ghost"
+            className="library-tag__action"
+            label={isPinned ? `Unpin ${tagName}` : `Delete tag ${tagName}`}
             onClick={(e) => {
-              e.stopPropagation();
-              if (confirm(`Delete tag "${tagName}"? This will remove it from all files.`)) {
-                deleteTag(tagName);
+              if (isPinned) {
+                e.stopPropagation();
+                recordLibraryEdit('Unpin tag', () => unpinTag(tagName));
+              } else {
+                askToDelete({ kind: 'delete-tag', tag: tagName }, e);
               }
             }}
-            title="Delete tag"
-          >
-            ×
-          </button>
-        )}
-      </div>
+            icon={<IconClose size={12} />}
+            title={isPinned ? 'Unpin tag' : 'Delete tag'}
+          />
+        }
+      >
+        <span className="library-tag__dot" aria-hidden="true" />
+        <span className="library-tag__name">{tagName}</span>
+      </ListRow>
     );
   };
 
-  // Render file row (I5: includes loading state)
+  /** One file. A row you can preview, rename, tag, drag to the canvas and trash. */
   const renderFileRow = (item: LibraryItem) => {
     const isActive = data.currentItemId === item.id;
     const isPreviewing = previewingItemId === item.id;
@@ -1000,54 +1173,189 @@ export const LibraryNode = memo(function LibraryNode({
     const isEditing = editingItemId === item.id;
     const isMultiSelected = selectedItemIds.has(item.id);
     const isVirtual = item.isVirtual === true;
+    const visibleTags = item.tags.filter((t) => t !== 'trash');
+    const tagsExpanded = expandedTagsItemId === item.id;
+    const shownTags = tagsExpanded ? visibleTags : visibleTags.slice(0, 1);
+    const hiddenTags = visibleTags.slice(1);
+    const toggleTags = () => setExpandedTagsItemId(tagsExpanded ? null : item.id);
+
+    const classes = [
+      'library-file-row',
+      tagsExpanded && 'is-tags-expanded',
+      isMultiSelected && 'is-multi-selected',
+      isMissing && 'is-missing',
+      isTrashed && 'is-trashed',
+      isEditing && 'is-editing',
+      isLoading && 'is-loading',
+      isVirtual && 'is-virtual',
+    ].filter(Boolean).join(' ');
 
     return (
-      <div
+      <ListRow
         key={item.id}
-        ref={(el) => {
-          if (el) fileRowRefs.current.set(item.id, el);
-          else fileRowRefs.current.delete(item.id);
-        }}
-        className={`library-file-row ${isActive ? 'selected' : ''} ${isMultiSelected ? 'multi-selected' : ''} ${isMissing ? 'missing' : ''} ${isTrashed ? 'trashed' : ''} ${isEditing ? 'editing' : ''} ${isLoading ? 'loading' : ''} ${isVirtual ? 'virtual' : ''}`}
+        data-item-id={item.id}
+        className={classes}
+        /* `ListRow` emits `aria-selected` from `selected`. A row caught by the
+           marquee is visually selected (accent inset edge + `--accent-ink`
+           label), so it has to be ANNOUNCED as selected too; `isActive` still
+           drives the "current item" dot on its own. */
+        selected={isActive || isMultiSelected}
         onClick={(e) => !isEditing && handleFileRowClick(item.id, e)}
         onKeyDown={(e) => {
           if (isEditing) return;
           if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             handleFileRowClick(item.id, e as unknown as React.MouseEvent);
+          } else if ((e.key === 'Delete' || e.key === 'Backspace') && !isTrashed) {
+            e.preventDefault();
+            recordLibraryEdit('Move sample to trash', () => trashItem(item.id));
+            toast.info('Item moved to trash');
           }
         }}
+        aria-keyshortcuts="Delete Backspace"
         tabIndex={0}
-        role="listitem"
-        aria-selected={isActive || isMultiSelected}
+        role="option"
         draggable={!isTrashed && !isEditing}
         onDragStart={(e) => !isTrashed && !isEditing && handleFileDragStart(e, item)}
-      >
-        {/* Virtual item indicator */}
-        {isVirtual && (
-          <span className="virtual-indicator" title="Virtual crop (references parent file)">
-            <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12">
-              <path d="M4 2v12l4-3v-6l-4-3zm5 3v6l4 3V2l-4 3z" opacity="0.7" />
-            </svg>
-          </span>
-        )}
+        title={`${item.relativePath} - double-click the name to rename, drag onto the canvas to place it`}
+        actions={
+          <>
+            {/* One gesture, one job. The chip filters; a real, labelled button
+                beside it takes the tag off this file. W5-P7 had the removal on a
+                `onDoubleClick` over the chip, which has no keyboard route, no
+                accessible name, and lived only in a tooltip — while the chip's
+                own Enter/Space was already spent on filtering. */}
+            <span className="library-file-row__tags">
+              {shownTags.map((tag) => (
+                <span key={tag} className="library-file-row__tagpair">
+                  <Chip
+                    className="library-file-row__tag"
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); handleTagClick(tag); }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        handleTagClick(tag);
+                      }
+                    }}
+                    title={`Filter by ${tag}`}
+                  >
+                    {tag}
+                  </Chip>
+                  <IconButton
+                    variant="ghost"
+                    className="library-file-row__untag"
+                    label={`Remove ${tag} tag`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      recordLibraryEdit('Remove tag', () => removeTagFromItem(item.id, tag));
+                    }}
+                    onKeyDown={(e: React.KeyboardEvent) => {
+                      if (e.key !== 'Enter' && e.key !== ' ') return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      recordLibraryEdit('Remove tag', () => removeTagFromItem(item.id, tag));
+                    }}
+                    icon={<IconClose size={11} />}
+                    title={`Remove ${tag} tag`}
+                  />
+                </span>
+              ))}
+              {/* ONE tag inline, the rest behind the count. Two chips plus their
+                  remove buttons could not both stay readable AND leave the file
+                  name its 120px floor — squeezed, they rendered as empty pills,
+                  which is worse than not showing them.
 
-        {/* Play/Stop button or loading indicator (I5) */}
+                  But the remove button travels with its chip, so a count that only
+                  had a tooltip made tags 2..N unremovable — a capability HEAD had.
+                  So the count is a DISCLOSURE: it names the hidden tags in its
+                  title, and clicking it (or Enter/Space on it) opens them on this
+                  row, each with its own remove button. */}
+              {hiddenTags.length > 0 && (
+                <Chip
+                  className="library-file-row__more"
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={tagsExpanded}
+                  aria-label={
+                    tagsExpanded
+                      ? 'Show fewer tags'
+                      : `Show ${hiddenTags.length} more ${hiddenTags.length === 1 ? 'tag' : 'tags'}: ${hiddenTags.join(', ')}`
+                  }
+                  onClick={(e) => { e.stopPropagation(); toggleTags(); }}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    toggleTags();
+                  }}
+                  title={tagsExpanded ? 'Show fewer tags' : `Also tagged ${hiddenTags.join(', ')} - click to remove any of them`}
+                >
+                  {tagsExpanded ? 'Less' : `+${hiddenTags.length}`}
+                </Chip>
+              )}
+            </span>
+            <IconButton
+              variant="ghost"
+              className={`library-file-row__trash${isTrashed ? ' is-restore' : ''}`}
+              label={isTrashed ? `Restore ${item.fileName}` : `Move ${item.fileName} to trash`}
+              disabled={isPreviewing || isLoading}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (isTrashed) {
+                  // Restoring and stepping out of the trash view is ONE gesture,
+                  // so it is one entry: undo puts the row back in the trash AND
+                  // puts the filter back where the player had it.
+                  recordLibraryEdit('Restore sample', () => {
+                    restoreItem(item.id);
+                    // Only clear the filter when we are LOOKING at the trash, so
+                    // the restored item reappears in the main list rather than
+                    // vanishing.
+                    if (activeFilterTag === 'trash') setActiveFilterTag(null);
+                  });
+                  toast.success('Item restored');
+                } else {
+                  recordLibraryEdit('Move sample to trash', () => trashItem(item.id));
+                  toast.info('Item moved to trash');
+                }
+              }}
+              icon={isTrashed ? <IconRestore /> : <IconClose size={13} />}
+              title={isTrashed ? 'Restore' : 'Move to trash'}
+            />
+            {isTrashed && (
+              <IconButton
+                variant="ghost"
+                className="library-file-row__delete"
+                label={`Permanently delete ${item.fileName}`}
+                disabled={isPreviewing || isLoading}
+                onClick={(e) =>
+                  askToDelete({ kind: 'delete-item', id: item.id, name: item.fileName }, e)
+                }
+                icon={<IconTrash />}
+                title="Permanently delete"
+              />
+            )}
+          </>
+        }
+      >
         <button
-          className={`file-preview-btn ${isPreviewing ? 'playing' : ''} ${isLoading ? 'loading' : ''}`}
-          onClick={e => { e.stopPropagation(); handlePreviewItem(item.id); }}
+          type="button"
+          className={`file-preview-btn${isPreviewing ? ' is-playing' : ''}`}
+          onClick={(e) => { e.stopPropagation(); handlePreviewItem(item.id); }}
+          aria-label={isPreviewing ? `Stop ${item.fileName}` : `Preview ${item.fileName}`}
+          aria-pressed={isPreviewing}
           title={isLoading ? 'Loading...' : (isPreviewing ? 'Stop' : 'Preview')}
           disabled={isLoading}
         >
-          {isLoading ? '...' : (isPreviewing ? '■' : '▶')}
+          {isPreviewing ? <IconStopGlyph /> : <IconPlayGlyph />}
         </button>
 
-        {/* File name - editable on double-click */}
         {isEditing ? (
-          <input
+          <Input
             ref={editNameInputRef}
-            type="text"
-            className="file-name-input"
+            className="library-file-row__rename"
             value={editingName}
             onChange={(e) => setEditingName(e.target.value)}
             onBlur={handleSaveFileName}
@@ -1060,117 +1368,31 @@ export const LibraryNode = memo(function LibraryNode({
               }
             }}
             onClick={(e) => e.stopPropagation()}
+            aria-label="File name"
           />
         ) : (
           <span
-            className="file-name"
-            title={`${item.relativePath} (double-click to rename)`}
+            className="library-file-row__name"
             onDoubleClick={(e) => {
               e.stopPropagation();
               handleStartEditFileName(item.id);
             }}
           >
+            {isVirtual && (
+              <span className="library-file-row__virtual" title="Virtual crop - it references its parent file">
+                CROP
+              </span>
+            )}
             {item.fileName}
           </span>
         )}
 
-        {/* Tag badges (right-aligned) */}
-        <div className="file-tags">
-          {item.tags.filter(t => t !== 'trash').slice(0, 2).map(tag => (
-            <span
-              key={tag}
-              className="file-tag-badge"
-              style={{
-                '--tag-bg': getTagColor(tag),
-                '--tag-text': getTagColorDark(tag),
-              } as React.CSSProperties}
-              onClick={(e) => { e.stopPropagation(); handleTagClick(tag); }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  handleTagClick(tag);
-                }
-              }}
-              tabIndex={0}
-              role="button"
-              title={`Filter by ${tag}`}
-            >
-              {tag}
-              <button
-                className="tag-remove-btn"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeTagFromItem(item.id, tag);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    removeTagFromItem(item.id, tag);
-                  }
-                }}
-                title={`Remove ${tag} tag`}
-                aria-label={`Remove ${tag} tag`}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-          {item.tags.filter(t => t !== 'trash').length > 2 && (
-            <span className="file-tag-more">+{item.tags.filter(t => t !== 'trash').length - 2}</span>
-          )}
-        </div>
-
-        {/* Trash/Restore button */}
-        <button
-          className={`file-trash-btn ${isTrashed ? 'restore' : ''}`}
-          disabled={isPreviewing || isLoading}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (isTrashed) {
-              restoreItem(item.id);
-              // Only clear filter if we're viewing trash, so restored item appears in main list
-              if (activeFilterTag === 'trash') {
-                setActiveFilterTag(null);
-              }
-              toast.success('Item restored');
-            } else {
-              trashItem(item.id);
-              toast.info('Item moved to trash');
-            }
-          }}
-          title={isTrashed ? 'Restore' : 'Move to trash'}
-        >
-          {isTrashed ? '↩' : '×'}
-        </button>
-
-        {/* Permanent delete button (only for trashed items) */}
-        {isTrashed && (
-          <button
-            className="file-delete-btn"
-            disabled={isPreviewing || isLoading}
-            onClick={async (e) => {
-              e.stopPropagation();
-              if (confirm(`Permanently delete "${item.fileName}"? This cannot be undone.`)) {
-                setLoadingItemId(item.id);
-                try {
-                  await permanentlyDeleteItem(item.id);
-                  toast.success('Item permanently deleted');
-                } catch (error) {
-                  console.error('Failed to delete item:', error);
-                  toast.error('Failed to delete item');
-                } finally {
-                  setLoadingItemId(null);
-                }
-              }
-            }}
-            title="Permanently delete"
-          >
-            🗑
-          </button>
-        )}
-      </div>
+        {item.duration ? (
+          <span className="oj-node__readout library-file-row__len">
+            {formatSampleDuration(item.duration)}
+          </span>
+        ) : null}
+      </ListRow>
     );
   };
 
@@ -1178,89 +1400,111 @@ export const LibraryNode = memo(function LibraryNode({
   const isScanning =
     scanProgress !== null && scanProgress.libraryId === effectiveLibraryId && scanProgress.phase !== 'complete';
 
-  // Combined style with dimensions
+  // Combined style with dimensions (S3's measured geometry reads data.width/height)
   const nodeStyle: React.CSSProperties = {
     ...style,
     width: nodeWidth,
     height: nodeHeight,
   };
 
-  // SEAM-1: the single live seam — the sample feed into connected samplers. Resolve
-  // it from the node's ports (id may be 'sample-out'; fall back by type/direction so
-  // a migrated node still finds it).
+  // SEAM-1: the single live seam - the sample feed into connected samplers.
+  // Resolve it from the node's ports (id may be 'sample-out'; fall back by
+  // type/direction so a migrated node still finds it).
   const sampleOutPort =
     node.ports.find((p) => p.id === 'sample-out') ??
     node.ports.find((p) => p.type === 'audio' && p.direction === 'output');
 
+
+  const cardClass = [
+    'schematic-node',
+    'library-node',
+    isResizing && 'is-resizing',
+    isHoveredWithConnections && 'hover-connecting',
+  ].filter(Boolean).join(' ');
+
   return (
-    <div
-      ref={nodeRef}
-      className={`schematic-node library-node library-two-panel ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''}`}
+    <NodeShell
+      className={cardClass}
       style={nodeStyle}
+      title={currentLibrary ? currentLibrary.name : 'Library'}
+      nodeType={currentLibrary ? `${currentLibrary.itemCount} FILES` : 'FILES'}
+      selected={isSelected}
+      dragging={isDragging}
+      headerProps={{ onMouseDown: handleHeaderMouseDown }}
       onMouseEnter={handleNodeMouseEnter}
       onMouseLeave={handleNodeMouseLeave}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => e.stopPropagation()}
-    >
-      {/* Sample feed output port (SEAM-1): wire Library -> Sampler. The selected
-          item's PCM is fed to every connected sampler via `sendSampleBuffer`. */}
-      {sampleOutPort && (
-        <Port
+      outputs={sampleOutPort ? (
+        <PortRow
+          side="output"
           kind="audio"
-          direction="output"
+          label={sampleOutPort.name || 'Sample'}
           connected={!!hasConnection?.(sampleOutPort.id)}
-          className={`library-sample-out-port ${hasConnection?.(sampleOutPort.id) ? 'connected' : ''}`}
           data-node-id={node.id}
           data-port-id={sampleOutPort.id}
           data-port-type="audio"
           onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(sampleOutPort.id, e); }}
-          onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(sampleOutPort.id, e)}
+          onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(sampleOutPort.id, e); }}
           onMouseEnter={() => handlePortMouseEnter?.(sampleOutPort.id)}
           onMouseLeave={handlePortMouseLeave}
-          title="Sample out — wire to a Sampler"
+          title="Sample out - wire this to a Sampler"
         />
-      )}
-
-      {/* Header */}
-      <div className="schematic-header" onMouseDown={handleHeaderMouseDown}>
-        <span className="schematic-title">
-          {currentLibrary ? currentLibrary.name : 'Library'}
-        </span>
-        {currentLibrary && (
-          <span className="library-count">{currentLibrary.itemCount}</span>
-        )}
-      </div>
-
-      {/* Content - Two panel layout */}
-      <div className="library-panels">
+      ) : undefined}
+    >
+      <div className="library-body" onMouseDown={(e) => e.stopPropagation()}>
         {!currentLibrary ? (
-          // No library linked - show link button
-          <div className="library-empty">
-            <button className="library-link-btn" onClick={handleLinkFolder} disabled={isLinking}>
-              {isLinking ? 'Linking...' : '+ Link Folder'}
-            </button>
-            <p className="library-hint">Select a folder containing audio files</p>
-          </div>
+          /* Nothing linked yet. One sentence about what a folder buys you, and
+             one primary button - the only solid accent fill on this card. */
+          <Callout
+            variant="info"
+            title="Link a folder of audio"
+            className="library-onboard"
+          >
+            <p className="library-onboard__body">
+              Point OpenJammer at a folder and every sound in it becomes
+              searchable, taggable, and draggable straight onto the canvas.
+              Nothing is copied or moved.
+            </p>
+            <Button
+              variant="primary"
+              className="library-onboard__cta"
+              onClick={handleLinkFolder}
+              loading={isLinking}
+              disabled={isLinking}
+            >
+              Link a folder...
+            </Button>
+            {!isFileSystemAccessSupported() && (
+              <p className="library-onboard__note">
+                This browser cannot open a folder. Chrome or Edge can.
+              </p>
+            )}
+          </Callout>
         ) : isScanning ? (
-          // Scanning progress
+          /* Reading the folder. A real progress bar plus skeleton rows, so the
+             panel keeps the shape it is about to have instead of collapsing. */
           <div className="library-scanning">
-            <div className="scan-progress">
-              <div
-                className="scan-progress-bar"
-                style={{ width: `${scanProgress && scanProgress.total > 0 ? (scanProgress.current / scanProgress.total) * 100 : 0}%` }}
-              />
-            </div>
-            <span className="scan-status">
-              Scanning: {scanProgress?.current || 0} / {scanProgress?.total || '?'}
+            <ProgressBar
+              value={scanProgress?.current ?? 0}
+              max={Math.max(scanProgress?.total ?? 1, 1)}
+              aria-label="Scanning folder"
+            />
+            <span className="oj-node__readout library-scanning__status">
+              {scanProgress?.current ?? 0} / {scanProgress?.total ?? '?'} files
             </span>
+            <div className="library-skeleton" aria-hidden="true">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <span key={i} className="library-skeleton__row" />
+              ))}
+            </div>
           </div>
         ) : (
-          <>
-            {/* Left Panel: Tags */}
-            <div className="library-left-panel" ref={leftPanelRef}>
-              {/* Pinned Tags Section - drop zone for pinning */}
+          <div className="library-panels">
+            {/* ---- Left: the tag rail ---- */}
+            <div className="library-tags-panel" ref={leftPanelRef}>
               <div
-                className={`library-tags-section pinned ${dragOverPinnedSection ? 'drag-over' : ''}`}
+                className={`library-tags-section${dragOverPinnedSection ? ' is-drop-target' : ''}`}
                 style={{ height: `${separatorPos * 100}%` }}
                 onDragOver={(e) => {
                   if (draggingTag) {
@@ -1271,18 +1515,19 @@ export const LibraryNode = memo(function LibraryNode({
                 onDragLeave={() => setDragOverPinnedSection(false)}
                 onDrop={handlePinnedSectionDrop}
               >
-                <div className="tags-section-header">
-                  <span>pinned Tags</span>
+                <div className="library-section-head">
+                  <span className="library-section-head__title">Pinned</span>
                 </div>
-                <ScrollContainer mode="dropdown" className="tags-list">
-                  {pinnedTags.map((tag, index) => renderTag(tag, true, index))}
+                <ScrollContainer mode="dropdown" className="library-tags-scroll">
+                  <List role="listbox" aria-label="Pinned tags" className="library-tag-list">
+                    {pinnedTags.map((tag, index) => renderTag(tag, true, index))}
+                  </List>
                   {pinnedTags.length === 0 && (
-                    <div className="no-tags-hint">Drag tags here to pin</div>
+                    <p className="library-hint">Drag a tag here to keep it at hand.</p>
                   )}
                 </ScrollContainer>
               </div>
 
-              {/* Separator */}
               <PanelSeparator
                 direction="vertical"
                 onMouseDown={handleSeparatorMouseDown}
@@ -1290,9 +1535,8 @@ export const LibraryNode = memo(function LibraryNode({
                 className="library-separator"
               />
 
-              {/* Other Tags Section - drop zone for unpinning */}
               <div
-                className={`library-tags-section other ${dragOverOtherSection ? 'drag-over' : ''}`}
+                className={`library-tags-section${dragOverOtherSection ? ' is-drop-target' : ''}`}
                 style={{ height: `${(1 - separatorPos) * 100}%` }}
                 onDragOver={(e) => {
                   if (draggingPinnedTag) {
@@ -1303,89 +1547,106 @@ export const LibraryNode = memo(function LibraryNode({
                 onDragLeave={() => setDragOverOtherSection(false)}
                 onDrop={handleOtherSectionDrop}
               >
-                <div className="tags-section-header">
-                  <span>other Tags</span>
-                  <button
-                    className="add-tag-btn"
+                <div className="library-section-head">
+                  <span className="library-section-head__title">All tags</span>
+                  <Button
+                    variant="ghost"
+                    className="library-add-tag"
                     onClick={() => setIsCreatingTag(true)}
-                    title="Create new tag"
+                    title="Create a new tag"
                   >
-                    +
-                  </button>
+                    + New
+                  </Button>
                 </div>
-                <ScrollContainer mode="dropdown" className="tags-list">
+                <ScrollContainer mode="dropdown" className="library-tags-scroll">
                   {isCreatingTag && (
-                    <div className="tag-input-row">
-                      <input
-                        ref={newTagInputRef}
-                        type="text"
-                        value={newTagName}
-                        onChange={(e) => setNewTagName(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') handleCreateTag();
-                          if (e.key === 'Escape') { setIsCreatingTag(false); setNewTagName(''); }
-                        }}
-                        onBlur={handleCreateTag}
-                        placeholder="Tag name..."
-                        onMouseDown={(e) => e.stopPropagation()}
-                      />
-                    </div>
+                    <Input
+                      ref={newTagInputRef}
+                      className="library-new-tag"
+                      value={newTagName}
+                      onChange={(e) => setNewTagName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleCreateTag();
+                        if (e.key === 'Escape') { setIsCreatingTag(false); setNewTagName(''); }
+                      }}
+                      onBlur={handleCreateTag}
+                      placeholder="Tag name..."
+                      aria-label="New tag name"
+                      onMouseDown={(e) => e.stopPropagation()}
+                    />
                   )}
-                  {otherTags.map(tag => renderTag(tag, false))}
+                  <List role="listbox" aria-label="All tags" className="library-tag-list">
+                    {otherTags.map((tag) => renderTag(tag, false))}
+                  </List>
                   {otherTags.length === 0 && !isCreatingTag && (
-                    <div className="no-tags-hint">Click + to create tags</div>
+                    <p className="library-hint">No tags yet. Make one with + New.</p>
                   )}
                 </ScrollContainer>
               </div>
             </div>
 
-            {/* Right Panel: Files */}
-            <div className="library-right-panel">
-              {/* Search bar */}
+            {/* ---- Right: search, the feed preview, and the files ---- */}
+            <div className="library-files-panel">
               <div className="library-search">
-                <input
-                  type="text"
-                  placeholder="Search files and tags..."
+                <Input
+                  ref={searchRef}
+                  className="library-search__input"
+                  type="search"
+                  placeholder="Search files and tags"
+                  aria-label="Search files and tags"
                   value={searchQuery}
-                  onChange={e => setSearchQuery(e.target.value)}
-                  onMouseDown={e => e.stopPropagation()}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onMouseDown={(e) => e.stopPropagation()}
                 />
                 {activeFilterTag && (
-                  <button
-                    className="clear-filter-btn"
+                  <Chip
+                    className="library-filter-chip"
+                    pressed
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setActiveFilterTag(null)}
-                    title="Clear tag filter"
-                  >
-                    × {activeFilterTag}
-                  </button>
-                )}
-                {activeFilterTag === 'trash' && libraryItems.length > 0 && (
-                  <button
-                    className="empty-trash-btn"
-                    disabled={loadingItemId !== null}
-                    onClick={async () => {
-                      if (confirm(`Permanently delete ${libraryItems.length} trashed item${libraryItems.length !== 1 ? 's' : ''}? This cannot be undone.`)) {
-                        setLoadingItemId('empty-trash');
-                        try {
-                          await emptyTrash();
-                          setActiveFilterTag(null);
-                          toast.success('Trash emptied');
-                        } catch (error) {
-                          console.error('[Library] Failed to empty trash:', error);
-                          toast.error('Failed to empty trash');
-                        } finally {
-                          setLoadingItemId(null);
-                        }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setActiveFilterTag(null);
                       }
                     }}
-                    title="Permanently delete all trashed items"
+                    title="Clear the tag filter"
                   >
-                    Empty Trash
-                  </button>
+                    {activeFilterTag} x
+                  </Chip>
+                )}
+                {activeFilterTag === 'trash' && libraryItems.length > 0 && (
+                  <Button
+                    variant="danger"
+                    className="library-empty-trash"
+                    disabled={loadingItemId !== null}
+                    onClick={(e) =>
+                      askToDelete({ kind: 'empty-trash', count: libraryItems.length }, e)
+                    }
+                  >
+                    Empty trash
+                  </Button>
                 )}
               </div>
 
-              {/* File list with selection box support */}
+              {/* What this node is feeding down the cable, right now. One idb
+                  read, one trace - the sample you picked, not every row. */}
+              {currentItem && (
+                <div className="library-feed">
+                  <WaveformView
+                    className="library-feed__clip"
+                    peaks={previewPeaks}
+                    durationLabel={currentItem.duration ? formatSampleDuration(currentItem.duration) : '-'}
+                    name={currentItem.fileName}
+                    cropped={currentItem.isVirtual === true}
+                    selected
+                    title="The sample being fed to every connected Sampler"
+                  />
+                  <span className="library-feed__label">Feeding</span>
+                </div>
+              )}
+
               <div
                 ref={filesContainerRef}
                 className="library-files-container"
@@ -1393,21 +1654,23 @@ export const LibraryNode = memo(function LibraryNode({
               >
                 <ScrollContainer ref={scrollContainerRef} mode="dropdown" className="library-files">
                   {libraryItems.length === 0 ? (
-                    <div className="library-no-files">
-                      {(searchQuery || activeFilterTag) ? `No matching files` : 'No files found'}
-                    </div>
+                    <p className="library-hint library-hint--center">
+                      {(searchQuery || activeFilterTag) ? 'Nothing matches that.' : 'This folder has no audio in it.'}
+                    </p>
                   ) : (
                     <>
-                      {/* Search results count (M5) */}
                       {(debouncedSearch || activeFilterTag) && (
-                        <div className="library-results-count">{libraryItems.length} item{libraryItems.length !== 1 ? 's' : ''}</div>
+                        <span className="oj-node__readout library-count">
+                          {libraryItems.length} item{libraryItems.length !== 1 ? 's' : ''}
+                        </span>
                       )}
-                      {libraryItems.map(renderFileRow)}
+                      <List role="listbox" aria-label="Files" className="library-file-list">
+                        {libraryItems.map(renderFileRow)}
+                      </List>
                     </>
                   )}
                 </ScrollContainer>
 
-                {/* Selection box overlay */}
                 {selectionBox && (
                   <div
                     className="library-selection-box"
@@ -1421,16 +1684,135 @@ export const LibraryNode = memo(function LibraryNode({
                 )}
               </div>
             </div>
-          </>
+          </div>
+        )}
+
+        {/* The one destructive question, always in the same place (UI-021). */}
+        {pendingConfirm && (
+          <Callout
+            key={pendingConfirm.kind}
+            variant="danger"
+            className="library-confirm"
+            role="alertdialog"
+            aria-label="Confirm"
+            onKeyDown={(event) => {
+              if (event.key !== 'Escape') return;
+              event.stopPropagation();
+              setPendingConfirm(null);
+            }}
+            title={
+              pendingConfirm.kind === 'delete-tag'
+                ? `Delete the tag "${pendingConfirm.tag}"?`
+                : pendingConfirm.kind === 'delete-item'
+                  ? `Permanently delete "${pendingConfirm.name}"?`
+                  : `Permanently delete ${pendingConfirm.count} trashed item${pendingConfirm.count === 1 ? '' : 's'}?`
+            }
+          >
+            <p className="library-confirm__body">
+              {pendingConfirm.kind === 'delete-tag'
+                ? 'It comes off every file that carries it. The files themselves are untouched.'
+                : 'This cannot be undone.'}
+            </p>
+            <div className="library-confirm__actions">
+              <Button
+                ref={keepItRef}
+                variant="secondary"
+                data-autofocus="true"
+                onClick={() => setPendingConfirm(null)}
+              >
+                Keep it
+              </Button>
+              <Button
+                variant="danger"
+                onClick={async () => {
+                  const action = pendingConfirm;
+                  setPendingConfirm(null);
+                  if (!action) return;
+                  if (action.kind === 'delete-tag') {
+                    // The files are untouched, so this one really does come back.
+                    recordLibraryEdit('Delete tag', () => deleteTag(action.tag));
+                    return;
+                  }
+                  if (action.kind === 'delete-item') {
+                    setLoadingItemId(action.id);
+                    try {
+                      // SEALED: the waveform and the file handle leave IndexedDB
+                      // here, so undo must not put back a row that plays nothing.
+                      await recordSealedLibraryEditAsync('Delete sample permanently', () =>
+                        permanentlyDeleteItem(action.id),
+                      );
+                      toast.success('Item permanently deleted');
+                    } catch (error) {
+                      console.error('Failed to delete item:', error);
+                      toast.error('Failed to delete item');
+                    } finally {
+                      setLoadingItemId(null);
+                    }
+                    return;
+                  }
+                  setLoadingItemId('empty-trash');
+                  try {
+                    await recordSealedLibraryEditAsync('Empty trash', async () => {
+                      await emptyTrash();
+                      setActiveFilterTag(null);
+                    });
+                    toast.success('Trash emptied');
+                  } catch (error) {
+                    console.error('[Library] Failed to empty trash:', error);
+                    toast.error('Failed to empty trash');
+                  } finally {
+                    setLoadingItemId(null);
+                  }
+                }}
+              >
+                Delete
+              </Button>
+            </div>
+          </Callout>
         )}
       </div>
 
-      {/* Resize handles */}
       <ResizeHandles
         handles={['se', 'e', 's']}
         onResizeStart={handleResizeStart}
         isResizing={isResizing}
       />
-    </div>
+    </NodeShell>
   );
 });
+
+/** Preview - a play triangle. */
+function IconPlayGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width={12} height={12} fill="currentColor" aria-hidden="true">
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  );
+}
+
+/** Stop the preview - a square. */
+function IconStopGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" width={12} height={12} fill="currentColor" aria-hidden="true">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  );
+}
+
+/** Put it back - a curling return arrow. */
+function IconRestore() {
+  return (
+    <svg viewBox="0 0 24 24" width={13} height={13} fill="currentColor" aria-hidden="true">
+      <path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z" />
+    </svg>
+  );
+}
+
+/** Gone for good - a bin. */
+function IconTrash() {
+  return (
+    <svg viewBox="0 0 24 24" width={13} height={13} fill="currentColor" aria-hidden="true">
+      <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z" />
+    </svg>
+  );
+}

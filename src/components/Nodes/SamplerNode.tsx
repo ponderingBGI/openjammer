@@ -1,15 +1,27 @@
 /**
- * Sampler Node - Simplified design similar to Instrument Node
+ * Sampler Node — one sample, played chromatically.
  *
- * Layout:
- * ┌─────────────────────────────────────────┐
- * │ ● bundle-in     SAMPLER                 │
- * │ ┌─────────────────────────────────────┐ │
- * │ │ ~~~waveform~~~  sample.wav   [C4] X │ │  ← Draggable clip with root note
- * │ └─────────────────────────────────────┘ │
- * │   Gain: 1.0     Spread: 1.0             │
- * │   Attack: 0.01  Release: 0.1      ○ out │
- * └─────────────────────────────────────────┘
+ * The card is the sample: a real clip card (`WaveformView`) showing the trace,
+ * the file name and the exact length, draggable back out onto the canvas and a
+ * drop target for anything with audio in it. Under it, the four things that
+ * decide how it sounds are four dials — bounded parameters get a `Knob` (the
+ * W5-P6 control rule) — and the one exact FACT, the root note, is a mono
+ * scrubber reading a real note name from the shared `noteNames` helper.
+ *
+ * Two things this file refuses to invent:
+ *   • a "record" button — the Sampler has no capture path at the engine seam
+ *     (`SamplerHandle` is get/setBuffer + rootNote/gain/attack/release). The
+ *     Looper and the Recorder capture; the Sampler receives.
+ *   • trim handles — a `SamplerNodeData` has no start/end frames, so a trim
+ *     control would move a value nothing reads. Crop the clip on the canvas
+ *     (double-click a clip) and drop the crop back in.
+ *
+ * ERR-1 (a persisted sample whose PCM could not be re-resolved) stays honest:
+ * the slot keeps the cached shape so you recognise WHICH sample broke, and says
+ * so in a Callout inside the card — never a modal, never a toast that steals the
+ * canvas.
+ *
+ * Rebuilt in W5-P7.
  */
 
 import { useCallback, useRef, useState, useEffect, memo } from 'react';
@@ -20,10 +32,23 @@ import { getAudioContext } from '../../audio/audioContext';
 import { getExecutor } from '../../audio/executor';
 import { useAudioClipStore, getClipBuffer } from '../../store/audioClipStore';
 import { loadClipAudio } from '../../utils/clipUtils';
+import { formatSampleDuration } from '../../utils/audioMetadata';
 import { isSamplerNodeData } from '../../engine/typeGuards';
 import { resolvePersistedSample } from './samplerPersistence';
+import { noteLabel } from '../controls/noteNames';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
-import { Port } from '@openjammer/oj-ui';
+import {
+    Button,
+    Callout,
+    IconButton,
+    IconClose,
+    Knob,
+    NodeShell,
+    PortRow,
+    ValueScrubber,
+    WaveformView,
+} from '@openjammer/oj-ui';
+import { useGestureBracket } from './nodeControls';
 import './SamplerNode.css';
 
 interface SamplerNodeProps {
@@ -40,22 +65,6 @@ interface SamplerNodeProps {
     isDragging?: boolean;
     isHoveredWithConnections?: boolean;
     style?: React.CSSProperties;
-}
-
-/** Note names for MIDI display */
-const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-
-/** Convert MIDI note to display string (e.g., 60 -> "C4") */
-function midiToNoteName(midiNote: number): string {
-    const octave = Math.floor(midiNote / 12) - 1;
-    const noteName = NOTE_NAMES[midiNote % 12];
-    return `${noteName}${octave}`;
-}
-
-/** Format duration for display */
-function formatDuration(seconds: number): string {
-    if (seconds < 1) return `${seconds.toFixed(1)}s`;
-    return `${Math.round(seconds)}s`;
 }
 
 /** Waveform resolution (number of sample points for display) */
@@ -83,45 +92,6 @@ const PARAM_RANGES = {
     ATTACK: { min: 0.001, max: 1, step: 0.01 },
     RELEASE: { min: 0.01, max: 2, step: 0.01 },
 } as const;
-
-/** Scrollable control component with proper scroll capture */
-interface ScrollableControlProps {
-    value: number;
-    onChange: (newValue: number) => void;
-    range: { min: number; max: number; step: number };
-    children: React.ReactNode;
-    className?: string;
-    title?: string;
-}
-
-const ScrollableControl = memo(function ScrollableControl({
-    value,
-    onChange,
-    range,
-    children,
-    className,
-    title
-}: ScrollableControlProps) {
-    const handleScroll = useCallback((data: ScrollData) => {
-        const delta = data.scrollingUp ? 1 : -1;
-        let newValue = value + delta * range.step;
-        newValue = Math.max(range.min, Math.min(range.max, newValue));
-        // Round to avoid floating point issues
-        const rounded = Math.round(newValue * 1000) / 1000;
-        if (rounded !== value) onChange(rounded);
-    }, [value, onChange, range]);
-
-    const { ref } = useScrollCapture<HTMLSpanElement>({
-        onScroll: handleScroll,
-        capture: true,
-    });
-
-    return (
-        <span ref={ref} className={className} title={title}>
-            {children}
-        </span>
-    );
-});
 
 export const SamplerNode = memo(function SamplerNode({
     node,
@@ -166,7 +136,6 @@ export const SamplerNode = memo(function SamplerNode({
     useEffect(() => {
         saveAudioToLibraryRef.current = saveAudioToLibrary;
     }, [saveAudioToLibrary]);
-    const nodeRef = useRef<HTMLDivElement>(null);
     const sampleAreaRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -449,8 +418,7 @@ export const SamplerNode = memo(function SamplerNode({
     }, [node.id, updateNodeData, generateWaveform, loadAudioFile]);
 
     // Clear sample
-    const handleClearSample = useCallback((e: React.MouseEvent) => {
-        e.stopPropagation();
+    const handleClearSample = useCallback(() => {
         updateNodeData(node.id, {
             sampleId: null,
             sampleName: null,
@@ -465,34 +433,59 @@ export const SamplerNode = memo(function SamplerNode({
         }
     }, [node.id, updateNodeData]);
 
-    // Change handlers for scrollable controls
+    // Change handlers. Each dial's whole sweep is ONE undo step: the bracket
+    // opens on the first value change (pointer, wheel or Arrow key alike) and
+    // closes on the control's commit.
+    const rootGesture = useGestureBracket();
     const handleRootNoteChange = useCallback((newValue: number) => {
-        updateNodeData(node.id, { rootNote: newValue });
+        const v = Math.round(Math.max(PARAM_RANGES.ROOT_NOTE.min, Math.min(PARAM_RANGES.ROOT_NOTE.max, newValue)));
+        rootGesture.begin();
+        updateNodeData(node.id, { rootNote: v });
+        rootGesture.end();
         const sampler = getExecutor().getSamplerAdapter(node.id);
-        if (sampler) sampler.setRootNote(newValue);
-    }, [node.id, updateNodeData]);
+        if (sampler) sampler.setRootNote(v);
+    }, [node.id, updateNodeData, rootGesture]);
 
+    const gain = useGestureBracket();
     const handleGainChange = useCallback((newValue: number) => {
+        gain.begin();
         updateNodeData(node.id, { gain: newValue });
         const sampler = getExecutor().getSamplerAdapter(node.id);
         if (sampler) sampler.setGain(newValue);
-    }, [node.id, updateNodeData]);
+    }, [node.id, updateNodeData, gain]);
 
+    const spread = useGestureBracket();
     const handleSpreadChange = useCallback((newValue: number) => {
+        spread.begin();
         updateNodeData(node.id, { spread: newValue });
-    }, [node.id, updateNodeData]);
+    }, [node.id, updateNodeData, spread]);
 
+    const attack = useGestureBracket();
     const handleAttackChange = useCallback((newValue: number) => {
+        attack.begin();
         updateNodeData(node.id, { attack: newValue });
         const sampler = getExecutor().getSamplerAdapter(node.id);
         if (sampler) sampler.setAttack(newValue);
-    }, [node.id, updateNodeData]);
+    }, [node.id, updateNodeData, attack]);
 
+    const release = useGestureBracket();
     const handleReleaseChange = useCallback((newValue: number) => {
+        release.begin();
         updateNodeData(node.id, { release: newValue });
         const sampler = getExecutor().getSamplerAdapter(node.id);
         if (sampler) sampler.setRelease(newValue);
-    }, [node.id, updateNodeData]);
+    }, [node.id, updateNodeData, release]);
+
+    // Scroll the root note by a semitone, with proper (non-passive) capture so
+    // the canvas never pans under the pointer.
+    const handleRootScroll = useCallback((scroll: ScrollData) => {
+        handleRootNoteChange(data.rootNote + (scroll.scrollingUp ? 1 : -1));
+    }, [data.rootNote, handleRootNoteChange]);
+
+    const { ref: rootScrollRef } = useScrollCapture<HTMLSpanElement>({
+        onScroll: handleRootScroll,
+        capture: true,
+    });
 
     const hasSample = !!data.sampleName;
     const hasRows = rows.length > 0;
@@ -520,203 +513,212 @@ export const SamplerNode = memo(function SamplerNode({
         e.dataTransfer.effectAllowed = 'copy';
     }, [data.sampleId, data.sampleName, data.duration, data.waveformData, node.id]);
 
+    const cardClass = [
+        'schematic-node',
+        'sampler-node',
+        hasLoadError && 'has-load-error',
+        isHoveredWithConnections && 'hover-connecting',
+        isClipDropTarget && 'clip-drop-target',
+    ].filter(Boolean).join(' ');
+
     return (
-        <div
-            ref={nodeRef}
-            className={`sampler-node schematic-node ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isHoveredWithConnections ? 'hover-connecting' : ''}`}
+        <NodeShell
+            className={cardClass}
             style={style}
+            title="Sampler"
+            nodeType="SMPL"
+            selected={!!isSelected}
+            dragging={!!isDragging}
+            headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}
-        >
-            {/* Left side input port */}
-            {bundleInPort && (
-                <Port
+            inputs={bundleInPort ? (
+                <PortRow
+                    side="input"
                     kind="control"
-                    direction="input"
+                    label={bundleInPort.name || 'Keys'}
                     connected={!!hasConnection?.(bundleInPort.id) || hasRows}
-                    className={`sampler-side-port input ${hasConnection?.(bundleInPort.id) || hasRows ? 'connected' : ''}`}
-                    style={{ width: '14px', height: '14px' }}
                     data-node-id={node.id}
                     data-port-id={bundleInPort.id}
                     data-port-type="control"
                     onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(bundleInPort.id, e); }}
-                    onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(bundleInPort.id, e)}
+                    onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(bundleInPort.id, e); }}
                     onMouseEnter={() => handlePortMouseEnter?.(bundleInPort.id)}
                     onMouseLeave={handlePortMouseLeave}
-                    title="Control input"
+                    title="Control input — wire a keyboard here"
                 />
-            )}
-
-            {/* Right side output port */}
-            {audioOutPort && (
-                <Port
+            ) : undefined}
+            outputs={audioOutPort ? (
+                <PortRow
+                    side="output"
                     kind="audio"
-                    direction="output"
+                    label={audioOutPort.name || 'Out'}
                     connected={!!hasConnection?.(audioOutPort.id)}
-                    className={`sampler-side-port output ${hasConnection?.(audioOutPort.id) ? 'connected' : ''}`}
-                    style={{ width: '14px', height: '14px' }}
                     data-node-id={node.id}
                     data-port-id={audioOutPort.id}
                     data-port-type="audio"
                     onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(audioOutPort.id, e); }}
-                    onMouseUp={(e: React.MouseEvent) => handlePortMouseUp?.(audioOutPort.id, e)}
+                    onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(audioOutPort.id, e); }}
                     onMouseEnter={() => handlePortMouseEnter?.(audioOutPort.id)}
                     onMouseLeave={handlePortMouseLeave}
                     title="Audio output"
                 />
-            )}
-
-            {/* Header */}
-            <div className="schematic-header" onMouseDown={handleHeaderMouseDown}>
-                <span className="schematic-title">Sampler</span>
-            </div>
-
-            {/* Sample drop zone - AudioClipVisual style, draggable OUT */}
-            <div
-                ref={sampleAreaRef}
-                className={`sampler-sample-area ${isDragOver || isClipDropTarget ? 'drag-over' : ''} ${hasSample ? 'has-sample' : ''} ${hasLoadError ? 'load-error' : ''}`}
-                draggable={hasSample}
-                onDragStart={handleSampleDragStart}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                title={
-                    hasLoadError
-                        ? 'Sample could not be loaded — drop the file again to restore it'
-                        : hasSample
-                          ? 'Drag to copy sample to canvas'
-                          : 'Drop audio file or clip here'
-                }
-            >
-                {hasSample ? (
-                    <>
-                        {/* Waveform */}
-                        <div className="sampler-waveform-container">
-                            <svg viewBox="0 0 100 20" preserveAspectRatio="none">
-                                {waveformData.length > 1 ? (
-                                    <polyline
-                                        className="sampler-waveform-path"
-                                        fill="none"
-                                        strokeWidth="1.5"
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        points={waveformData.map((v, i) =>
-                                            `${(i / (waveformData.length - 1)) * 100},${10 - v * 8}`
-                                        ).join(' ')}
-                                    />
-                                ) : (
-                                    <line x1="0" y1="10" x2="100" y2="10" className="sampler-waveform-path" />
-                                )}
-                                {/* Center line */}
-                                <line x1="0" y1="10" x2="100" y2="10" className="sampler-center-line" />
-                            </svg>
-
-                            {/* Duration badge */}
-                            {data.duration && (
-                                <span className="sampler-duration-badge">
-                                    {formatDuration(data.duration)}
-                                </span>
-                            )}
-                        </div>
-
-                        {/* Sample info bar */}
-                        <div className="sampler-info-bar">
-                            {hasLoadError && (
-                                <span
-                                    className="sampler-load-error-badge"
-                                    title="Sample could not be loaded — drop the file again to restore it"
-                                    aria-label="Sample failed to load"
-                                >
-                                    !
-                                </span>
-                            )}
-                            <span className="sampler-sample-name" title={data.sampleName || ''}>
-                                {data.sampleName}
-                            </span>
-                            <ScrollableControl
-                                value={data.rootNote}
-                                onChange={handleRootNoteChange}
-                                range={PARAM_RANGES.ROOT_NOTE}
-                                className="sampler-root-note"
-                                title="Root note (scroll to change)"
+            ) : undefined}
+        >
+            <div className="sampler-body" onMouseDown={(e) => e.stopPropagation()}>
+                {/* The slot. When it holds a sample it IS a clip card — the same
+                    object you see on the canvas and in the library, so dragging it
+                    out is obviously possible. */}
+                <div
+                    ref={sampleAreaRef}
+                    className={`sampler-slot${isDragOver || isClipDropTarget ? ' is-drop-target' : ''}${hasSample ? ' has-sample' : ''}`}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                >
+                    {hasSample ? (
+                        <WaveformView
+                            className="sampler-clip"
+                            peaks={waveformData}
+                            durationLabel={data.duration ? formatSampleDuration(data.duration) : '—'}
+                            name={data.sampleName}
+                            draggable
+                            dropTarget={isDragOver || isClipDropTarget}
+                            onDragStart={handleSampleDragStart}
+                            title={
+                                hasLoadError
+                                    ? 'Sample could not be loaded — drop the file again to restore it'
+                                    : 'Drag to copy this sample onto the canvas'
+                            }
+                        />
+                    ) : (
+                        <div className="sampler-empty">
+                            <Button
+                                variant="secondary"
+                                className="sampler-load"
+                                onClick={() => fileInputRef.current?.click()}
                             >
-                                {midiToNoteName(data.rootNote)}
-                            </ScrollableControl>
-                            <button
-                                className="sampler-clear-btn"
-                                onClick={handleClearSample}
-                                title="Remove sample"
-                            >
-                                <svg viewBox="0 0 24 24" fill="currentColor" width="10" height="10">
-                                    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                                </svg>
-                            </button>
+                                Load audio…
+                            </Button>
+                            <p className="sampler-empty__hint">
+                                or drop a file, a clip, or a library sample here
+                            </p>
                         </div>
-                    </>
-                ) : (
-                    <button
-                        type="button"
-                        className="sampler-drop-text"
-                        onClick={() => fileInputRef.current?.click()}
-                        title="Click to choose an audio file, or drop one here"
+                    )}
+                </div>
+
+                {/* Hidden picker for click-to-browse (bring your own sample). */}
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="audio/*,.wav,.mp3,.ogg,.flac,.aiff,.m4a"
+                    className="sampler-file-input"
+                    onChange={handleFileInputChange}
+                />
+
+                {/* ERR-1. The title now says the same thing as the body — W5-P7
+                    titled it "Sample is silent" over a sentence about a file that
+                    could not be found, which are two different faults. And the
+                    box carries HEAD's accessible name ("Sample failed to load"),
+                    which the rebuild dropped: a `role="note"` with no name is a
+                    box a screen reader walks past. */}
+                {hasLoadError && (
+                    <Callout
+                        variant="warning"
+                        title="Sample not found"
+                        aria-label="Sample failed to load"
                     >
-                        Drop or click to load audio
-                    </button>
+                        Its audio could not be found on this machine, so this slot
+                        makes no sound. Drop the file again — the shape above is
+                        the one that broke.
+                    </Callout>
+                )}
+
+                {/* The one exact FACT about the slot: which key plays it back at
+                    its own pitch. Mono, because it is a machine value. */}
+                {hasSample && (
+                    <div className="sampler-slot-row">
+                        <span ref={rootScrollRef} className="sampler-root">
+                            <ValueScrubber
+                                label="ROOT"
+                                value={data.rootNote}
+                                display={noteLabel(data.rootNote)}
+                                onCommit={handleRootNoteChange}
+                                title="Root note — the key that plays this sample at its own pitch. Scroll a semitone, click to type a MIDI number."
+                            />
+                        </span>
+                        <IconButton
+                            variant="ghost"
+                            className="sampler-clear"
+                            label="Remove this sample"
+                            onClick={handleClearSample}
+                            icon={<IconClose size={14} />}
+                            title="Remove sample"
+                        />
+                    </div>
+                )}
+
+                {/* Four bounded parameters, so four dials (the W5-P6 control rule:
+                    a bounded value gets a Knob up to six of them). */}
+                <div className="sampler-dials">
+                    <Knob
+                        label="GAIN"
+                        value={data.gain}
+                        min={PARAM_RANGES.GAIN.min}
+                        max={PARAM_RANGES.GAIN.max}
+                        defaultValue={1}
+                        size={44}
+                        format={(v) => `${v.toFixed(2)}×`}
+                        onChange={handleGainChange}
+                        onCommit={gain.end}
+                    />
+                    <Knob
+                        label="SPREAD"
+                        value={data.spread}
+                        min={PARAM_RANGES.SPREAD.min}
+                        max={PARAM_RANGES.SPREAD.max}
+                        defaultValue={1}
+                        size={44}
+                        format={(v) => `${v.toFixed(1)} st`}
+                        onChange={handleSpreadChange}
+                        onCommit={spread.end}
+                    />
+                    <Knob
+                        label="ATTACK"
+                        value={data.attack}
+                        min={PARAM_RANGES.ATTACK.min}
+                        max={PARAM_RANGES.ATTACK.max}
+                        defaultValue={0.01}
+                        size={44}
+                        log
+                        format={(v) => `${Math.round(v * 1000)} ms`}
+                        onChange={handleAttackChange}
+                        onCommit={attack.end}
+                    />
+                    <Knob
+                        label="RELEASE"
+                        value={data.release}
+                        min={PARAM_RANGES.RELEASE.min}
+                        max={PARAM_RANGES.RELEASE.max}
+                        defaultValue={0.1}
+                        size={44}
+                        log
+                        format={(v) => `${Math.round(v * 1000)} ms`}
+                        onChange={handleReleaseChange}
+                        onCommit={release.end}
+                    />
+                </div>
+
+                {/* SPREAD only means something once a keyboard row is wired in,
+                    so the sentence that explains it appears exactly then. An
+                    idle card stays short. */}
+                {hasRows && (
+                    <p className="sampler-hint">
+                        Spread is semitones per key — how far the pitch walks across the row.
+                    </p>
                 )}
             </div>
-            {/* Hidden picker for click-to-browse (bring your own sample). */}
-            <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/*,.wav,.mp3,.ogg,.flac,.aiff,.m4a"
-                style={{ display: 'none' }}
-                onChange={handleFileInputChange}
-            />
-
-            {/* Controls */}
-            <div className="sampler-controls">
-                <div className="sampler-controls-row">
-                    <ScrollableControl
-                        value={data.gain}
-                        onChange={handleGainChange}
-                        range={PARAM_RANGES.GAIN}
-                        className="sampler-control"
-                        title="Gain (0-2) - scroll to change"
-                    >
-                        Gain: {data.gain.toFixed(1)}
-                    </ScrollableControl>
-                    <ScrollableControl
-                        value={data.spread}
-                        onChange={handleSpreadChange}
-                        range={PARAM_RANGES.SPREAD}
-                        className="sampler-control"
-                        title="Spread in semitones - scroll to change"
-                    >
-                        Spread: {data.spread.toFixed(1)}
-                    </ScrollableControl>
-                </div>
-                <div className="sampler-controls-row">
-                    <ScrollableControl
-                        value={data.attack}
-                        onChange={handleAttackChange}
-                        range={PARAM_RANGES.ATTACK}
-                        className="sampler-control"
-                        title="Attack time - scroll to change"
-                    >
-                        Att: {data.attack.toFixed(2)}
-                    </ScrollableControl>
-                    <ScrollableControl
-                        value={data.release}
-                        onChange={handleReleaseChange}
-                        range={PARAM_RANGES.RELEASE}
-                        className="sampler-control"
-                        title="Release time - scroll to change"
-                    >
-                        Rel: {data.release.toFixed(2)}
-                    </ScrollableControl>
-                </div>
-            </div>
-        </div>
+        </NodeShell>
     );
 });
 

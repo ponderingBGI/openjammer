@@ -1,18 +1,30 @@
 /**
- * Sampler Visual Node - Internal view with row-based layout
+ * Sampler Visual Node — the Sampler seen from the inside.
  *
- * Layout:
- * ┌─────────────────────────────────────────────────────────┐
- * │ SAMPLER CONFIG                                          │
- * ├─────────────────────────────────────────────────────────┤
- * │ Row 1: "Keys" (12 ports)                                │
- * │ ● ● ● ● ● ● ● ● ● ● ● ●   Gain: 1.0   Spread: 1.0      │
- * ├─────────────────────────────────────────────────────────┤
- * │ Row 2: "Pads" (8 ports)                                 │
- * │ ● ● ● ● ● ● ● ●           Gain: 0.8   Spread: 2.0      │
- * ├─────────────────────────────────────────────────────────┤
- * │ ● + Connect bundle                                      │
- * └─────────────────────────────────────────────────────────┘
+ * Diving into a Sampler (`E`) asks one question: *which key does what?* So the
+ * inside view is the key map. Every row a connected bundle created becomes a
+ * strip of `KeyTile` pads — one pad per key port — with the row's two tuning
+ * values beside its name.
+ *
+ * **What a pad is, exactly.** It is a PATCH POINT, not a trigger. The Sampler's
+ * engine seam (`SamplerHandle`) is get/setBuffer + rootNote/gain/attack/release
+ * — there is no note-on a pad could send — so a pad here does what it has always
+ * done: it is the connection anchor for one key, and pressing it (mouse, Enter
+ * or Space) starts or lands a cable. It carries the canvas's
+ * `data-node-id`/`data-port-id`/`data-port-type` through KeyTile's embedded
+ * Port, so nothing about wiring changed; what changed is that a key is now a
+ * key-shaped thing you can hit rather than a 12-pixel dot.
+ *
+ * **What a pad SAYS.** The note it plays — `C4 D4 E4 …`, from the Sampler's
+ * ROOT walked by the row's SPREAD. W5-P7 printed the pad's index instead, which
+ * is the one fact the pad's own position already carried; the map now answers
+ * the question it exists for. A fractional spread lands between semitones, so
+ * the pad shows the nearest note and the exact offset stays in its accessible
+ * name.
+ *
+ * Rebuilt in W5-P7. The four scroll-to-edit spans this file used to hand-roll
+ * are the shared `ValueScrubber` now (audit §"four app value controls duplicate
+ * oj-ui ValueScrubber").
  */
 
 import { useCallback, memo } from 'react';
@@ -20,60 +32,10 @@ import type { GraphNode, SamplerNodeData, SamplerRow } from '../../engine/types'
 import { useGraphStore } from '../../store/graphStore';
 import { isSamplerNodeData } from '../../engine/typeGuards';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
-import { Port } from '@openjammer/oj-ui';
+import { Chip, KeyTile, NodeShell, PortRow, ValueScrubber } from '@openjammer/oj-ui';
+import { noteLabel } from '../controls/noteNames';
+import { useGestureBracket } from './nodeControls';
 import './SamplerVisual.css';
-
-/**
- * ScrollableValue - Value display with scroll capture for parameter adjustment
- * Uses useScrollCapture hook to properly prevent canvas scrolling
- */
-interface ScrollableValueProps {
-    value: number;
-    onChange: (newValue: number) => void;
-    min: number;
-    max: number;
-    step: number;
-    format: (v: number) => string;
-    title: string;
-    className?: string;
-}
-
-const ScrollableValue = memo(function ScrollableValue({
-    value,
-    onChange,
-    min,
-    max,
-    step,
-    format,
-    title,
-    className = ''
-}: ScrollableValueProps) {
-    const handleScroll = useCallback((data: ScrollData) => {
-        const delta = data.scrollingUp ? 1 : -1;
-        const newValue = Math.max(min, Math.min(max, value + delta * step));
-        // Calculate decimal places from step (e.g., 0.1 → 1, 0.5 → 1, 0.01 → 2)
-        const decimals = step < 1 ? Math.ceil(-Math.log10(step)) : 0;
-        const rounded = parseFloat(newValue.toFixed(decimals));
-        if (rounded !== value) {
-            onChange(rounded);
-        }
-    }, [value, onChange, min, max, step]);
-
-    const { ref } = useScrollCapture<HTMLSpanElement>({
-        onScroll: handleScroll,
-        capture: true,
-    });
-
-    return (
-        <span
-            ref={ref}
-            className={`sampler-row-value ${className}`}
-            title={title}
-        >
-            {format(value)}
-        </span>
-    );
-});
 
 interface SamplerVisualNodeProps {
     node: GraphNode;
@@ -87,6 +49,7 @@ interface SamplerVisualNodeProps {
     handleNodeMouseLeave?: () => void;
     isSelected?: boolean;
     isDragging?: boolean;
+    isHoveredWithConnections?: boolean;
     style?: React.CSSProperties;
 }
 
@@ -95,6 +58,53 @@ const ROW_PARAM_RANGES = {
     GAIN: { min: 0, max: 2, step: 0.1 },
     SPREAD: { min: 0, max: 12, step: 0.5 },
 } as const;
+
+/** One scroll-to-adjust value in a row header. Wraps the shared `ValueScrubber`
+ *  with the app's non-passive wheel capture, so the canvas never pans under it. */
+const RowValue = memo(function RowValue({
+    label,
+    value,
+    display,
+    min,
+    max,
+    step,
+    onChange,
+    title,
+}: {
+    label: string;
+    value: number;
+    display: string;
+    min: number;
+    max: number;
+    step: number;
+    onChange: (next: number) => void;
+    title: string;
+}) {
+    const clamp = useCallback((next: number) => {
+        const bounded = Math.max(min, Math.min(max, next));
+        const decimals = step < 1 ? Math.ceil(-Math.log10(step)) : 0;
+        return parseFloat(bounded.toFixed(decimals));
+    }, [min, max, step]);
+
+    const handleScroll = useCallback((data: ScrollData) => {
+        const next = clamp(value + (data.scrollingUp ? 1 : -1) * step);
+        if (next !== value) onChange(next);
+    }, [value, step, clamp, onChange]);
+
+    const { ref } = useScrollCapture<HTMLSpanElement>({ onScroll: handleScroll, capture: true });
+
+    return (
+        <span ref={ref} className="sampler-row-value">
+            <ValueScrubber
+                label={label}
+                value={value}
+                display={display}
+                onCommit={(next) => onChange(clamp(next))}
+                title={title}
+            />
+        </span>
+    );
+});
 
 export const SamplerVisualNode = memo(function SamplerVisualNode({
     node,
@@ -108,6 +118,7 @@ export const SamplerVisualNode = memo(function SamplerVisualNode({
     handleNodeMouseLeave,
     isSelected,
     isDragging,
+    isHoveredWithConnections,
     style
 }: SamplerVisualNodeProps) {
     // Get parent node for data access
@@ -138,26 +149,28 @@ export const SamplerVisualNode = memo(function SamplerVisualNode({
     const placeholderPortId = 'placeholder-in';
 
     return (
-        <div
-            className={`sampler-visual-node ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''}`}
+        <NodeShell
+            className={`schematic-node sampler-visual-node${isHoveredWithConnections ? ' hover-connecting' : ''}`}
             style={style}
+            title="Sampler"
+            /* What the card IS, not how many keys are on it: with one row the
+               count is already on that row's own chip, and a header that
+               repeats the row below it says nothing twice. */
+            nodeType="KEY MAP"
+            selected={!!isSelected}
+            dragging={!!isDragging}
+            headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}
         >
-            {/* Header */}
-            <div className="sampler-visual-header" onMouseDown={handleHeaderMouseDown}>
-                <span className="sampler-visual-title">Sampler</span>
-            </div>
-
-            {/* Rows container */}
-            <div className="sampler-visual-rows">
-                {/* Existing rows */}
+            <div className="sampler-visual-body" onMouseDown={(e) => e.stopPropagation()}>
                 {rows.map((row, index) => (
-                    <RowWithPorts
+                    <RowWithPads
                         key={row.rowId}
                         row={row}
                         nodeId={node.id}
                         parentNodeId={parentNodeId}
+                        rootNote={parentData.rootNote}
                         updateSamplerRow={updateSamplerRow}
                         handlePortMouseDown={handlePortMouseDown}
                         handlePortMouseUp={handlePortMouseUp}
@@ -168,13 +181,13 @@ export const SamplerVisualNode = memo(function SamplerVisualNode({
                     />
                 ))}
 
-                {/* Placeholder row for new connections */}
-                <div className={`sampler-placeholder-row ${rows.length > 0 ? '' : 'first-row'}`}>
-                    <Port
+                {/* The always-open slot: one more thing can always be wired in. */}
+                <div className={`sampler-add-row${rows.length > 0 ? ' has-rows' : ''}`}>
+                    <PortRow
+                        side="input"
                         kind="control"
-                        direction="input"
                         placeholder
-                        style={{ width: 12, height: 12 }}
+                        label={rows.length === 0 ? 'Connect input' : '+ Add input'}
                         data-node-id={node.id}
                         data-port-id={placeholderPortId}
                         data-port-type="control"
@@ -192,22 +205,27 @@ export const SamplerVisualNode = memo(function SamplerVisualNode({
                         tabIndex={0}
                         role="button"
                         aria-label={rows.length === 0 ? 'Connect input' : 'Add input'}
-                        title="Connect keyboard or single control"
+                        title="Connect a keyboard or a single control"
                     />
-                    <span className="sampler-placeholder-text">
-                        {rows.length === 0 ? 'Connect input' : '+ Add input'}
-                    </span>
                 </div>
+
+                {rows.length === 0 && (
+                    <p className="sampler-visual-hint">
+                        Wire a keyboard row in and its keys appear here as pads you can
+                        patch one at a time.
+                    </p>
+                )}
             </div>
-        </div>
+        </NodeShell>
     );
 });
 
-// Row with individual key ports - memoized to prevent unnecessary re-renders
-const RowWithPorts = memo(function RowWithPorts({
+// One row of key pads — memoized to prevent unnecessary re-renders
+const RowWithPads = memo(function RowWithPads({
     row,
     nodeId,
     parentNodeId,
+    rootNote,
     updateSamplerRow,
     handlePortMouseDown,
     handlePortMouseUp,
@@ -219,6 +237,8 @@ const RowWithPorts = memo(function RowWithPorts({
     row: SamplerRow;
     nodeId: string;
     parentNodeId: string | null;
+    /** The Sampler's ROOT — the note the leftmost pad plays. */
+    rootNote: number;
     updateSamplerRow: (nodeId: string, rowId: string, updates: Partial<SamplerRow>) => void;
     handlePortMouseDown?: (portId: string, e: React.MouseEvent) => void;
     handlePortMouseUp?: (portId: string, e: React.MouseEvent) => void;
@@ -227,66 +247,76 @@ const RowWithPorts = memo(function RowWithPorts({
     hasConnection?: (portId: string) => boolean;
     showDivider: boolean;
 }) {
-    // Generate key ports
-    const keyCount = row.portCount;
-    const keys = Array.from({ length: keyCount }, (_, i) => i);
+    const keys = Array.from({ length: row.portCount }, (_, i) => i);
+    const gesture = useGestureBracket();
 
-    // Memoized update handlers for gain and spread
     const handleGainChange = useCallback((newValue: number) => {
         if (!parentNodeId) return;
+        gesture.begin();
         updateSamplerRow(parentNodeId, row.rowId, { gain: newValue });
-    }, [parentNodeId, row.rowId, updateSamplerRow]);
+        gesture.end();
+    }, [parentNodeId, row.rowId, updateSamplerRow, gesture]);
 
     const handleSpreadChange = useCallback((newValue: number) => {
         if (!parentNodeId) return;
+        gesture.begin();
         updateSamplerRow(parentNodeId, row.rowId, { spread: newValue });
-    }, [parentNodeId, row.rowId, updateSamplerRow]);
+        gesture.end();
+    }, [parentNodeId, row.rowId, updateSamplerRow, gesture]);
 
     return (
-        <div className={`sampler-row-visual ${showDivider ? 'with-divider' : ''}`}>
-            {/* Row header with label and controls */}
-            <div className="sampler-row-header">
-                <span className="sampler-row-label">
-                    {row.label || 'Row'} ({row.portCount} keys)
-                </span>
-                <div className="sampler-row-controls">
-                    <ScrollableValue
-                        value={row.gain}
-                        onChange={handleGainChange}
-                        min={ROW_PARAM_RANGES.GAIN.min}
-                        max={ROW_PARAM_RANGES.GAIN.max}
-                        step={ROW_PARAM_RANGES.GAIN.step}
-                        format={(v) => `Gain: ${v.toFixed(1)}`}
-                        title="Gain (0-2) - scroll to change"
-                    />
-                    <ScrollableValue
-                        value={row.spread}
-                        onChange={handleSpreadChange}
-                        min={ROW_PARAM_RANGES.SPREAD.min}
-                        max={ROW_PARAM_RANGES.SPREAD.max}
-                        step={ROW_PARAM_RANGES.SPREAD.step}
-                        format={(v) => `Spread: ${v.toFixed(1)}`}
-                        title="Spread (semitones) - scroll to change"
-                    />
-                </div>
+        <div className={`sampler-row${showDivider ? ' with-divider' : ''}`}>
+            <div className="sampler-row__head">
+                <span className="sampler-row__label">{row.label || 'Row'}</span>
+                <Chip className="sampler-row__count">{row.portCount} keys</Chip>
             </div>
 
-            {/* Key ports display */}
-            <div className="sampler-row-keys" role="group" aria-label={`${row.label || 'Row'} key ports`}>
+            <div className="sampler-row__values">
+                <RowValue
+                    label="GAIN"
+                    value={row.gain}
+                    display={`${row.gain.toFixed(1)}×`}
+                    min={ROW_PARAM_RANGES.GAIN.min}
+                    max={ROW_PARAM_RANGES.GAIN.max}
+                    step={ROW_PARAM_RANGES.GAIN.step}
+                    onChange={handleGainChange}
+                    title="Row gain (0–2) — scroll to change, click to type"
+                />
+                <RowValue
+                    label="SPREAD"
+                    value={row.spread}
+                    display={`${row.spread.toFixed(1)} st`}
+                    min={ROW_PARAM_RANGES.SPREAD.min}
+                    max={ROW_PARAM_RANGES.SPREAD.max}
+                    step={ROW_PARAM_RANGES.SPREAD.step}
+                    onChange={handleSpreadChange}
+                    title="Semitones between neighbouring keys — scroll to change, click to type"
+                />
+            </div>
+
+            <div className="sampler-row__pads" role="group" aria-label={`${row.label || 'Row'} key ports`}>
                 {keys.map((index) => {
                     const portId = `${row.rowId}-key-${index}`;
                     const isConnected = hasConnection?.(portId) ?? false;
-                    // Calculate the semitone offset for this key
+                    /* The one question this card exists to answer is "which key
+                       does what", and W5-P7 printed `1 … 10` — an index, which is
+                       the one thing the pad's POSITION already says. The card
+                       knows ROOT and SPREAD (its own aria-label was already
+                       computing the offset), so it prints the NOTE. Fractional
+                       spreads land between semitones, so the pad shows the
+                       nearest note and the exact offset stays in the name. */
                     const semitonesFromRoot = index * row.spread;
-                    const keyLabel = `Key ${index + 1}: +${semitonesFromRoot.toFixed(1)} semitones`;
+                    const pitch = rootNote + semitonesFromRoot;
+                    const padNote = noteLabel(Math.round(pitch));
+                    const keyLabel = `Key ${index + 1}, ${padNote}, +${semitonesFromRoot.toFixed(1)} semitones from root`;
 
                     return (
-                        <Port
+                        <KeyTile
                             key={index}
-                            kind="control"
-                            direction="input"
+                            variant="pad"
+                            size={32}
+                            label={padNote}
                             connected={isConnected}
-                            style={{ width: 12, height: 12 }}
                             data-node-id={nodeId}
                             data-port-id={portId}
                             data-port-type="control"
@@ -301,8 +331,6 @@ const RowWithPorts = memo(function RowWithPorts({
                                     handlePortMouseDown?.(portId, e as unknown as React.MouseEvent);
                                 }
                             }}
-                            tabIndex={0}
-                            role="button"
                             aria-label={keyLabel}
                             title={keyLabel}
                         />

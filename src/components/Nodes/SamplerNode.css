@@ -1,99 +1,162 @@
-/* SamplerNode — Sampler faceplate: the drop-a-file chromatic sample player.
+/* SamplerNode — one sample, played chromatically.
+ *
+ * The card is a NodeShell and the slot is an oj-ui `WaveformView` — the SAME
+ * clip card the canvas and the library show, so "this is a piece of audio you
+ * can pick up" is learned once and true everywhere. This file owns the well the
+ * card sits in, the drop states, and the dial grid.
+ *
+ * Rebuilt in W5-P7. */
 
-   Split verbatim out of the former SchematicNodes.css (L2548-2799) in W5-S5. */
-
-/* ============================================
- * Sampler Node - Simplified audio sample player
- * Drop audio files and play chromatically via keyboard
- * ============================================ */
-.sampler-node {
-    position: relative;
-    min-width: 160px;
-    max-width: 200px;
+.oj-node.sampler-node {
+    width: 224px;
 }
 
-.sampler-node .schematic-header {
+.sampler-body {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--space-xs) var(--space-sm);
+    flex-direction: column;
+    gap: var(--space-md);
 }
 
-.sampler-node .schematic-title {
+/* ---- The slot ----------------------------------------------------------
+ * Empty, it is a dashed well asking for something. Full, the well GETS OUT OF
+ * THE WAY entirely: `WaveformView` already draws its own 1px `--border-subtle`
+ * edge and `--shadow-raised`, so a border here would sit hard against that one
+ * and read as a 2px line — the doubled hairline the New DNA forbids. One
+ * object, one edge, and it belongs to the clip card. */
+
+.sampler-slot {
+    border-radius: var(--radius-md);
+    border: 1px dashed var(--border-control);
+    background: var(--bg-tertiary);
+    padding: var(--space-sm);
+    transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+
+.sampler-slot.has-sample {
+    border: none;
+    background: transparent;
+    padding: 0;
+}
+
+/* "Let go here." The app already has one way of saying that — a 1.5px dashed
+   accent edge, drawn as an OUTLINE so the box never resizes under the pointer
+   (`WaveformView.is-drop-target`, `.audio-clip.drop-target`). The slot says it
+   the same way rather than inventing a green of its own; green is machine
+   state, not an invitation. On a FULL slot the clip card draws that edge
+   itself — the app hands `dropTarget` straight to `WaveformView` — so this rule
+   only ever paints the EMPTY well. */
+.sampler-slot:not(.has-sample).is-drop-target {
+    outline: 1.5px dashed var(--accent-primary);
+    outline-offset: -1.5px;
+    border-color: var(--accent-primary);
+    background: color-mix(in oklab, var(--accent-primary) 8%, transparent);
+}
+
+.sampler-slot .sampler-clip {
+    width: 100%;
+    cursor: grab;
+}
+
+/* TRACE BLEED — the flagship object on this card is "the card IS the sample",
+   and a loud, normalised take was drawing as a horizontal RULE hugging the top
+   of the clip card. `oj-ui Waveform` maps a peak of 1.0 to `y = 0`, so a
+   full-scale sample lands exactly on the viewBox edge and reads as a border
+   rather than as audio. The Looper solved the identical problem inside its own
+   inline SVG by widening the viewBox (`TRACE_BLEED = 3`); the shared component
+   cannot be widened from here (another lane's file), so the same 3% of headroom
+   is taken in CSS, off BOTH ends, from this card only. The drawing is unchanged
+   — the mapping, the colours and the peaks are the component's — it simply
+   stops touching the edge. `Waveform.css` sets `overflow: visible` and the
+   stroke is `non-scaling-stroke`, so nothing is clipped either way. */
+.sampler-slot .sampler-clip .oj-waveform-view__trace {
+    transform: scaleY(0.94);
+}
+
+.sampler-slot .sampler-clip:active {
+    cursor: grabbing;
+}
+
+/* ERR-1 — the slot LOOKS loaded but the engine has no PCM. The clip card's OWN
+   edge turns warning and the shape de-saturates, so a broken sample can never
+   be mistaken for a working one — and still only one line is drawn. The
+   sentence beside it is a Callout, not a toast. */
+.oj-node.sampler-node.has-load-error .oj-waveform-view {
+    border-color: var(--accent-warning);
+}
+
+.oj-node.sampler-node.has-load-error .oj-waveform__trace {
+    stroke: var(--text-muted);
+}
+
+.sampler-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs) 0;
+}
+
+.sampler-load.oj-btn {
+    width: 100%;
+}
+
+.sampler-empty__hint {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+    color: var(--text-secondary);
     text-align: center;
 }
 
+.sampler-file-input {
+    display: none;
+}
 
-/* Sample drop zone - AudioClipVisual style */
-.sampler-sample-area {
-    position: relative;
-    margin: var(--space-xs) var(--space-sm);
-    min-height: 40px;
-    background: var(--bg-canvas);
-    border-radius: var(--radius-sm);
-    border: 1px dashed var(--border-subtle);
-    overflow: hidden;
-    transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+/* ---- The slot's one exact fact ---------------------------------------- */
+
+.sampler-slot-row {
     display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    justify-content: center;
-}
-
-.sampler-sample-area:hover {
-    border-color: var(--audio-connected);
-}
-
-.sampler-sample-area.drag-over {
-    border-color: var(--accent-primary);
-    border-style: solid;
-    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
-    box-shadow: 0 0 8px color-mix(in srgb, var(--accent-primary) 30%, transparent);
-}
-
-.sampler-sample-area.has-sample {
-    border-style: solid;
-    border-color: var(--border-subtle);
-}
-
-.sampler-sample-area.has-sample:hover {
-    border-color: var(--audio-connected);
-    box-shadow: 0 0 6px color-mix(in srgb, var(--audio-connected) 30%, transparent);
-}
-
-/* ERR-1: a persisted sample whose PCM could not be re-resolved this mount. The
-   slot looks loaded (name + cached waveform) but the engine is silent, so it is
-   marked distinctly — a dashed warning border, dimmed waveform — and never
-   confused with an empty or a working slot. Non-modal: it never steals focus. */
-.sampler-sample-area.load-error {
-    border-style: dashed;
-    border-color: var(--accent-warning);
-    background: color-mix(in srgb, var(--accent-warning) 8%, transparent);
-}
-
-.sampler-sample-area.load-error .sampler-waveform-path {
-    opacity: 0.4;
-}
-
-.sampler-load-error-badge {
-    flex: 0 0 auto;
-    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    width: 12px;
-    height: 12px;
-    margin-right: 4px;
-    border-radius: 50%;
-    font-size: 9px;
-    font-weight: 700;
-    line-height: 1;
-    color: var(--bg-primary, #1a1a1a);
-    background: var(--accent-warning);
+    justify-content: space-between;
+    gap: var(--space-sm);
 }
 
-/* ERR-1: per-node "!" badge when an instrument's built-in default voice failed to
-   load (DEFECT 3). Same calm warning style as the sampler load-error badge. */
-.instrument-voice-error-badge,
+/* The scroll-capture wrapper: it exists to host the non-passive wheel listener
+   and must not change the scrubber's own box. */
+.sampler-root {
+    display: inline-flex;
+    min-width: 0;
+}
+
+/* ---- The dials --------------------------------------------------------- */
+
+.sampler-dials {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-sm) var(--space-md);
+    justify-items: center;
+    padding-top: var(--space-sm);
+    border-top: 1px solid var(--border-subtle);
+}
+
+.sampler-hint {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+    color: var(--text-secondary);
+}
+
+/* ---- Not this faceplate's, but this stylesheet's tenant -----------------
+ * `.node-plugin-error-badge` is emitted by `NodeWrapper.tsx` (the shared
+ * "(missing plugin)" mark in any node's header), and its only stylesheet has
+ * always been this one. W5-P7 kept it — deleting it would silently un-style a
+ * live badge on every hosted-plugin node — and only removed the literal ink
+ * fallback it carried (a raw grey). It should move to `SchematicBase.css` (which NodeWrapper
+ * also imports, and which owns the rest of the shared chrome) the next time that
+ * file is opened. Its sibling `.instrument-voice-error-badge` WAS deleted: W5-P8
+ * removed its last emitter, so it styled nothing. */
 .node-plugin-error-badge {
     flex: 0 0 auto;
     display: inline-flex;
@@ -102,153 +165,12 @@
     width: 14px;
     height: 14px;
     margin-left: 6px;
-    border-radius: 50%;
+    border-radius: var(--radius-pill);
+    font-family: var(--font-sans);
     font-size: 10px;
     font-weight: 700;
     line-height: 1;
-    color: var(--bg-primary, #1a1a1a);
+    color: var(--bg-primary);
     background: var(--accent-warning);
     cursor: help;
-}
-
-/* Drop text when empty */
-.sampler-drop-text {
-    font-family: var(--font-sans);
-    font-size: 11px;
-    color: var(--text-muted);
-    text-align: center;
-    padding: var(--space-sm);
-}
-
-/* Waveform container */
-.sampler-waveform-container {
-    position: relative;
-    height: 22px;
-    padding: 2px 4px;
-}
-
-.sampler-waveform-container svg {
-    width: 100%;
-    height: 100%;
-}
-
-.sampler-waveform-path {
-    stroke: var(--accent-primary);
-    stroke-width: 1.5;
-}
-
-.sampler-center-line {
-    stroke: var(--border-subtle);
-    stroke-width: 0.5;
-    stroke-dasharray: 2 2;
-    opacity: 0.5;
-}
-
-/* Duration badge */
-.sampler-duration-badge {
-    position: absolute;
-    top: 2px;
-    left: 4px;
-    font-family: var(--font-mono);
-    font-size: 9px;
-    color: var(--text-muted);
-    background: color-mix(in srgb, var(--bg-node) 80%, transparent);
-    padding: 1px 3px;
-    border-radius: 2px;
-}
-
-/* Sample info bar */
-.sampler-info-bar {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
-    padding: 2px var(--space-xs);
-    background: var(--bg-tertiary);
-    border-top: 1px solid var(--border-subtle);
-}
-
-.sampler-sample-name {
-    flex: 1;
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.sampler-root-note {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    font-weight: 600;
-    color: var(--accent-primary);
-    background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
-    padding: 1px 4px;
-    border-radius: var(--radius-sm);
-    cursor: ns-resize;
-    user-select: none;
-    transition: background var(--motion-fast);
-}
-
-.sampler-root-note:hover {
-    background: color-mix(in srgb, var(--accent-primary) 25%, transparent);
-}
-
-/* Clear button */
-.sampler-clear-btn {
-    width: 14px;
-    height: 14px;
-    padding: 0;
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    background: var(--bg-node);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
-    opacity: 0;
-    transition: all 0.15s ease;
-    flex-shrink: 0;
-}
-
-.sampler-sample-area:hover .sampler-clear-btn {
-    opacity: 1;
-}
-
-.sampler-clear-btn:hover {
-    background: var(--accent-danger);
-    color: white;
-    border-color: var(--accent-danger);
-}
-
-/* Controls section */
-.sampler-controls {
-    display: flex;
-    flex-direction: column;
-    padding: var(--space-xs) var(--space-sm);
-    gap: 2px;
-}
-
-.sampler-controls-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-sm);
-}
-
-.sampler-control {
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: var(--text-primary);
-    cursor: ns-resize;
-    user-select: none;
-    padding: 2px 4px;
-    border-radius: var(--radius-sm);
-    transition: background var(--motion-fast);
-    white-space: nowrap;
-}
-
-.sampler-control:hover {
-    background: var(--bg-tertiary);
 }

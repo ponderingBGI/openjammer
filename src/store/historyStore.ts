@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import type { Verb } from '../song/verbs';
 import type { Arrangement } from '../song/types';
 import type { GraphVerb } from './graphVerbs';
+import type { LibraryVerb } from './libraryVerbs';
 import { useEditingContextStore } from './editingContextStore';
 import { useClipboardStore } from './clipboardStore';
 import type { SurfaceId } from './uiViewStore';
@@ -42,7 +43,16 @@ export type DocumentVerb = { kind: 'setArrangement'; arrangement: Arrangement | 
 export type EditVerb =
     | { domain: 'graph'; verb: GraphVerb }
     | { domain: 'arrangement'; verb: Verb }
-    | { domain: 'document'; verb: DocumentVerb };
+    | { domain: 'document'; verb: DocumentVerb }
+    /**
+     * The project library's player-owned state — rename, trash/restore, tagging.
+     * A fourth domain rather than a fourth history: it rides the same `record` /
+     * `undo` / `begin`+`commit` machinery as the other three, so a gesture that
+     * touches the graph AND the library is still one entry and one `Ctrl+Z`
+     * (see `libraryVerbs.ts`, which owns the verb, the driver and the two
+     * opt-in recorders). Metadata and references only — never audio.
+     */
+    | { domain: 'library'; verb: LibraryVerb };
 
 export interface HistoryEntry {
     verbs: EditVerb[];
