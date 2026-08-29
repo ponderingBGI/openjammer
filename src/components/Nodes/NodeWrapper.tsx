@@ -26,6 +26,7 @@ import './InstrumentNode.css';
 import './LooperNode.css';
 import './MicrophoneNode.css';
 import './CanvasIONode.css';
+import './PortPanelNode.css';
 import './KeyboardVisualNode.css';
 import './ContainerNode.css';
 import './MathNode.css';
@@ -60,7 +61,6 @@ import { resolveNodeDefinition } from '../../engine/registry';
 import { getDynamicPlugin, HOSTED_PLUGIN_DESCRIPTOR_KEY, type HostedPluginDescriptor } from '../../engine/dynamicRegistry';
 import { getInvoke, isTauri } from '../../ai/tauri';
 import { NodeFrame, NodeShell, PortRow } from '@openjammer/oj-ui';
-import './BaseNode.css';
 
 interface NodeWrapperProps {
     node: GraphNode;
@@ -240,8 +240,14 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     }, [beginGesture, endGesture, moveNodes, node.id, zoom, selectNode, setCanvasDragging]);
 
     // Handle port mouse down - start connection dragging (with pending disconnect)
+    //
+    // POINTER-AGNOSTIC (UI-017): a panel port activated with Enter/Space hands us
+    // a KeyboardEvent cast to this signature, which carries no `button`. The old
+    // `e.button !== 0` guard rejected exactly that, so every advertised keyboard
+    // port activation in the app silently did nothing. Guard against a
+    // non-primary MOUSE button, not against the absence of one.
     const handlePortMouseDown = useCallback((portId: string, e: React.MouseEvent) => {
-        if (e.button !== 0) return; // Only left click
+        if (e.button != null && e.button !== 0) return;
         e.stopPropagation();
 
         // If not already connecting, start a new connection

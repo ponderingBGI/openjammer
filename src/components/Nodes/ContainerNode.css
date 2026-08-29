@@ -1,70 +1,40 @@
-/* ContainerNode — Container faceplate: the empty grouping node.
+/* ContainerNode — the "go inside" faceplate.
+ *
+ * A container has no controls, so the card's only job is to be openable. The
+ * ghost button spans the body and carries its own key cap, because the whole
+ * point of this node is that there are two ways in and they are the same door.
+ *
+ * Rebuilt in W5-P6. */
 
-   Split verbatim out of the former SchematicNodes.css (L1537-1603) in W5-S5. */
-
-/* ============================================
- * Container Node - Empty grouping node
- * ============================================ */
-.container-node {
-    min-width: 140px;
-    min-height: 80px;
+/* Wider than the utility cards: the title is a name the player wrote, and a
+   name that ellipsises at eight characters is not a name. */
+.oj-node.container-node {
+    width: 220px;
 }
 
-.container-header {
-    padding: var(--space-sm) var(--space-md);
-    background: var(--bg-node-header);
-    border-bottom: 1px solid var(--border-strong);
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    cursor: grab;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
+/* The renameable title sits in the header, in the header's own voice — the
+   EditableLabel inherits it rather than declaring a second one. */
+.container-title {
+    display: block;
+    min-width: 0;
 }
 
-.container-header:active {
-    cursor: grabbing;
+.container-title .oj-editable-label__text,
+.container-title .oj-input {
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    line-height: 1.2;
 }
 
-.container-name {
-    font-family: var(--font-sans);
-    font-size: var(--text-lg);
-    font-weight: 600;
-    color: var(--text-primary);
-    cursor: text;
-    transition: background var(--motion-fast);
-    padding: 2px 4px;
-    border-radius: var(--radius-sm);
+.container-empty {
+    justify-content: center;
 }
 
-.container-name:hover {
-    background: var(--bg-tertiary);
-}
-
-.container-name-input {
-    font-family: var(--font-sans);
-    font-size: var(--text-lg);
-    font-weight: 600;
-    color: var(--text-primary);
-    background: var(--bg-canvas);
-    border: 2px solid var(--accent-primary);
-    border-radius: var(--radius-sm);
-    padding: 2px 6px;
-    width: 100%;
-    outline: none;
-}
-
-
-.container-body {
-    padding: var(--space-md);
-    display: flex;
-    flex-direction: column;
+/* The door. Full width, so it reads as the card's action rather than a button
+   that happens to be on it. */
+.container-open.oj-btn {
+    justify-content: center;
     gap: var(--space-sm);
-    min-height: 40px;
-}
-
-.container-ports-hint {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    text-align: center;
-    font-style: italic;
+    width: 100%;
 }

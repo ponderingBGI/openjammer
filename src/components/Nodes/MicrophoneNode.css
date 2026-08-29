@@ -1,127 +1,64 @@
-/* MicrophoneNode — Microphone faceplate: latency badge, source selector, device dropdown
-   overrides, mute button + slash overlay and the input waveform.
+/* MicrophoneNode — the live-input faceplate.
+ *
+ * The Speaker's mirror image, deliberately: the same two halves in the same
+ * order (what the signal is doing, then where it comes from), so a player who
+ * has read one card has read both. What is different is the direction — the
+ * socket is on the right, and the level meter is a wide, low bed rather than a
+ * tall column, because an input is a stream you watch, not a level you set.
+ *
+ * Rebuilt in W5-P6. */
 
-   Split verbatim out of the former SchematicNodes.css (L1010-1132) in W5-S5. */
-
-/* ============================================
- * Microphone Node - Compact Layout
- * ============================================ */
-.microphone-node {
-    min-width: 140px;
+.oj-node.microphone-node {
+    width: 216px;
 }
 
-/* Low latency mode badge */
-.mic-latency-badge {
-    width: 20px;
-    height: 20px;
-    background: rgba(255, 193, 7, 0.9);
-    border-radius: 50%;
+/* ---- The live half ------------------------------------------------------
+ * On the card surface, NOT on an inset bed: the oj-ui Meter draws its idle
+ * tracks in `--bg-tertiary`, so a meter sitting on a `--bg-tertiary` panel is a
+ * meter you cannot see. (Noted as an oj-ui API need — the track wants to be a
+ * local custom property.) */
+.mic-stage {
     display: flex;
     align-items: center;
-    justify-content: center;
-    color: #000;
-    border: 1px solid var(--border-strong);
+    justify-content: space-between;
+    gap: var(--space-md);
 }
 
-.mic-content {
-    padding: var(--space-sm) var(--space-md);
+.mic-level {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    min-width: 0;
+}
+
+.mic-db {
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
+/* Muted is not "dimmed" — the meter reads exactly what is arriving, which is
+   nothing. The number says so, and the button carries the state. */
+.mic-stage.is-muted .mic-db {
+    color: var(--danger-ink);
+}
+
+.mic-mute.oj-icon-btn {
+    flex: none;
+    width: 38px;
+    height: 38px;
+}
+
+.mic-mute.oj-icon-btn[aria-pressed='true'] {
+    background: color-mix(in oklab, var(--accent-danger) 12%, var(--bg-tertiary));
+    color: var(--danger-ink);
+}
+
+/* ---- The route half ----------------------------------------------------- */
+.mic-route {
     display: flex;
     flex-direction: column;
     gap: var(--space-sm);
-}
-
-/* Controls row: source + mute + output */
-.mic-controls-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-}
-
-/* Source selector button */
-.mic-device-selector {
-    position: relative;
-}
-
-/* Device dropdown - expand to right, width set dynamically by JS */
-.mic-device-selector .device-dropdown {
-    left: 0;
-    right: auto;
-    white-space: nowrap;
-}
-
-.mic-source-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-sm);
-    border: 2px solid var(--text-primary);
-    background: var(--bg-canvas);
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all var(--motion-fast);
-}
-
-.mic-source-btn:hover {
-    background: var(--bg-tertiary);
-}
-
-/* Mute button */
-.mic-mute-btn {
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-sm);
-    border: 2px solid var(--text-primary);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: all var(--motion-fast);
-    position: relative;
-}
-
-.mic-mute-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.mic-mute-btn.live {
-    background: var(--accent-success);
-    color: white;
-}
-
-.mic-mute-btn.live:hover:not(:disabled) {
-    background: #3cb371;
-}
-
-.mic-mute-btn.muted {
-    background: var(--accent-danger);
-    color: white;
-}
-
-.mic-mute-btn.muted:hover:not(:disabled) {
-    background: #c94444;
-}
-
-/* Slash overlay for muted state */
-.mic-mute-btn.muted::after {
-    content: "";
-    position: absolute;
-    width: 70%;
-    height: 2px;
-    background: white;
-    transform: rotate(-45deg);
-    border-radius: 1px;
-}
-
-
-/* Waveform line */
-.mic-waveform-line {
-    width: 100%;
-    height: 20px;
-}
-
-.mic-waveform-path {
-    stroke: var(--accent-primary);
+    padding-top: 12px;
+    border-top: 1px solid var(--border-subtle);
 }

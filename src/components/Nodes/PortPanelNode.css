@@ -1,0 +1,130 @@
+/* PortPanelNode — the container-boundary panels (INPUTS and OUTPUTS).
+ *
+ * A panel is a list of sockets with editable names, so its body is one
+ * full-width column of `PortRow`s rather than the two mirrored stacks a normal
+ * node body uses. The row keeps PortRow's socket, its 24px target and its micro
+ * mono voice; this file only makes it span the card and gives it the hover and
+ * rename affordances a rename target needs.
+ *
+ * The old 2px ink header is gone with the rest of the sketchbook: both panels
+ * are the ordinary NodeShell card now.
+ *
+ * Written in W5-P6 (replaces the panel half of CanvasIONode.css). */
+
+/* Narrower than the shared 190px minimum: a panel is a list of names, not an
+   instrument. `min-width` comes with it because `.oj-node` sets the floor. */
+.oj-node.port-panel {
+    width: 176px;
+    min-width: 176px;
+}
+
+/* Bundle names are identities, not hints. A 176px panel leaves only ~52px after
+   the disclosure, count and well; the 9.5px tracked mono name needs 90px for
+   `KEYBOARD ROW 1`. Widen only panels that actually contain a bundle.
+   (Moved here from `_sockets.css` in W5-P6, unchanged in value, so the width
+   lives beside the panel it belongs to; `BundlePortGroup.test.tsx` pins it.) */
+.oj-node.port-panel:has(.bundle-port-group) {
+    width: 190px;
+    min-width: 190px;
+}
+
+.port-panel__rows {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: -2px -4px;
+}
+
+/* The row spans the card and pushes name and socket to opposite edges — the
+   socket always on the side its cable arrives from. */
+.port-panel .oj-port-row.port-panel__row {
+    width: 100%;
+    justify-content: space-between;
+    padding: 2px var(--space-xs);
+    border-radius: var(--radius-sm);
+    transition: background var(--motion-fast);
+}
+
+.port-panel .oj-port-row.port-panel__row:hover,
+.port-panel .oj-port-row.port-panel__row.is-editing {
+    background: var(--bg-tertiary);
+}
+
+/* The name is the row's label slot, so it inherits the micro mono voice; it
+   just has to fill the row (so the socket stays pinned to its own edge) and read
+   left-to-right whichever side the socket is on — an OUTPUT row is reversed for
+   the SOCKET's sake, not for the name's. */
+.port-panel .oj-port-row__label {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+}
+
+.port-panel__name {
+    display: block;
+    flex: 1;
+    min-width: 0;
+}
+
+.port-panel__name .oj-editable-label {
+    width: 100%;
+}
+
+.port-panel__name .oj-editable-label__text {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: inherit;
+    letter-spacing: inherit;
+    text-transform: inherit;
+    color: inherit;
+}
+
+.port-panel__name .oj-input {
+    width: 100%;
+    height: 22px;
+    padding: 0 4px;
+    font-size: var(--text-xs);
+}
+
+/* ---- The always-open slot ----------------------------------------------
+ * A dashed rule above it, and the slot's own socket is already the dashed
+ * empty well. The invitation is a ghost button so it reads as an action, but
+ * the SOCKET is the target — you make a port by landing a cable in it, and
+ * Enter on the row does the same thing from the keyboard. */
+.port-panel .oj-port-row.port-panel__row--add {
+    margin-top: 2px;
+    padding-top: var(--space-sm);
+    border-top: 1px dashed var(--border-subtle);
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    opacity: 0.8;
+}
+
+.port-panel .oj-port-row.port-panel__row--add:hover {
+    opacity: 1;
+}
+
+.port-panel__add.oj-btn {
+    flex: 1;
+    justify-content: flex-start;
+    min-height: 22px;
+    padding: 0 4px;
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    font-weight: 600;
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+.port-panel__empty {
+    margin: 0;
+    padding: var(--space-xs) 0;
+    text-align: center;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+}

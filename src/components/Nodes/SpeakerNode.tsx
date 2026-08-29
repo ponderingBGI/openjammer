@@ -1,20 +1,48 @@
 /**
- * Speaker Node - Audio output to device
- * Supports professional audio interfaces with low-latency detection
+ * Speaker Node — the canvas's master output, and the New DNA's signature
+ * faceplate (the handoff's "Output" card): a LEVEL knob, a big live meter, and
+ * one exact dB readout. Everything else on the card is a fact about the route.
+ *
+ * Two rules this file exists to keep:
+ *
+ *  1. The meter AND the readout never pass through React. Both ride the app's
+ *     one shared animation frame and write a custom property / a text node
+ *     directly (UI-023). A meter that re-rendered a node 60 times a second
+ *     would put the whole tree on the audio-visual hot path for a pixel height.
+ *  2. Device discovery is display-only. The global low-latency policy owns
+ *     defaults (P10); the sole automatic route change here is recovery when the
+ *     OS reports that an explicitly selected output was unplugged — a held note
+ *     beats a glitch.
  */
 
-import { useState, useEffect, useRef, useCallback, memo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import type { GraphNode, SpeakerNodeData } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useAudioStore } from '../../store/audioStore';
 import { getExecutor } from '../../audio/executor';
+import { registerTimelineLevelWriter } from '../Arrangement/timelineSignalLevels';
 import {
     type EnhancedAudioDevice,
     enhanceAudioDevices,
     sortDevicesByPriority,
-    detectLowLatencyDevice
+    detectLowLatencyDevice,
 } from '../../utils/audioDeviceDetection';
-import { Port } from '@openjammer/oj-ui';
+import {
+    Callout,
+    Chip,
+    DeviceSelect,
+    IconBolt,
+    IconButton,
+    IconMute,
+    IconSpeaker,
+    Knob,
+    Meter,
+    NodeShell,
+    PortRow,
+    type DeviceSelectItem,
+    type MeterHandle,
+} from '@openjammer/oj-ui';
+import { useGestureBracket } from './nodeControls';
 import './SpeakerNode.css';
 
 interface SpeakerNodeProps {
@@ -33,6 +61,27 @@ interface SpeakerNodeProps {
     style?: React.CSSProperties;
 }
 
+/** Below this the readout reads as silence, exactly like the handoff prototype. */
+const FLOOR_DB = -60;
+
+/** Linear 0..1 to the dB string a performer reads. */
+function formatDb(level: number): string {
+    if (!Number.isFinite(level) || level <= 0) return '-∞ dB';
+    const db = 20 * Math.log10(level);
+    return db <= FLOOR_DB + 0.5 ? '-∞ dB' : `${db.toFixed(1)} dB`;
+}
+
+/**
+ * The meter's own scale: -60…0 dBFS mapped onto 0…1, so 0 dBFS stays exactly
+ * 1.0 and the clip latch keeps meaning what it says. A linear meter is a lie
+ * dressed as precision. Mirrors `Shell/masterSignal`.
+ */
+function meterScale(level: number): number {
+    if (!Number.isFinite(level) || level <= 0) return 0;
+    const db = 20 * Math.log10(level);
+    return Math.max(0, Math.min(1, 1 + db / -FLOOR_DB));
+}
+
 export const SpeakerNode = memo(function SpeakerNode({
     node,
     handlePortMouseDown,
@@ -46,7 +95,7 @@ export const SpeakerNode = memo(function SpeakerNode({
     isSelected,
     isDragging,
     isHoveredWithConnections,
-    style
+    style,
 }: SpeakerNodeProps) {
     const data = node.data as SpeakerNodeData;
     const updateNodeData = useGraphStore((s) => s.updateNodeData);
@@ -63,10 +112,13 @@ export const SpeakerNode = memo(function SpeakerNode({
     });
     const isMuted = data.isMuted ?? false;
     const volume = data.volume ?? 1;
-    // Live output level (0..1) from the engine's per-node meter — the REAL master
-    // mix leaving this SpeakerOut (VIS-1), not a parallel analyser. When muted, the
-    // engine's `master_gain` is 0, so the meter naturally reads ~0.
-    const [outputLevel, setOutputLevel] = useState(0);
+
+    const meterRef = useRef<MeterHandle>(null);
+    const readoutRef = useRef<HTMLSpanElement>(null);
+    const mutedRef = useRef(isMuted);
+    // The frame writer reads this; keeping it in sync in an effect (not during
+    // render) is what lets the meter stay outside React entirely.
+    useEffect(() => { mutedRef.current = isMuted; }, [isMuted]);
 
     // Device discovery is display-only on mount. The global low-latency policy owns
     // defaults; the sole automatic route change here is recovery when the OS reports
@@ -79,15 +131,15 @@ export const SpeakerNode = memo(function SpeakerNode({
             try {
                 const devs = await navigator.mediaDevices.enumerateDevices();
                 if (cancelled) return;
-                const outputs = devs.filter(d => d.kind === 'audiooutput');
+                const outputs = devs.filter((d) => d.kind === 'audiooutput');
                 const sorted = sortDevicesByPriority(enhanceAudioDevices(outputs));
                 setDevices(sorted);
 
                 if (recoverMissingSelection) {
                     const current = useGraphStore.getState().nodes.get(node.id);
                     const selectedId = (current?.data as SpeakerNodeData | undefined)?.deviceId ?? 'default';
-                    const hasEnumeratedIds = sorted.some(device => device.deviceId.length > 0);
-                    if (hasEnumeratedIds && selectedId !== 'default' && !sorted.some(device => device.deviceId === selectedId)) {
+                    const hasEnumeratedIds = sorted.some((device) => device.deviceId.length > 0);
+                    if (hasEnumeratedIds && selectedId !== 'default' && !sorted.some((device) => device.deviceId === selectedId)) {
                         updateNodeData<SpeakerNodeData>(node.id, { deviceId: 'default' });
                         getExecutor().setSpeakerDevice(node.id, 'default');
                     }
@@ -97,10 +149,8 @@ export const SpeakerNode = memo(function SpeakerNode({
             }
         };
 
-        // Initial fetch
         void updateDevices(false);
 
-        // Listen for device changes (plug/unplug)
         const handleDeviceChange = () => { void updateDevices(true); };
         navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
 
@@ -110,227 +160,179 @@ export const SpeakerNode = memo(function SpeakerNode({
         };
     }, [node.id, updateNodeData]);
 
-    // Click outside to close device dropdown
+    // Close the device list on any pointer-down outside THIS node's own selector
+    // — a per-instance ref, so two Speakers no longer fight over one global
+    // `querySelector` (UI-018).
     useEffect(() => {
         if (!showDevices) return;
-
         const handleClickOutside = (e: PointerEvent) => {
-            if (!deviceSelectorRef.current?.contains(e.target as Node)) {
-                setShowDevices(false);
-            }
+            if (!deviceSelectorRef.current?.contains(e.target as Node)) setShowDevices(false);
         };
         document.addEventListener('pointerdown', handleClickOutside);
-
-        return () => {
-            document.removeEventListener('pointerdown', handleClickOutside);
-        };
+        return () => document.removeEventListener('pointerdown', handleClickOutside);
     }, [showDevices]);
+
     const currentDeviceId = data.deviceId || 'default';
-    const currentDevice = devices.find(d => d.deviceId === currentDeviceId);
+    const currentDevice = devices.find((d) => d.deviceId === currentDeviceId);
     const currentLabel = currentDevice?.label || 'Default Output';
     const isCurrentLowLatency = currentDevice?.isLowLatency || detectLowLatencyDevice(currentLabel);
 
-    // Handle device selection
-    const handleDeviceSelect = (deviceId: string) => {
+    /**
+     * The list the picker shows: the OS default first, then every enumerated
+     * output. Devices whose id the browser withholds before permission are left
+     * out — an unpickable row is a lie.
+     */
+    const deviceItems = useMemo<DeviceSelectItem[]>(
+        () => [
+            { id: 'default', label: 'Default Output' },
+            ...devices
+                .filter((d) => d.deviceId.length > 0 && d.deviceId !== 'default')
+                .map((d) => ({
+                    id: d.deviceId,
+                    label: d.label || 'Output',
+                    lowLatency: d.isLowLatency,
+                })),
+        ],
+        [devices],
+    );
+
+    const handleDeviceSelect = useCallback((deviceId: string) => {
         updateNodeData<SpeakerNodeData>(node.id, { deviceId });
         setShowDevices(false);
-
-        // Apply device change immediately
         getExecutor().setSpeakerDevice(node.id, deviceId);
-
-    };
+    }, [node.id, updateNodeData]);
 
     // Re-apply the persisted volume/mute to the engine on (re)load once the audio
-    // context is ready, and whenever they change (PERSIST-1). The engine bakes both
-    // into the SpeakerOut `master_param`s and re-applies them on graph load, so a
-    // project saved muted/quiet reloads muted/quiet at the engine seam — this drives
-    // the live engine to match the SSOT in node.data.
+    // context is ready, and whenever they change (PERSIST-1).
     useEffect(() => {
         if (!isAudioContextReady) return;
         getExecutor().setSpeakerVolume(node.id, volume, isMuted);
     }, [isAudioContextReady, node.id, volume, isMuted]);
 
-    // Drive the output meter from the engine's per-node level (the REAL master mix),
-    // keyed by this node's id (VIS-1) — no parallel AnalyserNode.
+    // The meter AND the dB readout, from the engine's per-node level for this
+    // SpeakerOut (VIS-1), on the app's ONE shared frame. No React state: one
+    // custom-property write and one text node per frame, and the text only when
+    // the number actually changed.
     useEffect(() => {
-        const unsubscribe = getExecutor().subscribeSignalLevels((levels) => {
-            setOutputLevel(Math.max(0, Math.min(1, levels.get(node.id) ?? 0)));
+        let lastText = '';
+        return registerTimelineLevelWriter((levels) => {
+            const raw = mutedRef.current ? 0 : (levels.get(node.id) ?? 0);
+            meterRef.current?.setSignal(meterScale(raw));
+            const text = formatDb(raw);
+            if (text !== lastText && readoutRef.current) {
+                lastText = text;
+                readoutRef.current.textContent = text;
+            }
         });
-        return unsubscribe;
     }, [node.id]);
 
-    // Handle mute toggle. Bracket the data edit in a gesture so undo/redo treats it
-    // as one reversible step (REV-1); the persist effect above drives the engine.
-    const handleMuteToggle = () => {
+    // Mute is one reversible step (REV-1); the persist effect drives the engine.
+    const handleMuteToggle = useCallback(() => {
         beginGesture();
         updateNodeData<SpeakerNodeData>(node.id, { isMuted: !isMuted });
         endGesture();
-    };
+    }, [beginGesture, endGesture, isMuted, node.id, updateNodeData]);
 
-    // Volume slider: live drag updates node.data (the SSOT) on every input; the
-    // effect re-applies to the engine so volume is heard immediately. The whole
-    // drag is one gesture (begin on first change, end on release) so a slider sweep
-    // is a single Ctrl+Z step (REV-1).
-    const gestureActiveRef = useRef(false);
-    const beginVolumeGesture = useCallback(() => {
-        if (gestureActiveRef.current) return;
-        gestureActiveRef.current = true;
-        beginGesture();
-    }, [beginGesture]);
-    const endVolumeGesture = useCallback(() => {
-        if (!gestureActiveRef.current) return;
-        gestureActiveRef.current = false;
-        endGesture();
-    }, [endGesture]);
-    useEffect(() => () => endVolumeGesture(), [endVolumeGesture]);
-    const handleVolumeChange = useCallback(
-        (e: React.ChangeEvent<HTMLInputElement>) => {
-            beginVolumeGesture();
-            const next = Math.max(0, Math.min(1, Number(e.target.value)));
-            updateNodeData<SpeakerNodeData>(node.id, { volume: next });
-        },
-        [node.id, updateNodeData, beginVolumeGesture],
-    );
+    // LEVEL: the whole sweep is one Ctrl+Z step. The bracket opens on the first
+    // value change (pointer, wheel or Arrow key alike) and closes on commit.
+    const level = useGestureBracket();
+    const handleLevelChange = useCallback((next: number) => {
+        level.begin();
+        updateNodeData<SpeakerNodeData>(node.id, { volume: Math.max(0, Math.min(1, next)) });
+    }, [level, node.id, updateNodeData]);
 
-    // Get input port for the speaker
-    const inputPort = node.ports.find(p => p.direction === 'input' && p.type === 'audio');
+    const inputPort = node.ports.find((p) => p.direction === 'input' && p.type === 'audio');
 
     return (
-        <div
-            className={`speaker-node schematic-node ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''} ${isHoveredWithConnections ? 'hover-connecting' : ''}`}
+        <NodeShell
+            className={`schematic-node speaker-node${isHoveredWithConnections ? ' hover-connecting' : ''}`}
             style={style}
+            title="Speaker"
+            nodeType="OUT"
+            selected={!!isSelected}
+            dragging={!!isDragging}
+            headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}
+            inputs={inputPort ? (
+                <PortRow
+                    side="input"
+                    kind="audio"
+                    label={inputPort.name}
+                    connected={!!hasConnection?.(inputPort.id)}
+                    data-node-id={node.id}
+                    data-port-id={inputPort.id}
+                    data-port-type={inputPort.type}
+                    onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(inputPort.id, e); }}
+                    onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(inputPort.id, e); }}
+                    onMouseEnter={() => handlePortMouseEnter?.(inputPort.id)}
+                    onMouseLeave={handlePortMouseLeave}
+                />
+            ) : undefined}
         >
-            {/* Header */}
-            <div
-                className="schematic-header"
-                onMouseDown={handleHeaderMouseDown}
-            >
-                <span className="schematic-title">Speaker</span>
-                {/* Warning badge if browser doesn't support setSinkId and non-default device selected */}
-                {!supportsSinkId && currentDeviceId !== 'default' && (
-                    <div className="speaker-warning" title="Browser doesn't support output device selection">
-                        ⚠️
-                    </div>
-                )}
-            </div>
-
-            {/* Visual Container */}
-            <div className="speaker-body">
-                {/* Input Port - positioned in top left corner under header */}
-                {inputPort && (
-                    <div
-                        className="speaker-input-port-wrapper"
-                        style={{ position: 'absolute', left: 'var(--space-sm)', top: 'var(--space-sm)' }}
-                    >
-                        <Port
-                            kind="audio"
-                            direction="input"
-                            connected={!!hasConnection?.(inputPort.id)}
-                            style={{ width: '14px', height: '14px' }}
-                            data-node-id={node.id}
-                            data-port-id={inputPort.id}
-                            data-port-type={inputPort.type}
-                            onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(inputPort.id, e); }}
-                            onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(inputPort.id, e); }}
-                            onMouseEnter={() => handlePortMouseEnter?.(inputPort.id)}
-                            onMouseLeave={handlePortMouseLeave}
-                            title={inputPort.name}
-                        />
-                    </div>
-                )}
-
-                {/* Speaker Symbol with Mute Button */}
-                <div className="speaker-symbol-container">
-                    <button
-                        className={`speaker-mute-btn ${isMuted ? 'muted' : 'live'}`}
-                        onClick={handleMuteToggle}
-                        title={isMuted ? 'Unmute' : 'Mute'}
-                    >
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="32" height="32">
-                            {isMuted ? (
-                                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" />
-                            ) : (
-                                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
-                            )}
-                        </svg>
-                    </button>
-                </div>
-
-                {/* Master volume + live output meter. The slider drives node.data
-                    (the SSOT); the engine applies it ONCE via the SpeakerOut master
-                    param. The meter reads the engine's per-node level (VIS-1). */}
-                <div className="speaker-volume-row" onMouseDown={(e) => e.stopPropagation()}>
-                    <input
-                        className="speaker-volume-slider"
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={volume}
-                        disabled={isMuted}
-                        onChange={handleVolumeChange}
-                        onPointerUp={endVolumeGesture}
-                        onPointerCancel={endVolumeGesture}
-                        onBlur={endVolumeGesture}
-                        title={`Volume ${Math.round(volume * 100)}%`}
-                        aria-label="Speaker volume"
+            {/* The instrument half of the card: one dial, one meter, one number. */}
+            <div className="speaker-stage" onMouseDown={(e) => e.stopPropagation()}>
+                <Knob
+                    label="LEVEL"
+                    value={volume}
+                    min={0}
+                    max={1}
+                    defaultValue={1}
+                    disabled={isMuted}
+                    format={(v) => `${Math.round(v * 100)}%`}
+                    onChange={handleLevelChange}
+                    onCommit={level.end}
+                />
+                <div className="speaker-readout">
+                    <Meter
+                        ref={meterRef}
+                        bars={9}
+                        height={44}
+                        barWidth={5}
+                        label="Speaker output level"
                     />
-                    <div className="speaker-output-meter" aria-hidden="true">
-                        <div
-                            className="speaker-output-meter-fill"
-                            style={{ width: `${Math.round((isMuted ? 0 : outputLevel) * 100)}%` }}
-                        />
-                    </div>
-                </div>
-
-                {/* Output Device Selector */}
-                <div ref={deviceSelectorRef} className="device-selector-container">
-                    <button
-                        className={`device-select-trigger ${isCurrentLowLatency ? 'low-latency' : ''}`}
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setShowDevices(!showDevices);
-                        }}
-                    >
-                        {isCurrentLowLatency && <span className="low-latency-icon" title="Low-latency audio interface">⚡</span>}
-                        <span className="device-label">{currentLabel}</span>
-                    </button>
-
-                    {showDevices && (
-                        <div
-                            className="device-dropdown schematic-dropdown"
-                            onWheel={(e) => e.stopPropagation()}
-                        >
-                            <button
-                                type="button"
-                                className="device-item"
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDeviceSelect('default');
-                                }}
-                            >
-                                Default Output
-                            </button>
-                            {devices.map(d => (
-                                <button
-                                    type="button"
-                                    key={d.deviceId}
-                                    className={`device-item ${d.isLowLatency ? 'low-latency' : ''}`}
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDeviceSelect(d.deviceId);
-                                    }}
-                                >
-                                    {d.isLowLatency && <span className="low-latency-icon" title="Low-latency audio interface">⚡</span>}
-                                    <span className="device-label">{d.label}</span>
-                                </button>
-                            ))}
-                        </div>
-                    )}
+                    <span ref={readoutRef} className="oj-node__readout speaker-db">
+                        -&#8734; dB
+                    </span>
                 </div>
             </div>
-        </div>
+
+            {/* The route, and what it costs. Facts, not controls — the quiet voice. */}
+            <div ref={deviceSelectorRef} className="speaker-route">
+                <div className="speaker-route__row">
+                    <DeviceSelect
+                        items={deviceItems}
+                        value={currentDeviceId}
+                        open={showDevices}
+                        onToggle={() => setShowDevices((v) => !v)}
+                        onSelect={handleDeviceSelect}
+                        ariaLabel="Speaker output device"
+                        placeholder="Default Output"
+                    />
+                    <IconButton
+                        className="speaker-mute"
+                        variant="node"
+                        label={isMuted ? 'Unmute speaker' : 'Mute speaker'}
+                        aria-pressed={isMuted}
+                        onClick={handleMuteToggle}
+                        icon={isMuted ? <IconMute size={18} /> : <IconSpeaker size={18} />}
+                    />
+                </div>
+                {isCurrentLowLatency && (
+                    <div className="oj-node__meta">
+                        <Chip tone="success">
+                            <IconBolt size={12} aria-hidden="true" />
+                            low latency
+                        </Chip>
+                    </div>
+                )}
+                {!supportsSinkId && currentDeviceId !== 'default' && (
+                    <Callout variant="warning" title="Route not applied">
+                        This browser cannot choose an output device. Sound is going to the
+                        system default.
+                    </Callout>
+                )}
+            </div>
+        </NodeShell>
     );
 });

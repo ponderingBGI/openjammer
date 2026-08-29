@@ -1,68 +1,44 @@
-/* MathNode — Math faceplate: the Add / Subtract nodes.
+/* MathNode — the Add / Subtract faceplate.
+ *
+ * The smallest card on the canvas, and the one that most needs to say what it
+ * does at a glance. The operator lives twice: once as the header's mono type
+ * chip (the glance) and once as the segmented control (the change). The
+ * explainer line under it spells the arithmetic out in the mono voice, because
+ * `In 1 − In 2` is a fact about signal order that a player will otherwise have
+ * to discover by ear.
+ *
+ * Rebuilt in W5-P6. */
 
-   Split verbatim out of the former SchematicNodes.css (L1604-1668) in W5-S5. */
-
-/* ============================================
- * Math Node (Add/Subtract)
- * ============================================ */
-.math-node {
-    min-width: 100px;
+/* Narrower than the shared 190px minimum, deliberately: a two-socket utility
+   card should not take an instrument's footprint. `min-width` has to come with
+   the width, because `.oj-node` sets the shared floor. */
+.oj-node.math-node {
+    width: 176px;
+    min-width: 176px;
 }
 
-.math-header {
-    padding: var(--space-xs) var(--space-sm);
-    background: var(--bg-node-header);
-    border-bottom: 1px solid var(--border-strong);
-    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-    cursor: grab;
+.math-operation {
     display: flex;
-    align-items: center;
-    gap: var(--space-sm);
 }
 
-.math-header:active {
-    cursor: grabbing;
+.math-operation .oj-seg {
+    width: 100%;
+    align-self: stretch;
 }
 
-.math-symbol {
+.math-operation .oj-seg__btn {
+    flex: 1;
+    padding-inline: var(--space-sm);
+    white-space: nowrap;
+}
+
+/* Which way the subtraction runs. Mono, muted, centred under the control. */
+.math-explainer {
+    margin: -4px 0 0;
     font-family: var(--font-mono);
-    font-size: var(--text-xl);
-    font-weight: bold;
-    color: var(--accent-primary);
-}
-
-.math-name {
-    font-family: var(--font-sans);
-    font-size: var(--text-md);
-    color: var(--text-primary);
-}
-
-.math-body {
-    padding: var(--space-sm);
-    display: flex;
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: stretch;
-    gap: var(--space-md);
-}
-
-.math-inputs {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-around;
-    gap: var(--space-sm);
-}
-
-.math-outputs {
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-start;
-}
-
-
-.subtract-indicator {
-    font-family: var(--font-mono);
+    font-weight: 500;
     font-size: var(--text-xs);
-    color: var(--accent-danger);
-    margin-left: var(--space-xs);
+    letter-spacing: var(--tracking-micro);
+    color: var(--text-muted);
+    text-align: center;
 }

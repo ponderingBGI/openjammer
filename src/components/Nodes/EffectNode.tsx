@@ -1,11 +1,28 @@
 /**
- * Effect Node - Audio effects processor
+ * Effect Node — the built-in audio effects.
+ *
+ * The card is a small instrument face: pick what the box IS from a menu, then
+ * turn its dials. Nothing here is a list of settings, because nothing here is
+ * a setting — every control drives a real kernel parameter while sound is
+ * flowing.
+ *
+ * WHICH CONTROL: bounded parameters get `Knob`s up to the same limit
+ * `AutoParamPanel` uses (KNOB_LIMIT = 6, the point at which a face stops being
+ * playable and starts needing to be scannable). Every built-in effect here has
+ * at most three, so they are all dials. Frequencies get a log sweep — a cutoff
+ * knob that crawls at the bottom and leaps at the top is a knob that lies.
+ *
+ * The type picker is a Menu popover rather than a native `<select>`: it is the
+ * only place on this card where the node changes identity, and it deserves the
+ * app's own menu physics and keyboard model.
  */
 
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GraphNode, EffectNodeData, EffectType } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
-import { Select, Slider } from '@openjammer/oj-ui';
+import { Button, IconChevronDown, Knob, Menu, MenuItem } from '@openjammer/oj-ui';
+import { useGestureBracket } from './nodeControls';
+import './EffectNode.css';
 
 interface EffectNodeProps {
     node: GraphNode;
@@ -13,27 +30,39 @@ interface EffectNodeProps {
 
 // Each option's `params` are the UI control names; they map 1:1 to the chosen
 // effect's REAL kernel param ids in the emitter (`EFFECT_LOWERING` in
-// manifest.ts). Every slider here drives the engine — no dead controls. The old
+// manifest.ts). Every dial here drives the engine — no dead controls. The old
 // 'pitch' option was removed: there is no pitch-shift primitive in ojcore, so it
 // was a fictional no-op (honesty over a dead menu entry).
 const EFFECT_OPTIONS: { value: EffectType; label: string; params: string[] }[] = [
-    { value: 'distortion', label: '🔥 Distortion', params: ['amount', 'level'] },
-    { value: 'filter', label: '🎛️ Filter', params: ['frequency', 'q'] },
-    { value: 'reverb', label: '🏛️ Reverb', params: ['mix'] },
-    { value: 'delay', label: '📢 Delay', params: ['time', 'feedback', 'mix'] }
+    { value: 'distortion', label: 'Distortion', params: ['amount', 'level'] },
+    { value: 'filter', label: 'Filter', params: ['frequency', 'q'] },
+    { value: 'reverb', label: 'Reverb', params: ['mix'] },
+    { value: 'delay', label: 'Delay', params: ['time', 'feedback', 'mix'] },
 ];
 
-// Slider config per UI param. Ranges mirror the kernel param decls so the UI can
-// never push an out-of-range value (the kernels clamp anyway, but the control
-// should be honest about the real usable range).
-const PARAM_CONFIG: Record<string, { min: number; max: number; step: number; default: number }> = {
-    amount: { min: 0, max: 1, step: 0.05, default: 0.5 },
-    level: { min: 0, max: 2, step: 0.05, default: 1 },
-    frequency: { min: 20, max: 20_000, step: 10, default: 1000 },
-    q: { min: 0.1, max: 20, step: 0.1, default: 0.707 },
-    mix: { min: 0, max: 1, step: 0.05, default: 0.3 },
-    time: { min: 0, max: 2, step: 0.01, default: 0.25 },
-    feedback: { min: 0, max: 0.9, step: 0.05, default: 0.4 }
+/**
+ * Per-parameter control config. Ranges mirror the kernel param decls so the UI
+ * can never push an out-of-range value (the kernels clamp anyway, but the
+ * control should be honest about the real usable range). `log` and `format` are
+ * what turn a number into something a hand can find.
+ */
+const PARAM_CONFIG: Record<
+    string,
+    { min: number; max: number; default: number; log?: boolean; format: (v: number) => string }
+> = {
+    amount: { min: 0, max: 1, default: 0.5, format: (v) => `${Math.round(v * 100)}%` },
+    level: { min: 0, max: 2, default: 1, format: (v) => `${v.toFixed(2)}×` },
+    frequency: {
+        min: 20,
+        max: 20_000,
+        default: 1000,
+        log: true,
+        format: (v) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : `${Math.round(v)} Hz`),
+    },
+    q: { min: 0.1, max: 20, default: 0.707, log: true, format: (v) => v.toFixed(2) },
+    mix: { min: 0, max: 1, default: 0.3, format: (v) => `${Math.round(v * 100)}%` },
+    time: { min: 0, max: 2, default: 0.25, format: (v) => `${Math.round(v * 1000)} ms` },
+    feedback: { min: 0, max: 0.9, default: 0.4, format: (v) => `${Math.round(v * 100)}%` },
 };
 
 export function EffectNode({ node }: EffectNodeProps) {
@@ -41,100 +70,106 @@ export function EffectNode({ node }: EffectNodeProps) {
     const updateNodeData = useGraphStore((s) => s.updateNodeData);
     const beginGesture = useGraphStore((s) => s.beginGesture);
     const endGesture = useGraphStore((s) => s.endGesture);
-    const gestureOpenRef = useRef(false);
-    const startGesture = useCallback(() => {
-        if (gestureOpenRef.current) return;
-        gestureOpenRef.current = true;
-        beginGesture();
-    }, [beginGesture]);
-    const closeGesture = useCallback(() => {
-        if (!gestureOpenRef.current) return;
-        gestureOpenRef.current = false;
-        endGesture();
-    }, [endGesture]);
-    useEffect(() => {
-        window.addEventListener('blur', closeGesture);
-        return () => {
-            window.removeEventListener('blur', closeGesture);
-            closeGesture();
-        };
-    }, [closeGesture]);
+    const gesture = useGestureBracket();
+
+    const [pickerOpen, setPickerOpen] = useState(false);
+    const pickerRef = useRef<HTMLDivElement>(null);
+    const triggerRef = useRef<HTMLButtonElement>(null);
 
     const effectType = data.effectType || 'distortion';
     const params = useMemo(() => data.params || {}, [data.params]);
+    const currentEffect = EFFECT_OPTIONS.find((e) => e.value === effectType);
 
-    const currentEffect = EFFECT_OPTIONS.find(e => e.value === effectType);
+    // Per-instance outside-click; two Effect nodes never share one popover.
+    useEffect(() => {
+        if (!pickerOpen) return;
+        const onDown = (e: PointerEvent) => {
+            if (!pickerRef.current?.contains(e.target as Node)) setPickerOpen(false);
+        };
+        document.addEventListener('pointerdown', onDown);
+        return () => document.removeEventListener('pointerdown', onDown);
+    }, [pickerOpen]);
 
-    // Change effect type
-    const handleTypeChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-        const newType = e.target.value as EffectType;
-        const effectConfig = EFFECT_OPTIONS.find(ef => ef.value === newType);
+    const closePicker = useCallback(() => {
+        setPickerOpen(false);
+        triggerRef.current?.focus();
+    }, []);
 
-        // Initialize default params for new effect type
+    /** Changing the effect re-seeds every parameter — one reversible step. */
+    const handleTypeChange = useCallback((newType: EffectType) => {
+        closePicker();
+        if (newType === effectType) return;
+        const effectConfig = EFFECT_OPTIONS.find((ef) => ef.value === newType);
         const newParams: Record<string, number> = {};
-        effectConfig?.params.forEach(param => {
+        effectConfig?.params.forEach((param) => {
             newParams[param] = PARAM_CONFIG[param]?.default ?? 0.5;
         });
+        beginGesture();
+        updateNodeData<EffectNodeData>(node.id, { effectType: newType, params: newParams });
+        endGesture();
+    }, [beginGesture, closePicker, effectType, endGesture, node.id, updateNodeData]);
 
-        updateNodeData<EffectNodeData>(node.id, {
-            effectType: newType,
-            params: newParams
-        });
-    }, [node.id, updateNodeData]);
-
-    // Update param value
     const handleParamChange = useCallback((param: string, value: number) => {
-        updateNodeData<EffectNodeData>(node.id, {
-            params: { ...params, [param]: value }
-        });
-    }, [node.id, params, updateNodeData]);
+        gesture.begin();
+        updateNodeData<EffectNodeData>(node.id, { params: { ...params, [param]: value } });
+    }, [gesture, node.id, params, updateNodeData]);
 
     return (
         <div className="effect-node">
-            {/* Effect Type Selector */}
-            <div className="node-row">
-                <Select
-                    className="node-select"
-                    value={effectType}
-                    onChange={handleTypeChange}
+            <div ref={pickerRef} className="effect-picker">
+                <Button
+                    ref={triggerRef}
+                    variant="node"
+                    className="effect-picker__trigger"
+                    aria-haspopup="menu"
+                    aria-expanded={pickerOpen}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    onClick={() => setPickerOpen((open) => !open)}
                 >
-                    {EFFECT_OPTIONS.map(opt => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                </Select>
+                    <span className="effect-picker__name">{currentEffect?.label ?? 'Effect'}</span>
+                    <IconChevronDown size={14} aria-hidden="true" />
+                </Button>
+                {pickerOpen && (
+                    <Menu
+                        ariaLabel="Effect type"
+                        className="effect-picker__menu"
+                        onEscape={closePicker}
+                        onMouseDown={(e) => e.stopPropagation()}
+                    >
+                        {EFFECT_OPTIONS.map((opt) => (
+                            <MenuItem
+                                key={opt.value}
+                                label={opt.label}
+                                aria-checked={opt.value === effectType}
+                                className={opt.value === effectType ? 'is-current' : undefined}
+                                onSelect={() => handleTypeChange(opt.value)}
+                            />
+                        ))}
+                    </Menu>
+                )}
             </div>
 
-            {/* Effect Parameters */}
-            {currentEffect?.params.map(param => {
-                const config = PARAM_CONFIG[param];
-                const value = params[param] ?? config?.default ?? 0.5;
-
-                return (
-                    <div key={param} className="node-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                            <span className="node-label" style={{ marginBottom: 0, textTransform: 'capitalize' }}>
-                                {param}
-                            </span>
-                            <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
-                                {typeof value === 'number' ? value.toFixed(2) : value}
-                            </span>
-                        </div>
-                        <Slider
-                            aria-label={param}
+            <div className="effect-dials" onMouseDown={(e) => e.stopPropagation()}>
+                {currentEffect?.params.map((param) => {
+                    const config = PARAM_CONFIG[param];
+                    const value = params[param] ?? config?.default ?? 0.5;
+                    return (
+                        <Knob
+                            key={param}
+                            label={param.toUpperCase()}
+                            value={value}
                             min={config?.min ?? 0}
                             max={config?.max ?? 1}
-                            step={config?.step ?? 0.1}
-                            value={value}
+                            log={config?.log ?? false}
+                            defaultValue={config?.default}
+                            size={44}
+                            format={config?.format ?? ((v) => v.toFixed(2))}
                             onChange={(v) => handleParamChange(param, v)}
-                            onPointerDown={startGesture}
-                            onPointerUp={closeGesture}
-                            onPointerCancel={closeGesture}
-                            onBlur={closeGesture}
-                            style={{ width: '100%' }}
+                            onCommit={gesture.end}
                         />
-                    </div>
-                );
-            })}
+                    );
+                })}
+            </div>
         </div>
     );
 }

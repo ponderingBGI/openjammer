@@ -1,18 +1,40 @@
 /**
- * Recorder Node - Record audio to WAV
- * Connected to the real Recorder audio class via the audio executor seam
+ * Recorder Node — capture what is reaching this input, to a WAV.
+ *
+ * Two states and one clock. Idle, the card is a red button and a list of what
+ * you already caught; armed, the elapsed time is the only thing that matters and
+ * it is the biggest thing on the card.
+ *
+ * The clock and the level never pass through React (UI-023): the time is written
+ * straight into a text node from the Recorder's own callback, and the level is
+ * an oj-ui `Meter` fed from the app's one shared animation frame. A recorder
+ * that re-rendered its node ten times a second would be spending a performer's
+ * frame budget on a number.
  */
 
-import { useState, useCallback, useEffect, memo } from 'react';
+import { useState, useCallback, useEffect, useRef, memo } from 'react';
 import { toast } from 'sonner';
-import { Button } from '@openjammer/oj-ui';
+import {
+    Button,
+    IconButton,
+    IconCheck,
+    IconClose,
+    IconDownload,
+    List,
+    ListRow,
+    Meter,
+    type MeterHandle,
+} from '@openjammer/oj-ui';
 import type { GraphNode } from '../../engine/types';
 import { useAudioStore } from '../../store/audioStore';
 import { useProjectStore } from '../../store/projectStore';
 import { useLibraryStore } from '../../store/libraryStore';
 import { getExecutor } from '../../audio/executor';
 import { getAudioContext } from '../../audio/audioContext';
+import { registerTimelineLevelWriter } from '../Arrangement/timelineSignalLevels';
+import { meterScale } from '../Shell/masterSignal';
 import type { Recording as AudioRecording } from '../../audio/executor';
+import './RecorderNode.css';
 
 interface RecorderNodeProps {
     node: GraphNode;
@@ -24,7 +46,15 @@ interface RecordingState {
     duration: number;
     timestamp: number;
     savedToProject?: boolean;
-    libraryItemId?: string;  // Reference to saved library item
+    libraryItemId?: string;
+}
+
+/** `m:ss`. The one time format on this card, and on the clips beside it. */
+function formatClock(seconds: number): string {
+    const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+    const mins = Math.floor(safe / 60);
+    const secs = Math.floor(safe % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 export const RecorderNode = memo(function RecorderNode({ node }: RecorderNodeProps) {
@@ -33,106 +63,96 @@ export const RecorderNode = memo(function RecorderNode({ node }: RecorderNodePro
     const getProjectHandle = useProjectStore((s) => s.getProjectHandle);
     const addAudioFile = useProjectStore((s) => s.addAudioFile);
 
-    // Library store for saving recordings and trashing deleted items
     const saveAudioToLibrary = useLibraryStore((s) => s.saveAudioToLibrary);
     const trashItem = useLibraryStore((s) => s.trashItem);
 
     const [isRecording, setIsRecording] = useState(false);
     const [recordings, setRecordings] = useState<RecordingState[]>([]);
-    const [recordingTime, setRecordingTime] = useState(0);
     const [isSaving, setIsSaving] = useState<string | null>(null);
 
-    // Get the Recorder instance from the audio executor
-    const getRecorder = useCallback(() => {
-        return getExecutor().getRecorder(node.id);
-    }, [node.id]);
+    const clockRef = useRef<HTMLSpanElement>(null);
+    const meterRef = useRef<MeterHandle>(null);
+    const recordingRef = useRef(false);
+    // Read by the shared frame writer; synced in an effect so the level never
+    // touches render.
+    useEffect(() => { recordingRef.current = isRecording; }, [isRecording]);
 
-    // Set up Recorder callbacks when component mounts or audio context becomes ready
+    const getRecorder = useCallback(() => getExecutor().getRecorder(node.id), [node.id]);
+
+    // The incoming level, on the shared frame. Only while armed — a recorder
+    // that is not recording has nothing to report. On the same dB scale as every
+    // other meter in the app (the shared `meterScale`): a linear bar under a dB
+    // world is a lie dressed as precision.
+    useEffect(() => registerTimelineLevelWriter((levels) => {
+        meterRef.current?.setSignal(recordingRef.current ? meterScale(levels.get(node.id) ?? 0) : 0);
+    }), [node.id]);
+
     useEffect(() => {
         if (!isAudioContextReady) return;
-
         const recorder = getRecorder();
         if (!recorder) return;
 
-        // Set up callbacks
         recorder.setOnRecordingComplete((recording: AudioRecording) => {
-            const newRecording: RecordingState = {
-                id: recording.id,
-                name: recording.name,
-                duration: recording.duration,
-                timestamp: recording.timestamp
-            };
-            setRecordings(prev => [...prev, newRecording]);
+            setRecordings((prev) => [
+                ...prev,
+                {
+                    id: recording.id,
+                    name: recording.name,
+                    duration: recording.duration,
+                    timestamp: recording.timestamp,
+                },
+            ]);
             setIsRecording(false);
-            setRecordingTime(0);
+            if (clockRef.current) clockRef.current.textContent = formatClock(0);
         });
 
+        // The clock is a text node, not state.
         recorder.setOnTimeUpdate((time: number) => {
-            setRecordingTime(time);
+            if (clockRef.current) clockRef.current.textContent = formatClock(time);
         });
 
         recorder.setOnRecordingDeleted((deletedRecording: AudioRecording) => {
-            // Trash the library item if the recording was saved
-            if (deletedRecording.libraryItemId) {
-                trashItem(deletedRecording.libraryItemId);
-            }
+            if (deletedRecording.libraryItemId) trashItem(deletedRecording.libraryItemId);
         });
 
-        // Initial sync of recordings from recorder
         const existingRecordings = recorder.getRecordings();
         if (existingRecordings.length > 0) {
-            setRecordings(existingRecordings.map(r => ({
+            setRecordings(existingRecordings.map((r) => ({
                 id: r.id,
                 name: r.name,
                 duration: r.duration,
-                timestamp: r.timestamp
+                timestamp: r.timestamp,
             })));
         }
 
         return () => {
-            // Cleanup callbacks
             recorder.setOnRecordingComplete(() => {});
             recorder.setOnRecordingDeleted(() => {});
             recorder.setOnTimeUpdate(() => {});
         };
     }, [isAudioContextReady, node.id, getRecorder, trashItem]);
 
-    // Start recording
     const handleStartRecording = useCallback(() => {
         const recorder = getRecorder();
-        if (recorder) {
-            recorder.startRecording();
-            setIsRecording(true);
-        }
+        if (!recorder) return;
+        recorder.startRecording();
+        setIsRecording(true);
     }, [getRecorder]);
 
-    // Stop recording
     const handleStopRecording = useCallback(() => {
-        const recorder = getRecorder();
-        if (recorder) {
-            recorder.stopRecording();
-        }
-        // isRecording will be set to false by the callback
+        getRecorder()?.stopRecording();
+        // isRecording is cleared by the completion callback.
     }, [getRecorder]);
 
-    // Download recording
     const handleDownload = useCallback((recordingId: string) => {
-        const recorder = getRecorder();
-        if (recorder) {
-            recorder.downloadRecording(recordingId);
-        }
+        getRecorder()?.downloadRecording(recordingId);
     }, [getRecorder]);
 
-    // Delete recording
     const handleDelete = useCallback((recordingId: string) => {
-        const recorder = getRecorder();
-        if (recorder) {
-            recorder.deleteRecording(recordingId);
-        }
-        setRecordings(prev => prev.filter(r => r.id !== recordingId));
+        getRecorder()?.deleteRecording(recordingId);
+        setRecordings((prev) => prev.filter((r) => r.id !== recordingId));
     }, [getRecorder]);
 
-    // Save recording to project folder and library
     const handleSaveToProject = useCallback(async (recordingId: string) => {
         if (!projectName) {
             toast.error('No project open. Create or open a project first.');
@@ -142,7 +162,6 @@ export const RecorderNode = memo(function RecorderNode({ node }: RecorderNodePro
         const recorder = getRecorder();
         if (!recorder) return;
 
-        // Get the recording blob for library save
         const recordingBlob = recorder.getRecordingBlob(recordingId);
         if (!recordingBlob) {
             toast.error('Recording not found');
@@ -151,7 +170,6 @@ export const RecorderNode = memo(function RecorderNode({ node }: RecorderNodePro
 
         setIsSaving(recordingId);
         try {
-            // First, convert the blob to an AudioBuffer for library storage
             const ctx = getAudioContext();
             if (!ctx) {
                 toast.error('Audio context not available');
@@ -160,12 +178,7 @@ export const RecorderNode = memo(function RecorderNode({ node }: RecorderNodePro
 
             const arrayBuffer = await recordingBlob.arrayBuffer();
             const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-
-            // Find the recording name for the library
-            const recordingState = recordings.find(r => r.id === recordingId);
-            const recordingName = recordingState?.name || 'Recording';
-
-            // Save to library store (this creates a library item visible in the library browser)
+            const recordingName = recordings.find((r) => r.id === recordingId)?.name || 'Recording';
             const libraryItemId = await saveAudioToLibrary(audioBuffer, recordingName, ['recording']);
 
             if (!libraryItemId) {
@@ -173,25 +186,17 @@ export const RecorderNode = memo(function RecorderNode({ node }: RecorderNodePro
                 return;
             }
 
-            // Store the libraryItemId on the Recording object for trash handling
-            const allRecordings = recorder.getRecordings();
-            const recording = allRecordings.find(r => r.id === recordingId);
-            if (recording) {
-                recording.libraryItemId = libraryItemId;
-            }
+            const recording = recorder.getRecordings().find((r) => r.id === recordingId);
+            if (recording) recording.libraryItemId = libraryItemId;
 
-            // Also save to project manifest (for compatibility with old system)
             const handle = await getProjectHandle();
             if (handle) {
                 const result = await recorder.saveRecordingToProject(recordingId, handle);
-                if (result) {
-                    await addAudioFile(recordingId, result);
-                }
+                if (result) await addAudioFile(recordingId, result);
             }
 
-            // Mark as saved in local state with libraryItemId
-            setRecordings(prev => prev.map(r =>
-                r.id === recordingId ? { ...r, savedToProject: true, libraryItemId } : r
+            setRecordings((prev) => prev.map((r) =>
+                r.id === recordingId ? { ...r, savedToProject: true, libraryItemId } : r,
             ));
             toast.success('Recording saved to project');
         } catch (err) {
@@ -202,129 +207,77 @@ export const RecorderNode = memo(function RecorderNode({ node }: RecorderNodePro
         }
     }, [projectName, getRecorder, getProjectHandle, addAudioFile, saveAudioToLibrary, recordings]);
 
-    // Format time
-    const formatTime = (seconds: number) => {
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    };
-
     return (
         <div className="recorder-node">
-            {/* Recording Status */}
-            <div style={{
-                textAlign: 'center',
-                marginBottom: '8px',
-                padding: '12px',
-                background: isRecording ? 'var(--accent-danger)' : 'var(--bg-tertiary)',
-                borderRadius: 'var(--radius-sm)',
-                transition: 'background 0.2s'
-            }}>
-                <div style={{
-                    fontSize: '28px',
-                    animation: isRecording ? 'pulse 1s infinite' : 'none'
-                }}>
-                    {isRecording ? '⏺' : '⏹'}
-                </div>
-                <div style={{
-                    fontSize: '18px',
-                    fontFamily: 'var(--font-mono)',
-                    fontWeight: 600,
-                    marginTop: '4px'
-                }}>
-                    {formatTime(recordingTime)}
-                </div>
+            {/* The clock, and what is arriving. The meter sits on the card
+                surface rather than inside the inset clock, because the oj-ui
+                Meter's idle track IS `--bg-tertiary` — on that bed it would be
+                invisible. */}
+            <div className={`recorder-clock${isRecording ? ' is-recording' : ''}`}>
+                <span className="recorder-clock__time" ref={clockRef}>0:00</span>
+            </div>
+            <div className="recorder-level">
+                <Meter ref={meterRef} bars={12} height={18} barWidth={4} label="Recording input level" />
             </div>
 
-            {/* Record Button */}
-            <div className="node-controls">
-                {!isRecording ? (
-                    <Button
-                        variant="danger"
-                        onClick={handleStartRecording}
-                        disabled={!isAudioContextReady}
-                        style={{ flex: 1 }}
-                    >
-                        ⏺ Start Recording
-                    </Button>
-                ) : (
-                    <Button
-                        variant="secondary"
-                        onClick={handleStopRecording}
-                        style={{ flex: 1 }}
-                    >
-                        ⏹ Stop Recording
-                    </Button>
-                )}
-            </div>
+            {!isRecording ? (
+                <Button
+                    variant="danger"
+                    className="recorder-arm"
+                    onClick={handleStartRecording}
+                    disabled={!isAudioContextReady}
+                >
+                    Record
+                </Button>
+            ) : (
+                <Button variant="node" className="recorder-arm" onClick={handleStopRecording}>
+                    Stop
+                </Button>
+            )}
 
-            {/* Recordings List */}
             {recordings.length > 0 && (
-                <div className="loop-list" style={{ marginTop: '8px' }}>
+                <List aria-label="Recordings" className="recorder-takes">
                     {recordings.map((recording, index) => (
-                        <div key={recording.id} className="loop-item">
-                            <span>
-                                Recording {index + 1} ({formatTime(recording.duration)})
-                            </span>
-                            <div className="loop-actions">
-                                {projectName && !recording.savedToProject && (
-                                    <Button
-                                        variant="success"
-                                        onClick={() => handleSaveToProject(recording.id)}
-                                        disabled={isSaving === recording.id}
-                                        style={{ padding: '2px 6px', fontSize: '10px' }}
-                                        title="Save to Project"
-                                    >
-                                        {isSaving === recording.id ? '...' : '📁'}
-                                    </Button>
-                                )}
-                                {recording.savedToProject && (
-                                    <span
-                                        style={{ padding: '2px 6px', fontSize: '10px', color: 'var(--accent-success)' }}
-                                        title="Saved to project"
-                                    >
-                                        ✓
-                                    </span>
-                                )}
-                                <Button
-                                    variant="primary"
-                                    onClick={() => handleDownload(recording.id)}
-                                    style={{ padding: '2px 6px', fontSize: '10px' }}
-                                    title="Download WAV"
-                                >
-                                    💾
-                                </Button>
-                                <Button
-                                    variant="danger"
-                                    onClick={() => handleDelete(recording.id)}
-                                    style={{ padding: '2px 6px', fontSize: '10px' }}
-                                    title="Delete"
-                                >
-                                    ✕
-                                </Button>
-                            </div>
-                        </div>
+                        <ListRow
+                            key={recording.id}
+                            actions={
+                                <>
+                                    {projectName && !recording.savedToProject && (
+                                        <IconButton
+                                            label={`Save take ${index + 1} to the project`}
+                                            disabled={isSaving === recording.id}
+                                            onClick={() => void handleSaveToProject(recording.id)}
+                                            icon={<IconCheck size={14} />}
+                                        />
+                                    )}
+                                    {recording.savedToProject && (
+                                        <span className="recorder-saved" title="Saved to project">
+                                            <IconCheck size={14} aria-hidden="true" />
+                                        </span>
+                                    )}
+                                    <IconButton
+                                        label={`Download take ${index + 1}`}
+                                        onClick={() => handleDownload(recording.id)}
+                                        icon={<IconDownload size={14} />}
+                                    />
+                                    <IconButton
+                                        label={`Delete take ${index + 1}`}
+                                        onClick={() => handleDelete(recording.id)}
+                                        icon={<IconClose size={14} />}
+                                    />
+                                </>
+                            }
+                        >
+                            <span className="recorder-take__name">Take {index + 1}</span>
+                            <span className="recorder-take__length">{formatClock(recording.duration)}</span>
+                        </ListRow>
                     ))}
-                </div>
+                </List>
             )}
 
             {recordings.length === 0 && !isRecording && (
-                <div style={{
-                    fontSize: '11px',
-                    color: 'var(--text-muted)',
-                    textAlign: 'center',
-                    marginTop: '8px'
-                }}>
-                    Connect audio input and click Record
-                </div>
+                <p className="recorder-hint">Wire an audio cable in, then press Record.</p>
             )}
-
-            <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.5; }
-        }
-      `}</style>
         </div>
     );
 });

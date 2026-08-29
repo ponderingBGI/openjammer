@@ -1,0 +1,99 @@
+/* RecorderNode — capture to a WAV.
+ *
+ * Was 11 inline style objects and an injected `<style>` block carrying its own
+ * `@keyframes pulse` (which the app's blanket reduced-motion rule could not
+ * reach cleanly, and which duplicated a "this is live" idiom the rest of the
+ * app expresses with a danger edge). All of it is here now, in tokens.
+ *
+ * Written in W5-P6. */
+
+.recorder-node {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    min-width: 176px;
+}
+
+/* ---- The clock ---------------------------------------------------------- */
+.recorder-clock {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-sm) 12px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    box-shadow: var(--shadow-inset);
+    transition: border-color var(--motion-fast), background var(--motion-fast);
+}
+
+/* Armed. A danger edge and a danger number — no blink: on a stage the thing you
+   need is to read the elapsed time, not to be reminded that time is passing. */
+.recorder-clock.is-recording {
+    border-color: var(--accent-danger);
+    background: color-mix(in oklab, var(--accent-danger) 8%, var(--bg-tertiary));
+}
+
+.recorder-clock__time {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    font-size: var(--text-xl);
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
+    transition: color var(--motion-fast);
+}
+
+.recorder-clock.is-recording .recorder-clock__time {
+    color: var(--danger-ink);
+}
+
+/* The incoming level, on the card surface so its idle tracks are legible. */
+.recorder-level {
+    display: flex;
+    justify-content: center;
+    margin-top: -2px;
+}
+
+.recorder-arm.oj-btn {
+    justify-content: center;
+    width: 100%;
+}
+
+/* ---- The takes ---------------------------------------------------------- */
+.recorder-takes {
+    max-height: 148px;
+    overflow-y: auto;
+}
+
+.recorder-take__name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.recorder-take__length {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+}
+
+/* Already in the project. A quiet tick, never a second button. */
+.recorder-saved {
+    display: inline-flex;
+    align-items: center;
+    padding: 0 var(--space-xs);
+    color: var(--success-ink);
+}
+
+.recorder-hint {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    line-height: 1.35;
+    color: var(--text-muted);
+    text-align: center;
+}

@@ -1,78 +1,47 @@
+/* SongNode — the record sleeve.
+ *
+ * Was the last whole-surface theme leak in this family: 16 literal colours, a
+ * fixed cream paper, an ochre "playing" fill and a hard 2px ink border, none of
+ * which survived a theme change. It is the ordinary node card now, and the only
+ * thing that changes when the transport rolls is a chip and a one-pixel edge —
+ * a song that is playing is a fact, not an alarm.
+ *
+ * `e2e/timeline-preview.spec.ts` selects `.song-node`; the class stays.
+ *
+ * Rebuilt in W5-P6. */
 
-
-.song-node {
-    position: absolute;
-    background: #fdfbf7;
-    border: 2px solid #2a2a2a;
-    border-radius: 8px;
-    min-width: 200px;
-    font-family: var(--font-sans);
-    box-shadow: var(--shadow-raised);
-    display: flex;
-    flex-direction: column;
-    user-select: none;
+.oj-node.song-node {
+    width: 224px;
 }
 
-.song-node.selected {
-    border-color: #4a90d9;
-    box-shadow: 0 0 0 2px rgba(74, 144, 217, 0.3), 3px 3px 0 rgba(0, 0, 0, 0.12);
+/* Rolling. A hairline in the success hue, matching the chip that names it —
+   colour never carries this alone. */
+.oj-node.song-node.playing {
+    border-color: var(--accent-success);
+    box-shadow: var(--shadow-overlay), inset 0 0 0 1px var(--accent-success);
 }
 
-.song-node.dragging {
-    opacity: 0.85;
-    cursor: grabbing;
-}
-
-/* A gentle paper-warm pulse while the transport runs — never a harsh blink. */
-.song-node.playing {
-    border-color: #c98a3c;
-    box-shadow: 0 0 0 2px rgba(201, 138, 60, 0.25), 3px 3px 0 rgba(0, 0, 0, 0.12);
-}
-
-.song-node-header {
-    padding: 6px 12px;
-    border-bottom: 2px solid #2a2a2a;
-    cursor: grab;
-    background: #f1e9d6;
-    border-radius: 6px 6px 0 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.song-node-disc {
-    font-size: 14px;
-    color: #c98a3c;
-    line-height: 1;
-}
-
-.song-node.playing .song-node-disc {
-    color: #b5731f;
-}
-
-.song-node-title {
-    font-size: 18px;
-    font-weight: 700;
-    color: #2a2a2a;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.song-node-body {
-    padding: 8px 12px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
+/* The exact facts: tracks, bars, tempo. Mono, because every one of them is a
+   number a player will compare against the timeline. */
 .song-node-summary {
-    font-size: 15px;
-    color: #4a4336;
+    margin: 0;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: var(--text-xs);
+    letter-spacing: var(--tracking-micro);
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
 }
 
-.song-node-hint {
-    font-size: 13px;
-    color: #9a8f78;
-    font-style: italic;
+.song-node-summary--empty {
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    letter-spacing: normal;
+    color: var(--text-muted);
+}
+
+.song-node-open.oj-btn {
+    justify-content: center;
+    gap: var(--space-sm);
+    width: 100%;
 }

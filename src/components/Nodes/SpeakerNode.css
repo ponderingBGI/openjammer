@@ -1,200 +1,77 @@
-/* SpeakerNode — Speaker faceplate: mute symbol, master volume slider + live output meter, and
-   the output-device selector. NOTE: `.schematic-dropdown` and `.device-item*`
-   are also consumed by MicrophoneNode (its own section only overrides them) —
-   a cross-family coupling for the faceplate lanes to resolve.
+/* SpeakerNode — the master-output faceplate.
+ *
+ * The handoff's "Output" card, rebuilt on the shared parts: a LEVEL Knob beside
+ * a tall Meter with one exact dB number under it, then the route (DeviceSelect
+ * + mute) under a hairline. Nothing here paints a control by hand — the dial,
+ * the meter, the picker and the chip are oj-ui; this file only decides the
+ * geometry of the face.
+ *
+ * Rebuilt in W5-P6. */
 
-   Split verbatim out of the former SchematicNodes.css (L59-252) in W5-S5. */
-
-/* ============================================
- * Speaker Node
- * ============================================ */
-.speaker-node {
-    min-width: 100px;
+.oj-node.speaker-node {
+    width: 232px;
 }
 
-/* Speaker warning badge */
-.speaker-warning {
-    font-size: 16px;
+/* ---- The instrument half ------------------------------------------------
+ * Dial left, meter right, baselines aligned on the label row so the knob's
+ * caption and the dB readout sit on the same line. */
+.speaker-stage {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--space-md);
+    padding-top: 2px;
 }
 
-.speaker-body {
+.speaker-readout {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: var(--space-sm) var(--space-md);
-    position: relative;
+    gap: 7px;
+    min-width: 92px;
 }
 
-/* Hover state when dragging connections over speaker node */
-.speaker-node.hover-connecting {
-    box-shadow: 0 0 0 2px var(--accent-primary), 0 0 12px color-mix(in srgb, var(--accent-primary) 30%, transparent);
-}
-
-
-/* Speaker symbol container */
-.speaker-symbol-container {
-    margin-bottom: var(--space-xs);
-}
-
-/* Speaker mute button - big speaker icon */
-.speaker-mute-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 48px;
-    height: 48px;
-    border: none;
-    border-radius: var(--radius-md);
-    background: transparent;
-    cursor: pointer;
-    transition: all var(--motion-fast);
-    color: var(--text-primary);
-}
-
-.speaker-mute-btn:hover {
-    background: var(--bg-tertiary);
-    transform: scale(1.05);
-}
-
-.speaker-mute-btn.live {
-    color: var(--accent-success);
-}
-
-.speaker-mute-btn.muted {
-    color: var(--accent-danger);
-    opacity: 0.7;
-}
-
-/* Master volume slider + live output meter (VIS-1: the meter reads the engine's
-   per-node level). One row under the speaker symbol, above the device selector. */
-.speaker-volume-row {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-xs);
-    width: 100%;
-    margin-bottom: var(--space-xs);
-}
-
-.speaker-volume-slider {
-    width: 100%;
-    height: var(--space-md);
-    margin: 0;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    cursor: pointer;
-    accent-color: var(--accent-primary);
-}
-
-.speaker-volume-slider:disabled {
-    cursor: not-allowed;
-    opacity: 0.5;
-}
-
-.speaker-output-meter {
-    width: 100%;
-    height: 6px;
-    border-radius: var(--radius-pill);
-    background: var(--bg-tertiary);
-    overflow: hidden;
-}
-
-.speaker-output-meter-fill {
-    height: 100%;
-    background: var(--accent-success);
-    border-radius: var(--radius-pill);
-    transition: width 60ms linear;
-}
-
-/* Device selector */
-.device-selector-container {
-    position: relative;
-    width: 100%;
-}
-
-.device-select-trigger {
-    width: 100%;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-pill);
-    background: var(--bg-canvas);
-    padding: var(--space-xs) var(--space-sm);
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
+/* The one number on this card. Tabular so the digits do not dance while the
+   level moves, and wide enough that `-118.0 dB` never reflows the face. */
+.speaker-db {
+    min-width: 74px;
     text-align: center;
-    cursor: pointer;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    transition: all var(--motion-fast);
-}
-
-.device-select-trigger:hover {
-    background: var(--bg-tertiary);
-}
-
-.schematic-dropdown {
-    position: absolute;
-    top: calc(100% + var(--space-xs));
-    left: 0;
-    width: 100%;
-    background: var(--bg-node);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
-    z-index: 100;
-    max-height: 200px;
-    overflow-y: auto;
-    box-shadow: var(--shadow-overlay);
-}
-
-.device-item {
-    padding: var(--space-sm) var(--space-md);
-    border-bottom: 1px solid var(--border-subtle);
-    font-family: var(--font-sans);
     font-size: var(--text-sm);
-    cursor: pointer;
-    transition: background var(--motion-fast);
+    color: var(--text-secondary);
 }
 
-.device-item:last-child {
-    border-bottom: none;
+/* ---- The route half -----------------------------------------------------
+ * Under a hairline, because a device choice is a FACT about where the sound
+ * goes, not part of the instrument you play. */
+.speaker-route {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    padding-top: 12px;
+    border-top: 1px solid var(--border-subtle);
 }
 
-.device-item:hover {
-    background: var(--bg-tertiary);
-}
-
-.device-item.selected {
-    background: var(--accent-primary);
-    color: var(--text-on-accent);
-}
-
-/* Low-latency device indicator (professional audio interfaces) */
-.device-item.low-latency {
+.speaker-route__row {
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
+    gap: var(--space-sm);
 }
 
-.low-latency-icon {
-    font-size: var(--text-sm);
-    color: var(--accent-warning);
-    flex-shrink: 0;
-}
-
-.device-item.low-latency .device-label,
-.device-select-trigger.low-latency .device-label {
+.speaker-route__row .oj-device-select {
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-width: 0;
 }
 
-.device-select-trigger.low-latency {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
+/* Mute keeps the picker's height so the row reads as one control strip. The
+   pressed state is the danger tint — a muted speaker is a state you must be
+   able to spot from across a stage. */
+.speaker-mute.oj-icon-btn {
+    flex: none;
+    width: 38px;
+    height: 38px;
 }
 
-.device-select-trigger .low-latency-icon {
-    color: var(--accent-warning);
+.speaker-mute.oj-icon-btn[aria-pressed='true'] {
+    background: color-mix(in oklab, var(--accent-danger) 12%, var(--bg-tertiary));
+    color: var(--danger-ink);
 }

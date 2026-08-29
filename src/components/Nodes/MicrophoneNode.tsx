@@ -1,5 +1,5 @@
 /**
- * Microphone Node - Live audio input (Schematic Style)
+ * Microphone Node — live audio input.
  *
  * SINGLE DEVICE OWNER: this component never opens its own `getUserMedia`. The
  * EXECUTOR owns exactly one OS mic stream and is the single source of truth; the
@@ -8,10 +8,15 @@
  * muted (wasm disconnects the worklet input; native `set_mic(node, false)`). So a
  * "muted" mic is truly off on stage, not merely dimmed here.
  *
- * The live waveform is driven by the engine's per-node meter
- * (`subscribeSignalLevels`, keyed by node id) — the REAL signal reaching the
- * engine — not a parallel AnalyserNode on a second stream. Mute/device persist in
- * `node.data` and are re-applied to the executor on load (PERSIST-1).
+ * The live level is the engine's per-node meter (`subscribeSignalLevels`, keyed
+ * by node id) — the REAL signal reaching the engine, not a parallel
+ * AnalyserNode — and it is drawn by an oj-ui `Meter` on the app's one shared
+ * frame. Nothing about the level passes through React (UI-023): the old version
+ * pushed a 16-element array into `useState` sixty times a second and re-rendered
+ * the whole card for it.
+ *
+ * Mute/device persist in `node.data` and are re-applied to the executor on load
+ * (PERSIST-1).
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
@@ -19,9 +24,23 @@ import type { GraphNode, MicrophoneNodeData } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useAudioStore } from '../../store/audioStore';
 import { getExecutor } from '../../audio/executor';
-import { ScrollContainer } from '../common/ScrollContainer';
+import { registerTimelineLevelWriter } from '../Arrangement/timelineSignalLevels';
+import { meterScale } from '../Shell/masterSignal';
 import { detectLowLatencyDevice } from '../../utils/audioDeviceDetection';
-import { Port } from '@openjammer/oj-ui';
+import {
+    Callout,
+    Chip,
+    DeviceSelect,
+    IconBolt,
+    IconButton,
+    IconMute,
+    IconSpeaker,
+    Meter,
+    NodeShell,
+    PortRow,
+    type DeviceSelectItem,
+    type MeterHandle,
+} from '@openjammer/oj-ui';
 import './MicrophoneNode.css';
 
 interface MicrophoneNodeProps {
@@ -47,7 +66,18 @@ interface AudioDevice {
     isUSB?: boolean;
 }
 
-const NUM_WAVEFORM_BARS = 16;
+/** What the enumeration told us about our right to see this machine's inputs. */
+type Access = 'unknown' | 'granted' | 'unnamed' | 'unavailable';
+
+/** Below this the readout reads as silence. Same scale as the Speaker's. */
+const FLOOR_DB = -60;
+
+/** Linear 0..1 to the dB string. "Is my mic hot?" is a number, not a feeling. */
+function formatInputDb(level: number): string {
+    if (!Number.isFinite(level) || level <= 0) return '-∞ dB';
+    const db = 20 * Math.log10(level);
+    return db <= FLOOR_DB + 0.5 ? '-∞ dB' : `${db.toFixed(1)} dB`;
+}
 
 export const MicrophoneNode = memo(function MicrophoneNode({
     node,
@@ -61,7 +91,8 @@ export const MicrophoneNode = memo(function MicrophoneNode({
     handleNodeMouseLeave,
     isSelected,
     isDragging,
-    style
+    isHoveredWithConnections,
+    style,
 }: MicrophoneNodeProps) {
     const data = node.data as MicrophoneNodeData;
     const updateNodeData = useGraphStore((s) => s.updateNodeData);
@@ -69,27 +100,33 @@ export const MicrophoneNode = memo(function MicrophoneNode({
     const audioConfig = useAudioStore((s) => s.audioConfig);
     const setDeviceInfo = useAudioStore((s) => s.setDeviceInfo);
 
-    // Use node-specific lowLatencyMode if set, otherwise use global setting
+    // Use node-specific lowLatencyMode if set, otherwise the global setting.
     const lowLatencyMode = data.lowLatencyMode ?? audioConfig.lowLatencyMode;
 
-    const [waveformBars, setWaveformBars] = useState<number[]>(Array(NUM_WAVEFORM_BARS).fill(0));
     const [devices, setDevices] = useState<AudioDevice[]>([]);
+    // Resolved once, up front: a browser with no `enumerateDevices` will never
+    // gain one, and deciding that in the effect body would be a setState the
+    // first render has to be re-run for.
+    const [access, setAccess] = useState<Access>(() =>
+        typeof navigator.mediaDevices?.enumerateDevices === 'function' ? 'unknown' : 'unavailable');
     const [showDevices, setShowDevices] = useState(false);
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>(data.deviceId || 'default');
     const deviceSelectorRef = useRef<HTMLDivElement>(null);
-
-    // Smoothed rolling history of the engine meter level, fed into the bars so the
-    // line scrolls like a scope instead of flat-lining (VIS-1 driven by the REAL
-    // engine feed, not a parallel AnalyserNode).
-    const levelHistoryRef = useRef<number[]>(Array(NUM_WAVEFORM_BARS).fill(0));
+    const meterRef = useRef<MeterHandle>(null);
+    const readoutRef = useRef<HTMLSpanElement>(null);
 
     const isMuted = data.isMuted ?? false;
+    const mutedRef = useRef(isMuted);
+    // The frame writer reads this; syncing in an effect (not during render) is
+    // what lets the meter stay outside React entirely.
+    useEffect(() => { mutedRef.current = isMuted; }, [isMuted]);
 
-    // Get output port
-    const outputPort = node.ports.find(p => p.direction === 'output' && p.type === 'audio');
+    const outputPort = node.ports.find((p) => p.direction === 'output' && p.type === 'audio');
     const outputPortId = outputPort?.id || 'audio-out';
 
-    // Fetch input devices with low-latency detection
+    // Enumerate input devices. Labels are withheld until the OS permission has
+    // been granted once, and that is worth SAYING rather than showing a list of
+    // "Microphone a1b2".
     useEffect(() => {
         if (!navigator.mediaDevices?.enumerateDevices) return;
 
@@ -98,245 +135,184 @@ export const MicrophoneNode = memo(function MicrophoneNode({
             try {
                 const devs = await navigator.mediaDevices.enumerateDevices();
                 if (cancelled) return;
-                const inputs = devs
-                    .filter(d => d.kind === 'audioinput')
-                    .map(d => ({
-                        deviceId: d.deviceId,
-                        label: d.label || `Microphone ${d.deviceId.slice(0, 4)}`,
-                        isUSB: detectLowLatencyDevice(d.label)
-                    }));
+                const raw = devs.filter((d) => d.kind === 'audioinput');
+                const named = raw.filter((d) => d.label.length > 0);
+                const inputs = named.map((d) => ({
+                    deviceId: d.deviceId,
+                    label: d.label,
+                    isUSB: detectLowLatencyDevice(d.label),
+                }));
                 setDevices(inputs);
+                setAccess(raw.length === 0 ? 'unavailable' : named.length === 0 ? 'unnamed' : 'granted');
 
-                // Update store with USB/low-latency device detection
-                const lowLatencyDevice = inputs.find(d => d.isUSB);
+                const lowLatencyDevice = inputs.find((d) => d.isUSB);
                 if (lowLatencyDevice) {
-                    setDeviceInfo({
-                        isUSBAudioInterface: true,
-                        deviceLabel: lowLatencyDevice.label
-                    });
+                    setDeviceInfo({ isUSBAudioInterface: true, deviceLabel: lowLatencyDevice.label });
                 }
 
-                // Check if currently selected device still exists
-                if (selectedDeviceId !== 'default') {
-                    const deviceStillExists = inputs.some(d => d.deviceId === selectedDeviceId);
-                    if (!deviceStillExists) {
-                        // Device was unplugged, fall back to default
-                        setSelectedDeviceId('default');
-                        updateNodeData<MicrophoneNodeData>(node.id, { deviceId: 'default' });
-                    }
+                // Recover an explicit route the OS no longer offers.
+                if (selectedDeviceId !== 'default' && named.length > 0 && !inputs.some((d) => d.deviceId === selectedDeviceId)) {
+                    setSelectedDeviceId('default');
+                    updateNodeData<MicrophoneNodeData>(node.id, { deviceId: 'default' });
                 }
             } catch {
-                if (!cancelled) setDevices([]);
+                if (!cancelled) {
+                    setDevices([]);
+                    setAccess('unavailable');
+                }
             }
         };
 
-        // Initial fetch
-        updateDevices();
-
-        // Listen for device changes (plug/unplug)
+        void updateDevices();
         navigator.mediaDevices.addEventListener('devicechange', updateDevices);
-
         return () => {
             cancelled = true;
             navigator.mediaDevices.removeEventListener('devicechange', updateDevices);
         };
     }, [setDeviceInfo, selectedDeviceId, node.id, updateNodeData]);
 
-    // Click outside to close device dropdown
+    // Per-instance outside-click, so two Microphones do not share one dropdown
+    // (UI-018).
     useEffect(() => {
         if (!showDevices) return;
-
         const handleClickOutside = (e: PointerEvent) => {
-            if (!deviceSelectorRef.current?.contains(e.target as Node)) {
-                setShowDevices(false);
-            }
+            if (!deviceSelectorRef.current?.contains(e.target as Node)) setShowDevices(false);
         };
         document.addEventListener('pointerdown', handleClickOutside);
-
-        return () => {
-            document.removeEventListener('pointerdown', handleClickOutside);
-        };
+        return () => document.removeEventListener('pointerdown', handleClickOutside);
     }, [showDevices]);
 
     // Drive the ENGINE mic input from this node's persisted intent. The executor
     // is the single device owner: it opens exactly one stream, feeds the engine
-    // MicIn, and goes SILENT at the seam when muted. Re-applied whenever mute or
-    // the selected device changes, AND on (re)load once the audio context is ready
-    // (PERSIST-1) — so a project saved muted reloads muted at the engine.
+    // MicIn, and goes SILENT at the seam when muted. Re-applied on (re)load once
+    // the audio context is ready (PERSIST-1) — a project saved muted reloads muted.
     useEffect(() => {
         if (!isAudioContextReady) return;
-        getExecutor().setMicrophoneInput(node.id, {
-            isMuted,
-            deviceId: selectedDeviceId,
-        });
+        getExecutor().setMicrophoneInput(node.id, { isMuted, deviceId: selectedDeviceId });
     }, [isAudioContextReady, node.id, isMuted, selectedDeviceId]);
 
-    // Drive the waveform from the engine's per-node meter (the REAL level reaching
-    // the engine), keyed by this node's id. When muted the engine feed is silence,
-    // so the meter naturally reads ~0 — the line flattens because the mic is truly
-    // off, not because we zero a local analyser. No second stream, no rAF analyser.
+    // The live level, on the shared frame. When muted the engine feed IS silence,
+    // so the meter falls because the mic is truly off — not because we zeroed a
+    // local analyser.
+    //
+    // The bars ride the SAME dB scale as the readout beside them (the shared
+    // `meterScale`, -60…0 dBFS onto 0…1). Drawing the raw linear level under a dB
+    // number would make the meter lie about its own readout: a normal −34 dB
+    // input is 0.02 linear, which is an empty bar.
     useEffect(() => {
-        const unsubscribe = getExecutor().subscribeSignalLevels((levels) => {
-            const level = levels.get(node.id) ?? 0;
-            const history = levelHistoryRef.current;
-            // Scroll the rolling window left and push the newest level on the right.
-            history.shift();
-            history.push(Math.max(0, Math.min(1, level)));
-            setWaveformBars([...history]);
+        let lastText = '';
+        return registerTimelineLevelWriter((levels) => {
+            const level = mutedRef.current ? 0 : (levels.get(node.id) ?? 0);
+            meterRef.current?.setSignal(meterScale(level));
+            const text = formatInputDb(level);
+            if (text !== lastText && readoutRef.current) {
+                lastText = text;
+                readoutRef.current.textContent = text;
+            }
         });
-        return unsubscribe;
     }, [node.id]);
 
-    // Toggle mute (persist to node.data; the effect above re-applies to the engine).
     const handleMuteToggle = useCallback(() => {
-        updateNodeData<MicrophoneNodeData>(node.id, {
-            isMuted: !isMuted
-        });
+        updateNodeData<MicrophoneNodeData>(node.id, { isMuted: !isMuted });
     }, [node.id, isMuted, updateNodeData]);
 
-    // Handle device selection (persist; the effect re-acquires the owned stream).
     const handleDeviceSelect = useCallback((deviceId: string) => {
         setSelectedDeviceId(deviceId);
         updateNodeData<MicrophoneNodeData>(node.id, { deviceId });
         setShowDevices(false);
     }, [node.id, updateNodeData]);
 
-    const currentLabel = devices.find(d => d.deviceId === selectedDeviceId)?.label || 'Select source';
-
-    // Calculate dynamic dropdown dimensions based on device names and count
-    const dropdownStyle = useMemo(() => {
-        // Include "Default Input" in the list for width calculation
-        const allLabels = ['Default Input', ...devices.map(d => d.label)];
-        const longestLabel = allLabels.reduce((a, b) => a.length > b.length ? a : b, '');
-
-        // Calculate width: ~8px per character + padding (32px for left/right padding)
-        // Min: 150px, Max: 320px
-        const charWidth = 7;
-        const padding = 32;
-        const calculatedWidth = Math.min(320, Math.max(150, longestLabel.length * charWidth + padding));
-
-        // Calculate height: ~36px per item (padding + font size)
-        // +1 for "Default Input", Min: auto, Max: 240px (about 6-7 items)
-        const itemHeight = 36;
-        const itemCount = devices.length + 1; // +1 for Default Input
-        const calculatedHeight = Math.min(240, itemCount * itemHeight);
-
-        return {
-            width: `${calculatedWidth}px`,
-            maxHeight: `${calculatedHeight}px`,
-        };
-    }, [devices]);
+    const deviceItems = useMemo<DeviceSelectItem[]>(
+        () => [
+            { id: 'default', label: 'Default Input' },
+            ...devices
+                .filter((d) => d.deviceId.length > 0 && d.deviceId !== 'default')
+                .map((d) => ({ id: d.deviceId, label: d.label, lowLatency: d.isUSB })),
+        ],
+        [devices],
+    );
 
     return (
-        <div
-            className={`schematic-node microphone-node ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''}`}
+        <NodeShell
+            className={`schematic-node microphone-node${isHoveredWithConnections ? ' hover-connecting' : ''}`}
             style={style}
+            title="Microphone"
+            nodeType="IN"
+            selected={isSelected}
+            dragging={isDragging}
+            headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}
+            outputs={
+                <PortRow
+                    side="output"
+                    kind="audio"
+                    label={outputPort?.name ?? 'Out'}
+                    connected={hasConnection(outputPortId)}
+                    data-node-id={node.id}
+                    data-port-id={outputPortId}
+                    data-port-type={outputPort?.type ?? 'audio'}
+                    onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(outputPortId, e); }}
+                    onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(outputPortId, e); }}
+                    onMouseEnter={() => handlePortMouseEnter?.(outputPortId)}
+                    onMouseLeave={handlePortMouseLeave}
+                />
+            }
         >
-            {/* Header */}
-            <div className="schematic-header" onMouseDown={handleHeaderMouseDown}>
-                <span className="schematic-title">Microphone</span>
-                {/* Low Latency Mode Badge */}
+            {/* What is coming in, right now. The one moving thing on the card, so
+                it sits on the card surface — a meter drawn on an inset bed is a
+                meter whose own bars are the colour of the bed. */}
+            <div className={`mic-stage${isMuted ? ' is-muted' : ''}`} onMouseDown={(e) => e.stopPropagation()}>
+                <div className="mic-level">
+                    <Meter ref={meterRef} bars={12} height={36} barWidth={5} label="Microphone input level" />
+                    <span ref={readoutRef} className="oj-node__readout mic-db">
+                        -&#8734; dB
+                    </span>
+                </div>
+                <IconButton
+                    className="mic-mute"
+                    variant="node"
+                    label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+                    aria-pressed={isMuted}
+                    title={isMuted ? 'Muted — the engine input is silent' : 'Live — click to mute'}
+                    onClick={handleMuteToggle}
+                    icon={isMuted ? <IconMute size={18} /> : <IconSpeaker size={18} />}
+                />
+            </div>
+
+            {/* Where it is coming from. */}
+            <div ref={deviceSelectorRef} className="mic-route">
+                <DeviceSelect
+                    items={deviceItems}
+                    value={selectedDeviceId}
+                    open={showDevices}
+                    onToggle={() => setShowDevices((v) => !v)}
+                    onSelect={handleDeviceSelect}
+                    ariaLabel="Microphone input device"
+                    placeholder="Default Input"
+                    disabled={access === 'unavailable'}
+                />
                 {lowLatencyMode && (
-                    <div className="mic-latency-badge" title="Low Latency Mode Active">
-                        <svg viewBox="0 0 24 24" width="12" height="12">
-                            <path d="M13 3L3 14h8v8l10-11h-8z" fill="currentColor"/>
-                        </svg>
+                    <div className="oj-node__meta">
+                        <Chip tone="success">
+                            <IconBolt size={12} aria-hidden="true" />
+                            low latency
+                        </Chip>
                     </div>
                 )}
+                {access === 'unnamed' && (
+                    <Callout variant="warning" title="Inputs are unnamed">
+                        The browser hides device names until you allow microphone access once.
+                        The default input still works.
+                    </Callout>
+                )}
+                {access === 'unavailable' && (
+                    <Callout variant="danger" title="No input available">
+                        This browser reports no audio input. Check the OS privacy settings,
+                        then reload.
+                    </Callout>
+                )}
             </div>
-
-            {/* Content Container */}
-            <div className="mic-content">
-                {/* Top row: Mute button + Source selector */}
-                <div className="mic-controls-row">
-                    {/* Mute Button */}
-                    <button
-                        className={`mic-mute-btn ${isMuted ? 'muted' : 'live'}`}
-                        onClick={handleMuteToggle}
-                        title={isMuted ? 'Muted (engine input silent) — click to go live' : 'Live — click to mute'}
-                    >
-                        <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-                            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" />
-                        </svg>
-                    </button>
-
-                    {/* Device Selector */}
-                    <div ref={deviceSelectorRef} className="mic-device-selector">
-                        <button
-                            className="mic-source-btn"
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setShowDevices(!showDevices);
-                            }}
-                            title={currentLabel}
-                        >
-                            <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
-                                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5z"/>
-                                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
-                            </svg>
-                        </button>
-
-                        {showDevices && (
-                            <ScrollContainer
-                                mode="dropdown"
-                                className="device-dropdown schematic-dropdown"
-                                style={dropdownStyle}
-                            >
-                                <div
-                                    className="device-item"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDeviceSelect('default');
-                                    }}
-                                >
-                                    Default Input
-                                </div>
-                                {devices.map(d => (
-                                    <div
-                                        key={d.deviceId}
-                                        className="device-item"
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            handleDeviceSelect(d.deviceId);
-                                        }}
-                                    >
-                                        {d.label}
-                                    </div>
-                                ))}
-                            </ScrollContainer>
-                        )}
-                    </div>
-
-                    {/* Output Port */}
-                    <Port
-                        kind="audio"
-                        direction="output"
-                        connected={hasConnection(outputPortId)}
-                        style={{ marginLeft: 'auto' }}
-                        data-node-id={node.id}
-                        data-port-id={outputPortId}
-                        data-port-type={outputPort?.type ?? 'audio'}
-                        onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(outputPortId, e); }}
-                        onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(outputPortId, e); }}
-                        onMouseEnter={() => handlePortMouseEnter?.(outputPortId)}
-                        onMouseLeave={handlePortMouseLeave}
-                    />
-                </div>
-
-                {/* Waveform Line — driven by the engine per-node meter */}
-                <svg className="mic-waveform-line" viewBox="0 0 100 20" preserveAspectRatio="none">
-                    <polyline
-                        className="mic-waveform-path"
-                        fill="none"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        points={waveformBars.map((v, i) => `${(i / (NUM_WAVEFORM_BARS - 1)) * 100},${10 - v * 8}`).join(' ')}
-                    />
-                </svg>
-            </div>
-        </div>
+        </NodeShell>
     );
 });

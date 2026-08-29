@@ -23,10 +23,7 @@
  * hittable row around an 18px well.
  */
 .port-row,
-.bundle-port-row,
-.math-port-row,
-.output-panel-port-row,
-.input-panel-port-row {
+.bundle-port-row {
     display: flex;
     align-items: center;
     gap: 7px;
@@ -46,9 +43,7 @@
     flex-direction: row-reverse;
 }
 
-.bundle-port-row,
-.output-panel-port-row,
-.input-panel-port-row {
+.bundle-port-row {
     justify-content: space-between;
     width: 100%;
     padding: 2px var(--space-xs);
@@ -56,26 +51,9 @@
     transition: background var(--motion-fast);
 }
 
-/* Bundle names are identities, not hints. A 140px input panel leaves only
-   ~52px after the disclosure, count and well; the 9.5px tracked mono name needs
-   90px for `KEYBOARD ROW 1`. Widen only panels that actually contain bundles. */
-.input-panel-node:has(.bundle-port-group) {
-    width: 190px;
-}
-
-.output-panel-port-row:hover,
-.input-panel-port-row:hover {
-    background: var(--bg-tertiary);
-}
-
-.math-port-row.output {
-    justify-content: flex-end;
-}
-
 /* The name beside a socket. The micro mono voice, matched to
    `.oj-port-row__label` — a port label is an exact machine name, not prose. */
-.port-label,
-.empty-slot-label {
+.port-label {
     display: flex;
     align-items: center;
     gap: var(--space-xs);
@@ -99,22 +77,6 @@
 
 .keyboard-schematic-body .port-label {
     text-align: left;
-}
-
-/* "Always one empty port": the trailing slot every panel keeps open. A dashed
-   rule above it, and the slot's own socket is already the dashed empty well. */
-.input-panel-port-row.empty-slot,
-.output-panel-port-row.empty-slot {
-    border-top: 1px dashed var(--border-subtle);
-    margin-top: var(--space-xs);
-    padding-top: var(--space-sm);
-    opacity: 0.75;
-    transition: opacity var(--motion-fast), background var(--motion-fast);
-}
-
-.input-panel-port-row.empty-slot:hover,
-.output-panel-port-row.empty-slot:hover {
-    opacity: 1;
 }
 
 /* ============================================================

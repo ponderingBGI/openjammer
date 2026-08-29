@@ -1,17 +1,20 @@
 /**
- * Container Node - Empty node for grouping and organizing other nodes
+ * Container Node — a named box you go inside.
  *
- * Features:
- * - Editable display name (click header to edit)
- * - When entered (E key): shows only canvas-input and canvas-output nodes
- * - Can be renamed to anything
+ * It makes no sound and owns no parameters, so the whole card is one question:
+ * what is in there, and how do I get in? A renameable title, a mono count chip
+ * of what it holds, the ports it publishes to this level, and one ghost button
+ * that is the same door the `E` key opens.
  */
 
-import { useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { GraphNode } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
+import { useCanvasNavigationStore } from '../../store/canvasNavigationStore';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
-import { Port } from '@openjammer/oj-ui';
+import { Button, Chip, EditableLabel, Kbd, NodeShell, PortRow } from '@openjammer/oj-ui';
+import { NodeFeedback } from './NodeFeedback';
+import { useNodeRefusal } from './nodeControls';
 import './ContainerNode.css';
 
 interface ContainerNodeProps {
@@ -26,6 +29,7 @@ interface ContainerNodeProps {
     handlePortMouseLeave?: () => void;
     isSelected?: boolean;
     isDragging?: boolean;
+    isHoveredWithConnections?: boolean;
     hasConnection?: (portId: string) => boolean;
 }
 
@@ -41,124 +45,123 @@ export function ContainerNode({
     handlePortMouseLeave,
     isSelected,
     isDragging,
-    hasConnection
+    isHoveredWithConnections,
+    hasConnection,
 }: ContainerNodeProps) {
-    const updateNodeData = useGraphStore(s => s.updateNodeData);
-    const flashingNodes = useUIFeedbackStore(s => s.flashingNodes);
-    const [isEditing, setIsEditing] = useState(false);
-    const [tempName, setTempName] = useState('');
+    const updateNodeData = useGraphStore((s) => s.updateNodeData);
+    const beginGesture = useGraphStore((s) => s.beginGesture);
+    const endGesture = useGraphStore((s) => s.endGesture);
+    const enterNode = useCanvasNavigationStore((s) => s.enterNode);
+    const flashNode = useUIFeedbackStore((s) => s.flashNode);
+    const isRefusing = useNodeRefusal(node.id);
+    const [editing, setEditing] = useState(false);
 
     const displayName = (node.data.displayName as string) || 'Untitled';
-    const isFlashing = flashingNodes.has(node.id);
 
-    const handleNameClick = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        setTempName(displayName);
-        setIsEditing(true);
-    };
+    /**
+     * What the player put in here. The container's own input/output panels are
+     * plumbing it did not create, so they do not count — a fresh, empty
+     * container must read as empty.
+     */
+    const childCount = useMemo(() => {
+        const special = new Set(node.specialNodes ?? []);
+        return (node.childIds ?? []).filter((id) => !special.has(id)).length;
+    }, [node.childIds, node.specialNodes]);
 
-    const handleNameSave = () => {
-        if (tempName.trim()) {
-            updateNodeData(node.id, { displayName: tempName.trim() });
+    const rename = useCallback((next: string) => {
+        setEditing(false);
+        if (!next || next === displayName) return;
+        beginGesture();
+        updateNodeData(node.id, { displayName: next });
+        endGesture();
+    }, [beginGesture, displayName, endGesture, node.id, updateNodeData]);
+
+    /**
+     * The same door `E` opens, and the same refusal when there is nothing behind
+     * it (NodeCanvas flashes the node for exactly this case).
+     */
+    const open = useCallback((event: React.MouseEvent) => {
+        event.stopPropagation();
+        if (childCount === 0 && (node.childIds?.length ?? 0) === 0) {
+            flashNode(node.id);
+            return;
         }
-        setIsEditing(false);
-    };
+        enterNode(node.id);
+    }, [childCount, enterNode, flashNode, node.childIds, node.id]);
 
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter') {
-            handleNameSave();
-        } else if (e.key === 'Escape') {
-            setIsEditing(false);
-        }
-    };
+    const inputPorts = node.ports.filter((p) => p.direction === 'input');
+    const outputPorts = node.ports.filter((p) => p.direction === 'output');
 
-    // Get ports from node (synced from internal canvas-input/output nodes)
-    const inputPorts = node.ports.filter(p => p.direction === 'input');
-    const outputPorts = node.ports.filter(p => p.direction === 'output');
+    const portRow = (port: GraphNode['ports'][number], side: 'input' | 'output') => (
+        <PortRow
+            key={port.id}
+            side={side}
+            kind={port.type === 'audio' ? 'audio' : port.type === 'universal' ? 'universal' : 'control'}
+            label={port.name}
+            connected={!!hasConnection?.(port.id)}
+            {...(port.type === 'universal' && port.resolvedType ? { resolvedKind: port.resolvedType } : {})}
+            data-node-id={node.id}
+            data-port-id={port.id}
+            data-port-type={port.type}
+            onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(port.id, e); }}
+            onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(port.id, e); }}
+            onMouseEnter={() => handlePortMouseEnter?.(port.id)}
+            onMouseLeave={handlePortMouseLeave}
+        />
+    );
 
     return (
-        <div
-            className={`schematic-node container-node ${isFlashing ? 'deletion-attempted' : ''} ${isSelected ? 'selected' : ''} ${isDragging ? 'dragging' : ''}`}
+        <NodeShell
+            className={`schematic-node container-node${isRefusing ? ' deletion-attempted' : ''}${isHoveredWithConnections ? ' hover-connecting' : ''}`}
             style={style}
+            title={
+                <span
+                    className="container-title"
+                    /* While the field is open, the header must stop being a drag
+                       handle — otherwise clicking to place the caret drags the
+                       node. Resting, the title still selects like any header. */
+                    onMouseDown={(e) => { if (editing) e.stopPropagation(); }}
+                    onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !editing) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setEditing(true);
+                        }
+                    }}
+                >
+                    <EditableLabel
+                        value={displayName}
+                        editing={editing}
+                        placeholder="Untitled"
+                        onCommit={rename}
+                        onCancel={() => setEditing(false)}
+                    />
+                </span>
+            }
+            nodeType={childCount === 0 ? 'EMPTY' : `${childCount} INSIDE`}
+            selected={!!isSelected}
+            dragging={!!isDragging}
+            headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}
+            inputs={inputPorts.map((port) => portRow(port, 'input'))}
+            outputs={outputPorts.map((port) => portRow(port, 'output'))}
         >
-            {/* Header with editable name */}
-            <div
-                className="container-header"
-                onMouseDown={handleHeaderMouseDown}
+            {inputPorts.length === 0 && outputPorts.length === 0 && (
+                <div className="oj-node__meta container-empty">
+                    <Chip>no ports published</Chip>
+                </div>
+            )}
+            <Button
+                variant="ghost"
+                className="container-open"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={open}
             >
-                {isEditing ? (
-                    <input
-                        type="text"
-                        value={tempName}
-                        onChange={(e) => setTempName(e.target.value)}
-                        onBlur={handleNameSave}
-                        onKeyDown={handleKeyDown}
-                        autoFocus
-                        className="container-name-input"
-                        onClick={(e) => e.stopPropagation()}
-                        onMouseDown={(e) => e.stopPropagation()}
-                    />
-                ) : (
-                    <span
-                        className="container-name"
-                        onClick={handleNameClick}
-                    >
-                        {displayName}
-                    </span>
-                )}
-            </div>
-
-            {/* Body with ports */}
-            <div className="container-body">
-                {/* Input ports on left */}
-                {inputPorts.map(port => (
-                    <div key={port.id} className="port-row input">
-                        <Port
-                            kind={port.type}
-                            direction="input"
-                            connected={!!hasConnection?.(port.id)}
-                            {...(port.type === 'universal' && port.resolvedType ? { resolvedKind: port.resolvedType } : {})}
-                            data-node-id={node.id}
-                            data-port-id={port.id}
-                            data-port-type={port.type}
-                            onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(port.id, e); }}
-                            onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(port.id, e); }}
-                            onMouseEnter={() => handlePortMouseEnter?.(port.id)}
-                            onMouseLeave={handlePortMouseLeave}
-                        />
-                        <span className="port-label">{port.name}</span>
-                    </div>
-                ))}
-
-                {/* Output ports on right */}
-                {outputPorts.map(port => (
-                    <div key={port.id} className="port-row output">
-                        <span className="port-label">{port.name}</span>
-                        <Port
-                            kind={port.type}
-                            direction="output"
-                            connected={!!hasConnection?.(port.id)}
-                            {...(port.type === 'universal' && port.resolvedType ? { resolvedKind: port.resolvedType } : {})}
-                            data-node-id={node.id}
-                            data-port-id={port.id}
-                            data-port-type={port.type}
-                            onMouseDown={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseDown?.(port.id, e); }}
-                            onMouseUp={(e: React.MouseEvent) => { e.stopPropagation(); handlePortMouseUp?.(port.id, e); }}
-                            onMouseEnter={() => handlePortMouseEnter?.(port.id)}
-                            onMouseLeave={handlePortMouseLeave}
-                        />
-                    </div>
-                ))}
-
-                {/* Hint when no ports */}
-                {inputPorts.length === 0 && outputPorts.length === 0 && (
-                    <div className="container-ports-hint">
-                        Press E to enter
-                    </div>
-                )}
-            </div>
-        </div>
+                Open<Kbd>E</Kbd>
+            </Button>
+            <NodeFeedback active={isRefusing} message={`${displayName} is empty — there is nothing to open yet.`} />
+        </NodeShell>
     );
 }
