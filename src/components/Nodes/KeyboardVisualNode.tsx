@@ -10,7 +10,7 @@ import { useAudioStore } from '../../store/audioStore';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
 import type { GraphNode } from '../../engine/types';
 import { KeyTile } from '@openjammer/oj-ui';
-import './SchematicNodes.css';
+import './KeyboardVisualNode.css';
 
 // Lock each KeyTile to the original square-key footprint (visual no-op vs the
 // legacy 50x50 .keyboard-visual-key). The spacebar keeps its wide 300px form.

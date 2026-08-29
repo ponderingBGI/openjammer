@@ -10,6 +10,7 @@
 import type { GraphNode } from '../../engine/types';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
 import { Port } from '@openjammer/oj-ui';
+import './MathNode.css';
 
 interface MathNodeProps {
     node: GraphNode;

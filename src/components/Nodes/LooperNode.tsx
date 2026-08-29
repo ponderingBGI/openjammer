@@ -29,6 +29,7 @@ import type { ScrollData } from '../../hooks/useScrollCapture';
 import { ScrollContainer } from '../common/ScrollContainer';
 import { LooperState } from '../../../packages/oj-protocol-ts/src/index';
 import { Port } from '@openjammer/oj-ui';
+import './LooperNode.css';
 
 // Type for library store functions to use in refs
 type SaveAudioToLibraryFn = (buffer: AudioBuffer, name: string, tags?: string[]) => Promise<string | null>;

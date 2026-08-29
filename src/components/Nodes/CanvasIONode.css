@@ -1,0 +1,311 @@
+/* CanvasIONode — The hierarchical-canvas I/O family: the canvas input/output nodes and the two
+   multi-port panels (output panel, input panel) that mirror them inside a
+   container. Shared here because all three are the same "port wall" idea and
+   the panels reuse the `flash-red` keyframe defined for the I/O nodes.
+
+   Split verbatim out of the former SchematicNodes.css (L1148-1218, L1300-1415, L1416-1536) in W5-S5. */
+
+/* ============================================
+ * Canvas I/O Nodes - Input/Output for Hierarchical Canvas
+ * ============================================ */
+.canvas-io-node {
+    min-width: 180px;
+    padding: var(--space-md);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.canvas-io-node .io-indicator {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.canvas-io-node .io-name-field {
+    width: 100%;
+    text-align: center;
+    cursor: pointer;
+}
+
+.canvas-io-node .name-input {
+    width: 100%;
+    padding: var(--space-xs) var(--space-sm);
+    border: 2px solid var(--accent-primary);
+    border-radius: var(--radius-sm);
+    background: var(--bg-canvas);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
+    text-align: center;
+    outline: none;
+}
+
+.canvas-io-node .name-text {
+    display: block;
+    padding: var(--space-xs);
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
+    color: var(--text-primary);
+    border: 2px solid transparent;
+    border-radius: var(--radius-sm);
+    transition: all var(--motion-fast);
+}
+
+.canvas-io-node .name-text:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-subtle);
+}
+
+.canvas-io-node .io-type-label {
+    font-size: var(--text-xs);
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+/* Special nodes can't be deleted - flash red on delete attempt */
+@keyframes flash-red {
+    0%, 100% { box-shadow: 0 0 0 2px var(--accent-primary); }
+    50% { box-shadow: 0 0 0 4px var(--accent-danger), 0 0 20px var(--accent-danger); }
+}
+
+.canvas-io-node.deletion-attempted {
+    animation: flash-red 0.4s ease-in-out;
+}
+
+/* ============================================================================
+   OUTPUT PANEL NODE - Multi-port output panel with editable labels
+   ============================================================================ */
+
+.output-panel-node {
+    position: absolute;
+    width: 140px;
+    background: var(--bg-node);
+    border: 2px solid var(--text-primary);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-raised);
+    cursor: default;
+    transition: box-shadow var(--motion-fast);
+}
+
+.output-panel-node:hover {
+    box-shadow: var(--shadow-overlay);
+}
+
+.output-panel-node.selected {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-primary);
+}
+
+.output-panel-node.dragging {
+    opacity: 0.9;
+    cursor: grabbing;
+}
+
+/* Header */
+.output-panel-header {
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--bg-tertiary);
+    border-bottom: 2px solid var(--text-primary);
+    cursor: grab;
+}
+
+.output-panel-header:active {
+    cursor: grabbing;
+}
+
+.output-panel-header .schematic-title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* Body */
+.output-panel-body {
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-sm) var(--space-xs);
+    gap: var(--space-sm);
+    min-height: 40px;
+}
+
+/* Empty state */
+.output-panel-empty {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    text-align: center;
+    padding: var(--space-xs);
+    font-style: italic;
+}
+
+
+
+/* Label */
+.output-panel-label {
+    flex: 1;
+    width: 0;
+    min-height: 1.2em;
+    line-height: 1.2;
+    font-size: var(--text-sm);
+    font-family: inherit;
+    color: var(--text-primary);
+    cursor: text;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    transition: background var(--motion-fast);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.output-panel-label:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+/* Label input for editing - seamless inline editing */
+.output-panel-label-input {
+    flex: 1;
+    width: 0;
+    font-size: var(--text-sm);
+    font-family: inherit;
+    color: var(--text-primary);
+    padding: 2px 4px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: rgba(0, 0, 0, 0.05);
+    outline: none;
+    caret-color: var(--accent-primary);
+}
+
+.output-panel-label-input::selection {
+    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+
+/* Focus styles for accessibility */
+.output-panel-label:focus {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 1px;
+}
+
+
+/* ============================================================================
+   INPUT PANEL NODE - Multi-port input panel with editable labels
+   Mirror of output panel: labels on left, ports on right
+   ============================================================================ */
+
+.input-panel-node {
+    position: absolute;
+    width: 140px;
+    background: var(--bg-node);
+    border: 2px solid var(--text-primary);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-raised);
+    cursor: default;
+    transition: box-shadow var(--motion-fast);
+}
+
+.input-panel-node:hover {
+    box-shadow: var(--shadow-overlay);
+}
+
+.input-panel-node.selected {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px var(--accent-primary);
+}
+
+.input-panel-node.dragging {
+    opacity: 0.9;
+    cursor: grabbing;
+}
+
+/* Header */
+.input-panel-header {
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--bg-tertiary);
+    border-bottom: 2px solid var(--text-primary);
+    cursor: grab;
+}
+
+.input-panel-header:active {
+    cursor: grabbing;
+}
+
+.input-panel-header .schematic-title {
+    font-size: var(--text-sm);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+/* Body */
+.input-panel-body {
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-sm) var(--space-xs);
+    gap: var(--space-sm);
+    min-height: 40px;
+}
+
+/* Empty state */
+.input-panel-empty {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+    text-align: center;
+    padding: var(--space-xs);
+    font-style: italic;
+}
+
+
+
+/* Label on left side */
+.input-panel-label {
+    flex: 1;
+    width: 0;
+    min-height: 1.2em;
+    line-height: 1.2;
+    font-size: var(--text-sm);
+    font-family: inherit;
+    color: var(--text-primary);
+    cursor: text;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    transition: background var(--motion-fast);
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.input-panel-label:hover {
+    background: rgba(0, 0, 0, 0.05);
+}
+
+/* Label input for editing - seamless inline editing */
+.input-panel-label-input {
+    flex: 1;
+    width: 0;
+    font-size: var(--text-sm);
+    font-family: inherit;
+    color: var(--text-primary);
+    padding: 2px 4px;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: rgba(0, 0, 0, 0.05);
+    outline: none;
+    caret-color: var(--accent-primary);
+    text-align: left;
+}
+
+.input-panel-label-input::selection {
+    background: color-mix(in srgb, var(--accent-primary) 18%, transparent);
+}
+
+/* Focus styles for accessibility */
+.input-panel-label:focus {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 1px;
+}

@@ -1,0 +1,127 @@
+/* MicrophoneNode — Microphone faceplate: latency badge, source selector, device dropdown
+   overrides, mute button + slash overlay and the input waveform.
+
+   Split verbatim out of the former SchematicNodes.css (L1010-1132) in W5-S5. */
+
+/* ============================================
+ * Microphone Node - Compact Layout
+ * ============================================ */
+.microphone-node {
+    min-width: 140px;
+}
+
+/* Low latency mode badge */
+.mic-latency-badge {
+    width: 20px;
+    height: 20px;
+    background: rgba(255, 193, 7, 0.9);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #000;
+    border: 1px solid var(--border-strong);
+}
+
+.mic-content {
+    padding: var(--space-sm) var(--space-md);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+/* Controls row: source + mute + output */
+.mic-controls-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+/* Source selector button */
+.mic-device-selector {
+    position: relative;
+}
+
+/* Device dropdown - expand to right, width set dynamically by JS */
+.mic-device-selector .device-dropdown {
+    left: 0;
+    right: auto;
+    white-space: nowrap;
+}
+
+.mic-source-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--text-primary);
+    background: var(--bg-canvas);
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--motion-fast);
+}
+
+.mic-source-btn:hover {
+    background: var(--bg-tertiary);
+}
+
+/* Mute button */
+.mic-mute-btn {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--motion-fast);
+    position: relative;
+}
+
+.mic-mute-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.mic-mute-btn.live {
+    background: var(--accent-success);
+    color: white;
+}
+
+.mic-mute-btn.live:hover:not(:disabled) {
+    background: #3cb371;
+}
+
+.mic-mute-btn.muted {
+    background: var(--accent-danger);
+    color: white;
+}
+
+.mic-mute-btn.muted:hover:not(:disabled) {
+    background: #c94444;
+}
+
+/* Slash overlay for muted state */
+.mic-mute-btn.muted::after {
+    content: "";
+    position: absolute;
+    width: 70%;
+    height: 2px;
+    background: white;
+    transform: rotate(-45deg);
+    border-radius: 1px;
+}
+
+
+/* Waveform line */
+.mic-waveform-line {
+    width: 100%;
+    height: 20px;
+}
+
+.mic-waveform-path {
+    stroke: var(--accent-primary);
+}

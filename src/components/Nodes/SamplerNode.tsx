@@ -24,6 +24,7 @@ import { isSamplerNodeData } from '../../engine/typeGuards';
 import { resolvePersistedSample } from './samplerPersistence';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
 import { Port } from '@openjammer/oj-ui';
+import './SamplerNode.css';
 
 interface SamplerNodeProps {
     node: GraphNode;

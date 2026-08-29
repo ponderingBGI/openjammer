@@ -1,0 +1,69 @@
+/* SchematicBase — The card every schematic faceplate is built on: the `.schematic-node` shell, its
+   selected/dragging/clip-drop states, and the `.schematic-header` strip. Socket
+   rules stay in `_sockets.css`, imported here so one import carries the whole
+   shared node language. Imported once, first, by `NodeWrapper.tsx` — every
+   family stylesheet below it may override these single-class rules by source
+   order, so this file must load before them.
+
+   Split verbatim out of the former SchematicNodes.css (L1-57, L602-604) in W5-S5. */
+
+/* Socket rules for the schematic faceplates live in _sockets.css — one socket
+   language for the whole canvas (D7). Imported here so every consumer of this
+   stylesheet gets them without touching a node component. */
+@import './_sockets.css';
+
+
+
+/* ============================================
+ * Schematic Node Base
+ * ============================================ */
+.schematic-node {
+    position: absolute;
+    background: var(--bg-node);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg);
+    color: var(--text-primary);
+    min-width: 140px;
+    overflow: visible;
+    user-select: none;
+    z-index: 1;
+    transition: box-shadow var(--motion-fast);
+}
+
+.schematic-node.selected {
+    z-index: 10;
+    box-shadow: 0 0 0 2px var(--accent-primary), var(--shadow-raised);
+}
+
+.schematic-node.dragging {
+    z-index: 100;
+    cursor: grabbing;
+    box-shadow: 0 0 0 2px var(--accent-primary), 6px 6px 0 var(--text-primary);
+}
+
+/* Audio clip drop target feedback */
+.schematic-node.clip-drop-target {
+    box-shadow: 0 0 0 3px var(--accent-success), 0 0 20px color-mix(in srgb, var(--accent-success) 40%, transparent);
+}
+
+.schematic-header {
+    border-bottom: 1px solid var(--border-strong);
+    padding: var(--space-sm) var(--space-md);
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--text-lg);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--bg-node-header);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    cursor: grab;
+}
+
+.schematic-header:active {
+    cursor: grabbing;
+}
+
+/* Settings + About panel styles were relocated to
+   src/components/Settings/SettingsPanel.css (a foreign Settings island removed
+   from this node stylesheet). */

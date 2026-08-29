@@ -13,6 +13,7 @@ import { useEffect, memo } from 'react';
 import { useAudioStore } from '../../store/audioStore';
 import type { GraphNode, KeyboardNodeData } from '../../engine/types';
 import { Port } from '@openjammer/oj-ui';
+import './KeyboardNode.css';
 
 interface KeyboardNodeProps {
     node: GraphNode;

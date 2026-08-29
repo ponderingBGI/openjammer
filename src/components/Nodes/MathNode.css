@@ -1,0 +1,68 @@
+/* MathNode — Math faceplate: the Add / Subtract nodes.
+
+   Split verbatim out of the former SchematicNodes.css (L1604-1668) in W5-S5. */
+
+/* ============================================
+ * Math Node (Add/Subtract)
+ * ============================================ */
+.math-node {
+    min-width: 100px;
+}
+
+.math-header {
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--bg-node-header);
+    border-bottom: 1px solid var(--border-strong);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    cursor: grab;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.math-header:active {
+    cursor: grabbing;
+}
+
+.math-symbol {
+    font-family: var(--font-mono);
+    font-size: var(--text-xl);
+    font-weight: bold;
+    color: var(--accent-primary);
+}
+
+.math-name {
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
+    color: var(--text-primary);
+}
+
+.math-body {
+    padding: var(--space-sm);
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: stretch;
+    gap: var(--space-md);
+}
+
+.math-inputs {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    gap: var(--space-sm);
+}
+
+.math-outputs {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+}
+
+
+.subtract-indicator {
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--accent-danger);
+    margin-left: var(--space-xs);
+}

@@ -1,0 +1,254 @@
+/* SamplerNode — Sampler faceplate: the drop-a-file chromatic sample player.
+
+   Split verbatim out of the former SchematicNodes.css (L2548-2799) in W5-S5. */
+
+/* ============================================
+ * Sampler Node - Simplified audio sample player
+ * Drop audio files and play chromatically via keyboard
+ * ============================================ */
+.sampler-node {
+    position: relative;
+    min-width: 160px;
+    max-width: 200px;
+}
+
+.sampler-node .schematic-header {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-xs) var(--space-sm);
+}
+
+.sampler-node .schematic-title {
+    text-align: center;
+}
+
+
+/* Sample drop zone - AudioClipVisual style */
+.sampler-sample-area {
+    position: relative;
+    margin: var(--space-xs) var(--space-sm);
+    min-height: 40px;
+    background: var(--bg-canvas);
+    border-radius: var(--radius-sm);
+    border: 1px dashed var(--border-subtle);
+    overflow: hidden;
+    transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+}
+
+.sampler-sample-area:hover {
+    border-color: var(--audio-connected);
+}
+
+.sampler-sample-area.drag-over {
+    border-color: var(--accent-primary);
+    border-style: solid;
+    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent-primary) 30%, transparent);
+}
+
+.sampler-sample-area.has-sample {
+    border-style: solid;
+    border-color: var(--border-subtle);
+}
+
+.sampler-sample-area.has-sample:hover {
+    border-color: var(--audio-connected);
+    box-shadow: 0 0 6px color-mix(in srgb, var(--audio-connected) 30%, transparent);
+}
+
+/* ERR-1: a persisted sample whose PCM could not be re-resolved this mount. The
+   slot looks loaded (name + cached waveform) but the engine is silent, so it is
+   marked distinctly — a dashed warning border, dimmed waveform — and never
+   confused with an empty or a working slot. Non-modal: it never steals focus. */
+.sampler-sample-area.load-error {
+    border-style: dashed;
+    border-color: var(--accent-warning);
+    background: color-mix(in srgb, var(--accent-warning) 8%, transparent);
+}
+
+.sampler-sample-area.load-error .sampler-waveform-path {
+    opacity: 0.4;
+}
+
+.sampler-load-error-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    margin-right: 4px;
+    border-radius: 50%;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--bg-primary, #1a1a1a);
+    background: var(--accent-warning);
+}
+
+/* ERR-1: per-node "!" badge when an instrument's built-in default voice failed to
+   load (DEFECT 3). Same calm warning style as the sampler load-error badge. */
+.instrument-voice-error-badge,
+.node-plugin-error-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    margin-left: 6px;
+    border-radius: 50%;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--bg-primary, #1a1a1a);
+    background: var(--accent-warning);
+    cursor: help;
+}
+
+/* Drop text when empty */
+.sampler-drop-text {
+    font-family: var(--font-sans);
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: center;
+    padding: var(--space-sm);
+}
+
+/* Waveform container */
+.sampler-waveform-container {
+    position: relative;
+    height: 22px;
+    padding: 2px 4px;
+}
+
+.sampler-waveform-container svg {
+    width: 100%;
+    height: 100%;
+}
+
+.sampler-waveform-path {
+    stroke: var(--accent-primary);
+    stroke-width: 1.5;
+}
+
+.sampler-center-line {
+    stroke: var(--border-subtle);
+    stroke-width: 0.5;
+    stroke-dasharray: 2 2;
+    opacity: 0.5;
+}
+
+/* Duration badge */
+.sampler-duration-badge {
+    position: absolute;
+    top: 2px;
+    left: 4px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    background: color-mix(in srgb, var(--bg-node) 80%, transparent);
+    padding: 1px 3px;
+    border-radius: 2px;
+}
+
+/* Sample info bar */
+.sampler-info-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 2px var(--space-xs);
+    background: var(--bg-tertiary);
+    border-top: 1px solid var(--border-subtle);
+}
+
+.sampler-sample-name {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sampler-root-note {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--accent-primary);
+    background: color-mix(in srgb, var(--accent-primary) 15%, transparent);
+    padding: 1px 4px;
+    border-radius: var(--radius-sm);
+    cursor: ns-resize;
+    user-select: none;
+    transition: background var(--motion-fast);
+}
+
+.sampler-root-note:hover {
+    background: color-mix(in srgb, var(--accent-primary) 25%, transparent);
+}
+
+/* Clear button */
+.sampler-clear-btn {
+    width: 14px;
+    height: 14px;
+    padding: 0;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--bg-node);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+}
+
+.sampler-sample-area:hover .sampler-clear-btn {
+    opacity: 1;
+}
+
+.sampler-clear-btn:hover {
+    background: var(--accent-danger);
+    color: white;
+    border-color: var(--accent-danger);
+}
+
+/* Controls section */
+.sampler-controls {
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-xs) var(--space-sm);
+    gap: 2px;
+}
+
+.sampler-controls-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+}
+
+.sampler-control {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-primary);
+    cursor: ns-resize;
+    user-select: none;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    transition: background var(--motion-fast);
+    white-space: nowrap;
+}
+
+.sampler-control:hover {
+    background: var(--bg-tertiary);
+}

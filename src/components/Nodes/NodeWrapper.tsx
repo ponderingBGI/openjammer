@@ -8,6 +8,29 @@ import { useGraphStore } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useIsAgentPending } from '../../store/agentSessionStore';
 import { generateUniqueId } from '../../utils/idGenerator';
+// The schematic faceplate stylesheets, in ONE explicit order.
+//
+// Each family file is also imported by its own component (so a node styles
+// itself in isolation — Ladle, unit tests, future extraction); the bundler
+// emits one copy either way. But *order* decides who wins between two
+// same-specificity rules, and leaving it to the order in which node components
+// happen to be imported below would mean a harmless reorder of that list
+// silently restyles the canvas. So the cascade is pinned here instead, above
+// every component import, in the exact order these blocks had inside the former
+// single SchematicNodes.css. `SchematicBase.css` is first (it also pulls
+// `_sockets.css`) because every family may override its single-class rules.
+import './SchematicBase.css';
+import './SpeakerNode.css';
+import './KeyboardNode.css';
+import './InstrumentNode.css';
+import './LooperNode.css';
+import './MicrophoneNode.css';
+import './CanvasIONode.css';
+import './KeyboardVisualNode.css';
+import './ContainerNode.css';
+import './MathNode.css';
+import './LibraryNode.css';
+import './SamplerNode.css';
 import { InstrumentNode } from './InstrumentNode';
 import { MicrophoneNode } from './MicrophoneNode';
 import { KeyboardNode } from './KeyboardNode';

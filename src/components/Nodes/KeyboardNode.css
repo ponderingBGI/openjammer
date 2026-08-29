@@ -1,0 +1,43 @@
+/* KeyboardNode — Keyboard faceplate: the card, the focused-mode ring and the octave chip.
+   (The former "Bundle Mode"/"Advanced Mode" banners held no rules once S3 moved
+   the port rows into `_sockets.css`, so they are not carried over.)
+
+   Split verbatim out of the former SchematicNodes.css (L253-292) in W5-S5. */
+
+/* ============================================
+ * Keyboard Node
+ * ============================================ */
+.keyboard-node {
+    min-width: 160px;
+}
+
+/* Keyboard node active (Mode 2-9 focused on this keyboard) */
+.keyboard-node.active {
+    border-width: 4px;
+    border-color: var(--accent-success);
+    box-shadow: 0 0 0 2px var(--bg-canvas), 0 0 12px color-mix(in srgb, var(--accent-success) 40%, transparent), var(--shadow-raised);
+}
+
+.keyboard-node .schematic-header {
+    padding: var(--space-sm) var(--space-md);
+}
+
+.keyboard-octave {
+    font-family: var(--font-mono);
+    font-size: var(--text-md);
+    font-weight: 600;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: 2px var(--space-sm);
+    user-select: none;
+    pointer-events: none;
+}
+
+.keyboard-schematic-body {
+    padding: var(--space-md);
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-sm);
+}

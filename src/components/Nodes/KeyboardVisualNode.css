@@ -1,0 +1,83 @@
+/* KeyboardVisualNode — Keyboard Visual faceplate: the full 30-key layout rendered inside a
+   keyboard's internal canvas.
+
+   Split verbatim out of the former SchematicNodes.css (L1219-1299) in W5-S5. */
+
+/* ============================================
+ * Keyboard Visual Node - Full keyboard layout
+ * Used inside keyboard's internal canvas
+ * ============================================ */
+.keyboard-visual-node {
+    min-width: 600px;
+    max-width: 700px;
+}
+
+.keyboard-visual-header {
+    text-align: center;
+}
+
+.keyboard-visual-body {
+    padding: var(--space-md) var(--space-lg);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+/* Keyboard rows */
+.keyboard-visual-node .keyboard-row {
+    display: flex;
+    gap: 4px;
+}
+
+.keyboard-visual-node .keyboard-row.row-1 {
+    margin-left: 0;
+}
+
+.keyboard-visual-node .keyboard-row.row-2 {
+    margin-left: 25px;
+}
+
+.keyboard-visual-node .keyboard-row.row-3 {
+    margin-left: 50px;
+}
+
+.keyboard-visual-node .keyboard-row.row-space {
+    margin-left: 80px;
+    margin-top: var(--space-sm);
+}
+
+/* Individual keys */
+.keyboard-visual-key {
+    position: relative;
+    width: 50px;
+    height: 50px;
+    background: var(--bg-canvas);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--motion-fast);
+    user-select: none;
+    cursor: crosshair;
+}
+
+.keyboard-visual-key:hover {
+    background: var(--bg-tertiary);
+    transform: translateY(-2px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.keyboard-visual-key.active {
+    background: var(--accent-primary);
+    color: var(--text-on-accent);
+    border-color: var(--accent-primary);
+    transform: translateY(0);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+
+/* Spacebar - wide key */
+.keyboard-visual-key.spacebar {
+    width: 300px;
+}

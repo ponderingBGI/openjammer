@@ -14,6 +14,7 @@ import { InstrumentLoader } from '../../audio/instrumentCatalog';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
 import { ScrollContainer } from '../common/ScrollContainer';
 import { Port, ValueScrubber } from '@openjammer/oj-ui';
+import './InstrumentNode.css';
 
 interface InstrumentNodeProps {
     node: GraphNode;

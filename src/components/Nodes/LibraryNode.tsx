@@ -33,6 +33,7 @@ import { usePanelResize } from '../../hooks/usePanelResize';
 import { ResizeHandles } from '../common/ResizeHandles';
 import { PanelSeparator } from '../common/PanelSeparator';
 import { ScrollContainer } from '../common/ScrollContainer';
+import './LibraryNode.css';
 
 interface LibraryNodeProps {
   node: GraphNode;

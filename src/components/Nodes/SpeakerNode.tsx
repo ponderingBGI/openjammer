@@ -15,6 +15,7 @@ import {
     detectLowLatencyDevice
 } from '../../utils/audioDeviceDetection';
 import { Port } from '@openjammer/oj-ui';
+import './SpeakerNode.css';
 
 interface SpeakerNodeProps {
     node: GraphNode;

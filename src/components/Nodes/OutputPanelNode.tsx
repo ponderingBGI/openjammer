@@ -13,7 +13,7 @@ import type { GraphNode } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
 import { isEmptyPort } from '../../utils/bundleManager';
-import './SchematicNodes.css';
+import './CanvasIONode.css';
 
 interface OutputPanelNodeProps {
     node: GraphNode;

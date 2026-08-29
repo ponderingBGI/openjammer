@@ -22,6 +22,7 @@ import { getExecutor } from '../../audio/executor';
 import { ScrollContainer } from '../common/ScrollContainer';
 import { detectLowLatencyDevice } from '../../utils/audioDeviceDetection';
 import { Port } from '@openjammer/oj-ui';
+import './MicrophoneNode.css';
 
 interface MicrophoneNodeProps {
     node: GraphNode;

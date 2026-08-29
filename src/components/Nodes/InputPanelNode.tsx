@@ -15,7 +15,7 @@ import { useGraphStore } from '../../store/graphStore';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
 import { BundlePortGroup } from '../BundlePortGroup';
 import { isBundlePort, isEmptyPort } from '../../utils/bundleManager';
-import './SchematicNodes.css';
+import './CanvasIONode.css';
 
 interface InputPanelNodeProps {
     node: GraphNode;

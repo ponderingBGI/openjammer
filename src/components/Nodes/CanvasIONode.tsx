@@ -11,6 +11,7 @@ import type { GraphNode } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
 import { Port } from '@openjammer/oj-ui';
+import './CanvasIONode.css';
 
 interface CanvasIONodeProps {
     node: GraphNode;
