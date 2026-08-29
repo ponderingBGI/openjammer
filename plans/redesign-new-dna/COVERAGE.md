@@ -36,6 +36,7 @@ Commit map for the "Lane / commit" column:
 | **W5-P8** | `ab23a31` | keyboard / instrument / MIDI / MiniLab family |
 | **W5-P10** | *not started* | canvas/app defects + dead code |
 | **W6-E2E** | *not started* | acceptance tests + visual-regression baselines |
+| **W6-CAP** | *this pass* | capture + judge every MISSING cell outside TB/P7 — [W6-CAP-REPORT.md](W6-CAP-REPORT.md) |
 
 ---
 
@@ -43,25 +44,25 @@ Commit map for the "Lane / commit" column:
 
 | Item | Lane / commit | Light | Dark | Status |
 |---|---|---|---|---|
-| Topbar | W4-S4 `ae92021` | `w4-s4-gate/g-14-topbar-light.png` | `w5-p6-gate/00-canvas-dark.png` *(incidental)* | DONE |
-| Transport pill | W4-S4 `ae92021` | `w5-p6-gate/00-canvas-light.png` *(incidental)* | `w5-p6-gate/00-canvas-dark.png` *(incidental)* | DONE — no dedicated capture |
+| Topbar | W4-S4 `ae92021` + W6-CAP | `w6-cap/topbar-light.png` | `w6-cap/topbar-dark.png` | DONE |
+| Transport pill | W4-S4 `ae92021` + W6-CAP | `w6-cap/transport-pill-light.png` | `w6-cap/transport-pill-dark.png` | DONE |
 | Breadcrumbs | W4-S4 `ae92021` | `w5-p6-gate/01-container-inside-light.png` *(incidental)* | `w5-p6-gate/01-container-inside-dark.png` *(incidental)* | DONE |
 | Surface switcher / sky band | W4-S4 `ae92021` + W4-TB | `w4-tb/light-1280-05-selected-clip.png` | `w4-tb/dark-1280-05-selected-clip.png` | IN-FLIGHT (TB) |
 | Onboarding — step 1 (experience) | W4-S4 `ae92021` | `w4-s4-gate/g-01-onboarding-light.png` | `w4-s4-gate/g-13-onboarding-dark.png` | DONE |
 | Onboarding — step 2 (goal) | W4-S4 `ae92021` | `w4-s4-gate/g-02-onboarding-goal.png` | `w4-s4-gate/g-17-onboarding-dark.png` | DONE |
 | Onboarding — step 3 (theme) | W4-S4 `ae92021` | `w4-s4-gate/g-03-onboarding-theme.png` | `w4-s4-gate/g-16-native-theme-step.png` | DONE |
-| Onboarding — reduced motion | W4-S4 `ae92021` | `w4-s4-gate/g-12-reduced-motion.png` | MISSING | DONE |
-| Help panel | W4-P9 `a554c99` | `w2-gate/light-01-canvas-help.png` *(pre-P9)* | `w2-gate/dark-01-canvas-help.png` *(pre-P9)* | DONE — **no post-redesign capture** |
-| Toasts (Sonner) | W4-P9 `a554c99` | `w4-s4-gate/g-22-toast-vs-palette.png` | MISSING | DONE |
-| PWA update prompt | W4-P9 `a554c99` | MISSING | MISSING | DONE — unverified |
-| Latency chip + popover | W4-S4 `ae92021` | MISSING | `w4-tb/dark-1280-05-selected-clip.png` *(incidental)* | DONE |
+| Onboarding — reduced motion | W4-S4 `ae92021` + W6-CAP | `w6-cap/onboarding-reduced-motion-light.png` | `w6-cap/onboarding-reduced-motion-dark.png` | DONE |
+| Help panel | W4-P9 `a554c99` + W6-CAP | `w6-cap/help-panel-light.png` | `w6-cap/help-panel-dark.png` | DEFECT → P10 (D4: `.oj-help__mode` is 11px sans) |
+| Toasts (Sonner) | W4-P9 `a554c99` + W6-CAP | `w6-cap/toast-light.png` | `w6-cap/toast-dark.png` | DONE |
+| PWA update prompt | W4-P9 `a554c99` + W6-CAP | `w6-cap/pwa-update-prompt-light.png` | `w6-cap/pwa-update-prompt-dark.png` | DONE |
+| Latency chip + popover | W4-S4 `ae92021` + W6-CAP | `w6-cap/latency-chip-light.png`, `latency-popover-light.png` | `w6-cap/latency-chip-dark.png`, `latency-popover-dark.png` | DONE |
 | Engine-health dot | W4-S4 `ae92021` | `w4-s4-gate/g-14-topbar-light.png` *(incidental)* | `w5-p6-gate/00-canvas-dark.png` *(incidental)* | DONE |
-| Offline chip | W4-S4 `ae92021` | MISSING | MISSING | DONE — unverified |
+| Offline chip | W4-S4 `ae92021` + W6-CAP | `w6-cap/offline-chip-light.png` | `w6-cap/offline-chip-dark.png` | DONE |
 | Project chip | W4-S4 `ae92021` | `w4-tb/light-1280-05-selected-clip.png` *(incidental)* | `w4-tb/dark-1280-05-selected-clip.png` *(incidental)* | DONE |
 | Collab control + presence overlay | W4-P9 `a554c99` | `w4-p9-gate/light-collab.png` | `w4-p9-gate/dark-collab.png` | DONE |
-| Error boundary | W4-P9 `a554c99` | MISSING | MISSING | DONE — unverified |
-| Safe-mode screen | W4-P9 `a554c99` | MISSING | MISSING | DONE — unverified |
-| Plugin window shell | W4-P9 `a554c99` | MISSING | MISSING | DONE — unverified |
+| Error boundary | W4-P9 `a554c99` + W6-CAP | `w6-cap/error-boundary-light.png` | `w6-cap/error-boundary-dark.png` | DEFECT → P10 (D7: dark title `#F84B4B` is not the dark `--danger-ink` `#FF7771`) |
+| Safe-mode screen | W4-P9 `a554c99` + W6-CAP | `w6-cap/safe-mode-light.png` | `w6-cap/safe-mode-dark.png` | DEFECT → P10 (D4: `.oj-fullscreen__link` is 11px sans) |
+| Plugin window shell | W4-P9 `a554c99` + W6-CAP | `w6-cap/plugin-window-shell-light.png` | `w6-cap/plugin-window-shell-dark.png` | DEFECT → P10 (D4: two 11px sans runs) |
 
 ## 2. Canvas
 
@@ -74,14 +75,14 @@ Commit map for the "Lane / commit" column:
 | Cables — selected | W3-S3 `41060df` | `w3-s3-gate/light-07-selected-cable.png` | `w3-s3-gate/dark-07-selected-cable.png` | DONE |
 | Cables — temp (drag) | W3-S3 `41060df` | `w3-s3-gate/light-06-temp-cable.png` | `w3-s3-gate/dark-06-temp-cable.png` | DONE |
 | Cables — bundled | W3-S3 `41060df` | `w3-s3-gate/light-14-bundle-close.png` | `w3-s3-gate/dark-10-bundle-closeup.png` | DONE |
-| Cables — universal | W3-S3 `41060df` | MISSING | MISSING | DONE — unverified |
+| Cables — universal | W3-S3 `41060df` + W6-CAP | `w6-cap/cable-universal-light.png` | `w6-cap/cable-universal-dark.png` | DONE — flat violet, 2.5px, `filter: none` at rest (`w6-cap/verify-ports.json`) |
 | Ghost mode | W3-S3 `41060df` | `w3-s3-gate/light-08-ghost.png` | `w3-s3-gate/dark-08-ghost.png` | DONE |
 | Context menu (→ oj-ui Menu) | W4-P5 `041ff72` | `w4-p5-gate/c01-menu-root--light.png` | `w4-p5-gate/c01-menu-root--dark.png` | DONE |
 | Context menu — submenu / edge flips | W4-P5 `041ff72` | `w4-p5-gate/c02-menu-submenu--light.png`, `c03-menu-corner-*--light.png` | `w4-p5-gate/c02-menu-submenu--dark.png`, `c03-menu-corner-*--dark.png` | DONE |
 | Node frame — selection | W3-S3 `41060df` | `w3-s3-gate/light-04-selected.png` | `w3-s3-gate/dark-04-selected.png` | DONE |
 | Node frame — dragging | W3-S3 `41060df` | `w3-s3-gate/light-05-dragging.png` | `w3-s3-gate/dark-05-dragging.png` | DONE |
-| Node frame — agent-pending | W3-S3 `41060df` | MISSING | MISSING | DONE — unverified |
-| Resize handles | W4-P9 `a554c99` | `w3-s3-gate/light-11-after-resize.png` *(incidental)* | MISSING | DONE |
+| Node frame — agent-pending | W3-S3 `41060df` + W6-CAP | `w6-cap/node-agent-pending-light.png` | `w6-cap/node-agent-pending-dark.png` | DEFECT → P10 (D3: 10 node components never pass `agentPending`, so the state is dead on them) |
+| Resize handles | **W5-P7** — re-attributed: `LibraryNode.tsx:1728` is the only call site | `w3-s3-gate/light-11-after-resize.png` *(incidental)* | MISSING | **NOT STARTED** (P7) |
 | Bundle port groups | W3-S3 `41060df` | `w3-s3-gate/light-09-bundle-inside.png`, `light-13-bundle-panel.png` | `w3-s3-gate/dark-09-bundle-inside.png` | DONE |
 
 ## 3. Node faceplates
@@ -103,8 +104,8 @@ ids**, not node types — corrected here.
 | `song` | W5-P6 `79c71b4` | `w5-p6-gate/song-light.png` | `w5-p6-gate/song-dark.png` | DONE |
 | `input-panel` | W5-P6 `79c71b4` | `w5-p6/input-panel-light.png` | `w5-p6/input-panel-dark.png` | DONE |
 | `output-panel` | W5-P6 `79c71b4` | `w5-p6/output-panel-light.png` | `w5-p6/output-panel-dark.png` | DONE |
-| `canvas-input` | W5-P6 `79c71b4` | `w5-p6-gate/01-container-inside-light.png` *(incidental)* | `w5-p6-gate/01-container-inside-dark.png` *(incidental)* | DONE — no dedicated capture |
-| `canvas-output` | W5-P6 `79c71b4` | `w5-p6-gate/01-container-inside-light.png` *(incidental)* | `w5-p6-gate/01-container-inside-dark.png` *(incidental)* | DONE — no dedicated capture |
+| `canvas-input` | W5-P6 `79c71b4` + W6-CAP | `w6-cap/canvas-io-light.png` | `w6-cap/canvas-io-dark.png` | DONE |
+| `canvas-output` | W5-P6 `79c71b4` + W6-CAP | `w6-cap/canvas-io-light.png` | `w6-cap/canvas-io-dark.png` | DONE |
 | `keyboard` | W5-P8 `ab23a31` | `w5-p8-gate/g-d1-keyboard-light.png` | `w5-p8-gate/g-d1-keyboard-dark.png` | DONE |
 | `keyboard-visual` | W5-P8 `ab23a31` | `w5-p8-gate/g-d1-keyboard-visual-light.png` | `w5-p8-gate/g-d1-keyboard-visual-dark.png` | DONE |
 | `instrument` | W5-P8 `ab23a31` | `w5-p8-gate/g-d1-instrument-light.png` | `w5-p8-gate/g-d1-instrument-dark.png` | DONE |
@@ -117,11 +118,11 @@ ids**, not node types — corrected here.
 | `sampler` | W5-P7 | MISSING | MISSING | **NOT STARTED** (P7) |
 | `sampler-visual` | W5-P7 | MISSING | MISSING | **NOT STARTED** (P7) |
 | `library` (two-panel browser) | W5-P7 | MISSING | MISSING | **NOT STARTED** (P7) |
-| `pan` | — | MISSING | MISSING | **NOT STARTED** — and unplaceable: in no `nodeCategories` entry (MASTER-PLAN follow-up, P10 scope) |
-| `width` | — | MISSING | MISSING | **NOT STARTED** — same registry gap as `pan` |
-| `strings` | — | MISSING | MISSING | **NOT STARTED** — live Instruments menu row + Ctrl+←/→ cycle target |
-| `keys` | — | MISSING | MISSING | **NOT STARTED** — live Instruments menu row + Ctrl+←/→ cycle target |
-| `winds` | — | MISSING | MISSING | **NOT STARTED** — live Instruments menu row + Ctrl+←/→ cycle target |
+| `pan` | W6-CAP | `w6-cap/faceplate-pan-light.png` | `w6-cap/faceplate-pan-dark.png` | DONE — and **placeable**: `registry.ts` now lists it under Effects |
+| `width` | W6-CAP | `w6-cap/faceplate-width-light.png` | `w6-cap/faceplate-width-dark.png` | DONE — placeable under Effects |
+| `strings` | W5-P8 `ab23a31` + W6-CAP | `w6-cap/faceplate-strings-light.png` | `w6-cap/faceplate-strings-dark.png` | DONE |
+| `keys` | W5-P8 `ab23a31` + W6-CAP | `w6-cap/faceplate-keys-light.png` | `w6-cap/faceplate-keys-dark.png` | DONE |
+| `winds` | W5-P8 `ab23a31` + W6-CAP | `w6-cap/faceplate-winds-light.png` | `w6-cap/faceplate-winds-dark.png` | DONE |
 | `AutoParamPanel` (in-node Knob rack) | W5-P6 `79c71b4` | `w5-p6/07-autoparam-light.png` | `w5-p6/07-autoparam-dark.png` | DONE |
 | Node states — selected / refusal / hover-connect | W5-P6 `79c71b4` | `w5-p6-gate/state-selected-speaker-light.png`, `state-refusal-math-light.png`, `w5-p6/state-hover-connecting-math-light.png` | `w5-p6-gate/state-selected-speaker-dark.png`, `state-refusal-math-dark.png`, `w5-p6/state-hover-connecting-math-dark.png` | DONE |
 
@@ -133,10 +134,12 @@ ids**, not node types — corrected here.
 > `instrument` and seeds the catalogue `instrumentId` that reproduces the same voice
 > (`src/engine/nodeTypeMigrations.ts`). Covenant #7/#8.
 >
-> **Still owed:** `strings` / `keys` / `winds` are LIVE — the three Instruments menu rows and
-> the three targets Ctrl+←/→ cycles between. They render through `InstrumentNode`, which had
-> its taste pass, but they have no dedicated capture. That is real capture debt, not a
-> deletion candidate.
+> **Settled (W6-CAP).** `strings` / `keys` / `winds` are LIVE — the three Instruments menu
+> rows and the three targets Ctrl+←/→ cycles between — and all three now have dedicated
+> captures in both themes, added from the real context menu. `pan` and `width` are captured
+> too, and the "unplaceable" note above them was stale: `src/engine/registry.ts` lists both
+> under the **Effects** menu bucket in the current tree. The only faceplates still without
+> an image are P7's four (`looper`, `sampler`, `sampler-visual`, `library`).
 
 ## 4. Timeline
 
@@ -162,8 +165,8 @@ are dirty in the working tree.
 | Section markers | W4-TB | `w4-tb/light-1280-03-first-light-out.png` *(incidental)* | `w4-tb/dark-1280-03-first-light-out.png` *(incidental)* | IN-FLIGHT |
 | Velocity lane / scroomer | W4-TB | MISSING | MISSING | IN-FLIGHT: TB |
 | Record ghost | W4-TB | MISSING | MISSING | IN-FLIGHT: TB |
-| Export dialog | W4-P9 `a554c99` | MISSING | MISSING | DONE — unverified |
-| Waveform editor modal + clip visual | W4-P9 `a554c99` | MISSING | MISSING | DONE — unverified |
+| Export dialog | W4-P9 `a554c99` + W6-CAP | `w6-cap/export-dialog-light.png` | `w6-cap/export-dialog-dark.png` | DONE |
+| Waveform editor modal + clip visual | W4-P9 `a554c99` + W6-CAP | `w6-cap/waveform-editor-light.png`, `audio-clip-visual-light.png` | `w6-cap/waveform-editor-dark.png`, `audio-clip-visual-dark.png` | DONE |
 | Step grid (beat rig) | W4-S4 `ae92021` | `w4-s4-gate/g-10-beat-first-light.png` | `w4-s4-gate/g-18-beat-dark.png` | DONE |
 
 ## 5. Command bar
@@ -179,11 +182,11 @@ are dirty in the working tree.
 | AI panel (browser tier) | W4-P5 `041ff72` | `w4-p5-gate/a01-ai-browser--light.png` | `w4-p5-gate/a01-ai-browser--dark.png` | DONE |
 | AI panel — empty / disabled | W4-P5 `041ff72` | `w4-p5-gate/g2-empty-desktop--light.png`, `g2-disabled--light.png` | `w4-p5-gate/g2-empty-desktop--dark.png`, `g2-disabled--dark.png` | DONE |
 | Auth chooser + detail | W4-P5 `041ff72` | `w4-p5-gate/g3-auth-chooser--light.png`, `g3-auth-detail--light.png` | `w4-p5-gate/g3-auth-chooser--dark.png`, `g3-auth-detail--dark.png` | DONE |
-| Model picker | W4-P5 `041ff72` | MISSING | MISSING | DONE — unverified |
-| Sessions list | W4-P5 `041ff72` | MISSING | MISSING | DONE — unverified |
-| Slash items | W4-P5 `041ff72` | MISSING | MISSING | DONE — unverified |
-| Rewind rows | W4-P5 `041ff72` | MISSING | MISSING | DONE — unverified |
-| Reduced motion | W4-P5 `041ff72` | `w4-p5-gate/r01-reduced-motion.png` | MISSING | DONE |
+| Model picker | W4-P5 `041ff72` + W6-CAP | `w6-cap/cmdbar-model-picker-light.png` | `w6-cap/cmdbar-model-picker-dark.png` | DEFECT → P10 (D5: `Chip tone="success"` means "selected" — `ModelPicker.tsx:312`) |
+| Sessions list | W4-P5 `041ff72` + W6-CAP | `w6-cap/cmdbar-sessions-light.png` | `w6-cap/cmdbar-sessions-dark.png` | DEFECT → P10 (D8, low: the filter field does not match the palette search) |
+| Slash items | W4-P5 `041ff72` + W6-CAP | `w6-cap/cmdbar-slash-items-light.png` | `w6-cap/cmdbar-slash-items-dark.png` | DONE |
+| Rewind rows | W4-P5 `041ff72` + W6-CAP | `w6-cap/cmdbar-rewind-light.png` | `w6-cap/cmdbar-rewind-dark.png` | DONE |
+| Reduced motion | W4-P5 `041ff72` + W6-CAP | `w6-cap/cmdbar-reduced-motion-light.png` | `w6-cap/cmdbar-reduced-motion-dark.png` | DONE |
 
 ## 6. Settings & panels
 
@@ -196,17 +199,17 @@ are dirty in the working tree.
 | Settings — updates / channels | W4-P9 `a554c99` | `w4-p9-gate/light-settings-updates.png` | `w4-p9-gate/dark-settings-updates.png` | DONE |
 | Settings — about | W4-P9 `a554c99` | `w4-p9-gate/light-settings-about.png` | `w4-p9-gate/dark-settings-about.png` | DONE |
 | Settings — appearance / theme picker | W4-P9 `a554c99` | `w4-p9-gate/light-settings-appearance.png` | `w4-p9-gate/dark-settings-appearance.png` | DONE |
-| Settings — first-run entry point | W4-S4 `ae92021` | `w4-s4-gate/g-20-settings-firstrun.png` | MISSING | DONE |
+| Settings — first-run entry point | W4-S4 `ae92021` + W6-CAP | `w6-cap/settings-firstrun-light.png` | `w6-cap/settings-firstrun-dark.png` | DEFECT → P10 (D4: `.oj-set-section__title` is 11px sans) |
 | Guides (LowLatencyGuide + steps) | W4-P9 `a554c99` | `w4-p9-gate/light-guide.png` | `w4-p9-gate/dark-guide.png` | DONE |
 | DevLog | W4-P9 `a554c99` | `w4-p9-gate/light-devlog.png` | `w4-p9-gate/dark-devlog.png` | DONE |
 | Plugins panel | W4-P9 `a554c99` | `w4-p9-gate/light-plugins.png` | `w4-p9-gate/dark-plugins.png` | DONE |
 | Audio health | W4-P9 `a554c99` | `w4-p9-gate/light-audiohealth.png` | `w4-p9-gate/dark-audiohealth.png` | DONE |
 | Issue reporter | W4-P9 `a554c99` | `w4-p9-gate/light-issuereporter.png` | `w4-p9-gate/dark-issuereporter.png` | DONE |
-| Panels — reduced motion | W4-P9 `a554c99` | `w4-p9-gate/reduced-motion-devlog.png`, `reduced-motion-keybindings.png` | MISSING | DONE |
-| MIDI device browser | W5-P8 `ab23a31` | `w5-p8-gate/g-h1-midi-browser.png` | MISSING | DONE |
-| MIDI device card + connection toast | W5-P8 `ab23a31` | `w5-p8-gate/g-h2-after-card-click.png`, `g-h1-add-midi-nowebmidi.png` | MISSING | DONE |
-| Bench | W4-P9 `a554c99` | MISSING | MISSING | DONE — unverified |
-| Relink-samples dialog | W4-P9 `a554c99` | MISSING | MISSING | DONE — unverified |
+| Panels — reduced motion | W4-P9 `a554c99` + W6-CAP | `w6-cap/panels-reduced-motion-devlog-light.png`, `panels-reduced-motion-keybindings-light.png` | `w6-cap/panels-reduced-motion-devlog-dark.png`, `panels-reduced-motion-keybindings-dark.png` | DONE |
+| MIDI device browser | W5-P8 `ab23a31` + W6-CAP | `w6-cap/midi-browser-light.png` | `w6-cap/midi-browser-dark.png` | DONE |
+| MIDI device card + connection toast | W5-P8 `ab23a31` + W6-CAP | `w6-cap/midi-device-card-light.png`, `midi-connection-toast-light.png` | `w6-cap/midi-device-card-dark.png`, `midi-connection-toast-dark.png` | DONE |
+| Bench | W4-P9 `a554c99` + W6-CAP | `w6-cap/bench-light.png` | `w6-cap/bench-dark.png` | DONE |
+| Relink-samples dialog | W4-P9 `a554c99` | UNREACHABLE | UNREACHABLE | **UNREACHABLE** — `RelinkSamplesDialog.tsx` is imported by nothing (dead code). Wire it or delete it (covenant #8), then capture. → P10 |
 
 ## 7. Design system (`packages/oj-ui`)
 
@@ -254,11 +257,11 @@ are dirty in the working tree.
 | LaneButton | W4-P3 `99afb72` | `w4-p3-gate/lane-button--state-matrix--light.png`, `rm-lanebutton--light.png` | same `--dark.png` | DONE |
 | DeviceSelect | W4-P3 `99afb72` | `w4-p3-gate/composites--deviceselect--*--light.png` (4) | same four `--dark.png` | DONE |
 | EditableLabel | W4-P3 `99afb72` | `w4-p3-gate/composites--editablelabel--*--light.png` (4) | same four `--dark.png` | DONE |
-| **Meter** | W4-S4 `ae92021` | `w5-p6-gate/speaker-playing-light.png` *(incidental)* | MISSING | DONE — **no dedicated capture** |
-| **TransportPill** | W4-S4 `ae92021` | `w5-p6-gate/00-canvas-light.png` *(incidental)* | `w5-p6-gate/00-canvas-dark.png` *(incidental)* | DONE — **no dedicated capture** |
-| **ParamRow** | W4-P3 `99afb72` | `w5-p6/07-autoparam-light.png` *(incidental)* | `w5-p6/07-autoparam-dark.png` *(incidental)* | DONE — **no dedicated capture** |
-| Icons (12) | W3-P2 `02dfc9b` | MISSING | MISSING | DONE — unverified |
-| Ladle catalog + theme switcher | W1-S0S1 `82ed464`, W2-S2 `a0ac294` | MISSING | MISSING | DONE — unverified |
+| **Meter** | W4-S4 `ae92021` + W6-CAP | `w6-cap/meter-light.png`, `meter-clipping-light.png` | `w6-cap/meter-dark.png`, `meter-clipping-dark.png` | DONE |
+| **TransportPill** | W4-S4 `ae92021` + W6-CAP | `w6-cap/transportpill-light.png`, `transportpill-recording-light.png` | `w6-cap/transportpill-dark.png`, `transportpill-recording-dark.png` | DEFECT → P10 (D6: 2px `--accent-danger` record-dot border, `TransportPill.css:138`) |
+| **ParamRow** | W4-P3 `99afb72` + W6-CAP | `w6-cap/paramrow-light.png`, `designsync-paramrow-light.png` | `w6-cap/paramrow-dark.png`, `designsync-paramrow-dark.png` | DONE |
+| Icons (12) | W3-P2 `02dfc9b` + W6-CAP | `w6-cap/icons-light.png` | `w6-cap/icons-dark.png` | DONE |
+| Ladle catalog + theme switcher | W1-S0S1 `82ed464`, W2-S2 `a0ac294` + W6-CAP | `w6-cap/ladle-catalog-light.png`, `ladle-theme-switcher-light.png` | `w6-cap/ladle-catalog-dark.png`, `ladle-theme-switcher-dark.png` | DONE — Ladle's own sidebar/addon chrome is third-party and does not read our tokens (expected) |
 | Figma Code Connect examples | W3/W4 lanes | n/a (source artifacts) | n/a | **PARTIAL — 7 of 44 folders unmapped**: `Knob`, `Meter`, `TransportPill`, `ParamRow`, `LaneButton`, `TimeRuler`, `WaveformCanvas` |
 | `component-map.json` regen | W6-DOCS | n/a | n/a | **NOT DONE** — stale by 7 folders; needs `bun run gen:component-map` (a full `ladle build`) |
 
@@ -267,9 +270,9 @@ are dirty in the working tree.
 | Item | Lane / commit | Light | Dark | Status |
 |---|---|---|---|---|
 | `index.html` boot shell | W2-S2 `a0ac294` | `w2-gate/light-00-boot.png` | `w2-gate/dark-00-boot.png` | DONE |
-| `public/download` page | — | MISSING | MISSING | **NOT STARTED** |
-| `apps/docs` site (fonts, hero, custom.css) | W1-S0S1 `82ed464` + W6-DOCS | MISSING | MISSING | **NOT STARTED** (copy updated by W6-DOCS; no render captured) |
-| `.design-sync` previews | W1-S0S1 `82ed464` | MISSING | MISSING | **NOT STARTED** |
+| `public/download` page | W6-CAP (captured, not fixed) | `w6-cap/download-page-light.png` | `w6-cap/download-page-dark.png` | **DEFECT (high) → web-surfaces fix lane** — still the retired Living Sketchbook: 2px ink borders, `2px 3px 0`/`3px 4px 0`/`2px 2px 0` offset shadows, literal `#4A90C2`, three text runs at 3.04–3.45:1, and `<meta color-scheme="light">` so there is **no dark theme** |
+| `apps/docs` site (fonts, hero, custom.css) | W1-S0S1 `82ed464` + W6-DOCS + W6-CAP | `w6-cap/docs-site-hero-light.png`, `docs-site-page-light.png` | `w6-cap/docs-site-hero-dark.png`, `docs-site-page-dark.png` | **DEFECT (high) → web-surfaces fix lane** — `apps/docs/src/styles/custom.css` still carries the retired palette + the three zero-blur shadows, wired into `--sl-shadow-*`; 2px borders and four 3.04:1 runs measured |
+| `.design-sync` previews | W1-S0S1 `82ed464` + W6-CAP | `w6-cap/designsync-{button,chip,cable,port,paramrow,index}-light.png` | the same six `-dark.png` | DONE — rendered with `ladle serve --stories '.design-sync/previews/**/*.tsx'`; no DNA or contrast findings |
 | `.impeccable/design.json` | W6-DOCS | n/a | n/a | DONE — regenerated from the new `DESIGN.md` |
 | `DESIGN.md` | W6-DOCS | n/a | n/a | DONE — replaced wholesale |
 | `PRODUCT.md` (brand, anti-references, a11y) | W6-DOCS | n/a | n/a | DONE |
@@ -282,101 +285,95 @@ are dirty in the working tree.
 | Visual-regression baselines (both themes) | W6-E2E | MISSING | MISSING | **NOT STARTED** |
 
 ---
-
 ## The MISSING list
 
-Work straight down this list. Each line is one capture (or one decision).
+Rewritten by **W6-CAP** (2026-08-29). Everything reachable outside the two lanes still
+running has been captured in both themes — 52 rows, 104 images, under
+`.scratch/w6-cap/`; the judgements are in [W6-CAP-REPORT.md](W6-CAP-REPORT.md).
+**13 rows remain**, and 11 of them belong to lanes that have not landed yet.
 
-### Blocking — the row's whole subject has no image in either theme
+### Still owed — a capture (11 rows, all owned by a running lane)
 
-1. `looper` faceplate — light + dark *(P7 not started)*
+1. `looper` faceplate — light + dark *(P7)*
 2. `sampler` faceplate — light + dark *(P7)*
 3. `sampler-visual` faceplate — light + dark *(P7)*
 4. `library` faceplate incl. the two-panel file browser — light + dark *(P7)*
-5. `pan` faceplate — light + dark *(also unplaceable; registry fix first)*
-6. `width` faceplate — light + dark *(same)*
-7. `strings`, `keys`, `winds` — **3 node types, 6 captures**, still no owner in any wave.
-   *(W6-P11 answered the "redesign or delete" question for the other six: `keyboard-key`
-   and the five fixed voices are deleted, the five migrated on load. These three are live
-   menu rows and stay.)*
-8. Universal-kind cable — light + dark
-9. Node frame `.is-agent-pending` — light + dark
-10. Export dialog — light + dark
-11. Waveform editor modal + `AudioClipVisual` + `ClipDragLayer` — light + dark
-12. Piano-roll velocity lane + scroomer — light + dark
-13. Timeline record ghost — light + dark
-14. Bench panel — light + dark
-15. Relink-samples dialog — light + dark
-16. Command bar: model picker — light + dark
-17. Command bar: sessions list — light + dark
-18. Command bar: slash items — light + dark
-19. Command bar: rewind rows — light + dark
-20. PWA update prompt — light + dark
-21. Offline chip — light + dark
-22. `AppErrorBoundary` — light + dark
-23. Safe-mode screen — light + dark
-24. Plugin window shell — light + dark
-25. Icons (all 12, one sheet) — light + dark
-26. Ladle catalog + its theme switcher — light + dark
-27. `public/download` page — light + dark
-28. `apps/docs` site (hero + a docs page) — light + dark
-29. `.design-sync` preview cards — light + dark
-30. Visual-regression baselines, both themes *(W6-E2E)*
+5. Resize handles — **dark** *(P7 — `LibraryNode.tsx:1728` is the only `ResizeHandles` call
+   site, so this row was mis-attributed to W4-P9)*
+6. Piano-roll velocity lane + scroomer — light + dark *(TB)*
+7. Timeline record ghost — light + dark *(TB)*
+8. Timeline playhead + loop/punch brace — dedicated, light + dark *(TB)*
+9. Section markers — dedicated, light + dark *(TB)*
+10. Timeline 1920×1080 — **dark** frames 06–12 (7 captures) *(TB)*
+11. Timeline reduced motion — **dark** *(TB)*
 
-### Half-covered — one theme, or only an incidental shot
+### Unreachable until code moves (1 row)
 
-32. `Meter` — dedicated component capture, light + dark
-33. `TransportPill` — dedicated component capture, light + dark
-34. `ParamRow` — dedicated component capture, light + dark
-35. Transport pill in situ — dedicated light + dark
-36. Topbar — **dark** dedicated capture
-37. Latency chip + popover — **light**
-38. Help panel — post-P9 capture, light + dark *(current shots are from the W2 token swap)*
-39. Toasts — **dark**
-40. Resize handles — **dark**
-41. `canvas-input` / `canvas-output` — dedicated faceplate captures, light + dark
-42. MIDI device browser / device card / connection toast — **dark** (3 captures)
-43. Settings first-run entry point — **dark**
-44. Timeline 1920×1080 — **dark** frames 06–12 (7 captures)
-45. Timeline reduced motion — **dark**
-46. Onboarding reduced motion — **dark**
-47. Command bar reduced motion — **dark**
-48. Panels reduced motion — **dark**
-49. Timeline playhead + loop/punch brace — dedicated captures, light + dark
-50. Section markers — dedicated captures, light + dark
+12. **Relink-samples dialog.** `src/components/Dialogs/RelinkSamplesDialog.tsx` is imported
+    by nothing — `grep -rn RelinkSamplesDialog src/` returns only the file itself. There is
+    no app state that renders it, so there is nothing to photograph. Wire it or delete it
+    (covenant #8: every production line is used), then capture. → **P10**
 
-### Not a screenshot — still blocks the gate
+### Not a screenshot — still blocks the gate (1 row + 5 carried items)
 
-51. **`component-map.json` (repo root) is stale and was NOT regenerated.** It reports
-    `coverage: { components: 53, withStory: 48, withFigma: 53 }` and is missing exactly
-    seven folders — `Knob`, `LaneButton`, `Meter`, `ParamRow`, `TimeRuler`,
-    `TransportPill`, `WaveformCanvas`. Regenerating it runs `bun run gen:component-map`,
-    which shells out to a full `ladle build`; that was deliberately not run here because
-    the host is memory-constrained and four other lanes were building at the time. **Run
-    it on a quiet machine before the gate closes.**
-52. **7 Code Connect mappings** missing: `Knob`, `Meter`, `TransportPill`, `ParamRow`,
-    `LaneButton`, `TimeRuler`, `WaveformCanvas`.
-53. **Figma masters** were built against the retired sketchbook construction and need a
-    Tokens Studio re-pull plus rebuilds where construction changed (flat Button, socket
-    Port, dotless Chip, barless Callout/Banner, hairline borders).
-54. **Two stale-prose sites** found while writing the docs, both harmless at runtime but
-    both advertising the retired language:
-    `packages/oj-ui/src/components/IconButton/IconButton.tsx` JSDoc ("hand-drawn ink
-    border, hard offset feel") and `src/components/EngineHealthDot/EngineHealthDot.tsx`
-    JSDoc ("a Caveat label").
-55. **One surviving port-glow declaration**: `src/components/Nodes/SamplerVisual.css`
-    (`.sampler-key-port.connected { box-shadow: 0 0 4px … }`, plus a hover `scale(1.3)` +
-    `brightness(1.2)`). The class appears in no `.tsx` — it is dead CSS — but it violates
-    the Nothing-Glows rule and sits in **P7's** files. Delete it with the Sampler pass.
+13. Visual-regression baselines, both themes *(W6-E2E)*
+
+Carried unchanged from the previous pass:
+
+- **`component-map.json` (repo root) is stale and was NOT regenerated.** It reports
+  `coverage: { components: 53, withStory: 48, withFigma: 53 }` and is missing exactly seven
+  folders — `Knob`, `LaneButton`, `Meter`, `ParamRow`, `TimeRuler`, `TransportPill`,
+  `WaveformCanvas`. Regenerating runs `bun run gen:component-map`, which shells out to a
+  full `ladle build`. **Run it on a quiet machine before the gate closes.**
+- **7 Code Connect mappings** missing: `Knob`, `Meter`, `TransportPill`, `ParamRow`,
+  `LaneButton`, `TimeRuler`, `WaveformCanvas`. *(W6-CAP confirms the same seven are absent
+  from `.design-sync/previews/`, which is why they could not be captured from there.)*
+- **Figma masters** were built against the retired sketchbook construction and need a
+  Tokens Studio re-pull plus rebuilds where construction changed (flat Button, socket Port,
+  dotless Chip, barless Callout/Banner, hairline borders).
+- **Two stale-prose sites**, both harmless at runtime, both advertising the retired
+  language: `packages/oj-ui/src/components/IconButton/IconButton.tsx` JSDoc ("hand-drawn ink
+  border, hard offset feel") and `src/components/EngineHealthDot/EngineHealthDot.tsx` JSDoc
+  ("a Caveat label").
+- **One surviving port-glow declaration**: `src/components/Nodes/SamplerVisual.css`
+  (`.sampler-key-port.connected { box-shadow: 0 0 4px … }`, plus a hover `scale(1.3)` +
+  `brightness(1.2)`). Dead CSS, but it violates the Nothing-Glows rule and sits in **P7's**
+  files. Delete it with the Sampler pass.
+
+### Defects W6-CAP opened (captured, judged, NOT fixed — this lane makes no source edits)
+
+Full detail, with file:line and measured numbers, in
+[W6-CAP-REPORT.md](W6-CAP-REPORT.md) § 2.
+
+| # | Sev | What | Owner |
+|---|---|---|---|
+| D1 | **high** | `public/download/download.css` is still the retired Living Sketchbook — 2px ink borders, three zero-blur offset shadows, the retired `#4A90C2`, three text runs at 3.04–3.45:1, and **no dark theme** (`<meta color-scheme="light">`) | web-surfaces fix lane |
+| D2 | **high** | `apps/docs/src/styles/custom.css` — the same retired palette and the same three zero-blur shadows, wired into `--sl-shadow-*`; 2px borders + four 3.04:1 runs measured on the hero and a docs page | web-surfaces fix lane |
+| D3 | med | `.is-agent-pending` is dead on **10 of 20** node components — every one that renders its own `NodeShell` omits `agentPending` (`MathNode`, `SpeakerNode`, `MicrophoneNode`, `ContainerNode`, `SongNode`, `CanvasIONode`, `PortPanelNode`, + P7's `LibraryNode` / `LooperNode` / `SamplerNode` / `SamplerVisualNode`) | P10 (+ P7 for four files) |
+| D4 | med | The 13px sans floor is broken in four shipped surfaces (11px `--text-xs` in `var(--font-sans)`): `SettingsPanel.css:105`, `SafeModeScreen.css:143`, `HelpPanel.css:43`, `PluginWindowShell.css:46,:66` | P10 |
+| D5 | med | `ModelPicker.tsx:312` uses `<Chip tone="success">current</Chip>` — `--accent-success` meaning "selected", which the Signal-Not-Brand Rule forbids | P10 |
+| D6 | low | `TransportPill.css:138` — `border: 2px solid var(--accent-danger)` on the record dot (1.5px is the maximum) | P10 / oj-ui |
+| D7 | low | `AppErrorBoundary.css:145` — dark `.app-error-title` is `#F84B4B`, not the dark `--danger-ink` `#FF7771` (4.80:1 vs 6.39:1); the file's contract is a hand-kept transcription of the token palette. Also an 18px size that is not in the scale | P10 |
+| D8 | low | The Resume-a-session filter field is a narrow left-aligned box where every other palette surface uses a full-bleed input | P10 |
+| D9 | doc | DESIGN.md contradicts itself: §3 calls Field labels "the one 12px sans exception", §5 specifies `Chip` at 12px/600, and `.oj-chip__label` measures 12px sans everywhere | W6-DOCS |
 
 ---
 
-## Gate verdict as of 2026-08-29
+## Gate verdict as of 2026-08-29 (after W6-CAP)
 
-**The coverage gate cannot close yet.** Four lanes are still open — **P7** (not started),
-**P8** and **TB** (built, uncommitted, gates running), **P10** and **W6-E2E** (not
-started) — and 55 items above are unresolved. The token layer, the component library, the
-shell, the command bar, the panels and the committed node families are covered in both
-themes and can be considered gate-complete; **the node registry is the biggest hole**:
-**14 of 36 node types have no capture in either theme, and 10 of those have no taste-pass
-owner in any wave** (`pan`, `width`, and the eight legacy fixed-instrument types).
+**The coverage gate still cannot close, but the hole is now small and named.** Two capture
+lanes are open — **P7** (not started) and **TB** (built, uncommitted) — and they own 11 of
+the 13 remaining rows. **W6-E2E** owns the twelfth (visual-regression baselines); the
+thirteenth is unreachable until dead code is resolved.
+
+What changed: the node registry is no longer the biggest hole. `strings`, `keys`, `winds`,
+`pan`, `width`, `canvas-input` and `canvas-output` are captured in both themes, so **32 of
+36 node types** now have an image and the four that do not are all P7's. Every shell,
+command-bar, panel, dialog and design-system row outside those two lanes has a light and a
+dark capture.
+
+What replaced it: **the retired Living Sketchbook is still shipping on the two public web
+surfaces** (`public/download` and `apps/docs`). Those are the loudest remaining defects and
+they are outside `src/`, which is exactly why five waves of redesign never touched them.
+Inside `src/` and `packages/oj-ui`, 104 captures found **zero** Caveat faces, **zero**
+glows outside `.oj-cable`, **zero** zero-blur offset shadows and **one** ≥2px border (D6).
