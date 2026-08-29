@@ -347,7 +347,7 @@ describe('AiPanel chat', () => {
         const newSession = vi.fn();
         useAgentSessionStore.setState({ newSession });
         renderPanel();
-        fireEvent.click(screen.getByRole('button', { name: /\+ New/i }));
+        fireEvent.click(screen.getByRole('button', { name: /^New$/i }));
         expect(newSession).toHaveBeenCalledOnce();
     });
 

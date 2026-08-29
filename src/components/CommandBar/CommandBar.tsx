@@ -1,5 +1,5 @@
 /**
- * CommandBar (U19 + U20 + M2) — Raycast-style Ctrl/Cmd+K command palette.
+ * CommandBar (U19 + U20 + M2 → W4-P5) — the Ctrl/Cmd+K command palette.
  *
  * Lazy-loaded by CommandBarHost on first palette intent. Owns its own open/close
  * state once mounted. Built from cmdk's primitives (`Command`, `Command.Input`,
@@ -11,22 +11,31 @@
  * - 'search' (U19): the action registry, ranked HERE (M2), not by cmdk.
  * - 'ai' (U20): press Tab from search to hand the typed text to the AI agent.
  *   The agent half renders in {@link AiPanel}: a streaming transcript whose
- *   OpenJammer edits apply live as undoable graph actions, or the "AI requires
- *   the desktop app" state in a plain browser.
+ *   OpenJammer edits apply live as undoable graph actions, or the honest
+ *   "AI runs in the desktop app" state in a plain browser.
  *
  * M2 — the palette OWNS its ordering:
  * - `shouldFilter={false}`: cmdk no longer filters/ranks; this file does.
  * - {@link buildPaletteCtx} gives the capability seam + selection context; we
  *   {@link queryActions} the registry for the 'palette' surface, then SCORE each
  *   row by `paletteScore(query, …)` combined with the local frecency floor
- *   ({@link usePaletteLearningStore}). A prefix-win is hard-boosted to the top;
- *   the list is sorted desc and capped. An empty query orders by learned
- *   frecency ("top picks on open").
+ *   ({@link usePaletteLearningStore}). The list is sorted desc and capped. An
+ *   empty query orders by learned frecency ("top picks on open").
  * - On pick we `recordPick(...)` BEFORE running the action (so the learning
  *   reflects the choice even if `run` navigates away), then close.
- * - The dedicated AI item + the Tab fast-path are preserved EXACTLY. The AI item
- *   is conceptually an Action (`enabled: caps.agent !== 'none'`); when there are
- *   ZERO local results it is auto-highlighted (D2-A2) so Enter asks the agent.
+ *
+ * W4-P5 — the palette is a signature surface, so it is built to the New DNA
+ * menu physics and the audit's ranking contract:
+ * - `.nj-menu` shell + `.nj-input` search field + ListRow result physics, with
+ *   `Kbd` keycaps for real shortcuts and a mono `Chip` for node-type rows.
+ * - UI-028: an EXACT title match always ranks first (a hard boost above every
+ *   learned signal), and a DISABLED row is never the default selection — the
+ *   highlight seeks the first ENABLED row.
+ * - The "Ask AI" affordance is no longer a pseudo-RESULT that could rank into
+ *   (or steal) the selection. It lives in the footer as the Tab hint it always
+ *   was, and the empty state teaches it — but only when the agent is actually
+ *   available on this platform. Enter on an empty result set still hands the
+ *   query to the agent, so the one-key path survives without a fake row.
  */
 
 import {
@@ -41,6 +50,7 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 import { Command } from 'cmdk';
+import { Chip, Kbd } from '@openjammer/oj-ui';
 import { useModalKeymap } from '../../keymap/useKeymap';
 import {
     queryActions,
@@ -51,6 +61,8 @@ import {
 import { buildPaletteCtx } from '../../store/actionContext';
 import { usePaletteLearningStore } from '../../store/paletteLearningStore';
 import { score as paletteScore } from '../../store/paletteScore';
+import { exactnessBoost } from './ranking';
+import { keyComboToString, useKeybindingsStore } from '../../store/keybindingsStore';
 // The AI half (AiPanel + the Pi agent backend + the markdown renderer it pulls
 // in) is the single heaviest non-first-paint subtree. It only renders in 'ai'
 // mode, so it is code-split behind a real dynamic import: the command palette
@@ -73,11 +85,24 @@ export type CommandBarOpenIntent =
 /** Max rows rendered after ranking (keeps the list snappy). */
 const MAX_ROWS = 50;
 
-/** Stable cmdk `value` for the dedicated AI item (used for auto-highlight). */
-const AI_ITEM_VALUE = '__ai__';
+/** Kept identical to oj-ui Modal so overlays share one focus-containment contract. */
+const FOCUSABLE =
+    'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
-/** Stable cmdk `value` for the "Reset Ranking" item. */
-const RESET_ITEM_VALUE = '__reset_ranking__';
+/** Stable id for the injected "Reset Ranking" row (ranked like any other). */
+const RESET_ITEM_ID = '__reset_ranking__';
+
+/**
+ * Palette action id → the keybinding action whose combo it actually runs. Only
+ * REAL bindings get a keycap: advertising a shortcut that does nothing is the
+ * kind of small lie the palette can't afford.
+ */
+const SHORTCUT_FOR: Record<string, string> = {
+    'app.devlog.toggle': 'panel.devLog',
+    'app.audio-health.toggle': 'panel.audioHealth',
+    'app.plugins.toggle': 'panel.plugins',
+    'arrangement.export-song': 'file.export',
+};
 
 /** A scored, ready-to-render registry row. */
 interface RankedItem {
@@ -106,6 +131,11 @@ function searchableText(action: Action): string {
     return `${action.title} ${action.group} ${(action.keywords ?? []).join(' ')}`;
 }
 
+/** The node type a `node.add.<type>` row spawns — shown as a mono type chip. */
+function nodeTypeOf(action: Action): string | null {
+    return action.id.startsWith('node.add.') ? action.id.slice('node.add.'.length) : null;
+}
+
 export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null }) {
     const [open, setOpen] = useState(() => intent?.kind === 'toggle');
     const modalEntries = useMemo(() => [{
@@ -131,6 +161,10 @@ export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null })
     // (see the layout effect below), but user arrow-nav updates it freely.
     const [value, setValue] = useState('');
     const inputRef = useRef<HTMLInputElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+    // Whatever held focus when the palette opened — restored on close so the
+    // player lands back where they were (the canvas keeps its keys).
+    const restoreFocusRef = useRef<HTMLElement | null>(null);
 
     // Subscribe to the registry so newly-registered actions (e.g. AI-authored
     // DSP nodes) re-render the open palette live. We only need the change tick;
@@ -140,6 +174,9 @@ export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null })
 
     // The local frecency floor (M2). Re-render on changes so picks re-rank.
     const learning = usePaletteLearningStore();
+    // Live keybindings, so a REMAPPED shortcut shows its real keycap (Kbd's
+    // `custom` tint) instead of the stock default.
+    const customBindings = useKeybindingsStore((s) => s.customBindings);
 
     const close = useCallback(() => {
         // Persist the mode + conversation across close: only the transient search
@@ -151,9 +188,12 @@ export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null })
         setAiAutoSend(false);
         setForceAuth(false);
         setValue('');
+        const restore = restoreFocusRef.current;
+        restoreFocusRef.current = null;
+        if (restore?.isConnected && typeof restore.focus === 'function') restore.focus();
     }, []);
 
-    // Hand the typed text off to AI mode (Tab from search, or the "Ask AI" item).
+    // Hand the typed text off to AI mode (Tab from search, or Enter on empty).
     const enterAiMode = useCallback(
         (autoSend = false) => {
             setAiPrompt(search);
@@ -189,10 +229,105 @@ export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null })
         setMode('search');
     }, [setMode]);
 
+    // Remember the pre-open focus once per opening, so closing hands it back.
+    useEffect(() => {
+        if (!open) return;
+        const active = document.activeElement;
+        if (restoreFocusRef.current === null && active instanceof HTMLElement) {
+            restoreFocusRef.current = active;
+        }
+    }, [open]);
+
     // Focus the search input whenever the palette opens or returns to search.
     useEffect(() => {
-        if (open && mode === 'search') inputRef.current?.focus();
+        if (open && mode === 'search') {
+            if (inputRef.current) inputRef.current.dataset.keyboardFocus = 'false';
+            inputRef.current?.focus();
+        }
     }, [open, mode]);
+
+    /**
+     * Match oj-ui Modal's focus trap while preserving search-mode Tab as the
+     * explicit agent handoff (the input's own handler claims that Tab first,
+     * so this only ever sees the ones nothing inside wanted).
+     *
+     * Tab is also the ONLY thing that moves DOM focus inside the palette, so it
+     * is the only thing that lights the search field's ring: a ring says "focus
+     * landed here by keyboard", not "someone is typing". Programmatic autofocus
+     * on open therefore shows the accent border alone.
+     */
+    const onOverlayKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key !== 'Tab') return;
+        if (inputRef.current) inputRef.current.dataset.keyboardFocus = 'true';
+        if (event.defaultPrevented) return;
+        const panel = containerRef.current;
+        if (!panel) return;
+        const focusable = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE));
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        const active = document.activeElement;
+        if (focusable.length === 0) {
+            event.preventDefault();
+            panel.focus();
+            return;
+        }
+        // Focus already fell outside (a control unmounted under it, or the mode
+        // swap emptied the panel for a frame). The scrim promises nothing behind
+        // it is live, so pull focus back in rather than let Tab walk the chrome.
+        if (!panel.contains(active)) {
+            event.preventDefault();
+            (event.shiftKey ? last : first)?.focus();
+            return;
+        }
+        if (event.shiftKey && active === first) {
+            event.preventDefault();
+            last?.focus();
+        } else if (!event.shiftKey && active === last) {
+            event.preventDefault();
+            first?.focus();
+        }
+    }, []);
+
+    /**
+     * AI mode swaps the panel's whole content, and the honest browser-tier state
+     * has no field to autofocus — focus would be left on `<body>`, OUTSIDE the
+     * trap, where the next Tab walks straight into the topbar behind the scrim.
+     * Pull it back to the top of the panel once the lazy panel has painted, and
+     * never steal from a composer/list that focused itself.
+     */
+    useEffect(() => {
+        if (!open || mode !== 'ai') return;
+        let frames = 0;
+        let raf = 0;
+        const settle = () => {
+            const panel = containerRef.current;
+            if (!panel || panel.contains(document.activeElement)) return;
+            const target = panel.querySelector<HTMLElement>(FOCUSABLE);
+            if (target) target.focus();
+            else if (frames++ < 20) raf = requestAnimationFrame(settle);
+            else panel.focus();
+        };
+        raf = requestAnimationFrame(settle);
+        return () => cancelAnimationFrame(raf);
+    }, [open, mode]);
+
+    // The Escape CASCADE's backstop. Every field and picker inside the bar
+    // handles Escape first and marks the event handled; this catches the cases
+    // where nothing inside holds focus (the browser tier's desktop-only state,
+    // a clicked button) so Escape is NEVER dead on the topmost surface. React
+    // delegates the portal's events on `document.body`, so by the time this
+    // document-level listener runs, `defaultPrevented` is already truthful.
+    useEffect(() => {
+        if (!open) return;
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (e.key !== 'Escape' || e.defaultPrevented) return;
+            e.preventDefault();
+            if (mode === 'ai') backToSearch();
+            else close();
+        };
+        document.addEventListener('keydown', onKeyDown);
+        return () => document.removeEventListener('keydown', onKeyDown);
+    }, [open, mode, backToSearch, close]);
 
     // Rebuild the action context when the palette opens or the registry/selection
     // changes. (Selection is captured at open; the registry tick covers live
@@ -207,6 +342,20 @@ export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null })
     // AI is offered when the platform can drive an agent (capability seam).
     const aiEnabled = paletteCtx ? paletteCtx.caps.agent !== 'none' : false;
 
+    const resetRanking = useCallback(() => {
+        // One global reset via the store action (keeps the empty-state shape in
+        // one place); per-command reset is the menu's job in a later milestone.
+        usePaletteLearningStore.getState().resetAll();
+    }, []);
+
+    // Only offer "Reset Ranking" once there is something learned to reset, so a
+    // pristine palette never presents a no-op. It is a REAL ranked row, not a
+    // pinned pseudo-item: it matches, scores and disappears like everything else.
+    const hasLearned =
+        Object.keys(learning.frecency).length > 0 ||
+        Object.keys(learning.prefixWins).length > 0 ||
+        Object.keys(learning.seedBoosts).length > 0;
+
     // Per-keystroke ranking. Memoized on (search, ctx, registry, learning).
     const ranked: RankedItem[] = useMemo(() => {
         if (!paletteCtx) return [];
@@ -216,7 +365,18 @@ export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null })
         // owned here. Do NOT pass `query`: queryActions' substring prefilter would
         // drop genuine fzf matches (e.g. "adlp" → "Add Looper") before paletteScore
         // ever runs, silently defeating subsequence search.
-        const candidates = queryActions(paletteCtx, { surface: 'palette' });
+        const candidates: Action[] = [...queryActions(paletteCtx, { surface: 'palette' })];
+        if (hasLearned) {
+            candidates.push({
+                id: RESET_ITEM_ID,
+                title: 'Reset Ranking',
+                group: 'App',
+                keywords: ['reset', 'ranking', 'frecency', 'clear', 'learning'],
+                targets: ['global'],
+                surfaces: ['palette'],
+                run: resetRanking,
+            });
+        }
 
         const q = search.trim();
         const prefixWinner = q
@@ -230,8 +390,10 @@ export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null })
             // Empty query → pure learned frecency (top picks on open).
             // Non-empty → fuzzy match dominates, learned breaks ties / nudges.
             let combined = q === '' ? learned : fuzzy + learned;
-            // Hard-boost a prefix win to the very top.
+            // Hard-boost a prefix win to the very top…
             if (prefixWinner && key === prefixWinner) combined += 100_000;
+            // …and an EXACT title match above even that (UI-028).
+            combined += exactnessBoost(q, action.title);
             return { action, key, fuzzy, combined };
         });
 
@@ -243,26 +405,15 @@ export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null })
         return matched.slice(0, MAX_ROWS).map(({ action, key }) => ({ action, key }));
         // `learning` is the store snapshot; scoreFor/prefixWins are read above and
         // re-rank whenever a pick mutates it.
-    }, [paletteCtx, search, registryTick, learning]);
+    }, [paletteCtx, search, registryTick, learning, hasLearned, resetRanking]);
 
     const hasLocalResults = ranked.length > 0;
-    // Only offer "Reset Ranking" once there is something learned to reset, so a
-    // pristine palette never presents a no-op.
-    const hasLearned =
-        Object.keys(learning.frecency).length > 0 ||
-        Object.keys(learning.prefixWins).length > 0 ||
-        Object.keys(learning.seedBoosts).length > 0;
 
     // The cmdk highlight is a DERIVED controlled value (no effect, so it is
     // applied on the same render the ranking changes — cmdk's own "select first
-    // item" pass can't win a race against it):
-    // - results present → the top-ranked row;
-    // - ZERO local results + AI available → the AI item (D2-A2), so Enter asks AI;
-    // - else the Reset item when it is shown; otherwise nothing highlighted.
-    let highlightValue = '';
-    if (hasLocalResults) highlightValue = ranked[0].action.id;
-    else if (aiEnabled) highlightValue = AI_ITEM_VALUE;
-    else if (hasLearned) highlightValue = RESET_ITEM_VALUE;
+    // item" pass can't win a race against it). UI-028: it seeks the first
+    // ENABLED row, so a disabled entry is never the default selection.
+    const highlightValue = ranked.find((item) => !item.action.disabledReason)?.action.id ?? '';
 
     // Seed/correct the highlight to the top row whenever the query or ranking
     // changes (a layout effect so it lands before paint, ahead of cmdk's own
@@ -284,27 +435,45 @@ export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null })
         [paletteCtx, learning, search, close],
     );
 
-    const resetRanking = useCallback(() => {
-        // One global reset via the store action (keeps the empty-state shape in
-        // one place); per-command reset is the menu's job in a later milestone.
-        usePaletteLearningStore.getState().resetAll();
-        close();
-    }, [close]);
+    /** The real, live keycap for a row — or null when it has no binding. */
+    const shortcutFor = useCallback(
+        (action: Action): { label: string; custom: boolean } | null => {
+            const bindingId = SHORTCUT_FOR[action.id];
+            if (!bindingId) return null;
+            const combo = useKeybindingsStore.getState().getBinding(bindingId);
+            if (!combo) return null;
+            return { label: keyComboToString(combo), custom: Boolean(customBindings[bindingId]) };
+        },
+        [customBindings],
+    );
 
     if (!open) return null;
 
     const grouped = groupRanked(ranked);
 
     return createPortal(
-        // ONE centred panel for BOTH modes over a flat ink wash (Raycast-style):
-        // Tab morphs the content in place rather than repositioning into a side
-        // rail, so the AI feels like a natural extension of the same window.
-        // Clicking the scrim closes. (See data-mode rules in CommandBar.css.)
-        <div className="command-bar-overlay" data-mode={mode} onClick={close}>
+        // ONE panel for BOTH modes over the theme scrim (Raycast-style): Tab
+        // morphs the content in place rather than repositioning into a side rail,
+        // so the AI feels like a natural extension of the same window. Clicking
+        // the scrim closes. (See data-mode rules in CommandBar.css.)
+        <div
+            className="command-bar-overlay"
+            data-mode={mode}
+            onClick={close}
+            onKeyDown={onOverlayKeyDown}
+            onPointerDownCapture={() => {
+                if (inputRef.current) inputRef.current.dataset.keyboardFocus = 'false';
+            }}
+        >
             <div
+                ref={containerRef}
                 className="command-bar-container"
                 onClick={(e) => e.stopPropagation()}
                 data-mode={mode}
+                role="dialog"
+                aria-modal="true"
+                aria-label={mode === 'ai' ? 'Ask the agent' : 'Command palette'}
+                tabIndex={-1}
             >
                 {mode === 'ai' ? (
                     <Suspense fallback={null}>
@@ -328,83 +497,122 @@ export function CommandBar({ intent }: { intent?: CommandBarOpenIntent | null })
                         <Command.Input
                             ref={inputRef}
                             className="command-bar-input"
-                            placeholder="Search commands… (Tab to ask AI)"
+                            data-keyboard-focus="false"
+                            placeholder="Search commands…"
                             value={search}
                             onValueChange={setSearch}
                             onKeyDown={(e) => {
                                 if (e.key === 'Escape') {
                                     e.preventDefault();
                                     close();
-                                } else if (e.key === 'Tab') {
+                                } else if (e.key === 'Tab' && !e.shiftKey) {
                                     // Tab is the fast path: if there is text,
                                     // send it immediately; empty Tab just opens chat.
+                                    e.preventDefault();
+                                    enterAiMode(search.trim().length > 0);
+                                } else if (
+                                    e.key === 'Enter' &&
+                                    !hasLocalResults &&
+                                    aiEnabled
+                                ) {
+                                    // Nothing local matched — Enter is the same
+                                    // handoff Tab makes, without a fake result row.
                                     e.preventDefault();
                                     enterAiMode(search.trim().length > 0);
                                 }
                             }}
                         />
                         <Command.List className="command-bar-list">
-                            <Command.Empty className="command-bar-empty">
-                                No results found.
-                            </Command.Empty>
-                            {/*
-                             * Ranked registry rows render FIRST so DOM order
-                             * agrees with our highlight (the AI/Reset items sit
-                             * last and only auto-highlight when there are zero
-                             * local results — see `highlightValue`).
-                             */}
+                            {!hasLocalResults && (
+                                <div className="command-bar-empty" role="status">
+                                    <p className="command-bar-empty-title">
+                                        No command for that
+                                    </p>
+                                    {/* Teach the way forward in BOTH tiers, and
+                                        never point at an agent this platform
+                                        cannot run. */}
+                                    <p className="command-bar-empty-body">
+                                        {aiEnabled ? (
+                                            <>
+                                                Press <Kbd>Tab</Kbd> to ask the agent to build it.
+                                            </>
+                                        ) : (
+                                            <>Try a node name — Speaker, Looper, Effect.</>
+                                        )}
+                                    </p>
+                                </div>
+                            )}
                             {grouped.map(([group, items]) => (
                                 <Command.Group
                                     key={group}
                                     heading={group}
                                     className="command-bar-group"
                                 >
-                                    {items.map((item) => (
-                                        <Command.Item
-                                            key={item.action.id}
-                                            value={item.action.id}
-                                            keywords={[
-                                                item.action.title,
-                                                item.action.group,
-                                                ...(item.action.keywords ?? []),
-                                            ]}
-                                            className="command-bar-item"
-                                            onSelect={() => runAction(item)}
-                                            disabled={Boolean(item.action.disabledReason)}
-                                            title={item.action.disabledReason}
-                                        >
-                                            {item.action.title}
-                                            {item.action.disabledReason && <span className="command-bar-item__hint">{item.action.disabledReason}</span>}
-                                        </Command.Item>
-                                    ))}
+                                    {items.map((item) => {
+                                        const shortcut = shortcutFor(item.action);
+                                        const nodeType = nodeTypeOf(item.action);
+                                        return (
+                                            <Command.Item
+                                                key={item.action.id}
+                                                value={item.action.id}
+                                                keywords={[
+                                                    item.action.title,
+                                                    item.action.group,
+                                                    ...(item.action.keywords ?? []),
+                                                ]}
+                                                className="command-bar-item"
+                                                onSelect={() => runAction(item)}
+                                                disabled={Boolean(item.action.disabledReason)}
+                                                title={item.action.disabledReason}
+                                            >
+                                                <span className="command-bar-item__label">
+                                                    {item.action.title}
+                                                </span>
+                                                {item.action.disabledReason && (
+                                                    <span className="command-bar-item__hint">
+                                                        {item.action.disabledReason}
+                                                    </span>
+                                                )}
+                                                {nodeType && (
+                                                    <Chip className="command-bar-item__type">
+                                                        {nodeType}
+                                                    </Chip>
+                                                )}
+                                                {shortcut && (
+                                                    <Kbd
+                                                        className="command-bar-item__key"
+                                                        custom={shortcut.custom}
+                                                    >
+                                                        {shortcut.label}
+                                                    </Kbd>
+                                                )}
+                                            </Command.Item>
+                                        );
+                                    })}
                                 </Command.Group>
                             ))}
-                            <Command.Group heading="AI" className="command-bar-group">
-                                <Command.Item
-                                    value={AI_ITEM_VALUE}
-                                    keywords={['ai', 'ask', 'agent', search]}
-                                    className="command-bar-item command-bar-item-ai"
-                                    onSelect={() => enterAiMode(search.trim().length > 0)}
-                                    disabled={!aiEnabled}
-                                >
-                                    {search.trim()
-                                        ? `Ask AI: "${search.trim()}"`
-                                        : 'Ask AI to build something…'}
-                                </Command.Item>
-                            </Command.Group>
-                            {hasLearned && (
-                                <Command.Group heading="App" className="command-bar-group">
-                                    <Command.Item
-                                        value={RESET_ITEM_VALUE}
-                                        keywords={['reset', 'ranking', 'frecency', 'clear']}
-                                        className="command-bar-item"
-                                        onSelect={resetRanking}
-                                    >
-                                        Reset Ranking
-                                    </Command.Item>
-                                </Command.Group>
-                            )}
                         </Command.List>
+                        <div className="command-bar-footer">
+                            <span className="command-bar-footer-hints">
+                                <span><Kbd>↑↓</Kbd> navigate</span>
+                                <span><Kbd>↵</Kbd> run</span>
+                                <span><Kbd>Esc</Kbd> close</span>
+                            </span>
+                            {aiEnabled ? (
+                                <button
+                                    type="button"
+                                    className="command-bar-ask"
+                                    onClick={() => enterAiMode(search.trim().length > 0)}
+                                >
+                                    <span>Ask the agent</span>
+                                    <Kbd>Tab</Kbd>
+                                </button>
+                            ) : (
+                                <span className="command-bar-ask-off">
+                                    The agent runs in the desktop app
+                                </span>
+                            )}
+                        </div>
                     </Command>
                 )}
             </div>

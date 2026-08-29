@@ -19,7 +19,15 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { Button } from '@openjammer/oj-ui';
+import {
+    Button,
+    Callout,
+    Chip,
+    Kbd,
+    List,
+    ListRow,
+    PanelHeader,
+} from '@openjammer/oj-ui';
 import { getAgentBackend } from '../../ai';
 import { getExecutor } from '../../audio/executor';
 import {
@@ -42,8 +50,9 @@ import { useGraphStore } from '../../store/graphStore';
 import { useAuthStore } from '../../auth/authStore';
 import { useSandboxStore } from '../../store/sandboxStore';
 import { useAiLearningStore } from '../../store/aiLearningStore';
+import { openExternal } from '../../ai/tauri';
 import { AuthChooser } from './AuthChooser';
-import { ChatMessage } from './ChatMessage';
+import { ChatMessage, StreamingDots } from './ChatMessage';
 import { SessionPicker } from './SessionPicker';
 import { ModelPicker } from './ModelPicker';
 
@@ -71,6 +80,11 @@ interface AiPanelProps {
 /** A short, friendly stem of a session id for the header chip. */
 function shortId(id: string): string {
     return id.length > 10 ? `${id.slice(0, 8)}…` : id;
+}
+
+/** A readable stem of a model id for the header chip (ids get long). */
+function shortModel(id: string): string {
+    return id.length > 22 ? `${id.slice(0, 20)}…` : id;
 }
 
 function slashParts(text: string): { query: string; args: string } {
@@ -228,6 +242,10 @@ export function AiPanel({
     // WHO PAYS must be configured before the composer is usable.
     const configured = useAuthStore((s) => s.configured);
     const refreshStatus = useAuthStore((s) => s.refreshStatus);
+    // The live model, shown as a header chip that IS the way to change it — the
+    // state is displayed exactly once, at its point of control.
+    const activeModelId = useAuthStore((s) => s.modelId);
+    const modelLabel = activeModelId ? shortModel(activeModelId) : 'default model';
     const [authDismissed, setAuthDismissed] = useState(false);
     const [localForceAuth, setLocalForceAuth] = useState(false);
     const showAuth = available && ((forceAuth || localForceAuth) ? !authDismissed : !configured);
@@ -591,6 +609,23 @@ export function AiPanel({
         else if (sb.requestYolo()) setYoloConfirm(true);
     }, []);
 
+    /**
+     * The Escape CASCADE's last rung. Every sub-view (composer, slash menu,
+     * pickers) handles Escape first and marks the event handled; anything that
+     * reaches the panel root means "leave the agent", which returns to the
+     * palette — and a second Escape there closes the bar. Without this, Escape
+     * was dead wherever the panel had no text field to hang it on (the browser
+     * tier's desktop-only state, most obviously).
+     */
+    const onEscapeToSearch = useCallback(
+        (e: ReactKeyboardEvent<HTMLDivElement>) => {
+            if (e.key !== 'Escape' || e.defaultPrevented) return;
+            e.preventDefault();
+            onBack();
+        },
+        [onBack],
+    );
+
     const onAiKeyDownCapture = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
         if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'y') {
             e.preventDefault();
@@ -603,7 +638,7 @@ export function AiPanel({
 
     if (!available) {
         return (
-            <div className="command-bar-ai" data-available="false">
+            <div className="command-bar-ai" data-available="false" onKeyDown={onEscapeToSearch}>
                 <DesktopOnly onBack={onBack} />
             </div>
         );
@@ -611,7 +646,7 @@ export function AiPanel({
 
     if (showAuth) {
         return (
-            <div className="command-bar-ai">
+            <div className="command-bar-ai" onKeyDown={onEscapeToSearch}>
                 <AuthChooser
                     onConfigured={() => {
                         setAuthDismissed(true);
@@ -631,7 +666,7 @@ export function AiPanel({
 
     if (view === 'resume') {
         return (
-            <div className="command-bar-ai">
+            <div className="command-bar-ai" onKeyDown={(e) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); setView('chat'); } }}>
                 <SessionPicker onResumed={() => setView('chat')} onCancel={() => setView('chat')} />
             </div>
         );
@@ -639,7 +674,7 @@ export function AiPanel({
 
     if (view === 'models') {
         return (
-            <div className="command-bar-ai">
+            <div className="command-bar-ai" onKeyDown={(e) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); setView('chat'); } }}>
                 <ModelPicker
                     runtime={getPiRuntime}
                     initialQuery={modelQuery}
@@ -655,7 +690,7 @@ export function AiPanel({
 
     if (view === 'rewind') {
         return (
-            <div className="command-bar-ai">
+            <div className="command-bar-ai" onKeyDown={(e) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); setView('chat'); } }}>
                 <RewindPicker
                     messages={messages}
                     onCancel={() => setView('chat')}
@@ -674,37 +709,46 @@ export function AiPanel({
     }
 
     return (
-        <div className="command-bar-ai" onKeyDownCapture={onAiKeyDownCapture}>
-            <div className="command-bar-ai-header">
-                <Button
-                    variant="ghost"
-                    onClick={onBack}
-                    aria-label="Back to search"
-                >
-                    ← Search
-                </Button>
-                <div className="command-bar-ai-header-right">
-                    <span className="command-bar-ai-session" title={sessionId ?? 'New chat'}>
+        <div className="command-bar-ai" onKeyDownCapture={onAiKeyDownCapture} onKeyDown={onEscapeToSearch}>
+            <PanelHeader
+                className="command-bar-ai-header"
+                title="Ask the agent"
+                onBack={onBack}
+                backLabel="Back to search"
+                badge={
+                    <Chip className="command-bar-ai-chip" title={sessionId ?? 'New chat'}>
                         {sessionId ? shortId(sessionId) : 'New chat'}
-                    </span>
-                    {messages.some((m) => m.role === 'user') && (
+                    </Chip>
+                }
+                actions={
+                    <>
+                        <button
+                            type="button"
+                            className="command-bar-ai-chipbtn"
+                            onClick={() => setView('models')}
+                            title="Choose the model ( /model )"
+                        >
+                            <Chip className="command-bar-ai-chip">{modelLabel}</Chip>
+                        </button>
+                        {messages.some((m) => m.role === 'user') && (
+                            <Button
+                                variant="ghost"
+                                onClick={() => setView('rewind')}
+                                title={`Rewind & edit an earlier prompt (${MOD}+↑)`}
+                            >
+                                Rewind
+                            </Button>
+                        )}
                         <Button
                             variant="ghost"
-                            onClick={() => setView('rewind')}
-                            title={`Rewind & edit an earlier prompt (${MOD}+↑)`}
+                            onClick={() => void newSession()}
+                            title="Start a new session ( /new )"
                         >
-                            ↺ Rewind
+                            New
                         </Button>
-                    )}
-                    <Button
-                        variant="ghost"
-                        onClick={() => void newSession()}
-                        title="Start a new session ( /new )"
-                    >
-                        + New
-                    </Button>
-                </div>
-            </div>
+                    </>
+                }
+            />
 
             <div className="command-bar-ai-transcript" ref={transcriptRef} onScroll={onTranscriptScroll}>
                 {runtimeStatus && (
@@ -722,7 +766,7 @@ export function AiPanel({
                         <p className="command-bar-ai-welcome-title">{welcome.greeting}</p>
                         <p className="command-bar-ai-welcome-body">
                             {welcome.body} everything i touch is one{' '}
-                            <kbd className="command-bar-kbd">{MOD}+Z</kbd> away.
+                            <Kbd>{MOD}+Z</Kbd> away.
                         </p>
                         <div className="command-bar-ai-welcome-chips">
                             {starters.map((chip) => (
@@ -797,7 +841,12 @@ export function AiPanel({
                     aria-controls={slashActive ? 'command-bar-ai-slash-menu' : undefined}
                 />
                 {slashActive && (
-                    <div className="command-bar-ai-slash" id="command-bar-ai-slash-menu" role="listbox">
+                    <List
+                        className="command-bar-ai-slash"
+                        id="command-bar-ai-slash-menu"
+                        role="listbox"
+                        aria-label="Slash commands"
+                    >
                         <div className="command-bar-ai-slash-head">
                             <span>Slash commands</span>
                             {!commandsLoaded && dynamicCommands.length === 0 && (
@@ -808,35 +857,45 @@ export function AiPanel({
                             <div className="command-bar-ai-slash-empty">No command matches /{slashQuery}</div>
                         ) : (
                             slashCommands.map((command, index) => (
-                                <button
-                                    type="button"
+                                <ListRow
                                     key={`${command.source}:${command.name}`}
                                     className="command-bar-ai-slash-item"
-                                    data-selected={index === slashIndex}
+                                    selected={index === slashIndex}
                                     role="option"
-                                    aria-selected={index === slashIndex}
                                     onMouseEnter={() => setSlashIndex(index)}
                                     onClick={() => void executeSlashCommand(command, slashArgs)}
+                                    actions={
+                                        <span className="command-bar-ai-slash-source">
+                                            {sourceLabel(command.source)}
+                                        </span>
+                                    }
                                 >
                                     <span className="command-bar-ai-slash-main">
                                         <code>/{command.name}</code>
                                         {command.argsHint && <span>{command.argsHint}</span>}
                                     </span>
                                     <span className="command-bar-ai-slash-desc">{command.description}</span>
-                                    <span className="command-bar-ai-slash-source">{sourceLabel(command.source)}</span>
-                                </button>
+                                </ListRow>
                             ))
                         )}
-                    </div>
+                    </List>
                 )}
                 <div className="command-bar-ai-composer-row">
                     <span className="command-bar-ai-hint">
-                        {running ? 'Working…' : (
+                        {running ? (
                             <>
-                                <kbd className="command-bar-kbd">↵</kbd> send ·{' '}
-                                <kbd className="command-bar-kbd">⇧↵</kbd> newline
+                                Working
+                                <StreamingDots />
+                            </>
+                        ) : (
+                            <>
+                                <Kbd>↵</Kbd> send
+                                <span className="command-bar-ai-hint-sep">·</span>
+                                <Kbd>⇧↵</Kbd> newline
                             </>
                         )}
+                        <span className="command-bar-ai-hint-sep">·</span>
+                        <Kbd>{MOD}+Z</Kbd> undoes anything
                     </span>
                     <Button
                         variant="primary"
@@ -939,27 +998,36 @@ function RewindPicker({
 
     return (
         <>
-            <div className="command-bar-ai-header">
-                <Button
-                    variant="ghost"
-                    onClick={onCancel}
-                    aria-label="Back to chat"
-                >
-                    ← Chat
-                </Button>
-                <span className="command-bar-ai-badge">Rewind &amp; edit</span>
-            </div>
+            <PanelHeader
+                className="command-bar-ai-header"
+                title="Rewind & edit"
+                onBack={onCancel}
+                backLabel="Back to chat"
+                actions={
+                    <span className="command-bar-ai-hint">
+                        <Kbd>↑↓</Kbd> choose
+                        <span className="command-bar-ai-hint-sep">·</span>
+                        <Kbd>↵</Kbd> edit
+                        <span className="command-bar-ai-hint-sep">·</span>
+                        <Kbd>Esc</Kbd> back
+                    </span>
+                }
+            />
             <div className="command-bar-models-help">
-                <span>Pick a prompt to edit and continue from. Your canvas stays put — {MOD}+Z reverts what the agent built.</span>
-                <span>↑↓ choose · Enter edit · Esc back</span>
+                <span>
+                    Pick a prompt to edit and continue from. Your canvas stays put — {MOD}+Z
+                    reverts what the agent built.
+                </span>
             </div>
             {turns.length === 0 ? (
                 <div className="command-bar-ai-welcome">
                     <p className="command-bar-ai-welcome-body">No earlier prompts to rewind to yet.</p>
                 </div>
             ) : (
+                /* oj-ui `List`'s layout on a real element: the picker owns focus
+                   for its arrow keys, and oj-ui's List exposes no ref. */
                 <div
-                    className="command-bar-rewind-list"
+                    className="oj-list command-bar-rewind-list"
                     role="listbox"
                     tabIndex={0}
                     ref={listRef}
@@ -981,18 +1049,16 @@ function RewindPicker({
                     }}
                 >
                     {turns.map((turn, i) => (
-                        <button
+                        <ListRow
                             key={turn.index}
-                            type="button"
                             className="command-bar-rewind-row"
-                            data-selected={i === sel}
+                            selected={i === sel}
                             role="option"
-                            aria-selected={i === sel}
                             onMouseEnter={() => setSel(i)}
                             onClick={() => onPick(turn.index)}
                         >
                             {turn.text}
-                        </button>
+                        </ListRow>
                     ))}
                 </div>
             )}
@@ -1034,18 +1100,35 @@ function YoloConfirm({ onCancel, onConfirm }: { onCancel: () => void; onConfirm:
     );
 }
 
-/** The browser fallback: AI is disabled, with a clear pointer to the desktop app. */
+/**
+ * The browser fallback. There is no dead input here and no half-live chat: the
+ * panel says plainly where the agent lives, points at the download, and hands
+ * the player straight back to the palette, which works everywhere.
+ */
 function DesktopOnly({ onBack }: { onBack: () => void }) {
     return (
-        <div className="command-bar-ai-desktop-only">
-            <p className="command-bar-ai-desktop-title">AI requires the desktop app</p>
-            <p className="command-bar-ai-desktop-body">
-                The AI agent runs locally in the OpenJammer desktop app, which drives Pi
-                with your own provider key. It isn’t available in the browser.
-            </p>
-            <Button variant="primary" onClick={onBack}>
-                Back to search
-            </Button>
-        </div>
+        <>
+            <PanelHeader
+                className="command-bar-ai-header"
+                title="Ask the agent"
+                onBack={onBack}
+                backLabel="Back to search"
+            />
+            <div className="command-bar-ai-desktop-only">
+                <Callout variant="info" title="AI requires the desktop app">
+                    The agent runs locally in the OpenJammer desktop app, which drives Pi with
+                    your own provider key — nothing about your session leaves your machine.
+                    The browser tier has no place to run it.
+                </Callout>
+                <div className="command-bar-ai-desktop-actions">
+                    <Button variant="primary" onClick={() => void openExternal('/download')}>
+                        Get the desktop app
+                    </Button>
+                    <Button variant="ghost" onClick={onBack}>
+                        Back to search
+                    </Button>
+                </div>
+            </div>
+        </>
     );
 }

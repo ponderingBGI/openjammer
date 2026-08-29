@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from '@openjammer/oj-ui';
+import { Chip, Kbd, List, ListRow, PanelHeader, Spinner } from '@openjammer/oj-ui';
 import { providerTitle } from '../../auth/providers';
 import { useAuthStore } from '../../auth/authStore';
 import {
@@ -226,21 +226,25 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
 
     return (
         <div className="command-bar-models">
-            <div className="command-bar-ai-header">
-                <Button
-                    variant="ghost"
-                    className="command-bar-ai-back"
-                    onClick={onCancel}
-                    aria-label="Back to chat"
-                >
-                    ← Chat
-                </Button>
-                <span className="command-bar-ai-badge">Choose model</span>
-            </div>
+            <PanelHeader
+                className="command-bar-ai-header"
+                title="Choose model"
+                onBack={onCancel}
+                backLabel="Back to chat"
+                actions={
+                    <span className="command-bar-ai-hint">
+                        <Kbd>↑↓</Kbd> choose
+                        <span className="command-bar-ai-hint-sep">·</span>
+                        <Kbd>↵</Kbd> switch
+                        <span className="command-bar-ai-hint-sep">·</span>
+                        <Kbd>Esc</Kbd> back
+                    </span>
+                }
+            />
 
             <div className="command-bar-models-help">
                 <span>Showing configured providers only: {configuredLabel}</span>
-                <span>Type a custom model id · ↑↓ choose · Enter switch · Esc back</span>
+                <span>Type a model id to add a custom one</span>
             </div>
 
             <input
@@ -271,9 +275,12 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
                 }}
             />
 
-            <div className="command-bar-models-list" role="listbox" aria-label="Available models">
+            <List className="command-bar-models-list" role="listbox" aria-label="Available models">
                 {loading && (
-                    <div className="command-bar-models-empty">Loading configured provider models…</div>
+                    <div className="command-bar-models-loading">
+                        <Spinner />
+                        Loading configured provider models…
+                    </div>
                 )}
                 {error && <div className="command-bar-ai-error">{error}</div>}
                 {!loading && !error && filtered.length === 0 && (
@@ -288,34 +295,33 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
                     const isSelected = index === selectedIdx;
                     const isSelecting = selectingKey === modelKey(model);
                     return (
-                        <button
+                        <ListRow
                             key={`${model.manual ? 'manual:' : ''}${modelKey(model)}`}
-                            type="button"
-                            className="command-bar-model-row"
-                            data-selected={isSelected}
-                            data-current={isCurrent}
-                            role="option"
-                            aria-selected={isSelected}
+                            selected={isSelected}
+                            current={isCurrent}
                             disabled={!!selectingKey}
+                            role="option"
                             onMouseEnter={() => setSelectedKey(rowKey(model))}
                             onClick={() => void choose(model)}
+                            actions={
+                                <span className="command-bar-model-meta">
+                                    <Chip>{providerTitle(model.provider)}</Chip>
+                                    {model.manual && <Chip>add custom</Chip>}
+                                    {model.instant && !model.manual && <Chip>session</Chip>}
+                                    {modelSupportsReasoning(model) && <Chip>reasoning</Chip>}
+                                    {isCurrent && <Chip tone="success">current</Chip>}
+                                    {isSelecting && <Chip>switching…</Chip>}
+                                </span>
+                            }
                         >
                             <span className="command-bar-model-main">
                                 <span className="command-bar-model-name">{modelLabel(model)}</span>
                                 <code>{model.id}</code>
                             </span>
-                            <span className="command-bar-model-meta">
-                                <span>{providerTitle(model.provider)}</span>
-                                {model.manual && <span>add custom</span>}
-                                {model.instant && !model.manual && <span>session</span>}
-                                {modelSupportsReasoning(model) && <span>reasoning</span>}
-                                {isCurrent && <strong>current ✓</strong>}
-                                {isSelecting && <span>switching…</span>}
-                            </span>
-                        </button>
+                        </ListRow>
                     );
                 })}
-            </div>
+            </List>
         </div>
     );
 }

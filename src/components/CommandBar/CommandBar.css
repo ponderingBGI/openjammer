@@ -1,5 +1,17 @@
-/* CommandBar (U19) — Ctrl/Cmd+K palette. Reuses the repo's design tokens and
-   overlay conventions (cf. .minimal-settings-overlay in SchematicNodes.css). */
+/*
+ * CommandBar — the Ctrl/Cmd+K palette and its AI panel.
+ *
+ * The palette is the surface people screenshot, so it is built to the New DNA
+ * menu physics exactly: a `--bg-node` panel with a 12px radius, one hairline,
+ * the overlay shadow and 6px of padding (the handoff's `.nj-menu`), a search
+ * field with `.nj-input`'s construction, and result rows with oj-ui ListRow
+ * behaviour — colour-only feedback, nothing that reflows under the pointer.
+ *
+ * Motion follows D6: 120ms on colour, a 260ms spring on transform, and nothing
+ * else. Every animation is inert under `prefers-reduced-motion`.
+ */
+
+/* ── Shell ────────────────────────────────────────────────────────────────── */
 
 .command-bar-overlay {
     position: fixed;
@@ -7,232 +19,405 @@
     display: flex;
     justify-content: center;
     align-items: flex-start;
-    padding-top: 14vh;
-    z-index: 3000; /* above settings (2000) — palette is the topmost surface */
-}
-
-/* Both modes share the theme scrim; Tab swaps content without moving the panel. */
-.command-bar-overlay[data-mode='search'],
-.command-bar-overlay[data-mode='ai'] {
+    padding: 12vh var(--space-lg) var(--space-lg);
+    /* The palette is the topmost app surface: it must clear settings
+       (--z-modal), the shell chrome (--z-panel) and any docked help panel. */
+    z-index: var(--z-top);
     background: var(--overlay-scrim);
 }
 
 /* ONE width for BOTH modes — there is no resize to animate, which is exactly why
    it reads as the same window: Tab only swaps what's inside. */
 .command-bar-container {
-    width: 620px;
-    max-width: calc(100vw - var(--space-xl));
+    width: 640px;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 6px;
     background: var(--bg-node);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-xl);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
     box-shadow: var(--shadow-overlay);
     color: var(--text-primary);
     overflow: hidden;
+    /* Transform on the spring, opacity on the fast curve — never layout. */
+    animation: command-bar-rise var(--motion-spring),
+        command-bar-fade 120ms cubic-bezier(.2, .8, .3, 1);
 }
 
-/* AI mode just gives the SAME panel a fixed height so the conversation has room
-   to scroll; the width (and thus the place on screen) never moves. */
+@keyframes command-bar-rise {
+    from {
+        transform: translateY(-10px) scale(0.985);
+    }
+
+    to {
+        transform: none;
+    }
+}
+
+@keyframes command-bar-fade {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+/* AI mode gives the SAME panel a fixed height so the conversation has room to
+   scroll; the width (and thus the place on screen) never moves. Its own header,
+   composer and footer span the full panel, so the menu padding steps aside. */
 .command-bar-container[data-mode='ai'] {
     height: min(70vh, 640px);
+    padding: 0;
     display: flex;
     flex-direction: column;
 }
 
 .command-bar-container[data-mode='ai'] .command-bar-ai {
     flex: 1;
-    min-height: 0; /* let the transcript scroll instead of growing the panel */
+    min-height: 0;
     max-height: none;
+}
+
+/* …except the states that are a short step rather than a conversation (the
+   browser tier's honest desktop-only message, the provider chooser). They hug
+   their content instead of reserving a half-screen of empty box. */
+.command-bar-container[data-mode='ai']:has(.command-bar-ai[data-available='false']),
+.command-bar-container[data-mode='ai']:has(.command-bar-auth) {
+    height: auto;
 }
 
 /* The in-place Tab morph is a content CROSS-FADE only (opacity — no layout
    animation), so the swap feels smooth without any width/height thrash. */
 .command-bar-container > * {
-    animation: command-bar-fade-in 160ms ease-out;
+    animation: command-bar-fade 120ms cubic-bezier(.2, .8, .3, 1);
 }
 
-@keyframes command-bar-fade-in {
-    from {
-        opacity: 0;
-    }
-    to {
-        opacity: 1;
-    }
-}
+/* ── Search field (`.nj-input`) ───────────────────────────────────────────── */
 
 .command-bar-input {
     width: 100%;
     box-sizing: border-box;
-    padding: var(--space-lg);
-    border: none;
-    border-bottom: 1px solid var(--border-strong);
-    background: transparent;
+    margin-bottom: 6px;
+    padding: 9px 12px;
+    background: var(--bg-node);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
     color: var(--text-primary);
     font-family: var(--font-sans);
-    font-size: var(--text-lg);
+    font-size: var(--text-md);
+    font-weight: 500;
+    line-height: 1.3;
     outline: none;
+    transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
 }
 
 .command-bar-input::placeholder {
     color: var(--text-muted);
 }
 
+/* Programmatic autofocus keeps the accent border (the field still reads as
+   focused) without permanently lighting the 3px ring. The ring returns after
+   keyboard interaction, through the same `:focus-visible` contract as the
+   rest of the system. */
+.command-bar-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: none;
+}
+
+.command-bar-input:focus-visible {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.command-bar-input:focus-visible[data-keyboard-focus='true'] {
+    box-shadow: var(--focus-ring);
+}
+
+/* ── Results ──────────────────────────────────────────────────────────────── */
+
 .command-bar-list {
-    max-height: 50vh;
+    max-height: min(52vh, 420px);
     overflow-y: auto;
-    padding: var(--space-xs) 0;
+    overscroll-behavior: contain;
 }
 
-.command-bar-empty {
-    padding: var(--space-lg);
-    text-align: center;
-    color: var(--text-muted);
-    font-size: var(--text-sm);
+/* A hairline between groups, inset like the handoff's `.nj-menu-sep`. */
+.command-bar-group + .command-bar-group {
+    position: relative;
+    margin-top: 5px;
+    padding-top: 5px;
 }
 
-.command-bar-group {
-    padding: var(--space-xs) 0;
+.command-bar-group + .command-bar-group::before {
+    content: '';
+    position: absolute;
+    inset: 0 8px auto;
+    height: 1px;
+    background: var(--border-subtle);
 }
 
 .command-bar-group [cmdk-group-heading] {
-    padding: var(--space-xs) var(--space-lg);
-    font-size: var(--text-xs);
-    font-weight: 700;
+    padding: 8px 10px 4px;
+    font-family: var(--font-sans);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
     color: var(--text-muted);
 }
 
 .command-bar-item {
     display: flex;
-    justify-content: space-between;
-    gap: var(--space-md);
-    padding: var(--space-sm) var(--space-lg);
-    font-size: var(--text-sm);
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
+    font-weight: 500;
+    line-height: 1.2;
     color: var(--text-primary);
     cursor: pointer;
     user-select: none;
+    /* Selection changes paint only — no row growth or layout shift. */
+    transition: background var(--motion-fast), color var(--motion-fast),
+        box-shadow var(--motion-fast);
 }
-.command-bar-item[data-disabled='true'] { color: var(--text-muted); cursor: not-allowed; }
-.command-bar-item__hint { font-size: var(--text-xs); font-weight: 400; }
 
+.command-bar-item__label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.command-bar-item:hover {
+    background: var(--bg-tertiary);
+}
+
+/* "Which row does Enter run" must survive glare and a colour deficiency, so the
+   selection is carried by THREE things, not one hue: a deeper inset fill, the
+   accent ink, and the `--shadow-raised` lift SegmentedControl uses for the same
+   "the selected one rises" physics. No side stripe — the row's edge stays quiet.
+
+   The 7% is measured, not chosen. Against real painted pixels (both themes) the
+   fill must clear 1.3:1 against a rest row AND keep `--accent-ink` above AA 4.5
+   on top of it, and those two windows only overlap at one integer step:
+
+     light  4-7%   (8% drops the label to 4.47)   → 7% = fill 1.398:1, ink 4.599:1
+     dark   7-11%  (6% drops the fill  to 1.289)  → 7% = fill 1.327:1, ink 5.033:1
+
+   Re-measure with plans/redesign-new-dna/.scratch/w4-p5b/probe2.mjs if the
+   accent or surface tokens ever move. */
 .command-bar-item[data-selected='true'] {
-    background: color-mix(in srgb, var(--accent-primary) 14%, transparent);
+    background: color-mix(in oklab, var(--text-primary) 7%, var(--bg-tertiary));
+    color: var(--accent-ink);
+    box-shadow: var(--shadow-raised);
 }
 
-.command-bar-item-ai {
+.command-bar-item[data-disabled='true'] {
+    color: var(--text-muted);
+    cursor: not-allowed;
+}
+
+/* A disabled row is never the thing Enter runs, so it takes neither fill — the
+   hover fill was already refused for exactly that reason. It is also the only
+   row that paints `--text-muted` (its reason), which the deeper fill would
+   push under AA. */
+.command-bar-item[data-disabled='true']:hover,
+.command-bar-item[data-disabled='true'][data-selected='true'] {
+    background: transparent;
+    color: var(--text-muted);
+    box-shadow: none;
+}
+
+.command-bar-item__hint {
+    flex-shrink: 0;
+    font-size: var(--text-xs);
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+/* The node type a row spawns — an exact identifier, so mono (Mono-Means-Exact). */
+.command-bar-item__type {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    font-weight: 500;
+}
+
+.command-bar-item__key {
+    flex-shrink: 0;
+}
+
+/* On a filled row the chip/keycap step onto the node surface so they keep their
+   edge instead of dissolving into the selection. */
+.command-bar-item:hover .command-bar-item__type,
+.command-bar-item[data-selected='true'] .command-bar-item__type,
+.command-bar-item:hover .oj-kbd,
+.command-bar-item[data-selected='true'] .oj-kbd {
+    background: var(--bg-node);
+}
+
+/* ── Empty state ──────────────────────────────────────────────────────────── */
+
+.command-bar-empty {
+    padding: var(--space-lg) var(--space-md) var(--space-md);
+    text-align: center;
+}
+
+.command-bar-empty-title {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-md);
     font-weight: 600;
+    color: var(--text-primary);
 }
 
+.command-bar-empty-body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin: var(--space-xs) 0 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    color: var(--text-muted);
+}
 
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+
+.command-bar-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+    margin-top: 5px;
+    padding: 8px 10px 4px;
+    border-top: 1px solid var(--border-subtle);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+.command-bar-footer-hints {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    min-width: 0;
+    overflow: hidden;
+}
+
+.command-bar-footer-hints > span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+
+/* The agent handoff lives HERE, not among the results: it is a mode change, not
+   a command, and as a row it used to rank into (and steal) the selection. */
+.command-bar-ask {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background var(--motion-fast), color var(--motion-fast);
+}
+
+.command-bar-ask:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.command-bar-ask:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+.command-bar-ask-off {
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* ══ AI panel ══════════════════════════════════════════════════════════════ */
 
 .command-bar-ai {
     position: relative; /* anchor for the YOLO confirm bottom-sheet */
     display: flex;
     flex-direction: column;
     min-height: 0;
+    height: 100%;
 }
 
+/* The panel header spans the full panel width (no menu padding in AI mode). */
 .command-bar-ai-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-lg);
-    border-bottom: 1px solid var(--border-strong);
+    flex-shrink: 0;
+    padding: var(--space-sm) var(--space-md);
 }
 
-.command-bar-ai-back {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    font-family: var(--font-sans);
-    font-size: var(--text-sm);
-    cursor: pointer;
-    padding: 0;
+.command-bar-ai-header .oj-panel-header__actions {
+    gap: 6px;
 }
 
-.command-bar-ai-back:hover {
-    color: var(--text-primary);
+/* The session / model chips in the header. The model chip is a control, so it
+   is a real button wearing a chip — no fake affordances. */
+.command-bar-ai-chip {
+    max-width: 180px;
 }
 
-.command-bar-ai-header-right {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    min-width: 0;
-}
-
-.command-bar-ai-badge {
-    font-size: var(--text-xs);
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--text-muted);
-    border: 1px solid var(--text-muted);
-    border-radius: var(--radius-sm);
-    padding: 1px var(--space-xs);
-}
-
-/* The active session id — exact, so mono; quiet, so muted on a sand pill. */
-.command-bar-ai-session {
+.command-bar-ai-chip .oj-chip__label {
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-secondary);
-    background: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-    padding: 2px 6px;
-    max-width: 140px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-weight: 500;
 }
 
-
-/* Rewind picker: prior prompts, newest first, one per row. */
-.command-bar-rewind-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-height: 0;
-    max-height: 360px;
-    overflow-y: auto;
-    padding: 0 var(--space-lg) var(--space-md);
-}
-
-.command-bar-rewind-list:focus-visible {
-    outline: none;
-}
-
-.command-bar-rewind-row {
-    width: 100%;
-    padding: var(--space-sm);
-    border: 1px solid transparent;
-    border-radius: var(--radius-md);
-    background: transparent;
-    color: var(--text-primary);
-    font-family: var(--font-sans);
-    font-size: var(--text-md);
+button.command-bar-ai-chipbtn {
+    padding: 0;
+    border: 0;
+    background: none;
     cursor: pointer;
-    text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    border-radius: var(--radius-pill);
+    transition: transform var(--motion-spring);
 }
 
-.command-bar-rewind-row[data-selected='true'],
-.command-bar-rewind-row:hover {
-    border-color: color-mix(in srgb, var(--accent-primary) 35%, transparent);
-    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+button.command-bar-ai-chipbtn:active {
+    transform: scale(var(--press-scale-btn));
 }
 
-/* The conversation: turns separated by generous rhythm, auto-stick to bottom. */
+button.command-bar-ai-chipbtn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+button.command-bar-ai-chipbtn:hover .oj-chip {
+    border-color: var(--border-strong);
+    color: var(--text-primary);
+}
+
+/* ── Transcript ───────────────────────────────────────────────────────────── */
+
 .command-bar-ai-transcript {
     flex: 1;
     overflow-y: auto;
-    padding: var(--space-md) var(--space-lg);
+    overscroll-behavior: contain;
+    padding: var(--space-md);
     display: flex;
     flex-direction: column;
-    gap: var(--space-lg);
+    gap: var(--space-md);
 }
 
 .command-bar-ai-welcome {
@@ -243,6 +428,7 @@
     margin: 0 0 var(--space-xs);
     font-family: var(--font-sans);
     font-size: var(--text-lg);
+    font-weight: 600;
     color: var(--text-primary);
 }
 
@@ -257,7 +443,7 @@
 .command-bar-ai-welcome-body code {
     font-family: var(--font-mono);
     font-size: 0.9em;
-    background: color-mix(in srgb, var(--text-primary) 8%, transparent);
+    background: var(--bg-tertiary);
     padding: 1px 4px;
     border-radius: var(--radius-sm);
 }
@@ -270,40 +456,15 @@
     margin-top: var(--space-md);
 }
 
-.command-bar-ai-welcome-chip {
-    font-family: var(--font-sans);
-    font-size: var(--text-sm);
-    padding: 2px var(--space-md);
-    border: 1px solid var(--border-strong);
+button.command-bar-ai-welcome-chip {
+    padding: 6px 12px;
     border-radius: var(--radius-pill);
-    background: var(--bg-node);
-    color: var(--text-primary);
-    cursor: pointer;
-    transition: transform var(--motion-fast), box-shadow var(--motion-fast);
+    font-size: var(--text-sm);
+    font-weight: 500;
 }
 
-.command-bar-ai-welcome-chip:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-overlay);
-}
+/* ── One turn ─────────────────────────────────────────────────────────────── */
 
-.command-bar-ai-welcome-chip:focus-visible {
-    outline: 1px solid var(--accent-primary);
-    outline-offset: 2px;
-}
-
-.command-bar-ai-welcome-chip:disabled {
-    opacity: 0.5;
-    cursor: default;
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .command-bar-ai-welcome-chip:hover {
-        transform: none;
-    }
-}
-
-/* One turn. */
 .command-bar-msg {
     display: flex;
     flex-direction: column;
@@ -313,17 +474,19 @@
     align-items: flex-end;
 }
 
-
+/* The player's own words sit on the panel surface behind a hairline; the agent
+   answers on the recessed tertiary card. Two cards, one grammar, no avatars. */
 .command-bar-msg-user-text {
     margin: 0;
     max-width: 85%;
-    padding: var(--space-xs) var(--space-md);
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-lg, 14px);
+    padding: 8px 12px;
+    background: var(--bg-node);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
     font-family: var(--font-sans);
-    font-size: var(--text-lg);
-    line-height: 1.3;
+    font-size: var(--text-md);
+    font-weight: 500;
+    line-height: 1.45;
     color: var(--text-primary);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -332,32 +495,63 @@
 .command-bar-msg-assistant {
     align-items: stretch;
     gap: var(--space-sm);
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--bg-tertiary);
+}
+
+.command-bar-msg-assistant[data-errored='true'] {
+    box-shadow: inset 2px 0 0 var(--danger-ink);
 }
 
 .command-bar-msg-thinking {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
     margin: 0;
     color: var(--text-muted);
-    font-style: italic;
     font-family: var(--font-sans);
     font-size: var(--text-sm);
 }
 
-/* The streaming caret — a quiet blink at the tail of the assistant's prose. */
-.command-bar-caret {
-    align-self: flex-start;
-    width: 7px;
-    height: 1.05em;
-    background: var(--text-muted);
-    animation: command-bar-blink 1s steps(2, start) infinite;
+/* The streaming indicator — three mono-scale dots pulsing at the tail of the
+   answer. Motion is the whole signal, so it holds still under reduced motion. */
+.command-bar-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
 }
 
-@keyframes command-bar-blink {
-    to {
-        visibility: hidden;
+.command-bar-dots i {
+    width: 4px;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--text-muted);
+    opacity: 0.35;
+    animation: command-bar-dot 900ms ease-in-out infinite;
+}
+
+.command-bar-dots i:nth-child(2) {
+    animation-delay: 150ms;
+}
+
+.command-bar-dots i:nth-child(3) {
+    animation-delay: 300ms;
+}
+
+@keyframes command-bar-dot {
+    0%,
+    100% {
+        opacity: 0.25;
+    }
+
+    50% {
+        opacity: 1;
     }
 }
 
-/* Assistant prose — Inter, readable measure, the Living Sketchbook in markdown. */
+/* ── Assistant prose ──────────────────────────────────────────────────────── */
+
 .command-bar-md {
     font-family: var(--font-sans);
     font-size: var(--text-sm);
@@ -383,7 +577,7 @@
 .command-bar-md h2,
 .command-bar-md h3 {
     font-family: var(--font-sans);
-    font-weight: 700;
+    font-weight: 600;
     line-height: 1.2;
     margin: var(--space-md) 0 var(--space-xs);
 }
@@ -411,32 +605,35 @@
 }
 
 .command-bar-md a {
-    color: var(--accent-primary);
+    color: var(--accent-ink);
     text-decoration: underline;
+    text-underline-offset: 2px;
     cursor: pointer;
 }
 
+/* Inline code is an exact token: mono on the node surface so it separates from
+   the tertiary card the answer sits on. */
 .command-bar-md code {
     font-family: var(--font-mono);
     font-size: 0.9em;
-    background: color-mix(in srgb, var(--text-primary) 8%, transparent);
-    padding: 1px 4px;
+    background: var(--bg-node);
+    border: 1px solid var(--border-subtle);
+    padding: 0 4px;
     border-radius: var(--radius-sm);
 }
 
-.command-bar-md pre {
+/* Fenced blocks render through oj-ui's CodeBlock; it only needs the rhythm. */
+.command-bar-md .oj-code {
     margin: 0 0 var(--space-sm);
-    padding: var(--space-sm) var(--space-md);
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    overflow-x: auto;
+    background: var(--bg-node);
+    max-height: 240px;
 }
 
-.command-bar-md pre code {
+.command-bar-md .oj-code code {
     background: none;
+    border: 0;
     padding: 0;
-    font-size: var(--text-xs);
+    font-size: inherit;
 }
 
 .command-bar-md blockquote {
@@ -459,7 +656,8 @@
     text-align: left;
 }
 
-/* The quiet "what the agent did" chips under an assistant turn. */
+/* ── Action chips (what the agent did) ────────────────────────────────────── */
+
 .command-bar-actions {
     display: flex;
     flex-wrap: wrap;
@@ -467,45 +665,27 @@
 }
 
 .command-bar-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
     max-width: 100%;
-    padding: 1px 8px;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-pill);
-    font-family: var(--font-sans);
+    padding: 3px 8px;
+    background: var(--bg-node);
     font-size: var(--text-xs);
-    color: var(--text-secondary);
+    font-weight: 500;
 }
 
-.command-bar-chip[data-ok='false'] {
-    color: var(--accent-danger);
-    border-color: color-mix(in srgb, var(--accent-danger) 40%, transparent);
-}
-
-/* Self-edit — Philia editing its OWN memory/skills, not the canvas. A soft accent
-   wash + dashed edge marks it as "you editing you", distinct from a graph chip
-   without shouting (the music still comes first). */
+/* Self-edit — Philia editing its OWN memory/skills, not the canvas. A dashed
+   accent edge marks it as "you editing you", distinct from a graph chip without
+   shouting (the music still comes first). */
 .command-bar-chip[data-self] {
-    color: var(--text-secondary);
     border-style: dashed;
-    border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border-subtle));
-    background: color-mix(in srgb, var(--accent-primary) 7%, var(--bg-tertiary));
+    border-color: var(--accent-ink);
+    color: var(--accent-ink);
 }
 
-.command-bar-chip[data-self] .command-bar-chip-glyph {
-    color: var(--accent-primary);
-    opacity: 1;
-}
-
-.command-bar-chip-glyph {
+.command-bar-chip .command-bar-chip-glyph {
     font-family: var(--font-mono);
-    opacity: 0.85;
 }
 
-.command-bar-chip-text {
+.command-bar-chip .oj-chip__label {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -515,7 +695,7 @@
     margin: 0;
     font-family: var(--font-sans);
     font-size: var(--text-sm);
-    color: var(--accent-danger);
+    color: var(--danger-ink);
 }
 
 .command-bar-ai-runtime,
@@ -537,46 +717,91 @@
     color: var(--text-muted);
 }
 
-/* The composer — a growing textarea + a send row, docked at the bottom. */
+/* ── Composer ─────────────────────────────────────────────────────────────── */
+
 .command-bar-ai-composer {
+    position: relative;
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-xs);
+    gap: var(--space-sm);
     padding: var(--space-sm) var(--space-md);
-    border-top: 1px solid var(--border-strong);
+    border-top: 1px solid var(--border-subtle);
     background: var(--bg-node);
 }
 
+/* The composer wears Textarea's construction (surface, one hairline, 10px
+   radius, the one focus ring) so it reads as the same family as the palette's
+   search field one Tab away. */
 .command-bar-ai-input {
     width: 100%;
     box-sizing: border-box;
-    border: none;
-    background: transparent;
     resize: none;
     max-height: 30vh;
-    padding: var(--space-xs);
+    padding: 9px 12px;
+    background: var(--bg-node);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-md);
     font-family: var(--font-sans);
-    font-size: var(--text-lg);
-    line-height: 1.4;
+    font-size: var(--text-md);
+    font-weight: 500;
+    line-height: 1.5;
     color: var(--text-primary);
     outline: none;
+    transition: border-color var(--motion-fast), box-shadow var(--motion-fast);
 }
 
 .command-bar-ai-input::placeholder {
     color: var(--text-muted);
 }
 
+.command-bar-ai-input:focus,
+.command-bar-ai-input:focus-visible {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: var(--focus-ring);
+}
+
+.command-bar-ai-composer-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+}
+
+.command-bar-ai-hint {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-width: 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+.command-bar-ai-hint-sep {
+    opacity: 0.5;
+}
+
+/* ── Slash commands ───────────────────────────────────────────────────────── */
+
 .command-bar-ai-slash {
+    position: absolute;
+    left: var(--space-md);
+    right: var(--space-md);
+    bottom: calc(100% - var(--space-sm));
+    z-index: var(--z-popover);
     display: flex;
     flex-direction: column;
     gap: 2px;
     max-height: 260px;
     overflow-y: auto;
-    padding: var(--space-xs);
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
+    padding: 6px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
     background: var(--bg-node);
-    box-shadow: var(--shadow-raised);
+    box-shadow: var(--shadow-overlay);
 }
 
 .command-bar-ai-slash-head,
@@ -584,31 +809,31 @@
     display: flex;
     justify-content: space-between;
     gap: var(--space-sm);
-    padding: 2px var(--space-xs) var(--space-xs);
+    padding: 8px 10px 4px;
     color: var(--text-muted);
     font-family: var(--font-sans);
-    font-size: var(--text-xs);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
 }
 
-.command-bar-ai-slash-item {
+.command-bar-ai-slash-empty {
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 500;
+    font-size: var(--text-sm);
+}
+
+/* Name and description are two columns inside the row's body; the source label
+   rides the row's trailing `actions` slot. (The grid lives on the body, not the
+   row: the row's own flex box also owns that slot.) */
+.command-bar-ai-slash-item .oj-list-row__body {
     display: grid;
-    grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.4fr) auto;
-    align-items: center;
+    grid-template-columns: minmax(120px, 0.8fr) minmax(0, 1.4fr);
+    align-items: baseline;
     gap: var(--space-sm);
-    width: 100%;
-    padding: var(--space-xs) var(--space-sm);
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-primary);
-    cursor: pointer;
     text-align: left;
-}
-
-.command-bar-ai-slash-item[data-selected='true'],
-.command-bar-ai-slash-item:hover {
-    border-color: color-mix(in srgb, var(--accent-primary) 35%, transparent);
-    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
 }
 
 .command-bar-ai-slash-main {
@@ -620,8 +845,8 @@
 
 .command-bar-ai-slash-main code {
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    color: var(--text-primary);
+    font-size: var(--text-sm);
+    color: inherit;
 }
 
 .command-bar-ai-slash-main span,
@@ -629,6 +854,7 @@
     color: var(--text-muted);
     font-family: var(--font-sans);
     font-size: var(--text-xs);
+    font-weight: 500;
 }
 
 .command-bar-ai-slash-desc {
@@ -637,27 +863,18 @@
     color: var(--text-secondary);
     font-family: var(--font-sans);
     font-size: var(--text-xs);
+    font-weight: 400;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.command-bar-ai-composer-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-sm);
-}
+/* ── Pickers (sessions · models · rewind) ─────────────────────────────────── */
 
-.command-bar-ai-hint {
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-}
-
-
-.command-bar-models {
+.command-bar-models,
+.command-bar-sessions {
     display: flex;
     flex-direction: column;
+    flex: 1;
     min-height: 0;
 }
 
@@ -665,55 +882,38 @@
     display: flex;
     justify-content: space-between;
     gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-lg);
+    padding: var(--space-sm) var(--space-md) 0;
     color: var(--text-muted);
     font-family: var(--font-sans);
     font-size: var(--text-xs);
 }
 
 .command-bar-models-input {
-    margin: 0 var(--space-lg) var(--space-sm);
+    margin: var(--space-sm) var(--space-md);
     width: auto;
 }
 
-.command-bar-models-list {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+.command-bar-models-list,
+.command-bar-rewind-list {
     min-height: 0;
     max-height: 360px;
-    overflow-y: auto;
-    padding: 0 var(--space-lg) var(--space-md);
+    padding: 0 var(--space-sm) var(--space-md);
+    overscroll-behavior: contain;
 }
 
-.command-bar-model-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: var(--space-md);
-    width: 100%;
-    padding: var(--space-sm);
-    border: 1px solid transparent;
-    border-radius: var(--radius-md);
-    background: transparent;
-    color: var(--text-primary);
-    cursor: pointer;
-    text-align: left;
+.command-bar-rewind-list:focus-visible,
+.command-bar-models-list:focus-visible {
+    outline: none;
 }
 
-.command-bar-model-row[data-selected='true'],
-.command-bar-model-row:hover {
-    border-color: color-mix(in srgb, var(--accent-primary) 35%, transparent);
-    background: color-mix(in srgb, var(--accent-primary) 10%, transparent);
+.command-bar-rewind-row {
+    overflow: hidden;
 }
 
-.command-bar-model-row[data-current='true'] {
-    border-color: color-mix(in srgb, var(--accent-success) 65%, var(--text-primary));
-}
-
-.command-bar-model-row:disabled {
-    cursor: wait;
-    opacity: 0.72;
+.command-bar-rewind-row .oj-list-row__body {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .command-bar-model-main {
@@ -725,16 +925,18 @@
 
 .command-bar-model-name {
     overflow: hidden;
-    font-weight: 700;
+    font-weight: 600;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .command-bar-model-main code {
+    display: block;
     overflow: hidden;
     color: var(--text-muted);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
+    font-weight: 400;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
@@ -745,37 +947,17 @@
     gap: var(--space-xs);
     flex-wrap: wrap;
     justify-content: flex-end;
-    color: var(--text-muted);
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
 }
 
-.command-bar-model-meta span,
-.command-bar-model-meta strong {
-    padding: 1px 6px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-pill);
-    background: var(--bg-node);
-    color: inherit;
-    font-weight: 600;
-}
-
-.command-bar-model-meta strong {
-    color: var(--accent-success);
-}
-
-.command-bar-models-empty {
+.command-bar-models-empty,
+.command-bar-models-loading {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
     padding: var(--space-md) var(--space-sm);
     color: var(--text-muted);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
-}
-
-/* The /resume session picker — reuses the palette list, with age + id columns. */
-.command-bar-sessions {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
 }
 
 .command-bar-session {
@@ -788,11 +970,11 @@
 .command-bar-session-main {
     font-family: var(--font-sans);
     font-size: var(--text-md);
-    color: var(--text-primary);
+    color: inherit;
 }
 
 .command-bar-session-current {
-    color: var(--accent-primary);
+    color: var(--accent-ink);
     font-size: var(--text-xs);
 }
 
@@ -802,40 +984,69 @@
     color: var(--text-muted);
 }
 
+/* ── Browser tier: the honest desktop-only state ──────────────────────────── */
 
 .command-bar-ai-desktop-only {
-    padding: var(--space-lg);
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
+    gap: var(--space-md);
     align-items: flex-start;
+    padding: var(--space-md);
 }
 
-.command-bar-ai-desktop-title {
-    margin: 0;
-    font-weight: 700;
-    font-size: var(--text-md);
+.command-bar-ai-desktop-only .oj-callout {
+    width: 100%;
+    box-sizing: border-box;
 }
 
-.command-bar-ai-desktop-body {
-    margin: 0;
-    color: var(--text-muted);
-    font-size: var(--text-sm);
-    line-height: 1.4;
+.command-bar-ai-desktop-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
 }
 
-/* AuthChooser (D6, M7) — the provider onboarding step. */
+/* ── AuthChooser ──────────────────────────────────────────────────────────── */
+
 .command-bar-auth {
     display: flex;
     flex-direction: column;
+    min-height: 0;
+}
+
+.command-bar-auth-body {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-md);
+    padding: var(--space-md);
+    overflow-y: auto;
+}
+
+/* A bare button in the column is an inline affordance, not a full-width bar. */
+.command-bar-auth-body > .oj-btn {
+    align-self: flex-start;
+}
+
+/* In AI mode the panel drops the menu padding, so the chooser's own field and
+   list carry the inset that keeps their rounded rows off the panel edge. */
+.command-bar-auth .command-bar-input,
+.command-bar-sessions .command-bar-input {
+    width: auto;
+    margin: 0 var(--space-md) var(--space-sm);
+}
+
+.command-bar-auth .command-bar-list,
+.command-bar-sessions .command-bar-list {
+    padding: 0 var(--space-sm) var(--space-sm);
 }
 
 .command-bar-auth-intro {
     margin: 0;
-    padding: var(--space-sm) var(--space-lg);
+    padding: var(--space-sm) var(--space-md);
     color: var(--text-muted);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
-    line-height: 1.4;
+    line-height: 1.45;
 }
 
 .command-bar-auth-configured {
@@ -843,19 +1054,19 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--space-sm);
-    margin: var(--space-sm) var(--space-lg);
-    padding: var(--space-xs) var(--space-sm);
-    border: 1px solid var(--border-strong);
+    margin: var(--space-sm) var(--space-md) 0;
+    padding: 8px 10px;
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--accent-success) 12%, var(--bg-node));
+    background: var(--bg-tertiary);
     color: var(--text-primary);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
     line-height: 1.35;
 }
 
 .command-bar-auth-configured span:last-child {
     color: var(--text-muted);
-    font-family: var(--font-sans);
     font-size: var(--text-xs);
 }
 
@@ -869,144 +1080,59 @@
 .command-bar-auth-item-title {
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
-    font-weight: 700;
+    gap: var(--space-sm);
+    font-weight: 600;
     font-size: var(--text-md);
-}
-
-.command-bar-auth-configured-mark {
-    padding: 1px 6px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-pill);
-    background: var(--bg-node);
-    color: var(--accent-success);
-    font-family: var(--font-sans);
-    font-size: var(--text-xs);
 }
 
 .command-bar-auth-item-subtitle {
     color: var(--text-muted);
     font-size: var(--text-sm);
+    font-weight: 400;
 }
 
-.command-bar-auth-link {
-    align-self: flex-start;
-    margin: var(--space-sm) var(--space-lg) 0;
-    background: none;
-    border: none;
-    padding: 0;
-    color: var(--accent-primary);
-    font-family: var(--font-sans);
-    font-size: var(--text-md);
-    text-decoration: underline;
-    cursor: pointer;
-}
-
-/* The NON-DISMISSIBLE data-training notice (opencode Zen free period). */
-.command-bar-auth-notice {
-    margin: var(--space-sm) var(--space-lg);
-    padding: var(--space-sm);
-    border: 1px solid var(--accent-danger);
-    border-radius: var(--radius-md);
-    color: var(--accent-danger);
-    background: color-mix(in srgb, var(--accent-danger) 8%, transparent);
-    font-size: var(--text-sm);
-    line-height: 1.4;
+.command-bar-auth-item[data-selected='true'] .command-bar-auth-item-subtitle {
+    color: var(--text-secondary);
 }
 
 .command-bar-auth-hint {
-    margin: var(--space-sm) var(--space-lg);
-    color: var(--text-muted);
+    margin: 0;
+    color: var(--text-secondary);
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
+    line-height: 1.45;
 }
 
-.command-bar-auth-input {
-    margin: var(--space-sm) var(--space-lg);
-    width: auto;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-md);
-}
-
-/* ── AI chrome: kbd hints, permission footer, YOLO ─────────────────────────── */
-
-/* Mono keycaps — "read this literally" (the Mono-Means-Exact rule). */
-.command-bar-kbd {
+.command-bar-auth-hint code {
     font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    line-height: 1;
-    padding: 2px 5px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-sm);
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
-    white-space: nowrap;
+    font-size: 0.92em;
 }
 
-
-/* The permission footer — always visible on the live agent surface so the jail
-   boundary is never a surprise. Mono, because it states an exact path/state. */
-/* The single reasoning control. It is the live indicator AND its own button —
-   click (or ⇧⇥) to cycle. State is shown exactly once, at its point of control. */
-.command-bar-ai-thinking {
-    display: inline-flex;
+.command-bar-auth-actions {
+    display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 1px 6px;
-    border: 1px solid var(--border-strong);
-    border-radius: var(--radius-pill);
-    background: color-mix(in srgb, var(--bg-node) 88%, var(--accent-primary) 12%);
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    white-space: nowrap;
-    appearance: none;
-    cursor: pointer;
-    transition: transform var(--motion-fast), color var(--motion-fast);
+    gap: var(--space-sm);
 }
 
-button.command-bar-ai-thinking:hover {
-    color: var(--text-secondary);
-    transform: translateY(-1px);
-}
-
-button.command-bar-ai-thinking:focus-visible {
-    outline: 1px solid var(--accent-primary);
-    outline-offset: 2px;
-}
-
-/* One-shot confirm pulse on change — opacity + a ≤1px lift, no blur, ~160ms.
-   Restarted imperatively (clear → reflow → set data-pulse) in cycleReasoning. */
-.command-bar-ai-thinking[data-pulse='true'] {
-    animation: oj-reasoning-pulse 160ms ease-out;
-}
-
-@keyframes oj-reasoning-pulse {
-    from {
-        opacity: 0.55;
-        transform: translateY(1px);
-    }
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
+/* ── AI chrome: reasoning control, permission footer, YOLO ────────────────── */
 
 .command-bar-ai-footer {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-lg);
-    border-top: 1px solid var(--border-strong);
+    padding: 6px var(--space-md);
+    border-top: 1px solid var(--border-subtle);
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     color: var(--text-muted);
 }
 
-/* Signal-Not-Brand: clay reports the YOLO danger state, always with its label. */
+/* Signal-Not-Brand: the danger ink reports the YOLO state, always with its label. */
 .command-bar-ai-footer[data-mode='yolo'] {
-    border-top-color: var(--accent-danger);
-    background: color-mix(in srgb, var(--accent-danger) 8%, transparent);
+    border-top-color: var(--danger-ink);
+    background: color-mix(in oklab, var(--accent-danger) 8%, transparent);
 }
 
 .command-bar-ai-sandbox code {
@@ -1015,12 +1141,11 @@ button.command-bar-ai-thinking:focus-visible {
 }
 
 .command-bar-ai-sandbox-yolo {
-    color: var(--accent-danger);
+    color: var(--danger-ink);
     font-weight: 700;
 }
 
-/* "memory: on/off" — a quiet truth indicator, not a control. The on-state gets a
-   small accent dot; off stays muted so it never competes with the music. */
+/* "memory: on/off" — a quiet truth indicator, not a control. */
 .command-bar-ai-memory {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
@@ -1038,36 +1163,96 @@ button.command-bar-ai-thinking:focus-visible {
     width: 6px;
     height: 6px;
     margin-right: 4px;
-    border-radius: 50%;
+    border-radius: var(--radius-pill);
     background: var(--accent-primary);
     vertical-align: middle;
+}
+
+/* The single reasoning control. It is the live indicator AND its own button —
+   click (or ⇧⇥) to cycle. State is shown exactly once, at its point of control. */
+.command-bar-ai-thinking {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 3px 8px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-pill);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+    appearance: none;
+    cursor: pointer;
+    transition: background var(--motion-fast), color var(--motion-fast),
+        transform var(--motion-spring);
+}
+
+button.command-bar-ai-thinking:hover {
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+}
+
+button.command-bar-ai-thinking:active {
+    transform: scale(var(--press-scale-btn));
+}
+
+button.command-bar-ai-thinking:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* One-shot confirm pulse on change — opacity only, ~160ms. Restarted
+   imperatively (clear → reflow → set data-pulse) in cycleReasoning. */
+.command-bar-ai-thinking[data-pulse='true'] {
+    animation: command-bar-reasoning-pulse 160ms cubic-bezier(.2, .8, .3, 1);
+}
+
+@keyframes command-bar-reasoning-pulse {
+    from {
+        opacity: 0.5;
+    }
+
+    to {
+        opacity: 1;
+    }
 }
 
 .command-bar-ai-yolo-toggle {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
     letter-spacing: 0.04em;
-    padding: 2px var(--space-sm);
-    border: 1px solid var(--border-strong);
+    padding: 3px var(--space-sm);
+    border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
-    background: var(--bg-node);
+    background: var(--bg-tertiary);
     color: var(--text-secondary);
     cursor: pointer;
-    transition: transform var(--motion-fast), box-shadow var(--motion-fast);
+    transition: background var(--motion-fast), color var(--motion-fast),
+        transform var(--motion-spring);
 }
 
 .command-bar-ai-yolo-toggle:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-raised);
+    color: var(--text-primary);
+    border-color: var(--border-strong);
+}
+
+.command-bar-ai-yolo-toggle:active {
+    transform: scale(var(--press-scale-btn));
+}
+
+.command-bar-ai-yolo-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
 }
 
 .command-bar-ai-yolo-toggle[data-mode='yolo'] {
-    border-color: var(--accent-danger);
-    color: var(--accent-danger);
+    border-color: var(--danger-ink);
+    color: var(--danger-ink);
 }
 
-/* The YOLO confirm — a bottom-sheet gate over the rail. Clay border = danger, and
-   entering YOLO is a deliberate two-step reach (Cancel is focused first). */
+/* The YOLO confirm — a sheet over the panel. Danger ink, and entering YOLO is a
+   deliberate two-step reach (Cancel is focused first). */
 .command-bar-yolo-confirm {
     position: absolute;
     inset: 0;
@@ -1077,21 +1262,22 @@ button.command-bar-ai-thinking:focus-visible {
     justify-content: center;
     gap: var(--space-md);
     padding: var(--space-lg);
-    background: color-mix(in srgb, var(--bg-node) 90%, transparent);
+    background: var(--bg-node);
 }
 
 .command-bar-yolo-title {
     margin: 0;
     font-family: var(--font-sans);
-    font-weight: 700;
+    font-weight: 600;
     font-size: var(--text-lg);
-    color: var(--accent-danger);
+    color: var(--danger-ink);
 }
 
 .command-bar-yolo-body {
     margin: 0;
+    font-family: var(--font-sans);
     font-size: var(--text-sm);
-    line-height: 1.45;
+    line-height: 1.5;
     color: var(--text-secondary);
 }
 
@@ -1101,3 +1287,20 @@ button.command-bar-ai-thinking:focus-visible {
     gap: var(--space-sm);
 }
 
+/* ── Reduced motion ───────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+    .command-bar-container,
+    .command-bar-container > * {
+        animation: none;
+    }
+
+    .command-bar-dots i {
+        animation: none;
+        opacity: 0.6;
+    }
+
+    .command-bar-ai-thinking[data-pulse='true'] {
+        animation: none;
+    }
+}

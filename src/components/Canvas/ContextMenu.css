@@ -1,19 +1,35 @@
-.context-menu {
+/*
+ * Context menu — the canvas right-click surface, built from the oj-ui `Menu`
+ * family. There is no bespoke menu engine here any more: this file only
+ * POSITIONS the panel and swaps oj-ui's `:hover` submenu disclosure for the
+ * state-driven one the component owns (so keyboard and touch reach a submenu
+ * the same way a mouse does — audit UI-003), leaving flip/clamp to the
+ * component's measurements (UI-004).
+ */
+
+.context-menu-host {
     position: fixed;
-    background: var(--bg-node);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-overlay);
-    min-width: 180px;
-    z-index: 1000;
-    animation: menuFadeIn 0.1s ease;
-    will-change: opacity, transform;
+    z-index: var(--z-popover);
 }
 
-@keyframes menuFadeIn {
+/* The panel itself is `.oj-menu` — 12px radius, 6px padding, overlay shadow.
+   Only the entrance is ours: a 260ms spring on transform + opacity, never on
+   layout. */
+.context-menu {
+    min-width: 200px;
+    transform-origin: top left;
+    animation: context-menu-in var(--motion-spring);
+}
+
+.context-menu-submenu {
+    min-width: 180px;
+    animation: context-menu-in var(--motion-spring);
+}
+
+@keyframes context-menu-in {
     from {
         opacity: 0;
-        transform: scale(0.95);
+        transform: scale(0.97);
     }
 
     to {
@@ -22,81 +38,58 @@
     }
 }
 
-.context-menu-category {
-    position: relative;
+/* Disclosure is STATE, not hover. oj-ui reveals a submenu on `:hover` /
+   `:focus-within`; a display:none subtree can never take focus, which is what
+   made the menu keyboard- and touch-dead (UI-003). Turn that engine off and
+   drive it from `data-open`, which the component sets for pointer, touch,
+   Enter/Space and ArrowRight alike. */
+.context-menu > .oj-menu-item--has-submenu:hover > .oj-menu-item__submenu,
+.context-menu > .oj-menu-item--has-submenu:focus-within > .oj-menu-item__submenu {
+    display: none;
 }
 
-.context-menu-category-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: var(--space-sm) var(--space-md);
-    color: var(--text-primary);
-    font-weight: 500;
-    cursor: pointer;
-    transition: background var(--motion-fast);
+.context-menu > .oj-menu-item--has-submenu[data-open='true'] > .oj-menu-item__submenu {
+    display: block;
 }
 
-.context-menu-category-header:hover {
+/* The submenu abuts the PANEL's edge, not the row's: the row is inset by the
+   menu's 6px padding, so oj-ui's default would overlap the parent panel by
+   exactly that much. Mirrored for the flipped (left-hand) placement. */
+.context-menu .oj-menu-item__submenu {
+    margin-left: 6px;
+    margin-right: 0;
+}
+
+.context-menu .oj-menu-item__submenu[data-flipped='true'] {
+    margin-left: 0;
+    margin-right: 6px;
+}
+
+/* An open category reads as held-open, matching the hover fill so nothing
+   shifts when the pointer leaves the row for the submenu. */
+.context-menu > .oj-menu-item--has-submenu[data-open='true'] {
     background: var(--bg-tertiary);
 }
 
-.context-menu-category-icon {
-    margin-right: var(--space-sm);
+/* One focus ring. `global.css` paints a 2px accent outline on every
+   `:focus-visible`, which would double up with the menu's own ring at the same
+   specificity as oj-ui's `outline: none`. Settle it here, on the surface that
+   owns the roving focus. */
+.context-menu .oj-menu-item:focus-visible {
+    outline: none;
 }
 
-.context-menu-category-arrow {
-    color: var(--text-muted);
-    font-size: var(--text-sm);
+/* The category glyph is an emoji, not an icon font — keep it at label size and
+   let it carry its own colour. */
+.context-menu .oj-menu-item__icon {
+    font-size: var(--text-md);
+    line-height: 1;
+    color: inherit;
 }
 
-.context-menu-submenu {
-    position: absolute;
-    left: 100%;
-    top: 0;
-    background: var(--bg-node);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    box-shadow: var(--shadow-overlay);
-    min-width: 160px;
-    z-index: 1001;
-    opacity: 0;
-    visibility: hidden;
-    transform: translateX(-10px);
-    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
-}
-
-.context-menu-category:hover>.context-menu-submenu {
-    opacity: 1;
-    visibility: visible;
-    transform: translateX(0);
-}
-
-.context-menu-item {
-    display: flex;
-    align-items: center;
-    padding: var(--space-sm) var(--space-md);
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all var(--motion-fast);
-}
-
-.context-menu-item:hover {
-    background: var(--accent-primary);
-    color: white;
-}
-
-.context-menu-separator {
-    height: 1px;
-    background: var(--border-subtle);
-    margin: var(--space-xs) 0;
-}
-
-.context-menu-header {
-    padding: var(--space-sm) var(--space-md);
-    color: var(--text-muted);
-    font-size: var(--text-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    border-bottom: 1px solid var(--border-subtle);
+@media (prefers-reduced-motion: reduce) {
+    .context-menu,
+    .context-menu-submenu {
+        animation: none;
+    }
 }
