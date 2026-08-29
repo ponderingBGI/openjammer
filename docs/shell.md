@@ -178,9 +178,9 @@ single history entry and one `Ctrl+Z` takes it away.
 
 | Goal | Real nodes | Sound |
 |---|---|---|
-| **jam** | `keyboard` → `instrument` (`gm-electric-piano-1`) → `effect` (delay) → `speaker` | An electric piano with space on it. Play Q–P / A–L / Z–/. |
-| **beat** | `keyboard` → `instrument` (`gm-synth-drum`) → `effect` (reverb) → `speaker`, plus a `song` | An 8-step groove, looping on the real transport. |
-| **sound** | `keyboard` → `instrument` (`gm-pad-warm`) → `effect` (filter) → [`pan`] → [`width`] → `speaker` | A warm pad through a filter, with real `Knob`s. |
+| **jam** | `keyboard-visual` → `instrument` (`gm-electric-piano-1`) → `effect` (delay) → `speaker` | An electric piano with space on it. Click the keys, or play Q–P / A–L / Z–/. |
+| **beat** | `keyboard-visual` → `instrument` (`gm-synth-drum`) → `effect` (reverb) → `speaker`, plus a `song` | An 8-step groove, looping on the real transport. |
+| **sound** | `keyboard-visual` → `instrument` (`gm-pad-warm`) → `effect` (filter) → [`pan`] → [`width`] → `speaker` | A warm pad through a filter, with real `Knob`s. |
 
 Wires resolve against the **live** node, not the registry: adding a `keyboard` replaces
 its declared ports with its internal panel's `Row 1…3`, and an `instrument`'s single
@@ -191,25 +191,22 @@ Every voice is synthesised by the engine from a catalogue id. **There are no bun
 sample assets in this repository**, which is why no rig uses the Sampler: it would install
 a node that makes no sound until the player finds a WAV.
 
-**Honest deviation — the rigs use `keyboard`, not `keyboard-visual`.** D12 names
-`keyboard-visual`, and every rig ships the bundle `keyboard` instead. This is deliberate
-and structural, not an oversight:
+**Every rig ships the ON-SCREEN keys** (`keyboard-visual`, D12). A beginner is told
+“press the keys”, so the first canvas contains keys to press: three QWERTY rows that
+light up, click to sound a note through the same seam typing uses, and end in the `ROW
+1…3` / `PEDAL` sockets the cables leave from. All three rows are wired to the
+instrument, so every key on the card plays (rows sound at octaves 5 / 4 / 3).
 
-- `keyboard-visual` is an **internal** node. `nodeInternals.createKeyboardInternals()`
-  mints one inside every `keyboard` container, `graphStore` lists it in
-  `UNDELETABLE_INTERNAL_TYPES`, and it is offered nowhere in the add menu.
-- **It cannot emit a note.** Only `KeyboardNode` calls `registerKeyboard(assignedKey,
-  nodeId)`, which is what `audioStore.activeKeyboardId` and the whole typing path resolve
-  against. `KeyboardVisualNode` is a *mirror*: it reads `activeKeys` and lights up. A
-  top-level one would glow when some *other* keyboard was played.
-- Its 31 outputs are per-key `control` ports with no row bundling, and it is 660 × 280 px.
+Two costs, written down rather than hidden:
 
-So a rig built on it would look like a keyboard and make no sound — the opposite of the
-promise. The cost is real and is written down rather than hidden: **a beginner is told
-"press the keys" while looking at a card with four sockets** (`ROW 1 / ROW 2 / ROW 3 /
-PEDAL`) and no keys, and the beat rig shows no pads at all. Closing that means giving the
-visual keyboard its own registration and row bundling — a node-faceplate change, tracked
-as a Wave 5 / P8 follow-up in `plans/redesign-new-dna/MASTER-PLAN.md`.
+- **The rows do not arrive as a detected BUNDLE.** `bundleManager.getBundleInfo` reads a
+  container's `output-panel` port; a leaf keyboard's `row-1` is not one, so the
+  instrument's input panel never expands and all three cables land on its single `IN`
+  socket. The notes are identical either way — what is missing is the per-row
+  `NOTE / OCT / OFF` tuning block, and the instrument says so in plain words. Giving a
+  leaf row a synthesised bundle is the tracked follow-up.
+- **There is no pad layout yet.** The faceplate draws keys only, so the beat rig gets
+  keys rather than a promise of pads.
 
 **Honest deviation:** the handoff's third rig asks for "an oscillator, a filter, knobs".
 There is no standalone oscillator or filter NODE in the registry — those are DSP, and DSP

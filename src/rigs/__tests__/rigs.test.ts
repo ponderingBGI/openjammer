@@ -20,6 +20,7 @@ const { useHistoryStore } = await import('../../store/historyStore');
 const { installRig, rigFor } = await import('../index');
 const { getNodeDefinition } = await import('../../engine/registry');
 const { BEAT_ROWS, BEAT_SOURCE_ID, BEAT_STEPS, BEAT_STEP_TICKS, buildBeatSong } = await import('../beatSong');
+const { resolveKeyboardNotes } = await import('../../audio/ojgraph');
 
 const GOALS = ['jam', 'beat', 'sound'] as const;
 const PERSONAS = ['first', 'some', 'pro'] as const;
@@ -123,16 +124,37 @@ describe('preset rigs', () => {
 
             const fromKeyboard = [...graph.connections.values()].filter((c) => c.sourceNodeId === keyboard.id);
             expect(fromKeyboard.length).toBe(3);
+            expect(new Set(fromKeyboard.map((c) => c.sourcePortId))).toEqual(
+                new Set(['row-1', 'row-2', 'row-3']),
+            );
             for (const connection of fromKeyboard) {
                 expect(connection.targetNodeId).toBe(installed.ids.inst);
                 expect(connection.type).toBe('control');
             }
+        });
 
-            // The instrument's panel expanded into one named bundle per row —
-            // exactly what dragging the three cables by hand produces.
-            const instrument = graph.nodes.get(installed.ids.inst!)!;
-            const bundles = instrument.ports.filter((port) => /^Keyboard Row \d/.test(port.name));
-            expect(bundles).toHaveLength(3);
+        it.each(GOALS)('gives the %s rig ON-SCREEN keys that make a note', (goal) => {
+            const installed = installRig(rigFor(goal, 'first'));
+            const graph = useGraphStore.getState();
+            const keyboardRef = goal === 'beat' ? 'pads' : 'keys';
+            const keyboard = graph.nodes.get(installed.ids[keyboardRef]!)!;
+            const instrumentRef = { jam: 'inst', beat: 'kit', sound: 'osc' }[goal];
+
+            // The node a beginner is told to press is the one with keys on it.
+            expect(keyboard.type).toBe('keyboard-visual');
+            // It owns a mode number of its own, allocated once and persisted.
+            expect((keyboard.data as { assignedKey?: number }).assignedKey).toBe(2);
+
+            // Every row reaches the instrument as a real MIDI note — the rig is
+            // playable, not a picture. (Rows sound 5/4/3, so key 0 is C5/C4/C3.)
+            for (const [row, midi] of [[1, 72], [2, 60], [3, 48]] as const) {
+                const notes = resolveKeyboardNotes(
+                    keyboard.id, row, 0, 0.8, graph.nodes, graph.connections,
+                );
+                expect(notes).toHaveLength(1);
+                expect(notes[0]!.targetNodeId).toBe(installed.ids[instrumentRef]);
+                expect(notes[0]!.midiNote).toBe(midi);
+            }
         });
 
         it('installs the beat rig\'s song and arms the loop', () => {

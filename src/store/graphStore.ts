@@ -19,6 +19,7 @@ import { useCanvasNavigationStore } from './canvasNavigationStore';
 import { useMIDIStore } from './midiStore';
 import type { InstrumentRow, InstrumentNodeData, SamplerRow, SamplerNodeData } from '../engine/types';
 import { applyGraphVerbs, diffGraph, type GraphStateSlice } from './graphVerbs';
+import { allocateKeyboardMode, claimedKeyboardModes, isKeyboardKind, keyboardModeOf, normalizeKeyboardModes } from './keyboardModes';
 import { isApplyingHistory, registerHistoryDriver, useHistoryStore, type EditVerb } from './historyStore';
 
 // ============================================================================
@@ -36,6 +37,18 @@ function migrateNodePorts(node: GraphNode): GraphNode {
 
     node.ports = node.ports
         .filter(port => !(node.type === 'looper' && port.id === 'sample-out'))
+        // A TOP-LEVEL `keyboard-visual` used to advertise one output per key. Those
+        // ports connected, drew a socket and routed nothing (only `Row 1..3` / `pedal`
+        // are resolved by `resolveKeyboardNotes` and `getConnectionsForRow`), so they
+        // are gone from the registry — drop them from saved sessions too, and the
+        // cables that lied get dropped with them by `connectionPortsExist`. The MIRROR
+        // inside a `keyboard` container keeps its per-key ports: those are really wired
+        // to the container's output panel.
+        .filter(port => !(
+            node.type === 'keyboard-visual'
+            && !node.parentId
+            && port.id.startsWith('key-')
+        ))
         // SEAM-1: the library node's only live seam is `sample-out` (the sampler PCM
         // feed). Its former `audio-out` / `trigger` ports had no engine consumer —
         // drop them from saved projects so no dead port lingers on the canvas.
@@ -309,25 +322,18 @@ export const useGraphStore = create<GraphStore>()(
                     specialNodes: []
                 };
 
-                // Auto-assign next available key for keyboard nodes
-                if (type === 'keyboard') {
-                    const state = get();
-                    const existingKeyboards = Array.from(state.nodes.values())
-                        .filter(n => n.type === 'keyboard');
-                    const usedKeys = new Set(
-                        existingKeyboards.map(kb => (kb.data as { assignedKey?: number }).assignedKey ?? 2)
-                    );
-
-                    // Find next available key (2-9)
-                    let nextKey = 2;
-                    while (usedKeys.has(nextKey) && nextKey <= 9) {
-                        nextKey++;
-                    }
-
-                    // Assign the key (wrap to 2 if all 2-9 are used)
+                // The mode number (2-9) a performer presses to play this keyboard is
+                // allocated ONCE, here, and persisted on the node — see
+                // `keyboardModes.ts`. It is part of THIS addNode's own history entry,
+                // so adding a keyboard still costs exactly one undo step, and nothing
+                // ever renumbers it afterwards. A mirror inside a `keyboard` container
+                // plays through its parent and claims nothing.
+                const isMirror = parentId !== null && get().nodes.get(parentId)?.type === 'keyboard';
+                if (isKeyboardKind(type) && !isMirror) {
                     node.data = {
                         ...node.data,
-                        assignedKey: nextKey <= 9 ? nextKey : 2
+                        // An explicit pin (a project file, a rig, the agent) wins.
+                        assignedKey: keyboardModeOf(node) ?? allocateKeyboardMode(get().nodes)
                     };
                 }
 
@@ -1580,7 +1586,17 @@ export const useGraphStore = create<GraphStore>()(
                 const newConnections = new Map<string, Connection>();
                 const newRootNodeIds: string[] = [];
 
+                // A file can carry two keyboards claiming the same mode number (it
+                // was hand-edited, or merged from two projects). Settle it in FILE
+                // order: the older node keeps what it has, the newer one moves.
+                // A healthy file changes nothing.
+                const modeFixes = normalizeKeyboardModes(nodes);
+
                 nodes.forEach(node => {
+                    const fixed = modeFixes.get(node.id);
+                    if (fixed !== undefined) {
+                        node = { ...node, data: { ...node.data, assignedKey: fixed } };
+                    }
                     newNodes.set(node.id, node);
                     // Collect root nodes
                     if (node.parentId === null || node.parentId === undefined) {
@@ -1695,6 +1711,23 @@ export const useGraphStore = create<GraphStore>()(
                         childIds: remapOwned(node.childIds),
                         specialNodes: remapOwned(node.specialNodes ?? []),
                     });
+                }
+
+                // Pasting a keyboard duplicates its mode number. The copy is the
+                // NEWER node, so the copy moves and the original — the one the
+                // player already learned — keeps its number.
+                const pastedNodes = Array.from(oldToNewIds.values()).flatMap((id) => {
+                    const pasted = newNodes.get(id);
+                    return pasted ? [pasted] : [];
+                });
+                const pastedModeFixes = normalizeKeyboardModes(
+                    pastedNodes,
+                    // Everything already on the canvas holds its number.
+                    claimedKeyboardModes(state.nodes),
+                );
+                for (const [id, mode] of pastedModeFixes) {
+                    const pasted = newNodes.get(id);
+                    if (pasted) newNodes.set(id, { ...pasted, data: { ...pasted.data, assignedKey: mode } });
                 }
 
                 const destinationParentId = useCanvasNavigationStore.getState().currentViewNodeId;
@@ -1922,6 +1955,17 @@ export const useGraphStore = create<GraphStore>()(
                             rootNodeIds = Array.from(nodes.values())
                                 .filter((n: GraphNode) => n.parentId === null)
                                 .map((n: GraphNode) => n.id);
+                        }
+
+                        // MIGRATION: settle keyboard mode numbers in FILE order — a
+                        // session saved before the numbers were persisted, or one that
+                        // collided, comes back with one number per keyboard and the
+                        // oldest keyboard keeping what the player learned. A healthy
+                        // session changes nothing, so a reload is byte-identical.
+                        const modeFixes = normalizeKeyboardModes(Array.from(nodes.values()));
+                        for (const [nodeId, mode] of modeFixes) {
+                            const node = nodes.get(nodeId);
+                            if (node) nodes.set(nodeId, { ...node, data: { ...node.data, assignedKey: mode } });
                         }
 
                         const connections = new Map<string, Connection>(migratedConnections);

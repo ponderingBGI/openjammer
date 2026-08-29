@@ -8,12 +8,13 @@
  *
  *  • It REGISTERS as a keyboard source — the same `registerKeyboard(n, id)` seam
  *    `KeyboardNode` uses — so pressing its number focuses it and the QWERTY rows
- *    play through it. The number is DERIVED from the graph (`deriveKeyboardNumber`),
- *    never persisted, so adding one writes nothing to the undo history and two
- *    keyboards never collide on mode 2.
- *  • It BUNDLES its rows: `Row 1 / Row 2 / Row 3 / Pedal` output sockets (registry),
- *    which is what `resolveKeyboardNotes` and `connectionActivity` resolve against.
- *    A rig can be keyboard-visual → instrument → speaker.
+ *    play through it. The number is ALLOCATED ONCE when the node enters the graph
+ *    and persisted on it, under the one law both keyboard kinds now obey
+ *    (`store/keyboardModes.ts`): nothing another node does ever moves it.
+ *  • It BUNDLES its rows: `Row 1 / Row 2 / Row 3 / Pedal` output sockets (registry) —
+ *    the ONLY sockets it has, because those are the only ports the note path
+ *    resolves. The key faces play; the row sockets patch. A rig is
+ *    keyboard-visual → instrument → speaker.
  *  • Clicking a key is a note — the SAME `emitKeyboardSignal` path as typing, so
  *    per-note sustain, cable pulses and the e2e note bridge all see one kind of
  *    event.
@@ -34,7 +35,7 @@ import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
 import type { GraphNode } from '../../engine/types';
 import { KeyTile, NodeFrame, NodeShell, PortRow } from '@openjammer/oj-ui';
 import { noteLabelFromDegree } from '../controls/noteNames';
-import { deriveKeyboardNumber, isKeyboardMirror } from './keyboardAssignment';
+import { isKeyboardMirror, keyboardModeOf, MIN_KEYBOARD_MODE } from '../../store/keyboardModes';
 import './KeyboardVisualNode.css';
 
 interface KeyboardVisualNodeProps {
@@ -113,8 +114,11 @@ export function KeyboardVisualNode({
     // Narrow selectors: both collapse to a primitive, so a graph edit elsewhere
     // never re-renders 30 keycaps.
     const isMirror = useGraphStore(useCallback((s) => isKeyboardMirror(s.nodes, node), [node]));
+    // Persisted, allocated once by `addNode`. Read from the LIVE node so undo /
+    // redo of the add is reflected; the fallback only covers a node that somehow
+    // reached the canvas without going through the allocator.
     const assignedKey = useGraphStore(
-        useCallback((s) => deriveKeyboardNumber(s.nodes, node.id), [node.id]),
+        useCallback((s) => keyboardModeOf(s.nodes.get(node.id)) ?? MIN_KEYBOARD_MODE, [node.id]),
     );
 
     // The id notes are emitted under. A mirror plays THROUGH its parent keyboard:
@@ -171,17 +175,28 @@ export function KeyboardVisualNode({
     }, [sourceId]);
 
     /**
-     * One tile, two jobs. The embedded well patches; the face plays. While a cable
-     * is already in the air the WHOLE tile is the socket, because that is the
-     * target the hand is aiming at.
+     * One tile, one or two jobs.
+     *
+     * A PLAYABLE keyboard has no per-key port (see the registry): the tile is
+     * purely the instrument, and the row socket beside it is the wiring. The
+     * MIRROR inside a `keyboard` container does have one per key — those are
+     * really wired to the container's output panel — so there the embedded well
+     * patches, and while a cable is already in the air the WHOLE tile is the
+     * socket, because that is the target the hand is aiming at.
      */
-    const tileHandlers = (portId: string, target: PlayTarget) => ({
+    const tileHandlers = (portId: string | undefined, target: PlayTarget) => ({
         onPointerDown: (e: React.PointerEvent<HTMLButtonElement>) => {
             if (e.button !== 0) return;
-            const onWell = (e.target as HTMLElement).closest('.oj-port') !== null;
-            if (onWell || isConnecting) {
-                handlePortMouseDown?.(portId, e);
-                return;
+            if (!portId) {
+                // No socket here. Don't steal a cable in flight — let it land (or
+                // miss) on a real port rather than firing a note under the drag.
+                if (isConnecting) return;
+            } else {
+                const onWell = (e.target as HTMLElement).closest('.oj-port') !== null;
+                if (onWell || isConnecting) {
+                    handlePortMouseDown?.(portId, e);
+                    return;
+                }
             }
             e.preventDefault();
             e.stopPropagation();
@@ -198,15 +213,15 @@ export function KeyboardVisualNode({
                 releasePointer(e.pointerId);
                 return;
             }
-            handlePortMouseUp?.(portId, e);
+            if (portId) handlePortMouseUp?.(portId, e);
         },
         onPointerCancel: (e: React.PointerEvent<HTMLButtonElement>) => releasePointer(e.pointerId),
         onLostPointerCapture: (e: React.PointerEvent<HTMLButtonElement>) => releasePointer(e.pointerId),
-        onPointerEnter: () => handlePortMouseEnter?.(portId),
+        onPointerEnter: () => { if (portId) handlePortMouseEnter?.(portId); },
         onPointerLeave: (e: React.PointerEvent<HTMLButtonElement>) => {
             // Without capture (touch fallback) a slide off the key must still end it.
             if (!e.currentTarget.hasPointerCapture?.(e.pointerId)) releasePointer(e.pointerId);
-            handlePortMouseLeave?.();
+            if (portId) handlePortMouseLeave?.();
         },
         // Keyboard-operable: a focused key plays on Enter and stops on release.
         onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>) => {
@@ -232,6 +247,7 @@ export function KeyboardVisualNode({
     });
 
     const portIds = useMemo(() => new Set(node.ports.map((p) => p.id)), [node.ports]);
+    const spacePortId = portIds.has('key-space') ? 'key-space' : undefined;
 
     /** The bundle socket that closes a key row — or a spacer when this instance
      *  is an old mirror whose ports predate row bundling. */
@@ -275,22 +291,25 @@ export function KeyboardVisualNode({
                         return [
                             <div className={`kv-keys kv-keys--${row}`} key={`keys-${row}`}>
                                 {keys.map((key, keyIndex) => {
-                                    const portId = portIdFor(key);
+                                    const keyPortId = portIdFor(key);
+                                    // Only the mirror carries a per-key port; a playable
+                                    // keyboard patches through its ROW socket.
+                                    const portId = portIds.has(keyPortId) ? keyPortId : undefined;
                                     return (
                                         <KeyTile
-                                            key={portId}
+                                            key={keyPortId}
                                             variant="key"
                                             size={34}
                                             className="keyboard-visual-key"
                                             label={key}
                                             hint={isMirror ? undefined : noteLabelFromDegree(keyIndex, octave)}
                                             active={down.has(`${row}:${keyIndex}`)}
-                                            connected={!!hasConnection?.(portId)}
+                                            connected={!!(portId && hasConnection?.(portId))}
                                             aria-label={`Row ${row}, key ${key}`}
-                                            title={`${key} → ${portId}`}
+                                            title={portId ? `${key} → ${portId}` : `${key} — plays on row ${row}`}
                                             data-node-id={node.id}
                                             data-port-id={portId}
-                                            data-port-type="control"
+                                            data-port-type={portId ? 'control' : undefined}
                                             {...tileHandlers(portId, { row, keyIndex })}
                                         />
                                     );
@@ -308,13 +327,13 @@ export function KeyboardVisualNode({
                             label="SPACE"
                             hint={isMirror ? undefined : 'HOLD'}
                             active={controlDown && isActive}
-                            connected={!!hasConnection?.('key-space')}
+                            connected={!!(spacePortId && hasConnection?.(spacePortId))}
                             aria-label="Sustain (space)"
-                            title="Space → key-space (sustain)"
+                            title={spacePortId ? 'Space → key-space (sustain)' : 'Space — sustain, patched from PEDAL'}
                             data-node-id={node.id}
-                            data-port-id="key-space"
-                            data-port-type="control"
-                            {...tileHandlers('key-space', 'pedal')}
+                            data-port-id={spacePortId}
+                            data-port-type={spacePortId ? 'control' : undefined}
+                            {...tileHandlers(spacePortId, 'pedal')}
                         />
                     </div>
                     {bundle('pedal', 'PEDAL', 'Pedal — the sustain signal on one cable')}

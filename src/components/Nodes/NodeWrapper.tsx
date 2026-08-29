@@ -75,6 +75,7 @@ const SCHEMATIC_TYPES = [
     'midi-visual',
     'minilab-3',
     'minilab3-visual',
+    'instrument',
     'piano', 'cello', 'electricCello', 'violin', 'saxophone', 'strings', 'keys', 'winds',
     'speaker',
     'looper',
@@ -482,6 +483,11 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
                 return nodeRoot(<MiniLab3Node {...schematicProps} />);
             case 'minilab3-visual':
                 return nodeRoot(<MiniLab3VisualNode {...schematicProps} />);
+            // `instrument` is the GENERIC voice every preset rig installs, and it
+            // has always been in InstrumentNode's own category table — it was
+            // simply never dispatched here, so a rig's instrument rendered as an
+            // anonymous fallback card with no voice picker.
+            case 'instrument':
             case 'piano':
             case 'cello':
             case 'electricCello':

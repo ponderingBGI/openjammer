@@ -27,6 +27,35 @@ const KEY_ROWS = ['Row 1', 'Row 2', 'Row 3'] as const;
  */
 const STAGE_PITCH = 265;
 
+/**
+ * The on-screen keyboard is the widest node in any rig (three QWERTY rows and a
+ * socket column, ~580px), so the first stage gets a pitch of its own.
+ */
+const KEYS_PITCH = 640;
+
+/** Where the chain starts, and where each stage lands. */
+const KEYS_AT = { x: 40, y: 120 };
+const INSTRUMENT_AT = { x: KEYS_AT.x + KEYS_PITCH, y: 200 };
+const EFFECT_AT = { x: INSTRUMENT_AT.x + STAGE_PITCH, y: 210 };
+const OUT_AT = { x: EFFECT_AT.x + STAGE_PITCH, y: 200 };
+
+/**
+ * EVERY rig's keyboard is the `keyboard-visual` — the on-screen keys (D12).
+ *
+ * A beginner's first canvas has to contain the thing they were told to press.
+ * The bundle `keyboard` renders four sockets and a hint line and nothing to
+ * click; this one renders the keys, lights them, and plays a note on click
+ * through the same seam typing uses. There is no pad layout to give the beat rig
+ * yet — the faceplate draws keys only — so the beat rig gets keys too rather
+ * than a promise of pads.
+ *
+ * The trade: a `keyboard-visual` row does not yet arrive at an instrument as a
+ * detected BUNDLE, so the instrument shows one socket per row instead of a
+ * NOTE/OCT/OFF tuning block (`bundleManager.getBundleInfo` only reads a
+ * container's panel ports — the follow-up). The notes are identical either way.
+ */
+const KEYBOARD_TYPE = 'keyboard-visual';
+
 function keyboardWires(keyboardRef: string, instrumentRef: string): RigWire[] {
     // Three control cables into the instrument's bundle input — the same gesture
     // as dragging Row 1, 2 and 3 across by hand, and the same result: the
@@ -43,20 +72,20 @@ function keyboardWires(keyboardRef: string, instrumentRef: string): RigWire[] {
 function jamRig(persona: Persona): RigSpec {
     const pro = persona === 'pro';
     const nodes: RigNode[] = [
-        { ref: 'keys', type: 'keyboard', position: { x: 40, y: 120 } },
+        { ref: 'keys', type: KEYBOARD_TYPE, position: { ...KEYS_AT } },
         {
             ref: 'inst',
             type: 'instrument',
-            position: { x: 320, y: 150 },
+            position: { ...INSTRUMENT_AT },
             data: { instrumentId: 'gm-electric-piano-1' },
         },
         {
             ref: 'space',
             type: 'effect',
-            position: { x: 590, y: 160 },
+            position: { ...EFFECT_AT },
             data: { effectType: 'delay', params: { time: 0.3, feedback: 0.34, mix: 0.28 } },
         },
-        { ref: 'out', type: 'speaker', position: { x: 830, y: 150 } },
+        { ref: 'out', type: 'speaker', position: { ...OUT_AT } },
     ];
     const wires: RigWire[] = [
         ...keyboardWires('keys', 'inst'),
@@ -67,8 +96,8 @@ function jamRig(persona: Persona): RigSpec {
     // A pro gets the stereo stage worth having: the delay lands in a field, not
     // a point. Its `width` knob is a real AutoParamPanel control.
     if (pro) {
-        nodes.splice(3, 0, { ref: 'wide', type: 'width', position: { x: 830, y: 165 }, data: { width: 1.4 } });
-        nodes[4]!.position = { x: 830 + STAGE_PITCH, y: 150 };
+        nodes.splice(3, 0, { ref: 'wide', type: 'width', position: { x: OUT_AT.x, y: OUT_AT.y + 15 }, data: { width: 1.4 } });
+        nodes[4]!.position = { x: OUT_AT.x + STAGE_PITCH, y: OUT_AT.y };
         wires[wires.length - 1] = { from: 'space', to: 'wide' };
         wires.push({ from: 'wide', to: 'out' });
     }
@@ -76,7 +105,7 @@ function jamRig(persona: Persona): RigSpec {
     return {
         id: 'jam',
         label: 'Jam rig',
-        blurb: 'An electric piano with a delay on it. Press Q–P, A–L or Z–/ to play.',
+        blurb: 'An electric piano with a delay on it. Click the keys, or press Q–P, A–L, Z–/.',
         nodes,
         wires,
     };
@@ -91,24 +120,25 @@ function jamRig(persona: Persona): RigSpec {
 function beatRig(persona: Persona): RigSpec {
     const pro = persona === 'pro';
     const nodes: RigNode[] = [
-        { ref: 'pads', type: 'keyboard', position: { x: 40, y: 120 } },
+        { ref: 'pads', type: KEYBOARD_TYPE, position: { ...KEYS_AT } },
         {
             ref: 'kit',
             type: 'instrument',
-            position: { x: 320, y: 150 },
+            position: { ...INSTRUMENT_AT },
             data: { instrumentId: 'gm-synth-drum' },
         },
         {
             ref: 'room',
             type: 'effect',
-            position: { x: 590, y: 160 },
+            position: { ...EFFECT_AT },
             data: { effectType: 'reverb', params: { mix: 0.22 } },
         },
-        { ref: 'out', type: 'speaker', position: { x: 830, y: 150 } },
-        // Centred below the chain, clear of the instrument (three key bundles
-        // make that node grow) and of both bottom corners, where the beginner's
-        // hint and the shortcut card live. A Song nobody can find is no Song.
-        { ref: 'song', type: 'song', position: { x: 600, y: 500 } },
+        { ref: 'out', type: 'speaker', position: { ...OUT_AT } },
+        // Below the chain and clear of the keyboard (which is ~360px tall now
+        // that it draws its keys), out of both bottom corners where the
+        // beginner's hint and the shortcut card live. A Song nobody can find is
+        // no Song.
+        { ref: 'song', type: 'song', position: { x: INSTRUMENT_AT.x, y: 580 } },
     ];
     const wires: RigWire[] = [
         ...keyboardWires('pads', 'kit'),
@@ -117,8 +147,8 @@ function beatRig(persona: Persona): RigSpec {
     ];
 
     if (pro) {
-        nodes.splice(3, 0, { ref: 'wide', type: 'width', position: { x: 830, y: 168 }, data: { width: 1.3 } });
-        nodes[4]!.position = { x: 830 + STAGE_PITCH, y: 150 };
+        nodes.splice(3, 0, { ref: 'wide', type: 'width', position: { x: OUT_AT.x, y: OUT_AT.y + 18 }, data: { width: 1.3 } });
+        nodes[4]!.position = { x: OUT_AT.x + STAGE_PITCH, y: OUT_AT.y };
         wires[wires.length - 1] = { from: 'room', to: 'wide' };
         wires.push({ from: 'wide', to: 'out' });
     }
@@ -148,17 +178,17 @@ function soundRig(persona: Persona): RigSpec {
     const pro = persona === 'pro';
 
     const nodes: RigNode[] = [
-        { ref: 'keys', type: 'keyboard', position: { x: 40, y: 120 } },
+        { ref: 'keys', type: KEYBOARD_TYPE, position: { ...KEYS_AT } },
         {
             ref: 'osc',
             type: 'instrument',
-            position: { x: 320, y: 150 },
+            position: { ...INSTRUMENT_AT },
             data: { instrumentId: 'gm-pad-warm' },
         },
         {
             ref: 'filter',
             type: 'effect',
-            position: { x: 580, y: 160 },
+            position: { ...EFFECT_AT },
             data: { effectType: 'filter', params: { frequency: 900, q: 2.4 } },
         },
     ];
@@ -168,20 +198,20 @@ function soundRig(persona: Persona): RigSpec {
     ];
 
     let last = 'filter';
-    let x = 580 + STAGE_PITCH;
+    let x = EFFECT_AT.x + STAGE_PITCH;
     if (!beginner) {
-        nodes.push({ ref: 'pan', type: 'pan', position: { x, y: 168 }, data: { pan: -0.25 } });
+        nodes.push({ ref: 'pan', type: 'pan', position: { x, y: 218 }, data: { pan: -0.25 } });
         wires.push({ from: last, to: 'pan' });
         last = 'pan';
         x += STAGE_PITCH;
     }
     if (pro) {
-        nodes.push({ ref: 'wide', type: 'width', position: { x, y: 168 }, data: { width: 1.5 } });
+        nodes.push({ ref: 'wide', type: 'width', position: { x, y: 218 }, data: { width: 1.5 } });
         wires.push({ from: last, to: 'wide' });
         last = 'wide';
         x += STAGE_PITCH;
     }
-    nodes.push({ ref: 'out', type: 'speaker', position: { x, y: 150 } });
+    nodes.push({ ref: 'out', type: 'speaker', position: { x, y: OUT_AT.y } });
     wires.push({ from: last, to: 'out' });
 
     return {

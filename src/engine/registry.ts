@@ -50,8 +50,11 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Virtual keyboard controller (auto-assigned key)',
         ui: 'react', // KeyboardNode (schematic switch)
         defaultPorts: [], // Ports generated from internal canvas-input/output nodes
+        // `assignedKey` is deliberately ABSENT: a fixed default would pre-claim
+        // mode 2 for every keyboard. `graphStore.addNode` allocates the lowest
+        // free number ONCE when the node enters the graph and persists it there
+        // (`store/keyboardModes.ts`).
         defaultData: {
-            assignedKey: 2,
             activeRow: null,
             rowOctaves: [4, 4, 4]
         },
@@ -94,56 +97,29 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         description: 'Playable on-screen keyboard — click a key or type Q-P / A-L / Z-/',
         ui: 'react', // KeyboardVisualNode (schematic switch)
         defaultPorts: [
-            // The three ROW bundles + the PEDAL. These are what a rig plugs into
-            // an instrument: `resolveKeyboardNotes` / `connectionActivity` resolve a
-            // keyboard's source port for row N by NAME ("Row N"), and the pedal by
-            // the id `pedal`. Without them a top-level visual keyboard could light
-            // up but never sound (master-plan Wave-5 follow-up #1). The per-key
-            // ports below stay: a player may still wire one key anywhere.
-            { id: 'row-1', name: 'Row 1', type: 'control', direction: 'output', position: { x: 1, y: 0.05 } },
-            { id: 'row-2', name: 'Row 2', type: 'control', direction: 'output', position: { x: 1, y: 0.30 } },
-            { id: 'row-3', name: 'Row 3', type: 'control', direction: 'output', position: { x: 1, y: 0.53 } },
-            { id: 'pedal', name: 'Pedal', type: 'control', direction: 'output', position: { x: 1, y: 0.85 } },
-            // Row 1 (Q-P): 10 keys - ports on right edge, y: 0.05-0.22
-            { id: 'key-q', name: 'Q', type: 'control', direction: 'output', position: { x: 1, y: 0.05 } },
-            { id: 'key-w', name: 'W', type: 'control', direction: 'output', position: { x: 1, y: 0.07 } },
-            { id: 'key-e', name: 'E', type: 'control', direction: 'output', position: { x: 1, y: 0.09 } },
-            { id: 'key-r', name: 'R', type: 'control', direction: 'output', position: { x: 1, y: 0.11 } },
-            { id: 'key-t', name: 'T', type: 'control', direction: 'output', position: { x: 1, y: 0.13 } },
-            { id: 'key-y', name: 'Y', type: 'control', direction: 'output', position: { x: 1, y: 0.15 } },
-            { id: 'key-u', name: 'U', type: 'control', direction: 'output', position: { x: 1, y: 0.17 } },
-            { id: 'key-i', name: 'I', type: 'control', direction: 'output', position: { x: 1, y: 0.19 } },
-            { id: 'key-o', name: 'O', type: 'control', direction: 'output', position: { x: 1, y: 0.21 } },
-            { id: 'key-p', name: 'P', type: 'control', direction: 'output', position: { x: 1, y: 0.23 } },
-            // Row 2 (A-L): 9 keys - y: 0.30-0.46
-            { id: 'key-a', name: 'A', type: 'control', direction: 'output', position: { x: 1, y: 0.30 } },
-            { id: 'key-s', name: 'S', type: 'control', direction: 'output', position: { x: 1, y: 0.32 } },
-            { id: 'key-d', name: 'D', type: 'control', direction: 'output', position: { x: 1, y: 0.34 } },
-            { id: 'key-f', name: 'F', type: 'control', direction: 'output', position: { x: 1, y: 0.36 } },
-            { id: 'key-g', name: 'G', type: 'control', direction: 'output', position: { x: 1, y: 0.38 } },
-            { id: 'key-h', name: 'H', type: 'control', direction: 'output', position: { x: 1, y: 0.40 } },
-            { id: 'key-j', name: 'J', type: 'control', direction: 'output', position: { x: 1, y: 0.42 } },
-            { id: 'key-k', name: 'K', type: 'control', direction: 'output', position: { x: 1, y: 0.44 } },
-            { id: 'key-l', name: 'L', type: 'control', direction: 'output', position: { x: 1, y: 0.46 } },
-            // Row 3 (Z-/): 10 keys - y: 0.53-0.71
-            { id: 'key-z', name: 'Z', type: 'control', direction: 'output', position: { x: 1, y: 0.53 } },
-            { id: 'key-x', name: 'X', type: 'control', direction: 'output', position: { x: 1, y: 0.55 } },
-            { id: 'key-c', name: 'C', type: 'control', direction: 'output', position: { x: 1, y: 0.57 } },
-            { id: 'key-v', name: 'V', type: 'control', direction: 'output', position: { x: 1, y: 0.59 } },
-            { id: 'key-b', name: 'B', type: 'control', direction: 'output', position: { x: 1, y: 0.61 } },
-            { id: 'key-n', name: 'N', type: 'control', direction: 'output', position: { x: 1, y: 0.63 } },
-            { id: 'key-m', name: 'M', type: 'control', direction: 'output', position: { x: 1, y: 0.65 } },
-            { id: 'key-comma', name: ',', type: 'control', direction: 'output', position: { x: 1, y: 0.67 } },
-            { id: 'key-period', name: '.', type: 'control', direction: 'output', position: { x: 1, y: 0.69 } },
-            { id: 'key-slash', name: '/', type: 'control', direction: 'output', position: { x: 1, y: 0.71 } },
-            // Spacebar - y: 0.85
-            { id: 'key-space', name: 'Space', type: 'control', direction: 'output', position: { x: 1, y: 0.85 } }
+            // The three ROW bundles + the PEDAL — and nothing else. These are what
+            // a rig plugs into an instrument: `resolveKeyboardNotes` /
+            // `connectionActivity` resolve a keyboard's source port for row N by
+            // NAME ("Row N"), and the pedal by the id `pedal`.
+            //
+            // There is deliberately NO port per key. This node used to advertise
+            // 31 of them; a cable from one connected, drew a socket row on the
+            // instrument and then routed nothing at all, because no note path in
+            // the app resolves a per-key port. Thirty wells that lie are worse
+            // than no wells. The MIRROR inside a `keyboard` container is the
+            // exception and keeps its per-key ports — there they are really wired
+            // to the container's output panel (`nodeInternals.createKeyboardInternals`).
+            { id: 'row-1', name: 'Row 1', type: 'control', direction: 'output', position: { x: 1, y: 0.22 } },
+            { id: 'row-2', name: 'Row 2', type: 'control', direction: 'output', position: { x: 1, y: 0.45 } },
+            { id: 'row-3', name: 'Row 3', type: 'control', direction: 'output', position: { x: 1, y: 0.68 } },
+            { id: 'pedal', name: 'Pedal', type: 'control', direction: 'output', position: { x: 1, y: 0.88 } }
         ],
         // A playable keyboard, not a mirror: `rowOctaves` is the octave each row
         // sounds at when no instrument row overrides it, exactly as on `keyboard`.
         // `assignedKey` is deliberately ABSENT — a fixed default would give every
-        // visual keyboard mode 2; `KeyboardVisualNode` derives a free number from
-        // the graph instead (see `deriveKeyboardNumber`).
+        // visual keyboard mode 2. `graphStore.addNode` allocates the lowest free
+        // number once and persists it, under the same law as `keyboard`
+        // (`store/keyboardModes.ts`).
         defaultData: {
             activeRow: null,
             // Three rows, three octaves — the top QWERTY row is the high one, the
@@ -191,7 +167,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
     midi: {
         type: 'midi',
         category: 'input',
-        name: 'Midi',
+        name: 'MIDI',
         description: 'Connect MIDI controllers (keyboards, pads, knobs)',
         ui: 'react', // MIDINode (schematic switch)
         defaultPorts: [

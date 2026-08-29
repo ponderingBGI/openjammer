@@ -110,6 +110,17 @@
     width: 292px;
 }
 
+/* A PLAYABLE keyboard has no per-key port — its keys patch through the ROW
+   socket beside them — so KeyTile's embedded well is rendered without any
+   `data-port-id` and must not be drawn: a well you can aim a cable at that
+   accepts nothing is the exact lie this round removed. The MIRROR inside a
+   `keyboard` container keeps its wells, because there each key really is wired
+   to the container's output panel. Attribute-driven, so the CSS cannot drift
+   from what the node advertises. */
+.keyboard-visual-node .keyboard-visual-key .oj-key-tile__port:not([data-port-id]) {
+    display: none;
+}
+
 /* The bundle socket column. `PortRow` already lays out [label][socket]; this
    only keeps it hard against the socket column and out of the row-gap. */
 .kv-grid .kv-bundle {

@@ -9,8 +9,10 @@
  *  2. The instrument picker is the shared `Menu`: real `role="menu"` rows with
  *     roving Arrow/Home/End focus, categories, Escape, and outside-click on
  *     `pointerdown`. It replaces a bespoke grid of clickable `div`s that no
- *     keyboard could reach. It anchors to the card instead of measuring the
- *     viewport, which also fixes the picker mispositioning at any zoom ≠ 1.
+ *     keyboard could reach. It ANCHORS to the card — so it pans and zooms with
+ *     the node — and is then measured, flipped and clamped inside the viewport
+ *     (`placePopover`), because a node low on the canvas otherwise opened its
+ *     whole menu below the fold with no way to reach it.
  *  3. Row values are the shared `ValueScrubber` — one scrub/type control in the
  *     app, not a private copy per faceplate.
  *
@@ -18,10 +20,11 @@
  * header is that you can change what it sounds like from it.
  */
 
-import { useState, useEffect, useMemo, useCallback, useRef, memo } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, memo } from 'react';
 import type { GraphNode, InstrumentNodeData, InstrumentRow, PortDefinition } from '../../engine/types';
 import { isBasicInstrumentNodeData } from '../../engine/typeGuards';
 import { useGraphStore } from '../../store/graphStore';
+import { useCanvasStore } from '../../store/canvasStore';
 import { useIsAgentPending } from '../../store/agentSessionStore';
 import { nodeDefinitions } from '../../engine/registry';
 import { InstrumentLoader } from '../../audio/instrumentCatalog';
@@ -38,6 +41,7 @@ import {
     ValueScrubber,
 } from '@openjammer/oj-ui';
 import { NOTE_NAMES } from '../controls/noteNames';
+import { placePopover, PICKER_GAP } from './popoverPlacement';
 import './InstrumentNode.css';
 
 interface InstrumentNodeProps {
@@ -252,9 +256,14 @@ export const InstrumentNode = memo(function InstrumentNode({
     const isAgentPending = useIsAgentPending(node.id);
 
     const cardRef = useRef<HTMLDivElement>(null);
+    const pickerRef = useRef<HTMLDivElement>(null);
     const searchRef = useRef<HTMLInputElement>(null);
     const [showPicker, setShowPicker] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
+    // Only while the picker is open: the canvas zoom changes the picker's SCREEN
+    // size, so the clamp has to be recomputed. Collapses to a constant when
+    // closed, so a wheel-zoom never re-renders a node for nothing.
+    const zoom = useCanvasStore((s) => (showPicker ? s.zoom : 0));
 
     // While the picker is open it owns the keyboard. An EMPTY modal binding set
     // is the app's own seam for that: the arbiter runs only the top-most modal
@@ -271,7 +280,10 @@ export const InstrumentNode = memo(function InstrumentNode({
     useEffect(() => {
         if (!showPicker) return;
         const onPointerDown = (e: PointerEvent) => {
-            if (!cardRef.current?.contains(e.target as Node)) closePicker();
+            const target = e.target as Node;
+            if (cardRef.current?.contains(target)) return;
+            if (pickerRef.current?.contains(target)) return;
+            closePicker();
         };
         document.addEventListener('pointerdown', onPointerDown);
         return () => document.removeEventListener('pointerdown', onPointerDown);
@@ -280,6 +292,57 @@ export const InstrumentNode = memo(function InstrumentNode({
     useEffect(() => {
         if (showPicker) searchRef.current?.focus();
     }, [showPicker]);
+
+    /**
+     * Measure, flip and clamp the picker inside the viewport — before paint.
+     *
+     * Everything is decided in VIEWPORT space (`placePopover`) because that is
+     * the space the player's screen is in, and written back in the anchor's own
+     * LOCAL space, because that is what `position: absolute` inside the canvas's
+     * transform speaks. `scale` is the canvas zoom, measured off the anchor
+     * rather than trusted from the store, so any ancestor transform is included.
+     */
+    useLayoutEffect(() => {
+        if (!showPicker) return;
+        const anchor = cardRef.current;
+        const picker = pickerRef.current;
+        if (!anchor || !picker) return;
+
+        const measure = () => {
+            // Reset first: a stale clamp would measure itself into a corner.
+            picker.style.top = '';
+            picker.style.left = '';
+            picker.style.maxHeight = '';
+
+            const anchorRect = anchor.getBoundingClientRect();
+            const pickerRect = picker.getBoundingClientRect();
+            const measured = anchor.offsetWidth > 0 ? anchorRect.width / anchor.offsetWidth : 1;
+            const scale = measured > 0 && Number.isFinite(measured) ? measured : 1;
+
+            const placed = placePopover(
+                anchorRect,
+                { width: pickerRect.width, height: pickerRect.height },
+                { width: window.innerWidth, height: window.innerHeight },
+                PICKER_GAP * scale,
+            );
+
+            picker.style.left = `${(placed.left - anchorRect.left) / scale}px`;
+            picker.style.top = `${(placed.top - anchorRect.top) / scale}px`;
+            picker.style.maxHeight = `${placed.maxHeight / scale}px`;
+            picker.dataset.flipped = placed.flipped ? 'true' : 'false';
+        };
+
+        measure();
+        window.addEventListener('resize', measure);
+        // Capture: the scroller is an ancestor panel, not the window.
+        window.addEventListener('scroll', measure, true);
+        return () => {
+            window.removeEventListener('resize', measure);
+            window.removeEventListener('scroll', measure, true);
+        };
+        // The query filters the list (changing its height) and the zoom changes
+        // its size on screen — both move where it fits.
+    }, [showPicker, searchQuery, zoom]);
 
     const availableCategories = useMemo(() => getAllowedCategories(node.type), [node.type]);
 
@@ -477,7 +540,7 @@ export const InstrumentNode = memo(function InstrumentNode({
                     {rows.length === 0 ? (
                         <p className="inst-empty">
                             {anyNoteInput
-                                ? 'Playing. Note, octave and offset appear when the notes arrive as a keyboard bundle.'
+                                ? 'Playing. Note, octave and offset appear when a Keyboard node’s row bundle arrives.'
                                 : 'Connect a keyboard row to play this instrument.'}
                         </p>
                     ) : (
@@ -530,6 +593,7 @@ export const InstrumentNode = memo(function InstrumentNode({
                 {showPicker && (
                     <div
                         className="inst-picker"
+                        ref={pickerRef}
                         onKeyDown={handlePickerKeyDown}
                         onMouseDown={(e) => e.stopPropagation()}
                     >

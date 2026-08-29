@@ -21,6 +21,7 @@ import { useCanvasStore } from '../store/canvasStore';
 import { useGraphStore } from '../store/graphStore';
 import { useArrangementStore } from '../store/arrangementStore';
 import { useAudioStore } from '../store/audioStore';
+import { isKeyboardKind, keyboardModeOf } from '../store/keyboardModes';
 import { logger } from '../utils/log';
 import type { GraphNode } from '../engine/types';
 import { buildBeatSong } from './beatSong';
@@ -136,13 +137,15 @@ export function focusRig(installed: InstalledRig): void {
     }
 
     // Typing is how this rig makes sound, so select the keyboard's mode. Modes
-    // 2–9 are the keyboards; mode 1 is config. The keyboard registers its number
-    // on mount, which is why this runs after the graph has painted.
-    const keyboard = graph
-        .getNodesByType('keyboard')
-        .find((node) => Object.values(installed.ids).includes(node.id));
-    const assigned = (keyboard?.data as { assignedKey?: number } | undefined)?.assignedKey;
-    if (typeof assigned === 'number') useAudioStore.getState().setCurrentMode(assigned);
+    // 2–9 are the keyboards; mode 1 is config. Either keyboard kind can be the
+    // rig's keyboard (the presets install the on-screen one), and both carry the
+    // number `addNode` allocated them, so ask the node — not the type.
+    const rigIds = new Set(Object.values(installed.ids));
+    const keyboard = [...graph.nodes.values()].find(
+        (node) => rigIds.has(node.id) && isKeyboardKind(node.type),
+    );
+    const assigned = keyboardModeOf(keyboard);
+    if (assigned !== undefined) useAudioStore.getState().setCurrentMode(assigned);
 }
 
 /** Build and install the rig for a goal at a persona's density. */
