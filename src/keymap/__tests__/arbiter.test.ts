@@ -4,7 +4,7 @@ import { clearBindingSetsForTests, registerBindingSet } from '../registry';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useAudioClipStore } from '../../store/audioClipStore';
 import { useUiViewStore } from '../../store/uiViewStore';
-import { keybindingActions } from '../../store/keybindingsStore';
+import { keybindingActions, UNBOUND_KEY, useKeybindingsStore } from '../../store/keybindingsStore';
 
 function key(keyValue: string, init: KeyboardEventInit = {}, target?: Element): KeyboardEvent {
     const event = new KeyboardEvent('keydown', { key: keyValue, bubbles: true, cancelable: true, ...init });
@@ -18,6 +18,7 @@ describe('keymap arbiter', () => {
         useUiViewStore.setState({ surface: 'canvas' });
         useCanvasStore.setState({ isDragging: false });
         useAudioClipStore.setState((state) => ({ dragState: { ...state.dragState, isDragging: false } }));
+        useKeybindingsStore.setState({ customBindings: {} });
     });
 
     afterEach(clearBindingSetsForTests);
@@ -51,6 +52,41 @@ describe('keymap arbiter', () => {
         expect(first).toHaveBeenCalledOnce();
         expect(second).toHaveBeenCalledOnce();
         expect(third).not.toHaveBeenCalled();
+    });
+
+    it('falls through the focused child surface to its enclosing surface INHERIT entries, then global', () => {
+        const piano = vi.fn(() => false);
+        const arrangement = vi.fn(() => true);
+        const global = vi.fn(() => true);
+        useUiViewStore.setState({ surface: 'arrangement' });
+        registerBindingSet({ id: 'pianoroll:clip-1', scope: 'surface', surface: 'pianoroll', entries: [{ actionId: 'child.unhandled', defaultBinding: { key: 'z', ctrl: true }, run: piano }] });
+        registerBindingSet({ id: 'arrangement', scope: 'surface', surface: 'arrangement', entries: [{ actionId: 'arrangement.undo', inherit: true, run: arrangement }] });
+        registerBindingSet({ id: 'global', scope: 'global', entries: [{ actionId: 'edit.undo', run: global }] });
+        const parent = document.createElement('div');
+        parent.dataset.keymapSurface = 'arrangement';
+        const child = document.createElement('div');
+        child.dataset.keymapSurface = 'pianoroll';
+        child.dataset.keymapSetId = 'pianoroll:clip-1';
+        child.tabIndex = 0;
+        parent.append(child);
+        document.body.append(parent);
+        child.focus();
+
+        const handled = resolveKeydown(key('z', { ctrlKey: true }, child));
+        parent.remove();
+        expect(handled).toBe(true);
+        expect(piano).toHaveBeenCalledOnce();
+        expect(arrangement).toHaveBeenCalledOnce();
+        expect(global).not.toHaveBeenCalled();
+    });
+
+    it('honours explicit unbinding for a binding-set-local default', () => {
+        const run = vi.fn(() => true);
+        useKeybindingsStore.setState({ customBindings: { 'arrangement.tool.draw': { key: UNBOUND_KEY } } });
+        useUiViewStore.setState({ surface: 'arrangement' });
+        registerBindingSet({ id: 'arrangement', scope: 'surface', surface: 'arrangement', entries: [{ actionId: 'arrangement.tool.draw', defaultBinding: { key: 'b' }, run }] });
+        expect(resolveKeydown(key('b'))).toBe(false);
+        expect(run).not.toHaveBeenCalled();
     });
 
     it('G1: bare Tab yields to editable and dialog-focusable targets', () => {
@@ -124,4 +160,69 @@ describe('keymap arbiter', () => {
             expect(run, actionId).toHaveBeenCalledOnce();
         }
     });
+    it('TA2d: an enclosing surface lends ONLY its inherit-flagged entries to a focused child', () => {
+        const rollUnhandled = vi.fn(() => false);
+        const parentInherited = vi.fn(() => true);
+        const parentLocal = vi.fn(() => true);
+        useUiViewStore.setState({ surface: 'arrangement' });
+        registerBindingSet({ id: 'pianoroll:clip-1', scope: 'surface', surface: 'pianoroll', entries: [{ actionId: 'child.unhandled', defaultBinding: { key: 's' }, run: rollUnhandled }] });
+        registerBindingSet({
+            id: 'arrangement', scope: 'surface', surface: 'arrangement', entries: [
+                { actionId: 'arrangement.split', defaultBinding: { key: 's' }, run: parentLocal },
+                { actionId: 'arrangement.undo', inherit: true, run: parentInherited },
+            ],
+        });
+        const parent = document.createElement('div');
+        parent.dataset.keymapSurface = 'arrangement';
+        const child = document.createElement('div');
+        child.dataset.keymapSurface = 'pianoroll';
+        child.dataset.keymapSetId = 'pianoroll:clip-1';
+        child.tabIndex = 0;
+        parent.append(child);
+        document.body.append(parent);
+        child.focus();
+
+        // `s` is a destructive arrangement EDIT; it must not reach the parent.
+        const split = key('s', {}, child);
+        expect(resolveKeydown(split)).toBe(false);
+        expect(rollUnhandled).toHaveBeenCalledOnce();
+        expect(parentLocal).not.toHaveBeenCalled();
+        expect(split.defaultPrevented).toBe(false);
+
+        // Ctrl+Z is flagged inheritable, so document history still works from the roll.
+        expect(resolveKeydown(key('z', { ctrlKey: true }, child))).toBe(true);
+        expect(parentInherited).toHaveBeenCalledOnce();
+        parent.remove();
+    });
+
+    it('S4: bare Tab only toggles surfaces from the song surfaces themselves', () => {
+        const run = vi.fn(() => true);
+        registerBindingSet({ id: 'global', scope: 'global', entries: [{ actionId: 'view.toggleArrangement', run }] });
+
+        const pill = document.createElement('div');
+        pill.className = 'transport-pill';
+        const play = document.createElement('button');
+        pill.append(play);
+        const surface = document.createElement('div');
+        surface.dataset.surfaceRoot = 'arrangement';
+        const clip = document.createElement('button');
+        surface.append(clip);
+        document.body.append(pill, surface);
+
+        // Chrome: the pill lives outside every `[data-surface-root]`, so Tab is
+        // native traversal and the arbiter must not preventDefault.
+        const fromPill = key('Tab', {}, play);
+        expect(resolveKeydown(fromPill)).toBe(false);
+        expect(fromPill.defaultPrevented).toBe(false);
+        expect(resolveKeydown(key('Tab', { shiftKey: true }, play))).toBe(false);
+        expect(run).not.toHaveBeenCalled();
+
+        // Inside a surface root — and on the bare body — Tab is the surface toggle.
+        expect(resolveKeydown(key('Tab', {}, clip))).toBe(true);
+        expect(resolveKeydown(key('Tab', {}, document.body))).toBe(true);
+        expect(run).toHaveBeenCalledTimes(2);
+        pill.remove();
+        surface.remove();
+    });
+
 });

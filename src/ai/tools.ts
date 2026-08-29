@@ -208,13 +208,13 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'Author the SONG TIMELINE with reversible primitive `verbs` or shared high-level `ops` — ' +
             'the SAME operation layer a human GUI drag emits — applied live and undoable with ' +
             'Ctrl+Z. During a live performer gesture it returns `queued: true` and lands afterward; the next `describe_arrangement` reports the queued result. ' +
-            'Verb kinds: setTempo; setTrackMute/setTrackSolo/setTrackName/setTrackGain/setTrackPan; addTrack/removeTrack; ' +
+            'Verb kinds: setTempo; setTrackMute/setTrackSolo/setTrackName/setTrackGain/setTrackPan/setTrackColor; addTrack/removeTrack/moveTrack; ' +
             'addSource/removeSource; addClip/removeClip/moveClip/setClipWindow/splitClip; ' +
             'setClipGain/setClipFades; addNote/removeNote/editNote; addLocation/removeLocation/' +
-            'moveLocation/setLoopRange/setPunchRange; rippleTracks/insertTime/removeTime; ' +
+            'moveLocation/setLocationName/setLoopRange/setPunchRange; rippleTracks/insertTime/removeTime; ' +
             'stretchClip; compound; addAutomationLane/removeAutomationLane; setAutomationPoint/' +
             'removeAutomationPoint/setAutomationRange/setAutomationLaneState/setAutomationLaneInterp. Ids for ADDED entities are minted for you (omit them). ' +
-            'Record operations: armTrack, setClick, setCountIn, record (start/stop). Timeline operations include moveClips, trimClip, splitAt, duplicateClips, deleteClips, setGrid, nudge, drawNote, note edits, automation edits, and range edits. Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
+            'Record operations: armTrack, setClick, setCountIn, record (start/stop). Timeline operations include `createClip { trackId, startTick, lengthTick, name? }` (the same atomic empty-lane Draw gesture), `addMarker { atTick, name? }` (the same marker Ctrl+M and a ruler double-click drop), moveClips, trimClip, splitAt, duplicateClips, deleteClips, setGrid, nudge, drawNote, note edits, automation edits, and range edits. Times are PPQN ticks — read ppq + bar positions from describe_arrangement first.',
     },
     {
         name: 'export_song',

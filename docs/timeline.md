@@ -65,12 +65,120 @@ The editing context owns grid, snap, tools, selection, focused viewport, and cli
 That keeps arrangement commands deterministic whether invoked by mouse, keyboard,
 command bar, or agent.
 
+### Wave 3 gesture and navigation contract
+
+Every timeline drag uses one surface-scoped pointer lifecycle. Capture loss is non-terminal;
+window pointer-up commits, while pointer-cancel, blur, Escape, and that surface unmounting
+restore the exact pre-gesture document. Arrangement teardown never aborts a piano-roll
+gesture. Preview writes share one animation frame. The dominant axis freezes after the
+4 px threshold (scaled 1.75 for coarse pointers), copy-drag is **Alt** held during the drag
+and requires 12 px horizontally, and edge auto-scroll stops after 400 ms when the pointer
+stops moving. Ctrl/Cmd during a drag inverts snap; it does not copy.
+
+Magnetic snap uses a 12 px grid radius and an 18 px radius for meaningful anchors; anchors
+win equal-distance ties. It is disabled below 3 px per grid unit. Ctrl/Cmd held during
+motion inverts snap, while Alt+Shift preserves the selection's relative offset. When snap
+displaces the raw point by at least 1 px, the controller publishes the snapped tick and the
+arrangement renders a positioned `.arrangement-snap-indicator`; its visual hairline styling
+belongs to the CSS lane and is not part of this TypeScript round. This supersedes BC-06's
+former flat 25 px law.
+
+Empty-lane drag selects a snapped time range; Alt+drag is object marquee, Ctrl toggles
+objects in that marquee, and Shift extends. Section/marker chips write
+`selection.sectionIds`; Delete emits `removeLocation`. Double-clicking the empty band of
+a section/marker chip or the uncovered sections row creates a marker, while double-clicking a
+chip's **label** opens its inline rename; the two are told apart by the element the pointer
+was pressed on, because pointer capture retargets the synthesized click to the capturing
+element. **Ctrl+M** creates a marker at the playhead, and `addMarker` exposes the same
+operation to the command/agent path.
+Marker drag and inline rename use `moveLocation` and `setLocationName`. Draw tool B previews a ghost and creates
+an empty MIDI source and clip as one `createClip` operation; a click/double-click creates
+one bar. Track names edit inline (Enter/changed blur commits, Escape restores), tracks
+reorder with `moveTrack`, the header colour input emits `setTrackColor`, lane height clamps
+to 28–480 px (Alt applies the drag to every lane; double-click restores the default height —
+220 px while an inline piano roll is open, 72 px otherwise — it does not measure content),
+and header width clamps to 160–320 px. The lane divider is the bottom 5 px of each lane; the header
+divider is a 6 px column at the header's right edge.
+
+The ruler chrome is 64 px — sections 22, braces 14, bars 28 — declared once as
+`--arrangement-ruler-height` in `gestureHandles.css`. Every ruled field overlay (ground, grid
+anchor, playhead, loop wash, range selection, range marquee) reads that same variable, so the
+playhead and the grid start exactly where the ruler ends; `RULER_HEIGHT` in
+`ArrangementSurface.tsx` is its JS twin and must be changed with it. The
+positioned loop bracket is calculated from its start/end ticks, `pxPerTick`, and horizontal
+scroll; the brace row creates, moves, and resizes loop/punch ranges. A press on the *empty*
+brace row does not swallow the click: it keeps bubbling to the ruler scrub, so a click without
+a drag still seeks, and the brace drag only takes the pointer — restoring the playhead — once
+it passes the 4 px threshold. A press on an existing brace or end cap owns the pointer
+outright. Scrubbing owns the
+complete pointer stream; editor note audition remains disabled while transport is rolling.
+Arrangement shortcuts include E/Q level navigation, Shift+Space, Shift+Z, Ctrl+0, +/-,
+Alt+G, Home/End, Ctrl+Left/Right marker traversal, Alt+Left/Right bar nudge, Up/Down clip
+track moves, Ctrl+Alt+arrows spatial selection (Shift extends), V/B/X/K/T tools,
+bracket-key grid changes, L/I/O/P/M/F/0, Ctrl+M, Ctrl+E, Ctrl+Shift+Backspace, and Ctrl+A.
+`I` and `O` clamp the loop they set: the range is always at least one grid unit long and never
+starts below zero, so `O` with the playhead at 1.1 no longer emits an invalid location verb.
+Two documented deviations from the interaction spec: spec §4.2 assigns `M` to the mixer while
+the code binds `M` to the metronome (the mixer is the transport's **Mix** button), and spec
+§4.3 assigns `K` to Velocity while both surfaces bind `K` to the knife.
+Catalogue-backed actions are rebindable in Settings; the newer binding-set-local actions
+use their documented defaults but are not yet listed in Settings. Follow-playhead defaults on in page
+mode: crossing the rightmost 15% jumps to one-sixth from the left. Manual scroll, zoom, or
+field interaction disarms it; play from stopped or F re-arms it. Reduced motion never stops
+the playhead clock and adds no smooth-scroll animation.
+
 ## Piano roll
 
 Double-click a MIDI clip to open its piano roll. It shares the song clock and source-note
 ids, so note edits immediately update the arrangement and remain undoable with the parent
 song. The shipped tools cover draw, select/move/copy, resize, velocity, erase, step entry,
 transpose and quantize.
+
+### Key resolution and the `inherit` allowlist
+
+Resolution is inside-out and, in order: an editable target or a native text copy yields
+outright; a live pointer drag consumes everything except Escape; the top-most modal is
+exclusive; then the focused binding set, each enclosing DOM surface outward, the active app
+surface if it is not already in that ancestry, and finally the global sets. The first entry
+whose combo matches, whose `guard` does not return `false`, and whose `run` returns `true`
+wins and calls `preventDefault`.
+
+**Fall-through is allowlisted, not blanket.** Only the innermost surface runs its whole set.
+An enclosing surface contributes just the entries flagged `inherit: true` on the
+`BindingEntry`. In the arrangement those are exactly seven: `arrangement.undo`,
+`arrangement.redo`, `arrangement.transport` (Space), `arrangement.playFromSelection`
+(Shift+Space), `arrangement.addMarker` (Ctrl+M), `arrangement.escape` and `arrangement.exit`.
+Global sets — the command palette, save, export, panels, `Tab` — always run. Everything else
+in the arrangement set is surface-local, so from a focused inline piano roll `s` cannot split,
+`0` cannot mute, `r`, `e`, `l`, `i`, `o`, `p`, `f`, `m`, `[`, `]`, `v b x k`, the arrows,
+Delete/Backspace, `Ctrl+D/E/A`, `Shift+Z`, `+`/`-`, `Ctrl+0`, `Home`/`End`, `Ctrl+←/→` and
+`Alt+←/→` do nothing: an editor can never edit the thing it is editing from underneath.
+
+Piano-roll keys live in one `surface: 'pianoroll'` binding set selected
+by the focused roll, whether that roll is inline or full-surface. Editable fields keep their
+native keys. Ctrl+Z / Ctrl+Shift+Z call shared document history from inline and full rolls,
+and Space, Shift+Space and Ctrl+M reach the arrangement through the allowlist. Space
+reaches transport unless Step is armed. `Q` closes the roll — collapsing an inline roll back
+to its previous lane height, or leaving the full-surface roll — and `Escape` clears the
+selection first, then closes. When the roll has nothing left to close, both entries return
+`false` and the arrangement's inherited `exit` / `escape` runs, so there is never a dead key.
+Ctrl+Q quantizes. T arms Step; while it
+is armed, `a w s e d f t g y h u j` enter pitches, Space/Backspace move the cursor, Z and
+Shift+Z change octave, and V/B/X/K do not steal those keystrokes. With Step disarmed,
+V/B/X/K select, draw, erase, and knife. Plain wheel scrolls, Alt+wheel edits velocity,
+Ctrl/Cmd+wheel zooms, and Ctrl/Cmd+Shift+wheel changes the visible pitch-row scale.
+ResizeObserver measures the host and rows never shrink below 6 px. Drawing or step entry
+beyond the active clip posts visible feedback; the clip is not silently extended.
+
+Key-bed and scroomer drags use the same window-owned pointer controller as note gestures.
+The velocity lane supports one-gesture paint and Alt-ramp. The piano-roll playhead, the
+arrangement playhead, record ghost, mixer meters, and per-track level beads all write from
+the shared timeline animation frame rather than independent loops.
+
+Structural edits while playing preview visually. Parameter/automation previews currently
+re-conduct the authored preview document at a bounded 20 Hz; there is not yet a direct
+real-time parameter-preview command. Failure preserves the last good sound. Agent edits that
+arrive during a performer gesture queue and apply atomically afterward as their own undo.
 
 The note laws are BC-30–37: drawing is one overlap-aware batch; a multi-note move uses one
 clamped delta; edge handles follow the shared hit-zone rule; velocity and transpose reject
@@ -136,7 +244,8 @@ The agent first calls `describe_arrangement`, which reports stable ids, ppq, bar
 tracks, clips, note detail, sections and automation targets. It changes the song with
 `edit_timeline`, an ordered batch of the same operations used by the UI: track and clip
 edits, grid/nudge, range editing, piano-roll notes, mixer/automation, loop/punch, and
-recording controls. Validation and application are atomic; one bad operation lands none of
+recording controls. `addMarker { atTick, name? }` is the marker operation shared with
+Ctrl+M and ruler double-click. Validation and application are atomic; one bad operation lands none of
 the batch, and a successful batch is one Ctrl+Z step.
 
 `export_song` uses the native export contract rather than a special agent renderer. Tool
@@ -150,6 +259,18 @@ preview, save/reopen, and export. The remaining named gaps are deliberately narr
 
 - take-lane expansion and comping UI;
 - Write/Touch automation capture;
+- a direct RT automation-preview command (preview is currently authored-document, 20 Hz);
+- Settings catalogue/conflict entries for the newest binding-set-local timeline shortcuts
+  (about 25 ids, including every `arrangement.tool.*` and `pianoroll.*` action), so those
+  cannot be rebound or conflict-checked yet;
+- visible CSS for the snap hairline, track level bead, inline track-name editor, brace row and
+  brace glyphs, section-chip label, resize grips, and the track-colour swatch popover (the
+  header still uses a raw `<input type="color">`); the bars row also overflows the ruler
+  viewport by 2 px because the shell's 2 px bottom border is inside its 64 px box;
+- bare `ArrowUp`/`ArrowDown` are consumed by the clip track-move binding even with nothing
+  selected, so they do not scroll the field natively;
+- Step entry is disarmed only from the toolbar Step button — no key disarms it;
+- group-edge magnetic anchors for multi-clip drags;
 - plugin delay compensation;
 - stems and reversible track freeze.
 

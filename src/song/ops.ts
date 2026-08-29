@@ -6,7 +6,7 @@ import type { CutBuffer } from '../store/clipboardStore';
 export interface OpResult { verbs: Verb[]; selectedClipIds?: string[]; selectedNoteIds?: string[]; skipped?: string[]; rejected?: string }
 
 export const EDIT_OPS = [
-    'moveClips', 'trimClip', 'splitAt', 'duplicateClips', 'deleteClips', 'setGrid', 'nudge', 'deleteTime', 'insertTime',
+    'createClip', 'addMarker', 'moveClips', 'trimClip', 'splitAt', 'duplicateClips', 'deleteClips', 'setGrid', 'nudge', 'deleteTime', 'insertTime',
     'cutSelection', 'copySelection', 'paste', 'pasteRepeat', 'selectRange', 'deleteRange', 'slipClip', 'splitRange', 'duplicateRange',
     'drawNote', 'moveNotes', 'copyNotes', 'resizeNotes', 'eraseNotes', 'setVelocity', 'transposeNotes', 'quantizeNotes',
     'setAutomationPoints', 'moveAutomationPoints', 'setAutomationRange', 'thinAutomation',
@@ -15,6 +15,8 @@ export const EDIT_OPS = [
 ] as const;
 export type EditOpName = typeof EDIT_OPS[number];
 export type TimelineOp =
+    | { op: 'createClip'; trackId: string; startTick: number; lengthTick: number; name?: string }
+    | { op: 'addMarker'; atTick: number; name?: string }
     | { op: 'moveClips'; clipIds: string[]; deltaTick: number; toTrackId?: string; ripple?: boolean }
     | { op: 'trimClip'; clipIds: string[]; edge: 'start' | 'end'; atTick: number }
     | { op: 'splitAt'; clipIds: string[]; atTick: number }
@@ -60,6 +62,63 @@ export type NoteOverlapPolicy = 'relax' | 'reject' | 'replace' | 'truncate-exist
 export interface NoteRange { fromTick: number; toTick: number; minPitch?: number; maxPitch?: number; sourceId?: string }
 
 interface LocatedNote { sourceId: string; source: MidiSource; note: ArrangementNote; index: number }
+
+/** Draw-tool operation: one empty MIDI source and its timeline window, undone atomically. */
+export function createClip(
+    arrangement: Arrangement,
+    trackId: string,
+    startTick: number,
+    lengthTick: number,
+    mintId: (prefix: string) => string,
+    name = 'MIDI clip',
+): OpResult {
+    if (!arrangement.tracks.some((track) => (track.id ?? track.ref) === trackId)) return { verbs: [], rejected: `no track "${trackId}"` };
+    if (!Number.isFinite(startTick) || startTick < 0) return { verbs: [], rejected: 'clip start must be zero or greater' };
+    if (!Number.isFinite(lengthTick) || lengthTick < 1) return { verbs: [], rejected: 'clip length must be at least one tick' };
+    const sourceId = mintId('src:midi');
+    const clipId = mintId('clip');
+    return {
+        verbs: [{
+            kind: 'compound',
+            verbs: [
+                { kind: 'addSource', source: { id: sourceId, kind: 'midi', name, notes: [], lengthTick } },
+                { kind: 'addClip', trackId, clip: { id: clipId, sourceId, startTick, lengthTick, name } },
+            ],
+        }],
+        selectedClipIds: [clipId],
+    };
+}
+
+/** One marker path for ruler, keyboard, command palette, and agent edits. */
+export function addMarker(arrangement: Arrangement, atTick: number, mintId: (prefix: string) => string, name?: string): OpResult {
+    if (!Number.isFinite(atTick) || atTick < 0) return { verbs: [], rejected: 'marker tick must be zero or greater' };
+    const markerNumber = (arrangement.locations ?? []).filter((location) => location.kind === 'mark').length + 1;
+    return {
+        verbs: [{ kind: 'addLocation', index: arrangement.locations?.length ?? 0, location: { id: mintId('location'), name: name?.trim() || `Marker ${markerNumber}`, kind: 'mark', startTick: Math.round(atTick) } }],
+    };
+}
+
+/**
+ * `I` / `O` set one loop edge from the playhead. The other edge follows so the
+ * range is always at least one grid unit long and never starts below zero —
+ * otherwise `I`/`O` at tick 0 emits `startTick: -1` and `applyVerb` throws
+ * "location cannot start below zero" as an uncaught page error mid-set.
+ */
+export function loopRangeForEdge(
+    current: { startTick?: number; endTick?: number } | undefined,
+    tick: number,
+    edge: 'in' | 'out',
+    gridUnitTicks: number,
+): { startTick: number; endTick: number } {
+    const unit = Math.max(1, Math.round(Number.isFinite(gridUnitTicks) ? gridUnitTicks : 1) || 1);
+    const at = Math.max(0, Math.round(Number.isFinite(tick) ? tick : 0));
+    if (edge === 'in') {
+        const startTick = at;
+        return { startTick, endTick: Math.max(startTick + unit, Math.round(current?.endTick ?? 0)) };
+    }
+    const endTick = Math.max(unit, at);
+    return { startTick: Math.max(0, Math.min(Math.round(current?.startTick ?? 0), endTick - unit)), endTick };
+}
 
 function findNote(arrangement: Arrangement, noteId: string): LocatedNote | undefined {
     for (const [sourceId, source] of Object.entries(arrangement.sources ?? {})) {

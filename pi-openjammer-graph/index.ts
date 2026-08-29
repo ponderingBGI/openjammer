@@ -485,6 +485,15 @@ export default function register(pi: ExtensionAPI): void {
                     factor: Type.Optional(Type.Number()),
                 }),
                 Type.Object({
+                    op: Type.Literal('createClip'), trackId: Type.String(),
+                    startTick: Type.Number(), lengthTick: Type.Number(),
+                    name: Type.Optional(Type.String()),
+                }),
+                Type.Object({
+                    op: Type.Literal('addMarker'), atTick: Type.Number(),
+                    name: Type.Optional(Type.String()),
+                }),
+                Type.Object({
                     op: Type.Literal('thinAutomation'), laneId: Type.String(), factor: Type.Optional(Type.Number()),
                 }),
                 Type.Object({ op: Type.Literal('setTrackGain'), trackId: Type.String(), gainDb: Type.Number() }),

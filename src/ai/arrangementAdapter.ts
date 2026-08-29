@@ -16,6 +16,8 @@ import { applyVerbs, type Verb } from '../song/verbs';
 import type { ArrangementToolPort } from './tools';
 import {
     copyNotes,
+    addMarker,
+    createClip,
     deleteClips,
     deleteTime,
     deleteRange,
@@ -112,6 +114,8 @@ export function createArrangementPort(): ArrangementToolPort {
                 for (const operation of ops) {
                     let result: OpResult = { verbs: [] };
                     switch (operation.op) {
+                        case 'createClip': result = createClip(projected, operation.trackId, operation.startTick, operation.lengthTick, store.mintId, operation.name); break;
+                        case 'addMarker': result = addMarker(projected, operation.atTick, store.mintId, operation.name); break;
                         case 'moveClips': result = moveClips(projected, operation.clipIds, operation.deltaTick, operation); break;
                         case 'trimClip': result = trimClip(projected, operation.clipIds, operation.edge, operation.atTick); break;
                         case 'splitAt': result = splitAt(projected, operation.clipIds, operation.atTick, store.mintId); break;

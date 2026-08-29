@@ -149,6 +149,29 @@ describe('createArrangementPort — live binding to the arrangement store', () =
         expect(useArrangementStore.getState().arrangement).toEqual(before);
     });
 
+    it('dispatches createClip as one undoable empty-MIDI document edit', () => {
+        const before = structuredClone(useArrangementStore.getState().arrangement!);
+        const trackId = before.tracks[0]!.id!;
+        const result = createArrangementPort().applyOps!([{ op: 'createClip', trackId, startTick: 9_600, lengthTick: 3_840, name: 'Drawn' }]);
+        expect(result.ok).toBe(true);
+        const next = useArrangementStore.getState().arrangement!;
+        const clip = next.tracks[0]!.clips.find((item) => item.startTick === 9_600)!;
+        expect(next.sources?.[clip.sourceId]).toMatchObject({ kind: 'midi', notes: [], lengthTick: 3_840 });
+        result.undo();
+        const undone = useArrangementStore.getState().arrangement!;
+        expect({ ...undone, idCounter: before.idCounter }).toEqual(before);
+    });
+
+    it('dispatches addMarker through the same reversible marker path as Ctrl+M', () => {
+        const before = structuredClone(useArrangementStore.getState().arrangement!);
+        const result = createArrangementPort().applyOps!([{ op: 'addMarker', atTick: 7_680, name: 'Drop' }]);
+        expect(result.ok).toBe(true);
+        expect(useArrangementStore.getState().arrangement!.locations).toContainEqual(expect.objectContaining({ name: 'Drop', kind: 'mark', startTick: 7_680 }));
+        result.undo();
+        const undone = useArrangementStore.getState().arrangement!;
+        expect({ ...undone, idCounter: before.idCounter }).toEqual(before);
+    });
+
     it('BC-30..37 dispatches the public piano-note ops through the shared lowering layer', () => {
         const port = createArrangementPort();
         const before = structuredClone(useArrangementStore.getState().arrangement!);

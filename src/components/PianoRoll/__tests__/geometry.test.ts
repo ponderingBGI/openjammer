@@ -26,8 +26,8 @@ describe('piano-roll geometry', () => {
         expect(shouldAutoDetectDrums([])).toBe(false);
     });
 
-    it('keeps pitched rows in the 3px to 16px contract range', () => {
-        expect(pitchRowHeight(40, { lo: 0, hi: 127 }, false)).toBe(3);
+    it('keeps pitched rows in the 6px to 16px hit-testable contract range', () => {
+        expect(pitchRowHeight(40, { lo: 0, hi: 127 }, false)).toBe(6);
         expect(pitchRowHeight(600, { lo: 60, hi: 71 }, false)).toBe(16);
         expect(pitchRowHeight(20, { lo: 35, hi: 81 }, true)).toBe(18);
     });

@@ -1,18 +1,25 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { useEffect, useRef, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { LaneButton, Slider, ValueScrubber } from '@openjammer/oj-ui';
-import { getExecutor } from '../../audio/executor';
 import type { ArrangementTrack } from '../../song/types';
 import { useArrangementStore } from '../../store/arrangementStore';
+import { ownPointerGesture } from './pointerGestureLifetime';
+import { registerTimelineLevelWriter } from './timelineSignalLevels';
 
-const EMPTY_LEVELS = new Map<string, number>();
-
-function Meter({ value }: { value: number }) {
-    return <span className={`mixer-meter${value >= 1 ? ' is-clipping' : ''}`} aria-hidden="true"><span style={{ transform: `scaleY(${Math.max(0, Math.min(1, value))})` }} /></span>;
+function Meter({ levelId, active }: { levelId: string; active: boolean }) {
+    const ref = useRef<HTMLSpanElement>(null);
+    useEffect(() => registerTimelineLevelWriter((levels) => {
+        const value = active ? levels.get(levelId) ?? 0 : 0;
+        ref.current?.classList.toggle('is-clipping', value >= 1);
+        const fill = ref.current?.firstElementChild as HTMLElement | null;
+        if (fill) fill.style.transform = `scaleY(${Math.max(0, Math.min(1, value))})`;
+    }), [active, levelId]);
+    return <span ref={ref} className="mixer-meter" aria-hidden="true"><span /></span>;
 }
 
-function TrackStrip({ track, peak }: { track: ArrangementTrack; peak: number }) {
+function TrackStrip({ track, active }: { track: ArrangementTrack; active: boolean }) {
     const trackId = track.id ?? track.ref;
     const gesture = useRef(false);
+    const cleanup = useRef<(() => void) | null>(null);
     const panGesture = useRef<{ y: number; value: number; moved: boolean } | null>(null);
     const suppressPanClick = useRef(false);
     const preview = (verb: Parameters<ReturnType<typeof useArrangementStore.getState>['previewGesture']>[0]) => {
@@ -23,12 +30,15 @@ function TrackStrip({ track, peak }: { track: ArrangementTrack; peak: number }) 
         }
         store.previewGesture(verb);
     };
-    const finish = () => {
+    const finish = (commit = true) => {
         if (!gesture.current) return;
         suppressPanClick.current = panGesture.current?.moved === true;
+        cleanup.current?.();
+        cleanup.current = null;
         gesture.current = false;
         panGesture.current = null;
-        useArrangementStore.getState().commitGesture();
+        if (commit) useArrangementStore.getState().commitGesture();
+        else useArrangementStore.getState().abortGesture();
     };
     const onFaderKey = (event: KeyboardEvent<HTMLInputElement>) => {
         if (!['ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft'].includes(event.key)) return;
@@ -48,14 +58,12 @@ function TrackStrip({ track, peak }: { track: ArrangementTrack; peak: number }) 
                         max={12}
                         step={0.5}
                         value={track.gainDb ?? 0}
-                        onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); useArrangementStore.getState().beginGesture('Adjust track gain'); gesture.current = true; }}
-                        onPointerUp={finish}
-                        onPointerCancel={() => { gesture.current = false; useArrangementStore.getState().abortGesture(); }}
+                        onPointerDown={(event) => { try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Window listeners own completion. */ } useArrangementStore.getState().beginGesture('Adjust track gain'); gesture.current = true; cleanup.current = ownPointerGesture(event.pointerId, { commit: () => finish(true), abort: () => finish(false) }); }}
                         onKeyDown={onFaderKey}
                         onChange={(gainDb) => preview({ kind: 'setTrackGain', trackId, gainDb })}
                     />
                 </div>
-                <Meter value={peak} />
+                <Meter levelId={track.ref} active={active} />
             </div>
             <span className="mixer-strip__readout">{(track.gainDb ?? 0).toFixed(1)} dB</span>
             <ValueScrubber
@@ -63,20 +71,22 @@ function TrackStrip({ track, peak }: { track: ArrangementTrack; peak: number }) 
                 value={track.pan ?? 0}
                 display={Math.abs(track.pan ?? 0) < 0.005 ? 'C' : `${(track.pan ?? 0) < 0 ? 'L' : 'R'}${Math.round(Math.abs(track.pan ?? 0) * 100)}`}
                 aria-label={`${track.name ?? track.ref} pan`}
-                onPointerDown={(event: PointerEvent<HTMLSpanElement>) => {
-                    event.currentTarget.setPointerCapture(event.pointerId);
+                onPointerDown={(event: ReactPointerEvent<HTMLSpanElement>) => {
+                    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Window listeners own completion. */ }
                     panGesture.current = { y: event.clientY, value: track.pan ?? 0, moved: false };
                     useArrangementStore.getState().beginGesture('Adjust track pan');
                     gesture.current = true;
+                    cleanup.current = ownPointerGesture(event.pointerId, {
+                        move: (nativeEvent) => {
+                            if (!panGesture.current) return;
+                            if (Math.abs(nativeEvent.clientY - panGesture.current.y) < 3) return;
+                            panGesture.current.moved = true;
+                            preview({ kind: 'setTrackPan', trackId, pan: panGesture.current.value + (panGesture.current.y - nativeEvent.clientY) / 80 });
+                        },
+                        commit: () => finish(true),
+                        abort: () => finish(false),
+                    });
                 }}
-                onPointerMove={(event: PointerEvent<HTMLSpanElement>) => {
-                    if (!panGesture.current) return;
-                    if (Math.abs(event.clientY - panGesture.current.y) < 3) return;
-                    panGesture.current.moved = true;
-                    preview({ kind: 'setTrackPan', trackId, pan: panGesture.current.value + (panGesture.current.y - event.clientY) / 80 });
-                }}
-                onPointerUp={finish}
-                onPointerCancel={() => { gesture.current = false; panGesture.current = null; suppressPanClick.current = false; useArrangementStore.getState().abortGesture(); }}
                 onClickCapture={(event) => {
                     if (!suppressPanClick.current) return;
                     suppressPanClick.current = false;
@@ -98,21 +108,15 @@ function TrackStrip({ track, peak }: { track: ArrangementTrack; peak: number }) 
 export function MixerDrawer() {
     const arrangement = useArrangementStore((state) => state.arrangement);
     const isPlaying = useArrangementStore((state) => state.isPlaying);
-    const [levels, setLevels] = useState<Map<string, number>>(new Map());
-    useEffect(() => {
-        if (!isPlaying) return;
-        return getExecutor().subscribeSignalLevels((next) => setLevels(new Map(next)));
-    }, [isPlaying]);
     if (!arrangement) return null;
-    const displayedLevels = isPlaying ? levels : EMPTY_LEVELS;
     return (
         <div className={`mixer-drawer${isPlaying ? '' : ' is-idle'}`} role="region" aria-label="Mixer">
             <div className="mixer-drawer__scroll">
-                {arrangement.tracks.map((track) => <TrackStrip key={track.id ?? track.ref} track={track} peak={displayedLevels.get(track.ref) ?? 0} />)}
+                {arrangement.tracks.map((track) => <TrackStrip key={track.id ?? track.ref} track={track} active={isPlaying} />)}
             </div>
             <section className="mixer-strip mixer-strip--master" aria-label="Master mixer strip">
                 <div className="mixer-strip__name">Master</div>
-                <div className="mixer-master-meter"><Meter value={displayedLevels.get('__master__') ?? 0} /></div>
+                <div className="mixer-master-meter"><Meter levelId="__master__" active={isPlaying} /></div>
                 <span className="mixer-strip__readout">0.0 dB</span>
             </section>
         </div>

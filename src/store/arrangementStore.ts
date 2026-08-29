@@ -39,6 +39,17 @@ let documentGeneration = 0;
 let recordSessionGeneration = 0;
 const GESTURE_WATCHDOG_MS = 5_000;
 const activePointers = new Set<number>();
+function verbValueEqual(a: unknown, b: unknown): boolean {
+    if (Object.is(a, b)) return true;
+    if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((value, index) => verbValueEqual(value, b[index]));
+    if (a && b && typeof a === 'object' && typeof b === 'object') {
+        const aRecord = a as Record<string, unknown>;
+        const bRecord = b as Record<string, unknown>;
+        const keys = Object.keys(aRecord);
+        return keys.length === Object.keys(bRecord).length && keys.every((key) => verbValueEqual(aRecord[key], bRecord[key]));
+    }
+    return false;
+}
 if (typeof window !== 'undefined') {
     window.addEventListener('pointerdown', (event) => activePointers.add(event.pointerId), true);
     const releasePointer = (event: PointerEvent) => activePointers.delete(event.pointerId);
@@ -299,7 +310,8 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 return;
             }
             log.warn('timeline gesture watchdog auto-closed an ownerless gesture', { detail: `${gestureDepth} frame(s) were open for over ${GESTURE_WATCHDOG_MS}ms` });
-            while (gestureDepth > 0) get().commitGesture();
+            const framesToClose = gestureDepth;
+            for (let index = 0; index < framesToClose && gestureDepth > 0; index += 1) get().commitGesture();
         }, GESTURE_WATCHDOG_MS);
     };
 
@@ -577,7 +589,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             const { next, inverse } = applyVerbs(base, verbs);
             // Returning a gesture to its exact origin is not an edit. Keep the
             // document version and unified history cursor unchanged.
-            if (JSON.stringify(next) === JSON.stringify(base)) {
+            if (verbs.length === inverse.length && verbs.every((verb, index) => verbValueEqual(verb, inverse[inverse.length - 1 - index]!))) {
                 set({ arrangement: base });
                 useHistoryStore.getState().commit();
                 flushQueuedApplies();

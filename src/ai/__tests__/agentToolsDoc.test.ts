@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { TOOL_CATALOGUE, catalogueToMarkdown } from '../tools';
+import { EDIT_OPS } from '../../song/ops';
 
 const DOC_PATH = resolve(process.cwd(), 'docs/agent-tools.md');
 
@@ -36,4 +37,15 @@ describe('docs/agent-tools.md', () => {
     it('points at the code-node ABI doc', () => {
         expect(doc).toContain('code-node-abi.md');
     });
+    it('names every op the timeline UI can reach, so the agent is told it exists', () => {
+        // An op in EDIT_OPS that the description never mentions is invisible: the
+        // agent cannot call what it is never told about. `addMarker` was the gap.
+        const editTimeline = TOOL_CATALOGUE.find((tool) => tool.name === 'edit_timeline')!;
+        for (const op of ['createClip', 'addMarker']) {
+            expect(EDIT_OPS).toContain(op);
+            expect(editTimeline.description, op).toContain(op);
+            expect(doc, op).toContain(op);
+        }
+    });
+
 });

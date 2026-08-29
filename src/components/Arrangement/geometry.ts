@@ -42,10 +42,13 @@ export function virtualizationWindow(
         offsets[index + 1] = offsets[index]! + heights[index]!;
     }
     const laneTop = Math.max(0, view.top - rulerHeight);
-    const laneBottom = laneTop + view.height - rulerHeight;
-    const firstLane = Math.max(0, offsets.findIndex((_offset, index) => index < heights.length && offsets[index + 1]! >= laneTop) - 1);
-    const computedLastLane = offsets.findIndex((offset) => offset > laneBottom) + 1 || heights.length;
-    const lastLane = Math.min(heights.length, Math.max(firstLane + 3, computedLastLane));
+    const laneBottom = Math.max(laneTop, laneTop + Math.max(0, view.height - rulerHeight));
+    let firstVisible = 0;
+    while (firstVisible < heights.length && offsets[firstVisible + 1]! <= laneTop) firstVisible += 1;
+    let lastVisible = firstVisible;
+    while (lastVisible < heights.length && offsets[lastVisible]! < laneBottom) lastVisible += 1;
+    const firstLane = heights.length === 0 ? 0 : Math.max(0, firstVisible - 1);
+    const lastLane = Math.min(heights.length, Math.max(lastVisible + 1, view.height <= rulerHeight ? firstLane + 3 : firstLane + 1));
     const fieldViewportWidth = Math.max(1, view.width - headerWidth);
     return {
         offsets,

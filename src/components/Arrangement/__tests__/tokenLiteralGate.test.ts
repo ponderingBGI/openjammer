@@ -52,9 +52,19 @@ describe('S2b CSS invariants', () => {
         expect(port).not.toContain('drop-shadow');
     });
 
-    it('removes the Speaker range input outer track', () => {
-        const nodes = readFileSync(join(process.cwd(), 'src/components/Nodes/SchematicNodes.css'), 'utf8');
-        expect(nodes).toMatch(/\.speaker-volume-slider\s*{[^}]*padding:\s*0;[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
+    it('keeps the Speaker faceplate off raw range inputs', () => {
+        // The old invariant pinned a `.speaker-volume-slider` rule that stripped a
+        // native range input's outer track. W5-P6 replaced that control with the
+        // oj-ui `Knob`, so the stronger statement is the one that holds now: the
+        // Speaker owns no bespoke range styling at all, and its level control is a
+        // shared part. A raw `<input type="range">` reappearing here would mean a
+        // second slider language on the canvas.
+        const css = readFileSync(join(process.cwd(), 'src/components/Nodes/SpeakerNode.css'), 'utf8');
+        const tsx = readFileSync(join(process.cwd(), 'src/components/Nodes/SpeakerNode.tsx'), 'utf8');
+        expect(css).not.toContain('slider-runnable-track');
+        expect(css).not.toContain('speaker-volume-slider');
+        expect(tsx).not.toContain('type="range"');
+        expect(tsx).toContain('<Knob');
     });
 
     it('uses the single fast-motion token in CSS', () => {

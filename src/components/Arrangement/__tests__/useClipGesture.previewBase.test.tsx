@@ -15,8 +15,8 @@ const ARRANGEMENT: Arrangement = {
 };
 
 function Harness() {
-    const gesture = useClipGesture(CLIP, 'track-1', 1, 200, () => undefined);
-    return <div data-track-id="track-1"><button aria-label="clip" onPointerDown={gesture.onPointerDown} onPointerCancel={gesture.onPointerCancel} onLostPointerCapture={gesture.onLostPointerCapture}>clip</button></div>;
+    const gesture = useClipGesture(CLIP, 'track-1', 1, 200, 56, () => undefined);
+    return <div data-track-id="track-1"><button aria-label="clip" onPointerDown={gesture.onPointerDown} onPointerCancel={gesture.onPointerCancel}>clip</button></div>;
 }
 
 const currentClip = () => useArrangementStore.getState().arrangement!.tracks[0]!.clips[0]!;
@@ -48,10 +48,9 @@ describe('useClipGesture gesture base', () => {
         const clip = screen.getByLabelText('clip');
         fireEvent.pointerDown(clip, { button: 0, pointerId: 1, clientX: 50, clientY: 50 });
         fireEvent.pointerMove(window, { pointerId: 1, clientX: 150, clientY: 50 });
-        const firstPreviewTick = currentClip().startTick;
         for (let index = 0; index < 24; index++) fireEvent.pointerMove(window, { pointerId: 1, clientX: 150, clientY: 50 });
-        expect(currentClip().startTick).toBe(firstPreviewTick);
         fireEvent.pointerUp(window, { pointerId: 1, clientX: 150, clientY: 50 });
+        expect(currentClip().startTick).toBe(1_100);
     });
 
     it('maps +100 px to +100 ticks and commits one undoable history entry', () => {
@@ -59,8 +58,8 @@ describe('useClipGesture gesture base', () => {
         const clip = screen.getByLabelText('clip');
         fireEvent.pointerDown(clip, { button: 0, pointerId: 2, clientX: 50, clientY: 50 });
         for (let index = 0; index < 10; index++) fireEvent.pointerMove(window, { pointerId: 2, clientX: 150, clientY: 50 });
-        expect(currentClip().startTick).toBe(1_100);
         fireEvent.pointerUp(window, { pointerId: 2, clientX: 150, clientY: 50 });
+        expect(currentClip().startTick).toBe(1_100);
         expect(useHistoryStore.getState().cursor).toBe(1);
         act(() => useArrangementStore.getState().undo());
         expect(currentClip().startTick).toBe(1_000);
@@ -71,10 +70,8 @@ describe('useClipGesture gesture base', () => {
         const clip = screen.getByLabelText('clip');
         fireEvent.pointerDown(clip, { button: 0, pointerId: 3, clientX: 50, clientY: 50, ctrlKey: true, shiftKey: true });
         fireEvent.pointerMove(window, { pointerId: 3, clientX: 150, clientY: 50, ctrlKey: true, shiftKey: true });
-        const firstSourceStart = currentClip().sourceStart;
         for (let index = 0; index < 24; index++) fireEvent.pointerMove(window, { pointerId: 3, clientX: 150, clientY: 50, ctrlKey: true, shiftKey: true });
-        expect(firstSourceStart).toBe(300);
-        expect(currentClip().sourceStart).toBe(firstSourceStart);
         fireEvent.pointerUp(window, { pointerId: 3, clientX: 150, clientY: 50 });
+        expect(currentClip().sourceStart).toBe(300);
     });
 });

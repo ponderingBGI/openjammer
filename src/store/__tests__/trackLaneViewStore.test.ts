@@ -28,4 +28,14 @@ describe('trackLaneViewStore inline piano roll height', () => {
 
         expect(useTrackLaneViewStore.getState().laneHeights['track-1']).toBe(104);
     });
+
+    it('clamps one/all lane heights and the header width', () => {
+        const store = useTrackLaneViewStore.getState();
+        store.setLaneHeight('a', 2);
+        store.setAllLaneHeights(['a', 'b'], 900);
+        store.setHeaderWidth(999);
+        expect(useTrackLaneViewStore.getState()).toMatchObject({ laneHeights: { a: 480, b: 480 }, headerWidth: 320 });
+        store.setHeaderWidth(1);
+        expect(useTrackLaneViewStore.getState().headerWidth).toBe(160);
+    });
 });

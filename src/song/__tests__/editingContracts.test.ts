@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { Arrangement } from '../types';
 import { applyVerbs } from '../verbs';
 import { deleteClips, duplicateClips, moveClips, nudge, splitAt, trimClip } from '../ops';
-import { gridTicks, snapTick } from '../../store/editingContextStore';
-import { crossedDragThreshold, dominantAxis } from '../../components/Arrangement/dragController';
+import { gridTicks, snapTimeline } from '../../store/editingContextStore';
+import { thresholdAxis } from '../../components/Arrangement/pointerGestureLifetime';
 
 const arrangement = (): Arrangement => ({
     name: 'contracts', tempoBpm: 120, ppq: 960, timeSignature: [4, 4], graph: { nodes: [], connections: [] },
@@ -25,11 +25,10 @@ describe('BC-05 grid units', () => {
 });
 
 describe('BC-06 magnetic snap', () => {
-    it('accepts only within 25px and Alt inversion suppresses it', () => {
-        expect(snapTick(90, [100], 2, 'magnetic')).toBe(100);
-        expect(snapTick(80, [100], 2, 'magnetic')).toBe(80);
-        expect(snapTick(90, [100], 2, 'magnetic', true)).toBe(90);
-        expect(snapTick(80, [100], 2, 'off', false, true)).toBe(100);
+    it('uses the Wave 3 12px grid radius and live Ctrl/Cmd inversion', () => {
+        expect(snapTimeline({ rawTick: 94, gridUnitTicks: 50, pxPerTick: 2, mode: 'magnetic' }).tick).toBe(100);
+        expect(snapTimeline({ rawTick: 93, gridUnitTicks: 50, pxPerTick: 2, mode: 'magnetic' }).tick).toBe(93);
+        expect(snapTimeline({ rawTick: 94, gridUnitTicks: 50, pxPerTick: 2, mode: 'magnetic', invert: true }).tick).toBe(94);
     });
 });
 
@@ -51,11 +50,11 @@ describe('BC-10 Ripple', () => {
 
 describe('BC-12 drag threshold and axis dominance', () => {
     it('uses 4px normally and 12px x / 4px y for copies', () => {
-        expect(crossedDragThreshold(3, 3, false)).toBe(false);
-        expect(crossedDragThreshold(5, 2, false)).toBe(true);
-        expect(crossedDragThreshold(11, 3, true)).toBe(false);
-        expect(crossedDragThreshold(11, 4, true)).toBe(true);
-        expect(dominantAxis(20, 2)).toBe('horizontal');
+        expect(thresholdAxis(3, 3, 'mouse', false)).toBeNull();
+        expect(thresholdAxis(5, 2, 'mouse', false)).toBe('horizontal');
+        expect(thresholdAxis(11, 3, 'mouse', true)).toBeNull();
+        expect(thresholdAxis(11, 4, 'mouse', true)).toBe('horizontal');
+        expect(thresholdAxis(20, 2, 'mouse', false)).toBe('horizontal');
     });
 });
 

@@ -27,9 +27,11 @@ export type Verb =
     | { kind: 'removeSource'; sourceId: string }
     | { kind: 'addTrack'; index: number; track: ArrangementTrack }
     | { kind: 'removeTrack'; trackId: string }
+    | { kind: 'moveTrack'; trackId: string; index: number }
     | { kind: 'setTrackMute'; trackId: string; mute: boolean }
     | { kind: 'setTrackSolo'; trackId: string; solo: boolean }
     | { kind: 'setTrackName'; trackId: string; name?: string }
+    | { kind: 'setTrackColor'; trackId: string; color?: string }
     | { kind: 'setTrackGain'; trackId: string; gainDb: number }
     | { kind: 'setTrackPan'; trackId: string; pan: number }
     | { kind: 'addClip'; trackId: string; clip: ArrangementClip }
@@ -206,6 +208,16 @@ export function applyVerb(arr: Arrangement, verb: Verb): { next: Arrangement; in
             const { ti, track } = locateTrack(arr, verb.trackId);
             return { next: { ...arr, tracks: removeAt(arr.tracks, ti) }, inverse: { kind: 'addTrack', index: ti, track } };
         }
+        case 'moveTrack': {
+            const { ti, track } = locateTrack(arr, verb.trackId);
+            if (!Number.isInteger(verb.index)) fail('track index must be an integer');
+            const without = removeAt(arr.tracks, ti);
+            const index = Math.max(0, Math.min(verb.index, without.length));
+            return {
+                next: { ...arr, tracks: insertAt(without, index, track) },
+                inverse: { kind: 'moveTrack', trackId: verb.trackId, index: ti },
+            };
+        }
         case 'setTrackMute': {
             const { ti, track } = locateTrack(arr, verb.trackId);
             return { next: mapTrack(arr, ti, (item) => withOptional(item, 'mute', verb.mute ? true : undefined)), inverse: { kind: 'setTrackMute', trackId: verb.trackId, mute: track.mute === true } };
@@ -217,6 +229,10 @@ export function applyVerb(arr: Arrangement, verb: Verb): { next: Arrangement; in
         case 'setTrackName': {
             const { ti, track } = locateTrack(arr, verb.trackId);
             return { next: mapTrack(arr, ti, (item) => withOptional(item, 'name', verb.name)), inverse: { kind: 'setTrackName', trackId: verb.trackId, name: track.name } };
+        }
+        case 'setTrackColor': {
+            const { ti, track } = locateTrack(arr, verb.trackId);
+            return { next: mapTrack(arr, ti, (item) => withOptional(item, 'color', verb.color)), inverse: { kind: 'setTrackColor', trackId: verb.trackId, color: track.color } };
         }
         case 'setTrackGain': {
             if (!Number.isFinite(verb.gainDb)) fail('track gain must be finite');

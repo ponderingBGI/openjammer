@@ -28,8 +28,11 @@ interface TrackLaneViewStore {
     expandedPianoRolls: Record<string, string>;
     automationLaneByTrack: Record<string, string>;
     mixerOpen: boolean;
+    headerWidth: number;
     rememberPitchRange: (trackId: string, range: PitchRange) => void;
     setLaneHeight: (trackId: string, height: number) => void;
+    setAllLaneHeights: (trackIds: readonly string[], height: number) => void;
+    setHeaderWidth: (width: number) => void;
     resetPitchRanges: () => void;
     togglePianoRoll: (trackId: string, clipId: string) => void;
     closePianoRoll: (trackId: string) => void;
@@ -44,6 +47,7 @@ export const useTrackLaneViewStore = create<TrackLaneViewStore>((set) => ({
     expandedPianoRolls: {},
     automationLaneByTrack: {},
     mixerOpen: false,
+    headerWidth: 200,
     rememberPitchRange: (trackId, range) => {
         set((state) => {
             const current = state.pitchRanges[trackId];
@@ -54,6 +58,13 @@ export const useTrackLaneViewStore = create<TrackLaneViewStore>((set) => ({
     setLaneHeight: (trackId, height) => set((state) => ({
         laneHeights: { ...state.laneHeights, [trackId]: Math.max(28, Math.min(480, height)) },
     })),
+    setAllLaneHeights: (trackIds, height) => set((state) => {
+        const clamped = Math.max(28, Math.min(480, height));
+        const laneHeights = { ...state.laneHeights };
+        for (const trackId of trackIds) laneHeights[trackId] = clamped;
+        return { laneHeights };
+    }),
+    setHeaderWidth: (headerWidth) => set({ headerWidth: Math.max(160, Math.min(320, headerWidth)) }),
     resetPitchRanges: () => set({ pitchRanges: {} }),
     togglePianoRoll: (trackId, clipId) => set((state) => {
         const open = state.expandedPianoRolls[trackId] === clipId;

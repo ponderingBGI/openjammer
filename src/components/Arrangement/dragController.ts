@@ -1,15 +1,4 @@
-export const DRAG_THRESHOLD_PX = 4;
-export const COPY_DRAG_X_THRESHOLD_PX = 12;
-
 export type DragAxis = 'horizontal' | 'vertical';
-
-export function crossedDragThreshold(dx: number, dy: number, copy: boolean, uiScale = 1): boolean {
-    return Math.abs(dx) >= (copy ? COPY_DRAG_X_THRESHOLD_PX : DRAG_THRESHOLD_PX) * uiScale || Math.abs(dy) >= DRAG_THRESHOLD_PX * uiScale;
-}
-
-export function dominantAxis(dx: number, dy: number): DragAxis {
-    return Math.abs(dx) >= Math.abs(dy) ? 'horizontal' : 'vertical';
-}
 
 export function autoScrollDelta(pointer: number, start: number, end: number): number {
     const edge = 28;

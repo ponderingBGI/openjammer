@@ -76,7 +76,7 @@ export function ClipView({
     const [peaks, setPeaks] = useState<Float32Array | null>(null);
     const geometry = clipGeometry(clip.startTick, clip.lengthTick, 0, pxPerTick);
     const height = laneHeight - 8;
-    const gesture = useClipGesture(clip, trackId, pxPerTick, geometry.width, onSelect);
+    const gesture = useClipGesture(clip, trackId, pxPerTick, geometry.width, height, onSelect);
     useEffect(() => {
         let live = true;
         if (source.kind === 'audio') {
@@ -104,7 +104,6 @@ export function ClipView({
             style={{ left: geometry.left, width: geometry.width, height }}
             onPointerDown={gesture.onPointerDown}
             onPointerCancel={gesture.onPointerCancel}
-            onLostPointerCapture={gesture.onLostPointerCapture}
             onClick={(event) => onSelect(event as unknown as React.PointerEvent, 'release')}
             onDoubleClick={(event) => { event.stopPropagation(); onDoubleClick?.(); }}
             role="listitem"

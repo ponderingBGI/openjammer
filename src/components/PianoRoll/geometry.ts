@@ -24,7 +24,7 @@ export function pitchName(pitch: number): string {
 
 export function pitchRowHeight(fieldHeight: number, range: PitchRange, drumMode: boolean): number {
     if (drumMode) return DRUM_ROW_HEIGHT;
-    return Math.max(3, Math.min(16, fieldHeight / Math.max(12, range.hi - range.lo + 1)));
+    return Math.max(6, Math.min(16, fieldHeight / Math.max(12, range.hi - range.lo + 1)));
 }
 
 export function velocityOpacity(velocity = 96): number {

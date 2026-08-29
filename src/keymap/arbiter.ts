@@ -1,16 +1,38 @@
 import { useAudioClipStore } from '../store/audioClipStore';
 import { useCanvasStore } from '../store/canvasStore';
-import { useKeybindingsStore } from '../store/keybindingsStore';
+import { matchesKeyCombo, UNBOUND_KEY, useKeybindingsStore } from '../store/keybindingsStore';
 import { useUiViewStore } from '../store/uiViewStore';
 import { hasNativeTextSelection, isEditableTarget, isFocusableInOpenDialog } from '../utils/editableTarget';
 import { getBindingSets } from './registry';
 import type { BindingSet } from './types';
 
-function runSets(event: KeyboardEvent, sets: readonly BindingSet[]): boolean {
-    const { matchesAction } = useKeybindingsStore.getState();
+/**
+ * S4: bare `Tab` / `Shift+Tab` is the canvas <-> arrangement toggle only when focus
+ * is on a song surface itself — `document.body`, or anything inside a
+ * `[data-surface-root]`. Focus parked in chrome (the floating transport pill, the
+ * topbar, a panel, a focus-trapped dialog) keeps native DOM traversal, so a
+ * performer can walk the pill button by button instead of being thrown to the other
+ * surface on the first Tab.
+ *
+ * This is deliberately a POSITIVE test on the event target. `:focus-visible` cannot
+ * carry the negative case: Chromium already raises it on the very keydown that is
+ * about to move focus, so every Tab would look like chrome.
+ */
+function isSurfaceTabTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) return true;
+    if (target === document.body) return true;
+    if (isFocusableInOpenDialog(target)) return false;
+    return Boolean(target.closest('[data-surface-root]'));
+}
+
+function runSets(event: KeyboardEvent, sets: readonly BindingSet[], inheritedOnly = false): boolean {
+    const bindings = useKeybindingsStore.getState();
     for (const set of sets) {
         for (const entry of set.entries) {
-            if (!matchesAction(event, entry.actionId) || entry.guard?.(event) === false) continue;
+            if (inheritedOnly && !entry.inherit) continue;
+            if (bindings.customBindings[entry.actionId]?.key === UNBOUND_KEY) continue;
+            const configured = bindings.getBinding(entry.actionId);
+            if (!(configured ? matchesKeyCombo(event, configured) : entry.defaultBinding && matchesKeyCombo(event, entry.defaultBinding)) || entry.guard?.(event) === false) continue;
             if (!entry.run(event)) continue;
             event.preventDefault();
             return true;
@@ -26,9 +48,9 @@ export function resolveKeydown(event: KeyboardEvent): boolean {
     const allSets = getBindingSets();
     const modalSets = allSets.filter((set) => set.scope === 'modal');
 
-    // Tab in a focus-trapped dialog is browser focus traversal, even when the
-    // focused target happens to be a non-editable button or link.
-    if (event.key === 'Tab' && isFocusableInOpenDialog(event.target)) return false;
+    // Tab is browser focus traversal everywhere except the song surfaces themselves —
+    // inside a focus-trapped dialog, on the transport pill, in the topbar, in a panel.
+    if (event.key === 'Tab' && !isSurfaceTabTarget(event.target)) return false;
 
     // While dragging, Escape may reach the normal ladder; every other key is
     // deliberately consumed so no edit can land beneath the pointer gesture.
@@ -46,9 +68,28 @@ export function resolveKeydown(event: KeyboardEvent): boolean {
         return runSets(event, modalSets.slice(-1));
     }
 
-    const surface = useUiViewStore.getState().surface;
-    const surfaceSets = allSets.filter((set) => set.scope === 'surface' && set.surface === surface);
-    if (runSets(event, surfaceSets)) return true;
+    // Resolution is inside-out: the focused binding set, each enclosing DOM
+    // surface, the active app surface when it is not already in that path,
+    // then global. An unhandled child shortcut therefore never walls off its
+    // parent editor, while a handled child shortcut still wins immediately.
+    // Fall-through is allowlisted, not blanket: only the FIRST (innermost)
+    // surface runs its whole set. Every enclosing surface contributes just its
+    // `inherit: true` entries, so a key the piano roll does not consume can
+    // reach undo, transport or the Escape cascade — and can never reach the
+    // arrangement's editing letters (`s` split, `0` mute, the tool keys).
+    const surfacePath: Array<{ surface: string; setId?: string }> = [];
+    let element = document.activeElement?.closest<HTMLElement>('[data-keymap-surface]') ?? null;
+    while (element) {
+        const surface = element.dataset.keymapSurface;
+        if (surface) surfacePath.push({ surface, setId: element.dataset.keymapSetId });
+        element = element.parentElement?.closest<HTMLElement>('[data-keymap-surface]') ?? null;
+    }
+    const activeSurface = useUiViewStore.getState().surface;
+    if (!surfacePath.some((entry) => entry.surface === activeSurface)) surfacePath.push({ surface: activeSurface });
+    for (const [depth, entry] of surfacePath.entries()) {
+        const surfaceSets = allSets.filter((set) => set.scope === 'surface' && set.surface === entry.surface && (!entry.setId || set.id === entry.setId));
+        if (runSets(event, surfaceSets, depth > 0)) return true;
+    }
 
     return runSets(event, allSets.filter((set) => set.scope === 'global'));
 }

@@ -1,0 +1,103 @@
+:root {
+    --arrangement-header-width: 200px;
+
+    /*
+     * Spec 2.3: the ruler stack is 64px — sections 22 + braces 14 + bars 28. It is
+     * declared ONCE here because every ruled overlay in the field (ground, grid
+     * anchor, playhead, loop wash, range selection, range marquee) has to start
+     * exactly where the ruler ends. When the two drifted apart the playhead and
+     * every grid line sat 18px too high, which a performer reads as the wrong beat.
+     * Keep it equal to `RULER_HEIGHT` in ArrangementSurface.tsx — the virtualization
+     * window measures in JS what this rule paints.
+     */
+    --arrangement-ruler-height: 64px;
+}
+
+.arrangement-track {
+    position: relative;
+    grid-template-columns: var(--arrangement-header-width, 200px) 1fr;
+}
+
+.arrangement-lane__resize {
+    position: absolute;
+    right: 0;
+    left: 0;
+    z-index: 9;
+    height: 5px;
+    cursor: ns-resize;
+}
+
+.arrangement-header-resize {
+    position: absolute;
+    top: 52px;
+    bottom: 0;
+    z-index: 20;
+    width: 6px;
+    transform: translateX(-3px);
+    cursor: col-resize;
+}
+
+.arrangement-ruler-shell {
+    height: var(--arrangement-ruler-height);
+    grid-template-columns: var(--arrangement-header-width, 200px) 1fr;
+}
+
+.arrangement-ruler-content {
+    height: var(--arrangement-ruler-height);
+}
+
+.arrangement-sections-row {
+    top: 0;
+    right: 0;
+    left: 0;
+    height: 22px;
+}
+
+.arrangement-braces-row {
+    position: absolute;
+    top: 22px;
+    right: 0;
+    left: 0;
+    z-index: 3;
+    height: 14px;
+    cursor: crosshair;
+}
+
+.arrangement-loop-brace,
+.arrangement-punch-brace {
+    position: absolute;
+    top: 0;
+    height: 14px;
+    display: flex;
+    justify-content: space-between;
+    cursor: grab;
+}
+
+.arrangement-loop-brace button,
+.arrangement-punch-brace button {
+    width: 7px;
+    height: 14px;
+    cursor: ew-resize;
+}
+
+.arrangement-bars-row {
+    top: 36px;
+    right: 0;
+    bottom: auto;
+    left: 0;
+    height: 28px;
+}
+
+.arrangement-loop-bracket {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 4;
+    height: 22px;
+}
+
+.arrangement-field-ground,
+.arrangement-grid-anchor,
+.arrangement-playhead {
+    left: var(--arrangement-header-width, 200px);
+}

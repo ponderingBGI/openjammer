@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { Arrangement, ArrangementTrack } from '../../song/types';
 import { useArrangementStore } from '../../store/arrangementStore';
 import { growPitchRange, initialPitchRange, useTrackLaneViewStore } from '../../store/trackLaneViewStore';
@@ -13,8 +13,10 @@ import { trackRecordInput, trackRecordKind } from '../../song/recording';
 import { RecordGhost } from './RecordGhost';
 import { useGraphStore } from '../../store/graphStore';
 import { timebase } from '../../song/time';
+import { ownPointerGesture, thresholdAxis } from './pointerGestureLifetime';
+import { registerTimelineLevelWriter } from './timelineSignalLevels';
 
-const TRACK_TINTS = ['var(--accent-secondary)', 'var(--accent-success)', 'var(--accent-warning)', 'var(--accent-danger)', 'var(--sketch-gray)'];
+const TRACK_TINTS = ['var(--accent-secondary)', 'var(--accent-success)', 'var(--accent-warning)', 'var(--accent-danger)', 'var(--text-secondary)'];
 
 export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick, visibleEndTick, shell = false }: {
     track: ArrangementTrack;
@@ -35,6 +37,9 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
     const activeClipDragIds = useEditingContextStore((state) => state.activeClipDragIds);
     const dropTargetId = useEditingContextStore((state) => state.clipDragPreview?.hoveredTrackId ?? null);
     const expandedClipId = useTrackLaneViewStore((state) => state.expandedPianoRolls[trackId]);
+    // Stable identity: `PianoRoll` memoizes its binding set on `onClose`, so a fresh
+    // closure here would unregister and re-register the whole set on every render.
+    const closeInlineRoll = useCallback(() => useTrackLaneViewStore.getState().closePianoRoll(trackId), [trackId]);
     const visibleAutomationId = useTrackLaneViewStore((state) => state.automationLaneByTrack[trackId]);
     const visibleAutomation = (track.automation ?? []).find((lane) => lane.id === visibleAutomationId);
     const armed = useArrangementStore((state) => state.armedTrackIds.includes(trackId));
@@ -55,15 +60,19 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
     const inputLabel = trackRecordInput(arrangement, track);
     const recordKind = trackRecordKind(arrangement, track);
     const [drumMode, setDrumMode] = useState<boolean | undefined>(undefined);
+    const [renaming, setRenaming] = useState(false);
+    const [nameDraft, setNameDraft] = useState(track.name ?? track.ref);
+    const levelRef = useRef<HTMLSpanElement>(null);
+    useEffect(() => registerTimelineLevelWriter((levels) => { if (levelRef.current) levelRef.current.style.transform = `scaleY(${Math.max(0, Math.min(1, levels.get(track.ref) ?? 0))})`; }), [track.ref]);
     const tintIndex = [...trackId].reduce((sum, character) => sum + character.charCodeAt(0), 0) % TRACK_TINTS.length;
     const punch = arrangement.locations?.find((location) => location.kind === 'punch' && location.endTick !== undefined);
     const ghostStart = Math.max(recordStartTick ?? 0, punch?.startTick ?? 0);
     const ghostEnd = punch?.endTick ?? Number.POSITIVE_INFINITY;
     return (
         <div className={`arrangement-track${visibleAutomation ? ' has-automation' : ''}${selectedTrackIds.includes(trackId) ? ' is-selected' : ''}${expandedClipId ? ' has-lane-menu' : ''}${dropTargetId === trackId ? ' is-drop-target' : ''}`} data-track-id={trackId} role="listitem" aria-label={track.name ?? track.ref} style={{ height: laneHeight + (visibleAutomation ? AUTOMATION_LANE_HEIGHT : 0), gridTemplateRows: visibleAutomation ? `${laneHeight}px ${AUTOMATION_LANE_HEIGHT}px` : `${laneHeight}px`, '--track-tint': track.color ?? TRACK_TINTS[tintIndex] } as CSSProperties}>
-            <div className="arrangement-track__header" onPointerDown={() => { if (!shell) useEditingContextStore.getState().setSelection('arrangement', { trackIds: [trackId] }); }}>
-                <span className="arrangement-track__stripe" />
-                <div className="arrangement-track__top"><span className="arrangement-track__grab" aria-hidden="true">⠿</span><span className="arrangement-track__name">{track.name ?? track.ref}</span></div>
+            <div className="arrangement-track__header" onPointerDown={(event) => { if (shell) return; const context = useEditingContextStore.getState(); const current = context.viewports.arrangement.selection.trackIds; if (event.ctrlKey || event.metaKey) context.setSelection('arrangement', { trackIds: current.includes(trackId) ? current.filter((id) => id !== trackId) : [...current, trackId] }); else if (event.shiftKey) { const indices = current.map((id) => arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === id)).filter((index) => index >= 0); const here = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === trackId); const anchor = indices.at(-1) ?? here; context.setSelection('arrangement', { trackIds: arrangement.tracks.slice(Math.min(anchor, here), Math.max(anchor, here) + 1).map((item) => item.id ?? item.ref) }); } else context.setSelection('arrangement', { trackIds: [trackId] }); }}>
+                <span className="arrangement-track__stripe"><span ref={levelRef} className="arrangement-track__level-bead" aria-hidden="true" /></span>
+                <div className="arrangement-track__top"><button className="arrangement-track__grab" type="button" aria-label={`Reorder ${track.name ?? track.ref}`} onPointerDown={(event) => { if (shell || event.button !== 0) return; event.stopPropagation(); const startY = event.clientY; let active = false; let targetIndex = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === trackId); const cleanup = ownPointerGesture(event.pointerId, { move(move) { if (!active) active = thresholdAxis(0, move.clientY - startY, move.pointerType, false) !== null; if (!active) return; const target = document.elementFromPoint(move.clientX, move.clientY)?.closest<HTMLElement>('[data-track-id]')?.dataset.trackId; const index = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === target); if (index >= 0) targetIndex = index; }, commit() { cleanup(); if (active) useArrangementStore.getState().apply({ kind: 'moveTrack', trackId, index: targetIndex }); }, abort() { cleanup(); } }); try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Window listeners own completion. */ } }}>⠿</button>{renaming ? <input className="arrangement-track__rename" aria-label={`Rename ${track.name ?? track.ref}`} autoFocus value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { const name = nameDraft.trim() || track.ref; if (name !== (track.name ?? track.ref)) useArrangementStore.getState().apply({ kind: 'setTrackName', trackId, name }); setRenaming(false); } else if (event.key === 'Escape') { setNameDraft(track.name ?? track.ref); setRenaming(false); } }} onBlur={() => { const name = nameDraft.trim() || track.ref; if (name !== (track.name ?? track.ref)) useArrangementStore.getState().apply({ kind: 'setTrackName', trackId, name }); setRenaming(false); }} /> : <span className="arrangement-track__name" onDoubleClick={() => { setNameDraft(track.name ?? track.ref); setRenaming(true); }}>{track.name ?? track.ref}</span>}<input type="color" aria-label={`Colour for ${track.name ?? track.ref}`} value={/^#[0-9a-f]{6}$/i.test(track.color ?? '') ? track.color : '#4a90c2'} onChange={(event) => useArrangementStore.getState().apply({ kind: 'setTrackColor', trackId, color: event.target.value })} /></div>
                 <div className="arrangement-track__controls">
                     <LaneButton tone="mute" aria-label={`Mute ${track.name ?? track.ref}`} aria-pressed={track.mute === true} onClick={() => useArrangementStore.getState().apply({ kind: 'setTrackMute', trackId, mute: !track.mute })}>M</LaneButton>
                     <LaneButton tone="solo" aria-label={`Solo ${track.name ?? track.ref}`} aria-pressed={track.solo === true} onClick={() => useArrangementStore.getState().apply({ kind: 'setTrackSolo', trackId, solo: !track.solo })}>S</LaneButton>
@@ -101,7 +110,7 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                 </div>}
             </div>
             <div className={`arrangement-lane${track.mute ? ' is-muted' : ''}${expandedClipId ? ' has-piano-roll' : ''}`} style={{ height: laneHeight }} role="list" onPointerEnter={() => useEditingContextStore.setState({ enteredTrackId: trackId })}>
-                {expandedClipId ? <PianoRollLane trackId={trackId} clipId={expandedClipId} pxPerTick={pxPerTick} leftTick={visibleStartTick} height={220} drumMode={drumMode} onDrumModeChange={setDrumMode} onOpenSurface={() => {
+                {expandedClipId ? <PianoRollLane trackId={trackId} clipId={expandedClipId} pxPerTick={pxPerTick} leftTick={visibleStartTick} height={220} drumMode={drumMode} onDrumModeChange={setDrumMode} onClose={closeInlineRoll} onOpenSurface={() => {
                     const arrangementViewport = useEditingContextStore.getState().viewports.arrangement;
                     useEditingContextStore.getState().setViewport('pianoroll', { pxPerTick: arrangementViewport.pxPerTick, leftTick: arrangementViewport.leftTick });
                     useEditingContextStore.getState().setSelection('pianoroll', { clipIds: [expandedClipId] });
@@ -130,10 +139,11 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                         if (phase === 'release') context.commitSelectionOp('arrangement');
                     }} /> : null;
                 })}
-                {!expandedClipId && track.clips.length === 0 && <div className="arrangement-lane__hint">drag audio here, or press D and draw.</div>}
+                {!expandedClipId && track.clips.length === 0 && <div className="arrangement-lane__hint">drag audio here · press B and draw</div>}
                 {!expandedClipId && isRecording && armed && binding && recordStartTick !== null && <RecordGhost node={binding.node} startTick={ghostStart} endTick={ghostEnd} pxPerTick={pxPerTick} laneHeight={laneHeight} notes={ghostNotes} pitchRange={range} />}
             </div>
             {visibleAutomation && <AutomationLaneView arrangement={arrangement} track={track} lane={visibleAutomation} pxPerTick={pxPerTick} />}
+            {!shell && <div className="arrangement-lane__resize" role="separator" aria-orientation="horizontal" aria-label={`Resize ${track.name ?? track.ref} lane`} tabIndex={0} style={{ top: laneHeight - 5 }} onDoubleClick={() => { const view = useTrackLaneViewStore.getState(); view.setLaneHeight(trackId, view.expandedPianoRolls[trackId] ? 220 : 72); }} onPointerDown={(event) => { if (event.button !== 0) return; event.stopPropagation(); const startY = event.clientY; const before = laneHeight; const all = event.altKey; const ids = arrangement.tracks.map((item) => item.id ?? item.ref); const cleanup = ownPointerGesture(event.pointerId, { move(move) { const next = before + move.clientY - startY; const view = useTrackLaneViewStore.getState(); if (all) view.setAllLaneHeights(ids, next); else view.setLaneHeight(trackId, next); }, commit() { cleanup(); }, abort() { const view = useTrackLaneViewStore.getState(); if (all) view.setAllLaneHeights(ids, before); else view.setLaneHeight(trackId, before); cleanup(); } }); try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Window listeners own completion. */ } }} />}
         </div>
     );
 }
