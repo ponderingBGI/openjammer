@@ -306,7 +306,18 @@ export function KeyboardVisualNode({
                                             active={down.has(`${row}:${keyIndex}`)}
                                             connected={!!(portId && hasConnection?.(portId))}
                                             aria-label={`Row ${row}, key ${key}`}
-                                            title={portId ? `${key} → ${portId}` : `${key} — plays on row ${row}`}
+                                            /*
+                                             * NOT "plays on row N". Playwright's
+                                             * `getByTitle('Play')` substring-matches, so
+                                             * "plays" made every one of the ~30 keys a
+                                             * candidate for the transport's Play button and
+                                             * two shipped timeline specs went strict-mode
+                                             * ambiguous. The full sentence lives on
+                                             * `aria-label` ("Row N, key K"), where the
+                                             * accessible name belongs; the tooltip states
+                                             * the same fact in the same words minus the verb.
+                                             */
+                                            title={portId ? `${key} → ${portId}` : `${key} · row ${row}`}
                                             data-node-id={node.id}
                                             data-port-id={portId}
                                             data-port-type={portId ? 'control' : undefined}

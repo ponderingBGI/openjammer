@@ -1,8 +1,26 @@
+/*
+ * THE DRAG GHOST — what you are about to commit, and what you are leaving.
+ *
+ * The ghost carries the clip's REAL content (its name bar and its notes or its
+ * waveform), not an empty rectangle, so the eye can confirm it is moving the
+ * right thing. The original stays visible underneath at 35%: seeing where a
+ * thing came from is what makes the undo you have not pressed yet feel safe.
+ */
+
+/*
+ * The layer is a zero-sized ORIGIN, not a box: it marks the arrangement
+ * surface's top-left inside the field overlay pane, because that is the space
+ * `useClipGesture` publishes `preview.x / preview.y` in. The CLIPPING is the
+ * pane's job (`.arrangement-field-overlay`) — a ghost that painted over the
+ * track headers and the ruler told the performer where a clip lands by hiding
+ * the two things that say where anything is.
+ */
 .arrangement-drag-ghost-layer {
     position: absolute;
-    z-index: 10;
-    inset: 0;
-    overflow: hidden;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
     pointer-events: none;
 }
 
@@ -10,17 +28,72 @@
     position: absolute;
     top: 0;
     left: 0;
-    border: 2px solid var(--timeline-selection);
+    box-sizing: border-box;
+    overflow: hidden;
+    border: 1.5px solid var(--timeline-selection);
+    border-left: 2px solid var(--track-tint, var(--accent-secondary));
     border-radius: var(--radius-sm);
-    background: var(--timeline-clip-bg);
+    background: color-mix(in oklab, var(--track-tint, var(--accent-secondary)) 12%, var(--timeline-clip-bg));
     box-shadow: var(--shadow-overlay);
     opacity: .96;
     will-change: transform;
 }
 
+.arrangement-drag-ghost .arrangement-clip__name {
+    background: color-mix(in oklab, var(--track-tint, var(--accent-secondary)) 24%, var(--timeline-clip-bg));
+}
+
+/* A copy-drag is a different act; the `+` says so without a second colour. */
+.arrangement-drag-ghost[data-copy="true"]::after {
+    content: '+';
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    color: var(--accent-ink);
+    font: 600 var(--text-sm)/1 var(--font-mono);
+}
+
+/*
+ * Locked is the one genuinely invalid drop this document model has: `moveClips`
+ * skips a locked clip, so the gesture would silently do nothing. Say so, in two
+ * words, before the release rather than after it. No shake, no sound.
+ */
+.arrangement-drag-ghost.is-invalid {
+    border-color: var(--accent-danger);
+    border-width: 1.5px;
+}
+.arrangement-track.is-drop-invalid .arrangement-lane {
+    outline: 1.5px solid var(--accent-danger);
+    outline-offset: -2px;
+}
+
+/*
+ * The readout chip follows the cursor with the exact position and the exact
+ * delta — mono, because they are numbers you may have to reproduce.
+ */
+.arrangement-drag-readout {
+    position: absolute;
+    top: 0;
+    left: 0;
+    display: flex;
+    gap: 8px;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-node);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-raised);
+    font: 500 var(--text-xs)/16px var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    will-change: transform;
+}
+.arrangement-drag-readout b { font-weight: 500; color: var(--text-muted); }
+.arrangement-drag-readout.is-invalid { color: var(--danger-ink); }
+.arrangement-drag-readout.is-invalid b { color: var(--danger-ink); }
+
 .arrangement-clip.is-dragging { opacity: .35; }
 
 .arrangement-track.is-drop-target .arrangement-lane {
-    outline: 2px solid var(--timeline-selection);
+    outline: 1.5px solid var(--timeline-selection);
     outline-offset: -2px;
 }

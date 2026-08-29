@@ -51,9 +51,47 @@ export function TransportPillHost({ onRequestAudio }: { onRequestAudio: () => vo
 
     const positionRef = useRef<HTMLSpanElement>(null);
     const meterRef = useRef<MeterHandle>(null);
+    const hostRef = useRef<HTMLDivElement>(null);
 
     // The meter: ONE subscription, the app's ONE frame, one style write.
     useEffect(() => subscribeMasterSignal((level) => meterRef.current?.setSignal(level)), []);
+
+    /**
+     * The pill PUBLISHES ITS WIDTH, because the ruled surfaces have to reserve a
+     * lane for it and it is the only thing that knows how wide it is.
+     *
+     * The pill is `position: fixed; left: 50%` — centred on the window, not on
+     * any column — so the arrangement's sky band reserves its middle
+     * symmetrically. That reserve used to be a literal 432px copied off a
+     * measurement, which meant adding a zone here would slide the pill back over
+     * the armed edit-mode control with every test still green (W4-TBb §12.2).
+     * Now `--arrangement-sky-pill-reserve` is `calc(this + 4px)`, so the
+     * geometric promise is a coupling rather than a coincidence.
+     *
+     * ONE observer, and a write only when the number actually changes: this
+     * fires during a transport zone appearing or disappearing, and a custom
+     * property written on `documentElement` invalidates style for the whole
+     * document — not something to do on every animation frame of a resize.
+     */
+    useEffect(() => {
+        const element = hostRef.current;
+        if (!element || typeof ResizeObserver === 'undefined') return;
+        let published = -1;
+        const publish = () => {
+            const width = element.getBoundingClientRect().width;
+            if (width <= 0 || Math.abs(width - published) < 0.5) return;
+            published = width;
+            document.documentElement.style.setProperty('--oj-transport-pill-width', `${width}px`);
+        };
+        publish();
+        const observer = new ResizeObserver(publish);
+        observer.observe(element);
+        return () => {
+            observer.disconnect();
+            // Back to the stylesheet's declared fallback rather than a stale width.
+            document.documentElement.style.removeProperty('--oj-transport-pill-width');
+        };
+    }, []);
 
     // The readout. While the transport is still we write once; while it rolls we
     // ride the shared frame. Either way React never sees the number.
@@ -162,7 +200,7 @@ export function TransportPillHost({ onRequestAudio }: { onRequestAudio: () => vo
     );
 
     return (
-        <div className="oj-transport-host" onClick={releaseChromeFocus}>
+        <div className="oj-transport-host" ref={hostRef} onClick={releaseChromeFocus}>
             <TransportPill
                 playing={rolling}
                 onPlayToggle={onPlayToggle}

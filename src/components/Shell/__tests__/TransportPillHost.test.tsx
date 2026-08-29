@@ -193,6 +193,71 @@ describe('TransportPillHost', () => {
         });
     });
 
+    /*
+     * W4-TBc item 4 (W4-TBb §12.2). The ruled surfaces reserve a centre lane for
+     * this pill, symmetrically, because it is `position: fixed; left: 50%` and
+     * centred on the window rather than on any column. That reserve used to be
+     * the literal 432px — a copy of a measurement, pinned by a `>= 428` that was
+     * a copy of the same measurement — so adding a transport zone here would put
+     * the pill back over the arrangement's armed edit-mode control with every
+     * test still green. The pill publishes its own width instead, and
+     * `--arrangement-sky-pill-reserve` is `calc(that + 4px)`.
+     */
+    describe('the pill publishes its width for the surfaces that reserve a lane for it', () => {
+        const observers: { callback: ResizeObserverCallback; disconnected: boolean }[] = [];
+
+        beforeEach(() => {
+            observers.length = 0;
+            document.documentElement.style.removeProperty('--oj-transport-pill-width');
+            class TestResizeObserver {
+                callback: ResizeObserverCallback;
+                disconnected = false;
+                constructor(callback: ResizeObserverCallback) { this.callback = callback; observers.push(this); }
+                observe() {}
+                disconnect() { this.disconnected = true; }
+            }
+            vi.stubGlobal('ResizeObserver', TestResizeObserver);
+        });
+
+        const widthIs = (width: number) => vi
+            .spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+            .mockReturnValue({ width, height: 44, x: 0, y: 0, top: 0, left: 0, right: width, bottom: 44, toJSON: () => ({}) });
+
+        it('writes the measured width onto the document element, from ONE observer', () => {
+            widthIs(427.9);
+            render(<TransportPillHost onRequestAudio={vi.fn()} />);
+            expect(document.documentElement.style.getPropertyValue('--oj-transport-pill-width')).toBe('427.9px');
+            expect(observers).toHaveLength(1);
+        });
+
+        /*
+         * A custom property on `documentElement` invalidates style for the whole
+         * document. This fires while a transport zone appears or disappears, so
+         * a write per observation would be a style recalculation per frame of a
+         * window resize — on the one component that is on screen during a take.
+         */
+        it('writes only when the number actually changes', () => {
+            const rect = widthIs(428);
+            render(<TransportPillHost onRequestAudio={vi.fn()} />);
+            const spy = vi.spyOn(document.documentElement.style, 'setProperty');
+
+            act(() => { observers[0]!.callback([], {} as ResizeObserver); });
+            expect(spy).not.toHaveBeenCalled();
+
+            rect.mockReturnValue({ width: 466, height: 44, x: 0, y: 0, top: 0, left: 0, right: 466, bottom: 44, toJSON: () => ({}) });
+            act(() => { observers[0]!.callback([], {} as ResizeObserver); });
+            expect(spy).toHaveBeenCalledWith('--oj-transport-pill-width', '466px');
+            spy.mockRestore();
+        });
+
+        it('falls back to the stylesheet rather than leaving a stale width behind', () => {
+            widthIs(427.9);
+            const { unmount } = render(<TransportPillHost onRequestAudio={vi.fn()} />);
+            unmount();
+            expect(document.documentElement.style.getPropertyValue('--oj-transport-pill-width')).toBe('');
+        });
+    });
+
     describe('the space hint', () => {
         it('appears on the canvas only while Space is the transport key', () => {
             const { rerender, container } = render(<TransportPillHost onRequestAudio={vi.fn()} />);

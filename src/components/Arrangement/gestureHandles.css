@@ -1,3 +1,12 @@
+/*
+ * THE RULED GEOMETRY, and the small controls that live on it.
+ *
+ * Every number that decides where the ruler ends and the field begins is
+ * written down ONCE, here. Everything the hand can grab on that geometry — the
+ * lane grip, the header grip, the loop and punch braces and their caps, the
+ * snap hairline — is styled here too, beside the measurement it depends on.
+ */
+
 :root {
     --arrangement-header-width: 200px;
 
@@ -18,6 +27,7 @@
     grid-template-columns: var(--arrangement-header-width, 200px) 1fr;
 }
 
+/* The bottom 5px of a lane is the height grip; Alt resizes every lane at once. */
 .arrangement-lane__resize {
     position: absolute;
     right: 0;
@@ -26,16 +36,29 @@
     height: 5px;
     cursor: ns-resize;
 }
+.arrangement-lane__resize:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
+/* The seam between the header column and the field is the width grip. */
 .arrangement-header-resize {
     position: absolute;
-    top: 52px;
+    top: calc(var(--arrangement-sky-height) + var(--arrangement-ruler-height));
     bottom: 0;
     z-index: 20;
     width: 6px;
     transform: translateX(-3px);
     cursor: col-resize;
 }
+.arrangement-header-resize::after {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 3px;
+    width: 1px;
+    background: var(--accent-primary);
+    opacity: 0;
+    transition: opacity var(--motion-fast);
+}
+.arrangement-header-resize:hover::after { opacity: .7; }
+.arrangement-header-resize:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .arrangement-ruler-shell {
     height: var(--arrangement-ruler-height);
@@ -47,12 +70,18 @@
 }
 
 .arrangement-sections-row {
+    position: absolute;
     top: 0;
     right: 0;
     left: 0;
     height: 22px;
 }
 
+/*
+ * The brace row: 14px of dedicated space for the loop and the punch. Before it
+ * existed there was no gesture at all to make a loop range — the biggest missing
+ * link between the model and the hand (spec D10).
+ */
 .arrangement-braces-row {
     position: absolute;
     top: 22px;
@@ -61,6 +90,7 @@
     z-index: 3;
     height: 14px;
     cursor: crosshair;
+    border-block: 1px solid color-mix(in oklab, var(--border-subtle) 60%, transparent);
 }
 
 .arrangement-loop-brace,
@@ -72,15 +102,59 @@
     justify-content: space-between;
     cursor: grab;
 }
+.arrangement-loop-brace:active,
+.arrangement-punch-brace:active { cursor: grabbing; }
 
-.arrangement-loop-brace button,
-.arrangement-punch-brace button {
-    width: 7px;
-    height: 14px;
-    cursor: ew-resize;
+/* The 3px bar that IS the range, drawn between the two caps. */
+.arrangement-loop-brace::before,
+.arrangement-punch-brace::before {
+    content: '';
+    position: absolute;
+    top: 5px;
+    right: 0;
+    left: 0;
+    height: 3px;
+    border-radius: var(--radius-pill);
+    background: var(--accent-primary);
+}
+.arrangement-punch-brace::before {
+    background: repeating-linear-gradient(90deg, var(--accent-danger) 0 4px, transparent 4px 8px);
+    border-radius: 0;
 }
 
+/* End caps — 7px grips, the only part of the brace that resizes it. */
+.arrangement-loop-brace button,
+.arrangement-punch-brace button {
+    position: relative;
+    z-index: 1;
+    width: 7px;
+    height: 14px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: transparent;
+    font-size: 0;
+    cursor: ew-resize;
+}
+.arrangement-loop-brace button::before,
+.arrangement-punch-brace button::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    left: 2px;
+    width: 3px;
+    border-radius: 2px;
+    background: var(--accent-primary);
+}
+.arrangement-punch-brace button::before { background: var(--accent-danger); }
+.arrangement-loop-brace button:last-child::before,
+.arrangement-punch-brace button:last-child::before { left: auto; right: 2px; }
+.arrangement-loop-brace button:focus-visible,
+.arrangement-punch-brace button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
 .arrangement-bars-row {
+    position: absolute;
     top: 36px;
     right: 0;
     bottom: auto;
@@ -100,4 +174,27 @@
 .arrangement-grid-anchor,
 .arrangement-playhead {
     left: var(--arrangement-header-width, 200px);
+}
+
+/*
+ * The snap hairline. It appears ONLY when magnetism actually displaced the raw
+ * value, so the grid can never lie about what it just did to your edit. One
+ * pixel, accent, an 80ms fade in — and no exit animation, because the tick it
+ * marks stops being true the instant the pointer moves off it.
+ */
+.arrangement-snap-indicator {
+    position: absolute;
+    z-index: 10;
+    top: var(--arrangement-ruler-height);
+    width: 1px;
+    background: var(--accent-primary);
+    animation: arrangement-snap-in 80ms linear both;
+    pointer-events: none;
+    will-change: transform;
+}
+@keyframes arrangement-snap-in { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+    .arrangement-snap-indicator { animation: none; }
+    .arrangement-header-resize::after { transition: none; }
 }

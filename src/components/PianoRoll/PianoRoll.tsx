@@ -3,7 +3,7 @@ import type { Arrangement, ArrangementClip, ArrangementNote } from '../../song/t
 import type { Verb } from '../../song/verbs';
 import { copyNotes, drawNotes, eraseNotes, moveNotes, noteDragFloor, resizeNotes, setVelocity as lowerVelocity, transposeNotes } from '../../song/ops';
 import { InstrumentLoader } from '../../audio/instrumentCatalog';
-import { gridTicks, snapTimeline } from '../../store/editingContextStore';
+import { gridTicks, snapTimeline, type GridUnit } from '../../store/editingContextStore';
 import { useEditingContextStore } from '../../store/editingContextStore';
 import { copySelection, cutSelection, paste } from '../../song/editingActions';
 import { useArrangementStore } from '../../store/arrangementStore';
@@ -78,6 +78,32 @@ function findClip(track: { clips: ArrangementClip[] }, clipId: string): Arrangem
     return track.clips.find((item) => item.id === clipId);
 }
 
+/**
+ * V · B · X · K · T — Select, Draw, Erase, Knife, Step. Same five letters, same
+ * order, on the arrangement and here, so the hand learns one tool grammar.
+ */
+const ROLL_TOOLS = [
+    ['select', 'V', 'Select tool'],
+    ['draw', 'B', 'Draw tool'],
+    ['erase', 'X', 'Erase tool'],
+    ['knife', 'K', 'Knife tool'],
+    ['step', 'T', 'Step entry'],
+] as const;
+
+/**
+ * The full surface's key bed is a CONSTANT width in both pitched and drum mode.
+ * The ruler above it is offset by the same number, and a gutter that changed
+ * with drum auto-detection would slide every bar number 20px sideways the moment
+ * a part looked percussive. Fits a GM name; the inline lane keeps the narrower
+ * pitched bed, where nothing above it claims to measure the notes.
+ */
+export const SURFACE_KEY_WIDTH = 64;
+/** Scroomer + key bed — what the surface's ruler corner has to match exactly. */
+export const SURFACE_GUTTER = SCROOMER_WIDTH + SURFACE_KEY_WIDTH;
+
+/** The quantize ladder the grid chip cycles. */
+const QUANTIZE_GRIDS: GridUnit[] = ['1/4', '1/8', '1/16', '1/32', '1/8t'];
+
 export function PianoRoll(props: PianoRollProps) {
     const { clipId, onClose, trackId } = props;
     const mode = props.mode ?? 'inline';
@@ -112,6 +138,14 @@ export function PianoRoll(props: PianoRollProps) {
     const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
     const [ghost, setGhost] = useState<{ tick: number; pitch: number; durTick: number } | null>(null);
     const [rejection, setRejection] = useState('');
+    const [quantizeOpen, setQuantizeOpen] = useState(false);
+    /*
+     * The full surface gets no `onDrumModeChange` from its host, so its "Drums"
+     * button was pressed-looking and inert — auto-detection with no way out.
+     * Own the override locally when nobody else does; §9 promises an explicit
+     * override, and a control that cannot be un-pressed is worse than none.
+     */
+    const [localDrumMode, setLocalDrumMode] = useState<boolean | undefined>(undefined);
 
     const track = arrangement?.tracks.find((item) => item.id === props.trackId);
     const clip = track && findClip(track, props.clipId);
@@ -131,7 +165,7 @@ export function PianoRoll(props: PianoRollProps) {
     const instrumentId = arrangement?.graph.nodes.find((node) => node.ref === track?.ref)?.data?.instrumentId;
     const instrumentDrums = typeof instrumentId === 'string' && InstrumentLoader.getDefinition(instrumentId)?.category === 'percussion';
     const autoDrum = instrumentDrums || shouldAutoDetectDrums(allTrackNotes);
-    const drumMode = props.drumMode ?? autoDrum;
+    const drumMode = props.drumMode ?? localDrumMode ?? autoDrum;
     const range = trackRange ?? noteRange(allTrackNotes);
     const trackPitchMin = allTrackNotes.length ? Math.min(...allTrackNotes.map((note) => note.pitch)) : null;
     const trackPitchMax = allTrackNotes.length ? Math.max(...allTrackNotes.map((note) => note.pitch)) : null;
@@ -595,8 +629,8 @@ export function PianoRoll(props: PianoRollProps) {
     return (
         <section
             ref={rootRef}
-            className={`piano-roll piano-roll--${mode}${drumMode ? ' is-drums' : ''}`}
-            style={{ '--piano-roll-height': `${height}px`, '--piano-roll-key-width': `${drumMode ? 64 : KEY_COLUMN_WIDTH}px`, '--piano-roll-scroomer-width': `${SCROOMER_WIDTH}px` } as CSSProperties}
+            className={`piano-roll piano-roll--${mode}${drumMode ? ' is-drums' : ''}${isPlaying ? ' is-rolling' : ''}`}
+            style={{ '--piano-roll-height': `${height}px`, '--piano-roll-key-width': `${mode === 'surface' ? SURFACE_KEY_WIDTH : drumMode ? 64 : KEY_COLUMN_WIDTH}px`, '--piano-roll-scroomer-width': `${SCROOMER_WIDTH}px` } as CSSProperties}
             aria-label={`${track.name ?? 'MIDI track'} piano roll, ${currentNotes.length} notes${drumMode ? ', drum mode' : ''}`}
             tabIndex={0}
             data-keymap-surface="pianoroll"
@@ -606,15 +640,45 @@ export function PianoRoll(props: PianoRollProps) {
                 else drawAt(xToTick(event.clientX), yToPitch(event.clientY));
             }}
         >
+            {/*
+             * The toolbar carries only what a hand reaches for mid-take: the
+             * five tools, the grid, quantize, and the drum-row override. The
+             * three quantize NUMBER fields live behind `⋯` — they are set once a
+             * session, and permanent chrome should cost nothing to ignore.
+             */}
             <header className="piano-roll__toolbar">
                 <span className="piano-roll__title">{clip.name ?? midiSource.name}</span>
+                <div className="piano-roll__tools" role="group" aria-label="Tool">
+                    {ROLL_TOOLS.map(([id, glyph, label]) => (
+                        <button
+                            key={id}
+                            type="button"
+                            aria-label={label}
+                            aria-pressed={id === 'step' ? stepEntry.trackId === props.trackId : stepEntry.trackId !== props.trackId && tool === id}
+                            onClick={() => {
+                                const context = useEditingContextStore.getState();
+                                if (id === 'step') { context.setStepEntry({ trackId: stepEntry.trackId === props.trackId ? null : props.trackId, positionTick: clip.startTick }); return; }
+                                if (stepEntry.trackId === props.trackId) context.setStepEntry({ trackId: null });
+                                context.setViewport(mode === 'surface' ? 'pianoroll' : 'arrangement', { tool: id });
+                            }}
+                        >{glyph}</button>
+                    ))}
+                </div>
+                <button type="button" className="piano-roll__grid-chip" aria-label={`Quantize grid: ${quantizeGrid}`} title="Quantize grid" onClick={() => {
+                    const index = QUANTIZE_GRIDS.indexOf(quantizeGrid);
+                    useEditingContextStore.getState().setQuantize({ quantizeGrid: QUANTIZE_GRIDS[(index + 1) % QUANTIZE_GRIDS.length]! });
+                }}>Q {quantizeGrid}</button>
+                <button type="button" className="piano-roll__tool" disabled={!selectedNoteIds.length} title="Quantize the selection (Ctrl+Q)" onClick={() => { if (selectedNoteIds.length) props.onQuantize?.(selectedNoteIds); }}>Quantize</button>
+                <button type="button" className="piano-roll__tool" aria-pressed={drumMode} onClick={() => (props.onDrumModeChange ?? setLocalDrumMode)(!drumMode)}>Drums</button>
+                <span className="piano-roll__more">
+                    <button type="button" className="piano-roll__close" aria-label="Quantize options" aria-expanded={quantizeOpen} onClick={() => setQuantizeOpen((open) => !open)}>⋯</button>
+                    {quantizeOpen && <div className="piano-roll__popover" role="group" aria-label="Quantize options">
+                        <label className="piano-roll__quantize-field">Grid<select aria-label="Quantize grid" value={quantizeGrid} onChange={(event) => useEditingContextStore.getState().setQuantize({ quantizeGrid: event.target.value as typeof quantizeGrid })}><option value="1/4">1/4</option><option value="1/8">1/8</option><option value="1/16">1/16</option><option value="1/32">1/32</option><option value="1/8t">1/8T</option></select></label>
+                        <label className="piano-roll__quantize-field">Strength<input aria-label="Quantize strength" type="number" min="0" max="100" value={quantizeStrength} onChange={(event) => useEditingContextStore.getState().setQuantize({ quantizeStrength: Number(event.target.value) })} /></label>
+                        <label className="piano-roll__quantize-field">Swing<input aria-label="Quantize swing" type="number" min="-150" max="150" value={quantizeSwing} onChange={(event) => useEditingContextStore.getState().setQuantize({ quantizeSwing: Number(event.target.value) })} /></label>
+                    </div>}
+                </span>
                 <span className="piano-roll__mode-note" aria-live="polite">{drumMode ? 'Drum rows auto-detected' : 'Pitched notes'}</span>
-                <button type="button" className="piano-roll__tool" aria-pressed={drumMode} onClick={() => props.onDrumModeChange?.(!drumMode)}>Drums</button>
-                <label className="piano-roll__quantize-field">Grid<select aria-label="Quantize grid" value={quantizeGrid} onChange={(event) => useEditingContextStore.getState().setQuantize({ quantizeGrid: event.target.value as typeof quantizeGrid })}><option value="1/4">1/4</option><option value="1/8">1/8</option><option value="1/16">1/16</option><option value="1/32">1/32</option><option value="1/8t">1/8T</option></select></label>
-                <label className="piano-roll__quantize-field">Strength<input aria-label="Quantize strength" type="number" min="0" max="100" value={quantizeStrength} onChange={(event) => useEditingContextStore.getState().setQuantize({ quantizeStrength: Number(event.target.value) })} /></label>
-                <label className="piano-roll__quantize-field">Swing<input aria-label="Quantize swing" type="number" min="-150" max="150" value={quantizeSwing} onChange={(event) => useEditingContextStore.getState().setQuantize({ quantizeSwing: Number(event.target.value) })} /></label>
-                <button type="button" className="piano-roll__tool" onClick={() => { if (selectedNoteIds.length) props.onQuantize?.(selectedNoteIds); }}>{selectedNoteIds.length ? 'Quantize' : 'select notes to quantize'}</button>
-                <button type="button" className="piano-roll__tool" aria-pressed={stepEntry.trackId === props.trackId} onClick={() => useEditingContextStore.getState().setStepEntry({ trackId: stepEntry.trackId === props.trackId ? null : props.trackId, positionTick: clip.startTick })}>Step</button>
                 {props.onClose && mode === 'surface' && <button type="button" className="piano-roll__close" aria-label="Close piano roll" onClick={props.onClose}>⌃</button>}
             </header>
             {rejection && <span className="piano-roll__rejection" role="status">{rejection}</span>}

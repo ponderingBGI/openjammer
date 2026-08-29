@@ -4,15 +4,16 @@ import { useArrangementStore } from '../../store/arrangementStore';
 import { snapTimeline, useEditingContextStore, type GridUnit } from '../../store/editingContextStore';
 import { useTrackLaneViewStore } from '../../store/trackLaneViewStore';
 import { useBindingSet } from '../../keymap/useKeymap';
-import { arrangementLengthTicks, timebase } from '../../song/time';
+import { arrangementLengthTicks, formatBarBeat, timebase } from '../../song/time';
 import { buildTempoMap, sampleToTick } from '../../song/tempoMap';
 import { buildPaperSketch } from '../../song/songs/paperSketch';
 import { buildFirstLight } from '../../song/songs/firstLight';
-import { TransportStrip } from './TransportStrip';
+import { SkyBand } from './SkyBand';
 import { RulerStack } from './RulerStack';
 import { GridLayer } from './GridLayer';
 import { TrackLaneView } from './TrackLaneView';
 import { PlayheadLayer } from './PlayheadLayer';
+import { registerScrollWriter, writeScrollTransforms } from './usePlayheadTransform';
 import { addMarker, createClip, deleteTime, duplicateClips, insertTime, loopRangeForEdge, nudge, splitAt } from '../../song/ops';
 import { gridTicks } from '../../store/editingContextStore';
 import { useHistoryStore } from '../../store/historyStore';
@@ -36,11 +37,18 @@ function parseMusicalDuration(value: string, ticksPerBeat: number, ticksPerBar: 
 }
 
 const RULER_HEIGHT = 64;
+/**
+ * The sky band's height, in JS. Its twin is `--arrangement-sky-height` in
+ * `ArrangementSurface.css`, and `rulerStack.test.tsx` pins them equal — the
+ * field overlay pane starts at `sky + ruler`, so a drift between the two would
+ * offset every transient overlay from the field it is supposed to be inside.
+ */
+const SKY_HEIGHT = 56;
 const EMPTY_GHOST_BARS = 32;
 const EMPTY_GHOST_TRACKS = buildPaperSketch().tracks.map((track, index) => ({ ...track, id: `empty-ghost-${index}`, name: `Track ${index + 1}`, clips: [], automation: undefined }));
 const EMPTY_TRACK_ARRANGEMENT = { name: 'Untitled song', tempoBpm: 120, ppq: 960, timeSignature: [4, 4] as [number, number], graph: { nodes: [], connections: [] }, tracks: [{ id: 'track-1', name: 'Track 1', ref: 'track-1', clips: [] }] };
 
-export function ArrangementSurface({ active, visible = active, transition, songNodeId, onOpenSettings }: { active: boolean; visible?: boolean; transition?: 'in' | 'out'; songNodeId: string | null; onOpenSettings?: () => void }) {
+export function ArrangementSurface({ active, visible = active, transition, songNodeId }: { active: boolean; visible?: boolean; transition?: 'in' | 'out'; songNodeId: string | null; onOpenSettings?: () => void }) {
     const arrangement = useArrangementStore((state) => state.arrangement);
     const viewport = useEditingContextStore((state) => state.viewports.arrangement);
     const gridUnit = useEditingContextStore((state) => state.gridUnit);
@@ -53,6 +61,7 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     const activeClipDragIds = useEditingContextStore((state) => state.activeClipDragIds);
     const snapIndicatorTick = useEditingContextStore((state) => state.snapIndicatorTick);
     const scrollRef = useRef<HTMLDivElement>(null);
+    const overlayOriginRef = useRef<HTMLDivElement>(null);
     const [view, setView] = useState({ width: 1000, height: 600, left: 0, top: 0 });
     const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number; mode: 'object' | 'range' } | null>(null);
     const [timePrompt, setTimePrompt] = useState<'insert' | 'delete' | null>(null);
@@ -65,6 +74,30 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     const scrollbarFade = useRef<number | null>(null);
     const viewportFrame = useRef<number | null>(null);
     const pendingZoom = useRef<{ pointer: number; factor: number; ticksPerBar: number } | null>(null);
+
+    /*
+     * The field overlay pane holds its children in TIMELINE-CONTENT coordinates,
+     * so it counter-translates by the live scroll offsets. This is written
+     * straight onto the DOM, synchronously in `onScroll`, rather than through
+     * `view` — a React state hop would put the playhead and the ghost one frame
+     * behind the clips they are pointing at, which on a ruled surface is the
+     * same lie as an unlocked pixel.
+     *
+     * It registers with `registerScrollWriter` rather than being called from the
+     * handler directly, so that this pane (which carries the playhead LINE) and
+     * the ruler-borne playhead CAP are written by ONE call in ONE scroll event.
+     * Two synchronous writes are still two clocks if anything can ever call one
+     * without the other.
+     */
+    const writeOverlayOrigin = () => {
+        const scroll = scrollRef.current;
+        const origin = overlayOriginRef.current;
+        if (scroll && origin) origin.style.transform = `translate3d(${-headerWidth - scroll.scrollLeft}px,${-RULER_HEIGHT - scroll.scrollTop}px,0)`;
+    };
+    useEffect(() => {
+        writeOverlayOrigin();
+        return registerScrollWriter(writeOverlayOrigin);
+    });
 
     const scheduleViewportWrite = () => {
         if (viewportFrame.current !== null) return;
@@ -213,20 +246,36 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     if (!arrangement) {
         return (
             <div className={`arrangement-surface song-interior ${transition ? `surface-transition-${transition}` : ''}`} data-surface-root="arrangement" data-keymap-surface="arrangement" data-song-node={songNodeId ?? 'song'} tabIndex={-1} role="region" aria-label="Arrangement" hidden={!visible} inert={!active ? true : undefined} aria-hidden={!active} style={{ '--arrangement-header-width': `${headerWidth}px` } as CSSProperties}>
-                <TransportStrip fieldWidth={view.width - headerWidth} onOpenSettings={onOpenSettings} />
+                <SkyBand fieldWidth={view.width - headerWidth} />
                 <div className="arrangement-empty-stage">
                     <div className="arrangement-empty-ghost" aria-hidden="true" inert>
-                        <RulerStack fieldWidth={Math.max(1, view.width - headerWidth)} contentWidth={Math.max(1, view.width - headerWidth)} scrollLeft={0} pxPerTick={(Math.max(1, view.width - headerWidth)) / (EMPTY_GHOST_BARS * 960 * 4)} ticksPerBar={960 * 4} beatsPerBar={4} gridUnit="adaptive" snapOn sections={[]} songEnd={EMPTY_GHOST_BARS * 960 * 4} onToggleSnap={() => undefined} />
+                        <RulerStack fieldWidth={Math.max(1, view.width - headerWidth)} contentWidth={Math.max(1, view.width - headerWidth)} scrollLeft={0} pxPerTick={(Math.max(1, view.width - headerWidth)) / (EMPTY_GHOST_BARS * 960 * 4)} ticksPerBar={960 * 4} beatsPerBar={4} gridUnit="adaptive" snapOn sections={[]} songEnd={EMPTY_GHOST_BARS * 960 * 4} onToggleSnap={() => undefined} shell />
                         <div className="arrangement-lanes" role="list" aria-label="Tracks">
-                            {EMPTY_GHOST_TRACKS.map((track) => <TrackLaneView key={track.id} track={track} arrangement={{ ...EMPTY_TRACK_ARRANGEMENT, tracks: EMPTY_GHOST_TRACKS }} pxPerTick={1} visibleStartTick={0} visibleEndTick={0} shell />)}
+                            {EMPTY_GHOST_TRACKS.map((track, offset) => <TrackLaneView key={track.id} track={track} arrangement={{ ...EMPTY_TRACK_ARRANGEMENT, tracks: EMPTY_GHOST_TRACKS }} index={offset} pxPerTick={1} visibleStartTick={0} visibleEndTick={0} shell />)}
                         </div>
                     </div>
                     <div className="arrangement-empty-card">
                         <h1>An empty page.</h1>
                         <p>Start a sketch, or ask the agent to dream one up. Ctrl+Z undoes anything.</p>
+                        {/*
+                         * Every way IN is named here (spec 8.3 / D13). Two starters
+                         * for "show me something that already sounds", and two paths
+                         * for "I want to make it myself" — because an empty state
+                         * that only offers demos teaches the player that the demos
+                         * are the product.
+                         */}
                         <div className="arrangement-empty-starters">
                             <Button variant="primary" onClick={() => useArrangementStore.getState().setArrangement({ ...buildPaperSketch(), codeNodes: undefined })}>Start from 'Paper Sketch'</Button>
                             <Button onClick={() => useArrangementStore.getState().setArrangement(buildFirstLight())}>Start from 'First Light'</Button>
+                            <Button onClick={() => {
+                                const store = useArrangementStore.getState();
+                                store.setArrangement(EMPTY_TRACK_ARRANGEMENT);
+                                store.armTrack(EMPTY_TRACK_ARRANGEMENT.tracks[0]!.id, true);
+                            }}>Record something</Button>
+                            <Button onClick={() => {
+                                useArrangementStore.getState().setArrangement(EMPTY_TRACK_ARRANGEMENT);
+                                useEditingContextStore.getState().setViewport('arrangement', { tool: 'draw' });
+                            }}>Draw a clip</Button>
                         </div>
                         <button className="arrangement-empty-secondary" type="button" onClick={() => useArrangementStore.getState().setArrangement(EMPTY_TRACK_ARRANGEMENT)}>Add an empty track</button>
                         <div className="arrangement-empty-footer"><Kbd>Tab</Kbd><span>back to the canvas</span></div>
@@ -249,19 +298,26 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     );
     const pinnedTrackIndices = dragActive ? arrangement.tracks.map((track, index) => track.clips.some((clip) => clip.id && activeClipDragIds.includes(clip.id)) ? index : -1).filter((index) => index >= 0) : [];
     const { offsets, laneTop, visibleStartTick, visibleEndTick } = virtual;
+    const fieldGroundHeight = Math.max(offsets.at(-1)!, view.height - RULER_HEIGHT);
     const firstLane = pinnedTrackIndices.length ? Math.min(virtual.firstLane, ...pinnedTrackIndices) : virtual.firstLane;
     const lastLane = pinnedTrackIndices.length ? Math.max(virtual.lastLane, ...pinnedTrackIndices.map((index) => index + 1)) : virtual.lastLane;
 
     return (
         <div className={`arrangement-surface song-interior ${transition ? `surface-transition-${transition}` : ''}`} data-surface-root="arrangement" data-keymap-surface="arrangement" data-song-node={songNodeId ?? 'song'} tabIndex={-1} role="region" aria-label="Arrangement" hidden={!visible} inert={!active ? true : undefined} aria-hidden={!active} style={{ '--arrangement-header-width': `${headerWidth}px` } as CSSProperties}>
-            <TransportStrip fieldWidth={fieldViewportWidth} onOpenSettings={onOpenSettings} />
-            <DragGhostLayer />
+            <SkyBand fieldWidth={fieldViewportWidth} />
             <div className="arrangement-header-resize" role="separator" aria-orientation="vertical" aria-label="Resize track headers" tabIndex={0} style={{ left: headerWidth }} onPointerDown={(event) => { if (event.button !== 0) return; const startX = event.clientX; const before = headerWidth; const cleanup = ownPointerGesture(event.pointerId, { move(move) { useTrackLaneViewStore.getState().setHeaderWidth(before + move.clientX - startX); }, commit() { cleanup(); }, abort() { useTrackLaneViewStore.getState().setHeaderWidth(before); cleanup(); } }); try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Window listeners own completion. */ } }} />
             <div
                 className="arrangement-scroll"
                 ref={scrollRef}
                 onScroll={(event) => {
                     const target = event.currentTarget;
+                    /*
+                     * ONE call, and every scroll-synchronous element moves in
+                     * it: the overlay pane's origin (which carries the playhead
+                     * LINE, the ghost, the readout, the hairline and the
+                     * marquee) and the ruler's playhead CAP.
+                     */
+                    writeScrollTransforms();
                     target.classList.add('is-scrolling');
                     if (scrollbarFade.current !== null) window.clearTimeout(scrollbarFade.current);
                     scrollbarFade.current = window.setTimeout(() => target.classList.remove('is-scrolling'), 200);
@@ -372,21 +428,47 @@ export function ArrangementSurface({ active, visible = active, transition, songN
                         try { element.setPointerCapture(pointerId); } catch { /* Window listeners own completion. */ }
                     }}
                 >
-                    <RulerStack fieldWidth={fieldViewportWidth} contentWidth={contentWidth} scrollLeft={view.left} pxPerTick={viewport.pxPerTick} ticksPerBar={tb.ticksPerBar} beatsPerBar={tb.beatsPerBar} gridUnit={gridUnit} snapOn={snapMode === 'magnetic'} sections={sections} songEnd={lengthTicks} loop={loop} punch={punch} onToggleSnap={() => useEditingContextStore.getState().toggleSnap()} />
-                    <div className="arrangement-field-ground" aria-hidden="true" style={{ width: contentWidth, height: offsets.at(-1) }} />
-                    <div className="arrangement-song-end" aria-hidden="true" style={{ left: headerWidth + lengthTicks * viewport.pxPerTick, width: Math.max(0, contentWidth - lengthTicks * viewport.pxPerTick), height: offsets.at(-1) }} />
+                    <RulerStack fieldWidth={fieldViewportWidth} contentWidth={contentWidth} scrollLeft={view.left} scrollRef={scrollRef} pxPerTick={viewport.pxPerTick} ticksPerBar={tb.ticksPerBar} beatsPerBar={tb.beatsPerBar} gridUnit={gridUnit} snapOn={snapMode === 'magnetic'} sections={sections} songEnd={lengthTicks} loop={loop} punch={punch} onToggleSnap={() => useEditingContextStore.getState().toggleSnap()} />
+                    {/*
+                     * The PAPER runs to the bottom of the window, not to the last
+                     * lane. Ending it at `offsets.at(-1)` left ~400px of bare
+                     * `--bg-canvas` under the tracks — a faint seam in light, a
+                     * hard black band in dark that reads as an unfinished render
+                     * (W4-TB-REVIEW §8.2). The lanes still end where the tracks
+                     * end; only the ground and the past-end wash continue.
+                     */}
+                    <div className="arrangement-field-ground" aria-hidden="true" style={{ width: contentWidth, height: fieldGroundHeight }} />
+                    <div className="arrangement-song-end" aria-hidden="true" style={{ left: headerWidth + lengthTicks * viewport.pxPerTick, width: Math.max(0, contentWidth - lengthTicks * viewport.pxPerTick), height: fieldGroundHeight }} />
                     <div className="arrangement-grid-anchor" style={{ transform: `translate3d(${view.left}px,${view.top}px,0)` }}>
                         <GridLayer width={fieldViewportWidth} height={Math.max(1, Math.min(view.height - RULER_HEIGHT, offsets.at(-1)! - laneTop))} scrollLeft={view.left} pxPerTick={viewport.pxPerTick} ticksPerBar={tb.ticksPerBar} beatsPerBar={tb.beatsPerBar} gridUnit={gridUnit} sections={sections} />
                     </div>
                     <div className="arrangement-lanes" role="list" aria-label="Tracks" style={{ paddingTop: offsets[firstLane], height: offsets.at(-1) }}>
-                        {arrangement.tracks.slice(firstLane, lastLane).map((track) => <TrackLaneView key={track.id ?? track.ref} track={track} arrangement={arrangement} pxPerTick={viewport.pxPerTick} visibleStartTick={visibleStartTick} visibleEndTick={visibleEndTick} />)}
+                        {arrangement.tracks.slice(firstLane, lastLane).map((track, offset) => <TrackLaneView key={track.id ?? track.ref} track={track} arrangement={arrangement} index={firstLane + offset} pxPerTick={viewport.pxPerTick} visibleStartTick={visibleStartTick} visibleEndTick={visibleEndTick} />)}
                     </div>
+                </div>
+            </div>
+            {/*
+             * THE FIELD OVERLAY PANE (spec 2.2 / 8.2). Every transient thing the
+             * field draws lives in here and nowhere else, because the one rule
+             * they share is not a z-index — it is a boundary: above the clips,
+             * never on the chrome. See `.arrangement-field-overlay` for why the
+             * stacking order cannot say that and a clip can.
+             */}
+            <div className="arrangement-field-overlay" data-field-overlay style={{ left: headerWidth, width: fieldViewportWidth, height: Math.max(0, view.height - RULER_HEIGHT) }}>
+                <div className="arrangement-field-overlay__origin" ref={overlayOriginRef}>
                     {loop?.endTick != null && <div className="arrangement-loop-wash" aria-hidden="true" style={{ left: headerWidth + loop.startTick * viewport.pxPerTick, width: (loop.endTick - loop.startTick) * viewport.pxPerTick, height: offsets.at(-1) }} />}
-                    {viewport.selection.timeRange && <div className="arrangement-range-selection" aria-label={`Time selection ${Math.round(viewport.selection.timeRange.fromTick)} to ${Math.round(viewport.selection.timeRange.toTick)}`} style={{ left: headerWidth + viewport.selection.timeRange.fromTick * viewport.pxPerTick, width: (viewport.selection.timeRange.toTick - viewport.selection.timeRange.fromTick) * viewport.pxPerTick, height: offsets.at(-1) }} />}
+                    {viewport.selection.timeRange && <div className="arrangement-range-selection" aria-label={`Time selection ${Math.round(viewport.selection.timeRange.fromTick)} to ${Math.round(viewport.selection.timeRange.toTick)}`} style={{ left: headerWidth + viewport.selection.timeRange.fromTick * viewport.pxPerTick, width: (viewport.selection.timeRange.toTick - viewport.selection.timeRange.fromTick) * viewport.pxPerTick, height: offsets.at(-1) }}>
+                        {/* A range names itself at both edges, so it is legible without measuring. */}
+                        <span>{formatBarBeat(tb, viewport.selection.timeRange.fromTick)}</span>
+                        <span>{formatBarBeat(tb, viewport.selection.timeRange.toTick)}</span>
+                    </div>}
                     {snapIndicatorTick !== null && <div className="arrangement-snap-indicator" aria-hidden="true" style={{ transform: `translate3d(${headerWidth + snapIndicatorTick * viewport.pxPerTick}px,0,0)`, height: offsets.at(-1) }} />}
                     <PlayheadLayer pxPerTick={viewport.pxPerTick} scrollRef={scrollRef} height={offsets.at(-1)!} />
                     {marquee && <div className={`arrangement-marquee${marquee.mode === 'range' ? ' is-range' : ''}`} aria-hidden="true" style={{ left: marquee.x, top: marquee.y, width: marquee.width, height: marquee.height }} />}
                     {drawGhost && <div className="arrangement-clip arrangement-clip--draw" data-draw-ghost aria-hidden="true" style={{ left: drawGhost.x, top: drawGhost.y, width: drawGhost.width, height: drawGhost.height }} />}
+                </div>
+                <div className="arrangement-field-overlay__surface">
+                    <DragGhostLayer bounds={{ left: headerWidth, top: SKY_HEIGHT + RULER_HEIGHT, right: headerWidth + fieldViewportWidth, bottom: SKY_HEIGHT + RULER_HEIGHT + Math.max(0, view.height - RULER_HEIGHT) }} />
                 </div>
             </div>
             {mixerOpen && <MixerDrawer />}

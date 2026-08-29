@@ -1,14 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useArrangementStore } from '../../store/arrangementStore';
 import { useEditingContextStore } from '../../store/editingContextStore';
 import { useUiViewStore } from '../../store/uiViewStore';
 import { arrangementLengthTicks, timebase } from '../../song/time';
 import { RulerStack } from '../Arrangement/RulerStack';
-import { TransportStrip } from '../Arrangement/TransportStrip';
-import { PianoRollSurface } from './PianoRoll';
+import { SkyBand } from '../Arrangement/SkyBand';
+import { PianoRollSurface, SURFACE_GUTTER } from './PianoRoll';
 import { applyPianoRollQuantize, auditionPianoRollNote } from './actions';
 
-const HEADER_WIDTH = 200;
+/*
+ * The ruler's corner is exactly the roll's key-bed gutter, so bar 1's tick sits
+ * on tick 0 of the notes. With the arrangement's 200px corner it sat 124px to
+ * the right — a ruled surface whose ruler measured the wrong place.
+ */
+const HEADER_WIDTH = SURFACE_GUTTER;
+/*
+ * Everything this host paints ABOVE the roll: sky band 56 + ruler 64 + the
+ * clip-bracket strip 18. The roll gets the rest exactly, so its velocity lane
+ * lands on the bottom edge instead of hanging off it.
+ */
+const CHROME_ABOVE_ROLL = 56 + 64 + 18;
 
 export function PianoRollSurfaceHost({ active, visible = active, transition }: { active: boolean; visible?: boolean; transition?: 'in' | 'out' }) {
     const arrangement = useArrangementStore((state) => state.arrangement);
@@ -60,10 +71,10 @@ export function PianoRollSurfaceHost({ active, visible = active, transition }: {
     const loop = (arrangement.locations ?? []).find((location) => location.kind === 'loop');
     const close = () => useUiViewStore.getState().closePianoRoll();
 
-    return <div ref={rootRef} className={`arrangement-surface piano-roll-surface-host song-interior ${transition ? `surface-transition-${transition}` : ''}`} data-surface-root="pianoroll" tabIndex={-1} role="region" aria-label={`Piano roll — ${track.name ?? track.ref}`} hidden={!visible} inert={!active ? true : undefined} aria-hidden={!active} onKeyDownCapture={(event) => { if (event.key !== 'Escape') return; const target = event.target as HTMLElement; if (target.matches('input, select, textarea, [contenteditable="true"]')) { event.preventDefault(); event.stopPropagation(); target.blur(); } }}>
-        <TransportStrip fieldWidth={fieldWidth} />
+    return <div ref={rootRef} className={`arrangement-surface piano-roll-surface-host song-interior ${transition ? `surface-transition-${transition}` : ''}`} style={{ '--arrangement-header-width': `${HEADER_WIDTH}px` } as CSSProperties} data-surface-root="pianoroll" tabIndex={-1} role="region" aria-label={`Piano roll — ${track.name ?? track.ref}`} hidden={!visible} inert={!active ? true : undefined} aria-hidden={!active} onKeyDownCapture={(event) => { if (event.key !== 'Escape') return; const target = event.target as HTMLElement; if (target.matches('input, select, textarea, [contenteditable="true"]')) { event.preventDefault(); event.stopPropagation(); target.blur(); } }}>
+        <SkyBand fieldWidth={fieldWidth} />
         <RulerStack surface="pianoroll" fieldWidth={fieldWidth} contentWidth={contentWidth} scrollLeft={viewport.leftTick * viewport.pxPerTick} pxPerTick={viewport.pxPerTick} ticksPerBar={tb.ticksPerBar} beatsPerBar={tb.beatsPerBar} gridUnit={gridUnit} snapOn={snapMode === 'magnetic'} sections={sections} songEnd={arrangementLengthTicks(arrangement)} loop={loop} onToggleSnap={() => useEditingContextStore.getState().toggleSnap()} />
         <div className="piano-roll__clip-brackets" aria-label={`Clip bounds ${clip.startTick} to ${clip.startTick + clip.lengthTick}`}><i style={{ left: HEADER_WIDTH + (clip.startTick - viewport.leftTick) * viewport.pxPerTick }}>[</i><i style={{ left: HEADER_WIDTH + (clip.startTick + clip.lengthTick - viewport.leftTick) * viewport.pxPerTick }}>]</i></div>
-        <PianoRollSurface trackId={track.id ?? track.ref} clipId={clipId} pxPerTick={viewport.pxPerTick} leftTick={viewport.leftTick} height={Math.max(320, hostSize.height - 180)} onClose={close} onQuantize={applyPianoRollQuantize} onAudition={(pitch, velocity, phase) => auditionPianoRollNote(track.ref, pitch, velocity, phase)} />
+        <PianoRollSurface trackId={track.id ?? track.ref} clipId={clipId} pxPerTick={viewport.pxPerTick} leftTick={viewport.leftTick} height={Math.max(320, hostSize.height - CHROME_ABOVE_ROLL)} onClose={close} onQuantize={applyPianoRollQuantize} onAudition={(pitch, velocity, phase) => auditionPianoRollNote(track.ref, pitch, velocity, phase)} />
     </div>;
 }

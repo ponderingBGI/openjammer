@@ -8,6 +8,7 @@
 import { useRef, useCallback, memo } from 'react';
 import type { AudioClip } from '../../engine/types';
 import { useAudioClipStore } from '../../store/audioClipStore';
+import { formatSampleDuration } from '../../utils/audioMetadata';
 import './AudioClipVisual.css';
 
 interface AudioClipVisualProps {
@@ -20,18 +21,6 @@ interface AudioClipVisualProps {
     onDoubleClick?: () => void;
     style?: React.CSSProperties;
     className?: string;
-}
-
-/**
- * Format duration to display string
- * < 1s: show decimals (0.5s)
- * >= 1s: show whole seconds
- */
-function formatDuration(seconds: number): string {
-    if (seconds < 1) {
-        return `${seconds.toFixed(1)}s`;
-    }
-    return `${Math.round(seconds)}s`;
 }
 
 /**
@@ -181,7 +170,7 @@ export const AudioClipVisual = memo(function AudioClipVisual({
 
                 {/* Duration badge */}
                 <span className="audio-clip-duration">
-                    {formatDuration(clip.durationSeconds)}
+                    {formatSampleDuration(clip.durationSeconds)}
                 </span>
             </div>
 

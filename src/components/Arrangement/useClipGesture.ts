@@ -139,6 +139,9 @@ export function useClipGesture(clip: ArrangementClip, trackId: string, pxPerTick
                 width,
                 height,
                 copy: g.copy,
+                tick: clip.startTick + rawDelta,
+                originTick: g.previewBase.tracks.flatMap((item) => item.clips).find((item) => item.id === clip.id)?.startTick ?? clip.startTick,
+                locked: clip.locked === true,
             });
         }
     };

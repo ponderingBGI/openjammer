@@ -56,6 +56,20 @@ export interface ClipDragPreview {
     width: number;
     height: number;
     copy: boolean;
+    /** VIEW ONLY — the tick the clip would land on, for the drag readout chip. */
+    tick: number;
+    /**
+     * VIEW ONLY — where the gesture started, taken from the pre-gesture
+     * document, so the readout can show an honest delta rather than a delta
+     * measured against a value the preview has already moved.
+     */
+    originTick: number;
+    /**
+     * VIEW ONLY — the drop is a no-op. `moveClips` skips locked clips, so this
+     * is the one genuinely invalid drop the document model has; saying so before
+     * the release is more honest than a gesture that silently does nothing.
+     */
+    locked: boolean;
 }
 
 export interface SurfaceViewport {

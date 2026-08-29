@@ -1,16 +1,56 @@
+/*
+ * THE ARRANGEMENT — New DNA.
+ *
+ * Calm ground, loud signal. The page is quiet: warm-neutral lanes, hairline
+ * rules, mono for every exact value. Colour is spent only on things that are
+ * TRUE — the playhead (where you are), the accent outline (what is selected),
+ * the track tint (whose sound this is) and the level bead (what is making noise
+ * right now). Nothing here glows: the New DNA reserves glow for live-signal
+ * carriers, and a position marker is not one (spec D15).
+ *
+ * Layout, top to bottom:  sky band 56 · ruler stack 64 · ruled field · mixer 188.
+ * The scroller owns both axes; the ruler is sticky-top and the header column is
+ * sticky-left INSIDE it, so the browser does the pixel-locking and no rAF
+ * translateX compensation can shear them apart.
+ */
+
 :root {
     /*
-     * The ruled surfaces start below the topbar AND below the lane the floating
-     * transport pill occupies, so the pill never covers a bar: 46px of topbar
-     * (`--oj-topbar-height`, declared in Shell/Topbar.css) plus the 56px band the
-     * pill sits in. It is spelled out here rather than composed from that
+     * The ruled surfaces start directly under the topbar and paint their own
+     * 56px sky band, which is the lane the floating transport pill occupies —
+     * so the pill never covers a bar. 46px is `--oj-topbar-height` (declared in
+     * Shell/Topbar.css); it is spelled out here rather than composed from that
      * variable because this directory is gated against undeclared custom
-     * properties — the two must be changed together.
-     *
-     * Wave 4 S4 reservation: the sky band that will eventually FILL this space is
-     * the timeline lane's to build.
+     * properties. The two must be changed together.
      */
-    --oj-surface-top: 102px;
+    --oj-surface-top: 46px;
+    --arrangement-sky-height: 56px;
+    --arrangement-mixer-height: 188px;
+
+    /*
+     * The pill's own width, PUBLISHED BY THE PILL (`TransportPillHost`, one
+     * `ResizeObserver`, written on `document.documentElement` only when the
+     * number actually changes). The 428px here is the measured full-zone width
+     * and it is a fallback, not the source of truth: it is what the reserve is
+     * worth for the frame between first paint and first measurement, and what
+     * it is worth in a jsdom render with no layout.
+     *
+     * It is declared rather than left to the `var()` fallback because this
+     * directory is gated against undeclared custom properties, and because a
+     * reserve that silently collapsed to nothing if the host ever stopped
+     * publishing would bring M3 back with every test still green.
+     */
+    --oj-transport-pill-width: 428px;
+    /*
+     * The centre lane the floating transport pill occupies, reserved on BOTH
+     * sides. The pill is `position: fixed; left: 50%` — it is centred on the
+     * WINDOW, not on any column — so the only construction that can promise it
+     * never covers a control is a symmetric one, and the only one that can KEEP
+     * that promise is one derived from the pill's real width plus a 4px
+     * shoulder. The old literal 432 was a copy of a measurement: add a zone to
+     * the pill and it went stale with every gate still passing (W4-TBb §12.2).
+     */
+    --arrangement-sky-pill-reserve: calc(var(--oj-transport-pill-width, 428px) + 4px);
 }
 
 .arrangement-surface {
@@ -21,11 +61,19 @@
     flex-direction: column;
     overflow: hidden;
     color: var(--text-primary);
-    background-color: var(--timeline-bg);
-    background-image: radial-gradient(circle, color-mix(in srgb, var(--text-primary) 6%, transparent) 1px, transparent 1px);
-    background-size: 24px 24px;
+    background: var(--timeline-bg);
+    font-family: var(--font-sans);
+    /*
+     * A gesture on this surface is always a DRAG, never a text selection. Without
+     * this, dragging a clip down-left paints the track headers blue-on-highlight
+     * — a glitch the eye reads as "something broke" mid-edit.
+     */
+    user-select: none;
 }
 .arrangement-surface[hidden] { display: none; }
+/* …except where there is genuinely text to select. */
+.arrangement-surface input,
+.arrangement-surface textarea { user-select: text; }
 
 .surface-transition-in {
     animation: arrangement-surface-in 180ms cubic-bezier(.2, 0, 0, 1) 60ms both;
@@ -42,52 +90,129 @@
     to { opacity: 0; transform: scale(.985); }
 }
 
-.arrangement-transport {
-    flex: 0 0 52px;
-    height: 52px;
-    display: flex;
+/* ── Sky band ────────────────────────────────────────────────────────────────
+ * Identity left, the ONE transport pill floating over the middle, the surface's
+ * own utilities right. Undo/redo are deliberately absent: they are document-
+ * scoped and already live in the topbar 46px above this line, and a second copy
+ * of a control is exactly what "extend, don't fork" forbids.
+ */
+
+/*
+ * THREE SLOTS, and the middle one is the pill's. A one-sided reserve (a
+ * flex gap that only protected the song name) let the right-flushed utility
+ * cluster slide under the centred pill at ≤1024px, so at 1024 the armed
+ * `Slide` was behind the pill's keycap and at 900 the zoom chip was gone —
+ * "which edit mode is armed" is exactly the thing a performer must be able to
+ * read without clicking (W4-TB-REVIEW M3). A symmetric grid states the rule
+ * geometrically instead of hoping: the cluster CANNOT enter the centre lane.
+ */
+.arrangement-sky {
+    position: relative;
+    z-index: 6;
+    flex: 0 0 var(--arrangement-sky-height);
+    height: var(--arrangement-sky-height);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--arrangement-sky-pill-reserve) minmax(0, 1fr);
     align-items: center;
     padding: 0 14px;
-    gap: 10px;
-    background-color: var(--timeline-chrome-bg);
-    background-image: radial-gradient(circle, color-mix(in srgb, var(--text-primary) 6%, transparent) 1px, transparent 1px);
-    background-size: 24px 24px;
-    border-bottom: 2px solid var(--border-strong);
+    background: var(--timeline-bg);
 }
 
-.arrangement-transport__cluster { display: flex; align-items: center; gap: 10px; }
-.arrangement-transport__cluster--right { justify-content: flex-end; min-width: 390px; }
-.arrangement-transport__latency { min-width: 0; max-width: 340px; }
-.arrangement-transport__latency .oj-callout { gap: 4px; padding: 4px 6px; }
-.arrangement-transport__latency .oj-callout__title { margin: 0; font-size: 14px; }
-.arrangement-transport__latency .oj-callout__content > span:first-child { display: none; }
-.arrangement-transport__latency .oj-btn { width: auto; min-width: 32px; }
-.arrangement-edit-mode { display: inline-flex; overflow: hidden; border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm); }
-.arrangement-edit-mode button { min-height: 24px; padding: 0 7px; border: 0; background: var(--timeline-lane-bg); color: var(--text-secondary); font: 600 14px/1 var(--font-sans); }
-.arrangement-edit-mode button + button { border-left: 1px solid var(--border-strong); }
-.arrangement-edit-mode button[aria-pressed="true"] { background: var(--text-primary); color: var(--text-on-accent); }
-.arrangement-transport__title {
-    flex: 1;
+.arrangement-sky__identity {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
+    padding-right: var(--space-md);
+}
+
+.arrangement-sky__name {
+    min-width: 0;
     overflow: hidden;
-    font-family: var(--font-sans);
-    font-size: 22px;
-    font-weight: 600;
-    text-align: center;
+    color: var(--text-primary);
+    font: 600 var(--text-lg)/1 var(--font-sans);
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-.arrangement-transport .oj-button { width: 32px; height: 32px; min-height: 32px; padding: 0; }
-.arrangement-transport .arrangement-transport__play { width: 36px; }
-.arrangement-transport .arrangement-record { position: relative; width: auto; min-width: 32px; padding-inline: 8px; gap: 5px; }
-.arrangement-record__dot { width: 10px; height: 10px; border: 2px solid var(--timeline-playhead); border-radius: var(--radius-pill); background: transparent; }
-.arrangement-record.is-recording .arrangement-record__dot { background: var(--timeline-playhead); animation: arrangement-record-pulse 1200ms ease-in-out infinite; }
-.arrangement-record.is-outside-punch { opacity: .48; }
-.arrangement-record__label { color: var(--timeline-playhead); font: 700 13px/1 var(--font-sans); }
-.arrangement-record-error { position: absolute; z-index: 12; top: var(--arrangement-ruler-height); left: 14px; max-width: 42ch; padding: 5px 8px; border: 1px solid var(--accent-danger); border-radius: var(--radius-sm); background: var(--timeline-chrome-bg); color: var(--text-primary); font: 500 13px/1.3 var(--font-sans); }
+
+.arrangement-sky__hint {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    color: var(--text-muted);
+    font: 500 var(--text-sm)/1 var(--font-sans);
+}
+
+/*
+ * The cluster WRAPS rather than overflows. Below ~1177px its column is narrower
+ * than its controls, and the honest degradation is a second row inside the same
+ * 56px band — every arrangement utility stays on the surface where the hand can
+ * reach it mid-take. An overflow `⋯` would have hidden the tail behind a click,
+ * which is the same failure M3 names, only slower.
+ *
+ * Two rows only fit COMPACTED (24 + 3 + 24 = 51px), which is why the compaction
+ * media query below is 1180px and not 1024px — see the note there.
+ */
+.arrangement-sky__utility {
+    display: flex;
+    align-items: center;
+    align-content: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 4px 6px;
+    min-width: 0;
+    padding-left: var(--space-md);
+}
+
+/* The pill's lane. Empty on purpose — the grid column IS the reserve. */
+.arrangement-sky__gap { min-width: 0; }
+
+.arrangement-sky__utility .oj-btn { height: 30px; min-height: 30px; padding: 0 11px; font-size: var(--text-sm); }
+.arrangement-sky__utility .oj-value-scrubber__value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.arrangement-zoom-scrubber .oj-value-scrubber__value { min-width: 62px; font-size: var(--text-sm); text-align: center; }
+
+/*
+ * Errors are a chip in the utility cluster, never a modal and never a banner
+ * that shoves the ruler down (spec 8.3). Tinted TEXT only — a red fill up here
+ * would be louder than the music.
+ */
+.arrangement-sky__alert { flex: 0 1 auto; min-width: 0; max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 .arrangement-record-live { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
-@keyframes arrangement-record-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
-.arrangement-transport .oj-value-scrubber__value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-.arrangement-zoom-scrubber .oj-value-scrubber__value { min-width: 76px; font-size: 14px; text-align: center; }
+
+/*
+ * Slide / Ripple. A two-state segmented control in the New DNA's shape (inset
+ * pill, the selected segment RISES onto the surface) but built from plain
+ * buttons, because the whole surface's edit mode is a mode switch, not a tab
+ * strip, and the shipped e2e names it by button role.
+ */
+.arrangement-edit-mode {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+}
+.arrangement-edit-mode button {
+    min-height: 24px;
+    padding: 0 10px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font: 600 var(--text-sm)/1 var(--font-sans);
+    transition: color var(--motion-fast), background var(--motion-fast);
+}
+.arrangement-edit-mode button:hover { color: var(--text-primary); }
+.arrangement-edit-mode button[aria-pressed="true"] {
+    background: var(--bg-node);
+    color: var(--text-primary);
+    box-shadow: var(--shadow-raised);
+}
+.arrangement-edit-mode button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* ── Scroller ───────────────────────────────────────────────────────────────── */
 
 .arrangement-scroll {
     position: relative;
@@ -95,14 +220,68 @@
     overflow: auto;
     scrollbar-color: transparent transparent;
     scrollbar-width: auto;
+    background: var(--timeline-bg);
 }
 .arrangement-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
 .arrangement-scroll::-webkit-scrollbar-track { background: transparent; }
 .arrangement-scroll::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 .arrangement-scroll::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--radius-pill); background: transparent; background-clip: padding-box; transition: background-color 90ms linear; }
-.arrangement-scroll.is-scrolling { scrollbar-color: color-mix(in srgb, var(--text-primary) 22%, transparent) transparent; }
-.arrangement-scroll.is-scrolling::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--text-primary) 22%, transparent); }
+.arrangement-scroll.is-scrolling { scrollbar-color: color-mix(in oklab, var(--text-primary) 22%, transparent) transparent; }
+.arrangement-scroll.is-scrolling::-webkit-scrollbar-thumb { background-color: color-mix(in oklab, var(--text-primary) 22%, transparent); }
 .arrangement-timeline-content { position: relative; }
+
+/* ── The field overlay pane ──────────────────────────────────────────────────
+ *
+ * ONE clipped window onto the ruled field, and everything transient rides in
+ * it: the drag ghost, its readout, the snap hairline, the marquee, the loop
+ * wash, the range selection and the playhead line.
+ *
+ * The z-ladder cannot express what these overlays need. They must sit ABOVE
+ * clips (a ghost behind the clip it is moving is useless) and BELOW the two
+ * pieces of chrome the shell contract says are always there — the sticky
+ * header column and the ruler stack. One stacking order cannot be both, so a
+ * lower z-index is the wrong tool: the answer is a CLIP. The pane is laid over
+ * the scroller's field viewport (its left edge is the header's right edge, its
+ * top edge is the ruler's bottom) with `overflow: hidden`, so no overlay can
+ * paint on chrome no matter where the pointer goes or how far the field is
+ * scrolled.
+ *
+ * Two origins live inside it, and neither costs the children a coordinate
+ * change:
+ *   • `__origin` is the timeline CONTENT's origin, counter-translated by the
+ *     scroll offsets, so `top: var(--arrangement-ruler-height)` and
+ *     `left: headerWidth + tick·pxPerTick` still mean exactly what they meant
+ *     when these elements lived inside the scroller.
+ *   • `__surface` is the SURFACE's origin, which is the space
+ *     `useClipGesture` publishes the drag preview in.
+ * Both are zero-sized: they are places to measure from, not boxes.
+ */
+.arrangement-field-overlay {
+    position: absolute;
+    top: calc(var(--arrangement-sky-height) + var(--arrangement-ruler-height));
+    z-index: 10;
+    overflow: hidden;
+    pointer-events: none;
+}
+.arrangement-field-overlay__origin,
+.arrangement-field-overlay__surface {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+}
+.arrangement-field-overlay__origin { will-change: transform; }
+.arrangement-field-overlay__surface {
+    top: calc(-1 * (var(--arrangement-sky-height) + var(--arrangement-ruler-height)));
+    left: calc(-1 * var(--arrangement-header-width, 200px));
+}
+
+/* ── Ruler stack ─────────────────────────────────────────────────────────────
+ * Three rows in one 64px band (geometry lives in gestureHandles.css, which is
+ * the single place the 64 is written down): sections & marks, loop/punch
+ * braces, bars. Closed by one hairline, never a 2px ink rule.
+ */
 
 .arrangement-ruler-shell {
     position: sticky;
@@ -110,118 +289,514 @@
     left: 0;
     z-index: 8;
     width: 100vw;
-    height: 46px;
     display: grid;
-    grid-template-columns: 200px 1fr;
-    border-bottom: 2px solid var(--border-strong);
+    box-sizing: border-box;
     background: var(--timeline-chrome-bg);
+}
+/*
+ * The closing hairline is DRAWN, not a border. A `border-bottom` sits inside the
+ * 64px box, which left the 28px bars row one pixel taller than the viewport that
+ * clips it — the 2px overflow TA2d measured. The ruler's baseline belongs on top
+ * of the last pixel of the tick ladder anyway.
+ */
+.arrangement-ruler-shell::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 1px;
+    background: var(--border-strong);
+    pointer-events: none;
 }
 .arrangement-corner {
     position: relative;
     z-index: 2;
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 10px;
-    border-right: 2px solid var(--border-strong);
-    background-color: var(--timeline-chrome-bg);
-    background-image: radial-gradient(circle, color-mix(in srgb, var(--text-primary) 6%, transparent) 1px, transparent 1px);
-    background-size: 24px 24px;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    padding: 4px 8px 4px 12px;
+    border-right: 1px solid var(--border-strong);
+    background: var(--timeline-chrome-bg);
 }
+.arrangement-corner__row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* The roll's corner is only as wide as its key bed, so it stacks and centres. */
+.arrangement-corner--roll { padding-inline: 6px; }
+.arrangement-corner--roll .arrangement-corner__row { justify-content: center; }
+.arrangement-corner--roll .arrangement-grid-chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+
+/* Grid unit: an exact value, so it is mono on an inset chip. */
 .arrangement-grid-chip {
-    padding: 2px 6px;
-    border: 1px solid var(--timeline-clip-border);
+    flex: none;
+    height: 22px;
+    padding: 0 7px;
+    border: 0;
     border-radius: var(--radius-sm);
-    background: var(--timeline-lane-bg);
+    background: var(--bg-tertiary);
     color: var(--text-secondary);
-    font: 500 13px/1 var(--font-mono);
+    font: 500 var(--text-xs)/22px var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    transition: background var(--motion-fast), color var(--motion-fast);
 }
-.arrangement-magnet {
-    width: 24px;
-    height: 24px;
-    border: 1.5px solid var(--border-strong);
+.arrangement-grid-chip:hover { background: color-mix(in oklab, var(--text-primary) 8%, var(--bg-tertiary)); color: var(--text-primary); }
+.arrangement-grid-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.arrangement-magnet,
+.arrangement-follow {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border: 0;
     border-radius: var(--radius-sm);
-    background: var(--timeline-lane-bg);
+    background: transparent;
     color: var(--text-muted);
-    box-shadow: var(--shadow-raised);
-    font-family: var(--font-sans);
-    font-size: 13px;
-    font-weight: 700;
+    font: 700 var(--text-sm)/1 var(--font-sans);
+    transition: background var(--motion-fast), color var(--motion-fast);
 }
-.arrangement-magnet[aria-pressed="true"] { color: var(--text-primary); box-shadow: inset 0 0 0 1px var(--border-strong), var(--shadow-raised); }
+.arrangement-magnet:hover,
+.arrangement-follow:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+.arrangement-magnet[aria-pressed="true"],
+.arrangement-follow[aria-pressed="true"] { background: var(--bg-tertiary); color: var(--accent-ink); }
+.arrangement-magnet:focus-visible,
+.arrangement-follow:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/* V · B · X — the tool strip, one inset pill, the armed tool rises. */
+.arrangement-tool {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+}
+.arrangement-tool button {
+    width: 26px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font: 600 var(--text-sm)/1 var(--font-sans);
+    transition: color var(--motion-fast), background var(--motion-fast);
+}
+.arrangement-tool button:hover { color: var(--text-primary); }
+.arrangement-tool button[aria-pressed="true"] { background: var(--bg-node); color: var(--text-primary); box-shadow: var(--shadow-raised); }
+.arrangement-tool button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
 .arrangement-ruler-viewport { position: relative; overflow: hidden; cursor: pointer; }
-.arrangement-ruler-content { position: relative; height: 46px; will-change: transform; }
-.arrangement-sections-row { position: absolute; inset: 0 0 22px; height: 24px; }
-.arrangement-bars-row { position: absolute; inset: 24px 0 0; height: 22px; }
+.arrangement-ruler-content { position: relative; will-change: transform; }
+
+/*
+ * A SECTION spans to the next section, so it is a chip: inset fill, one
+ * hairline, 11px/600 label. Selected takes the 1.5px accent outline and the one
+ * ring — never a fill drench, because a drenched chip reads as "playing".
+ */
 .arrangement-section-chip {
     position: absolute;
-    top: 2px;
-    height: 20px;
+    top: 3px;
+    box-sizing: border-box;
+    height: 17px;
     padding: 0 6px;
     overflow: hidden;
-    border: 2px solid var(--timeline-section-marker);
+    border: 1px solid var(--border-strong);
     border-radius: var(--radius-sm);
-    background: var(--timeline-lane-bg);
-    color: var(--text-primary);
-    font: 700 14px/16px var(--font-sans);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font: 600 var(--text-xs)/15px var(--font-sans);
+    text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
+    transition: color var(--motion-fast), border-color var(--motion-fast), background var(--motion-fast);
 }
-.arrangement-loop-bracket { position: absolute; top: 0; height: 24px; display: flex; justify-content: space-between; color: var(--timeline-section-marker); font: 700 22px/22px var(--font-mono); pointer-events: none; }
+.arrangement-section-chip:hover { color: var(--text-primary); border-color: var(--border-control); }
+.arrangement-section-chip.is-selected {
+    border: 1.5px solid var(--timeline-selection);
+    color: var(--text-primary);
+    box-shadow: var(--focus-ring);
+}
+.arrangement-section-chip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.arrangement-section-chip__label { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+input.arrangement-section-chip { min-width: 60px; background: var(--bg-node); color: var(--text-primary); border-color: var(--accent-primary); box-shadow: var(--focus-ring); }
 
-.arrangement-field-ground { position: absolute; top: var(--arrangement-ruler-height); left: 200px; z-index: 1; background: var(--timeline-lane-bg); pointer-events: none; }
+/*
+ * A MARK is a point in time, not a span — a 7px triangle sitting on the row's
+ * floor with its name beside it. No chip, no fill: it must never look like a
+ * section that happens to be short.
+ */
+.arrangement-section-chip--mark {
+    width: auto;
+    max-width: 18ch;
+    padding: 0 5px 0 11px;
+    border-color: transparent;
+    background: transparent;
+    color: var(--text-secondary);
+}
+.arrangement-section-chip--mark::before {
+    content: '';
+    position: absolute;
+    top: 4px;
+    left: 0;
+    border-top: 7px solid var(--timeline-section-marker);
+    border-right: 7px solid transparent;
+}
+.arrangement-section-chip--mark:hover { background: var(--bg-tertiary); border-color: var(--border-strong); }
+.arrangement-section-chip--mark.is-selected::before { border-top-color: var(--timeline-selection); }
+
+/* Bar numbers: mono, muted, tabular — an exact value read at a glance. */
+.arrangement-bars-row .oj-time-ruler { color: var(--text-muted); font-size: var(--text-xs); }
+
+/*
+ * The loop bracket glyphs that ride above the wash. Hairline weight, accent
+ * colour, and pointer-transparent so the sections row keeps its double-click.
+ */
+.arrangement-loop-bracket {
+    display: flex;
+    justify-content: space-between;
+    color: var(--accent-primary);
+    font: 500 var(--text-md)/22px var(--font-mono);
+    opacity: .55;
+    pointer-events: none;
+}
+
+/* ── The ruled field ────────────────────────────────────────────────────────── */
+
+.arrangement-field-ground { position: absolute; top: var(--arrangement-ruler-height); z-index: 1; background: var(--timeline-lane-bg); pointer-events: none; }
+/* Past the song's end: the honest edge of the piece. */
 .arrangement-song-end { position: absolute; top: var(--arrangement-ruler-height); z-index: 1; background: var(--timeline-lane-alt-bg); pointer-events: none; }
-.arrangement-grid-anchor { position: absolute; top: var(--arrangement-ruler-height); left: 200px; z-index: 2; pointer-events: none; }
+.arrangement-grid-anchor { position: absolute; top: var(--arrangement-ruler-height); z-index: 2; pointer-events: none; }
 .arrangement-grid-layer { display: block; }
 .arrangement-lanes { position: relative; z-index: 3; }
+
 .arrangement-track {
     --track-tint: var(--accent-secondary);
     display: grid;
-    grid-template-columns: 200px 1fr;
     border-bottom: 1px solid var(--timeline-lane-divider);
     content-visibility: auto;
     contain-intrinsic-size: auto 72px;
 }
 .arrangement-track.has-automation { contain-intrinsic-size: auto 168px; }
+/* Alternate lane tint at 40% — enough to count rows, quiet enough to ignore. */
+.arrangement-track.is-odd .arrangement-lane { background: color-mix(in oklab, var(--timeline-lane-alt-bg) 40%, transparent); }
+/* Soloed elsewhere: this lane is not the one you are hearing. */
+.arrangement-track.is-dimmed .arrangement-lane,
+.arrangement-track.is-dimmed .arrangement-track__header { opacity: .55; }
+
 .arrangement-track__header {
     position: sticky;
     left: 0;
     z-index: 5;
     display: grid;
-    grid-template-rows: 26px 24px;
+    grid-template-rows: 26px 3px 24px;
     align-content: center;
-    padding: 4px 8px 4px 16px;
-    border-right: 2px solid var(--border-strong);
-    background-color: var(--timeline-chrome-bg);
-    background-image: radial-gradient(circle, color-mix(in srgb, var(--text-primary) 6%, transparent) 1px, transparent 1px);
-    background-size: 24px 24px;
+    gap: 2px;
+    padding: 3px 8px 3px 14px;
+    overflow: hidden;
+    border-right: 1px solid var(--border-strong);
+    background: var(--timeline-chrome-bg);
 }
-.arrangement-track.is-selected .arrangement-track__header { background-color: var(--timeline-lane-alt-bg); }
-.arrangement-track.is-selected .arrangement-track__stripe { width: 6px; }
-.arrangement-track.has-lane-menu .arrangement-track__header { grid-template-rows: 26px 24px 1fr; align-content: start; }
-.arrangement-track__stripe { position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--track-tint); }
+.arrangement-track.is-selected .arrangement-track__header { background: color-mix(in oklab, var(--accent-primary) 6%, var(--timeline-chrome-bg)); }
+.arrangement-track.has-lane-menu .arrangement-track__header { grid-template-rows: 26px 3px 24px 1fr; align-content: start; }
+
+/*
+ * The colour stripe is the ONE sanctioned vertical bar on this surface: it is
+ * the track's identity, the same colour the clip carries on its left edge, not
+ * decoration. Selected widens it to 6px and takes the accent, so "which track
+ * am I on" is answerable from the far side of a stage.
+ */
+.arrangement-track__stripe { position: absolute; inset: 0 auto 0 0; width: 4px; background: var(--track-tint); transition: width var(--motion-fast); }
+.arrangement-track.is-selected .arrangement-track__stripe { width: 6px; background: var(--accent-primary); }
+
 .arrangement-track__top,
 .arrangement-track__controls { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.arrangement-track__grab { width: 12px; opacity: .35; cursor: grab; }
-.arrangement-track__name { overflow: clip; overflow-clip-margin: 6px; font: 600 18px/26px var(--font-sans); text-overflow: ellipsis; white-space: nowrap; }
-.arrangement-instrument-chip { min-width: 0; max-width: 108px; height: 20px; display: inline-flex; overflow: hidden; border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--timeline-lane-alt-bg); }
-.arrangement-instrument-chip button { height: 17px; padding: 0; border: 0; background: transparent; color: var(--text-primary); font: 500 13px/17px var(--font-sans); }
-.arrangement-instrument-chip__name { min-width: 0; flex: 1; padding-inline: 5px !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.arrangement-instrument-chip__swap { flex: 0 0 16px; border-left: 1px solid var(--border-subtle) !important; font-size: 11px !important; }
-.arrangement-track__lane-menu { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; align-items: center; gap: 4px; min-width: 0; padding-top: 4px; font: 500 14px/1 var(--font-sans); }
+.arrangement-track__grab { width: 12px; padding: 0; border: 0; background: transparent; color: var(--text-muted); opacity: .5; cursor: grab; transition: opacity var(--motion-fast); }
+.arrangement-track__grab:hover { opacity: 1; }
+.arrangement-track__grab:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.arrangement-track__name { flex: 1; min-width: 0; overflow: hidden; color: var(--text-primary); font: 600 var(--text-md)/26px var(--font-sans); text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+.arrangement-track__rename {
+    flex: 1;
+    min-width: 0;
+    height: 22px;
+    padding: 0 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--bg-node);
+    color: var(--text-primary);
+    font: 600 var(--text-md)/1 var(--font-sans);
+}
+.arrangement-track__rename:focus { outline: none; border-color: var(--accent-primary); box-shadow: var(--focus-ring); }
+
+/*
+ * The swatch. A native colour input is the only picker that reaches the OS
+ * palette, so it stays — but it is dressed as a swatch chip rather than the
+ * browser's grey button, and its size matches the M/S/R row it sits beside.
+ */
+.arrangement-track__swatch {
+    position: relative;
+    flex: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    background: var(--track-tint);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--text-primary) 22%, transparent);
+    cursor: pointer;
+}
+/*
+ * The native colour input is the only picker that reaches the OS palette, so it
+ * stays — invisible, on top of a swatch that shows the track's EFFECTIVE tint.
+ * The browser's own swatch shows the input's `value`, which is a fallback hex
+ * whenever the track has no explicit colour: it would claim the lane is blue
+ * while its stripe and its clips are orange.
+ */
+.arrangement-track__swatch input { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; opacity: 0; cursor: pointer; }
+.arrangement-track__swatch:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+
+/*
+ * The LEVEL BEAD — the only animated element in the field region (spec D14).
+ * "Sound is visible" is answered once, at one stationary, pixel-cheap place, so
+ * the field never has to repaint at 60fps to tell you which track is singing.
+ */
+.arrangement-track__level-bead {
+    display: block;
+    width: 100%;
+    height: 3px;
+    border-radius: var(--radius-pill);
+    /*
+     * `--success-ink`, not `--accent-success`: the bead is a 3px non-text
+     * graphical object, so WCAG 1.4.11's 3:1 applies, and the raw accent sits at
+     * 2.97:1 on the header in light. The ink pair is exactly the token this
+     * system minted for "this state colour has to be legible".
+     */
+    background: var(--success-ink);
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: transform 60ms linear;
+}
+
+.arrangement-instrument-chip { min-width: 0; max-width: 104px; height: 20px; display: inline-flex; align-items: center; overflow: hidden; border-radius: var(--radius-sm); background: var(--bg-tertiary); }
+.arrangement-instrument-chip button { height: 20px; padding: 0; border: 0; background: transparent; color: var(--text-secondary); font: 500 var(--text-xs)/20px var(--font-sans); transition: color var(--motion-fast); }
+.arrangement-instrument-chip button:hover { color: var(--text-primary); }
+.arrangement-instrument-chip button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.arrangement-instrument-chip__name { min-width: 0; flex: 1; padding-inline: 6px !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arrangement-instrument-chip__swap { flex: 0 0 15px; font-size: 10px !important; }
+
+.arrangement-track__lane-menu { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; align-items: center; gap: 4px; min-width: 0; padding-top: 5px; color: var(--text-muted); font: 500 var(--text-xs)/1 var(--font-sans); }
 .arrangement-track__lane-menu > span:first-child { grid-column: 1 / -1; }
-.arrangement-track__lane-menu button { height: 20px; padding: 0 4px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--timeline-lane-bg); color: var(--text-primary); font: 500 14px/1 var(--font-sans); }
-.arrangement-track__lane-menu button[aria-pressed="true"] { background: var(--text-primary); color: var(--text-on-accent); }
+.arrangement-track__lane-menu button { height: 20px; padding: 0 6px; border: 0; border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-secondary); font: 600 var(--text-xs)/1 var(--font-sans); transition: background var(--motion-fast), color var(--motion-fast); }
+.arrangement-track__lane-menu button:hover { color: var(--text-primary); }
+.arrangement-track__lane-menu button[aria-pressed="true"] { background: var(--accent-primary); color: var(--text-on-accent); }
+.arrangement-track__lane-menu button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .arrangement-track__lane-menu .arrangement-lane-menu__quantize { grid-column: 1 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.arrangement-arm[aria-pressed="true"] { color: var(--accent-success); box-shadow: inset 0 0 0 1px var(--accent-success), var(--shadow-raised); }
-.arrangement-arm[aria-pressed="true"] span { font-size: 16px; line-height: 1; }
-.arrangement-arm.is-recording { color: var(--timeline-playhead); }
+.arrangement-track__lane-menu button:disabled { opacity: .45; }
+.arrangement-track__lane-menu .arrangement-lane-menu__close { justify-self: end; width: 26px; padding: 0; }
+
+.arrangement-arm[aria-pressed="true"] { color: var(--accent-danger); box-shadow: inset 0 0 0 1.5px var(--accent-danger); }
+.arrangement-arm.is-recording { background: var(--accent-danger); color: var(--text-on-accent); animation: arrangement-record-pulse 1200ms ease-in-out infinite; }
+@keyframes arrangement-record-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+
 .arrangement-lane {
     position: relative;
     min-width: 0;
     overflow: hidden;
     background: transparent;
 }
+.arrangement-lane__hint {
+    position: absolute;
+    inset: 8px 16px 8px 14px;
+    display: grid;
+    place-items: center;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font: 500 var(--text-sm)/1 var(--font-sans);
+}
+
+/* Recording: a dashed danger ghost grows in the lane while the take runs. */
+.arrangement-record-ghost { position: absolute; z-index: 3; top: 4px; min-width: 1px; overflow: hidden; border: 1.5px dashed var(--accent-danger); border-radius: var(--radius-sm); background: color-mix(in oklab, var(--accent-danger) 7%, transparent); pointer-events: none; }
+.arrangement-record-ghost > span { position: absolute; width: 8px; height: 3px; border-radius: 1px; background: var(--universal-connection); opacity: .8; }
+
+/* ── Clips ───────────────────────────────────────────────────────────────────
+ * A clip is a card on the page: 6px radius, a wash of its track's tint over the
+ * surface, one hairline boundary, and a 2px tint edge on the left that says
+ * whose sound this is. Selection is an OUTLINE plus the one ring — the fill
+ * moves by 6% and no more, so a selected clip never looks like a different clip.
+ */
+
+.arrangement-clip {
+    position: absolute;
+    top: 4px;
+    box-sizing: border-box;
+    min-width: 1px;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--timeline-clip-border);
+    border-left: 2px solid var(--track-tint);
+    border-radius: var(--radius-sm);
+    background: color-mix(in oklab, var(--track-tint) 12%, var(--timeline-clip-bg));
+    color: var(--text-primary);
+    box-shadow: var(--shadow-raised);
+    text-align: left;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
+}
+.arrangement-clip:hover { background: color-mix(in oklab, var(--track-tint) 17%, var(--timeline-clip-bg)); }
+.arrangement-clip.is-selected {
+    border: 1.5px solid var(--timeline-selection);
+    border-left: 2px solid var(--track-tint);
+    background: color-mix(in oklab, var(--track-tint) 18%, var(--timeline-clip-bg));
+    box-shadow: var(--focus-ring);
+}
+.arrangement-clip:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.arrangement-clip.is-muted { background: var(--timeline-clip-muted-bg); border-left-color: color-mix(in oklab, var(--track-tint) 40%, transparent); }
+.arrangement-clip.is-muted .arrangement-clip__name { text-decoration: line-through; background: var(--timeline-clip-muted-bg); color: var(--text-muted); }
+.arrangement-clip.is-muted .arrangement-clip__canvas,
+.arrangement-clip.is-muted .arrangement-clip__waveform { opacity: .4; }
+/* Locked: dashed, and the trim edges refuse the hand rather than lying about it. */
+.arrangement-clip.is-locked { border-style: dashed; border-left-style: solid; }
+.arrangement-clip.is-locked:hover { cursor: not-allowed; }
+/* A benched plugin under this track: warn border + a ⚠ in the name bar. The
+   sound keeps playing — a held note beats a glitch. */
+.arrangement-clip.is-faulted { border-color: var(--accent-warning); border-width: 1.5px; }
+.arrangement-clip.is-dragging { opacity: .35; box-shadow: none; }
+
+.arrangement-clip__name {
+    position: absolute;
+    z-index: 2;
+    inset: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 18px;
+    padding-left: 7px;
+    overflow: hidden;
+    background: color-mix(in oklab, var(--track-tint) 24%, var(--timeline-clip-bg));
+    color: var(--text-primary);
+    font: 600 var(--text-sm)/18px var(--font-sans);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.arrangement-clip__name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arrangement-clip__fault { flex: none; margin-right: 5px; color: var(--warning-ink); font-size: var(--text-xs); }
+.arrangement-clip__canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.arrangement-clip__waveform { position: absolute; left: 0; bottom: 0; }
+/* Trim grips: a 6px square on the edge you are about to move. */
+.arrangement-clip__handle { position: absolute; z-index: 4; top: 50%; width: 5px; height: 14px; border-radius: 2px; background: var(--timeline-selection); transform: translateY(-50%); pointer-events: none; }
+.arrangement-clip__handle.is-left { left: 1px; }
+.arrangement-clip__handle.is-right { right: 1px; }
+.arrangement-clip__take { position: absolute; z-index: 5; right: 4px; bottom: 4px; min-width: 20px; height: 16px; padding: 0 5px; border-radius: var(--radius-pill); background: var(--bg-tertiary); color: var(--text-secondary); font: 500 var(--text-xs)/16px var(--font-mono); text-align: center; }
+
+/* The draw-a-clip ghost: the shape you are about to commit, dashed and quiet. */
+.arrangement-clip--draw {
+    z-index: 6;
+    border: 1.5px dashed var(--accent-primary);
+    border-left: 1.5px dashed var(--accent-primary);
+    background: color-mix(in oklab, var(--accent-primary) 8%, transparent);
+    box-shadow: none;
+    pointer-events: none;
+}
+
+/* ── Overlays: playhead, loop, selection ─────────────────────────────────────── */
+
+/*
+ * The playhead is the engine clock made visible. Accent and 2px while rolling,
+ * a quiet 1.5px --t2 line when stopped — state carried by colour and motion,
+ * never by blur.
+ *
+ * The LINE rides the field overlay pane, so it stops at the header's edge
+ * instead of slicing through the track names when the field is scrolled. Its
+ * 9px CAP is a separate element inside the ruler's own viewport — that viewport
+ * already begins at the header edge and already clips, so the cap can sit in
+ * the bars row where the spec puts it and still never reach the 200px corner.
+ * One writer drives both (`usePlayheadTransform`), in the same `onScroll` call,
+ * so they cannot disagree about the time they are marking — not at rest and not
+ * mid-wheel, where riding the ruler's React-committed transform tore them 150px
+ * apart for a frame (W4-TBb §2).
+ */
+.arrangement-playhead {
+    position: absolute;
+    z-index: 9;
+    top: var(--arrangement-ruler-height);
+    width: 1.5px;
+    background: var(--text-secondary);
+    pointer-events: none;
+    will-change: transform;
+}
+.arrangement-playhead.is-rolling { width: 2px; background: var(--timeline-playhead); }
+
+/*
+ * A direct child of `.arrangement-ruler-viewport`, NOT of
+ * `.arrangement-ruler-content`: the content box is counter-translated from
+ * React state and the cap must be counter-translated from the live scroll. It
+ * writes its own `-scrollLeft` instead, which is why it can sit outside the
+ * only box in the ruler that moves.
+ */
+.arrangement-playhead-cap {
+    position: absolute;
+    z-index: 5;
+    bottom: 0;
+    left: 0;
+    width: 0;
+    height: 0;
+    margin-left: -5px;
+    border-top: 9px solid var(--text-secondary);
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    pointer-events: none;
+    will-change: transform;
+}
+.arrangement-playhead-cap.is-rolling { border-top-color: var(--timeline-playhead); }
+
+.arrangement-loop-wash { position: absolute; z-index: 4; top: var(--arrangement-ruler-height); background: var(--timeline-loop-range); pointer-events: none; }
+
+/*
+ * A time range names itself at both edges, so you never have to measure the
+ * page to know what you selected.
+ */
+.arrangement-range-selection {
+    position: absolute;
+    z-index: 5;
+    top: var(--arrangement-ruler-height);
+    border-inline: 1px solid var(--timeline-selection);
+    background: color-mix(in oklab, var(--timeline-selection) 10%, transparent);
+    pointer-events: none;
+}
+.arrangement-range-selection > span {
+    position: absolute;
+    top: 3px;
+    padding: 1px 5px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-node);
+    color: var(--text-secondary);
+    font: 500 var(--text-xs)/15px var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    box-shadow: var(--shadow-raised);
+    white-space: nowrap;
+}
+.arrangement-range-selection > span:first-child { left: 3px; }
+.arrangement-range-selection > span:last-child { right: 3px; }
+
+/*
+ * A marquee is a PROPOSAL, not a result — neutral dashed (spec D19). Colouring
+ * it accent would pre-announce a selection that may turn out to be empty. The
+ * range variant keeps the accent because it paints exactly the range it makes.
+ */
+.arrangement-marquee { position: absolute; z-index: 8; border: 1px dashed var(--border-control); background: color-mix(in oklab, var(--text-primary) 5%, transparent); pointer-events: none; }
+.arrangement-marquee.is-range { top: var(--arrangement-ruler-height) !important; border-style: solid; border-color: var(--timeline-selection); border-top: 0; border-bottom: 0; background: color-mix(in oklab, var(--timeline-selection) 10%, transparent); }
+
+/* Hover hairline: where a click would land on this lane. */
+.arrangement-lane::after { content: ''; position: absolute; z-index: 1; left: 0; right: 0; top: 50%; border-top: 1px solid color-mix(in oklab, var(--timeline-selection) 25%, transparent); opacity: 0; pointer-events: none; }
+.arrangement-lane:hover::after { opacity: 1; }
+.arrangement-lane.has-piano-roll::after { display: none; }
+.arrangement-track:has(.arrangement-clip:focus-visible) .arrangement-lane { outline: 1.5px solid var(--accent-primary); outline-offset: -2px; }
+
+/* ── Automation lane ─────────────────────────────────────────────────────────
+ * The controls sit in the 200px header COLUMN, in line with the track header
+ * above them — one column of controls, one column of time. (Spec 2.6 draws them
+ * as a 28px row across the top; that would leave a 68px field, which is too
+ * shallow to place a point in confidently and breaks the shipped ramp e2e.)
+ */
 
 .arrangement-automation__header {
     position: sticky;
@@ -229,47 +804,51 @@
     z-index: 5;
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: 30px 24px;
+    grid-template-rows: 28px 24px 24px;
     align-content: center;
     gap: 4px 6px;
-    padding: 6px 8px 6px 16px;
+    padding: 6px 8px 6px 14px;
     border-top: 1px solid var(--timeline-lane-divider);
-    border-right: 2px solid var(--border-strong);
+    border-right: 1px solid var(--border-strong);
     background: var(--timeline-chrome-bg);
 }
-.arrangement-automation__header .oj-select { min-width: 0; height: 28px; padding-block: 0; font: 500 14px/1 var(--font-sans); }
-.arrangement-automation__value { align-self: center; color: var(--text-secondary); font: 500 13px/1 var(--font-mono); }
+.arrangement-automation__header .oj-select { grid-column: 1 / -1; min-width: 0; height: 26px; padding-block: 0; font: 500 var(--text-sm)/1 var(--font-sans); }
+.arrangement-automation__value { align-self: center; color: var(--text-secondary); font: 500 var(--text-xs)/1 var(--font-mono); font-variant-numeric: tabular-nums; }
 .arrangement-automation__state,
-.arrangement-automation__interp { height: 20px; border-width: 1px; border-radius: var(--radius-sm); }
+.arrangement-automation__interp { justify-self: end; height: 20px; }
+.arrangement-automation__interp { grid-column: 1 / -1; justify-self: stretch; }
 .arrangement-automation__state .oj-seg__btn,
-.arrangement-automation__interp .oj-seg__btn { min-height: 18px; padding: 0 7px; font: 500 12px/18px var(--font-sans); }
+.arrangement-automation__interp .oj-seg__btn { min-height: 16px; padding: 0 8px; font: 600 var(--text-xs)/16px var(--font-sans); }
+
 .arrangement-automation__field {
     position: relative;
     height: 96px;
     overflow: hidden;
     border-top: 1px solid var(--timeline-lane-divider);
-    background: var(--timeline-lane-bg);
+    background: color-mix(in oklab, var(--timeline-lane-alt-bg) 55%, var(--timeline-lane-bg));
     cursor: crosshair;
 }
-.arrangement-automation__default { position: absolute; right: 0; left: 0; height: 1px; background: var(--timeline-grid-sub); pointer-events: none; }
+.arrangement-automation__default { position: absolute; right: 0; left: 0; height: 1px; background: var(--border-subtle); pointer-events: none; }
 .arrangement-automation__curve { position: absolute; inset: 0; width: 100%; height: 96px; overflow: visible; pointer-events: none; }
 .arrangement-automation__curve path { fill: none; stroke: var(--timeline-automation-line); stroke-width: 1.5px; vector-effect: non-scaling-stroke; }
 .arrangement-automation__point {
     position: absolute;
     z-index: 2;
-    width: 11px;
-    height: 11px;
+    box-sizing: border-box;
+    width: 9px;
+    height: 9px;
     padding: 0;
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-control);
     border-radius: var(--radius-pill);
-    background: var(--timeline-lane-bg);
+    background: var(--bg-node);
     box-shadow: none;
     transform: translate(-50%, -50%);
     cursor: grab;
+    transition: background var(--motion-fast), border-color var(--motion-fast);
 }
-.arrangement-automation__point:hover { background: var(--timeline-automation-line); }
+.arrangement-automation__point:hover { background: var(--timeline-automation-line); border-color: var(--timeline-automation-line); }
 .arrangement-automation__point:active { cursor: grabbing; }
-.arrangement-automation__point:focus-visible { background: var(--timeline-selection); outline: 1px dashed var(--text-primary); outline-offset: 3px; }
+.arrangement-automation__point:focus-visible { outline: none; border-color: var(--accent-primary); background: var(--accent-primary); box-shadow: var(--focus-ring); }
 .arrangement-automation__range {
     position: absolute;
     z-index: 1;
@@ -279,120 +858,170 @@
     padding: 0;
     border: 1px dashed var(--timeline-selection);
     border-radius: 0;
-    background: color-mix(in srgb, var(--timeline-selection) 16%, transparent);
+    background: color-mix(in oklab, var(--timeline-selection) 10%, transparent);
     box-shadow: none;
     cursor: ns-resize;
 }
 
+/* ── Mixer drawer ────────────────────────────────────────────────────────────
+ * 188px of channel, on the chrome ground, closed by one hairline. Every exact
+ * value in it is mono; the meter is the only thing that moves.
+ */
+
 .mixer-drawer {
-    flex: 0 0 236px;
-    min-height: 236px;
+    flex: 0 0 var(--arrangement-mixer-height);
+    min-height: var(--arrangement-mixer-height);
     display: flex;
-    border-top: 2px solid var(--border-strong);
-    background-color: var(--timeline-chrome-bg);
-    background-image: radial-gradient(circle, color-mix(in srgb, var(--text-primary) 6%, transparent) 1px, transparent 1px);
-    background-size: 24px 24px;
+    border-top: 1px solid var(--border-strong);
+    background: var(--timeline-chrome-bg);
 }
 .mixer-drawer__scroll { flex: 1; display: flex; min-width: 0; overflow-x: auto; overflow-y: hidden; }
-.mixer-strip { flex: 0 0 124px; display: grid; grid-template-rows: 28px auto 1fr 16px 24px; grid-template-columns: 1fr auto; padding: 6px 8px; border-right: 1px solid var(--timeline-lane-divider); }
-.mixer-strip--master { flex-basis: 92px; border-right: 0; border-left: 2px solid var(--border-strong); }
-.mixer-strip__name { grid-column: 1 / -1; overflow: hidden; font: 600 18px/24px var(--font-sans); text-align: center; text-overflow: ellipsis; white-space: nowrap; }
-.mixer-strip__body { grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 0; }
-.mixer-strip__fader { position: relative; width: 72px; height: 82px; }
-.mixer-strip__fader .oj-slider { position: absolute; top: 31px; left: -5px; width: 82px; transform: rotate(-90deg); }
-.mixer-strip__readout { grid-column: 1 / -1; color: var(--text-secondary); font: 400 13px/1 var(--font-mono); text-align: center; white-space: nowrap; }
-.mixer-strip__fader .oj-slider::-webkit-slider-runnable-track { height: 6px; border: 2px solid var(--text-primary); background: var(--bg-tertiary); }
-.mixer-strip__fader .oj-slider::-moz-range-track { height: 6px; border: 2px solid var(--text-primary); background: var(--bg-tertiary); }
-.mixer-strip__fader .oj-slider::-webkit-slider-thumb,
-.mixer-strip__fader .oj-slider::-moz-range-thumb { border: 2px solid var(--text-primary); background: var(--bg-node); box-shadow: var(--shadow-raised); }
-.mixer-meter { position: relative; width: 8px; height: 76px; overflow: hidden; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg-tertiary); }
-.mixer-meter > span { position: absolute; inset: 0; background: var(--accent-success); transform-origin: bottom; transition: transform 60ms linear; }
+.mixer-strip { flex: 0 0 124px; display: grid; grid-template-rows: 20px minmax(0, 1fr) 16px 22px 22px; gap: 3px; padding: 8px 8px 10px; border-right: 1px solid var(--timeline-lane-divider); }
+.mixer-strip--master { flex-basis: 92px; border-right: 0; border-left: 1px solid var(--border-strong); background: color-mix(in oklab, var(--timeline-lane-alt-bg) 45%, transparent); }
+.mixer-strip__name { overflow: hidden; color: var(--text-primary); font: 600 var(--text-sm)/20px var(--font-sans); text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.mixer-strip__body { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 0; }
+/*
+ * The fader is the shared oj-ui Slider, rotated. It keeps its own construction —
+ * 6px inset rail with the accent progress fill, 18px surface thumb — because a
+ * bespoke override here was a second slider language for one control.
+ */
+.mixer-strip__fader { position: relative; width: 26px; height: 100%; min-height: 76px; }
+.mixer-strip__fader .oj-slider { position: absolute; top: 50%; left: 50%; width: 76px; transform: translate(-50%, -50%) rotate(-90deg); }
+.mixer-strip__readout { color: var(--text-secondary); font: 500 var(--text-xs)/16px var(--font-mono); font-variant-numeric: tabular-nums; text-align: center; white-space: nowrap; }
+.mixer-meter { position: relative; width: 8px; height: 76px; overflow: hidden; border-radius: var(--radius-pill); background: var(--bg-tertiary); }
+.mixer-meter > span { position: absolute; inset: 0; border-radius: var(--radius-pill); background: var(--success-ink); transform-origin: bottom; transform: scaleY(0); transition: transform 60ms linear; }
 .mixer-meter.is-clipping > span { background: var(--accent-danger); }
 .mixer-drawer.is-idle .mixer-meter > span { transition: none; }
-.mixer-strip__pan { min-width: 36px; align-self: center; }
-.mixer-strip__pan .oj-value-scrubber__value { min-width: 34px; padding: 2px 4px; border: 1px solid var(--border-strong); border-radius: var(--radius-pill); font-size: 13px; text-align: center; cursor: ns-resize; }
-.mixer-strip__switches { display: flex; align-items: center; gap: 3px; }
-.mixer-master-meter { grid-column: 1 / -1; display: grid; place-items: center; }
-.mixer-strip--master > .mixer-strip__readout { grid-column: 1 / -1; align-self: center; }
-.arrangement-track:has(.arrangement-clip:focus-visible) .arrangement-lane { outline: 2px solid var(--accent-primary); outline-offset: -2px; }
-.arrangement-lane__hint { position: absolute; top: 8px; left: 16px; width: min(420px, calc(100% - 32px)); height: calc(100% - 16px); display: grid; place-items: center; border: 1px dashed color-mix(in srgb, var(--text-primary) 18%, transparent); border-radius: var(--radius-sm); color: color-mix(in srgb, var(--text-primary) 50%, transparent); font: 400 15px/1 var(--font-sans); }
-.arrangement-record-ghost { position: absolute; z-index: 3; top: 4px; min-width: 1px; overflow: hidden; border: 2px dashed var(--timeline-playhead); border-radius: var(--radius-sm); background: color-mix(in srgb, var(--timeline-playhead) 7%, transparent); pointer-events: none; }
-.arrangement-record-ghost > span { position: absolute; width: 8px; height: 3px; border-radius: 1px; background: var(--timeline-note-fill); opacity: .78; }
+.mixer-strip__pan { justify-self: center; }
+.mixer-strip__pan .oj-value-scrubber__value { min-width: 40px; padding: 3px 8px; border-radius: var(--radius-pill); background: var(--bg-tertiary); color: var(--text-secondary); font-family: var(--font-mono); font-size: var(--text-xs); text-align: center; cursor: ns-resize; }
+.mixer-strip__switches { display: flex; align-items: center; justify-content: center; gap: 4px; }
+.mixer-master-meter { display: grid; place-items: center; }
+.mixer-strip--master > .mixer-strip__readout { align-self: center; }
 
-.arrangement-clip {
-    position: absolute;
-    top: 4px;
-    min-width: 1px;
-    padding: 0;
-    overflow: hidden;
-    border: 1px solid var(--timeline-clip-border);
-    border-left-width: 2px;
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--track-tint) 14%, var(--timeline-clip-bg));
-    color: var(--text-primary);
-    box-shadow: none;
-    text-align: left;
-}
-.arrangement-clip:hover { border-color: var(--timeline-clip-border); }
-.arrangement-clip.is-selected { border: 2px solid var(--timeline-selection); background: color-mix(in srgb, var(--track-tint) 26%, var(--timeline-clip-bg)); }
-.arrangement-clip.is-selected:focus-visible { outline: 1px dashed var(--text-primary); outline-offset: 3px; }
-.arrangement-clip.is-muted { background: var(--timeline-clip-muted-bg); }
-.arrangement-clip.is-muted .arrangement-clip__name { text-decoration: line-through; }
-.arrangement-clip.is-dragging { opacity: .95; box-shadow: var(--shadow-overlay); }
-.arrangement-marquee { position: absolute; z-index: 8; border: 1px dashed var(--timeline-selection); background: color-mix(in srgb, var(--timeline-selection) 8%, transparent); pointer-events: none; }
-.arrangement-marquee.is-range { top: var(--arrangement-ruler-height) !important; border-style: solid; border-top: 0; border-bottom: 0; background: color-mix(in srgb, var(--timeline-selection) 16%, transparent); }
-.arrangement-range-selection { position: absolute; z-index: 5; top: var(--arrangement-ruler-height); border-inline: 1px solid var(--timeline-selection); background: color-mix(in srgb, var(--timeline-selection) 16%, transparent); pointer-events: none; }
-.arrangement-lane::after { content: ''; position: absolute; z-index: 1; left: 0; right: 0; top: 50%; border-top: 1px solid color-mix(in srgb, var(--timeline-selection) 25%, transparent); opacity: 0; pointer-events: none; }
-.arrangement-lane:hover::after { opacity: 1; }
-.arrangement-clip__name { position: absolute; z-index: 2; inset: 0 0 auto; height: 18px; padding-left: 8px; overflow: hidden; border-bottom: 1px solid color-mix(in srgb, var(--timeline-clip-border) 35%, transparent); background: color-mix(in srgb, var(--track-tint) 30%, var(--timeline-clip-bg)); font: 600 14px/17px var(--font-sans); text-overflow: ellipsis; white-space: nowrap; }
-.arrangement-clip__canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-.arrangement-clip__waveform { position: absolute; left: 0; bottom: 0; }
-.arrangement-clip__handle { position: absolute; z-index: 4; top: 50%; width: 6px; height: 6px; background: var(--text-primary); transform: translateY(-50%); }
-.arrangement-clip__handle.is-left { left: 1px; }
-.arrangement-clip__handle.is-right { right: 1px; }
-.arrangement-clip__take { position: absolute; z-index: 5; right: 4px; bottom: 4px; min-width: 22px; height: 18px; padding: 0 5px; border: 1px solid var(--timeline-clip-border); border-radius: var(--radius-pill); background: var(--timeline-lane-bg); color: var(--text-secondary); font: 600 13px/16px var(--font-mono); text-align: center; }
-.arrangement-playhead { position: absolute; z-index: 7; top: var(--arrangement-ruler-height); left: 200px; width: 2px; background: var(--timeline-playhead); pointer-events: none; will-change: transform; }
-.arrangement-loop-wash { position: absolute; z-index: 4; top: var(--arrangement-ruler-height); background: var(--timeline-loop-range); pointer-events: none; }
-.arrangement-time-prompt { position: absolute; z-index: 30; top: 68px; left: 50%; translate: -50% 0; display: flex; align-items: end; gap: 10px; padding: 10px 12px; color: var(--text-primary); background: var(--timeline-chrome-bg); border: 2px solid var(--border-strong); border-radius: var(--radius-md); box-shadow: var(--shadow-raised); font-family: var(--font-sans); }
-.arrangement-time-prompt strong { align-self: center; font-family: var(--font-sans); font-size: 18px; white-space: nowrap; }
-.arrangement-time-prompt label { display: grid; gap: 3px; font-size: 12px; }
-.arrangement-time-prompt input, .arrangement-time-prompt select { min-height: 32px; padding: 4px 8px; color: var(--text-primary); background: var(--timeline-lane-bg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font: 14px var(--font-mono); }
-.arrangement-time-prompt > span { align-self: center; max-width: 24ch; color: var(--accent-danger); font-size: 13px; }
+/* ── Time prompt ─────────────────────────────────────────────────────────────── */
+
+.arrangement-time-prompt { position: absolute; z-index: 30; top: 88px; left: 50%; translate: -50% 0; display: flex; align-items: end; gap: 10px; padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-node); color: var(--text-primary); box-shadow: var(--shadow-overlay); font-family: var(--font-sans); }
+.arrangement-time-prompt strong { align-self: center; font: 600 var(--text-lg)/1 var(--font-sans); white-space: nowrap; }
+.arrangement-time-prompt label { display: grid; gap: 5px; color: var(--text-secondary); font: 600 var(--text-xs)/1 var(--font-sans); }
+.arrangement-time-prompt input, .arrangement-time-prompt select { min-height: 30px; padding: 4px 9px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-node); color: var(--text-primary); font: 500 var(--text-sm)/1 var(--font-mono); }
+.arrangement-time-prompt input:focus, .arrangement-time-prompt select:focus { outline: none; border-color: var(--accent-primary); box-shadow: var(--focus-ring); }
+.arrangement-time-prompt > span { align-self: center; max-width: 24ch; color: var(--danger-ink); font: 500 var(--text-sm)/1.3 var(--font-sans); }
 .arrangement-time-prompt > div { display: flex; gap: 6px; }
-.arrangement-time-prompt button { min-height: 32px; padding: 4px 9px; color: var(--text-primary); background: var(--timeline-lane-bg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font: 600 14px var(--font-sans); }
+.arrangement-time-prompt button { min-height: 30px; padding: 0 12px; border: 0; border-radius: var(--radius-md); background: var(--bg-tertiary); color: var(--text-primary); font: 600 var(--text-sm)/1 var(--font-sans); }
+.arrangement-time-prompt button[type="submit"] { background: var(--accent-primary); color: var(--text-on-accent); }
+.arrangement-time-prompt button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
-.arrangement-empty-stage { position: relative; flex: 1; overflow: hidden; opacity: 1; }
-.arrangement-empty-ghost { position: absolute; inset: 0; opacity: .35; pointer-events: none; }
+/* ── Empty and loading ───────────────────────────────────────────────────────
+ * A ghosted 32-bar shell behind one surface card. The page is already ruled, so
+ * the invitation reads as "this is the paper", not "something failed to load".
+ */
+
+.arrangement-empty-stage { position: relative; flex: 1; overflow: hidden; }
+.arrangement-empty-ghost { position: absolute; inset: 0; opacity: .4; pointer-events: none; }
 .arrangement-empty-ghost .arrangement-ruler-shell { position: relative; }
 .arrangement-empty-ghost .arrangement-lanes { height: auto; }
-.arrangement-empty-card { position: absolute; top: 50%; left: 50%; width: min(420px, calc(100% - 32px)); padding: 28px 32px; border: 2px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-node); box-shadow: var(--shadow-overlay); text-align: center; transform: translate(-50%, -50%); }
-.arrangement-empty-card h1 { font: 700 28px/1.1 var(--font-sans); }
-.arrangement-empty-card p { margin: 10px 0 18px; color: var(--text-secondary); font: 400 16px/1.45 var(--font-sans); }
-.arrangement-empty-starters { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
-.arrangement-empty-secondary { display: block; margin: 12px auto 0; font: 400 16px/1 var(--font-sans); text-decoration: underline; }
-.arrangement-empty-footer { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 18px; color: var(--text-muted); font: 400 14px/1 var(--font-sans); }
+.arrangement-empty-card {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: min(460px, calc(100% - 32px));
+    padding: 28px 32px 26px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-xl);
+    background: var(--bg-node);
+    box-shadow: var(--shadow-overlay);
+    text-align: center;
+    transform: translate(-50%, -50%);
+}
+.arrangement-empty-card h1 { margin: 0; color: var(--text-primary); font: 600 var(--text-2xl)/1.1 var(--font-sans); }
+.arrangement-empty-card p { margin: 10px auto 20px; max-width: 36ch; color: var(--text-secondary); font: 400 var(--text-md)/1.5 var(--font-sans); }
+.arrangement-empty-starters { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+.arrangement-empty-secondary {
+    display: block;
+    margin: 14px auto 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font: 500 var(--text-sm)/1 var(--font-sans);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    transition: color var(--motion-fast);
+}
+.arrangement-empty-secondary:hover { color: var(--text-primary); }
+.arrangement-empty-secondary:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: var(--radius-sm); }
+.arrangement-empty-footer { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-subtle); color: var(--text-muted); font: 500 var(--text-sm)/1 var(--font-sans); }
 
-@media (max-width: 760px) {
-    .arrangement-transport__title { display: none; }
-    .arrangement-transport__cluster--right { min-width: 0; margin-left: auto; }
-    .arrangement-transport__cluster--right .oj-value-scrubber:first-child { display: none; }
+/*
+ * NO arrangement-level loading skeleton. The document is synchronous — there is
+ * nothing to wait for at this scale, and an 800ms fake skeleton would be a lie
+ * about work that is not happening. The honest granularity is the CLIP: one
+ * without peaks yet shows its name bar over an empty tinted body while
+ * `getWaveform()` resolves, which is exactly what spec 8.3 asks for.
+ */
+
+/*
+ * Narrow. The centre lane never shrinks — the pill does not — so what gives is
+ * the chrome around the controls, and then the row count. The zoom chip is the
+ * one utility that is genuinely redundant here (Ctrl+wheel, `+`/`-` and Ctrl+0
+ * all reach it), so it is the only thing that leaves.
+ */
+/*
+ * THE BREAKPOINT IS THE WRAP (W4-TBb F2).
+ *
+ * The cluster starts wrapping at ~1177px, where its controls are still 30px
+ * tall: two 30px rows plus the 3px row-gap is 63px inside a 56px band, so the
+ * ruler's sections row painted over the bottom of the zoom chip — measured
+ * 2.2px of overflow and 627–781px² of cluster ∩ ruler across every width from
+ * 1030 to 1177. Compacted, the same two rows are 24 + 3 + 24 = 51px and fit,
+ * and 1100–1180 goes back to ONE row, which is strictly better than before.
+ * So the compaction has to start where the wrap starts, not 150px later.
+ */
+@media (max-width: 1180px) {
+    .arrangement-sky__utility { gap: 3px 4px; }
+    .arrangement-sky__utility .oj-btn { height: 24px; min-height: 24px; padding: 0 8px; }
+    .arrangement-sky__utility .arrangement-edit-mode { padding: 2px; }
+    .arrangement-sky__utility .arrangement-edit-mode button { padding: 0 7px; }
+}
+
+/* The `Tab` hint is the first thing to go, and it goes on its own width. */
+@media (max-width: 1024px) {
+    .arrangement-sky__hint { display: none; }
+}
+
+@media (max-width: 900px) {
+    .arrangement-sky__utility .arrangement-zoom-scrubber { display: none; }
 }
 
 @media (pointer: coarse) {
     .arrangement-track { min-height: 56px; }
-    .arrangement-clip__name { height: 22px; }
-    .arrangement-clip__handle { width: 12px; height: 12px; }
-    .arrangement-scroll { scrollbar-color: color-mix(in srgb, var(--text-primary) 22%, transparent) transparent; }
-    .arrangement-scroll::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--text-primary) 22%, transparent); }
+    .arrangement-clip__name { height: 22px; line-height: 22px; }
+    .arrangement-clip__handle { width: 10px; height: 20px; }
+    .arrangement-scroll { scrollbar-color: color-mix(in oklab, var(--text-primary) 22%, transparent) transparent; }
+    .arrangement-scroll::-webkit-scrollbar-thumb { background-color: color-mix(in oklab, var(--text-primary) 22%, transparent); }
 }
 
+/*
+ * Reduced motion. Nothing here carries meaning by motion alone: the record arm
+ * stops pulsing and takes a solid fill plus a ring, the meters and the bead
+ * write instantly, the skeleton swaps rather than crossfades. The PLAYHEAD
+ * keeps moving — it is the clock, not decoration.
+ */
 @media (prefers-reduced-motion: reduce) {
     .surface-transition-in,
     .surface-transition-out { animation: none; }
+    .arrangement-arm.is-recording { animation: none; box-shadow: inset 0 0 0 2px var(--text-on-accent); }
+    .arrangement-track__stripe,
+    .arrangement-edit-mode button,
+    .arrangement-tool button,
+    .arrangement-grid-chip,
     .arrangement-magnet,
-    .arrangement-transport .oj-button { transition: color 0s, border-color 0s, background-color 0s; transform: none; }
-    .mixer-meter > span { transition: none; }
-    .arrangement-record.is-recording .arrangement-record__dot { animation: none; box-shadow: 0 0 0 2px var(--text-primary); }
-    .arrangement-scroll { scrollbar-color: color-mix(in srgb, var(--text-primary) 22%, transparent) transparent; }
-    .arrangement-scroll::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--text-primary) 22%, transparent); transition: none; }
+    .arrangement-follow,
+    .arrangement-clip,
+    .arrangement-section-chip,
+    .arrangement-automation__point { transition: none; }
+    .mixer-meter > span,
+    .arrangement-track__level-bead { transition: none; }
+    .arrangement-scroll { scrollbar-color: color-mix(in oklab, var(--text-primary) 22%, transparent) transparent; }
+    .arrangement-scroll::-webkit-scrollbar-thumb { background-color: color-mix(in oklab, var(--text-primary) 22%, transparent); transition: none; }
 }
