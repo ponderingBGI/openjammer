@@ -1302,8 +1302,29 @@ describe('P7c — F2: the tag identity dot actually renders', () => {
     let drop: (() => void) | null = null;
     afterEach(() => { drop?.(); drop = null; });
 
-    it('the tag row lays its body out as a flex line, so an 8px dot is 8px', async () => {
-        drop = await injectSheet('LibraryNode.css');
+    /**
+     * W6-P7D item 3 — the local restatement is GONE, and this is the assertion
+     * that says the deletion was safe.
+     *
+     * P7c added `.library-tag .oj-list-row__body { display: flex; … }` because
+     * `ListRow`'s body slot was a bare inline `<span>`: a non-replaced inline
+     * box ignores width/height, so the dot painted 0x0 and M1's whole
+     * justification ("the hue now buys exactly one thing: the 8px dot") bought
+     * nothing on screen. The rule carried its own removal instruction — "the
+     * day `.oj-list-row__body` is a flex line in the component, DELETE this".
+     * `ListRow.css` landed that in 06fa8c7, so the copy is gone.
+     *
+     * The test therefore loads BOTH sheets, which is the real cascade: the flex
+     * line has to come from the COMPONENT now. Injecting only `LibraryNode.css`
+     * would pass on the pre-deletion file and fail on this one, which is
+     * exactly backwards — it would pin the duplication in place.
+     */
+    it('inherits ListRow\'s flex body — no local copy — and the 8px dot still measures', async () => {
+        const dropRow = await injectSheet(
+            '../../../packages/oj-ui/src/components/ListRow/ListRow.css',
+        );
+        const dropLib = await injectSheet('LibraryNode.css');
+        drop = () => { dropLib(); dropRow(); };
         seedLibrary([item({ tags: ['drums'] })], ['drums']);
         const id = useGraphStore.getState().addNode('library', { x: 0, y: 0 });
         useGraphStore.getState().updateNodeData(id, { libraryId: 'lib' });
@@ -1312,13 +1333,33 @@ describe('P7c — F2: the tag identity dot actually renders', () => {
         const dot = container.querySelector<HTMLElement>('.library-tag__dot');
         expect(dot, 'the seeded tag row did not render').toBeTruthy();
         const body = dot!.closest('.oj-list-row__body') as HTMLElement;
-        // `ListRow`'s body slot is a plain inline `<span>`. A non-replaced inline
-        // box ignores width/height, so the dot painted 0x0 and M1's whole
-        // justification ("the hue now buys exactly one thing: the 8px dot")
-        // bought nothing on screen.
         expect(getComputedStyle(body).display).toBe('flex');
+        expect(getComputedStyle(body).alignItems).toBe('center');
         expect(getComputedStyle(dot!).width).toBe('8px');
         expect(getComputedStyle(dot!).height).toBe('8px');
+        // The one measured delta the deletion accepts: the dot-to-name gap is
+        // the component's `--space-xs` (4px) where the local copy hard-coded
+        // 6px. The token wins — a tag row's in-row gap is the same gap every
+        // other list row in the app spends.
+        expect(getComputedStyle(body).gap).toBe('var(--space-xs)');
+    });
+
+    it('keeps no private restatement of ListRow\'s body layout', async () => {
+        const fs = await import('node:fs/promises');
+        const path = await import('node:path');
+        // Comments stripped: the file explains the deletion by NAMING the rule
+        // it deleted, which is the point of the comment and would otherwise
+        // fail its own assertion.
+        const css = (await fs.readFile(path.resolve(__dirname, '../LibraryNode.css'), 'utf8'))
+            .replace(/\/\*[\s\S]*?\*\//g, '');
+        expect(css).not.toContain('.library-tag .oj-list-row__body');
+        // The file-row rule survives, but ONLY for the two declarations that
+        // really override the component (the filename's 120px floor and the
+        // flex that lets the trailing cluster be the side that gives).
+        const fileRow = css.match(/\.library-file-row \.oj-list-row__body\s*\{([^}]*)\}/)?.[1] ?? '';
+        expect(fileRow).toContain('min-width: 120px');
+        expect(fileRow).not.toContain('display: flex');
+        expect(fileRow).not.toContain('align-items');
     });
 });
 

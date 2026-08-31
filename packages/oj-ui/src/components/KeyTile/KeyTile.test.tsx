@@ -280,6 +280,51 @@ describe('KeyTile', () => {
         expect(keyTileCss).not.toMatch(/\.oj-key-tile--black:not\(\.is-active\) \.oj-key-tile__label/);
     });
 
+    /**
+     * W6-P7D / F3 — the 13px sans floor, in the most-looked-at surface in the app.
+     *
+     * `.oj-key-tile--key` set its legend in `var(--font-sans)` at 11px, which
+     * DESIGN.md §3 forbids outright: the two sub-13px steps exist ONLY for
+     * spaced uppercase mono micro-labels, and §5's own KeyTile entry already
+     * specified "a bottom-anchored 10px MONO legend". Every other size in this
+     * file (the base 10px, the hint chip's 9px) was already mono; the key
+     * variant was the single sans exception, and it rendered on the default
+     * canvas.
+     *
+     * Lifting to 13px instead is not available: `keyTileBoxes` above shows a
+     * `size={34}` key would start its label stack at 15.75px against a socket
+     * band that ends at 18.3px, i.e. the legend under the well — the one thing
+     * this file exists to prevent. So the face moves, and the size-relative
+     * geometry (which the P3c cases depend on) is untouched.
+     *
+     * The rule is the same strict one `typeFloor.test.ts` holds the app sheets
+     * to: a block that sets a sub-13px size must SAY it is mono, in that block.
+     */
+    it('sets no sub-13px size in the sans — the legend is the micro mono voice', () => {
+        const flat = keyTileCss.replace(/\/\*[\s\S]*?\*\//g, '');
+        const offenders: string[] = [];
+        for (const m of flat.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+            const selector = m[1]!.trim().replace(/\s+/g, ' ');
+            const body = m[2]!;
+            // Sizes named either through the shorthand (`font: 600 10px/1 …`,
+            // `font: 600 min(11px, …)/1 …`) or through `font-size:`.
+            const sizes = [...body.matchAll(/font(?:-size)?:[^;]*?(\d+(?:\.\d+)?)px/g)]
+                .map((s) => Number(s[1]));
+            if (!sizes.some((px) => px < 13)) continue;
+            if (/var\(--font-mono\)/.test(body)) continue;
+            offenders.push(`${selector} → ${sizes.join(', ')}px`);
+        }
+        expect(offenders).toEqual([]);
+        // …and the sans is not named anywhere in this file at all, so the tile
+        // speaks one voice rather than two.
+        expect(flat).not.toContain('var(--font-sans)');
+        // The micro-label discipline that buys the sub-13px step: spaced, and
+        // uppercase like every other micro label in the system.
+        expect(keyTileCss).toMatch(
+            /\.oj-key-tile--key \.oj-key-tile__label\s*{[\s\S]*?letter-spacing:\s*var\(--tracking-micro\)[\s\S]*?text-transform:\s*uppercase/,
+        );
+    });
+
     it('merges a custom className', () => {
         const { container } = render(<KeyTile variant="key" className="mine" />);
         expect(container.querySelector('button')!.className).toContain('mine');

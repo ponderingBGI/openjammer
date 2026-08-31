@@ -70,6 +70,7 @@ import {
   type LibraryItem,
 } from '../../store/libraryStore';
 import { recordLibraryEdit, recordSealedLibraryEditAsync } from '../../store/libraryVerbs';
+import { useIsAgentPending } from '../../store/agentSessionStore';
 import { base64ToPeaks, formatSampleDuration } from '../../utils/audioMetadata';
 import { isFileSystemAccessSupported, selectLibraryFolder } from '../../utils/fileSystemAccess';
 import { getAudioContext } from '../../audio/audioContext';
@@ -80,6 +81,7 @@ import { ResizeHandles } from '../common/ResizeHandles';
 import { PanelSeparator } from '../common/PanelSeparator';
 import { ScrollContainer } from '../common/ScrollContainer';
 import { useConfirmFocus } from '../Shell/confirmFocus';
+import { RelinkSamplesDialog } from '../Dialogs/RelinkSamplesDialog';
 import './LibraryNode.css';
 
 interface LibraryNodeProps {
@@ -142,14 +144,26 @@ export const LibraryNode = memo(function LibraryNode({
     volume: 0.8,
   };
   const updateNodeData = useGraphStore(s => s.updateNodeData);
+  const isAgentPending = useIsAgentPending(node.id);
 
   // Library store
   const libraries = useLibraryStore(s => s.libraries);
   const scanProgress = useLibraryStore(s => s.scanProgress);
   const addLibrary = useLibraryStore(s => s.addLibrary);
   const scanLibrary = useLibraryStore(s => s.scanLibrary);
-  const getItemsByLibrary = useLibraryStore(s => s.getItemsByLibrary);
   const projectLibraryId = useLibraryStore(s => s.projectLibraryId);
+  const checkMissingItems = useLibraryStore(s => s.checkMissingItems);
+  /**
+   * The items map, SUBSCRIBED — not read through `getItemsByLibrary()`.
+   *
+   * `getItemsByLibrary` is a store ACTION: calling it reads `get().items`
+   * without subscribing, so nothing on this card re-rendered when an item's
+   * `status` flipped. That is half of why the missing-file loop was dead — even
+   * once something wrote `status: 'missing'`, the struck-through row
+   * (`.is-missing`, below) would not have appeared until an unrelated render
+   * happened along. One subscription fixes the row, the list and the banner.
+   */
+  const storeItems = useLibraryStore(s => s.items);
 
   // Tag management from store
   const pinnedTags = useLibraryStore(s => s.pinnedTags);
@@ -180,16 +194,99 @@ export const LibraryNode = memo(function LibraryNode({
     }
   }, [data.libraryId, projectLibraryId, libraries, node.id, updateNodeData]);
 
-  // Also trigger scan if library exists but hasn't been scanned
+  /**
+   * The one fact both filesystem effects below key off, as a STAMP rather than
+   * as the `libraries` object.
+   *
+   * `libraries` gets a new identity on every store write — including every
+   * per-file tick of a scan in progress — so an effect that depends on it and
+   * also WRITES to it is a spin, and both effects below do exactly that. The
+   * stamp is two scalars, so it changes when the answer changes and not before.
+   */
+  const libraryScanStamp = useLibraryStore(s => {
+    const lib = effectiveLibraryId ? s.libraries[effectiveLibraryId] : undefined;
+    return lib ? `${lib.status}:${lib.lastScanAt}` : '';
+  });
+
+  /**
+   * Read the folder once, if it has never been read.
+   *
+   * SPIN-1. This used to depend on `libraries` and to retry on any status but
+   * `scanning` — which meant that a scan that FAILED (`restoreHandle` came back
+   * empty, or the permission was refused) wrote `status: 'error'` into
+   * `libraries`, which gave the object a new identity, which re-ran this
+   * effect, which retried the same doomed scan, forever. Nothing changed
+   * between attempts, so it never recovered and never stopped: a card sitting
+   * on the canvas pinning the main thread with IndexedDB reads while the player
+   * is trying to play. An automatic retry that cannot succeed is not
+   * resilience.
+   *
+   * `error` and `permission_needed` are therefore TERMINAL until the player
+   * acts. They are not dead ends — linking a folder (`addLibrary`) and
+   * relinking one (`relinkLibrary`) both put the library back to `ready`, which
+   * moves the stamp and lets this effect fire again.
+   */
   useEffect(() => {
-    if (effectiveLibraryId && libraries[effectiveLibraryId]) {
-      const lib = libraries[effectiveLibraryId];
-      // If library has never been scanned (lastScanAt = 0), trigger a scan
-      if (lib.lastScanAt === 0 && lib.status !== 'scanning') {
-        scanLibrary(effectiveLibraryId, false).catch(console.error);
-      }
-    }
-  }, [effectiveLibraryId, libraries, scanLibrary]);
+    if (!effectiveLibraryId) return;
+    const [status, scannedAt] = libraryScanStamp.split(':');
+    if (status !== 'ready' || scannedAt !== '0') return;
+    scanLibrary(effectiveLibraryId, false).catch(console.error);
+  }, [effectiveLibraryId, libraryScanStamp, scanLibrary]);
+
+  /**
+   * MISSING-1 — the producer half of the missing-file loop.
+   *
+   * `libraryStore.checkMissingItems()` is the only thing that writes
+   * `status: 'missing'` at scale, and until now it had no caller a player could
+   * reach: it was transitively dead behind `relinkLibrary`, which was dead
+   * behind a dialog nothing imported. So `LibraryNode` rendered a struck-through
+   * `.is-missing` row and `LibraryNode.css` painted it `--danger-ink` for a
+   * state that could never occur. Wired here, at the one moment the answer can
+   * change and is worth paying for: a library this card is showing has finished
+   * a scan.
+   *
+   * It is NOT in the render path and NOT undoable. The walk is async, batched
+   * 50 at a time inside the store, and refuses to run at all when the folder's
+   * permission has lapsed (see `checkMissingItems`) — so the worst case is that
+   * the card says nothing, never that it strikes through a folder that is fine.
+   */
+  useEffect(() => {
+    if (!effectiveLibraryId) return;
+    const [status, scannedAt] = libraryScanStamp.split(':');
+    if (status !== 'ready' || scannedAt === '0') return;
+    checkMissingItems(effectiveLibraryId).catch((err) => {
+      // Reported, never thrown at the player: an unreadable folder is a fact
+      // about the machine, and the card is still usable without the answer.
+      console.warn('[Library] Missing-file check failed:', err);
+    });
+  }, [effectiveLibraryId, libraryScanStamp, checkMissingItems]);
+
+  /**
+   * Every item in this library, derived from the SUBSCRIBED map.
+   *
+   * This replaces `getItemsByLibrary(effectiveLibraryId)`, which is the same
+   * one-line filter but reached through a store action — i.e. a read with no
+   * subscription behind it, so the file list never repainted when an item
+   * changed underneath it. Same result, one source, and it is the source the
+   * missing-file banner reads too.
+   */
+  const allLibraryItems = useMemo(
+    () =>
+      effectiveLibraryId
+        ? Object.values(storeItems).filter((item) => item.libraryId === effectiveLibraryId)
+        : [],
+    [storeItems, effectiveLibraryId],
+  );
+
+  /** The rows the walk found gone. The banner's count and the dialog's list
+   *  are the same array — one source, so they cannot disagree. */
+  const missingItems = useMemo(
+    () => allLibraryItems.filter((item) => item.status === 'missing'),
+    [allLibraryItems],
+  );
+
+  /** The relink sheet, opened from the banner below. */
+  const [isRelinking, setIsRelinking] = useState(false);
 
   // Local state
   const [searchQuery, setSearchQuery] = useState('');
@@ -341,7 +438,7 @@ export const LibraryNode = memo(function LibraryNode({
   // Get filtered items - uses debounced search for performance (I2)
   const libraryItems = useMemo(() => {
     if (!effectiveLibraryId) return [];
-    let allItems = getItemsByLibrary(effectiveLibraryId);
+    let allItems = allLibraryItems;
 
     // Hide trashed items unless 'trash' is the active filter
     if (activeFilterTag !== 'trash') {
@@ -364,7 +461,7 @@ export const LibraryNode = memo(function LibraryNode({
     }
 
     return allItems;
-  }, [effectiveLibraryId, getItemsByLibrary, debouncedSearch, activeFilterTag]);
+  }, [effectiveLibraryId, allLibraryItems, debouncedSearch, activeFilterTag]);
 
   // Handle linking a new folder
   const handleLinkFolder = useCallback(async () => {
@@ -1430,6 +1527,7 @@ export const LibraryNode = memo(function LibraryNode({
       nodeType={currentLibrary ? `${currentLibrary.itemCount} FILES` : 'FILES'}
       selected={isSelected}
       dragging={isDragging}
+      agentPending={isAgentPending}
       headerProps={{ onMouseDown: handleHeaderMouseDown }}
       onMouseEnter={handleNodeMouseEnter}
       onMouseLeave={handleNodeMouseLeave}
@@ -1453,6 +1551,34 @@ export const LibraryNode = memo(function LibraryNode({
       ) : undefined}
     >
       <div className="library-body" onMouseDown={(e) => e.stopPropagation()}>
+        {/* MISSING-2 — the exit from the struck-through rows.
+            Above the list, because it is about the list; a banner and not a
+            modal, because a folder that moved is not an emergency and a live
+            instrument never has focus taken from it to be told about one. The
+            count comes from the same array the sheet lists, so the two cannot
+            disagree. */}
+        {currentLibrary && !isScanning && missingItems.length > 0 && (
+          <Callout
+            variant="danger"
+            className="library-missing"
+            title={`${missingItems.length} sample${missingItems.length === 1 ? '' : 's'} moved or went missing`}
+          >
+            <p className="library-missing__body">
+              The struck-through rows below point at files that are no longer
+              where the folder scan left them. Nothing is lost — point
+              OpenJammer at them again and every tag, crop and name comes with
+              them.
+            </p>
+            <Button
+              className="library-missing__cta"
+              onClick={() => setIsRelinking(true)}
+            >
+              Relink {missingItems.length} missing sample
+              {missingItems.length === 1 ? '' : 's'}...
+            </Button>
+          </Callout>
+        )}
+
         {!currentLibrary ? (
           /* Nothing linked yet. One sentence about what a folder buys you, and
              one primary button - the only solid accent fill on this card. */
@@ -1769,6 +1895,23 @@ export const LibraryNode = memo(function LibraryNode({
               </Button>
             </div>
           </Callout>
+        )}
+
+        {/* MISSING-3 — the recovery itself. On close the walk runs again, so
+            the banner's count is the answer to what the player just did rather
+            than what was true when the sheet opened: relink three of five and
+            the card says two, with no reload and no second gesture. */}
+        {isRelinking && effectiveLibraryId && (
+          <RelinkSamplesDialog
+            libraryId={effectiveLibraryId}
+            missingSamples={missingItems}
+            onClose={() => {
+              setIsRelinking(false);
+              checkMissingItems(effectiveLibraryId).catch((err) => {
+                console.warn('[Library] Missing-file re-check failed:', err);
+              });
+            }}
+          />
         )}
       </div>
 

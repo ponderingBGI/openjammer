@@ -138,9 +138,28 @@
     gap: min(4px, calc(var(--oj-key-tile-sizing-axis) * 0.084));
     padding-bottom: min(6px, calc(var(--oj-key-tile-sizing-axis) * 0.125));
     /* 11px at the default 48px axis; a vignette-sized key scales its legend
-       with everything else so the reserved socket band always has room. */
-    font: 600 min(11px, calc(var(--oj-key-tile-sizing-axis) * 0.23))/1 var(--font-sans);
+       with everything else so the reserved socket band always has room.
+       The face is MONO, and that is not a preference — 11px is `--text-xs`,
+       which DESIGN.md §3 assigns to JetBrains Mono only ("Keycaps, node type
+       chips…"), and §5's own KeyTile entry specifies "a bottom-anchored 10px
+       mono legend". Sans at 11px was the one place this file broke the 13px
+       floor. Lifting to 13px was the alternative and it does not fit: at
+       `size={34}` the label stack would start at 15.75px while the reserved
+       socket band ends at 18.3px, so a 13px legend would sit UNDER the well —
+       the one thing this file exists to prevent. So the legend joins the voice
+       the rest of the tile already speaks (the base is `600 10px/1 mono`, the
+       hint chip `500 9px/1 mono`), and takes the micro-label discipline with
+       it: spaced and uppercase, held to the full 4.5:1 bar. */
+    font: 600 min(11px, calc(var(--oj-key-tile-sizing-axis) * 0.23))/1 var(--font-mono);
     color: var(--text-secondary);
+}
+
+/* The micro-label half of the rule above. Scoped to the legend so the hint
+   chip — which is already its own 9px mono keycap with its own padding —
+   keeps its measured width on a 34px key. */
+.oj-key-tile--key .oj-key-tile__label {
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
 }
 
 /*

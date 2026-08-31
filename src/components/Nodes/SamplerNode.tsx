@@ -27,6 +27,7 @@
 import { useCallback, useRef, useState, useEffect, memo } from 'react';
 import type { GraphNode, SamplerNodeData, SamplerRow, AudioClip, ClipDropTarget } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
+import { useIsAgentPending } from '../../store/agentSessionStore';
 import { getItemFile, useLibraryStore } from '../../store/libraryStore';
 import { getAudioContext } from '../../audio/audioContext';
 import { getExecutor } from '../../audio/executor';
@@ -126,6 +127,7 @@ export const SamplerNode = memo(function SamplerNode({
         : defaultData;
 
     const updateNodeData = useGraphStore((s) => s.updateNodeData);
+    const isAgentPending = useIsAgentPending(node.id);
     // Persist user-dropped PCM through the SAME project-library path that library
     // and looper samples use (PERSIST-1): a bring-your-own sample becomes a real,
     // re-resolvable asset whose itemId we store in node.data — never the decoded
@@ -529,6 +531,7 @@ export const SamplerNode = memo(function SamplerNode({
             nodeType="SMPL"
             selected={!!isSelected}
             dragging={!!isDragging}
+            agentPending={isAgentPending}
             headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}

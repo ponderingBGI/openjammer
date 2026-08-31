@@ -67,8 +67,18 @@
   text-overflow: ellipsis;
 }
 
+/* Two routes out, given equal weight and a shared edge. They share the row when
+   the sheet is wide enough and each takes the full width when it is not —
+   either way they line up, instead of two differently-sized pills centred one
+   above the other. */
 .relink-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+}
+
+.relink-actions .oj-btn {
+  flex: 1 1 200px;
   justify-content: center;
 }
 

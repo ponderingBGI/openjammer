@@ -89,6 +89,7 @@ import { useGraphStore } from '../../store/graphStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { useAudioStore } from '../../store/audioStore';
 import { useAudioClipStore, setClipBuffer, getClipBuffer } from '../../store/audioClipStore';
+import { useIsAgentPending } from '../../store/agentSessionStore';
 import { useLibraryStore } from '../../store/libraryStore';
 import { getExecutor, INFINITE_DURATION, isInfiniteDuration, type Loop } from '../../audio/executor';
 import { getAudioContext } from '../../audio/audioContext';
@@ -310,6 +311,7 @@ export const LooperNode = memo(function LooperNode({
     const updateNodeData = useGraphStore((s) => s.updateNodeData);
     const beginGesture = useGraphStore((s) => s.beginGesture);
     const endGesture = useGraphStore((s) => s.endGesture);
+    const isAgentPending = useIsAgentPending(node.id);
     const isAudioContextReady = useAudioStore((s) => s.isAudioContextReady);
 
     // Audio clip store for drag-out functionality
@@ -1018,6 +1020,7 @@ export const LooperNode = memo(function LooperNode({
             nodeType="LOOP"
             selected={isSelected}
             dragging={isDragging}
+            agentPending={isAgentPending}
             headerProps={{ onMouseDown: handleHeaderMouseDown }}
             headerAction={stateChip}
             onMouseEnter={handleNodeMouseEnter}

@@ -140,25 +140,17 @@
     font-size: var(--text-sm);
 }
 
-/* `ListRow` puts its children in `<span class="oj-list-row__body">`, and that
-   span declares only `flex: 1; min-width: 0` — no `display`. An empty `<span>`
-   sized in px inside an inline box is a non-replaced inline element, so it
-   ignores width/height and paints NOTHING: the dot below rendered 0x0, which
-   made M1's whole justification ("the hue now buys exactly one thing, the 8px
-   dot") buy nothing on screen. The same missing line is why
-   `.library-tag__name`'s ellipsis never fired. The file row already declares
-   this for itself (`.library-file-row .oj-list-row__body` below).
-
-   The ROOT cause is that `ListRow` should declare it once, and the oj-ui lane
-   owns that. The day `.oj-list-row__body` is a flex line in the component,
-   DELETE this rule and the file-row one below rather than leaving two consumers
-   restating a default. */
-.library-tag .oj-list-row__body {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-}
+/* The local `.library-tag .oj-list-row__body` restatement is GONE (06fa8c7). It
+   existed because `ListRow`'s body span declared only `flex: 1; min-width: 0`,
+   so an inline box swallowed the 8px dot below and killed the name's ellipsis.
+   `ListRow.css` now ships `display: flex; align-items: center;
+   gap: var(--space-xs); flex: 1; min-width: 0` on `.oj-list-row__body` itself,
+   which is this rule verbatim except for the gap — 4px (`--space-xs`) where the
+   copy said 6px. The token wins: a tag row's dot-to-name gap is the same
+   in-row gap every other list row in the app spends, and one consumer holding a
+   private 6px is exactly the drift the component landing was meant to end.
+   (The file-row rule below is NOT redundant — it overrides `flex` and the
+   120px filename floor — so it stays.) */
 
 /* The hue, spent on eight pixels. */
 .library-tag__dot {
@@ -335,11 +327,10 @@
    `flex-shrink: 0`, which on a 3-tag row squeezed `pad-long-name-that-runs-on.wav`
    down to 63px — about eight characters — while a 1-tag row above it carried a
    large void. A file browser whose files cannot be told apart is not one, so the
-   body claims a 120px floor and the trailing cluster is the side that gives. */
+   body claims a 120px floor and the trailing cluster is the side that gives.
+   The flex line itself (`display`/`align-items`/`gap`) comes from `ListRow` now
+   and is not restated here — only the two declarations that OVERRIDE it. */
 .library-file-row .oj-list-row__body {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
     flex: 1 1 auto;
     min-width: 120px;
 }
@@ -678,6 +669,28 @@
 @keyframes library-skeleton-breathe {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.55; }
+}
+
+/* ---- Files that left the disk ------------------------------------------ */
+
+/* The honest-failure banner. Same construction as the confirm strip below —
+   a Callout that does not shrink, prose on the floor, one action — because it
+   is the same shape of thing: the card telling the player something true and
+   handing them the one control that answers it. It is `danger` to match the
+   `--danger-ink` the struck-through rows are already painted in; the banner and
+   the rows are one statement, not two. */
+.library-missing {
+    flex: 0 0 auto;
+}
+
+.library-missing__body {
+    margin: 0;
+    font-size: var(--text-sm);
+    line-height: 1.4;
+}
+
+.library-missing__cta {
+    margin-top: var(--space-sm);
 }
 
 /* ---- The one destructive question -------------------------------------- */

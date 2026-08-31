@@ -32,6 +32,7 @@ import type { GraphNode, SamplerNodeData, SamplerRow } from '../../engine/types'
 import { useGraphStore } from '../../store/graphStore';
 import { isSamplerNodeData } from '../../engine/typeGuards';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
+import { useIsAgentPending } from '../../store/agentSessionStore';
 import { Chip, KeyTile, NodeShell, PortRow, ValueScrubber } from '@openjammer/oj-ui';
 import { noteLabel } from '../controls/noteNames';
 import { useGestureBracket } from './nodeControls';
@@ -125,6 +126,7 @@ export const SamplerVisualNode = memo(function SamplerVisualNode({
     const parentNodeId = node.parentId;
     const parentNode = useGraphStore((s) => parentNodeId ? s.nodes.get(parentNodeId) : null);
     const updateSamplerRow = useGraphStore((s) => s.updateSamplerRow);
+    const isAgentPending = useIsAgentPending(node.id);
 
     const defaultData: SamplerNodeData = {
         sampleId: null,
@@ -159,6 +161,7 @@ export const SamplerVisualNode = memo(function SamplerVisualNode({
             nodeType="KEY MAP"
             selected={!!isSelected}
             dragging={!!isDragging}
+            agentPending={isAgentPending}
             headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}
