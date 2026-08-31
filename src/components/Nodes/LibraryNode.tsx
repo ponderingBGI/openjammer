@@ -186,11 +186,29 @@ export const LibraryNode = memo(function LibraryNode({
   // Priority: node's own libraryId > projectLibraryId
   const effectiveLibraryId = data.libraryId || projectLibraryId;
 
-  // Auto-set the library ID when project library becomes available
+  /**
+   * Auto-bind this card to the project library the first time one exists.
+   *
+   * T4 — this write is NOT recorded. It is a binding the ENVIRONMENT decided:
+   * the player dropped a Library card, a project library happened to already be
+   * linked, and the card pinned itself to it. `graphStore`'s `set` wrapper
+   * records a `setNodeData` verb for every mutation, so before this the mere act
+   * of a card MOUNTING grew the undo stack by one — and the player's next
+   * `Ctrl+Z`, reaching for the note they just played, spent itself putting
+   * `libraryId` back to `undefined` and changing nothing they could see. Undo
+   * belongs to the player; background bookkeeping does not get to sit in it.
+   *
+   * The write itself stays: `effectiveLibraryId` already falls back to
+   * `projectLibraryId`, but the PIN is real — `addLibrary` re-points
+   * `projectLibraryId`, so without it a card would silently jump to whatever
+   * folder was linked last from some other card. Recording is what was wrong,
+   * not the binding. The player's own link gesture (`handleSelectFolder`, which
+   * writes the same field) still records, as it must.
+   */
   useEffect(() => {
     // If node doesn't have a library set and project library is available, auto-select it
     if (!data.libraryId && projectLibraryId && libraries[projectLibraryId]) {
-      updateNodeData<LibraryNodeData>(node.id, { libraryId: projectLibraryId });
+      updateNodeData<LibraryNodeData>(node.id, { libraryId: projectLibraryId }, { record: false });
     }
   }, [data.libraryId, projectLibraryId, libraries, node.id, updateNodeData]);
 

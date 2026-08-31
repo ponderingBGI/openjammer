@@ -132,7 +132,22 @@ interface GraphStore {
     removeNode: (nodeId: string) => void;
     updateNodePosition: (nodeId: string, position: Position) => void;
     moveNodes: (positions: Map<string, Position>) => void;
-    updateNodeData: <T extends object>(nodeId: string, data: Partial<T>) => void;
+    /**
+     * Merge `data` into a node's `data`.
+     *
+     * `options.record: false` performs the SAME write without an undo entry.
+     * `graphStore`'s `set` wrapper diffs every mutation and records a
+     * `setNodeData` verb, so a write driven by the ENVIRONMENT rather than by
+     * the player — an auto-binding decided in an effect, an engine-derived
+     * degraded-plugin flag — otherwise lands in the undo stack and `Ctrl+Z`
+     * spends itself on bookkeeping instead of on the player's last edit. That is
+     * the one thing undo may never do mid-set.
+     *
+     * It defaults to recording and it is OPT-IN, never a blanket wrapper — the
+     * same shape as `libraryVerbs`' recorders one domain over. A caller has to
+     * say "this was not the player" out loud, in the call, where a reader sees it.
+     */
+    updateNodeData: <T extends object>(nodeId: string, data: Partial<T>, options?: { record?: boolean }) => void;
     updateNodePorts: (nodeId: string, ports: import('../engine/types').PortDefinition[]) => void;
     renamePort: (nodeId: string, portId: string, name: string) => void;
     updateNodeType: (nodeId: string, type: NodeType) => void;
@@ -529,8 +544,14 @@ export const useGraphStore = create<GraphStore>()(
                 });
             },
 
-            updateNodeData: (nodeId, data) => {
-                set((state) => {
+            updateNodeData: (nodeId, data, options) => {
+                // The one escape hatch out of the recording wrapper. `rawSet` IS
+                // the setter `set` delegates to (persist-wrapped), so an
+                // unrecorded write still lands, still persists and still wakes
+                // every subscriber — it only skips the diff that would mint an
+                // undo entry. Not a second write path: same body, one branch.
+                const apply = options?.record === false ? rawSet : set;
+                apply((state) => {
                     const node = state.nodes.get(nodeId);
                     if (!node) return state;
 

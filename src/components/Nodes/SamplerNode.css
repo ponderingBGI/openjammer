@@ -148,29 +148,9 @@
     color: var(--text-secondary);
 }
 
-/* ---- Not this faceplate's, but this stylesheet's tenant -----------------
- * `.node-plugin-error-badge` is emitted by `NodeWrapper.tsx` (the shared
- * "(missing plugin)" mark in any node's header), and its only stylesheet has
- * always been this one. W5-P7 kept it — deleting it would silently un-style a
- * live badge on every hosted-plugin node — and only removed the literal ink
- * fallback it carried (a raw grey). It should move to `SchematicBase.css` (which NodeWrapper
- * also imports, and which owns the rest of the shared chrome) the next time that
- * file is opened. Its sibling `.instrument-voice-error-badge` WAS deleted: W5-P8
- * removed its last emitter, so it styled nothing. */
-.node-plugin-error-badge {
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 14px;
-    height: 14px;
-    margin-left: 6px;
-    border-radius: var(--radius-pill);
-    font-family: var(--font-sans);
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 1;
-    color: var(--bg-primary);
-    background: var(--accent-warning);
-    cursor: help;
-}
+/* `.node-plugin-error-badge` used to squat here — it is emitted by
+ * `NodeWrapper.tsx`, not by this faceplate, and W5-P7 left a note saying it
+ * belonged in `SchematicBase.css` the next time that file was opened. W6-Z
+ * opened it: the rule now lives beside the rest of the shared node chrome, in
+ * the sheet owned by the component that renders the element. Nothing to do
+ * here. */

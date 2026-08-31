@@ -172,6 +172,62 @@
     flex-wrap: wrap;
 }
 
+/* The degraded-plugin mark, in the header of ANY node type.
+ *
+ * Emitted by `NodeWrapper.tsx` (invariant #4a) when a hosted plugin is missing
+ * or has crashed and the node degraded to a labeled passthrough — a held note
+ * beats a glitch, so the project stays open and this is the only thing that
+ * changes. It lived in `SamplerNode.css` until W6-Z purely by accident of
+ * history; it is shared chrome, so it belongs in the sheet the emitting
+ * component owns.
+ *
+ * The run is the MICRO MONO voice (`--font-mono` + `--text-micro` +
+ * `--tracking-micro` + uppercase) — the same discipline that buys every other
+ * sub-13px label in this app the right to be sub-13px (DESIGN §3; the Menu and
+ * KeyTile precedent). It was `10px var(--font-sans)`: a sans run below the 13px
+ * floor AND a size that is not on the scale at all. The glyph is `!`, so
+ * uppercase is a no-op on it today; the tracking's trailing space was expected
+ * to push it off centre inside the 14px well, and measured 0.00px because the
+ * flex centring absorbs it. The voice is declared where a reader can see it
+ * rather than left to be inherited.
+ *
+ * The INK changed too, because measuring the new run caught what the old one
+ * hid: `--bg-primary` on `--accent-warning` is **2.27:1 in the light theme**
+ * (near-white on amber). `--bg-primary` is the inverse of `--text-primary`, so
+ * it only happens to be dark ink in the DARK theme — in light it was a
+ * near-invisible glyph on the one mark that says "your plugin just died". The
+ * app already has the ink for a solid accent fill and it is theme-invariant by
+ * construction: `--text-on-accent` (#1D1C18), which the Arrangement, the piano
+ * roll and the Library all use for exactly this. Measured after, in Chromium,
+ * on a real degraded node: 6.76 light / 8.38 dark — both clear of the 4.5:1 the
+ * micro voice is still held to.
+ *
+ * The amber FILL is unchanged: the mark reads as a state, not as a control, and
+ * nothing about a crash should be quieter than it is. */
+.node-plugin-error-badge {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    /* 6px is off the space scale (`--space-xs` is 4px), and it is carried over
+       verbatim: this lane's change is the TYPE run, and moving the badge 2px
+       closer to the title is a visual delta nobody asked for on a surface that
+       only appears when a plugin has crashed. Noted, not fixed. */
+    margin-left: 6px;
+    border-radius: var(--radius-pill);
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    color: var(--text-on-accent);
+    background: var(--accent-warning);
+    cursor: help;
+}
+
 /* The mono voice for an exact value a performer reads mid-set. */
 .oj-node__readout {
     font-family: var(--font-mono);

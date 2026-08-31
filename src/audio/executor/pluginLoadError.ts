@@ -9,9 +9,17 @@
  * clears automatically the moment the plugin resolves again (a rescan/auto-rebind
  * re-pushes a clean graph).
  *
- * SSOT + REV-1: written through `useGraphStore.getState().updateNodeData` OUTSIDE
- * any begin/endGesture and only when the value actually changes — so this
+ * SSOT + REV-1: written through `useGraphStore.getState().updateNodeData` with
+ * `{ record: false }`, and only when the value actually changes — so this
  * engine-derived runtime state never lands in the user's undo history.
+ *
+ * That flag USED to be missing, and this file's own note above was wrong about
+ * it: staying outside `begin/endGesture` does not keep a write out of history,
+ * because `graphStore`'s `set` wrapper diffs and records EVERY graph mutation
+ * that is not a history replay. So a plugin crashing mid-set pushed an undo
+ * entry, and the player's next `Ctrl+Z` — reaching for the edit they just
+ * made — un-degraded a node instead. Corrected in W6-Z, using the opt-out the
+ * comment always assumed existed.
  *
  * Shared by BOTH executors (native degraded_stubs + wasm last_degraded_node_ids)
  * so there is one degraded path, not a fork (code-value #2: extend the pillar).
@@ -43,7 +51,7 @@ export function setNodePluginLoadError(nodeId: string, hasError: boolean): void 
     // Only write on a real change — avoids churning the store (and re-renders) on
     // every graph push when the state is unchanged.
     if (current === hasError) return;
-    // `updateNodeData` outside any gesture: engine-derived runtime state, not a
-    // user edit, so it must NOT create an undo entry.
-    store.updateNodeData<NodeData>(nodeId, { pluginLoadError: hasError });
+    // Engine-derived runtime state, not a user edit, so it must NOT create an
+    // undo entry — said out loud, in the call.
+    store.updateNodeData<NodeData>(nodeId, { pluginLoadError: hasError }, { record: false });
 }

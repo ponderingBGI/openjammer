@@ -655,7 +655,6 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
             itemRefs: [],
             playbackMode: 'oneshot',
             volume: 1,
-            missingItemIds: [],
             // Tag panel state
             separatorPosition: 0.5,  // Position of pinned/other tags separator (0-1)
             // Node resizing
