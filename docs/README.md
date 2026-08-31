@@ -11,8 +11,8 @@ everything else is the way it is.
   infinite by everyone), the nine code values, and the day-to-day playbook. Loaded every session.
 - [PRODUCT.md](../PRODUCT.md): who plays OpenJammer and why — register, users,
   anti-references, the design principles, and the Live Performance Rule. The strategic brief.
-- [DESIGN.md](../DESIGN.md): the visual system — "The Living Sketchbook" (hand-drawn
-  Outfit, warm dot-grid paper, hard blur-free shadows, audio-blue/control-grey ports).
+- [DESIGN.md](../DESIGN.md): the visual system — calm ground, loud signal (Outfit on a warm
+  dot-grid canvas, soft layered depth, audio-teal/control-grey/universal-violet ports).
 
 ## Architecture & extension
 

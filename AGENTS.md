@@ -161,10 +161,16 @@ Do not introduce `npm`/`yarn`/`pnpm` commands anywhere in the codebase or the do
 ### Port types and colors
 
 Port color tells the eye what travels down a cable — the player learns it in seconds. The
-type is the source of truth; the color follows from it.
+type is the source of truth; the **token** follows from it, and the token is the only
+place a value lives. Name the type, never the hex.
 
-- `type: 'audio'` → **blue** (music / sound)
-- `type: 'technical'` → **grey** (numbers / triggers)
+- `type: 'audio'` → `--audio-connection` (**teal**) — music / sound
+- `type: 'technical'` → `--control-connection` (**grey**) — numbers / triggers
+- `type: 'universal'` → `--universal-port` (**violet**) — adapts to whatever it connects to
+
+Sound is the only saturated one; control is deliberately desaturated so the signal that
+matters reads first. If you see `#4A90C2` — the old blue — it is stale
+([DESIGN.md](../../DESIGN.md) §2, "Wiring — the legend").
 
 Examples: keyboard outputs are `technical` (they send numbers, not sound); instrument
 inputs are `technical` (they receive triggers); instrument outputs are `audio` (they make
