@@ -71,6 +71,7 @@ export interface ThemeValues {
     shadowPressed: string;
     focusRing: string;
     accentInk: string;
+    accentTwoInk: string;
     successInk: string;
     warningInk: string;
     dangerInk: string;

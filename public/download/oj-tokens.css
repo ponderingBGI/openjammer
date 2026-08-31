@@ -1,0 +1,287 @@
+/*
+ * OpenJammer design tokens — public/download.
+ *
+ * GENERATED from the DTCG sources in packages/oj-tokens/tokens/ (primitive.json
+ * + themes/{light,dark}.json) by packages/oj-tokens/build.mjs. This surface is
+ * static: it has no React and no applyTheme() to inject the semantic values at
+ * runtime, so they ship here as a stylesheet instead. DO NOT HAND-EDIT — run
+ * `bun run tokens`. src/components/__tests__/webSurfaceTokens.test.ts asserts
+ * this file is byte-identical to a fresh render, so a palette move turns that
+ * test red instead of drifting silently.
+ *
+ * Two themes, selected two ways: the OS preference (prefers-color-scheme) and an
+ * explicit [data-theme] on the root, so a toggle can override the OS.
+ */
+
+:root {
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 99px;
+  --text-micro: 9.5px;
+  --text-xs: 11px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 15px;
+  --text-xl: 22px;
+  --text-2xl: 30px;
+  --font-sans: 'Outfit', system-ui, 'Segoe UI', -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --node-min-width: 190px;
+  --port-size: 18px;
+  --transition-normal: 250ms ease;
+  --transition-slow: 0.4s ease;
+  --motion-fast: 120ms cubic-bezier(.2,.8,.3,1);
+  --motion-spring: 260ms cubic-bezier(.34,1.56,.64,1);
+  --tracking-micro: 0.08em;
+  --press-scale-btn: 0.96;
+  --press-scale-pad: 0.94;
+  --hover-lift: -2px;
+  --knob-size: 52px;
+  --key-tile-size: 48px;
+  --z-node: 10;
+  --z-panel: 100;
+  --z-popover: 1000;
+  --z-modal: 2000;
+  --z-toast: 3000;
+  --z-top: 10000;
+}
+
+/* Light — the default theme. */
+:root {
+    --bg-primary: #F4F3F0;
+    --bg-secondary: #FAF9F6;
+    --bg-node: #FFFFFF;
+    --bg-tertiary: #ECEAE4;
+    --bg-canvas: #F4F3F0;
+    --bg-node-header: #FAF9F6;
+    --text-primary: #1D1C18;
+    --text-secondary: #5A5850;
+    --text-muted: #6C695F;
+    --text-on-accent: #1D1C18;
+    --border-subtle: #E3E1DA;
+    --border-strong: #C8C5BB;
+    --border-control: #89867C;
+    --accent-primary: oklch(0.66 0.19 40);
+    --accent-secondary: oklch(0.71 0.19 40);
+    --accent-success: oklch(0.64 0.17 150);
+    --accent-warning: oklch(0.72 0.15 80);
+    --accent-danger: oklch(0.58 0.21 25);
+    --audio-connection: oklch(0.6 0.12 200);
+    --audio-connected: oklch(0.6 0.12 200);
+    --control-connection: #8F8C82;
+    --control-connected: #8F8C82;
+    --universal-port: oklch(0.66 0.19 300);
+    --universal-connection: oklch(0.66 0.19 300);
+    --timeline-bg: #F4F3F0;
+    --timeline-chrome-bg: #FAF9F6;
+    --timeline-lane-bg: #FFFFFF;
+    --timeline-lane-alt-bg: #F4F3F0;
+    --timeline-grid-bar: color-mix(in oklab, #1D1C18 24%, transparent);
+    --timeline-grid-beat: color-mix(in oklab, #1D1C18 11%, transparent);
+    --timeline-grid-sub: color-mix(in oklab, #1D1C18 5.5%, transparent);
+    --timeline-lane-divider: #E3E1DA;
+    --timeline-clip-bg: #FFFFFF;
+    --timeline-clip-border: #6C695F;
+    --timeline-clip-muted-bg: #ECEAE4;
+    --timeline-note-fill: oklch(0.6 0.12 200);
+    --timeline-waveform-fill: oklch(0.5 0.12 200);
+    --timeline-automation-line: oklch(0.66 0.19 300);
+    --timeline-playhead: oklch(0.6 0.19 40);
+    --timeline-section-marker: #1D1C18;
+    --timeline-loop-range: color-mix(in oklab, var(--accent-primary) 7%, transparent);
+    --timeline-selection: oklch(0.66 0.19 40);
+    --shadow-raised: 0 1px 2px rgba(24,22,16,.05), 0 2px 6px rgba(24,22,16,.06);
+    --shadow-overlay: 0 2px 6px rgba(24,22,16,.07), 0 12px 28px rgba(24,22,16,.11);
+    --shadow-inset: inset 0 1px 3px rgba(0,0,0,.22);
+    --shadow-pressed: inset 0 2px 6px rgba(0,0,0,.28);
+    --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent-primary) 28%, transparent);
+    --accent-ink: oklch(0.504 0.19 40);
+    --accent-two-ink: oklch(0.3 0.16 300);
+    --success-ink: oklch(0.459 0.17 150);
+    --warning-ink: oklch(0.497 0.15 80);
+    --danger-ink: oklch(0.491 0.21 25);
+    --audio-ink: oklch(0.453 0.12 200);
+    --overlay-scrim: color-mix(in oklab, #F4F3F0 45%, transparent);
+}
+
+/* Dark, when the OS asks for it. */
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg-primary: #161510;
+        --bg-secondary: #242219;
+        --bg-node: #201F19;
+        --bg-tertiary: #2A2822;
+        --bg-canvas: #161510;
+        --bg-node-header: #242219;
+        --text-primary: #F1EFE8;
+        --text-secondary: #ABA89C;
+        --text-muted: #928E83;
+        --text-on-accent: #1D1C18;
+        --border-subtle: #33312A;
+        --border-strong: #4B473D;
+        --border-control: #807C6F;
+        --accent-primary: oklch(0.72 0.19 40);
+        --accent-secondary: oklch(0.78 0.19 40);
+        --accent-success: oklch(0.7 0.17 150);
+        --accent-warning: oklch(0.78 0.15 80);
+        --accent-danger: oklch(0.66 0.21 25);
+        --audio-connection: oklch(0.7 0.12 200);
+        --audio-connected: oklch(0.7 0.12 200);
+        --control-connection: #767267;
+        --control-connected: #767267;
+        --universal-port: oklch(0.72 0.19 300);
+        --universal-connection: oklch(0.72 0.19 300);
+        --timeline-bg: #161510;
+        --timeline-chrome-bg: #242219;
+        --timeline-lane-bg: #201F19;
+        --timeline-lane-alt-bg: #1B1A15;
+        --timeline-grid-bar: color-mix(in oklab, #F1EFE8 22%, transparent);
+        --timeline-grid-beat: color-mix(in oklab, #F1EFE8 10%, transparent);
+        --timeline-grid-sub: color-mix(in oklab, #F1EFE8 5%, transparent);
+        --timeline-lane-divider: #33312A;
+        --timeline-clip-bg: #201F19;
+        --timeline-clip-border: #928E83;
+        --timeline-clip-muted-bg: #2A2822;
+        --timeline-note-fill: oklch(0.7 0.12 200);
+        --timeline-waveform-fill: oklch(0.62 0.12 200);
+        --timeline-automation-line: oklch(0.72 0.19 300);
+        --timeline-playhead: oklch(0.72 0.19 40);
+        --timeline-section-marker: #F1EFE8;
+        --timeline-loop-range: color-mix(in oklab, var(--accent-primary) 7%, transparent);
+        --timeline-selection: oklch(0.72 0.19 40);
+        --shadow-raised: 0 1px 2px rgba(0,0,0,.3), 0 2px 8px rgba(0,0,0,.25);
+        --shadow-overlay: 0 4px 10px rgba(0,0,0,.35), 0 14px 32px rgba(0,0,0,.4);
+        --shadow-inset: inset 0 1px 3px rgba(0,0,0,.45);
+        --shadow-pressed: inset 0 2px 6px rgba(0,0,0,.5);
+        --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent-primary) 35%, transparent);
+        --accent-ink: oklch(0.767 0.19 40);
+        --accent-two-ink: oklch(0.88 0.068 300);
+        --success-ink: oklch(0.707 0.17 150);
+        --warning-ink: oklch(0.78 0.15 80);
+        --danger-ink: oklch(0.785 0.21 25);
+        --audio-ink: oklch(0.711 0.12 200);
+        --overlay-scrim: color-mix(in oklab, #161510 55%, transparent);
+    }
+}
+
+/* An explicit choice always wins over the OS preference. */
+:root[data-theme='dark'] {
+    --bg-primary: #161510;
+    --bg-secondary: #242219;
+    --bg-node: #201F19;
+    --bg-tertiary: #2A2822;
+    --bg-canvas: #161510;
+    --bg-node-header: #242219;
+    --text-primary: #F1EFE8;
+    --text-secondary: #ABA89C;
+    --text-muted: #928E83;
+    --text-on-accent: #1D1C18;
+    --border-subtle: #33312A;
+    --border-strong: #4B473D;
+    --border-control: #807C6F;
+    --accent-primary: oklch(0.72 0.19 40);
+    --accent-secondary: oklch(0.78 0.19 40);
+    --accent-success: oklch(0.7 0.17 150);
+    --accent-warning: oklch(0.78 0.15 80);
+    --accent-danger: oklch(0.66 0.21 25);
+    --audio-connection: oklch(0.7 0.12 200);
+    --audio-connected: oklch(0.7 0.12 200);
+    --control-connection: #767267;
+    --control-connected: #767267;
+    --universal-port: oklch(0.72 0.19 300);
+    --universal-connection: oklch(0.72 0.19 300);
+    --timeline-bg: #161510;
+    --timeline-chrome-bg: #242219;
+    --timeline-lane-bg: #201F19;
+    --timeline-lane-alt-bg: #1B1A15;
+    --timeline-grid-bar: color-mix(in oklab, #F1EFE8 22%, transparent);
+    --timeline-grid-beat: color-mix(in oklab, #F1EFE8 10%, transparent);
+    --timeline-grid-sub: color-mix(in oklab, #F1EFE8 5%, transparent);
+    --timeline-lane-divider: #33312A;
+    --timeline-clip-bg: #201F19;
+    --timeline-clip-border: #928E83;
+    --timeline-clip-muted-bg: #2A2822;
+    --timeline-note-fill: oklch(0.7 0.12 200);
+    --timeline-waveform-fill: oklch(0.62 0.12 200);
+    --timeline-automation-line: oklch(0.72 0.19 300);
+    --timeline-playhead: oklch(0.72 0.19 40);
+    --timeline-section-marker: #F1EFE8;
+    --timeline-loop-range: color-mix(in oklab, var(--accent-primary) 7%, transparent);
+    --timeline-selection: oklch(0.72 0.19 40);
+    --shadow-raised: 0 1px 2px rgba(0,0,0,.3), 0 2px 8px rgba(0,0,0,.25);
+    --shadow-overlay: 0 4px 10px rgba(0,0,0,.35), 0 14px 32px rgba(0,0,0,.4);
+    --shadow-inset: inset 0 1px 3px rgba(0,0,0,.45);
+    --shadow-pressed: inset 0 2px 6px rgba(0,0,0,.5);
+    --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent-primary) 35%, transparent);
+    --accent-ink: oklch(0.767 0.19 40);
+    --accent-two-ink: oklch(0.88 0.068 300);
+    --success-ink: oklch(0.707 0.17 150);
+    --warning-ink: oklch(0.78 0.15 80);
+    --danger-ink: oklch(0.785 0.21 25);
+    --audio-ink: oklch(0.711 0.12 200);
+    --overlay-scrim: color-mix(in oklab, #161510 55%, transparent);
+}
+
+:root[data-theme='light'] {
+    --bg-primary: #F4F3F0;
+    --bg-secondary: #FAF9F6;
+    --bg-node: #FFFFFF;
+    --bg-tertiary: #ECEAE4;
+    --bg-canvas: #F4F3F0;
+    --bg-node-header: #FAF9F6;
+    --text-primary: #1D1C18;
+    --text-secondary: #5A5850;
+    --text-muted: #6C695F;
+    --text-on-accent: #1D1C18;
+    --border-subtle: #E3E1DA;
+    --border-strong: #C8C5BB;
+    --border-control: #89867C;
+    --accent-primary: oklch(0.66 0.19 40);
+    --accent-secondary: oklch(0.71 0.19 40);
+    --accent-success: oklch(0.64 0.17 150);
+    --accent-warning: oklch(0.72 0.15 80);
+    --accent-danger: oklch(0.58 0.21 25);
+    --audio-connection: oklch(0.6 0.12 200);
+    --audio-connected: oklch(0.6 0.12 200);
+    --control-connection: #8F8C82;
+    --control-connected: #8F8C82;
+    --universal-port: oklch(0.66 0.19 300);
+    --universal-connection: oklch(0.66 0.19 300);
+    --timeline-bg: #F4F3F0;
+    --timeline-chrome-bg: #FAF9F6;
+    --timeline-lane-bg: #FFFFFF;
+    --timeline-lane-alt-bg: #F4F3F0;
+    --timeline-grid-bar: color-mix(in oklab, #1D1C18 24%, transparent);
+    --timeline-grid-beat: color-mix(in oklab, #1D1C18 11%, transparent);
+    --timeline-grid-sub: color-mix(in oklab, #1D1C18 5.5%, transparent);
+    --timeline-lane-divider: #E3E1DA;
+    --timeline-clip-bg: #FFFFFF;
+    --timeline-clip-border: #6C695F;
+    --timeline-clip-muted-bg: #ECEAE4;
+    --timeline-note-fill: oklch(0.6 0.12 200);
+    --timeline-waveform-fill: oklch(0.5 0.12 200);
+    --timeline-automation-line: oklch(0.66 0.19 300);
+    --timeline-playhead: oklch(0.6 0.19 40);
+    --timeline-section-marker: #1D1C18;
+    --timeline-loop-range: color-mix(in oklab, var(--accent-primary) 7%, transparent);
+    --timeline-selection: oklch(0.66 0.19 40);
+    --shadow-raised: 0 1px 2px rgba(24,22,16,.05), 0 2px 6px rgba(24,22,16,.06);
+    --shadow-overlay: 0 2px 6px rgba(24,22,16,.07), 0 12px 28px rgba(24,22,16,.11);
+    --shadow-inset: inset 0 1px 3px rgba(0,0,0,.22);
+    --shadow-pressed: inset 0 2px 6px rgba(0,0,0,.28);
+    --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent-primary) 28%, transparent);
+    --accent-ink: oklch(0.504 0.19 40);
+    --accent-two-ink: oklch(0.3 0.16 300);
+    --success-ink: oklch(0.459 0.17 150);
+    --warning-ink: oklch(0.497 0.15 80);
+    --danger-ink: oklch(0.491 0.21 25);
+    --audio-ink: oklch(0.453 0.12 200);
+    --overlay-scrim: color-mix(in oklab, #F4F3F0 45%, transparent);
+}

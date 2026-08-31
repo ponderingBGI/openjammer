@@ -1,9 +1,40 @@
-import { Button, Chip, Kbd, ValueScrubber } from '@openjammer/oj-ui';
+import { Button, Chip, IconWarning, Kbd, ValueScrubber } from '@openjammer/oj-ui';
 import { useArrangementStore } from '../../store/arrangementStore';
 import { useEditingContextStore } from '../../store/editingContextStore';
 import { timebase } from '../../song/time';
 import { useTrackLaneViewStore } from '../../store/trackLaneViewStore';
 import { usePluginFaultCards } from '../../store/pluginFaultStore';
+
+/**
+ * A failure in the utility cluster.
+ *
+ * A full-sentence chip costs a row's worth of width, and three compacted rows
+ * are 24 + 3 + 24 + 3 + 24 = 78px inside a 56px band: with an alert present the
+ * cluster overflowed by 24.19px and covered 7 621px² of the ruler from 1030px
+ * down (W4-TBb-REPORT §2b). Shrinking the text does not fix it — even a 10ch cap
+ * still overflows below 840px — and growing the band is what spec 8.3 forbids.
+ *
+ * So the chip is built never to cost a row: the WARNING GLYPH is always there,
+ * the sentence takes only the slack the controls leave (`ArrangementSurface.css`
+ * gives it a flex base of zero), and below the compaction width the sentence
+ * steps out of the layout entirely. It is never SILENCED, though — the label is
+ * clipped rather than removed, so this chip's own `role="status"` live region
+ * still announces every word, and the full message rides the `title` at every
+ * width, because 34ch truncates even when the text is showing.
+ */
+function Alert({ tone, children }: { tone: 'warning' | 'danger'; children: string }) {
+    return (
+        <Chip
+            className="arrangement-sky__alert"
+            tone={tone}
+            role="status"
+            title={children}
+            glyph={<IconWarning size={13} />}
+        >
+            {children}
+        </Chip>
+    );
+}
 
 /**
  * THE SKY BAND — 56px of surface chrome above the ruler.
@@ -28,6 +59,8 @@ import { usePluginFaultCards } from '../../store/pluginFaultStore';
  *
  * Errors are CHIPS in this cluster, never a modal and never a banner that
  * shoves the ruler down: a failed take must not move the bar you were reading.
+ * Below the compaction width they shed their sentence and keep the glyph (see
+ * {@link Alert}) — the band has 56px and a third row does not fit in it.
  */
 export function SkyBand({ fieldWidth }: { fieldWidth: number; onOpenSettings?: () => void }) {
     const arrangement = useArrangementStore((state) => state.arrangement);
@@ -52,9 +85,9 @@ export function SkyBand({ fieldWidth }: { fieldWidth: number; onOpenSettings?: (
             </div>
             <div className="arrangement-sky__gap" aria-hidden="true" />
             <div className="arrangement-sky__utility">
-                {faults.length > 0 && <Chip className="arrangement-sky__alert" tone="warning" role="status">{faults.length} plugin benched</Chip>}
-                {transportError && <Chip className="arrangement-sky__alert" tone="warning" role="status">{transportError}</Chip>}
-                {recordError && <Chip className="arrangement-sky__alert" tone="danger" role="status">{recordError}</Chip>}
+                {faults.length > 0 && <Alert tone="warning">{`${faults.length} plugin benched`}</Alert>}
+                {transportError && <Alert tone="warning">{transportError}</Alert>}
+                {recordError && <Alert tone="danger">{recordError}</Alert>}
                 <div className="arrangement-edit-mode" role="group" aria-label="Edit mode">
                     <button type="button" aria-pressed={editMode === 'slide'} onClick={() => useEditingContextStore.getState().setEditMode('slide')}>Slide</button>
                     <button type="button" aria-pressed={editMode === 'ripple'} onClick={() => useEditingContextStore.getState().setEditMode('ripple')}>Ripple</button>

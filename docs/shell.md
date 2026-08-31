@@ -40,11 +40,30 @@ A warning must be seen without stealing the moment.
 
 ### `Tab`, focus, and the chrome
 
-`Tab` means two things and both are right: on the stage it **switches surface** (the
-keycap in the topbar says so), on a control it **walks to the next control**. The keymap
-arbiter draws that line by the event's target — `Tab` only reaches
-`view.toggleArrangement` when the target is `document.body` or inside a
-`[data-surface-root]`.
+`Tab` means two things and both are right: on the **stage floor** it **switches surface**
+(the keycap in the topbar says so), on a control it **walks to the next control**. The
+keymap arbiter draws that line by the event's target — `Tab` only reaches
+`view.toggleArrangement` when the target is `document.body` or a `[data-surface-root]`
+element **itself**. Anything *inside* a surface — a node, a faceplate, a port, a clip, a
+track header — keeps native traversal.
+
+That last clause is the fix for W5-P6's F7. The rule used to match every DESCENDANT of a
+surface root, so one `Tab` with focus on a node port swapped the visible surface and hid
+the card the player was working on: no port, knob or pad on the canvas was reachable by
+keyboard at all. Now a `Tab` from the empty stage brings up the other surface, and a `Tab`
+inside a card means what it means everywhere else.
+
+`Shift+Tab` obeys the same target rule and **never toggles** — `view.toggleArrangement` is
+bound to a bare `Tab` — so a backwards `Tab` from the stage floor walks into the chrome.
+That asymmetry is deliberate: it is the keyboard-only route off a surface, and the way back
+in is a `Tab` forward from the topbar, which lands on the first control inside the active
+surface.
+
+**The two surfaces you cannot see never hold the tab order.** All three stay mounted (a
+switch is instant and nothing loses its scroll), so each carries `inert` + `aria-hidden`
+whenever it is not the active surface, and `hidden` once its transition has finished. The
+`inert` is not belt-and-braces: during the 180ms transition-out the peer is still painted,
+and that is exactly the window in which a `Tab` could have landed in it.
 
 That guard is only honest if a click does not silently park focus on chrome, so the
 topbar and the transport pill each **release focus after a POINTER activation** and keep

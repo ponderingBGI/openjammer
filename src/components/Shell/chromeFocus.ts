@@ -5,8 +5,11 @@
  * is, and both are right: on the stage it switches surface (the keycap in the
  * topbar says so), and on a control it walks to the next control. The keymap
  * arbiter draws that line by looking at the event's target — `Tab` only reaches
- * `view.toggleArrangement` when the target is `document.body` or inside a
- * `[data-surface-root]`.
+ * `view.toggleArrangement` when the target is `document.body` or a
+ * `[data-surface-root]` element ITSELF. Focus inside a surface (a node, a port,
+ * a clip) walks natively like anything else; that is W6-UI's narrowing of
+ * W5-P6's F7, and it is why the surface root is the thing this file hands focus
+ * back to.
  *
  * That guard is only honest if a *click* does not silently park focus on a piece
  * of chrome. Click the play button, walk away, press `Tab` — without this the

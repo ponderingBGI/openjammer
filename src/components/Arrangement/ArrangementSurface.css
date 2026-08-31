@@ -176,8 +176,19 @@
  * Errors are a chip in the utility cluster, never a modal and never a banner
  * that shoves the ruler down (spec 8.3). Tinted TEXT only — a red fill up here
  * would be louder than the music.
+ *
+ * AND IT NEVER TAKES A ROW OF ITS OWN. `flex: 1 1 0` gives the chip a flex BASE
+ * of zero, so it can never be the item that pushes the cluster onto a second
+ * row — it takes whatever slack the controls leave and ellipsises inside it.
+ * The alternative, `flex: 0 1 auto`, sizes from content and wraps before it
+ * shrinks (wrapping is decided before shrinking), which is what put a 291px
+ * sentence on a row of its own: measured 57px of cluster in a 56px band from
+ * 1190 to ~1350 and 64px from ~1350 to ~1880, i.e. the full sentence only ever
+ * fitted on a 1885px-wide window. The 27px floor is the glyph plus its padding,
+ * so the warning can be squeezed but never vanish — a failure with no marker is
+ * worse than a failure with no sentence.
  */
-.arrangement-sky__alert { flex: 0 1 auto; min-width: 0; max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arrangement-sky__alert { position: relative; flex: 1 1 0; min-width: 27px; max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .arrangement-record-live { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
 
@@ -982,6 +993,50 @@ input.arrangement-section-chip { min-width: 60px; background: var(--bg-node); co
     .arrangement-sky__utility .oj-btn { height: 24px; min-height: 24px; padding: 0 8px; }
     .arrangement-sky__utility .arrangement-edit-mode { padding: 2px; }
     .arrangement-sky__utility .arrangement-edit-mode button { padding: 0 7px; }
+
+    /*
+     * THE ALERT LOSES ITS SENTENCE, NOT ITS MEANING (W4-TBb-REPORT §2b).
+     *
+     * A full-sentence chip is a row's worth of width, and a THIRD compacted row
+     * (24 + 3 + 24 + 3 + 24 = 78px) cannot fit a 56px band — measured 24.19px of
+     * overflow and 7 621px² of cluster ∩ ruler from 1030px down. No cap on the
+     * text fixes it (10ch still overflows below 840px) and growing the band is
+     * what spec 8.3 forbids, so the chip becomes the glyph.
+     *
+     * The label is CLIPPED, never `display: none`: this chip is its own
+     * `role="status"` live region, and a removed label is a failure a screen
+     * reader stops hearing. The sentence stays in the a11y tree and on `title`.
+     */
+    .arrangement-sky__alert { flex: 0 0 auto; max-width: none; padding: 4px 7px; }
+    .arrangement-sky__alert .oj-chip__label {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        padding: 0;
+        margin: -1px;
+        overflow: hidden;
+        clip: rect(0, 0, 0, 0);
+        white-space: nowrap;
+        border: 0;
+    }
+}
+
+/*
+ * AN ALERT COSTS THE ROW 33px, SO IT MOVES THE WRAP.
+ *
+ * The five controls start wrapping at ~1177px, which is why compaction is at
+ * 1180. Add the alert's 27px floor and its 6px gap and the same wrap happens at
+ * ~1245: measured two 30px rows (58.19px of cluster) in a 56px band, and
+ * 854px² of cluster ∩ ruler, from 1190 to 1240. Compacting everyone 65px early
+ * to pay for a chip that is usually not there would be the wrong trade, so the
+ * threshold moves only for the cluster that HAS one. `:has()` is the whole
+ * mechanism — no JS, no resize listener, no second layout path.
+ */
+@media (max-width: 1260px) {
+    .arrangement-sky__utility:has(.arrangement-sky__alert) { gap: 3px 4px; }
+    .arrangement-sky__utility:has(.arrangement-sky__alert) .oj-btn { height: 24px; min-height: 24px; padding: 0 8px; }
+    .arrangement-sky__utility:has(.arrangement-sky__alert) .arrangement-edit-mode { padding: 2px; }
+    .arrangement-sky__utility:has(.arrangement-sky__alert) .arrangement-edit-mode button { padding: 0 7px; }
 }
 
 /* The `Tab` hint is the first thing to go, and it goes on its own width. */

@@ -177,17 +177,6 @@ export function getTagColor(tagName: string): string {
   return `hsl(${hue}, 60%, 70%)`;
 }
 
-export function getTagColorDark(tagName: string): string {
-  // Hash string to number
-  let hash = 0;
-  for (let i = 0; i < tagName.length; i++) {
-    hash = tagName.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  // Convert to hue (0-360)
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 50%, 25%)`;
-}
-
 // ============================================================================
 // Store Interface
 // ============================================================================

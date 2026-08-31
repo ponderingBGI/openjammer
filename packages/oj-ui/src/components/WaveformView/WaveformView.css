@@ -1,9 +1,19 @@
 
+/*
+ * A CLIP EDGE IS A CONTENT BOUNDARY, NOT CHROME (DESIGN.md §2).
+ *
+ * `--border-subtle` is the hairline between two pieces of chrome; on this card
+ * it measured 1.31:1 light / 1.27:1 dark against the node ground it sits on,
+ * i.e. the boundary of the one object on screen that IS the audio was
+ * invisible. WCAG 1.4.11 puts a 3:1 floor under a non-text boundary that
+ * carries meaning, and the timeline already names the token for exactly this
+ * edge — the same clip, drawn in the arrangement (W5-P7-REVIEW claim 1).
+ */
 .oj-waveform-view {
     display: flex;
     flex-direction: column;
     background: var(--bg-node);
-    border: 1px solid var(--border-subtle);
+    border: 1px solid var(--timeline-clip-border);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-raised);
     overflow: hidden;

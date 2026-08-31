@@ -31,12 +31,20 @@
     overflow: hidden;
 }
 
-/* The fill: the only thing that moves with the sound. */
+/*
+ * The fill: the only thing that moves with the sound.
+ *
+ * `--success-ink`, not `--accent-success`. The lit bar is the READOUT — the
+ * meaning-carrying mark — so WCAG 1.4.11's 3:1 applies against the bed it is
+ * read out of (`--bg-tertiary`): the accent measured 2.61:1 in light
+ * (W5-P7-REVIEW claim 2). The ink is the same green at a readable lightness, so
+ * the three states still read as three: bed, lit, and the danger latch.
+ */
 .oj-meter__fill {
     position: absolute;
     inset: 0;
     border-radius: 2px;
-    background: var(--accent-success);
+    background: var(--success-ink);
     transform-origin: bottom;
     transform: scaleY(calc(var(--oj-meter-signal, 0) * var(--oj-meter-k, 1)));
     transition: transform 60ms linear, background-color var(--motion-fast);

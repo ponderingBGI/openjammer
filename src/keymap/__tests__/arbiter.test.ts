@@ -195,7 +195,13 @@ describe('keymap arbiter', () => {
         parent.remove();
     });
 
-    it('S4: bare Tab only toggles surfaces from the song surfaces themselves', () => {
+    /*
+     * W5-P6 F7 / W6-UI item 7. `Tab` used to reach the surface toggle from ANY
+     * descendant of a `[data-surface-root]`, so one Tab on a node port swapped
+     * the visible surface and hid the node under the performer's hands. The law
+     * now: the STAGE FLOOR toggles, a control walks.
+     */
+    it('S4: bare Tab toggles surfaces from the stage floor, and only from there', () => {
         const run = vi.fn(() => true);
         registerBindingSet({ id: 'global', scope: 'global', entries: [{ actionId: 'view.toggleArrangement', run }] });
 
@@ -205,6 +211,7 @@ describe('keymap arbiter', () => {
         pill.append(play);
         const surface = document.createElement('div');
         surface.dataset.surfaceRoot = 'arrangement';
+        surface.tabIndex = -1;
         const clip = document.createElement('button');
         surface.append(clip);
         document.body.append(pill, surface);
@@ -217,11 +224,54 @@ describe('keymap arbiter', () => {
         expect(resolveKeydown(key('Tab', { shiftKey: true }, play))).toBe(false);
         expect(run).not.toHaveBeenCalled();
 
-        // Inside a surface root — and on the bare body — Tab is the surface toggle.
-        expect(resolveKeydown(key('Tab', {}, clip))).toBe(true);
+        // The stage floor: the surface ROOT and the bare body toggle.
+        expect(resolveKeydown(key('Tab', {}, surface))).toBe(true);
         expect(resolveKeydown(key('Tab', {}, document.body))).toBe(true);
         expect(run).toHaveBeenCalledTimes(2);
+
+        // A control INSIDE the surface walks natively — this is the trap.
+        const fromClip = key('Tab', {}, clip);
+        expect(resolveKeydown(fromClip)).toBe(false);
+        expect(fromClip.defaultPrevented).toBe(false);
+        expect(run).toHaveBeenCalledTimes(2);
+
         pill.remove();
+        surface.remove();
+    });
+
+    /*
+     * Symmetry: the target rule does not look at the modifier, so Shift+Tab is
+     * native traversal from exactly the same places Tab is — and it is never the
+     * toggle, because `view.toggleArrangement` is bound to a BARE Tab. That is
+     * the keyboard-only route off a surface and into the chrome.
+     */
+    it('S4: Shift+Tab obeys the same target rule and never toggles', () => {
+        const run = vi.fn(() => true);
+        registerBindingSet({ id: 'global', scope: 'global', entries: [{ actionId: 'view.toggleArrangement', run }] });
+
+        const surface = document.createElement('div');
+        surface.dataset.surfaceRoot = 'canvas';
+        surface.tabIndex = -1;
+        const port = document.createElement('button');
+        const nested = document.createElement('div');
+        nested.className = 'oj-node';
+        nested.append(port);
+        surface.append(nested);
+        document.body.append(surface);
+
+        for (const target of [surface, document.body, port]) {
+            const event = key('Tab', { shiftKey: true }, target);
+            expect(resolveKeydown(event), 'Shift+Tab is never consumed').toBe(false);
+            expect(event.defaultPrevented).toBe(false);
+        }
+        expect(run).not.toHaveBeenCalled();
+
+        // ...and a port nested two levels deep is still not the stage floor.
+        const forward = key('Tab', {}, port);
+        expect(resolveKeydown(forward)).toBe(false);
+        expect(forward.defaultPrevented).toBe(false);
+        expect(run).not.toHaveBeenCalled();
+
         surface.remove();
     });
 

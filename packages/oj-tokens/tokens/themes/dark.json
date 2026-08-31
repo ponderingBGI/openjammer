@@ -48,6 +48,7 @@
     "shadowPressed": { "$value": "inset 0 2px 6px rgba(0,0,0,.5)" },
     "focusRing": { "$value": "0 0 0 3px color-mix(in oklab, var(--accent-primary) 35%, transparent)" },
     "accentInk": { "$value": "oklch(0.767 0.19 40)", "$type": "color" },
+    "accentTwoInk": { "$value": "oklch(0.88 0.068 300)", "$type": "color", "$description": "The readable ink of the SECOND accent (universalConnection), carried UP in lightness the way every dark-theme ink is. Worst composite 5.15:1 at velocity 0; L* ramp 21.4 across the 0.68..1.0 alpha. The 25 L* the light theme reaches is not reachable here at that alpha floor - a PURE WHITE ink over this lane spends only 25.5 - so this value sits at the top of what still reads as the violet second accent rather than as white." },
     "successInk": { "$value": "oklch(0.707 0.17 150)", "$type": "color" },
     "warningInk": { "$value": "oklch(0.78 0.15 80)", "$type": "color" },
     "dangerInk": { "$value": "oklch(0.785 0.21 25)", "$type": "color" },

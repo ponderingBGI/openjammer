@@ -589,7 +589,9 @@ Sizes are the primitive scale (`--text-*` in `packages/oj-tokens/tokens/primitiv
 | **Micro** | `--text-micro` 9.5px | JetBrains Mono 600, `--tracking-micro` .08em, uppercase | Socket labels, ruler marks, unit labels. |
 
 `Field` labels are the one 12px sans exception (600, uppercase, `.02em`) — they name a
-control rather than carrying information, and they are held to the same 4.5:1 bar.
+control rather than carrying information, and they are held to the same 4.5:1 bar. It is
+the ONLY one: a `Chip` carries information (a tag, a state, a count), so it sits on the
+13px floor with everything else — §5 used to say 12px and §3 forbade it, and §3 won.
 
 ### Named Rules
 
@@ -823,7 +825,10 @@ chrome.
   they cannot drift apart.
 - **Menu** (`.oj-menu`) — overlay surface, 12px radius, 6px padding; items 14px/500 at
   `8px 10px` with an 8px radius, hover and focus both `--bg-tertiary`. Shortcuts render as
-  `Kbd` keycaps; category headers are 10.5px/600 uppercase `--text-muted`; separators are a
+  `Kbd` keycaps; category headers are the **Micro voice** (`--text-micro` 9.5px JetBrains
+  Mono 600, `--tracking-micro`, uppercase, `--text-muted`) — they name a group rather than
+  carrying information, so they change FACE to stay quieter than the 14px items above them
+  instead of dropping below the 13px sans floor, which §3 forbids; separators are a
   1px `--border-subtle` line inset 8px. There is **one** menu vocabulary — the canvas
   context menu, the File/Edit/View menus and every dropdown are this component.
 - **Modal** (`.oj-modal`) — `--overlay-scrim` with a guarded 14px backdrop blur, an
@@ -833,7 +838,8 @@ chrome.
   tints **the title and the icon only** (via `--callout-accent` / `--banner-accent`, always
   an ink token); the body stays `--text-secondary`. **There is no left accent bar and no
   tinted body wash.**
-- **Chip** (`.oj-chip`) — a pill on the inset, 12px/600, tones recolouring the **text**
+- **Chip** (`.oj-chip`) — a pill on the inset, **13px/600** (`--text-sm`; the trailing
+  `count` slot stays 11px mono), tones recolouring the **text**
   only. **No dot inside a chip** — the component actively strips a `●`-style glyph or a
   nested `StatusDot`. Pressed lifts to `--bg-node` + `--shadow-raised`.
 - **StatusDot** — an 8px pill, borderless, ink-coloured by status. It stands alone next to

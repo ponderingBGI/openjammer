@@ -93,6 +93,7 @@
     --shadow-pressed: inset 0 2px 6px rgba(0,0,0,.28);
     --focus-ring: 0 0 0 3px color-mix(in oklab, var(--accent-primary) 28%, transparent);
     --accent-ink: oklch(0.504 0.19 40);
+    --accent-two-ink: oklch(0.3 0.16 300);
     --success-ink: oklch(0.459 0.17 150);
     --warning-ink: oklch(0.497 0.15 80);
     --danger-ink: oklch(0.491 0.21 25);

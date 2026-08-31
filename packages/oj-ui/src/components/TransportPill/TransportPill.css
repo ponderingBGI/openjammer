@@ -97,7 +97,7 @@
     position: absolute;
     inset: 0;
     border-radius: 50%;
-    border: 2px solid var(--accent-primary);
+    border: 1.5px solid var(--accent-primary);
     animation: oj-transport-attn 1.6s ease-out infinite;
     pointer-events: none;
 }
@@ -136,7 +136,7 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    border: 2px solid var(--accent-danger);
+    border: 1.5px solid var(--accent-danger);
     background: transparent;
     transition: background-color var(--motion-fast);
 }

@@ -190,6 +190,56 @@ describe('ruler height is one variable', () => {
         expect(TIMELINE_DOC).toContain('1180px');
     });
 
+    /*
+     * W6-UI item 8 / W4-TBb-REPORT §2b — THE ALERT SHEDS ITS SENTENCE ON THE
+     * SAME WIDTH.
+     *
+     * A full-sentence chip costs a row's worth of width, so with an alert
+     * present the cluster wanted a THIRD compacted row: 24 + 3 + 24 + 3 + 24 =
+     * 78px inside a 56px band. Measured 24.19px of overflow and 7 621px² of
+     * cluster ∩ ruler from 1030px down, and no cap on the text fixes it (even
+     * 10ch still overflows below 840px). Growing the band is what spec 8.3
+     * forbids. So below the SAME width the cluster compacts at, the chip becomes
+     * the warning glyph.
+     *
+     * On the pre-fix sheet there is no glyph rule and no label rule, and the
+     * chip carried no `title` at all, so the tail of a truncated message was
+     * unreadable at every width.
+     */
+    it('turns the alert chip into a glyph on the compaction width, without silencing it', () => {
+        const compaction = mediaBlock(SURFACE_CSS, 'max-width: 1180px');
+        expect(compaction, 'the 34ch cap is what forced the row; it goes with the text').toMatch(/\.arrangement-sky__alert\s*{[^}]*max-width:\s*none;/s);
+        expect(compaction, 'the glyph sizes itself once the sentence is out of flow').toMatch(/\.arrangement-sky__alert\s*{[^}]*flex:\s*0 0 auto;/s);
+
+        // The label is CLIPPED, never removed: the chip is its own `role=status`
+        // live region and a removed label is a failure nobody hears.
+        const label = /\.arrangement-sky__alert \.oj-chip__label\s*{([^}]*)}/s.exec(compaction)?.[1] ?? '';
+        expect(label, 'display:none would take the message out of the a11y tree').not.toMatch(/display:\s*none/);
+        expect(label).toMatch(/position:\s*absolute/);
+        expect(label).toMatch(/clip:\s*rect\(0, 0, 0, 0\)/);
+        expect(label).toMatch(/width:\s*1px/);
+
+        /*
+         * Wide, the sentence is the chip — but on a flex BASE OF ZERO, so it
+         * takes the slack the controls leave instead of wrapping onto a row of
+         * its own. `flex: 0 1 auto` (wrap is decided before shrink) is what put
+         * 57px of cluster in a 56px band from 1190px up, and 64px from ~1350:
+         * the full sentence only ever fitted on a 1885px window. The 27px floor
+         * is the glyph plus its padding — squeezed, never vanished.
+         */
+        expect(SURFACE_CSS).toMatch(/\.arrangement-sky__alert\s*{[^}]*flex:\s*1 1 0;/s);
+        expect(SURFACE_CSS).toMatch(/\.arrangement-sky__alert\s*{[^}]*min-width:\s*27px;/s);
+        expect(SURFACE_CSS).toMatch(/\.arrangement-sky__alert\s*{[^}]*max-width:\s*34ch;/s);
+
+        // ...and the full message is on `title` at EVERY width, because 34ch
+        // truncates even when the text is showing.
+        const skyBand = readFileSync(resolve(process.cwd(), 'src/components/Arrangement/SkyBand.tsx'), 'utf8');
+        expect(skyBand).toMatch(/title=\{children\}/);
+        expect(skyBand).toMatch(/glyph=\{<IconWarning/);
+        expect(skyBand, 'every alert goes through the one component').not.toMatch(/<Chip className="arrangement-sky__alert"/);
+        expect((skyBand.match(/<Alert tone=/g) ?? []).length, 'faults, transport and record all use it').toBe(3);
+    });
+
     it('keeps the JS virtualization constant equal to the CSS variable', () => {
         const cssHeight = Number(/--arrangement-ruler-height:\s*(\d+)px;/.exec(GESTURE_CSS)![1]);
         const jsHeight = Number(/const RULER_HEIGHT = (\d+);/.exec(SURFACE_TSX)![1]);

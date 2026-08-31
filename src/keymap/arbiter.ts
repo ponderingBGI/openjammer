@@ -7,12 +7,25 @@ import { getBindingSets } from './registry';
 import type { BindingSet } from './types';
 
 /**
- * S4: bare `Tab` / `Shift+Tab` is the canvas <-> arrangement toggle only when focus
- * is on a song surface itself — `document.body`, or anything inside a
- * `[data-surface-root]`. Focus parked in chrome (the floating transport pill, the
- * topbar, a panel, a focus-trapped dialog) keeps native DOM traversal, so a
- * performer can walk the pill button by button instead of being thrown to the other
- * surface on the first Tab.
+ * S4: bare `Tab` is the canvas <-> arrangement toggle only when focus is on the
+ * STAGE FLOOR — `document.body`, or a `[data-surface-root]` element ITSELF.
+ * Focus parked in chrome (the floating transport pill, the topbar, a panel, a
+ * focus-trapped dialog) keeps native DOM traversal, and so does focus parked on
+ * anything *inside* a surface: a node, a faceplate, a port, a clip.
+ *
+ * The `closest()` this replaces matched every descendant, which is what W5-P6's
+ * F7 measured: with focus on a node port, one `Tab` swapped the visible surface
+ * and hid the node the performer was working on, so no port, knob or pad on the
+ * canvas was reachable by keyboard at all. A surface that cannot be walked is
+ * not a surface. `matches()` keeps the law the topbar keycap advertises — press
+ * `Tab` on the empty stage and the other surface comes up — while inside a card
+ * `Tab` means what it means everywhere else: the next control.
+ *
+ * `Shift+Tab` obeys the same target rule (the guard below does not look at the
+ * modifier), but it never toggles: `view.toggleArrangement` is bound to a bare
+ * `Tab`, so a backwards Tab from the stage floor walks into the chrome. That
+ * asymmetry is deliberate — it is the keyboard-only route OUT of a surface, and
+ * the hidden peer is `inert`, so it can never be the thing Shift+Tab lands on.
  *
  * This is deliberately a POSITIVE test on the event target. `:focus-visible` cannot
  * carry the negative case: Chromium already raises it on the very keydown that is
@@ -22,7 +35,7 @@ function isSurfaceTabTarget(target: EventTarget | null): boolean {
     if (!(target instanceof Element)) return true;
     if (target === document.body) return true;
     if (isFocusableInOpenDialog(target)) return false;
-    return Boolean(target.closest('[data-surface-root]'));
+    return target.matches('[data-surface-root]');
 }
 
 function runSets(event: KeyboardEvent, sets: readonly BindingSet[], inheritedOnly = false): boolean {

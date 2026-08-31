@@ -48,6 +48,7 @@
     "shadowPressed": { "$value": "inset 0 2px 6px rgba(0,0,0,.28)" },
     "focusRing": { "$value": "0 0 0 3px color-mix(in oklab, var(--accent-primary) 28%, transparent)" },
     "accentInk": { "$value": "oklch(0.504 0.19 40)", "$type": "color" },
+    "accentTwoInk": { "$value": "oklch(0.3 0.16 300)", "$type": "color", "$description": "The readable ink of the SECOND accent (universalConnection). Unlike the other inks it is not sized for 4.5:1 text: its job is the piano-roll note, which is painted at a velocity ALPHA of 0.68..1.0, so it must clear 3:1 composited at 0.68 over the white-key row, the black-key row and every tinted clip ground (worst 5.58 here) and still spend >=25 L* across that alpha ramp (26.4). Same hue/at-gamut chroma as the accent, carried down in lightness." },
     "successInk": { "$value": "oklch(0.459 0.17 150)", "$type": "color" },
     "warningInk": { "$value": "oklch(0.497 0.15 80)", "$type": "color" },
     "dangerInk": { "$value": "oklch(0.491 0.21 25)", "$type": "color" },

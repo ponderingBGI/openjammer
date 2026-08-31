@@ -29,15 +29,25 @@ const contrast = (theme: ThemeFile, foreground: ColorKey, background: ColorKey) 
     return ratio(parse(value(theme, foreground), ground), ground);
 };
 /**
- * The two numbers the piano-roll note is built from, read from the code that
- * paints it rather than copied here — a gate that restates a constant can only
- * ever agree with itself.
+ * The piano-roll note is built from a TOKEN and an alpha ramp, and this gate
+ * reads both from the code that ships — a gate that restates a constant can
+ * only ever agree with itself.
+ *
+ * W4-TBb derived the ink inline
+ * (`color-mix(in oklab, var(--universal-connection) 60%, var(--text-primary))`)
+ * because no ink token for the second accent existed, and this gate parsed the
+ * 60 out of the stylesheet. `--accent-two-ink` is that token (W6-UI item 6), so
+ * the ink is now read from the theme files and the stylesheet is asserted to
+ * ADOPT it. The replacement is a coupling, not a copy: change either side and
+ * this file goes red.
  */
 const ROLL_CSS = readFileSync(resolve(process.cwd(), 'src/components/PianoRoll/PianoRoll.css'), 'utf8');
-const NOTE_INK_WEIGHT = Number(/--piano-roll-note-ink:\s*color-mix\(in oklab,\s*var\(--universal-connection\)\s*([\d.]+)%,\s*var\(--text-primary\)\)/.exec(ROLL_CSS)?.[1] ?? 'NaN') / 100;
+const NOTE_INK_ADOPTS_TOKEN = /--piano-roll-note-ink:\s*var\(--accent-two-ink\)\s*;/.test(ROLL_CSS);
 /** `.piano-roll__row.is-black` is the lane-alt tint at this alpha over the lane. */
 const BLACK_ROW_ALPHA = Number(/\.piano-roll__row\.is-black\s*{\s*background:\s*color-mix\(in oklab,\s*var\(--timeline-lane-alt-bg\)\s*([\d.]+)%/.exec(ROLL_CSS)?.[1] ?? 'NaN') / 100;
-const noteInk = (theme: ThemeFile) => mixOklab(value(theme, 'universalConnection'), value(theme, 'textPrimary'), NOTE_INK_WEIGHT);
+const noteInk = (theme: ThemeFile) => rgb(value(theme, 'accentTwoInk'));
+/** CIE L* — the perceptual lightness the velocity ramp is measured in. */
+const lstar = (color: RGB) => new Color('srgb', color.map((channel) => channel / 255) as RGB).to('lab').coords[0]!;
 
 /**
  * The ground an inline note is ACTUALLY painted on, read from the two files
@@ -140,6 +150,24 @@ describe.each([['light', light], ['dark', dark]] as const)('%s arrangement contr
     });
 
     /*
+     * AND THE RAMP HAS TO BE WORTH READING. 3:1 at the softest velocity is the
+     * floor; a ramp a player can SEE is the reason velocity is carried in alpha
+     * at all. W4-TBb's stand-in ink spent 20.5 L* in light and 19.1 in dark
+     * (down from 27.8 before the alpha floor was lifted) — a third of the
+     * dynamics gone. Measured as CIE L* between the softest and the loudest note
+     * as PAINTED on the white-key row.
+     *
+     * The two themes carry different numbers because the physics differs, not
+     * because dark was let off — see the ceiling gate below, which proves it.
+     */
+    it('spends enough lightness across the velocity ramp to read as dynamics', () => {
+        const ground = rgb(value(theme, 'timelineLaneBg'));
+        const softest = lstar(blend(noteInk(theme), ground, velocityOpacity(0)));
+        const loudest = lstar(blend(noteInk(theme), ground, velocityOpacity(127)));
+        expect(Math.abs(loudest - softest)).toBeGreaterThanOrEqual(_name === 'light' ? 25 : 20.5);
+    });
+
+    /*
      * NOT a floor gate, on purpose. `--acc` and `--acc2` are near-isoluminant by
      * design (both oklch L .66 light / .72 dark), so an accent ring on a note
      * fill has never reached 3:1 — it measured 1.00 light / 1.01 dark at
@@ -191,12 +219,22 @@ describe.each([['light', light], ['dark', dark]] as const)('%s arrangement contr
     );
 });
 
-describe('the note ink is derived from the shipped CSS', () => {
-    it('parses both constants out of PianoRoll.css', () => {
-        expect(NOTE_INK_WEIGHT).toBeGreaterThan(0);
-        expect(NOTE_INK_WEIGHT).toBeLessThanOrEqual(1);
+describe('the note ink is a token the shipped CSS adopts', () => {
+    it('reads --accent-two-ink out of PianoRoll.css, and the black row out of the same file', () => {
+        expect(NOTE_INK_ADOPTS_TOKEN, 'PianoRoll.css must set --piano-roll-note-ink to var(--accent-two-ink)').toBe(true);
+        expect(ROLL_CSS.match(/--piano-roll-note-ink:/g), 'the ink is declared once and the stand-in derivation is gone, not shadowed').toHaveLength(1);
         expect(BLACK_ROW_ALPHA).toBeGreaterThan(0);
         expect(BLACK_ROW_ALPHA).toBeLessThanOrEqual(1);
+    });
+
+    /*
+     * NO UNUSED TOKEN SHIPS (covenant #8). `--accent-two-ink` exists for exactly
+     * one mark today; if the roll ever stops adopting it, the token goes with
+     * it, and this is the line that says so.
+     */
+    it('is declared in both themes and used by the one thing that needs it', () => {
+        for (const theme of [light, dark] as ThemeFile[]) expect(value(theme, 'accentTwoInk')).toMatch(/^oklch\(/);
+        expect(ROLL_CSS).toContain('var(--accent-two-ink)');
     });
 
     /*
@@ -228,6 +266,50 @@ describe('the note ink is derived from the shipped CSS', () => {
                 expect(tinted.some((channel, index) => Math.abs(channel - lane[index]!) > 1)).toBe(true);
             }
         }
+    });
+});
+
+/*
+ * WHY DARK CARRIES A 20.5 L* FLOOR AND LIGHT CARRIES 25.
+ *
+ * `velocityOpacity` starts at 0.68, so softest and loudest differ by 32% of one
+ * alpha — and over the dark lane (#201F19, L* 12.6) the whole range is worth
+ * only 25.5 L* even to a PURE WHITE ink. Nothing that is still the violet
+ * second accent gets there: the gate below SWEEPS every in-gamut
+ * `oklch(L C 300)` with enough chroma to read as a hue and takes the best one.
+ * Light has no such ceiling — a black ink spends 34.7 L* over paper — which is
+ * why it holds the 25 the spec asks for and dark holds 20.5.
+ *
+ * These two gates are the PROOF, not the excuse. They recompute the ceiling
+ * from the ramp the app actually ships, so if the alpha floor is ever lowered —
+ * the real fix, and affordable now that the ink clears 3:1 with room to spare —
+ * the ceiling rises past 25, the first gate goes red, and that is exactly the
+ * moment dark should be held to the light number.
+ */
+describe('the dark velocity ramp sits at its ceiling, not merely below the target', () => {
+    const spread = (theme: ThemeFile, ink: RGB) => {
+        const ground = rgb(value(theme, 'timelineLaneBg'));
+        return Math.abs(lstar(blend(ink, ground, velocityOpacity(127))) - lstar(blend(ink, ground, velocityOpacity(0))));
+    };
+    /** The best ramp any in-gamut ink at the second accent's hue can buy. */
+    const violetCeiling = (() => {
+        let best = 0;
+        for (let L = 0.05; L <= 0.99; L += 0.01) {
+            for (let C = 0.05; C <= 0.3; C += 0.01) {
+                const candidate = new Color(`oklch(${L.toFixed(2)} ${C.toFixed(2)} 300)`);
+                if (!candidate.inGamut('srgb')) continue;
+                best = Math.max(best, spread(dark as ThemeFile, rgb(candidate)));
+            }
+        }
+        return best;
+    })();
+
+    it('cannot reach 25 L* in dark at this alpha floor with any ink that is still violet', () => {
+        expect(violetCeiling, 'if this clears 25 the alpha floor moved and dark should hold the light number').toBeLessThan(25);
+    });
+
+    it('spends at least 90% of that ceiling', () => {
+        expect(spread(dark as ThemeFile, noteInk(dark as ThemeFile)) / violetCeiling).toBeGreaterThanOrEqual(0.9);
     });
 });
 

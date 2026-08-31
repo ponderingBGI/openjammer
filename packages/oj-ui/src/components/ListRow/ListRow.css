@@ -40,15 +40,22 @@
     outline-offset: 1px;
 }
 
+/* The dot keeps the 8px it has always stood at: 4px of margin plus the body's
+   4px gap in a flex body, and the full 8px in a plain-text one (below). */
 .oj-list-row.is-current .oj-list-row__body::before {
     content: '';
     display: inline-block;
+    flex: none;
     width: 6px;
     height: 6px;
-    margin-right: var(--space-sm);
+    margin-right: var(--space-xs);
     border-radius: var(--radius-pill);
     background: var(--accent-ink);
     vertical-align: middle;
+}
+
+.oj-list-row.is-current .oj-list-row__body:not(:has(*))::before {
+    margin-right: var(--space-sm);
 }
 
 .oj-list-row.is-disabled {
@@ -57,8 +64,47 @@
     pointer-events: none;
 }
 
-/* The text/content column — flexes to fill, truncates gracefully. */
+/*
+ * THE TEXT/CONTENT COLUMN — and it is a ROW, declared once, here.
+ *
+ * The body used to declare only `flex: 1; min-width: 0`. As a flex item of the
+ * row it was blockified, so anything a consumer put inside it stayed INLINE: an
+ * empty `<span>` sized in px painted nothing (the Library's 8px tag dot
+ * measured 0×0 on screen — W5-P7b F2) and a sibling's ellipsis never fired.
+ * Six consumers had each re-declared the same three lines to work around it
+ * (`.ah-row`, `.collab-peer`, `.devlog-row`, `.plugin-browser__quarantine-row`,
+ * `.looper-layer`, `.library-file-row`). That is the symptom; this is the cause.
+ * Consumers keep overriding `gap` (or swapping in a grid) — those rules are more
+ * specific and still win.
+ */
 .oj-list-row__body {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    flex: 1;
+    min-width: 0;
+}
+
+/*
+ * ...except when the body IS the text. `text-overflow: ellipsis` applies to
+ * block containers only, so turning a plain-text body into a flex box would
+ * silently trade a consumer's ellipsis for a hard clip (the command bar's
+ * rewind list is exactly that shape). A body with no element children needs no
+ * row, so it keeps the block box it has always computed to.
+ */
+.oj-list-row__body:not(:has(*)) {
+    display: block;
+}
+
+/*
+ * The commonest shape in the app is ONE wrapper element inside the body
+ * (`.relink-sample-info`, `.plugin-browser__identity`, `.command-bar-model-main`).
+ * As a block box it filled the body; as a flex item it would shrink to its
+ * content and take its `min-width: 0` truncation with it. Restore the fill, and
+ * only for the case where nothing else is competing for the room — a body with
+ * siblings keeps whatever `flex` its own stylesheet gives them.
+ */
+.oj-list-row__body > :only-child {
     flex: 1;
     min-width: 0;
 }

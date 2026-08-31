@@ -8,7 +8,15 @@
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-pill);
     font-family: var(--font-sans);
-    font-size: 12px;
+    /*
+     * THE 13px FLOOR (DESIGN.md §3). A chip carries INFORMATION — a tag, a
+     * state, a count — so it is functional sans text and the floor applies; the
+     * one 12px sans exception is the `Field` label, which only NAMES a control.
+     * The 12px literal here was the last place §5 and §3 disagreed
+     * (W5-P7-REVIEW claim 3); §5 now agrees with the scale. The `count` slot
+     * below stays mono at `--text-xs`, which the floor exempts by construction.
+     */
+    font-size: var(--text-sm);
     font-weight: 600;
     line-height: 1;
     background: var(--bg-tertiary);

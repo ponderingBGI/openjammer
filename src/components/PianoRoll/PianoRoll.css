@@ -14,23 +14,24 @@
 .piano-roll {
     --piano-roll-toolbar-height: 40px;
     /*
-     * THE NOTE INK — `--acc2`, carried far enough toward the page's own ink to
-     * clear 3:1 at the QUIETEST velocity, not just the loudest.
+     * THE NOTE INK — the readable ink of `--acc2`, now a NAMED TOKEN.
      *
      * `--universal-connection` at full opacity is 3.35:1 on a white-key row and
      * 3.20:1 on a black-key one, so once velocity thins it there is no alpha
-     * floor that can rescue it (W4-TB-REVIEW M4). Mixing 60% of it into
-     * `--text-primary` keeps the hue — it is unmistakably the same violet — and
-     * carries the softest note to 3.2:1 light / 4.8:1 dark, measured composited.
+     * floor that can rescue it (W4-TB-REVIEW M4). W4-TBb shipped
+     * `color-mix(in oklab, var(--universal-connection) 60%, var(--text-primary))`
+     * as a stand-in and said so: it coupled the second accent to the BODY-TEXT
+     * colour, so a typography decision moved note colour, and it left light at
+     * 3.0006:1 — four ten-thousandths of headroom — with a 19.1 L* velocity ramp
+     * in dark.
      *
-     * It is derived rather than named because there is no `--accent-two-ink`
-     * token yet (the surface borrows `--universal-connection`, a PORT name, for
-     * its second accent — see W4-TB-REPORT §2.1). `--text-primary` flips with
-     * the theme, so this one expression darkens in light and lightens in dark,
-     * which is exactly what an ink token would do. When `--accent-two-ink`
-     * lands, this line is the only thing that has to change.
+     * `--accent-two-ink` (W6-UI item 6) is that ink named and re-derived against
+     * the grounds the note is actually painted on: worst composite 5.58 light /
+     * 5.15 dark at velocity 0 over the white-key row, the black-key row and all
+     * five tinted clip grounds, with a 26.4 / 21.4 L* ramp. `contrast.test.ts`
+     * reads the token, not this line, so the two can never drift.
      */
-    --piano-roll-note-ink: color-mix(in oklab, var(--universal-connection) 60%, var(--text-primary));
+    --piano-roll-note-ink: var(--accent-two-ink);
     position: relative;
     /*
      * THE ROLL OWNS ITS OWN Z-LADDER (W4-TBb F1).

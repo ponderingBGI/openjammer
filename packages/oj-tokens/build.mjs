@@ -10,6 +10,14 @@
  *                              colors applyTheme would otherwise inject at runtime.
  *                              Emitting it here keeps `bun run tokens` the single
  *                              source for every token artifact (no manual step → no drift).
+ *   public/download/oj-tokens.css        BOTH themes as a static sheet, gated by
+ *   apps/docs/src/styles/oj-tokens.css   `prefers-color-scheme` AND `[data-theme]`.
+ *                              The two web surfaces have no React and therefore no
+ *                              applyTheme(); they used to be transcribed by a
+ *                              hand-run scratch script, which is a second copy of
+ *                              the palette. One renderer now, in `staticSheet.mjs`,
+ *                              called from here and asserted byte-for-byte by
+ *                              `src/components/__tests__/webSurfaceTokens.test.ts`.
  *
  * Run via the repo root: `bun run tokens`. Output is deterministic (no
  * timestamps), so CI can drift-guard it with `git diff --exit-code`.
@@ -23,6 +31,7 @@ import StyleDictionary from 'style-dictionary';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { renderStaticTokenSheet, STATIC_TOKEN_SHEETS } from './staticSheet.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const r = (...p) => join(__dirname, ...p);
@@ -134,6 +143,19 @@ const ojTokensCss =
     lightRoot;
 await fs.writeFile(r('../oj-ui/oj-tokens.css'), ojTokensCss, 'utf8');
 
+// 4) The two static web surfaces -> their own two-theme sheets ---------------
+// They have no applyTheme(), so they carry the whole palette twice over, once
+// per selection mechanism. One renderer, imported by the drift test as well.
+const primitives = css.trimStart().trimEnd();
+for (const { path, surface } of STATIC_TOKEN_SHEETS) {
+    await fs.writeFile(
+        r('../..', path),
+        renderStaticTokenSheet(surface, primitives, themeColors.light, themeColors.dark),
+        'utf8',
+    );
+}
+
 console.log(
-    `oj-tokens: built dist/variables.css, src/generated/themes.ts, oj-ui/oj-tokens.css (${THEMES.length} themes)`,
+    `oj-tokens: built dist/variables.css, src/generated/themes.ts, oj-ui/oj-tokens.css` +
+        ` and ${STATIC_TOKEN_SHEETS.length} static web-surface sheets (${THEMES.length} themes)`,
 );
