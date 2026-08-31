@@ -20,7 +20,7 @@
 
 import { create } from 'zustand';
 import { getExecutor } from '../audio/executor';
-import { useArrangementStore } from './arrangementStore';
+import { stopReturnsToOrigin, useArrangementStore } from './arrangementStore';
 
 // ============================================================================
 // Store Interface
@@ -56,7 +56,12 @@ export const useTransportStore = create<TransportStore>((set, get) => ({
         // including the canvas, because a rig with a Song in it is a song.
         const arrangement = useArrangementStore.getState();
         if (arrangement.arrangement) {
-            if (arrangement.isPlaying) arrangement.stop();
+            // Spec §7 is a THREE-state grammar, not a toggle: rolling → Stop;
+            // stopped away from where playback started → the second Stop, which
+            // returns the playhead there; otherwise → Play. Asking only
+            // `isPlaying` is what made "stop twice and you are back where you
+            // started" unreachable from every shipped control.
+            if (arrangement.isPlaying || stopReturnsToOrigin(arrangement)) arrangement.stop();
             else arrangement.play();
             return;
         }

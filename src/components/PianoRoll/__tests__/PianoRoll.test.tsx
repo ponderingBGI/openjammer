@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { eraseNotes } from '../../../song/ops';
 import { buildPaperSketch } from '../../../song/songs/paperSketch';
 import { useArrangementStore } from '../../../store/arrangementStore';
 import { useEditingContextStore } from '../../../store/editingContextStore';
@@ -200,5 +201,110 @@ describe('PianoRoll pointer gesture lifetime', () => {
         expect(close).not.toHaveBeenCalled();
         act(() => { resolveKeydown(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
         expect(close).toHaveBeenCalledOnce();
+    });
+});
+
+/**
+ * BC-30 — "an exact time+pitch duplicate is never minted" — and the other half of
+ * the law, which is that a refusal has to SAY so.
+ *
+ * The guard was always right and always silent: a deliberate double-click that
+ * produces nothing and explains nothing reads as a broken editor, while the
+ * branch immediately above it ("The note would extend beyond this clip.") has
+ * always spoken.
+ *
+ * The cell is taken from a note the fixture already has, by inverting the roll's
+ * own geometry off that note's inline style — `left` is `(tick - leftTick) *
+ * pxPerTick` and `top` is `(range.hi - pitch) * rowHeight`, and jsdom reports a
+ * zero-origin field — so the aim is the note's own tick and pitch by
+ * construction, not by pixel luck. The event goes to the FIELD, because a
+ * double-click that lands ON a note opens the full surface instead.
+ */
+describe('PianoRoll — BC-30 refuses a duplicate, and says so', () => {
+    let trackId: string;
+    let clipId: string;
+
+    beforeEach(() => {
+        useArrangementStore.getState().setArrangement(buildPaperSketch());
+        useHistoryStore.getState().clear();
+        const arrangement = useArrangementStore.getState().arrangement!;
+        const track = arrangement.tracks.find((item) => item.clips.some((clip) => arrangement.sources?.[clip.sourceId]?.kind === 'midi'))!;
+        trackId = track.id!;
+        clipId = track.clips.find((item) => arrangement.sources?.[item.sourceId]?.kind === 'midi')!.id!;
+    });
+
+    const renderRoll = () => render(<PianoRollLane trackId={trackId} clipId={clipId} pxPerTick={0.1} />);
+    const noteCount = () => {
+        const arrangement = useArrangementStore.getState().arrangement!;
+        const clip = arrangement.tracks.find((track) => track.id === trackId)!.clips.find((item) => item.id === clipId)!;
+        const source = arrangement.sources![clip.sourceId]!;
+        if (source.kind !== 'midi') throw new Error('fixture must contain MIDI');
+        return source.notes.length;
+    };
+    /** The centre of a cell an existing note already occupies. */
+    const occupiedCell = (container: HTMLElement) => {
+        const note = container.querySelector<HTMLElement>('.piano-roll-note[data-note-id]');
+        expect(note, 'the fixture must render at least one note').not.toBeNull();
+        const left = Number.parseFloat(note!.style.left);
+        const top = Number.parseFloat(note!.style.top);
+        const height = Number.parseFloat(note!.style.height) || 6;
+        return { bubbles: true, clientX: left, clientY: top + height / 2 };
+    };
+
+    it('drawing on an occupied cell mints nothing, records nothing, and says why', () => {
+        const { container } = renderRoll();
+        const field = container.querySelector('.piano-roll__field')!;
+        const cell = occupiedCell(container);
+        const before = noteCount();
+        expect(container.querySelector('.piano-roll__rejection'), 'nothing is being reported yet').toBeNull();
+
+        act(() => { fireEvent.dblClick(field, cell); });
+
+        expect(useHistoryStore.getState().cursor, 'a refused draw is not an edit').toBe(0);
+        expect(noteCount(), 'and mints nothing').toBe(before);
+        expect(container.querySelector('.piano-roll__rejection')?.textContent).toBe('That note is already there.');
+    });
+
+    it('reports without stealing focus, and clears itself', () => {
+        vi.useFakeTimers();
+        const { container } = renderRoll();
+        const field = container.querySelector('.piano-roll__field')!;
+        const focusBefore = document.activeElement;
+
+        act(() => { fireEvent.dblClick(field, occupiedCell(container)); });
+
+        const status = container.querySelector('.piano-roll__rejection')!;
+        expect(status, 'the refusal is reported').not.toBeNull();
+        expect(status.getAttribute('role'), 'a live region, never a dialog').toBe('status');
+        expect(container.querySelector('[role="dialog"]'), 'no modal mid-set').toBeNull();
+        expect(document.activeElement, 'nothing takes focus off the roll').toBe(focusBefore);
+
+        act(() => { vi.advanceTimersByTime(1200); });
+        expect(container.querySelector('.piano-roll__rejection'), 'the chip is transient').toBeNull();
+    });
+
+    it('erase the occupant and the identical cell draws — the guard is about duplicates only', () => {
+        vi.useFakeTimers();
+        const { container } = renderRoll();
+        const field = container.querySelector('.piano-roll__field')!;
+        const cell = occupiedCell(container);
+        const occupant = container.querySelector<HTMLElement>('.piano-roll-note[data-note-id]')!.dataset.noteId!;
+
+        act(() => { fireEvent.dblClick(field, cell); });
+        expect(useHistoryStore.getState().cursor, 'refused: no edit').toBe(0);
+        act(() => { vi.advanceTimersByTime(1200); });
+
+        // Take the occupant away through the shared op, so the cell is provably
+        // free rather than hopefully free.
+        act(() => {
+            const arrangement = useArrangementStore.getState().arrangement!;
+            useArrangementStore.getState().apply(eraseNotes(arrangement, { noteIds: [occupant] }).verbs);
+        });
+        const afterErase = noteCount();
+
+        act(() => { fireEvent.dblClick(field, cell); });
+
+        expect(noteCount(), 'the same cell now draws').toBe(afterErase + 1);
+        expect(container.querySelector('.piano-roll__rejection'), 'a successful draw says nothing').toBeNull();
     });
 });

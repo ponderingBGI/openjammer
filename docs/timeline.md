@@ -19,6 +19,20 @@ shortcuts follow the active surface. An empty Song names every way in: the compa
 track), **Draw a clip** (adds a track and arms the Draw tool), and a ghost link for a bare
 empty track.
 
+**`E` in, `Q` out — in every mode, with the note row as the fall-through.** On the canvas
+those two keys collide with the computer-keyboard note row (`q w e r t y u i o p` is row 1),
+and installing a rig selects that rig's keyboard mode so typing plays it straight away. Every
+preset that carries a Song carries a keyboard, so for a first-run player the two conditions
+always coincided and `E` over a selected Song node was a note: the level grammar was dead in
+exactly the songs that had somewhere to go. `canvas.enterNode` and `canvas.exitLevel` are now
+registered **before** the note row and **consume their key only when they change level** —
+`E` when exactly one selected node can be entered (a Song opens the arrangement), `Q` when you
+are inside a node. Nothing selected, nothing enterable, already at the root: the key falls
+through and plays its note, which is how a jam looks. The alternative — scoping the note row
+to a focused keyboard node — was rejected because the row is played while looking at the whole
+canvas with nothing focused; that would have cost real playing to buy one key. In config mode
+(mode 1) both keys still always belong to the canvas, since there is no note behind them.
+
 **The surface, top to bottom.** A 56px **sky band** carries the song's name and the `Tab`
 keycap on the left, the surface's own utilities on the right — edit mode (Slide / Ripple),
 punch, mixer, export, timeline zoom — and reserves its middle for the ONE floating
@@ -114,7 +128,21 @@ addressable graph or mixer parameters.
 wasm `OjGraph`, normalized `TempoMap`, and immutable sample-addressed `Timeline` used by
 preview and offline bounce. Backend remapping changes engine manifest ids, not musical
 time. Playback publishes those documents to the active executor; the transport freezes
-honestly on stop and auto-stops after the authored release tail. Loop range is absent
+honestly on stop and auto-stops after the authored release tail.
+
+**The transport gesture is three states, not a toggle.** One gesture — `Space`, or the
+pill's button — and what it means depends on where the transport is. Rolling: **Stop**, and
+the playhead freezes exactly where it is. Stopped *away from the tick playback last started
+at*: the **second Stop**, which returns the playhead there; the button says so, showing a
+solid rewind mark and the name "Return to where playback started" rather than a play triangle
+that would not play. Anywhere else: **Play**. So stop-stop rewinds and a further press plays
+from the origin it just returned to, and there is no "return on stop" preference to find.
+`stopReturnsToOrigin()` in `arrangementStore` is the one predicate all four callers read —
+`transportStore.toggleGlobalPause` (the pill and canvas `Space`), `arrangement.transport`,
+`pianoroll.transport`, and the pill's glyph — so the key and the button can never disagree
+about what the next press does. The arm is cleared by anything that re-aims the transport
+(`play`, `seek`, `record`) and by the honest end-of-song halt, because a rewind nobody asked
+for is a musical accident. Loop range is absent
 unless the document contains a `loop` location. Enabling Loop without such a range does
 not create an implicit whole-song loop: playback still stops at the authored end.
 
@@ -155,6 +183,29 @@ gesture. Preview writes share one animation frame. The dominant axis freezes aft
 4 px threshold (scaled 1.75 for coarse pointers), copy-drag is **Alt** held during the drag
 and requires 12 px horizontally, and edge auto-scroll stops after 400 ms when the pointer
 stops moving. Ctrl/Cmd during a drag inverts snap; it does not copy.
+
+**Who owns a finger.** The field is one `overflow: auto` scroller, and a scroller claims
+every touch that crosses its slop unless a descendant says otherwise — so until the
+declarations existed the whole timeline was pointer-only in practice: a touch drag on a clip
+went `pointerdown` → `pointercancel`, the gesture correctly restored the pre-gesture
+document, and the clip never moved. Everything the hand **grabs** is `touch-action: none` —
+the clip (and therefore its trim, fade and slip zones, which are descendants), the ruler
+stack with its section chips and braces, the lane-height and header-width dividers, the track
+reorder grip, automation points, mixer faders and pan scrubbers, and the piano roll's note
+field, key bed, velocity lane and scroomer. The scroll container itself is `pan-x pan-y`, and
+`.arrangement-lane` is deliberately left alone: empty lane ground is how a finger pans the
+field, and a surface that cannot be scrolled by touch is worse than a time range that cannot
+be drawn by one. Measured: a finger moves a clip and `scrollLeft`/`scrollTop` do not change;
+a finger on bare lane ground scrolls the field and no range is written.
+
+**An editor open in a lane owns its own pointers.** The inline piano roll renders *inside*
+`.arrangement-lane`, in place of the clips, so the lane's empty-ground gesture excludes the
+roll exactly as it already excluded `.arrangement-clip`. Without that, every press on a note
+also started the arrangement's range-select: the roll wrote `noteIds` first and the lane
+overwrote the surface selection last, so — since every roll keyboard action begins
+`if (!selectedNoteIds.length) return` — transpose, velocity, nudge, duplicate and delete all
+went dead the moment a pointer touched a note, while the full-surface roll kept working. The
+inline lane and the surface are the same component and never get a second interaction model.
 
 Magnetic snap uses a 12 px grid radius and an 18 px radius for meaningful anchors; anchors
 win equal-distance ties. It is disabled below 3 px per grid unit. Ctrl/Cmd held during

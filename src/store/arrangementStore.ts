@@ -228,6 +228,17 @@ export interface ArrangementStore {
     lastQueuedEditResult: QueuedEditResult | null;
     pendingSeekSample: number | null;
     playOriginTick: number;
+    /**
+     * Spec §7: the transport has just been stopped by the PLAYER, so the next
+     * Stop is the second one — the one that returns the playhead to
+     * `playOriginTick`. It is store state rather than a private flag because the
+     * callers of the transport gesture (the pill, Space on either DAW surface)
+     * have to ask "is this press a Stop?" before they ask "is it playing?", and
+     * the pill has to SAY so on its button. Cleared by `play`, `seek`, `record`
+     * and the honest end-of-song halt — a rewind you did not ask for is a
+     * musical accident.
+     */
+    returnToOriginArmed: boolean;
     loopOn: boolean;
     loopEnabled: boolean;
     armedTrackIds: string[];
@@ -315,7 +326,6 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
     let gestureIds: number[] = [];
     let gestureFrames: Array<{ committed: Verb[]; preview: Verb[] }> = [];
     let gestureWatchdog: ReturnType<typeof setTimeout> | null = null;
-    let returnToOriginArmed = false;
     let queuedEditId = 0;
     let queuedApplies: Array<{ verbs: Verb[]; surface: 'arrangement' | 'pianoroll'; result: QueuedEditResult; undoRequested: boolean }> = [];
 
@@ -433,6 +443,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
         lastQueuedEditResult: null,
         pendingSeekSample: null,
         playOriginTick: 0,
+        returnToOriginArmed: false,
         loopOn: false,
         loopEnabled: false,
         armedTrackIds: [],
@@ -460,7 +471,6 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             gestureFrames = [];
             clearGestureWatchdog();
             queuedApplies = [];
-            returnToOriginArmed = false;
             idCounter = normalized ? seedCounter(normalized) : 1;
             documentGeneration += 1;
             recordSessionGeneration += 1;
@@ -486,6 +496,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 lastQueuedEditResult: null,
                 pendingSeekSample: null,
                 playOriginTick: 0,
+                returnToOriginArmed: false,
                 loopOn: false,
                 loopEnabled: false,
                 armedTrackIds: [],
@@ -691,7 +702,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             const origin = state.transportPending === 'seek' && state.pendingSeekSample !== null
                 ? sampleToTick(buildTempoMap(arr), state.pendingSeekSample)
                 : state.playheadTick;
-            returnToOriginArmed = false;
+            set({ returnToOriginArmed: false });
             try {
                 startPreview(arr, origin, () => get().haltAtEnd());
                 const generation = ++transportGeneration;
@@ -707,9 +718,9 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
 
         stop: () => {
             if (!get().isPlaying) {
-                if (returnToOriginArmed && get().playheadTick !== get().playOriginTick) {
+                if (get().returnToOriginArmed && get().playheadTick !== get().playOriginTick) {
                     const origin = get().playOriginTick;
-                    returnToOriginArmed = false;
+                    set({ returnToOriginArmed: false });
                     get().seek(origin);
                 }
                 return;
@@ -719,8 +730,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 return;
             }
             const generation = ++transportGeneration;
-            set({ isPlaying: false, transportPending: 'stop', transportError: null, pendingSeekSample: null });
-            returnToOriginArmed = true;
+            set({ isPlaying: false, transportPending: 'stop', transportError: null, pendingSeekSample: null, returnToOriginArmed: true });
             stopPreview();
             armPendingTransportTimeout(generation);
         },
@@ -728,8 +738,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
         haltAtEnd: () => {
             if (!get().isPlaying) return;
             const generation = ++transportGeneration;
-            set({ isPlaying: false, transportPending: 'stop', transportError: null, pendingSeekSample: null });
-            returnToOriginArmed = false;
+            set({ isPlaying: false, transportPending: 'stop', transportError: null, pendingSeekSample: null, returnToOriginArmed: false });
             stopPreview();
             armPendingTransportTimeout(generation);
         },
@@ -742,8 +751,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             const map = buildTempoMap(arr);
             const samples = tickToSample(map, clamped);
             const generation = ++transportGeneration;
-            returnToOriginArmed = false;
-            set({ playOriginTick: clamped, transportPending: 'seek', transportError: null, pendingSeekSample: samples });
+            set({ playOriginTick: clamped, transportPending: 'seek', transportError: null, pendingSeekSample: samples, returnToOriginArmed: false });
             try {
                 ensureTransportSubscription();
                 getExecutor().seekArrangement(samples);
@@ -824,7 +832,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             }
             recordSessionGeneration += 1;
             const generation = ++transportGeneration;
-            set({ isPlaying: true, isRecording: true, playOriginTick: startTick, recordStartTick: startTick, ghostNotes: [], recordError: null, transportError: null, transportPending: 'play' });
+            set({ isPlaying: true, isRecording: true, playOriginTick: startTick, recordStartTick: startTick, ghostNotes: [], recordError: null, transportError: null, transportPending: 'play', returnToOriginArmed: false });
             armPendingTransportTimeout(generation);
             set({ recordingBindings: activeRecordBindings });
             beginMidiRecordJournal(startTick, activeRecordBindings);
@@ -883,6 +891,29 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
         },
     };
 });
+
+/**
+ * Spec §7 — is the next press of the ONE transport gesture a Stop, rather than a Play?
+ *
+ * "Stop … the playhead freezes where it is (honest). A second Stop returns it to
+ * the tick where playback last started." `stop()` has always carried all of that;
+ * what was missing was a caller willing to ask this question. Every caller used to
+ * ask only `isPlaying`, so the second press played and §7's sentence was
+ * unreachable from the product (W6-E2E finding F1).
+ *
+ * The predicate is deliberately exported rather than folded into `stop()`: it is
+ * also what the transport pill READS, so the button can say "Return to where
+ * playback started" instead of showing a play triangle that would not play. One
+ * question, one answer, three callers and one glyph — the key and the button can
+ * never disagree about what the next press does.
+ *
+ * It is false the moment anything has re-aimed the transport (`play`, `seek`,
+ * `record`) or the song simply ended (`haltAtEnd`): a rewind nobody asked for is
+ * a musical accident.
+ */
+export function stopReturnsToOrigin(state: ArrangementStore = useArrangementStore.getState()): boolean {
+    return Boolean(state.arrangement) && !state.isPlaying && state.returnToOriginArmed && state.playheadTick !== state.playOriginTick;
+}
 
 registerHistoryDriver((verbs) => {
     // Apply in the order recorded. A `document` snapshot replaces the whole

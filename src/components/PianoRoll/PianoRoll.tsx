@@ -6,7 +6,7 @@ import { InstrumentLoader } from '../../audio/instrumentCatalog';
 import { gridTicks, snapTimeline, type GridUnit } from '../../store/editingContextStore';
 import { useEditingContextStore } from '../../store/editingContextStore';
 import { copySelection, cutSelection, paste } from '../../song/editingActions';
-import { useArrangementStore } from '../../store/arrangementStore';
+import { stopReturnsToOrigin, useArrangementStore } from '../../store/arrangementStore';
 import { useHistoryStore } from '../../store/historyStore';
 import { getGridLadder } from '../../song/rulerMarks';
 import { growPitchRange, initialPitchRange, useTrackLaneViewStore, type PitchRange } from '../../store/trackLaneViewStore';
@@ -373,7 +373,12 @@ export function PianoRoll(props: PianoRollProps) {
         const absoluteTick = Math.max(clip.startTick, snap(tick));
         if (absoluteTick + duration > clip.startTick + clip.lengthTick) { setRejection('The note would extend beyond this clip.'); window.setTimeout(() => setRejection(''), 1200); return; }
         const sourceTick = Math.round((clip.sourceStart ?? 0) + absoluteTick - clip.startTick);
-        if (midiSource.notes.some((note) => note.tick === sourceTick && note.pitch === pitch)) return;
+        // BC-30: an exact time+pitch duplicate is never minted. Refusing is right;
+        // refusing SILENTLY was not — a deliberate gesture that produces nothing and
+        // says nothing reads as a broken editor, and the branch immediately above
+        // has always said why. Report without stealing focus: the same 1.2s
+        // `role="status"` line, no dialog, no sound, nothing to dismiss.
+        if (midiSource.notes.some((note) => note.tick === sourceTick && note.pitch === pitch)) { setRejection('That note is already there.'); window.setTimeout(() => setRejection(''), 1200); return; }
         const note: ArrangementNote = { tick: sourceTick, durTick: drumMode ? 1 : Math.max(1, Math.round(duration)), pitch, vel: drawVelocity };
         const result = drawNotes(arrangement, clip.id!, [note], useArrangementStore.getState().mintId, useEditingContextStore.getState().overlapPolicy);
         useArrangementStore.getState().apply(result.verbs, { surface: selectionSurface });
@@ -599,7 +604,7 @@ export function PianoRoll(props: PianoRollProps) {
                 { actionId: 'pianoroll.step.advance', defaultBinding: { key: ' ' }, guard: (event: KeyboardEvent) => !event.repeat && useEditingContextStore.getState().stepEntry.trackId === trackId, run: (event: KeyboardEvent) => { keyDownRef.current(event as unknown as React.KeyboardEvent); return true; } },
                 { actionId: 'pianoroll.step.retreat', defaultBinding: { key: 'Backspace' }, guard: (event: KeyboardEvent) => !event.repeat && useEditingContextStore.getState().stepEntry.trackId === trackId && useEditingContextStore.getState().viewports[selectionSurface].selection.noteIds.length === 0, run: (event: KeyboardEvent) => { keyDownRef.current(event as unknown as React.KeyboardEvent); return true; } },
                 ...([['pianoroll.step.octaveDown', 'z', -1, false], ['pianoroll.step.octaveUp', 'z', 1, true]] as const).map(([actionId, key, direction, shift]) => ({ actionId, defaultBinding: { key, shift }, guard: (event: KeyboardEvent) => !event.repeat && useEditingContextStore.getState().stepEntry.trackId === trackId, run: () => { const current = useEditingContextStore.getState().stepEntry.octave; useEditingContextStore.getState().setStepEntry({ octave: Math.max(-1, Math.min(9, current + direction)) }); return true; } })),
-                { actionId: 'pianoroll.transport', defaultBinding: { key: ' ' }, guard: (event: KeyboardEvent) => !event.repeat && useEditingContextStore.getState().stepEntry.trackId !== trackId, run: () => { const store = useArrangementStore.getState(); if (store.isPlaying) store.stop(); else store.play(); return true; } },
+                { actionId: 'pianoroll.transport', defaultBinding: { key: ' ' }, guard: (event: KeyboardEvent) => !event.repeat && useEditingContextStore.getState().stepEntry.trackId !== trackId, run: () => { const store = useArrangementStore.getState(); if (store.isPlaying || stopReturnsToOrigin(store)) store.stop(); else store.play(); return true; } },
                 { actionId: 'pianoroll.undo', defaultBinding: { key: 'z', ctrl: true }, run: (): boolean => { useHistoryStore.getState().undo(); return true; } },
                 { actionId: 'pianoroll.redo', defaultBinding: { key: 'z', ctrl: true, shift: true }, run: (): boolean => { useHistoryStore.getState().redo(); return true; } },
                 // TL-18 / spec §4: one level of the Escape and Q grammar per press. When this

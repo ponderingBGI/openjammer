@@ -18,7 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Meter, TransportPill, type MeterHandle } from '@openjammer/oj-ui';
-import { useArrangementStore } from '../../store/arrangementStore';
+import { stopReturnsToOrigin, useArrangementStore } from '../../store/arrangementStore';
 import { useAudioStore } from '../../store/audioStore';
 import { useTransportStore } from '../../store/transportStore';
 import { useUiViewStore } from '../../store/uiViewStore';
@@ -44,6 +44,14 @@ export function TransportPillHost({ onRequestAudio }: { onRequestAudio: () => vo
     const clickEnabled = useArrangementStore((state) => state.clickEnabled);
     const countInBars = useArrangementStore((state) => state.countInBars);
     const armedTrackIds = useArrangementStore((state) => state.armedTrackIds);
+    /**
+     * Spec §7's second Stop. `stopReturnsToOrigin` is the SAME predicate
+     * `transportStore.toggleGlobalPause` consults before it decides what this
+     * button's click means, read here through the fields it depends on so the
+     * glyph re-renders the instant the arm changes. The pill may not show a play
+     * triangle over a press that will rewind instead.
+     */
+    const returnArmed = useArrangementStore((state) => stopReturnsToOrigin(state));
 
     const isGloballyPaused = useTransportStore((state) => state.isGloballyPaused);
     const isAudioContextReady = useAudioStore((state) => state.isAudioContextReady);
@@ -206,6 +214,7 @@ export function TransportPillHost({ onRequestAudio }: { onRequestAudio: () => vo
                 onPlayToggle={onPlayToggle}
                 playLabel={arrangement ? 'Play' : 'Start sound'}
                 stopLabel={arrangement ? 'Stop' : 'Hold all sound'}
+                returnArmed={returnArmed}
                 pulse={pulse}
                 onReturnToStart={arrangement ? () => useArrangementStore.getState().returnToStart() : undefined}
                 record={

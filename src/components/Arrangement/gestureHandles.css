@@ -22,6 +22,36 @@
     --arrangement-ruler-height: 64px;
 }
 
+/*
+ * WHO OWNS A FINGER — spec §3's first gesture law, written down once.
+ *
+ * The field is one `overflow: auto` scroller, and a scroller claims every touch
+ * that crosses its slop unless a descendant says otherwise. Without these rules
+ * the whole timeline was pointer-only in practice: a measured 96px touch drag on
+ * a clip went `pointerdown` → `is-dragging` → `pointercancel`, the app correctly
+ * restored the pre-gesture document, and the clip never moved (W6-E2E finding
+ * F3). `touch-action: none` is not a preference here; it is the difference
+ * between a gesture that can complete and one that cannot.
+ *
+ * The split follows §3 exactly: `none` on the things the hand GRABS — clips (and
+ * therefore their trim, fade and slip zones, which are descendants), notes, the
+ * ruler and its braces, automation points, faders and the lane/header dividers —
+ * and `pan-x pan-y` on the scroll container itself, so one finger on empty lane
+ * ground still scrolls the field in both axes. A lane is deliberately NOT `none`:
+ * empty space is where the field is scrolled, and a surface a finger cannot pan
+ * is worse than a time-range selection a finger cannot draw.
+ */
+.arrangement-scroll { touch-action: pan-x pan-y; }
+
+.arrangement-clip,
+.arrangement-ruler-viewport,
+.arrangement-lane__resize,
+.arrangement-header-resize,
+.arrangement-track__grab,
+.arrangement-automation__point,
+.mixer-strip__fader,
+.mixer-strip__pan { touch-action: none; }
+
 .arrangement-track {
     position: relative;
     grid-template-columns: var(--arrangement-header-width, 200px) 1fr;

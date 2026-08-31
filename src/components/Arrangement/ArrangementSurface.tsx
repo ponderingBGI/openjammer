@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Button, Kbd } from '@openjammer/oj-ui';
-import { useArrangementStore } from '../../store/arrangementStore';
+import { stopReturnsToOrigin, useArrangementStore } from '../../store/arrangementStore';
 import { snapTimeline, useEditingContextStore, type GridUnit } from '../../store/editingContextStore';
 import { useTrackLaneViewStore } from '../../store/trackLaneViewStore';
 import { useBindingSet } from '../../keymap/useKeymap';
@@ -134,7 +134,11 @@ export function ArrangementSurface({ active, visible = active, transition, songN
             // focused inline piano roll: document history, transport, marker drop, and the
             // exit/Escape cascade. Everything below is surface-local on purpose — an editor
             // must never be able to split, mute or re-tool the clip it is editing.
-            { actionId: 'arrangement.transport', inherit: true, guard: (event: KeyboardEvent) => !event.repeat, run: () => { const store = useArrangementStore.getState(); if (store.isPlaying) store.stop(); else { useEditingContextStore.setState({ followPlayhead: true }); store.play(); } return true; } },
+            // Spec §7 / §4.2 `Space` ×2: rolling → Stop; stopped away from where
+            // playback started → the second Stop, which returns the playhead
+            // there; otherwise → Play. `stopReturnsToOrigin` is the SAME question
+            // the pill asks, so the key and the button cannot disagree.
+            { actionId: 'arrangement.transport', inherit: true, guard: (event: KeyboardEvent) => !event.repeat, run: () => { const store = useArrangementStore.getState(); if (store.isPlaying || stopReturnsToOrigin(store)) store.stop(); else { useEditingContextStore.setState({ followPlayhead: true }); store.play(); } return true; } },
             { actionId: 'arrangement.undo', inherit: true, run: () => { useHistoryStore.getState().undo(); return true; } },
             { actionId: 'arrangement.redo', inherit: true, run: () => { useHistoryStore.getState().redo(); return true; } },
             { actionId: 'arrangement.selectionUndo', run: () => { useEditingContextStore.getState().undoSelection('arrangement'); return true; } },
@@ -329,7 +333,28 @@ export function ArrangementSurface({ active, visible = active, transition, songN
                     style={{ width: headerWidth + contentWidth, minHeight: RULER_HEIGHT + offsets.at(-1)! + view.height * 0.4 }}
                     onPointerDown={(event) => {
                         useEditingContextStore.setState({ followPlayhead: false });
-                        if (event.button !== 0 || !(event.target as HTMLElement).closest('.arrangement-lane') || (event.target as HTMLElement).closest('.arrangement-clip')) return;
+                        /*
+                         * The lane's own ground, and nothing else.
+                         *
+                         * A clip has always been excluded here — its gesture owns
+                         * the press. The INLINE PIANO ROLL had not been: it renders
+                         * INSIDE `.arrangement-lane` in place of the clips, and its
+                         * elements are not `.arrangement-clip`, so every press on a
+                         * note also started this range-select. The roll's own
+                         * gesture ran first and set `noteIds`; this one finished
+                         * last and overwrote the surface selection with a
+                         * `timeRange` (or, on a click, cleared it) — and because
+                         * every roll keyboard action begins `if
+                         * (!selectedNoteIds.length) return`, transpose, velocity,
+                         * nudge, duplicate and delete all went dead the moment a
+                         * pointer touched a note. The FULL roll surface was never
+                         * affected, which is exactly the tell (W6-E2E finding F4).
+                         *
+                         * An editor open in a lane owns its own pointers. Spec §9:
+                         * the inline lane and the surface are the same component,
+                         * and it "never gets a second interaction model".
+                         */
+                        if (event.button !== 0 || !(event.target as HTMLElement).closest('.arrangement-lane') || (event.target as HTMLElement).closest('.arrangement-clip, .piano-roll')) return;
                         const rect = event.currentTarget.getBoundingClientRect();
                         const lane = (event.target as HTMLElement).closest<HTMLElement>('.arrangement-lane')!;
                         const laneRect = lane.getBoundingClientRect();

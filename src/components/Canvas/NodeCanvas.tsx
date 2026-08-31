@@ -763,18 +763,75 @@ export function NodeCanvas() {
                 }
             }
 
-            // Mode 1 only shortcuts (config mode)
-            if (currentMode === 1) {
-                // Q key - Go back up one level in hierarchical canvas (only in mode 1)
-                if (actionId === 'canvas.exitLevel') {
-                    e.preventDefault();  // Always prevent default for consistency
-                    if (currentViewNodeId !== null) {
-                        exitToParent();
-                    }
-                    // At root level, Q silently does nothing (consistent with navigation being unavailable)
+            /*
+             * §4's LEVEL GRAMMAR — `E` goes in, `Q` comes out — and it reads the
+             * same way on all three surfaces, in EVERY mode.
+             *
+             * These two used to sit inside the `currentMode === 1` gate below,
+             * and their binding entries sat AFTER the computer-keyboard note row
+             * (`ROW_KEYS[1]` is `q w e r t y u i o p`) in the same set. Installing
+             * a rig switches the app into that rig's keyboard mode so typing plays
+             * straight away — and every preset rig that carries a Song also carries
+             * a keyboard — so from the first second of a first run, `E` over a
+             * selected Song node was a note and the arrangement was unreachable by
+             * key (W6-E2E finding F2).
+             *
+             * The note row is now the FALL-THROUGH rather than the gate: these
+             * entries are registered first, but they consume their key only when
+             * there is a level to change. Nothing selected, nothing to enter,
+             * already at the root — the key is a note again, so a jam with nothing
+             * selected (which is how a jam looks) plays exactly as before. In
+             * config mode they still always consume, because there is no note
+             * behind them and a rebound key must keep behaving as it always has.
+             */
+            if (actionId === 'canvas.exitLevel') {
+                if (currentViewNodeId !== null) {
+                    e.preventDefault();
+                    exitToParent();
                     return;
                 }
+                // At the root there is nowhere to go. In config mode Q still owns
+                // the key (silently); in a keyboard mode it is the note Q.
+                if (currentMode === 1) e.preventDefault();
+                return;
+            }
 
+            if (actionId === 'canvas.enterNode') {
+                const selectedIds = Array.from(useGraphStore.getState().selectedNodeIds);
+                // Use fresh state to avoid stale closure issues.
+                const selectedNode = selectedIds.length === 1 ? useGraphStore.getState().nodes.get(selectedIds[0]) : undefined;
+                if (selectedNode) {
+                    // M5: resolve via the node's OPEN identity when set, so a
+                    // dynamic AI node honours its dynamic def's canEnter:false.
+                    const definition = resolveNodeDefinition(selectedNode);
+                    const canEnter = definition.canEnter !== false;
+                    const hasChildren = Boolean(selectedNode.childIds && selectedNode.childIds.length > 0);
+                    if (selectedNode.type === 'song') {
+                        e.preventDefault();
+                        useUiViewStore.getState().setSurface('arrangement', selectedNode.id);
+                        return;
+                    }
+                    if (canEnter && hasChildren) {
+                        e.preventDefault();
+                        enterNode(selectedNode.id);
+                        return;
+                    }
+                    // Nothing to enter. In config mode the flash is the honest
+                    // "no" for ANY failure reason (canEnter=false OR no children);
+                    // in a keyboard mode the key is a note, and a flash there
+                    // would be noise on top of a note the player did want.
+                    if (currentMode === 1) {
+                        e.preventDefault();
+                        useUIFeedbackStore.getState().flashNode(selectedNode.id);
+                    }
+                    return;
+                }
+                if (currentMode === 1) e.preventDefault();
+                return;
+            }
+
+            // Mode 1 only shortcuts (config mode)
+            if (currentMode === 1) {
                 // Spacebar in config mode - toggle global play/pause for continuous sources
                 if (actionId === 'canvas.transport' && !e.repeat) {
                     e.preventDefault();
@@ -928,31 +985,8 @@ export function NodeCanvas() {
                     return;
                 }
 
-                // E key - Dive into selected node's internal canvas
-                if (actionId === 'canvas.enterNode') {
-                    e.preventDefault();
-                    const selectedIds = Array.from(useGraphStore.getState().selectedNodeIds);
-                    if (selectedIds.length !== 1) return;
-
-                    // Use fresh state to avoid stale closure issues
-                    const selectedNode = useGraphStore.getState().nodes.get(selectedIds[0]);
-                    if (!selectedNode) return;
-
-                    // M5: resolve via the node's OPEN identity when set, so a
-                    // dynamic AI node honours its dynamic def's canEnter:false.
-                    const definition = resolveNodeDefinition(selectedNode);
-                    const canEnter = definition.canEnter !== false;
-                    const hasChildren = selectedNode.childIds && selectedNode.childIds.length > 0;
-                    if (selectedNode.type === 'song') {
-                        useUiViewStore.getState().setSurface('arrangement', selectedNode.id);
-                    } else if (canEnter && hasChildren) {
-                        enterNode(selectedNode.id);
-                    } else {
-                        // Flash node for ANY failure reason (canEnter=false OR no children)
-                        useUIFeedbackStore.getState().flashNode(selectedNode.id);
-                    }
-                    return;
-                }
+                // `canvas.enterNode` (`E`) and `canvas.exitLevel` (`Q`) are handled
+                // ABOVE the gate — §4's level grammar is not a config-mode feature.
             }
 
             // Keyboard input mode (modes 2-9)
@@ -1021,10 +1055,29 @@ export function NodeCanvas() {
             }
         }
 
+        /*
+         * §4's level grammar runs BEFORE the note row, and only these two do.
+         *
+         * Order inside a binding set is priority: `runSets` walks the entries and
+         * stops at the first whose `run` returns true. The note entries returned
+         * `event.defaultPrevented` after unconditionally consuming their key, so
+         * while any keyboard mode was live — which is every first run, because
+         * installing a rig selects that rig's keyboard mode — `E` and `Q` never
+         * reached the canvas at all.
+         *
+         * They are lifted above the row rather than the row being scoped to a
+         * focused keyboard node, because the row is played while looking at the
+         * whole canvas with nothing focused: taking that away would cost real
+         * playing to buy one key. Instead the handlers above fall through when
+         * they have nothing to do, so the row keeps every key that was not about
+         * to move the player somewhere. `canvas.transport` deliberately stays
+         * below: in a keyboard mode `Space` is the sustain pedal.
+         */
+        const levelActions = ['canvas.enterNode', 'canvas.exitLevel'];
         const regularActions = [
-            'canvas.escape', 'edit.delete', 'canvas.deleteBackspace', 'canvas.exitLevel',
+            'canvas.escape', 'edit.delete', 'canvas.deleteBackspace',
             'canvas.transport', 'view.ghostMode', 'edit.undo', 'edit.redo',
-            'canvas.copy', 'canvas.paste', 'canvas.multiConnect', 'canvas.enterNode',
+            'canvas.copy', 'canvas.paste', 'canvas.multiConnect',
             'canvas.selectAll', 'canvas.duplicate', 'view.zoomIn', 'view.zoomOut', 'view.resetView',
         ];
         const noteActions = Object.values(ROW_KEYS).flat().map((key) => `note.${key}`);
@@ -1033,6 +1086,13 @@ export function NodeCanvas() {
             scope: 'surface',
             surface: 'canvas',
             entries: [
+                ...levelActions.map((actionId) => ({
+                    actionId,
+                    run: (event: KeyboardEvent) => {
+                        handleKeyDown(event, actionId);
+                        return event.defaultPrevented;
+                    },
+                })),
                 ...noteActions.map((actionId) => ({
                     actionId,
                     guard: () => useAudioStore.getState().currentMode > 1,

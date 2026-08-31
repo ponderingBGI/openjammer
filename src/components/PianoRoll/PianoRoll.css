@@ -209,7 +209,7 @@
  * document. C is labelled, and C and F carry the seam hairline, so the eye can
  * find an octave without counting.
  */
-.piano-roll__keys { position: relative; z-index: 4; overflow: hidden; border-right: 1px solid var(--border-strong); background: var(--timeline-lane-bg); }
+.piano-roll__keys { position: relative; z-index: 4; overflow: hidden; border-right: 1px solid var(--border-strong); background: var(--timeline-lane-bg); touch-action: none; }
 .piano-roll__key { position: relative; display: flex; align-items: center; justify-content: flex-end; padding-right: 5px; overflow: hidden; background: var(--timeline-lane-bg); color: var(--text-muted); font: 500 var(--text-xs)/1 var(--font-mono); white-space: nowrap; }
 /*
  * A sharp is drawn as a SHORT BAR on the white ground, the way a keyboard is
@@ -303,7 +303,8 @@
  * and a whole phrase's shape is readable in one sweep.
  */
 
-.piano-roll__velocity { position: relative; flex: 0 0 56px; height: 56px; margin-left: calc(var(--piano-roll-scroomer-width) + var(--piano-roll-key-width)); overflow: hidden; border-top: 1px solid var(--timeline-lane-divider); background: var(--timeline-lane-bg); }
+/* Spec §3: a lollipop is grabbed, so the compositor never gets to call it a scroll. */
+.piano-roll__velocity { position: relative; flex: 0 0 56px; height: 56px; margin-left: calc(var(--piano-roll-scroomer-width) + var(--piano-roll-key-width)); overflow: hidden; border-top: 1px solid var(--timeline-lane-divider); background: var(--timeline-lane-bg); touch-action: none; }
 .piano-roll__velocity .is-guide { position: absolute; right: 0; left: 0; height: 1px; background: var(--timeline-grid-sub); pointer-events: none; }
 .piano-roll__velocity .is-96 { top: 25%; }
 .piano-roll__velocity .is-64 { top: 50%; background: var(--timeline-grid-beat); }

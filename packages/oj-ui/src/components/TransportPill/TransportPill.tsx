@@ -72,6 +72,17 @@ export interface TransportPillProps extends Omit<HTMLAttributes<HTMLDivElement>,
     /** Verb when rolling. Default "Stop". */
     stopLabel?: string;
     /**
+     * Spec §7's SECOND Stop is armed: the transport is stopped away from where
+     * playback last started, so the next press of this button rewinds there
+     * rather than playing. The glyph and the name follow, because a play
+     * triangle that does not play is the second-worst lie this component can
+     * tell (the worst is a stop square over a rolling transport). Ignored while
+     * `playing`.
+     */
+    returnArmed?: boolean;
+    /** Accessible name for the armed second Stop. Default "Return to where playback started". */
+    returnLabel?: string;
+    /**
      * Cold-load attention pulse. TRUE only in the browser tier, only before the
      * first user gesture of the session, and never while rolling — a pulsing
      * button on stage is noise. The pill enforces the last of those itself.
@@ -108,6 +119,20 @@ const PlayGlyph = () => (
 const StopGlyph = () => (
     <svg viewBox="0 0 14 14" width="12" height="12" aria-hidden="true" focusable="false">
         <rect x="1.5" y="1.5" width="11" height="11" rx="2" fill="currentColor" />
+    </svg>
+);
+
+/**
+ * Spec §7's SECOND Stop: go back to where playback last started. Deliberately
+ * NOT the `ReturnGlyph` below — that one sits two controls away and means "to
+ * bar 1", and two identical arrows 40px apart meaning different ticks is exactly
+ * the kind of thing a hand learns wrong once and then trusts. Filled bar +
+ * filled triangle is the universal rewind mark; the neighbour stays a hairline.
+ */
+const RewindGlyph = () => (
+    <svg viewBox="0 0 14 14" width="13" height="13" aria-hidden="true" focusable="false">
+        <path d="M12.4 1.8 4.4 7l8 5.2Z" fill="currentColor" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+        <rect x="1.3" y="1.6" width="2.2" height="10.8" rx="1.1" fill="currentColor" />
     </svg>
 );
 
@@ -386,6 +411,8 @@ export function TransportPill({
     onPlayToggle,
     playLabel = 'Play',
     stopLabel = 'Stop',
+    returnArmed = false,
+    returnLabel = 'Return to where playback started',
     pulse = false,
     onReturnToStart,
     record,
@@ -403,6 +430,10 @@ export function TransportPill({
     // While the transport rolls it would be a lie, so it is suppressed here as
     // well as at the call site — belt and braces on a stage.
     const attn = pulse && !playing && !record?.recording;
+    // Three states, one button, and the glyph names the one you are in:
+    // rolling → Stop, second-Stop armed → Return, otherwise → Play.
+    const rewind = !playing && returnArmed;
+    const transportName = playing ? stopLabel : rewind ? returnLabel : playLabel;
 
     const hasTime = Boolean(position || tempo);
     const hasState = Boolean(loop || metronome);
@@ -413,12 +444,12 @@ export function TransportPill({
             <div className="oj-transport__zone oj-transport__zone--transport">
                 <button
                     type="button"
-                    className={`oj-transport__play${playing ? ' is-playing' : ''}${attn ? ' is-attn' : ''}`}
-                    aria-label={playing ? stopLabel : playLabel}
-                    title={`${playing ? stopLabel : playLabel}${hint ? ` (${hint})` : ''}`}
+                    className={`oj-transport__play${playing ? ' is-playing' : ''}${rewind ? ' is-return-armed' : ''}${attn ? ' is-attn' : ''}`}
+                    aria-label={transportName}
+                    title={`${transportName}${hint ? ` (${hint})` : ''}`}
                     onClick={onPlayToggle}
                 >
-                    {playing ? <StopGlyph /> : <PlayGlyph />}
+                    {playing ? <StopGlyph /> : rewind ? <RewindGlyph /> : <PlayGlyph />}
                 </button>
 
                 {record && (
