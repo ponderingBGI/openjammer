@@ -17,6 +17,7 @@
 import type { GraphNode } from '../../engine/types';
 import { useArrangementStore } from '../../store/arrangementStore';
 import { useUiViewStore } from '../../store/uiViewStore';
+import { useIsAgentPending } from '../../store/agentSessionStore';
 import { arrangementLengthTicks, timebase } from '../../song/time';
 import { Button, Chip, Kbd, NodeShell, StatusDot } from '@openjammer/oj-ui';
 import { NodeFeedback } from './NodeFeedback';
@@ -45,6 +46,7 @@ export function SongNode({
     const arrangement = useArrangementStore((s) => s.arrangement);
     const isPlaying = useArrangementStore((s) => s.isPlaying);
     const isRefusing = useNodeRefusal(node.id);
+    const isAgentPending = useIsAgentPending(node.id);
     const openArrangement = useUiViewStore((s) => s.setSurface);
 
     const title = arrangement?.name ?? 'Empty song';
@@ -61,6 +63,7 @@ export function SongNode({
             nodeType="SONG"
             selected={!!isSelected}
             dragging={!!isDragging}
+            agentPending={isAgentPending}
             headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}

@@ -45,7 +45,8 @@
     align-items: center;
     gap: 6px;
     margin-left: auto;
-    font-size: var(--text-xs);
+    /* Sans prose ("Keyboard 2"), so 13px — the Kbd inside keeps its mono step. */
+    font-size: var(--text-sm);
     font-weight: 500;
     color: var(--text-secondary);
 }
@@ -59,7 +60,8 @@
     padding: 8px 10px;
     border-radius: var(--radius-md);
     background: var(--bg-tertiary);
-    font-size: var(--text-xs);
+    /* Sans prose sits on the 13px floor; --text-xs is the mono step. */
+    font-size: var(--text-sm);
     line-height: 1.4;
     /* The honesty copy is never the dimmest pixel — contrast-safe warning ink. */
     color: var(--warning-ink);

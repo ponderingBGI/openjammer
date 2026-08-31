@@ -88,6 +88,23 @@ have a full 1280×800 context frame at `<slug>-<theme>-frame.png`.
 
 ## 2. DEFECTS, ranked
 
+> **Outcome column — appended by lane W6-FIX (2026-08-29).** The findings below are
+> unchanged; this table is the only edit. Full evidence, measurements and pinning tests:
+> [`W6-FIX-REPORT.md`](W6-FIX-REPORT.md).
+
+| # | Outcome | Where |
+|---|---|---|
+| **D1** | **FIXED** | `public/download/download.css` rebuilt tokens-only (new `public/download/oj-tokens.css` transcribes the DTCG palette for both schemes); `public/download/index.html:11–20` `color-scheme: light dark` + per-scheme `theme-color`. Measured: 23 text runs, min **5.08** light / **6.27** dark, 0 hard shadows, 0 ≥2px borders, 0 console errors. Pinned by `src/components/__tests__/webSurfaces.test.ts` + `webSurfaceTokens.test.ts`. |
+| **D2** | **FIXED** | `apps/docs/src/styles/custom.css` rewritten as a single `--sl-*` → oj-token remap (both themes from one mapping) over the new `apps/docs/src/styles/oj-tokens.css`; `apps/docs/src/components/Hero.astro:29–48` de-2px'd (scope note in the W6-FIX report). Measured: min **4.95** light / **5.59** dark on the home + `play/first-patch`, 0 hard shadows, 0 ≥2px borders. Same pinning tests. |
+| **D3** | **FIXED (7 of 11)** · **4 deferred** | `agentPending` wired in `MathNode.tsx:107`, `SpeakerNode.tsx:247`, `MicrophoneNode.tsx:245`, `ContainerNode.tsx:147`, `SongNode.tsx:66`, `CanvasIONode.tsx:130`, `PortPanelNode.tsx:184`. Verified live: `add` now renders `oj-node is-agent-pending schematic-node math-node add`. Pinned by `src/components/Nodes/__tests__/agentPendingRing.test.tsx` (10 node types × 2 states). **`LibraryNode` / `LooperNode` / `SamplerNode` / `SamplerVisualNode` → P7c**, one line each. |
+| **D4** | **FIXED (+3 more found)** | `SettingsPanel.css:109`, `SafeModeScreen.css:151`, `HelpPanel.css:49` and `:64`, `PluginWindowShell.css:48`/`:68` all lifted to `--text-sm`. Also found and fixed: `HelpPanel.css` `.oj-help__warning`, `SafeModeScreen.css` `.oj-fullscreen__option` (16px, off-scale), and three command-bar runs (see W6-FIX §4). Live sweep of all four surfaces in both themes: **0 sub-13px sans**. Pinned by `src/components/__tests__/typeFloor.test.ts`. |
+| **D5** | **FIXED** | `ModelPicker.tsx:312` → `<Chip>current</Chip>`. Live: chip class `oj-chip`, colour `--text-secondary`; the row keeps `is-current` + `aria-current="true"`, so the mark is still doubled and never colour-alone. Pinned by `src/components/CommandBar/__tests__/ModelPicker.test.tsx`. |
+| **D6** | **NOT THIS LANE** | `packages/oj-ui` is owned by W6-UI. Untouched. |
+| **D7** | **FIXED** | `AppErrorBoundary.css:154` dark title `#F84B4B` → `#FF7771` (`--danger-ink` dark, sRGB-clipped): **4.80 → 6.39:1** on `#201F19`. Secondary: title `18px → 15px`, mono `12px → 11px` (both now on the scale). Pinned by `src/components/__tests__/appErrorBoundaryTokens.test.ts`, which reads the DTCG files — no hand copies. |
+| **D8** | **FIXED** | `CommandBar.css` — cmdk's root inside `.command-bar-sessions` is now the same stretching flex column the model picker's field already sat in. Measured: field **210px → 606px** in a 640px panel, 17px gutter, both themes. Same `.command-bar-input` component, no fork. Pinned in the ModelPicker test file. |
+| **D9** | **NOT THIS LANE** | DESIGN.md is W6-DOCS's. W6-FIX found a second instance of the same contradiction: DESIGN §5 also specifies the palette's menu category headers at **10.5px sans**. |
+| **Relink dialog** (§3) | **NEITHER wired NOR deleted — P7 follow-up** | The missing-samples state is real and rendered (`LibraryNode.tsx:1171`, `LibraryNode.css:582`), but its only producer (`libraryStore.ts:805 checkMissingItems`) has no caller and `LibraryNodeData.missingItemIds` is written nowhere. Both wiring points are inside `LibraryNode.tsx` / `libraryStore.ts`, which W6-FIX must not touch. Evidence + the exact three-point wiring: W6-FIX-REPORT §5. |
+
 ### D1 — HIGH — `public/download` still ships the retired Living Sketchbook
 
 The public download page was never migrated. Its stylesheet says so out loud.

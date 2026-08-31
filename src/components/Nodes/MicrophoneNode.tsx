@@ -23,6 +23,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import type { GraphNode, MicrophoneNodeData } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useAudioStore } from '../../store/audioStore';
+import { useIsAgentPending } from '../../store/agentSessionStore';
 import { getExecutor } from '../../audio/executor';
 import { registerTimelineLevelWriter } from '../Arrangement/timelineSignalLevels';
 import { meterScale } from '../Shell/masterSignal';
@@ -95,6 +96,7 @@ export const MicrophoneNode = memo(function MicrophoneNode({
     style,
 }: MicrophoneNodeProps) {
     const data = node.data as MicrophoneNodeData;
+    const isAgentPending = useIsAgentPending(node.id);
     const updateNodeData = useGraphStore((s) => s.updateNodeData);
     const isAudioContextReady = useAudioStore((s) => s.isAudioContextReady);
     const audioConfig = useAudioStore((s) => s.audioConfig);
@@ -240,6 +242,7 @@ export const MicrophoneNode = memo(function MicrophoneNode({
             nodeType="IN"
             selected={isSelected}
             dragging={isDragging}
+            agentPending={isAgentPending}
             headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}

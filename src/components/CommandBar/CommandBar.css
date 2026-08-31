@@ -159,12 +159,17 @@
     background: var(--border-subtle);
 }
 
+/* A category header is the MICRO MONO voice, the same four lines as
+   `packages/oj-ui/.../Menu/Menu.css`'s `.oj-menu-category` — mono is the one
+   face allowed under the 13px sans floor, and 9.5px mono measures within a
+   pixel of the 10.5px sans it replaces, so the quiet is kept and the run is
+   legal. The retired 10.5px sans is gone from this sheet entirely. */
 .command-bar-group [cmdk-group-heading] {
     padding: 8px 10px 4px;
-    font-family: var(--font-sans);
-    font-size: 10.5px;
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
     font-weight: 600;
-    letter-spacing: 0.1em;
+    letter-spacing: var(--tracking-micro);
     text-transform: uppercase;
     color: var(--text-muted);
 }
@@ -776,7 +781,9 @@ button.command-bar-ai-welcome-chip {
     gap: 6px;
     min-width: 0;
     font-family: var(--font-sans);
-    font-size: var(--text-xs);
+    /* 13px, the sans floor — --text-xs is the JetBrains Mono step. The Kbd caps
+       inside keep their own 11px mono. */
+    font-size: var(--text-sm);
     color: var(--text-muted);
 }
 
@@ -804,6 +811,8 @@ button.command-bar-ai-welcome-chip {
     box-shadow: var(--shadow-overlay);
 }
 
+/* The slash menu's header is a category header, so it takes the same micro mono
+   voice as `[cmdk-group-heading]` above. */
 .command-bar-ai-slash-head,
 .command-bar-ai-slash-empty {
     display: flex;
@@ -811,16 +820,20 @@ button.command-bar-ai-welcome-chip {
     gap: var(--space-sm);
     padding: 8px 10px 4px;
     color: var(--text-muted);
-    font-family: var(--font-sans);
-    font-size: 10.5px;
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
     font-weight: 600;
-    letter-spacing: 0.1em;
+    letter-spacing: var(--tracking-micro);
     text-transform: uppercase;
 }
 
+/* The empty row is not a header — it is a SENTENCE ("No command matches /foo"),
+   so it opts back out to sans prose on the 13px floor. It shared the block above
+   only for the box, never for the voice. */
 .command-bar-ai-slash-empty {
     text-transform: none;
     letter-spacing: 0;
+    font-family: var(--font-sans);
     font-weight: 500;
     font-size: var(--text-sm);
 }
@@ -885,7 +898,8 @@ button.command-bar-ai-welcome-chip {
     padding: var(--space-sm) var(--space-md) 0;
     color: var(--text-muted);
     font-family: var(--font-sans);
-    font-size: var(--text-xs);
+    /* Sans prose sits on the 13px floor. */
+    font-size: var(--text-sm);
 }
 
 .command-bar-models-input {
@@ -975,13 +989,17 @@ button.command-bar-ai-welcome-chip {
 
 .command-bar-session-current {
     color: var(--accent-ink);
-    font-size: var(--text-xs);
+    /* Sans prose ("· current"), so the floor applies. */
+    font-size: var(--text-sm);
 }
 
+/* 11px mono is a legal micro step, but DESIGN.md §3 holds it to the full 4.5:1
+   body bar. `--text-muted` measured 3.93 light / 3.80 dark on the SELECTED row,
+   whose fill is 7% deeper than the inset it was chosen against. */
 .command-bar-session-id {
     font-family: var(--font-mono);
     font-size: var(--text-xs);
-    color: var(--text-muted);
+    color: var(--text-secondary);
 }
 
 /* ── Browser tier: the honest desktop-only state ──────────────────────────── */
@@ -1033,6 +1051,23 @@ button.command-bar-ai-welcome-chip {
 .command-bar-sessions .command-bar-input {
     width: auto;
     margin: 0 var(--space-md) var(--space-sm);
+}
+
+/* `width: auto` on an <input> is its INTRINSIC size (~210px), not its parent's.
+   The model picker's filter is full-bleed because it is a direct child of the
+   picker's own flex column and stretches; `SessionPicker` puts its field inside
+   cmdk's root <div>, which is not a flex container, so the same declaration left
+   a small floating box on a surface where every other field is full-bleed.
+   Making cmdk's root the same stretching column gives the field the palette's
+   own physics — no second Input, no forked rule. `AuthChooser` builds the same
+   shape (its `<Command>` root wraps the same `.command-bar-input`), so it is the
+   same rule, not a second one. */
+.command-bar-auth [cmdk-root],
+.command-bar-sessions [cmdk-root] {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }
 
 .command-bar-auth .command-bar-list,

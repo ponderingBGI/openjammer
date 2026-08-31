@@ -105,7 +105,8 @@
 .oj-set-section__title {
     margin: 0;
     font-family: var(--font-sans);
-    font-size: var(--text-xs);
+    /* 13px, the sans floor: --text-xs is the JetBrains Mono step (DESIGN.md §3). */
+    font-size: var(--text-sm);
     font-weight: 600;
     letter-spacing: var(--tracking-micro);
     text-transform: uppercase;

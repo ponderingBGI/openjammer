@@ -42,9 +42,10 @@
     white-space: nowrap;
 }
 
+/* "on <node>" is sans prose, so it sits on the 13px floor, not the mono step. */
 .plugin-window-identity span {
     color: var(--text-muted);
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     white-space: nowrap;
 }
 
@@ -64,7 +65,7 @@
 }
 
 .plugin-window-dirty-label {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     color: var(--warning-ink);
 }
 

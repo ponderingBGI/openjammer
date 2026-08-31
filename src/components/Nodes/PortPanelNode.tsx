@@ -19,6 +19,7 @@ import { useCallback, useMemo, useState, memo } from 'react';
 import { Button, EditableLabel, NodeShell, PortRow } from '@openjammer/oj-ui';
 import type { GraphNode, BundlePortDefinition } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
+import { useIsAgentPending } from '../../store/agentSessionStore';
 import { BundlePortGroup } from '../BundlePortGroup';
 import { isBundlePort, isEmptyPort } from '../../utils/bundleManager';
 import { NodeFeedback } from './NodeFeedback';
@@ -103,6 +104,7 @@ export const PortPanelNode = memo(function PortPanelNode({
     const beginGesture = useGraphStore((s) => s.beginGesture);
     const endGesture = useGraphStore((s) => s.endGesture);
     const isRefusing = useNodeRefusal(node.id);
+    const isAgentPending = useIsAgentPending(node.id);
 
     const portLabels = useMemo(
         () => (node.data.portLabels as Record<string, string>) || {},
@@ -179,6 +181,7 @@ export const PortPanelNode = memo(function PortPanelNode({
             nodeType="PANEL"
             selected={!!isSelected}
             dragging={!!isDragging}
+            agentPending={isAgentPending}
             headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}

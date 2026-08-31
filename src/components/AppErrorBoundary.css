@@ -20,9 +20,19 @@
  *          accent #EE5E23 (oklch(0.66 0.19 40)) · danger ink #BB0015
  *   dark   canvas #161510 · surface #201F19 · inset #2A2822
  *          text #F1EFE8 / #ABA89C / #928E83 · lines #33312A / #4B473D
- *          accent #FF723A (oklch(0.72 0.19 40)) · danger #F84B4B
+ *          accent #FF723A (oklch(0.72 0.19 40)) · danger ink #FF7771
  * If the palette moves, this file must be updated BY HAND in the same commit —
  * that cost is the price of a card that always renders, and it is worth paying.
+ * `src/components/__tests__/appErrorBoundaryTokens.test.ts` reads the DTCG token
+ * files and fails on the drift, so "BY HAND" never means "by memory".
+ *
+ * Type sizes are literals for the same reason, and they are the scale's own
+ * steps (30 / 22 / 15 / 14 / 13 sans, 11 / 9.5 mono) — the same test pins them.
+ *
+ * The `prefers-reduced-motion` block at the end is the one place a stylesheet in
+ * this repo may ship its own (DESIGN.md §4 gives that job to global.css alone):
+ * the blanket rule lives in the app's stylesheet, which is exactly what may have
+ * failed to load by the time this card renders.
  *
  * Shape: a Callout-shaped card (surface fill, 1px hairline, 12px radius, soft
  * layered shadow, tinted title, secondary body) so the worst moment in the app
@@ -56,7 +66,7 @@
 /* Callout physics: the variant tints the TITLE, the body stays neutral. */
 .app-error-title {
     margin: 0 0 6px;
-    font-size: 18px;
+    font-size: 15px;
     font-weight: 600;
     line-height: 1.2;
     color: #BB0015;
@@ -69,7 +79,7 @@
     border-radius: 6px;
     background: #ECEAE4;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1.5;
     color: #1D1C18;
     word-break: break-word;
@@ -141,7 +151,7 @@
     }
 
     .app-error-title {
-        color: #F84B4B;
+        color: #FF7771;
     }
 
     .app-error-msg {

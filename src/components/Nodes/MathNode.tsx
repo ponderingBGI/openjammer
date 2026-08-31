@@ -13,6 +13,7 @@
 import { useCallback } from 'react';
 import type { GraphNode, NodeType } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
+import { useIsAgentPending } from '../../store/agentSessionStore';
 import { NodeShell, PortRow, SegmentedControl } from '@openjammer/oj-ui';
 import { NodeFeedback } from './NodeFeedback';
 import { useNodeRefusal } from './nodeControls';
@@ -60,6 +61,7 @@ export function MathNode({
     const beginGesture = useGraphStore((s) => s.beginGesture);
     const endGesture = useGraphStore((s) => s.endGesture);
     const isRefusing = useNodeRefusal(node.id);
+    const isAgentPending = useIsAgentPending(node.id);
     const isAdd = node.type === 'add';
 
     // The resolved type for port colouring (stored in node data). A universal
@@ -102,6 +104,7 @@ export function MathNode({
             nodeType={isAdd ? '+' : '−'}
             selected={!!isSelected}
             dragging={!!isDragging}
+            agentPending={isAgentPending}
             headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}

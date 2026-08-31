@@ -19,6 +19,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import type { GraphNode, SpeakerNodeData } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useAudioStore } from '../../store/audioStore';
+import { useIsAgentPending } from '../../store/agentSessionStore';
 import { getExecutor } from '../../audio/executor';
 import { registerTimelineLevelWriter } from '../Arrangement/timelineSignalLevels';
 // The meter's dB scale lives ONCE, next to the master meter that defines it.
@@ -89,6 +90,7 @@ export const SpeakerNode = memo(function SpeakerNode({
     style,
 }: SpeakerNodeProps) {
     const data = node.data as SpeakerNodeData;
+    const isAgentPending = useIsAgentPending(node.id);
     const updateNodeData = useGraphStore((s) => s.updateNodeData);
     const beginGesture = useGraphStore((s) => s.beginGesture);
     const endGesture = useGraphStore((s) => s.endGesture);
@@ -242,6 +244,7 @@ export const SpeakerNode = memo(function SpeakerNode({
             nodeType="OUT"
             selected={!!isSelected}
             dragging={!!isDragging}
+            agentPending={isAgentPending}
             headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}

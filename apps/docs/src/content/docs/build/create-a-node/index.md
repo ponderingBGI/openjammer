@@ -16,7 +16,7 @@ that matches `main`):
   — the end-to-end walkthrough: declare the manifest, implement `DspInstance`, wire ports
   and parameters, and register the node so the picker can find it.
 - **[Node standards](https://github.com/ponderingBGI/openjammer/blob/main/docs/node-standards.md)**
-  — the conventions a node must follow: port types and colors (`audio` → blue,
+  — the conventions a node must follow: port types and colors (`audio` → teal,
   `technical` → grey), naming, parameter ranges, and the real-time-safety rules every node
   inherits from the core.
 - **[Code-node ABI](https://github.com/ponderingBGI/openjammer/blob/main/docs/code-node-abi.md)**

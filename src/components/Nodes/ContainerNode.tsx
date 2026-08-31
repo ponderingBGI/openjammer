@@ -12,6 +12,7 @@ import type { GraphNode } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useCanvasNavigationStore } from '../../store/canvasNavigationStore';
 import { useUIFeedbackStore } from '../../store/uiFeedbackStore';
+import { useIsAgentPending } from '../../store/agentSessionStore';
 import { Button, Chip, EditableLabel, Kbd, NodeShell, PortRow } from '@openjammer/oj-ui';
 import { NodeFeedback } from './NodeFeedback';
 import { useNodeRefusal } from './nodeControls';
@@ -54,6 +55,7 @@ export function ContainerNode({
     const enterNode = useCanvasNavigationStore((s) => s.enterNode);
     const flashNode = useUIFeedbackStore((s) => s.flashNode);
     const isRefusing = useNodeRefusal(node.id);
+    const isAgentPending = useIsAgentPending(node.id);
     const [editing, setEditing] = useState(false);
 
     const displayName = (node.data.displayName as string) || 'Untitled';
@@ -142,6 +144,7 @@ export function ContainerNode({
             nodeType={childCount === 0 ? 'EMPTY' : `${childCount} INSIDE`}
             selected={!!isSelected}
             dragging={!!isDragging}
+            agentPending={isAgentPending}
             headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}

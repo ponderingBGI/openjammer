@@ -4,12 +4,25 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Get OpenJammer</title>
+    <!--
+      The brand line, in the New DNA voice: a REAL INSTRUMENT (crafted,
+      immediate, deep). The retired "warm sketchbook canvas" was the last place
+      the old system's name survived in a search result or a link preview.
+    -->
     <meta
       name="description"
-      content="Download OpenJammer — a node-driven instrument you patch on a warm sketchbook canvas, then play live. Native desktop builds for macOS, Windows and Linux, or just play in your browser."
+      content="Download OpenJammer — a real instrument you patch on a canvas and play live, as a native desktop build for macOS, Windows or Linux at the lowest latency, or zero-install in your browser."
     />
-    <meta name="color-scheme" content="light" />
-    <meta name="theme-color" content="#F5F0E8" />
+    <!--
+      Exactly two themes, like the app. The page names neither: the token sheet
+      answers both `prefers-color-scheme` and an explicit `[data-theme]`.
+      `theme-color` cannot take a custom property, so the two literals here are
+      `--bg-canvas` per theme — asserted against the DTCG tokens by
+      src/components/__tests__/webSurfaceTokens.test.ts.
+    -->
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#F4F3F0" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#161510" media="(prefers-color-scheme: dark)" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <!--
       Standalone static page. NO React, NO service worker, NO app bundle.
@@ -19,6 +32,45 @@
       download.js only ENHANCES this (collapses <details>, swaps in a detected
       primary card); it never removes the floor.
     -->
+    <!--
+      The two faces this page actually renders, discovered here in the document
+      instead of one round trip later. Without these links the browser only
+      learns a woff2 exists once download.css has parsed its `@font-face`:
+      measured, Outfit starts at 19ms with `initiatorType: 'css'`; with them it
+      starts at 6ms as a `link`. That is a real round trip off the critical path
+      on any connection that is not loopback.
+
+      EXACTLY the two it paints, checked rather than assumed. Walking every text
+      run: this page is Outfit 400/500/600/700 and `JetBrains Mono @ 500` — the
+      version string and the Recommended chip. It never renders mono 400, so
+      preloading `jetbrains-mono-regular.woff2` here would fetch a face nothing
+      uses; `-medium` is the one that was still arriving late. (The docs are the
+      other way round — mono 400 on every page — which is why that head names a
+      different second face.) `crossorigin` is required even same-origin: fonts
+      are always CORS-fetched, and without it the preload is discarded and
+      fetched a second time.
+
+      It is NOT this page's layout shift, though. Measured before and after,
+      throttled and not, CLS stays ~0.076-0.086 either way, and the
+      `layout-shift` entries blame `.oj-other` / `.oj-browser` / `.oj-foot`
+      moving down when download.js injects the detected-OS card. See the W6-FIXb
+      report: the FOUT attribution was wrong, the enhancement is the cause.
+    -->
+    <link
+      rel="preload"
+      as="font"
+      type="font/woff2"
+      crossorigin
+      href="/fonts/outfit-variable.woff2"
+    />
+    <link
+      rel="preload"
+      as="font"
+      type="font/woff2"
+      crossorigin
+      href="/fonts/jetbrains-mono-medium.woff2"
+    />
+    <link rel="stylesheet" href="/download/oj-tokens.css" />
     <link rel="stylesheet" href="/download/download.css" />
   </head>
   <body>
@@ -58,6 +110,17 @@
         <div class="oj-other-body">
           <div class="oj-plat" data-os="macos">
             <h2 class="oj-plat-title">macOS</h2>
+            <!--
+              The chip is a caption ABOVE the pair, not a badge inside one of the
+              two buttons: nesting a surface in a control made "Apple Silicon"
+              wider than its "Intel" peer, and out here the caption can say how
+              to choose instead of only pointing.
+            -->
+            <p class="oj-pick" id="dl-macos-pick">
+              <span class="oj-chip">Recommended</span>
+              Apple Silicon &mdash; pick Intel only for a Mac from 2019 or
+              earlier.
+            </p>
             <div class="oj-btn-row">
               <a
                 class="oj-btn"
@@ -65,7 +128,6 @@
                 href="https://github.com/ponderingBGI/openjammer/releases/latest"
               >
                 Apple Silicon (M1&ndash;M4)
-                <span class="oj-chip" id="dl-macos-arm-chip">Recommended</span>
               </a>
               <a
                 class="oj-btn"

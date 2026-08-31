@@ -266,6 +266,11 @@
     if (el) el.hidden = true;
   }
 
+  function hideIf(id, condition) {
+    var el = document.getElementById(id);
+    if (el) el.hidden = !!condition;
+  }
+
   function tidyEmptyPlatforms() {
     var blocks = document.querySelectorAll('.oj-other-body .oj-plat');
     Array.prototype.forEach.call(blocks, function (block) {
@@ -280,6 +285,9 @@
     var n = 0;
     if (setAnchor('dl-macos-arm', urls['macos-arm'])) n++;
     else hideAnchor('dl-macos-arm');
+    // The caption points at the Apple Silicon button; if that button is gone
+    // (no arm asset in this release) the caption points at nothing.
+    hideIf('dl-macos-pick', !isRealAsset(urls['macos-arm']));
     if (setAnchor('dl-macos-intel', urls['macos-intel'])) n++;
     else hideAnchor('dl-macos-intel');
     if (setAnchor('dl-windows', urls['windows'])) n++;
@@ -292,19 +300,25 @@
     return n;
   }
 
-  function btn(href, label, opts) {
-    opts = opts || {};
+  function btn(href, label) {
     var a = document.createElement('a');
     a.className = 'oj-btn';
     a.href = href;
     a.appendChild(document.createTextNode(label));
-    if (opts.recommended) {
-      var chip = document.createElement('span');
-      chip.className = 'oj-chip';
-      chip.textContent = 'Recommended';
-      a.appendChild(chip);
-    }
     return a;
+  }
+
+  // "Recommended" is a CAPTION ABOVE the pair, never a chip nested inside one of
+  // the buttons — same shape (and same markup) as the macOS block in index.html.
+  function pick(text) {
+    var p = document.createElement('p');
+    p.className = 'oj-pick';
+    var chip = document.createElement('span');
+    chip.className = 'oj-chip';
+    chip.textContent = 'Recommended';
+    p.appendChild(chip);
+    p.appendChild(document.createTextNode(text));
+    return p;
   }
 
   // Build the detected-OS primary card. Returns true if a card was rendered
@@ -328,17 +342,18 @@
     row.className = 'oj-btn-row';
 
     var rendered = false;
+    var pickLine = null;
 
     if (os === 'macos') {
       heading.textContent = 'Download for macOS';
       note.textContent = LATENCY.native;
-      // NEVER auto-pick arch: two equal buttons, Apple-Silicon-then-Intel.
+      // NEVER auto-pick arch: two equal buttons, Apple-Silicon-then-Intel,
+      // with one caption above them saying how to choose.
       if (isRealAsset(urls['macos-arm'])) {
-        row.appendChild(
-          btn(urls['macos-arm'], 'Apple Silicon (M1–M4)', {
-            recommended: true,
-          })
+        pickLine = pick(
+          ' Apple Silicon — pick Intel only for a Mac from 2019 or earlier.'
         );
+        row.appendChild(btn(urls['macos-arm'], 'Apple Silicon (M1–M4)'));
         rendered = true;
       }
       if (isRealAsset(urls['macos-intel'])) {
@@ -395,6 +410,7 @@
     if (!rendered) return false;
     card.appendChild(heading);
     card.appendChild(note);
+    if (pickLine) card.appendChild(pickLine);
     card.appendChild(row);
     slot.appendChild(card);
     section.hidden = false;

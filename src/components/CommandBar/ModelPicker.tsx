@@ -309,7 +309,7 @@ export function ModelPicker({ runtime, initialQuery = '', onSelected, onCancel }
                                     {model.manual && <Chip>add custom</Chip>}
                                     {model.instant && !model.manual && <Chip>session</Chip>}
                                     {modelSupportsReasoning(model) && <Chip>reasoning</Chip>}
-                                    {isCurrent && <Chip tone="success">current</Chip>}
+                                    {isCurrent && <Chip>current</Chip>}
                                     {isSelecting && <Chip>switching…</Chip>}
                                 </span>
                             }

@@ -24,11 +24,55 @@ export default defineConfig({
             editLink: {
                 baseUrl: 'https://github.com/ponderingBGI/openjammer/edit/main/apps/docs/',
             },
-            // Living-Sketchbook skin: CSS-variable token remap (warm paper, ink
-            // line, Outfit voice, hard offset shadows) plus exactly ONE bespoke
+            // New DNA skin: a CSS-variable remap that points Starlight's own
+            // `--sl-*` scale at the OpenJammer semantic tokens (custom.css
+            // imports the transcribed token sheet), plus exactly ONE bespoke
             // component slot — the splash Hero. This is the only component
             // override (hard cap): the brand ships through tokens, not forks.
             customCss: ['./src/styles/custom.css'],
+            // Preload the two self-hosted faces the site actually renders.
+            // `custom.css` @imports fonts.css, so the woff2 sits behind TWO
+            // stylesheet parses: the browser cannot discover it until the sheet
+            // and its nested @import have both landed. These links move that
+            // discovery into the document (measured on the sibling download
+            // page, same font setup: 19ms as `css` -> 6ms as `link`, both faces
+            // in parallel). It buys a round trip, not a CLS number — see the
+            // W6-FIXb report for why the FOUT attribution there was wrong.
+            //
+            // The second face is mono 400, NOT the 500 the download page
+            // preloads: walking every text run, every docs page renders
+            // `JetBrains Mono @ 400` (inline code, kbd) while only some pull 500,
+            // and this head is site-wide — a preload on a page that never paints
+            // the face is a wasted fetch on the critical path.
+            // `crossorigin` is required even same-origin — fonts are always
+            // CORS-fetched, and without it the preload is thrown away and
+            // fetched a second time. It is spelled `'anonymous'` (not `true`,
+            // which Astro renders as the invalid `crossorigin="true"`) so the
+            // preload's CORS mode matches the font fetch by name, not by the
+            // enumerated attribute's invalid-value default. Paths carry the
+            // `/openjammer` base, like fonts.css's own `src:` URLs.
+            head: [
+                {
+                    tag: 'link',
+                    attrs: {
+                        rel: 'preload',
+                        as: 'font',
+                        type: 'font/woff2',
+                        crossorigin: 'anonymous',
+                        href: '/openjammer/fonts/outfit-variable.woff2',
+                    },
+                },
+                {
+                    tag: 'link',
+                    attrs: {
+                        rel: 'preload',
+                        as: 'font',
+                        type: 'font/woff2',
+                        crossorigin: 'anonymous',
+                        href: '/openjammer/fonts/jetbrains-mono-regular.woff2',
+                    },
+                },
+            ],
             components: {
                 Hero: './src/components/Hero.astro',
             },

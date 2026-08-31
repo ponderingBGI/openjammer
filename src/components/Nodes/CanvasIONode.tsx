@@ -14,6 +14,7 @@
 import { useCallback, useState } from 'react';
 import type { GraphNode } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
+import { useIsAgentPending } from '../../store/agentSessionStore';
 import { EditableLabel, NodeShell, PortRow } from '@openjammer/oj-ui';
 import { NodeFeedback } from './NodeFeedback';
 import { useNodeRefusal } from './nodeControls';
@@ -54,6 +55,7 @@ export function CanvasIONode({
     const beginGesture = useGraphStore((s) => s.beginGesture);
     const endGesture = useGraphStore((s) => s.endGesture);
     const isRefusing = useNodeRefusal(node.id);
+    const isAgentPending = useIsAgentPending(node.id);
     const [editing, setEditing] = useState(false);
 
     const portName = (node.data.portName as string) || '';
@@ -125,6 +127,7 @@ export function CanvasIONode({
             nodeType={isInput ? 'FROM PARENT' : 'TO PARENT'}
             selected={!!isSelected}
             dragging={!!isDragging}
+            agentPending={isAgentPending}
             headerProps={{ onMouseDown: handleHeaderMouseDown }}
             onMouseEnter={handleNodeMouseEnter}
             onMouseLeave={handleNodeMouseLeave}
