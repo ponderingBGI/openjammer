@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { assertAudiblePeak, decodeWav } from './helpers/audio';
-import { bootApp } from './journeys/support';
+import { bootApp, tabToOtherSurface } from './journeys/support';
 
 // Render-smoke for the browser PWA target (plan §4.2 / §3). Proves the production
 // bundle loads, comes up cross-origin isolated (so the SharedArrayBuffer fast
@@ -209,7 +209,7 @@ test.describe('PWA shell', () => {
     test('browser export downloads a valid 24-bit WAV blob', async ({ page }) => {
         test.setTimeout(90_000);
         await bootApp(page);
-        await page.keyboard.press('Tab');
+        await tabToOtherSurface(page);
         await page.getByRole('button', { name: /start from 'paper sketch'/i }).click();
         await page.getByRole('button', { name: 'Export', exact: true }).click();
 
@@ -239,7 +239,7 @@ test.describe('PWA shell', () => {
     test('First Light starter exports in-browser @slow', async ({ page }) => {
         test.setTimeout(180_000);
         await bootApp(page);
-        await page.keyboard.press('Tab');
+        await tabToOtherSurface(page);
         await page.getByRole('button', { name: /start from 'first light'/i }).click();
         await expect(page.locator('.arrangement-track')).toHaveCount(5);
         await page.getByRole('button', { name: 'Export', exact: true }).click();

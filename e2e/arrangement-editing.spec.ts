@@ -8,6 +8,16 @@ async function openPaperSketch(page: Page) {
     await page.mouse.click(box.x + box.width / 2, box.y + 170, { button: 'right' });
     await page.getByText('Utility', { exact: false }).last().click();
     await page.getByRole('menuitem', { name: /Add Song/i }).click();
+    /*
+     * `Tab` switches surface only from the STAGE FLOOR — `document.body` or a
+     * `[data-surface-root]` element itself (docs/shell.md, "Tab, focus, and the
+     * chrome"). Straight after the menu click the focus is still on the
+     * `div.oj-menu-item` that was just dismissed, which is *inside* a surface,
+     * so the press walks controls instead of toggling and the empty state never
+     * opens. Wait for the node the menu created, then press from the floor.
+     */
+    await expect(page.locator('.song-node')).toHaveCount(1);
+    await page.locator('body').focus();
     await page.keyboard.press('Tab');
     await page.getByRole('button', { name: /Start from 'Paper Sketch'/i }).click();
     await expect(page.locator('.arrangement-clip')).toHaveCount(3);

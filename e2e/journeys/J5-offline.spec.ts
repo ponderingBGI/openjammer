@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { assertAudiblePeak, assertMusicalDuration, decodeWav } from '../helpers/audio';
 import type { Arrangement } from '../../src/song/types';
-import { exportSong, snapshot } from './support';
+import { exportSong, snapshot, tabToOtherSurface } from './support';
 
 async function reloadFromInstalledPwa(page: Page): Promise<void> {
     const previousTimeOrigin = await page.evaluate(() => performance.timeOrigin);
@@ -49,7 +49,7 @@ test('@journey J5 Offline — installed PWA composes, edits, exports, and reload
     test.skip(!hasWebAudio, `${browserName} build has no Web Audio API for offline export`);
 
     await page.getByRole('button', { name: /skip, take me in/i }).click();
-    await page.keyboard.press('Tab');
+    await tabToOtherSurface(page);
     await page.getByRole('button', { name: /start from 'paper sketch'/i }).click();
     await expect(page.locator('.arrangement-clip')).toHaveCount(3);
 
@@ -126,5 +126,16 @@ test('@journey J5 Offline — installed PWA composes, edits, exports, and reload
 
     await reloadFromInstalledPwa(page);
     await expect(page.locator('#root')).not.toBeEmpty();
-    await expect(page.getByRole('button', { name: /skip, take me in/i })).toBeVisible();
+    /*
+     * The second offline reload comes back INTO the studio, not into the first
+     * run. This test skipped the overlay near the top, and onboarding runs once —
+     * "the absence of a stored answer set is the only thing that opens it"
+     * (`Onboarding.tsx`). So asking for "Skip, take me in" again asserts the
+     * opposite of the shipped law; what is worth proving here is that the
+     * answers, the shell and the surfaces all survived a reload with no origin.
+     */
+    await expect(page.getByRole('button', { name: /skip, take me in/i })).toHaveCount(0);
+    await expect(page.locator('[data-surface-root]').first()).toBeAttached();
+    expect(await page.evaluate(() => localStorage.getItem('oj-onboarding-v1'))).not.toBeNull();
+    expect(pageErrors, `offline reload errors:\n${pageErrors.join('\n')}`).toEqual([]);
 });

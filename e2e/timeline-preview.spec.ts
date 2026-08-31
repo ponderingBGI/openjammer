@@ -136,6 +136,10 @@ test.describe('Timeline live preview', () => {
         await page.getByText('Utility', { exact: false }).last().click();
         await page.getByRole('menuitem', { name: /Add Song/i }).click();
         await expect(page.locator('.song-node')).toHaveCount(1);
+        // From the stage floor: `Tab` toggles surface only when the target is
+        // `document.body` or a surface root (docs/shell.md). The menu click left
+        // the focus on a control, where `Tab` walks instead.
+        await page.locator('body').focus();
         await page.keyboard.press('Tab');
         await expect(page.locator('[data-surface-root="canvas"]')).toBeHidden();
         await expect(page.locator('[data-surface-root="arrangement"]')).toBeVisible();
