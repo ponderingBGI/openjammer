@@ -13,7 +13,7 @@
     "check": "bun scripts/gen-component-index.mjs && astro check"
   },
   "dependencies": {
-    "@astrojs/starlight": "0.41.7",
+    "@astrojs/starlight": "0.41.10",
     "astro": "7.2.4",
     "sharp": "0.35.3"
   },
