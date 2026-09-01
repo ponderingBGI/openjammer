@@ -165,7 +165,7 @@ jobs:
       # global-allocator swap `assert_no_alloc` installs. A REQUIRED per-PR check
       # via the aggregate `gate` — an RT-path heap regression fails the merge.
       - name: Install cargo-nextest (no-alloc gate)
-        uses: taiki-e/install-action@5b4d68e2e660441203ab128a23676f1e4faf1532 # v2
+        uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2
         with:
           tool: cargo-nextest
       - name: RT no-alloc gate (assert_no_alloc)
