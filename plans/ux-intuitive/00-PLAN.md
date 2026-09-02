@@ -99,6 +99,10 @@ discoverable-but-slightly-off.
 
 ## Constraints carried over
 
+The operating model (design notes, orchestrator review, proportionate verification, the net-lines
+ledger) now lives in `plans/craft/00-THE-CRAFT.md` and supersedes the process here.
+
+
 bun only · builders never `git add/commit/stash/checkout` · orchestrator commits by pathspec
 after an adversarial gate · Playwright under `node` · private ports per lane (5240+) ·
 ≤3 concurrent Chromium lanes · codex quota returns 2026-09-03 18:26 (use it for bounded grind
