@@ -163,7 +163,7 @@ impl HostedPlugin {
         self.backend.process(inputs, outputs, nframes);
         for output in outputs {
             let n = nframes.min(output.len());
-            self.output_faulted |= ojcore::sanitize(&mut output[..n]);
+            self.output_faulted |= ojcore::sanitize(&mut output[..n]).non_finite;
         }
     }
 
@@ -318,7 +318,7 @@ impl DspInstance for PluginHostNode {
             // excessive finite output is hard-clamped to +/-4 headroom.
             for output in ctx.outputs.iter_mut() {
                 let n = ctx.nframes.min(output.len());
-                if ojcore::sanitize(&mut output[..n]) {
+                if ojcore::sanitize(&mut output[..n]).non_finite {
                     self.output_faulted = true;
                 }
             }

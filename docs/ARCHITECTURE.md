@@ -70,6 +70,83 @@ bun native --engine           # windowless Rust/DSP inner-loop via bacon
 bun run tauri build --features plugin-host-juce  # local installer matching release plugin hosting
 ```
 
+### The committed wasm artefact — when it MUST be rebuilt
+
+`src/audio/wasm/pkg/` (`ojcore_wasm.js` + `ojcore_wasm_bg.wasm`) is a **checked-in
+build artefact**, so a fresh clone builds the app with no Rust toolchain. That
+trade has exactly one failure mode, and it has already cost us a stage-breaking
+bug: the artefact silently going stale against `crates/`.
+
+**Rebuild it — `bash src/audio/wasm/build-wasm.sh --release` — and commit the two
+files whenever you change anything the worklet reaches through
+`wasm-bindgen`:** a new/renamed/removed `#[wasm_bindgen]` export in
+`crates/ojcore-wasm`, or a change to `ojcore` / `ojcore-dsp` / `ojinstrument` /
+`ojproto` behaviour you expect the browser tier to have. The engine crates are
+statically linked into that binary; an untouched `pkg/` means the browser is
+running a different engine from the one in `crates/`.
+
+Prereqs (once): `rustup toolchain install nightly`,
+`rustup +nightly target add wasm32-unknown-unknown`,
+`rustup +nightly component add rust-src`, and
+`cargo install wasm-bindgen-cli --version 0.2.125` — the CLI version **must**
+match the `wasm-bindgen` pin in `crates/ojcore-wasm/Cargo.toml`.
+
+**The guards — two of them.** First, `build-wasm.sh` emits `ojcore_wasm.d.ts` and it
+is committed beside the glue, so `tsc` sees the engine's real export list: calling
+an export the artefact does not have is a **compile error**. (The imports used to
+carry `@ts-expect-error`, which is exactly how a non-existent `drain_transport`
+went unnoticed for 17 commits.) Second,
+`src/audio/worklets/__tests__/wasmExportParity.test.ts` parses the committed glue's
+export list, the `.wasm` binary's own export section, and every `wasm.<name>(` call
+in the worklet, and fails the web gate when they disagree — naming the missing
+export. The declarations catch a *missing* export; the parity test additionally
+catches the two halves of the artefact being committed **out of sync with each
+other**, which types alone cannot see. It exists because the previous mitigation was the
+opposite of a guard: the worklet soft-probed for exports with
+`Reflect.get(wasm, 'drain_transport')` "so the committed pre-W3 glue stays
+usable", the probe was always false, and the browser tier shipped for months with
+**no transport return path and no timeline loaders at all** — every Play told the
+player "the audio engine did not acknowledge the transport command" while the
+engine was rolling fine, and every song's notes were dropped in silence. A
+missing engine export is now a red test, never an invisible no-op (code-value #4:
+fallbacks are exceptional, and never over the core's own contract).
+
+Note that CI's `wasm32 build` step (`.github/workflows/ci.yml`) only proves the
+crate *compiles* for `wasm32`; it does not regenerate or diff the artefact. The
+parity test is what ties the shipped bytes to the source.
+
+### Known gap: the wasm return path allocates on the render thread
+
+Stated here rather than left to be rediscovered, because it looks like a
+real-time-safety violation and the reason it is tolerated is not obvious.
+
+`OjcoreProcessor.process()` — the AudioWorklet **render callback** — drains the
+engine every 4 render quanta (~10 ms, i.e. **~94×/s** at 48 kHz/128) via
+`drain_meters`, `drain_looper`, `drain_looper_edges`, `drain_events` and
+`drain_transport`. Each returns a Rust `Vec`, the generated glue copies it into a
+fresh JS typed array, and the worklet then adds a `TextDecoder`/`JSON.parse` and a
+structured-clone `postMessage`. That is several allocations per drain, on the audio
+thread, and it is the long-standing shape of the browser tier's return path — not
+something any one change introduced. The wasm allocator is dlmalloc inside linear
+memory, so there is no syscall, no OS lock and no priority inversion of the kind a
+native `malloc` would cause; but a `memory.grow` on the render thread is still a
+dropout waiting to happen.
+
+**No CI gate covers any of this.** The required no-alloc gate is
+`cargo nextest run -p ojcore`, and its `assert_no_alloc` scopes
+(`crates/ojcore/tests/engine.rs`) wrap `Engine::process_block` on the **native**
+target with **no meter ring attached**. So neither `ojcore-wasm`, nor
+`Engine::publish_levels` (and therefore nor `Engine::transport_frame`), nor the
+worklet's JS drains sit inside any gate. `transport_frame` is alloc-free by
+inspection — `position_at` is pure arithmetic and `tempo_snapshot` is an `Arc`
+refcount bump — but nothing proves it mechanically.
+
+**Follow-up (named, not fixed here): `OJ-RT-WASM-RING`.** Move the wasm drains onto
+a pre-allocated `SharedArrayBuffer` ring, the way native already publishes through
+`meter::MeterRing`, so the render callback writes into fixed memory and the main
+thread decodes; and extend the no-alloc gate to cover `publish_levels` with a ring
+attached.
+
 Setup + per-OS prerequisites live in one place: **[CONTRIBUTING.md § Native desktop](../CONTRIBUTING.md#native-desktop-tauri)**
 (`bun run oj setup` installs them — a set derived from CI, asserted by a unit test, so local matches CI).
 

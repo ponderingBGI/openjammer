@@ -60,9 +60,14 @@ import { WORKLET_TEXT_CODEC_INSTALLED } from './worklet-text-codec';
 // Because the default-import path never referenced the real `initSync`, Rollup also
 // tree-shook the synchronous instantiate out of the production bundle entirely. Pull
 // the NAMED `initSync` so the side-effectful sync instantiate is kept and used.
-// @ts-expect-error - generated JS module has no .d.ts (built by build-wasm.sh).
+//
+// Imported WITH its declarations. `build-wasm.sh` emits `ojcore_wasm.d.ts` and it
+// is committed beside the glue, so `tsc` sees the engine's real export list:
+// calling an export the shipped artefact does not have is a COMPILE error here,
+// not a silent `any` that fails at 48 kHz in front of an audience. This import
+// used to carry `@ts-expect-error`, which is precisely why nothing noticed that
+// `drain_transport` had never existed.
 import { initSync } from '../wasm/pkg/ojcore_wasm.js';
-// @ts-expect-error - generated JS module has no .d.ts (built by build-wasm.sh).
 import * as wasm from '../wasm/pkg/ojcore_wasm.js';
 
 interface InitMsg {
@@ -166,6 +171,12 @@ class OjcoreProcessor extends AudioWorkletProcessor {
     /** Block counter so looper snapshots/edges drain at ~UI rate (every ~4 blocks),
      *  ungated by metering — the row/playhead must surface even with meters off. */
     private looperTick = 0;
+    /**
+     * Latched once the transport drain has thrown, so a stale/incompatible wasm
+     * artefact reports itself exactly once instead of ~94x/s from the render
+     * thread. Never reset: within one session the artefact cannot change.
+     */
+    private transportDrainFailed = false;
     /** Blocks between fault drains (~10 Hz). Recomputed from the rate in init. */
     private eventDrainBlocks = 38;
     /** Per-node recorder captures: node id -> accumulated mono PCM chunks. */
@@ -192,10 +203,10 @@ class OjcoreProcessor extends AudioWorkletProcessor {
                     this.pushCommandFrame(msg.bytes);
                     break;
                 case 'load_tempo_map':
-                    if (this.ready) this.callOptionalLoader(msg.type, msg.bytes);
+                    if (this.ready) this.callLoader(msg.type, msg.bytes);
                     break;
                 case 'load_timeline':
-                    if (this.ready) this.callOptionalLoader(msg.type, msg.bytes);
+                    if (this.ready) this.callLoader(msg.type, msg.bytes);
                     break;
                 case 'meters':
                     this.metersEnabled = msg.enabled;
@@ -216,11 +227,18 @@ class OjcoreProcessor extends AudioWorkletProcessor {
         }
     }
 
-    /** Resolve W3 loaders dynamically so the committed pre-W3 generated glue stays
-     * usable until it is rebuilt; a missing optional export is a quiet no-op. */
-    private callOptionalLoader(name: 'load_tempo_map' | 'load_timeline', bytes: Uint8Array): void {
-        const loader = Reflect.get(wasm as object, name) as ((payload: Uint8Array) => boolean) | undefined;
-        if (typeof loader === 'function') loader(bytes);
+    /** Publish a timeline document (tempo map / timeline) into the engine.
+     *
+     * Called DIRECTLY, like every other engine export. This was a
+     * `Reflect.get(wasm, name)` soft probe added so a stale committed glue stayed
+     * usable — and because the shipped glue predated these two exports, it silently
+     * dropped every tempo map and every timeline: the browser engine never received
+     * the notes of a song it was asked to play, with nothing logged. A missing
+     * export is now a `tsc` error against the committed `.d.ts`, plus a red
+     * `wasmExportParity` test — which is the only way this can be noticed. */
+    private callLoader(name: 'load_tempo_map' | 'load_timeline', bytes: Uint8Array): void {
+        if (name === 'load_tempo_map') wasm.load_tempo_map(bytes);
+        else wasm.load_timeline(bytes);
     }
 
     /**
@@ -493,29 +511,64 @@ class OjcoreProcessor extends AudioWorkletProcessor {
         // dedicated `looper` message; an edge (the AUTHORITATIVE row-create signal,
         // never dropped) rides the SAME `events` message the fault pipe uses, so
         // the LooperEdge tag reaches the looper handle through one seam. The drain
-        // runs at the meter cadence (~10 ms) — fast enough for a smooth playhead,
-        // and the per-block kernel snapshot is coalesced to the latest each tick.
+        // runs at the meter cadence — every 4 render quanta, i.e. every ~10 ms or
+        // ~94x/s at 48 kHz/128 — fast enough for a smooth playhead, and the
+        // per-block kernel snapshot is coalesced to the latest each tick.
+        //
+        // Every drain in this block allocates when it has something to say
+        // (`Vec` -> a copied JS typed array -> postMessage), ON THE RENDER THREAD.
+        // That is the long-standing shape of the wasm return path, not something
+        // introduced here; see docs/ARCHITECTURE.md "Known gap: the wasm return
+        // path allocates on the render thread".
         this.looperTick++;
         if (this.looperTick >= 4) {
             this.looperTick = 0;
-            // Newer W3 wasm glue exposes the engine's latest Transport snapshot.
-            // Keep the committed pre-W3 binary safe until its generated bindings are
-            // refreshed: absence means no frame, never a render-thread exception.
-            const transportDrain = Reflect.get(wasm as object, 'drain_transport') as
-                (() => Uint8Array) | undefined;
-            if (typeof transportDrain === 'function') {
-                const transportBytes = transportDrain();
+            // Transport: the engine's authoritative `EngineFrame::Transport`, the
+            // SAME frame the native tier publishes (both come from the one
+            // `Engine::transport_frame` assembler; native encodes it onto the
+            // std-only meter ring, we get it as JSON). This is the browser tier's
+            // ONLY transport acknowledgement — without it `arrangementStore`'s
+            // 1500 ms timeout fires on every Play and tells the player the engine
+            // never answered.
+            //
+            // Called DIRECTLY, on purpose. This used to be a
+            // `Reflect.get(wasm, 'drain_transport')` soft probe so a stale committed
+            // glue "stayed usable"; the export did not exist, the probe was silently
+            // always-false, and the entire transport return path was dead for the
+            // life of the browser tier. A missing engine export is now caught twice:
+            // by `tsc` against the committed `ojcore_wasm.d.ts`, and by
+            // `__tests__/wasmExportParity.test.ts` against the shipped `.wasm`'s own
+            // export section — instead of being an invisible no-op (covenant:
+            // fallbacks are exceptional, and never over the core's own contract).
+            // The CALL is inside the try, not just the decode. An exception thrown
+            // out of `process()` permanently disables an AudioWorkletProcessor —
+            // the node is never called again and the instrument goes silent for the
+            // rest of the session. So a stale artefact whose glue lacks
+            // `drain_transport` must cost the player their transport READOUT, never
+            // their sound: a held note beats a glitch. Reported once, then quiet, so
+            // a per-quantum failure cannot storm the main thread either.
+            try {
+                const transportBytes = wasm.drain_transport() as Uint8Array;
                 if (transportBytes?.length) {
-                    try {
-                        const decoded = JSON.parse(new TextDecoder().decode(transportBytes)) as {
-                            Transport?: unknown;
-                        };
-                        if (decoded.Transport) {
-                            this.port.postMessage({ type: 'transport', frame: decoded.Transport });
-                        }
-                    } catch {
-                        // Telemetry is lossy; a later complete frame replaces this one.
+                    const decoded = JSON.parse(new TextDecoder().decode(transportBytes)) as {
+                        Transport?: unknown;
+                    };
+                    if (decoded.Transport) {
+                        this.port.postMessage({ type: 'transport', frame: decoded.Transport });
                     }
+                }
+            } catch (err) {
+                // Telemetry is lossy; a later complete frame replaces a bad decode.
+                // A MISSING export is not lossy, it is broken, so say so — once.
+                if (!this.transportDrainFailed) {
+                    this.transportDrainFailed = true;
+                    this.port.postMessage({
+                        type: 'error',
+                        message:
+                            'transport drain failed; the playhead will not move. The committed ' +
+                            'wasm artefact is probably stale — rebuild with ' +
+                            `src/audio/wasm/build-wasm.sh --release (${String(err)})`,
+                    });
                 }
             }
             const lframes = wasm.drain_looper() as Float32Array;

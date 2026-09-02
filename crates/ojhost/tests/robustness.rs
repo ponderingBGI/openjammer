@@ -67,7 +67,12 @@ fn output_guard_scrubs_nan_inf_denormal_and_clamps() {
         assert!(!plugin.take_output_fault(), "fault latch is consumable");
     }
     let mut block = [3.5, 8.0, -9.0];
-    assert!(ojcore::sanitize(&mut block));
+    let report = ojcore::sanitize(&mut block);
+    assert!(report.clamped, "over-headroom output is clamped");
+    assert!(
+        !report.non_finite,
+        "a clamp is headroom housekeeping, not a reportable fault"
+    );
     assert_eq!(block, [3.5, 4.0, -4.0]);
 }
 

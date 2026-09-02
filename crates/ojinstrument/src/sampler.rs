@@ -24,6 +24,7 @@ use alloc::vec::Vec;
 use ojcore::{
     DspInstance, DspKind, ParamDecl, PluginLoader, PluginManifest, PortDecl, ProcessCtx, UiKind,
 };
+use ojcore_dsp::guards::flush_denormal;
 use ojproto::PrimitiveKind;
 
 use crate::adsr::{Adsr, AdsrParams};
@@ -260,12 +261,20 @@ impl DspInstance for SamplerInstrument {
                 let frac = v.pos - i as f32;
                 // Velocity brightness: a one-pole low-pass per channel (coef 1 =
                 // fully open). L runs the identical recurrence the mono Sampler did.
+                //
+                // The one-pole state is RECIRCULATING, and the voice keeps
+                // rendering past the end of the PCM (`sample_at` returns 0.0
+                // there) while the envelope releases — so with the input pinned
+                // at zero `lp_l`/`lp_r` decay multiplicatively straight into the
+                // subnormal band. `flush_denormal` floors that; it deliberately
+                // passes NaN/Inf through so genuine garbage still faults at the
+                // node boundary.
                 let l = sample_at(pcm_l, i, frac, n);
-                v.lp_l += v.lp_coef * (l - v.lp_l);
+                v.lp_l = flush_denormal(v.lp_l + v.lp_coef * (l - v.lp_l));
                 out_l[f] += v.lp_l * g * v.amp * self.gain;
                 if let Some(r_out) = out_r.as_deref_mut() {
                     let r = sample_at(pcm_r, i, frac, n);
-                    v.lp_r += v.lp_coef * (r - v.lp_r);
+                    v.lp_r = flush_denormal(v.lp_r + v.lp_coef * (r - v.lp_r));
                     r_out[f] += v.lp_r * g * v.amp * self.gain;
                 }
                 v.pos += v.inc;

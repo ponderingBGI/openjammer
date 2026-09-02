@@ -47,6 +47,19 @@ pub struct Engine {
     out_ptrs: Vec<*mut f32>,
     /// Authoritative transport FSM, sample clock, and loop/punch state.
     pub(crate) transport: Transport,
+    /// Monotonic count of transport COMMANDS the engine has consumed.
+    ///
+    /// The transport frame alone cannot answer "did you hear me?". A `Seek` onto
+    /// the sample we are already parked at, or a `TransportPause` on an already
+    /// paused transport, changes nothing observable — so a return path that
+    /// speaks only when the frame changes stays silent, and the UI (which armed a
+    /// 1500 ms acknowledgement timeout the moment it sent the command) tells the
+    /// player the engine never answered. Pressing Home at bar 1 did exactly that.
+    ///
+    /// So the engine counts commands as well as describing state: consumers pair
+    /// this with the frame and re-state the transport whenever EITHER moves.
+    /// Wrapping is harmless — only inequality is ever tested.
+    transport_epoch: u64,
     /// Immutable tempo/meter snapshot used when no native RCU receiver is attached.
     tempo_map: Arc<TempoMapRt>,
     /// Native swap-whole tempo publication handle. Loaded once per process block.
@@ -125,6 +138,7 @@ impl Engine {
             in_ptrs,
             out_ptrs,
             transport: Transport::new(sample_rate as f32),
+            transport_epoch: 0,
             tempo_map: Arc::new(TempoMapRt::one_point(sample_rate, 120.0, 4, 4)),
             #[cfg(feature = "std")]
             tempo_map_rx: None,
@@ -376,6 +390,66 @@ impl Engine {
         self.transport
     }
 
+    /// **The** authoritative control-rate transport snapshot, as the single
+    /// [`ojproto::EngineFrame::Transport`] BOTH tiers publish.
+    ///
+    /// This is the one place the frame's eight fields are assembled from the
+    /// position read + the transport FSM. Native encodes the result into the
+    /// `std`-only meter ring (`meter::return_frame::encode_transport`); the wasm
+    /// worklet serialises the same enum to JSON in `ojcore_wasm::drain_transport`.
+    /// Two encodings, ONE frame — so the browser tier can never drift into a
+    /// parallel transport contract (code-value #2: extend the pillar, never fork
+    /// it). Alloc-free pure arithmetic; advances the incremental
+    /// [`MetricCursor`] so a per-block native call stays O(1).
+    ///
+    /// `map` is the caller's tempo snapshot ([`Self::transport_frame_now`] reads
+    /// it for you when you have not already got one in hand).
+    pub fn transport_frame(&mut self, map: &TempoMapRt) -> ojproto::EngineFrame {
+        let pos = self
+            .transport
+            .position_at(self.timeline_sample(), map, &mut self.metric_cursor);
+        self.transport_frame_at(&pos)
+    }
+
+    /// Assemble the frame from an ALREADY-TAKEN position read.
+    ///
+    /// Split out so a caller that also needs the raw [`TransportPos`] (native's
+    /// `publish_levels` wants `pos.beat` at full width for the `Beat` frame) can
+    /// take the position ONCE and still get the one canonical frame, rather than
+    /// reading the clock twice or re-deriving the fields by hand.
+    ///
+    /// Note the one narrowing: [`ojproto::EngineFrame::Transport::beat`] is `u16`
+    /// while [`TransportPos::beat`] is `u32`, so a beat index above 65 535 within
+    /// a single bar saturates. No real meter comes close (it would need a
+    /// 65 536-beat bar); the `Beat` frame keeps the full `u32`.
+    #[inline]
+    fn transport_frame_at(&self, pos: &TransportPos) -> ojproto::EngineFrame {
+        ojproto::EngineFrame::Transport {
+            sample: pos.sample,
+            tick: pos.tick,
+            bar: pos.bar,
+            beat: pos.beat.min(u16::MAX as u32) as u16,
+            phase: pos.phase,
+            motion: self.transport.motion() as u8,
+            rec: self.transport.record_armed(),
+            loop_on: self.transport.loop_on(),
+        }
+    }
+
+    /// How many transport COMMANDS this engine has consumed. Pair it with
+    /// [`Self::transport_frame`] to answer "did you hear me?" even when the
+    /// command changed nothing — see [`Self::transport_epoch`]'s field docs.
+    pub fn transport_epoch(&self) -> u64 {
+        self.transport_epoch
+    }
+
+    /// [`Self::transport_frame`] against the engine's current tempo snapshot —
+    /// the shape a caller without a map in hand (the wasm worklet) wants.
+    pub fn transport_frame_now(&mut self) -> ojproto::EngineFrame {
+        let map = self.tempo_snapshot();
+        self.transport_frame(&map)
+    }
+
     fn tempo_snapshot(&self) -> Arc<TempoMapRt> {
         #[cfg(feature = "std")]
         if let Some(rx) = self.tempo_map_rx.as_ref() {
@@ -495,6 +569,17 @@ impl Engine {
     /// frames rather than blocking when the ring is full.
     #[cfg(feature = "std")]
     fn publish_levels(&mut self, map: &TempoMapRt) {
+        if self.meter_ring.is_none() {
+            return;
+        }
+        // ONE position read, BEFORE borrowing the ring (the read needs `&mut self`
+        // for the incremental metric cursor). `pos` keeps `beat` at its full `u32`
+        // for the `Beat` frame; `transport_frame_at` turns the same read into the
+        // one canonical transport frame the wasm tier also drains.
+        let pos = self
+            .transport
+            .position_at(self.timeline_sample(), map, &mut self.metric_cursor);
+        let transport = self.transport_frame_at(&pos);
         let Some(ring) = self.meter_ring.as_ref() else {
             return;
         };
@@ -515,24 +600,29 @@ impl Engine {
             let _ = ring.push(&buf[..n]);
         }
 
-        // Transport beat.
-        let pos = self
-            .transport
-            .position_at(self.timeline_sample(), map, &mut self.metric_cursor);
+        // Transport beat, at the position read's FULL width (the `Beat` frame has
+        // always carried `u32`; taking it off the narrowed transport frame would
+        // have silently capped it).
         let n = return_frame::encode_beat(pos.bar, pos.beat, pos.phase, &mut buf);
         let _ = ring.push(&buf[..n]);
-        let n = return_frame::encode_transport(
-            pos.sample,
-            pos.tick,
-            pos.bar,
-            pos.beat.min(u16::MAX as u32) as u16,
-            pos.phase,
-            self.transport.motion() as u8,
-            self.transport.record_armed(),
-            self.transport.loop_on(),
-            &mut buf,
-        );
-        let _ = ring.push(&buf[..n]);
+
+        // ...and the authoritative transport frame, off the same single snapshot.
+        if let ojproto::EngineFrame::Transport {
+            sample,
+            tick,
+            bar,
+            beat,
+            phase,
+            motion,
+            rec,
+            loop_on,
+        } = transport
+        {
+            let n = return_frame::encode_transport(
+                sample, tick, bar, beat, phase, motion, rec, loop_on, &mut buf,
+            );
+            let _ = ring.push(&buf[..n]);
+        }
     }
 
     /// UNGATED looper return path: published every block regardless of the
@@ -621,6 +711,18 @@ impl Engine {
     ///   [`crate::DspInstance::looper_action`]. Non-looper nodes inherit the
     ///   trait's default no-op; a [`crate::LooperNode`] consumes it.
     pub fn apply_rt(&mut self, cmd: RtCommand) {
+        // Every transport verb advances the epoch, INCLUDING one whose effect is
+        // a no-op. "I heard you and there was nothing to do" is an answer; silence
+        // is not (see `transport_epoch`).
+        if matches!(
+            cmd,
+            RtCommand::TransportPlay
+                | RtCommand::TransportPause
+                | RtCommand::Seek { .. }
+                | RtCommand::TransportSet { .. }
+        ) {
+            self.transport_epoch = self.transport_epoch.wrapping_add(1);
+        }
         match cmd {
             RtCommand::SetParam { node, param, value } => {
                 if let Some(slot) = self.program.slot_of_id(node) {
@@ -1334,8 +1436,10 @@ impl Engine {
                 }
             }
             // U16: guard the master output (a non-finite source would otherwise reach
-            // the device). Flag if ANY channel produced non-finite.
-            if sanitize(&mut out[..nframes]) {
+            // the device). Flag if ANY channel produced non-finite — and ONLY for
+            // non-finite: the denormal flush and the headroom clamp this same call
+            // performs are housekeeping, not garbage.
+            if sanitize(&mut out[..nframes]).non_finite {
                 master_dirty = true;
             }
             // Master brickwall limiter — AFTER sanitize (so a master-level NaN/Inf is
@@ -1607,13 +1711,16 @@ impl Engine {
     }
 
     /// U16: flush any non-finite/denormal sample in every output buffer of
-    /// `node` to silence; raise the node's `non_finite` flag if it had to.
+    /// `node` to silence; raise the node's `non_finite` flag ONLY for genuine
+    /// NaN/Inf. A denormal flush or a headroom clamp is housekeeping on healthy
+    /// audio and stays silent (see [`crate::SanitizeReport`]) — reporting it was
+    /// what turned every decaying delay tail into a permanent fault card.
     /// Alloc-free; runs on the audio thread.
     fn sanitize_node(&mut self, node: usize, nframes: usize) {
         let mut dirty = false;
         for buf in self.program.out_bufs[node].iter_mut() {
             let n = nframes.min(buf.len());
-            if sanitize(&mut buf[..n]) {
+            if sanitize(&mut buf[..n]).non_finite {
                 dirty = true;
             }
         }
