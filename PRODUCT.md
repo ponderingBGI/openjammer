@@ -34,6 +34,21 @@ then discovers — months later — that there was never a wall: they can drop *
 and rewire its insides, author a new one, or reskin the whole instrument, and it still
 feels like the same trustworthy thing.
 
+### The guiding star
+
+**Build the set on the canvas. Bind it to your hands. Play without looking.** The node
+canvas is the primary interface — the place the player spends most of their time, and the
+thing that makes OpenJammer feel like you can build anything. Each node is a simple,
+intuitive block; the set is what you make by putting them together, as simple or as deep
+as the idea demands, with your own plugins, instruments, samples and loops. Before a show
+the set is crafted with care; on stage it is played from hardware: any control and any
+verb binds to a MIDI knob, pad or button in one gesture, the way Ableton's Ctrl+M does, so
+the performer never has to look at a monitor again. That holds for a band routed live
+through one machine with a chain per instrument, for a solo act with loops and samples,
+and for recording — Record is on a pad, and you are just in the moment. Every design
+decision below serves this. Where two options compete, the one that keeps eyes off the
+screen and hands on the music wins.
+
 ## Brand Personality
 
 **A real instrument.** Three words, unchanged: crafted, immediate, deep.

@@ -25,6 +25,24 @@ They are not decoration. They decide what good work looks like here.
    The core earns the right to be small by being perfect; the community earns the right to
    make OpenJammer anything. **When in doubt, it is a plugin. Every user makes it their own.**
 
+## The guiding star
+
+> **Build the set on the canvas. Bind it to your hands. Play without looking.**
+
+The node canvas is not a setup screen on the way to somewhere else; it is the instrument,
+and it is where a player spends most of their time. Every node is one simple, obvious
+building block, and the power is in putting them together — a patcher who knows ComfyUI,
+Max or a modular already speaks the language on day one, and a beginner grows into it
+one node at a time without ever being handed a wall. Then the set goes to the stage: any
+control and any verb — a knob, a mute, a looper's record, the transport, a scene change —
+binds to real MIDI hardware in one gesture (Ableton's Ctrl+M is the bar), the monitor goes
+dark, and the performer is in the moment with taped-up buttons and their own instruments,
+plugins, samples and loops. A band routed through one machine with a chain per player;
+a solo act with loops and samples; a recording session where Record lives on a pad — the
+same set, the same nodes, the same bindings. Everything in this file exists to make that
+true. When two designs compete, the one that keeps the player's eyes off the screen and
+their hands on the music wins.
+
 For *who* plays this and *why*, and for the design philosophy, see
 [PRODUCT.md](../../PRODUCT.md) (strategy, users, the instrument-not-a-dashboard line) and
 [DESIGN.md](../../DESIGN.md) (the visual system — "The Living Sketchbook"). Read those

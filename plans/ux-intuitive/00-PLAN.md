@@ -8,6 +8,11 @@ author. This plan closes that gap.
 
 ## Premise
 
+The guiding star (now in `AGENTS.md` and `PRODUCT.md`): **build the set on the canvas, bind it
+to your hands, play without looking.** The node canvas is the primary interface; hardware
+mapping of every control and verb is the second half of it; every persona study and fix wave
+below is measured against that.
+
 PRODUCT.md sets the bar: *a novice is making sound in seconds and is never overwhelmed; the
 tool disappears into the play; cables carry signal, a node is a box that does one thing.* The
 capstone review (`plans/redesign-new-dna/FINAL-REVIEW.md` §2) already found seams that only

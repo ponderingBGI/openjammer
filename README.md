@@ -65,6 +65,11 @@ beliefs carry the whole project:
   behind one shared contract. When in doubt, it's a plugin — and every user makes it
   their own.
 
+And one guiding star: **build the set on the canvas, bind it to your hands, play without
+looking.** The node canvas is the instrument — simple blocks you put together into
+anything, with your own plugins, samples and loops. Then every knob, pad and button on
+your MIDI hardware can take any control or any verb, and the monitor goes dark.
+
 What you get:
 
 - 🎹 **133 instruments out of the box** — distinct procedural voices (piano, strings,
