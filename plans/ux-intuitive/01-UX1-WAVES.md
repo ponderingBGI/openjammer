@@ -80,6 +80,16 @@ Owns `crates/**`, `src/audio/worklets/**`, `src/audio/wasm/pkg/**`, `OjcoreWasmE
 - HA-22 one tool strip at a time (`RulerStack.tsx`, `PianoRoll.tsx`).
 - U15 step-sequencer card (the beat rig's bottom strip; `src/components/Rigs/*` or wherever it lives — find it).
 
+
+### UX-1F — the performer's keyboard (from `FH-2-LOG.md`; after 1D/1E commit)
+- Every focusable control on the Song (instrument chevron, Mute, Solo, Arm, browser rows) fires on Enter and Space — real `<button>`s or a shared key handler; a keyboard-only walk test across the track header.
+- The pill's fault state is visible text, not a dot: the reason renders as one line under the pill (micro voice) the first time and stays as the dot + title after; the Esc hint is in that line; the live region speaks it.
+- Focus is selection for the keyboard: Delete/Enter on a focused clip or note acts on it (focus moves selection, as the roll's roving model already does).
+- `M`: keep the spec's binding (metronome) but never silently — the pill shows the metronome state and the live region says it; add a Song-scoped track mute key (per `02-timeline-interaction-spec.md` §4; if none, `Shift+M` on the focused track) with the same feedback.
+- The instrument browser never returns zero results after clearing the family filters its own empty state recommends; the stock drum kit (`gm-synth-drum`) is offered back in `pick` context.
+- Spawn placement reserves the transport pill's rectangle (and the hint/help corners) so a new card never lands under chrome.
+- Decision U17: sound truth. The header's "making sound" line reads the master meter, not the transport: rolling at −∞ dB for more than one bar reads "Rolling, but silent — check the track's voice" in warning ink. One source (the Speaker/master meter the shell already trusts).
+
 ## After UX-1
 FH-2 (performer, keyboard-only) and FH-3 (sound designer) run against the post-1A build; FH-1
 re-runs end to end; the HA lane re-measures its 30 rows. Then UX-2 from whatever survives.
