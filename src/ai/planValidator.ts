@@ -27,6 +27,7 @@
 
 import type { PortDefinition } from '../engine/types';
 import type { PlanNode, WorkflowPlan } from './plan';
+import { portNameMatches } from '../engine/portVocabulary';
 
 // ============================================================================
 // Error model
@@ -207,12 +208,26 @@ export function validatePlan(plan: WorkflowPlan, lookups: PlanLookups): PlanErro
 // Helpers (pure)
 // ============================================================================
 
-/** Find a port by its human NAME (case-sensitive, the canvas label). */
+/**
+ * Find a port by its human NAME (case-sensitive, the canvas label).
+ *
+ * Matching goes through {@link portNameMatches}, the SAME map
+ * `graphStore.migrateNodePorts` renames saved projects with — so the retired
+ * spellings of the generic pair (`Audio Out`, `Audio In`, `Output`, `Input`,
+ * `Audio`) and the raw port id resolve here exactly as they do in the lowering.
+ *
+ * This function and `planAdapter.resolvePlanPort` are two halves of one contract:
+ * the validator says whether a plan is sound and the lowering turns it into
+ * verbs, so if they ever disagree about what a name means, `validate_plan` would
+ * green-light a plan that then wires the wrong port — or, as happened when the
+ * vocabulary was renamed, reject the worked example from the agent's own contract
+ * doc. Importing the map keeps this module pure: it is a table, not a registry.
+ */
 function findPortByName(
     ports: readonly PortDefinition[],
     name: string,
 ): PortDefinition | undefined {
-    return ports.find((p) => p.name === name);
+    return ports.find((p) => portNameMatches(p, name));
 }
 
 /**

@@ -22,6 +22,7 @@ import type { InstrumentRow, InstrumentNodeData, SamplerRow, SamplerNodeData } f
 import { applyGraphVerbs, diffGraph, type GraphStateSlice } from './graphVerbs';
 import { allocateKeyboardMode, claimedKeyboardModes, isKeyboardKind, keyboardModeOf, normalizeKeyboardModes } from './keyboardModes';
 import { isApplyingHistory, registerHistoryDriver, useHistoryStore, type EditVerb } from './historyStore';
+import { currentPortName } from '../engine/portVocabulary';
 
 // ============================================================================
 // Utility Functions
@@ -31,7 +32,19 @@ function generateId(): string {
     return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
 }
 
-function migrateNodePorts(node: GraphNode): GraphNode {
+/**
+ * The port half of the LOAD seam, exported so it can be tested as itself.
+ *
+ * It runs at `:2032` and `:2097` on every rehydrate. It was previously private,
+ * and the consequence was that the port-name migration — the thing that decides
+ * whether a returning player's card reads the same word it read when they added
+ * it — had no test at all: the vocabulary gate walked the registry instead, and
+ * so agreed the rename was complete while saved projects still said `Audio Out`.
+ * Testing it through `persist.rehydrate()` is not an option under jsdom (the
+ * middleware does not restore there), and a test that re-implements the seam
+ * would only agree with itself.
+ */
+export function migrateNodePorts(node: GraphNode): GraphNode {
     if (!Array.isArray(node.ports)) {
         return node;
     }
@@ -56,11 +69,22 @@ function migrateNodePorts(node: GraphNode): GraphNode {
         .filter(port => !(node.type === 'library' && (port.id === 'audio-out' || port.id === 'trigger')))
         .map(port => ({
             ...port,
-            type: (port.type as string) === 'technical' ? 'control' : port.type
+            type: (port.type as string) === 'technical' ? 'control' : port.type,
+            // Direction-aware, and shared with the agent's plan resolver — see
+            // `engine/portVocabulary.ts` for why those two must read one map.
+            name: currentPortName(port.id, port.name, port.direction === 'output' ? 'output' : 'input') ?? port.name,
         }));
 
     return node;
 }
+
+/**
+ * The generic signal ports speak ONE vocabulary — `In` and `Out` — and the whole
+ * rule, including every retired spelling and why direction matters, lives in
+ * `engine/portVocabulary.ts`. Saved projects persist their ports, so the rename
+ * has to reach them here too or a returning player keeps the old vocabulary
+ * forever (code-value #7: migrate fully, leave no legacy path).
+ */
 
 function connectionPortsExist(conn: Connection, nodes: Map<string, GraphNode>): boolean {
     const sourceNode = nodes.get(conn.sourceNodeId);

@@ -40,8 +40,12 @@ export interface ThemeValues {
     controlConnection: string;
     controlConnected: string;
 
-    // Universal connections (adapts to connected type)
-    universalPort: string;
+    // Universal connections (adapts to connected type). There is ONE token: the
+    // socket and the cable are the same violet, so `--universal-connection` is
+    // both. A second `universalPort` was declared alongside it and never read by
+    // a single rule — it survived only in AGENTS.md's port law, which pointed the
+    // reader at the dormant one. Removed under code-value #8 (every production
+    // line is used); the law now names the token that paints.
     universalConnection: string;
 
     // Arrangement timeline

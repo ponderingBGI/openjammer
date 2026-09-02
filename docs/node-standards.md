@@ -220,7 +220,7 @@ Use these standard port definitions for consistency:
 // Standard audio input
 const audioInput: PortDefinition = {
     id: 'audio-in',
-    name: 'Audio In',
+    name: 'In',
     type: 'audio',
     direction: 'input',
     position: { x: 0, y: 0.5 }  // input column; set y to the node's socket row
@@ -229,7 +229,7 @@ const audioInput: PortDefinition = {
 // Standard audio output
 const audioOutput: PortDefinition = {
     id: 'audio-out',
-    name: 'Audio Out',
+    name: 'Out',
     type: 'audio',
     direction: 'output',
     position: { x: 1, y: 0.5 }  // output column; set y to the node's socket row

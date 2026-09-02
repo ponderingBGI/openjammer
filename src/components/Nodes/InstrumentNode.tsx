@@ -526,7 +526,7 @@ export const InstrumentNode = memo(function InstrumentNode({
                     agentPending={isAgentPending}
                     headerProps={{ onMouseDown: handleHeaderMouseDown }}
                     inputs={inputSockets}
-                    outputs={outputPort ? [socket(outputPort, 'AUDIO', 'Audio output')] : []}
+                    outputs={outputPort ? [socket(outputPort, 'OUT', 'Audio output')] : []}
                 >
                     {rows.length === 0 ? (
                         <p className="inst-empty">

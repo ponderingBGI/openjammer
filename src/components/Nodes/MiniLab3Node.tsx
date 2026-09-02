@@ -63,6 +63,9 @@ export function MiniLab3Node({
     const isConnected = Boolean(data.isConnected && data.deviceId && connectedDevice?.state === 'connected');
 
     // Re-propagate deviceId to children when it changes (page reload, late connect).
+    // `{ record: false }` — the same environment-driven repair as `MIDINode`'s: the
+    // fan-out to the child midi-visual is a real graph mutation, so without the
+    // opt-out a reload minted an undo entry the player never authored.
     const lastPropagatedDeviceId = useRef<string | null>(null);
     useEffect(() => {
         if (!node.childIds.length) return;
@@ -71,7 +74,7 @@ export function MiniLab3Node({
         useGraphStore.getState().updateNodeData(node.id, {
             deviceId: data.deviceId,
             presetId: data.presetId,
-        });
+        }, { record: false });
         lastPropagatedDeviceId.current = data.deviceId;
     }, [node.id, node.childIds.length, data.deviceId, data.presetId]);
 

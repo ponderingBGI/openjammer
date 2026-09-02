@@ -24,9 +24,9 @@
  */
 
 import { useEffect } from "react";
-import { nodeDefinitions, menuCategories } from "../../engine/registry";
+import { nodeDefinitions, menuCategories, getNodeDefinition } from "../../engine/registry";
 import type { NodeCategory, NodeType, Position } from "../../engine/types";
-import { useGraphStore } from "../../store/graphStore";
+import { getNodeDimensions, useGraphStore } from "../../store/graphStore";
 import { useCanvasStore } from "../../store/canvasStore";
 import { useCanvasNavigationStore } from "../../store/canvasNavigationStore";
 import { registerAll } from "../../store/commandRegistry";
@@ -37,6 +37,7 @@ import { getInvoke } from "../../ai/tauri";
 import { useEditingContextStore } from "../../store/editingContextStore";
 import { applyPianoRollQuantize } from "../PianoRoll";
 import { useUiViewStore } from "../../store/uiViewStore";
+import { freeSpawnPoint, type SpawnBounds, type SpawnBox } from "../../utils/spawnPlacement";
 
 // Human-readable group label per category (matches the menu's casing).
 const CATEGORY_LABEL: Record<NodeCategory, string> = {
@@ -48,14 +49,106 @@ const CATEGORY_LABEL: Record<NodeCategory, string> = {
   utility: "Utility",
 };
 
-/** The canvas-space centre of the current viewport (the palette's spawn point). */
-function viewportCenter(): Position {
+/**
+ * The palette's spawn point: the canvas position that puts the CARD's centre at
+ * the viewport's centre.
+ *
+ * `addNode` takes a top-LEFT, and this used to return the viewport centre
+ * unadjusted — so the card hung down and to the right of the middle, and anything
+ * taller than about 400px was already partly off the bottom edge before a single
+ * cascade step was taken. Half the card's size is the whole correction, and it is
+ * also what makes "centre of the screen" mean what a player would expect.
+ */
+function viewportCenter(card: { width: number; height: number }): Position {
   const rect = useCanvasStore.getState().canvasRect;
   const screenCenter: Position = {
     x: rect.left + rect.width / 2,
     y: rect.top + rect.height / 2,
   };
-  return useCanvasStore.getState().screenToCanvas(screenCenter);
+  const centre = useCanvasStore.getState().screenToCanvas(screenCenter);
+  return { x: centre.x - card.width / 2, y: centre.y - card.height / 2 };
+}
+
+/**
+ * The REAL, rendered size of every card currently on the canvas, in canvas px,
+ * keyed by node id — plus, separately, by node type.
+ *
+ * The registry's `dimensions` are the obvious source for this and they are wrong
+ * for the purpose. Measured at zoom 1.0 on the shipping build, a Looper declares
+ * `height: 120` and renders **267**; a Sampler declares `140` and renders **378**.
+ * Those numbers date from the fixed-height cards the New DNA faceplates replaced,
+ * and nothing re-declared them when the bodies became content-driven. A
+ * containment test that trusts them passes a card that then hangs off the bottom
+ * of the screen, which is precisely what the first version of this fix did.
+ *
+ * Re-declaring all fourteen faceplates is the real repair and it is not this
+ * lane's. Reading the surface is the honest substitute: a card already mounted is
+ * a real measurement, and it costs one pass over ~10 elements on an add.
+ */
+function measuredCards(): { byId: Map<string, { width: number; height: number }>; byType: Map<string, { width: number; height: number }> } {
+  const byId = new Map<string, { width: number; height: number }>();
+  const byType = new Map<string, { width: number; height: number }>();
+  if (typeof document === 'undefined') return { byId, byType };
+  const zoom = useCanvasStore.getState().zoom || 1;
+  for (const element of document.querySelectorAll('.oj-node')) {
+    const box = element.getBoundingClientRect();
+    if (!box.width || !box.height) continue;
+    const size = { width: box.width / zoom, height: box.height / zoom };
+    // A card carries no id of its own; every one of its ports does.
+    const id = element.querySelector('[data-node-id]')?.getAttribute('data-node-id');
+    if (id) {
+      byId.set(id, size);
+      const type = useGraphStore.getState().nodes.get(id)?.type;
+      if (type) byType.set(type, size);
+    }
+  }
+  return { byId, byType };
+}
+
+/**
+ * How much room to reserve for the card about to be added: what a card of this
+ * type ACTUALLY measures if one is already on screen, else what it declares.
+ *
+ * Exact when the answer is knowable, honest when it is not — rather than a
+ * fudge factor that would be neither.
+ */
+function spawnCardSize(type: NodeType, byType: Map<string, { width: number; height: number }>): { width: number; height: number } {
+  const measured = byType.get(type);
+  if (measured) return measured;
+  const declared = getNodeDefinition(type).dimensions;
+  let width = declared?.width ?? 200;
+  let height = declared?.height ?? 150;
+  // No card of this type on screen, so the declared size is all the registry
+  // offers — and for a content-driven faceplate it under-states the truth by up
+  // to 2.7x. Take the tallest card that IS on screen as a floor: it is a real
+  // measurement of a real faceplate on this surface, and reserving slightly too
+  // much room only moves the card, while reserving too little puts it off the
+  // bottom of the screen where the player never sees it land.
+  for (const size of byType.values()) {
+    width = Math.max(width, size.width);
+    height = Math.max(height, size.height);
+  }
+  return { width, height };
+}
+
+/**
+ * The visible canvas, in CANVAS space — the rectangle a newly added card has to
+ * stay inside to be seen.
+ *
+ * A card that lands off-screen is the same failure as a card that lands under
+ * another one: the gesture promised a card appearing and the player got nothing.
+ * `viewportCenter()` puts the card's top-LEFT at the centre, so a tall card
+ * already overflows before any cascade, and the cascade then pushed it further.
+ * Returns `undefined` before the canvas has been measured, in which case the
+ * placement rule simply skips the containment test.
+ */
+function visibleCanvasBounds(): SpawnBounds | undefined {
+  const canvas = useCanvasStore.getState();
+  const rect = canvas.canvasRect;
+  if (!rect.width || !rect.height) return undefined;
+  const topLeft = canvas.screenToCanvas({ x: rect.left, y: rect.top });
+  const bottomRight = canvas.screenToCanvas({ x: rect.left + rect.width, y: rect.top + rect.height });
+  return { left: topLeft.x, top: topLeft.y, right: bottomRight.x, bottom: bottomRight.y };
 }
 
 /** The canvas level the user is currently viewing (the default add parent). */
@@ -73,11 +166,29 @@ function currentParentId(): string | null {
  * - Context menu (M4): `ctx.point` is the clicked canvas point; if the user
  *   right-clicked a node, `ctx.node` is the spawn parent.
  *
+ * Either way the point is only the STARTING wish: {@link freeSpawnPoint}
+ * cascades off any sibling already sitting there. The palette had no point of
+ * its own, so three adds in a row produced three cards on one pixel and the
+ * player watched two of them land invisibly.
+ *
  * RE-READs the stores at call time (mutation discipline) — never the snapshot.
  */
 function addNodeFromCtx(type: NodeType, ctx?: ActionCtx): void {
-  const canvasPos = ctx?.point ?? viewportCenter();
   const parentId = ctx?.node?.id ?? currentParentId();
+  // Real RECTANGLES, not origins: a 380px-tall Library and a 90px Multiplier are
+  // not the same obstacle, and two big cards 30px apart cover each other almost
+  // completely while their origins look comfortably separated.
+  const measured = measuredCards();
+  const siblings: SpawnBox[] = [];
+  for (const node of useGraphStore.getState().nodes.values()) {
+    if ((node.parentId ?? null) !== parentId) continue;
+    // The card's REAL footprint where it is on screen; its declared one only as a
+    // fallback. Reserving the largest card's size for every sibling would
+    // artificially exhaust the canvas and push the run off-screen anyway.
+    siblings.push({ position: node.position, ...(measured.byId.get(node.id) ?? getNodeDimensions(node)) });
+  }
+  const card = spawnCardSize(type, measured.byType);
+  const canvasPos = freeSpawnPoint(ctx?.point ?? viewportCenter(card), siblings, card, visibleCanvasBounds());
   useGraphStore.getState().addNode(type, canvasPos, parentId);
 }
 

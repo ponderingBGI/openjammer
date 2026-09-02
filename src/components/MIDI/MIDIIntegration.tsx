@@ -125,10 +125,14 @@ export function MIDIIntegration() {
             const device = getDeviceBySignature(data.deviceSignature);
             if (device) {
                 reconnectedNodesRef.current.add(node.id);
+                // `{ record: false }` — a controller reappearing on the bus re-arms
+                // a card the player already owns. Nothing was authored, so nothing
+                // may be undone: `Ctrl+Z` here would only re-disconnect a device
+                // that is physically plugged in.
                 updateNodeData(node.id, {
                     deviceId: device.id,
                     isConnected: true,
-                });
+                }, { record: false });
             }
         }
     }, [isInitialized, inputs, getDeviceBySignature, updateNodeData]);

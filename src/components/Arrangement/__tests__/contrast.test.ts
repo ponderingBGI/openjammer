@@ -46,6 +46,16 @@ const NOTE_INK_ADOPTS_TOKEN = /--piano-roll-note-ink:\s*var\(--accent-two-ink\)\
 /** `.piano-roll__row.is-black` is the lane-alt tint at this alpha over the lane. */
 const BLACK_ROW_ALPHA = Number(/\.piano-roll__row\.is-black\s*{\s*background:\s*color-mix\(in oklab,\s*var\(--timeline-lane-alt-bg\)\s*([\d.]+)%/.exec(ROLL_CSS)?.[1] ?? 'NaN') / 100;
 const noteInk = (theme: ThemeFile) => rgb(value(theme, 'accentTwoInk'));
+/**
+ * The scroomer tick's PAINT, read out of the rule that paints it — the token
+ * name as well as the opacity. Reading only the alpha would let the ink token be
+ * swapped back to the wiring violet with this gate still green, which is a gate
+ * agreeing with itself. `--piano-roll-note-ink` is resolved through the roll's
+ * own alias to the theme key it aliases.
+ */
+const SCROOMER_RULE = /\.piano-roll__scroomer > i \{([^}]*)\}/.exec(ROLL_CSS)?.[1] ?? '';
+const SCROOMER_TICK_ALPHA = Number(/opacity:\s*([\d.]+)/.exec(SCROOMER_RULE)?.[1] ?? 'NaN');
+const SCROOMER_TICK_TOKEN = /background:\s*var\((--[\w-]+)\)/.exec(SCROOMER_RULE)?.[1] ?? '';
 /** CIE L* — the perceptual lightness the velocity ramp is measured in. */
 const lstar = (color: RGB) => new Color('srgb', color.map((channel) => channel / 255) as RGB).to('lab').coords[0]!;
 
@@ -65,6 +75,11 @@ const lstar = (color: RGB) => new Color('srgb', color.map((channel) => channel /
  * 12% out of the `.arrangement-clip` rule itself.
  */
 const SURFACE_CSS = readFileSync(resolve(process.cwd(), 'src/components/Arrangement/ArrangementSurface.css'), 'utf8');
+/** The record ghost's danger wash weight and its marks' opacity, read from the sheet. */
+const GHOST_WASH_WEIGHT = Number(/\.arrangement-record-ghost \{[^}]*background:\s*color-mix\(in oklab,\s*var\(--accent-danger\)\s*([\d.]+)%/.exec(SURFACE_CSS)?.[1] ?? 'NaN') / 100;
+const GHOST_MARK_RULE = /\.arrangement-record-ghost > span \{([^}]*)\}/.exec(SURFACE_CSS)?.[1] ?? '';
+const GHOST_MARK_ALPHA = Number(/opacity:\s*([\d.]+)/.exec(GHOST_MARK_RULE)?.[1] ?? 'NaN');
+const GHOST_MARK_TOKEN = /background:\s*var\((--[\w-]+)\)/.exec(GHOST_MARK_RULE)?.[1] ?? '';
 const CLIP_TINT_WEIGHT = Number(/\.arrangement-clip\s*{[^}]*background:\s*color-mix\(in oklab,\s*var\(--track-tint\)\s*([\d.]+)%,\s*var\(--timeline-clip-bg\)\)/s.exec(SURFACE_CSS)?.[1] ?? 'NaN') / 100;
 /** `var(--accent-secondary)` → `accentSecondary`, so the palette is never re-typed. */
 const TRACK_TINT_KEYS = TRACK_TINTS.map((tint) => tint.replace(/^var\(--|\)$/g, '').replace(/-(\w)/g, (_, letter: string) => letter.toUpperCase()) as ColorKey);
@@ -318,5 +333,85 @@ describe('theme token schema', () => {
         const keys = Object.keys(light.color).sort();
         expect(Object.keys(dark.color).sort()).toEqual(keys);
         expect(keys.filter((key) => /\d/.test(key))).toEqual([]);
+    });
+});
+
+/**
+ * W6-SHIP items 12 + 13 — two marks that had to be read, and were not.
+ *
+ * Both were painted with `--universal-connection`, and that single choice was two
+ * faults at once:
+ *
+ *  - **Naming.** AGENTS.md's port-colour law and DESIGN §2 both say the wiring
+ *    colours are meaning: *"do not spend these colours on anything that is not a
+ *    port or a cable."* A scroomer tick and a captured-note mark are neither.
+ *  - **Legibility.** The wiring violet is an accent tuned for a socket core, not
+ *    an INK tuned to be read. Composited over its real ground it measured 2.25:1
+ *    (scroomer) and 2.57:1 (record ghost) here in light — the browser sweep read
+ *    2.78 and 3.01 against its own sampled grounds. Every one of those four
+ *    numbers is at or under WCAG 1.4.11's 3:1 floor for a meaningful non-text
+ *    mark; 3.01 is not a pass, it is a queue position.
+ *
+ * The fix for both is the ink token this system already minted for this exact
+ * problem — `--accent-two-ink`, "the readable ink of the SECOND accent" — reached
+ * through the roll's own `--piano-roll-note-ink` alias where the marks ARE notes.
+ * The two remaining wiring-token uses in the roll (the draw ghost, the step
+ * cursor) moved to `--timeline-automation-line`, which is byte-identical in both
+ * themes and therefore a rename with no repaint; both are carried by a solid
+ * border or ring rather than by their wash, so neither needed the ink.
+ *
+ * Measured, not asserted: the grounds are rebuilt here from the shipping tokens.
+ */
+describe('marks that must be read clear the 3:1 floor', () => {
+    const MARK_FLOOR = 3;
+
+    /** The scroomer's note map: the ink at its opacity over the `--bg-tertiary` rail. */
+    const scroomerTick = (theme: ThemeFile) => {
+        const ground = rgb(value(theme, 'bgTertiary'));
+        return ratio(blend(noteInk(theme), ground, SCROOMER_TICK_ALPHA), ground);
+    };
+
+    /** The record ghost's captured notes, over the ghost's OWN ground: the danger
+     *  wash at its real weight over the lane, not the bare lane. */
+    const recordGhostMark = (theme: ThemeFile) => {
+        const ground = mixOklab(value(theme, 'accentDanger'), value(theme, 'timelineLaneBg'), GHOST_WASH_WEIGHT);
+        return ratio(blend(rgb(value(theme, 'accentTwoInk')), ground, GHOST_MARK_ALPHA), ground);
+    };
+
+    it('the scroomer note map, in both themes', () => {
+        expect(SCROOMER_TICK_ALPHA, 'the alpha is read from the sheet, not retyped').toBeGreaterThan(0);
+        // The sheet must still be reaching for the ink these numbers describe.
+        expect(SCROOMER_TICK_TOKEN, 'the ticks wear the note ink').toBe('--piano-roll-note-ink');
+        expect(NOTE_INK_ADOPTS_TOKEN, 'and that alias still resolves to --accent-two-ink').toBe(true);
+        expect(scroomerTick(light as ThemeFile)).toBeGreaterThanOrEqual(MARK_FLOOR);
+        expect(scroomerTick(dark as ThemeFile)).toBeGreaterThanOrEqual(MARK_FLOOR);
+        // Light was the failure and it is no longer marginal — this is the number
+        // that stops 2.25 coming back as 3.01.
+        expect(scroomerTick(light as ThemeFile)).toBeGreaterThan(5);
+    });
+
+    it('the record ghost captured-note marks, in both themes', () => {
+        expect(GHOST_WASH_WEIGHT, 'the wash weight is read from the sheet').toBeGreaterThan(0);
+        expect(GHOST_MARK_TOKEN, 'the marks wear the second accent INK, not the accent').toBe('--accent-two-ink');
+        expect(recordGhostMark(light as ThemeFile)).toBeGreaterThanOrEqual(MARK_FLOOR);
+        expect(recordGhostMark(dark as ThemeFile)).toBeGreaterThanOrEqual(MARK_FLOOR);
+        expect(recordGhostMark(light as ThemeFile)).toBeGreaterThan(5);
+    });
+
+    it('spends no wiring token on a timeline mark', () => {
+        // The law, held on the sheets rather than on a memory of having fixed it.
+        // Comments are stripped so this file's own prose can name the token.
+        const strip = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, '');
+        for (const [name, css] of [['PianoRoll.css', ROLL_CSS], ['ArrangementSurface.css', SURFACE_CSS]] as const) {
+            expect(strip(css), `${name} paints with the port/cable violet`).not.toMatch(/--universal-connection/);
+            expect(strip(css), `${name} paints with the port/cable grey`).not.toMatch(/--control-connection/);
+        }
+    });
+
+    it('the rename really was a rename — the two violets are identical in both themes', () => {
+        // If these ever diverge, the draw ghost and the step cursor silently
+        // changed colour and this file is the only thing that would notice.
+        expect(value(light as ThemeFile, 'timelineAutomationLine')).toBe(value(light as ThemeFile, 'universalConnection'));
+        expect(value(dark as ThemeFile, 'timelineAutomationLine')).toBe(value(dark as ThemeFile, 'universalConnection'));
     });
 });

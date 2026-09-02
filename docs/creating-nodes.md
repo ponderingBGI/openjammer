@@ -151,7 +151,7 @@ Per-port flag stored in panel's `data`:
 ```typescript
 data: {
     portLabels: {
-        'port-1': 'Audio Out',
+        'port-1': 'Out',
         'empty-abc123': ''  // Empty slot
     },
     portHideExternalLabel: {

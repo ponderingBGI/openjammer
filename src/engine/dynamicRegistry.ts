@@ -139,10 +139,10 @@ export function hostedPluginIdFor(desc: HostedPluginDescriptor): string {
 function hostedPorts(desc: HostedPluginDescriptor): PortDefinition[] {
     const ports: PortDefinition[] = [];
     if ((desc.ports?.audio_in ?? 0) > 0) {
-        ports.push({ id: 'audio-in', name: 'Audio In', type: 'audio', direction: 'input', position: { x: 0, y: 0.5 } });
+        ports.push({ id: 'audio-in', name: 'In', type: 'audio', direction: 'input', position: { x: 0, y: 0.5 } });
     }
     if ((desc.ports?.audio_out ?? 0) > 0) {
-        ports.push({ id: 'audio-out', name: 'Audio Out', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } });
+        ports.push({ id: 'audio-out', name: 'Out', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } });
     }
     return ports;
 }
@@ -187,8 +187,8 @@ export function makeHostedPluginDefinition(desc: HostedPluginDescriptor): NodeDe
  * other way around.)
  */
 const EFFECT_DYNAMIC_PORTS: readonly PortDefinition[] = [
-    { id: 'audio-in', name: 'Audio In', type: 'audio', direction: 'input', position: { x: 0, y: 0.5 } },
-    { id: 'audio-out', name: 'Audio Out', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } },
+    { id: 'audio-in', name: 'In', type: 'audio', direction: 'input', position: { x: 0, y: 0.5 } },
+    { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } },
 ];
 
 /** The data fields an AI-authored DSP node carries (a subset of NodeData). */

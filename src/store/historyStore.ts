@@ -70,6 +70,24 @@ export function registerHistoryDriver(driver: Driver): () => void {
     return () => drivers.delete(driver);
 }
 
+/**
+ * Apply an entry's verbs by handing the WHOLE list to every driver; each filters
+ * to its own domain.
+ *
+ * The consequence, said out loud because it is a trap and not a design: **apply
+ * order is per-DRIVER, not per-verb.** A `graph` verb sequenced AFTER a `document`
+ * verb in the same entry is still applied BEFORE it, because `graphStore` runs as
+ * one unit at whatever position the insertion-ordered `drivers` Set gives it.
+ * `arrangementStore` goes to real trouble to preserve relative order between
+ * `document` and `arrangement` verbs — but that is ordering WITHIN one driver, and
+ * it does not and cannot generalise across them.
+ *
+ * Harmless today: the four domains are disjoint, so no verb depends on another
+ * domain's having been applied first. It stops being harmless the moment one does
+ * — e.g. a graph verb that reads a document field the same entry swapped. If you
+ * need that, the fix is to sequence at the ENTRY level (two entries, or an
+ * explicit ordered pass), not to hope the `drivers` Set is in the right order.
+ */
 function dispatch(verbs: readonly EditVerb[]): void {
     applyingHistory = true;
     try {

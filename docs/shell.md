@@ -53,8 +53,30 @@ the card the player was working on: no port, knob or pad on the canvas was reach
 keyboard at all. Now a `Tab` from the empty stage brings up the other surface, and a `Tab`
 inside a card means what it means everywhere else.
 
+**Canvas ports are still not in the tab order, and that is an OPEN question, not a
+decision.** Fixing the surface swap made ports *reachable in principle*; it did not put
+them in the tab order, and a measured keyboard-only session found **0 of 84 ports
+tabbable**. A keyboard-only player can therefore build a rig's nodes from `Ctrl+K` and
+cannot connect them. `plans/redesign-new-dna/03-canvas-app-reliability-audit.md:41`
+(UI-017, P1) also records that the keyboard route into `startConnecting` fails on
+`button === 0`.
+
+This line exists so the state of that question is written down somewhere other than a defect
+log. It is a product decision and it has not been made: either ports join the tab order —
+in which case UI-017 is an open P1 shipping unfixed — or they are deliberately out of it,
+in which case there must be another keyboard route to a connection, and this paragraph
+should say what it is. What is not acceptable is the current situation, where the branch
+ships a known P1 as though it were settled.
+
+By contrast the piano roll's notes ARE in the tab order and are now a single tab stop
+(roving tabindex, `PianoRoll.tsx`); they used to be 128 stops, which is the failure mode a
+naive "make it all tabbable" fix for ports would reproduce on the canvas.
+
 `Shift+Tab` obeys the same target rule and **never toggles** — `view.toggleArrangement` is
-bound to a bare `Tab` — so a backwards `Tab` from the stage floor walks into the chrome.
+bound to a bare `Tab` — so a backwards `Tab` from the stage floor walks into the chrome. In
+practice it takes **two** presses, not one: the first lands on `document.body`, the second
+enters the chrome and then walks File · Edit · View · Canvas · health · Collaborate · theme ·
+Settings · Start sound · keyboard help.
 That asymmetry is deliberate: it is the keyboard-only route off a surface, and the way back
 in is a `Tab` forward from the topbar, which lands on the first control inside the active
 surface.
@@ -90,7 +112,7 @@ Zones appear only when they are **true**:
 | Zone | When | Notes |
 |---|---|---|
 | Play / Stop | always | 32px accent circle. Also the browser's audio-unlock gesture. Shows **Stop only once the engine has confirmed it**. |
-| Record | a Song exists | Disabled with *"Arm a track first"* until a track is armed. |
+| Record | a Song exists | Disabled with *"Arm a track first — open the arrangement with Tab"* until a track is armed. |
 | Return to start | a Song exists | |
 | `bar.beat` readout | a Song exists | Click to type a position. Muted while a transport command is unconfirmed. |
 | Tempo | always | Drag `Δx/3` per BPM, `Shift` fine, `Alt` coarse, clamped 20–300, ONE `setTempo` on release. Without a Song it is inert and says why. |

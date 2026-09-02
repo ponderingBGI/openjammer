@@ -13,6 +13,7 @@ import { growPitchRange, initialPitchRange, useTrackLaneViewStore, type PitchRan
 import {
     clippedNoteGeometry,
     DRUM_ROW_HEIGHT,
+    GM_DRUM_NAMES,
     isBlackPitch,
     isKeyboardSeam,
     KEY_COLUMN_WIDTH,
@@ -29,14 +30,6 @@ import { cancelPianoRollAuditions, type PianoRollAuditionToken } from './actions
 import { ownPointerGesture } from '../Arrangement/pointerGestureLifetime';
 import { useBindingSet } from '../../keymap/useKeymap';
 import { registerTimelineFrameWriter } from '../Arrangement/sharedAnimationFrame';
-
-const GM_DRUM_NAMES: Record<number, string> = {
-    35: 'Kick', 36: 'Kick', 37: 'Side stick', 38: 'Snare', 39: 'Clap', 40: 'Snare',
-    41: 'Low tom', 42: 'Closed HH', 43: 'Low tom', 44: 'Pedal HH', 45: 'Mid tom',
-    46: 'Open HH', 47: 'Mid tom', 48: 'High tom', 49: 'Crash', 50: 'High tom',
-    51: 'Ride', 52: 'China', 53: 'Ride bell', 54: 'Tambourine', 55: 'Splash',
-    56: 'Cowbell', 57: 'Crash', 59: 'Ride', 60: 'High bongo', 61: 'Low bongo',
-};
 
 export type PianoRollMode = 'inline' | 'surface';
 
@@ -146,6 +139,26 @@ export function PianoRoll(props: PianoRollProps) {
      * override, and a control that cannot be un-pressed is worse than none.
      */
     const [localDrumMode, setLocalDrumMode] = useState<boolean | undefined>(undefined);
+    /*
+     * ROVING TABINDEX (W6-SHIP item 6).
+     *
+     * Every note is a real `<button>` — which is right, they are the primary
+     * object of this editor and they should be operable — but all of them were
+     * `tabIndex 0`. The starter's first clip has 128 notes, so tabbing INTO the
+     * roll cost 128 presses to get back out again: the roll was a tab trap, and
+     * a worse one than an unreachable control, because the notes INVITE the
+     * keyboard and then hold it.
+     *
+     * The fix is the standard composite-widget pattern: the roll is ONE tab stop.
+     * One note is tabbable at a time, the rest are `-1`, and the arrows move the
+     * roving focus between them. `Tab` then leaves the roll in a single press.
+     *
+     * This is deliberately NOT selection. Selection is what the edit verbs act on
+     * and it already has its own grammar (click, shift-click, marquee, Ctrl+A);
+     * roving focus is only "which note would `Tab` land on". They are kept apart
+     * so nothing about the existing edit semantics moves.
+     */
+    const [rovingNoteId, setRovingNoteId] = useState<string | null>(null);
 
     const track = arrangement?.tracks.find((item) => item.id === props.trackId);
     const clip = track && findClip(track, props.clipId);
@@ -164,7 +177,17 @@ export function PianoRoll(props: PianoRollProps) {
     })();
     const instrumentId = arrangement?.graph.nodes.find((node) => node.ref === track?.ref)?.data?.instrumentId;
     const instrumentDrums = typeof instrumentId === 'string' && InstrumentLoader.getDefinition(instrumentId)?.category === 'percussion';
-    const autoDrum = instrumentDrums || shouldAutoDetectDrums(allTrackNotes);
+    // Every kit signal the app HAS, handed to one predicate: the instrument's
+    // registry category (a fact), the two names (weak evidence), and the shape of
+    // the material (the last resort). `instrumentDrums` used to be OR'd in here
+    // and nowhere else, so the inline roll in `TrackLaneView` — the roll a player
+    // actually meets first — was making the decision on the guess alone.
+    const autoDrum = shouldAutoDetectDrums(allTrackNotes, {
+        instrumentIsPercussion: instrumentDrums,
+        trackName: track?.name,
+        instrumentId: typeof instrumentId === 'string' ? instrumentId : undefined,
+        ppq: arrangement?.ppq,
+    });
     const drumMode = props.drumMode ?? localDrumMode ?? autoDrum;
     const range = trackRange ?? noteRange(allTrackNotes);
     const trackPitchMin = allTrackNotes.length ? Math.min(...allTrackNotes.map((note) => note.pitch)) : null;
@@ -622,6 +645,53 @@ export function PianoRoll(props: PianoRollProps) {
     useBindingSet(pianoRollBindings);
 
     const currentNotes = midiSource?.notes ?? [];
+    /*
+     * The notes that actually reach the DOM: a note outside the visible pitch
+     * range or clipped away entirely renders `null`, so the roving target has to
+     * be chosen from THIS list or the one tabbable note could be one that is not
+     * on screen — a tab stop into nothing.
+     */
+    const renderedNotes = currentNotes.filter((note) => {
+        if (note.pitch < range.lo || note.pitch > range.hi) return false;
+        return clippedNoteGeometry(note, clip?.startTick ?? 0, clip?.sourceStart ?? 0, clip?.lengthTick ?? 0, props.pxPerTick) !== null;
+    });
+    /*
+     * Exactly one tabbable note, chosen in the order a player would expect to
+     * find it: wherever the roving focus was last left, else the first note they
+     * have selected (that is the one they are working on), else the first note in
+     * the clip. Each candidate is checked against `renderedNotes`, so a note that
+     * scrolls out of pitch range hands the tab stop on instead of taking it away.
+     */
+    const focusableNoteId = (() => {
+        const has = (id: string | null | undefined) => !!id && renderedNotes.some((note) => note.id === id);
+        if (has(rovingNoteId)) return rovingNoteId;
+        const selected = selectedNoteIds.find(has);
+        if (selected) return selected;
+        return renderedNotes.find((note) => !!note.id)?.id ?? null;
+    })();
+    /** Put focus on a note, or on that note's velocity handle. */
+    const focusRow = (noteId: string, row: 'note' | 'velocity') => {
+        const selector = row === 'note'
+            ? `button[data-note-id="${CSS.escape(noteId)}"]`
+            : `[data-lollipop-note-id="${CSS.escape(noteId)}"]`;
+        requestAnimationFrame(() => rootRef.current?.querySelector<HTMLElement>(selector)?.focus());
+    };
+    /**
+     * Move the roving focus by `delta` notes in render order, and take focus with
+     * it — on whichever ROW the player is already on. Walking the velocity lane
+     * must not throw the player back up to the note grid; it is the same roving
+     * index seen from one row down.
+     */
+    const moveRovingFocus = (delta: number, row: 'note' | 'velocity' = 'note') => {
+        if (!renderedNotes.length) return;
+        const at = renderedNotes.findIndex((note) => note.id === focusableNoteId);
+        const next = renderedNotes[Math.max(0, Math.min(renderedNotes.length - 1, (at < 0 ? 0 : at) + delta))];
+        if (!next?.id || next.id === focusableNoteId) return;
+        setRovingNoteId(next.id);
+        // Focus follows the roving index — that IS the pattern; a tabindex that
+        // moves without the focus moving is just a different note being unreachable.
+        focusRow(next.id, row);
+    };
     const otherClipNotes = track?.clips.flatMap((other) => {
         if (other.id === clip?.id) return [];
         const otherSource = arrangement?.sources?.[other.sourceId];
@@ -705,7 +775,40 @@ export function PianoRoll(props: PianoRollProps) {
                             const geometry = clippedNoteGeometry(note, clip.startTick, clip.sourceStart ?? 0, clip.lengthTick, props.pxPerTick);
                             if (!geometry || note.pitch < range.lo || note.pitch > range.hi) return null;
                             const selected = !!note.id && noteIdSet.has(note.id);
-                            return <button key={note.id ?? index} type="button" data-note-id={note.id} className={`piano-roll-note${selected ? ' is-selected' : ''}${drumMode ? ' is-drum' : ''}`} style={{ left: geometry.left, top: (range.hi - note.pitch) * rowHeight + Math.max(1, (rowHeight - (drumMode ? 10 : Math.max(3, rowHeight - 2))) / 2), width: drumMode ? 10 : geometry.width, height: drumMode ? 10 : Math.max(3, rowHeight - 2), '--note-opacity': `${velocityOpacity(note.vel) * 100}%` } as CSSProperties} aria-label={`${pitchName(note.pitch)}, tick ${note.tick}, duration ${note.durTick}, velocity ${note.vel ?? 96}`} aria-pressed={selected} onPointerDown={(event) => { erase(event, note); if (event.button === 0 && tool !== 'erase') startNoteDrag(event, note, geometry.width); }} onPointerMove={moveNoteDrag} onPointerUp={(event) => endDrag(event.pointerId)} onPointerCancel={cancelNoteDrag} onContextMenu={(event) => event.preventDefault()} />;
+                            return <button key={note.id ?? index} type="button" data-note-id={note.id} className={`piano-roll-note${selected ? ' is-selected' : ''}${drumMode ? ' is-drum' : ''}`} style={{ left: geometry.left, top: (range.hi - note.pitch) * rowHeight + Math.max(1, (rowHeight - (drumMode ? 10 : Math.max(3, rowHeight - 2))) / 2), width: drumMode ? 10 : geometry.width, height: drumMode ? 10 : Math.max(3, rowHeight - 2), '--note-opacity': `${velocityOpacity(note.vel) * 100}%` } as CSSProperties} aria-label={`${pitchName(note.pitch)}, tick ${note.tick}, duration ${note.durTick}, velocity ${note.vel ?? 96}`} aria-pressed={selected} tabIndex={note.id && note.id === focusableNoteId ? 0 : -1} onFocus={() => { if (note.id) setRovingNoteId(note.id); }} onKeyDown={(event) => {
+                                /*
+                                 * Arrows move the roving focus ONLY when nothing is
+                                 * selected. That is not a new rule — it is exactly the
+                                 * guard the surface handler already uses (`if
+                                 * (!selectedNoteIds.length) return`), so the two are
+                                 * complementary: with a selection the arrows nudge,
+                                 * transpose and set velocity as they always did, and
+                                 * with none they walk the notes. Neither shadows the
+                                 * other and the edit grammar is untouched.
+                                 */
+                                /*
+                                 * Shift+ArrowDown drops onto THIS note's velocity
+                                 * handle; Shift+ArrowUp on the handle comes back.
+                                 * It is navigation, not an edit, so it runs whether
+                                 * or not there is a selection — and it stops
+                                 * propagating so the surface's raw arrow handler
+                                 * (which does not test Shift) cannot also transpose.
+                                 * No entry in `pianoRollBindings` pairs Shift with a
+                                 * vertical arrow, so nothing is shadowed.
+                                 */
+                                if (event.shiftKey && event.key === 'ArrowDown' && note.id) {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setRovingNoteId(note.id);
+                                    focusRow(note.id, 'velocity');
+                                    return;
+                                }
+                                if (selectedNoteIds.length) return;
+                                if (event.key === 'ArrowRight' || event.key === 'ArrowDown') { event.preventDefault(); moveRovingFocus(1); }
+                                else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') { event.preventDefault(); moveRovingFocus(-1); }
+                                else if (event.key === 'Home') { event.preventDefault(); moveRovingFocus(-renderedNotes.length); }
+                                else if (event.key === 'End') { event.preventDefault(); moveRovingFocus(renderedNotes.length); }
+                            }} onPointerDown={(event) => { erase(event, note); if (event.button === 0 && tool !== 'erase') startNoteDrag(event, note, geometry.width); }} onPointerMove={moveNoteDrag} onPointerUp={(event) => endDrag(event.pointerId)} onPointerCancel={cancelNoteDrag} onContextMenu={(event) => event.preventDefault()} />;
                         })}
                         {ghost && <span className={`piano-roll-note piano-roll-note--draw${drumMode ? ' is-drum' : ''}`} style={{ left: ghost.tick * props.pxPerTick, top: (range.hi - ghost.pitch) * rowHeight + Math.max(1, (rowHeight - (drumMode ? 10 : Math.max(3, rowHeight - 2))) / 2), width: drumMode ? 10 : Math.max(2, ghost.durTick * props.pxPerTick), height: drumMode ? 10 : Math.max(3, rowHeight - 2) }} />}
                         {stepEntry.trackId === props.trackId && <span className="piano-roll__step-cursor" style={{ left: stepEntry.positionTick * props.pxPerTick, top: (range.hi - stepEntry.pitch) * rowHeight, width: Math.max(2, stepLength * props.pxPerTick), height: rowHeight }} />}
@@ -715,7 +818,7 @@ export function PianoRoll(props: PianoRollProps) {
                     </div>
                 </div>
             </div>
-            <VelocityLane notes={currentNotes} clip={clip} pxPerTick={props.pxPerTick} leftTick={leftTick} selectedIds={noteIdSet} onSelect={(id) => { useEditingContextStore.getState().setSelection(selectionSurface, { noteIds: [id] }); }} />
+            <VelocityLane notes={currentNotes} clip={clip} pxPerTick={props.pxPerTick} leftTick={leftTick} selectedIds={noteIdSet} onSelect={(id) => { useEditingContextStore.getState().setSelection(selectionSurface, { noteIds: [id] }); }} onRove={(delta) => moveRovingFocus(delta, 'velocity')} onBackToNote={(id) => { setRovingNoteId(id); focusRow(id, 'note'); }} />
         </section>
     );
 }
@@ -758,7 +861,18 @@ function PitchScroomer({ trackId, range, pitchesWithNotes }: { trackId: string; 
     </div>;
 }
 
-function VelocityLane({ notes, clip, pxPerTick, leftTick, selectedIds, onSelect }: { notes: readonly ArrangementNote[]; clip: ArrangementClip; pxPerTick: number; leftTick: number; selectedIds: Set<string>; onSelect: (id: string) => void }) {
+/**
+ * The velocity lane — one lollipop per note.
+ *
+ * ROVING TABINDEX, continued. Fixing the note grid alone left an identical trap
+ * one row down: every lollipop was a tab stop, so the roll still held 139 of them
+ * and forty consecutive `Tab` presses never escaped. The lane is not a second tab
+ * stop and it does not get its own roving index — it is the SAME index seen from
+ * one row down. Every lollipop is `-1`; the player reaches the focused note's
+ * handle with `Shift+ArrowDown` and comes back with `Shift+ArrowUp` or `Escape`.
+ * Arrows then walk the lane, staying in the lane.
+ */
+function VelocityLane({ notes, clip, pxPerTick, leftTick, selectedIds, onSelect, onRove, onBackToNote }: { notes: readonly ArrangementNote[]; clip: ArrangementClip; pxPerTick: number; leftTick: number; selectedIds: Set<string>; onSelect: (id: string) => void; onRove: (delta: number) => void; onBackToNote: (noteId: string) => void }) {
     const laneRef = useRef<HTMLDivElement>(null);
     const drag = useRef<{ pointerId: number; noteId?: string; base: Arrangement; startX: number; startVelocity: number; ramp: boolean; cleanup: () => void } | null>(null);
     const previewVelocity = (event: Pick<PointerEvent, 'clientY'>, note: ArrangementNote) => {
@@ -801,7 +915,11 @@ function VelocityLane({ notes, clip, pxPerTick, leftTick, selectedIds, onSelect 
     }, []);
     return <div ref={laneRef} className="piano-roll__velocity" aria-label="Velocity lane" onPointerDown={(event) => { if (event.button !== 0 || event.target !== event.currentTarget) return; const base = useArrangementStore.getState().arrangement; if (!base) return; const bounds = event.currentTarget.getBoundingClientRect(); const pointerId = event.pointerId; drag.current = { pointerId, base, startX: event.clientX, startVelocity: Math.max(0, Math.min(127, Math.round((bounds.bottom - event.clientY) / bounds.height * 127))), ramp: event.altKey, cleanup: () => undefined }; drag.current.cleanup = ownPointerGesture(pointerId, { move: previewPaint, commit: () => finish(pointerId, true), abort: () => finish(pointerId, false) }, 'pianoroll'); useArrangementStore.getState().beginGesture(event.altKey ? 'Ramp note velocity' : 'Paint note velocity'); previewPaint(event); try { event.currentTarget.setPointerCapture(pointerId); } catch { /* Window listeners own completion. */ } }}>
         <i className="is-guide is-96" /><i className="is-guide is-64" /><i className="is-guide is-32" />
-        {notes.map((note) => note.id && <button key={note.id} type="button" className={`piano-roll__lollipop${selectedIds.has(note.id) ? ' is-selected' : ''}`} style={{ left: (clip.startTick + note.tick - (clip.sourceStart ?? 0) - leftTick) * pxPerTick, height: `${(note.vel ?? 96) / 127 * 100}%` }} aria-label={`${pitchName(note.pitch)} velocity ${note.vel ?? 96}`} onPointerDown={(event) => { const base = useArrangementStore.getState().arrangement; if (!base) return; onSelect(note.id!); const pointerId = event.pointerId; drag.current = { pointerId, noteId: note.id!, base, startX: event.clientX, startVelocity: note.vel ?? 96, ramp: false, cleanup: () => undefined }; drag.current.cleanup = ownPointerGesture(pointerId, { move: (nativeEvent) => previewVelocity(nativeEvent, note), commit: () => finish(pointerId, true), abort: () => finish(pointerId, false) }, 'pianoroll'); try { event.currentTarget.setPointerCapture(pointerId); } catch { /* Window listeners own completion. */ } useArrangementStore.getState().beginGesture('Set note velocity'); previewVelocity(event, note); }} onPointerMove={(event) => { if (drag.current?.pointerId === event.pointerId) previewVelocity(event, note); }} onPointerUp={(event) => finish(event.pointerId, true)} onPointerCancel={(event) => finish(event.pointerId, false)} />)}
+        {notes.map((note) => note.id && <button key={note.id} type="button" tabIndex={-1} data-lollipop-note-id={note.id} onKeyDown={(event) => {
+            if (event.key === 'Escape' || (event.shiftKey && event.key === 'ArrowUp')) { event.preventDefault(); event.stopPropagation(); onBackToNote(note.id!); return; }
+            if (event.key === 'ArrowRight') { event.preventDefault(); event.stopPropagation(); onRove(1); }
+            else if (event.key === 'ArrowLeft') { event.preventDefault(); event.stopPropagation(); onRove(-1); }
+        }} className={`piano-roll__lollipop${selectedIds.has(note.id) ? ' is-selected' : ''}`} style={{ left: (clip.startTick + note.tick - (clip.sourceStart ?? 0) - leftTick) * pxPerTick, height: `${(note.vel ?? 96) / 127 * 100}%` }} aria-label={`${pitchName(note.pitch)} velocity ${note.vel ?? 96}`} onPointerDown={(event) => { const base = useArrangementStore.getState().arrangement; if (!base) return; onSelect(note.id!); const pointerId = event.pointerId; drag.current = { pointerId, noteId: note.id!, base, startX: event.clientX, startVelocity: note.vel ?? 96, ramp: false, cleanup: () => undefined }; drag.current.cleanup = ownPointerGesture(pointerId, { move: (nativeEvent) => previewVelocity(nativeEvent, note), commit: () => finish(pointerId, true), abort: () => finish(pointerId, false) }, 'pianoroll'); try { event.currentTarget.setPointerCapture(pointerId); } catch { /* Window listeners own completion. */ } useArrangementStore.getState().beginGesture('Set note velocity'); previewVelocity(event, note); }} onPointerMove={(event) => { if (drag.current?.pointerId === event.pointerId) previewVelocity(event, note); }} onPointerUp={(event) => finish(event.pointerId, true)} onPointerCancel={(event) => finish(event.pointerId, false)} />)}
     </div>;
 }
 

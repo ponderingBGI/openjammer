@@ -16,7 +16,8 @@ import { timebase } from '../../song/time';
 import { ownPointerGesture, thresholdAxis } from './pointerGestureLifetime';
 import { registerTimelineLevelWriter } from './timelineSignalLevels';
 import { usePluginFaultCards } from '../../store/pluginFaultStore';
-import { trackTint } from './trackTint';
+import { InstrumentLoader } from '../../audio/instrumentCatalog';
+import { trackTint, trackTintHex, UNSET_SWATCH_HEX } from './trackTint';
 
 export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick, visibleEndTick, index = 0, shell = false }: {
     track: ArrangementTrack;
@@ -72,6 +73,38 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
     const [nameDraft, setNameDraft] = useState(track.name ?? track.ref);
     const levelRef = useRef<HTMLSpanElement>(null);
     /*
+     * The native colour picker is the one control on this surface that cannot be
+     * handed a token — the OS dialog opens on a literal hex. So the lane resolves
+     * its OWN computed `--track-tint` to sRGB once it is mounted, and the picker
+     * opens on the colour the player can see. Before this it opened on the
+     * hard-coded blue AGENTS.md and DESIGN.md both declare retired, for every
+     * track that had no colour of its own -- which is all of them until someone
+     * picks one.
+     */
+    const laneRef = useRef<HTMLDivElement>(null);
+    const [swatchHex, setSwatchHex] = useState(UNSET_SWATCH_HEX);
+    const tint = trackTint(track);
+    /*
+     * Resolved LAZILY, at the moment the picker is about to open, rather than
+     * eagerly in an effect.
+     *
+     * The effect version was keyed on `[track, tint]` — neither of which changes
+     * when the THEME does — so switching to dark left the swatch holding the
+     * light theme's hex while the lane painted the dark one. That is the same
+     * class of defect this whole helper exists to fix: a colour asserted once and
+     * then quietly wrong.
+     *
+     * Resolving on `pointerdown`/`focus` fixes it at the root rather than by
+     * adding a theme dependency, because "the value is correct when the dialog
+     * opens" is the actual requirement, and no dependency list can be wrong about
+     * that. It also takes a `getComputedStyle` plus a canvas allocation off every
+     * lane's mount — with 8 tracks on screen that is 8 fewer of each per render
+     * pass, paid only by the one player who actually clicks a swatch.
+     */
+    const resolveSwatch = useCallback(() => {
+        setSwatchHex(trackTintHex(track, laneRef.current));
+    }, [track]);
+    /*
      * The level bead is the ONE animated element in the field region (spec D14):
      * "sound is visible" is answered here, at a stationary 3px bar under the
      * track's name, instead of by repainting every clip at 60fps. It is written
@@ -96,15 +129,27 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
         const clipSource = clip && arrangement.sources?.[clip.sourceId];
         return clipSource?.kind === 'midi' ? clipSource.notes : [];
     })() : [];
-    const effectiveDrumMode = drumMode ?? shouldAutoDetectDrums(expandedNotes);
+    /*
+     * The inline roll gets the SAME kit signals the full roll gets. It used to
+     * call `shouldAutoDetectDrums(expandedNotes)` bare while `PianoRoll` OR'd in
+     * the instrument's percussion category first — so the roll a player meets
+     * first was deciding on the weakest evidence in the system.
+     */
+    const effectiveDrumMode = drumMode ?? shouldAutoDetectDrums(expandedNotes, {
+        instrumentIsPercussion: typeof instrument === 'string'
+            && InstrumentLoader.getDefinition(instrument)?.category === 'percussion',
+        trackName: track.name,
+        instrumentId: typeof instrument === 'string' ? instrument : undefined,
+        ppq: arrangement.ppq,
+    });
     const punch = arrangement.locations?.find((location) => location.kind === 'punch' && location.endTick !== undefined);
     const ghostStart = Math.max(recordStartTick ?? 0, punch?.startTick ?? 0);
     const ghostEnd = punch?.endTick ?? Number.POSITIVE_INFINITY;
     return (
-        <div className={`arrangement-track${visibleAutomation ? ' has-automation' : ''}${selectedTrackIds.includes(trackId) ? ' is-selected' : ''}${expandedClipId ? ' has-lane-menu' : ''}${dropTargetId === trackId ? (dropLocked ? ' is-drop-invalid' : ' is-drop-target') : ''}${index % 2 === 1 ? ' is-odd' : ''}${dimmed ? ' is-dimmed' : ''}`} data-track-id={trackId} role="listitem" aria-label={track.name ?? track.ref} style={{ height: laneHeight + (visibleAutomation ? AUTOMATION_LANE_HEIGHT : 0), gridTemplateRows: visibleAutomation ? `${laneHeight}px ${AUTOMATION_LANE_HEIGHT}px` : `${laneHeight}px`, '--track-tint': trackTint(track) } as CSSProperties}>
+        <div className={`arrangement-track${visibleAutomation ? ' has-automation' : ''}${selectedTrackIds.includes(trackId) ? ' is-selected' : ''}${expandedClipId ? ' has-lane-menu' : ''}${dropTargetId === trackId ? (dropLocked ? ' is-drop-invalid' : ' is-drop-target') : ''}${index % 2 === 1 ? ' is-odd' : ''}${dimmed ? ' is-dimmed' : ''}`} data-track-id={trackId} role="listitem" aria-label={track.name ?? track.ref} style={{ height: laneHeight + (visibleAutomation ? AUTOMATION_LANE_HEIGHT : 0), gridTemplateRows: visibleAutomation ? `${laneHeight}px ${AUTOMATION_LANE_HEIGHT}px` : `${laneHeight}px`, '--track-tint': tint } as CSSProperties} ref={laneRef}>
             <div className="arrangement-track__header" onPointerDown={(event) => { if (shell) return; const context = useEditingContextStore.getState(); const current = context.viewports.arrangement.selection.trackIds; if (event.ctrlKey || event.metaKey) context.setSelection('arrangement', { trackIds: current.includes(trackId) ? current.filter((id) => id !== trackId) : [...current, trackId] }); else if (event.shiftKey) { const indices = current.map((id) => arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === id)).filter((index) => index >= 0); const here = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === trackId); const anchor = indices.at(-1) ?? here; context.setSelection('arrangement', { trackIds: arrangement.tracks.slice(Math.min(anchor, here), Math.max(anchor, here) + 1).map((item) => item.id ?? item.ref) }); } else context.setSelection('arrangement', { trackIds: [trackId] }); }}>
                 <span className="arrangement-track__stripe" aria-hidden="true" />
-                <div className="arrangement-track__top"><button className="arrangement-track__grab" type="button" aria-label={`Reorder ${track.name ?? track.ref}`} onPointerDown={(event) => { if (shell || event.button !== 0) return; event.stopPropagation(); const startY = event.clientY; let active = false; let targetIndex = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === trackId); const cleanup = ownPointerGesture(event.pointerId, { move(move) { if (!active) active = thresholdAxis(0, move.clientY - startY, move.pointerType, false) !== null; if (!active) return; const target = document.elementFromPoint(move.clientX, move.clientY)?.closest<HTMLElement>('[data-track-id]')?.dataset.trackId; const index = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === target); if (index >= 0) targetIndex = index; }, commit() { cleanup(); if (active) useArrangementStore.getState().apply({ kind: 'moveTrack', trackId, index: targetIndex }); }, abort() { cleanup(); } }); try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Window listeners own completion. */ } }}>⠿</button>{renaming ? <input className="arrangement-track__rename" aria-label={`Rename ${track.name ?? track.ref}`} autoFocus value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { const name = nameDraft.trim() || track.ref; if (name !== (track.name ?? track.ref)) useArrangementStore.getState().apply({ kind: 'setTrackName', trackId, name }); setRenaming(false); } else if (event.key === 'Escape') { setNameDraft(track.name ?? track.ref); setRenaming(false); } }} onBlur={() => { const name = nameDraft.trim() || track.ref; if (name !== (track.name ?? track.ref)) useArrangementStore.getState().apply({ kind: 'setTrackName', trackId, name }); setRenaming(false); }} /> : <span className="arrangement-track__name" onDoubleClick={() => { setNameDraft(track.name ?? track.ref); setRenaming(true); }}>{track.name ?? track.ref}</span>}<span className="arrangement-track__swatch"><input type="color" aria-label={`Colour for ${track.name ?? track.ref}`} value={/^#[0-9a-f]{6}$/i.test(track.color ?? '') ? track.color : '#4a90c2'} onChange={(event) => useArrangementStore.getState().apply({ kind: 'setTrackColor', trackId, color: event.target.value })} /></span></div>
+                <div className="arrangement-track__top"><button className="arrangement-track__grab" type="button" aria-label={`Reorder ${track.name ?? track.ref}`} onPointerDown={(event) => { if (shell || event.button !== 0) return; event.stopPropagation(); const startY = event.clientY; let active = false; let targetIndex = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === trackId); const cleanup = ownPointerGesture(event.pointerId, { move(move) { if (!active) active = thresholdAxis(0, move.clientY - startY, move.pointerType, false) !== null; if (!active) return; const target = document.elementFromPoint(move.clientX, move.clientY)?.closest<HTMLElement>('[data-track-id]')?.dataset.trackId; const index = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === target); if (index >= 0) targetIndex = index; }, commit() { cleanup(); if (active) useArrangementStore.getState().apply({ kind: 'moveTrack', trackId, index: targetIndex }); }, abort() { cleanup(); } }); try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Window listeners own completion. */ } }}>⠿</button>{renaming ? <input className="arrangement-track__rename" aria-label={`Rename ${track.name ?? track.ref}`} autoFocus value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { const name = nameDraft.trim() || track.ref; if (name !== (track.name ?? track.ref)) useArrangementStore.getState().apply({ kind: 'setTrackName', trackId, name }); setRenaming(false); } else if (event.key === 'Escape') { setNameDraft(track.name ?? track.ref); setRenaming(false); } }} onBlur={() => { const name = nameDraft.trim() || track.ref; if (name !== (track.name ?? track.ref)) useArrangementStore.getState().apply({ kind: 'setTrackName', trackId, name }); setRenaming(false); }} /> : <span className="arrangement-track__name" onDoubleClick={() => { setNameDraft(track.name ?? track.ref); setRenaming(true); }}>{track.name ?? track.ref}</span>}<span className="arrangement-track__swatch"><input type="color" aria-label={`Colour for ${track.name ?? track.ref}`} value={swatchHex} onPointerDown={resolveSwatch} onFocus={resolveSwatch} onChange={(event) => useArrangementStore.getState().apply({ kind: 'setTrackColor', trackId, color: event.target.value })} /></span></div>
                 <span ref={levelRef} className="arrangement-track__level-bead" aria-hidden="true" />
                 <div className="arrangement-track__controls">
                     <LaneButton tone="mute" aria-label={`Mute ${track.name ?? track.ref}`} aria-pressed={track.mute === true} onClick={() => useArrangementStore.getState().apply({ kind: 'setTrackMute', trackId, mute: !track.mute })}>M</LaneButton>

@@ -86,4 +86,29 @@ describe('SpeakerNode device recovery policy', () => {
         expect((useGraphStore.getState().nodes.get(id)!.data as { deviceId?: string }).deviceId)
             .toBe('stage-interface');
     });
+
+    it('recovers WITHOUT growing the undo history — an unplugged cable is not an edit', async () => {
+        // W6-SHIP Z4. The OS taking a device away is the environment, not the
+        // player. If this write records, the next `Ctrl+Z` mid-set re-selects an
+        // output that is physically gone — undo spent on bookkeeping, and the
+        // performer's actual last edit still on the stack behind it.
+        const id = useGraphStore.getState().addNode('speaker', { x: 0, y: 0 });
+        useGraphStore.getState().updateNodeData(id, { deviceId: 'unplugged-interface' });
+        render(<SpeakerNode node={useGraphStore.getState().nodes.get(id)!} />);
+        await waitFor(() => expect(enumerateDevices).toHaveBeenCalledTimes(1));
+        useHistoryStore.getState().clear();
+
+        await act(async () => {
+            deviceChange?.();
+            await Promise.resolve();
+        });
+
+        // The recovery LANDED…
+        await waitFor(() =>
+            expect((useGraphStore.getState().nodes.get(id)!.data as { deviceId?: string }).deviceId)
+                .toBe('default'));
+        // …and history never noticed.
+        expect(useHistoryStore.getState().entries).toHaveLength(0);
+        expect(useHistoryStore.getState().canUndo()).toBe(false);
+    });
 });

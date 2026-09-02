@@ -61,7 +61,7 @@ compact** to 24px — that is the width the cluster actually starts *wrapping* a
 ruler's sections row painting over the bottom of the zoom chip (measured 2.2px of overflow
 across 1030–1177). Compacted, two rows are 24 + 3 + 24 = 51px and fit, and 1100–1180 goes
 back to a single row. **At ≤1024px** the `Tab` hint goes. **At ≤900px** the zoom chip
-leaves — the one control that is genuinely redundant, since `Ctrl+wheel`, `+`/`-` and
+leaves — the one control that is genuinely redundant, since `Ctrl+wheel`, bare `=`/`-` and
 `Ctrl+0` all still reach it. No arrangement utility is ever moved behind an overflow menu,
 because "which mode am I in" must be readable without a click.
 
@@ -112,7 +112,10 @@ repainting every clip at 60fps. Section chips are document locations, not decora
 labels; a `kind: 'mark'` renders as a triangle pin with its name, never as a chip that
 appears to span a section it does not own.
 
-The **mixer drawer** is 188px (`M`), one 124px strip per track plus a 92px master. The
+The **mixer drawer** is 188px, one 124px strip per track plus a 92px master. It has **no
+key**: it is opened from the sky band's **Mix** button (`SkyBand.tsx`). `M` is the
+**metronome** (`arrangement.metronome`, `ArrangementSurface.tsx`) — this line used to
+attribute `M` to the mixer, which is the interaction spec's assignment and not the code's. The
 **automation lane** is 96px; its parameter select, live value, `Off | Play` and
 `Step | Linear` live in the 200px header column, in line with the track header above them —
 one column of controls, one column of time.
@@ -259,7 +262,10 @@ complete pointer stream; editor note audition remains disabled while transport i
 Arrangement shortcuts include E/Q level navigation, Shift+Space, Shift+Z, Ctrl+0, +/-,
 Alt+G, Home/End, Ctrl+Left/Right marker traversal, Alt+Left/Right bar nudge, Up/Down clip
 track moves, Ctrl+Alt+arrows spatial selection (Shift extends), V/B/X/K/T tools,
-bracket-key grid changes, L/I/O/P/M/F/0, Ctrl+M, Ctrl+E, Ctrl+Shift+Backspace, and Ctrl+A.
+bracket-key grid changes, L/I/O/P/M/F/0, bare `=`/`-` zoom, Ctrl+M, Ctrl+E,
+Ctrl+Shift+Backspace, and Ctrl+A. The zoom keys are **bare `=` and `-`**, not `+`/`-`:
+`matchesKeyCombo` is strict on all three modifier groups, so `Shift+=` (which is how a
+player types `+`) does not match `=` and does nothing.
 `I` and `O` clamp the loop they set: the range is always at least one grid unit long and never
 starts below zero, so `O` with the playhead at 1.1 no longer emits an invalid location verb.
 Two documented deviations from the interaction spec: spec §4.2 assigns `M` to the mixer while
@@ -283,9 +289,11 @@ adds a 40px toolbar and the clip-bounds brackets, never a second interaction mod
 toolbar carries only what a hand reaches for mid-take: the five tools (`V B X K T`, 28px
 each), the quantize grid chip, `Quantize`, the drum-row override, and a `⋯` popover holding
 grid / strength / swing, because those three number fields are set once a session and should
-not cost permanent chrome. Notes are painted in the **`--acc2` ink** — `--universal-connection`
-carried 60% of the way into `--text-primary`, so it darkens in light and lightens in dark
-exactly as a real `--accent-two-ink` token would — at `velocityOpacity()`, whose ramp runs
+not cost permanent chrome. Notes are painted in the **`--acc2` ink** — which is now a
+real token, `--accent-two-ink`, reached through the roll's `--piano-roll-note-ink` alias.
+It used to be derived inline as `--universal-connection` carried 60% of the way into
+`--text-primary`; the token shipped and the derivation is gone — at `velocityOpacity()`,
+whose ramp runs
 **0.68 → 1.0**. Both numbers are set by the 3:1 floor rather than by taste: raw `--acc2` at
 FULL opacity is only 3.35:1 on a white-key row, so no alpha floor alone could have carried
 the quiet notes, and at the old 0.45 floor the softest note measured 1.65:1. Composited, the
@@ -435,20 +443,15 @@ preview, save/reopen, and export. The remaining named gaps are deliberately narr
 - the track colour still uses a native `<input type="color">` (dressed as a swatch showing
   the track's *effective* tint) rather than the 8-swatch popover; the native picker is the
   only one that reaches the OS palette;
-- `shouldAutoDetectDrums` false-positives on a pitched part whose ≤16 distinct pitches all
-  fall in 35–81 (Paper Sketch's chord clip is one), so the roll opens in drum rows until the
-  `Drums` toggle is pressed;
 - `--acc` and `--acc2` are near-isoluminant by design (oklch L .66 light / .72 dark), so the
   accent **selection ring on a note** is 1.0–2.0:1 against the note's own fill and the
   selected state leans on the ring plus the focus halo outside it, not on the ring alone.
   The same question applies to the selection outline over a tinted clip fill (2.98–3.04:1 in
   light). Both are spec-level colour decisions (§2.5 / §2.7), not local CSS bugs, and both
   are recorded by gates in `Arrangement/__tests__/contrast.test.ts`;
-- the surface still borrows `--universal-connection` — a *port* name — as its second accent,
-  and derives the piano-roll note ink from it. A real `--accent-two` / `--accent-two-ink`
-  token pair in `oj-tokens` would let it stop;
 - bare `ArrowUp`/`ArrowDown` are consumed by the clip track-move binding even with nothing
-  selected, so they do not scroll the field natively;
+  selected, so they do not scroll the field natively — verified still true
+  (`ArrangementSurface.tsx` returns `true` from that handler regardless of the selection);
 - Step entry is disarmed only from the toolbar Step button — no key disarms it;
 - group-edge magnetic anchors for multi-clip drags;
 - plugin delay compensation;

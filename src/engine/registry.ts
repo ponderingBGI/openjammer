@@ -23,7 +23,7 @@ import { MINILAB3_CONFIG, generatePortsFromConfig } from '../components/controls
 // instead and are left alone.
 const audioOutput: PortDefinition = {
     id: 'audio-out',
-    name: 'Audio Out',
+    name: 'Out',
     type: 'audio',
     direction: 'output',
     position: { x: 1, y: 0.5 }  // output column; y overridden per node
@@ -31,7 +31,7 @@ const audioOutput: PortDefinition = {
 
 const audioInput: PortDefinition = {
     id: 'audio-in',
-    name: 'Audio In',
+    name: 'In',
     type: 'audio',
     direction: 'input',
     position: { x: 0, y: 0.5 }  // input column; y overridden per node
@@ -119,7 +119,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
             // Input ports on left (connected from input-panel rows)
             { id: 'row-in', name: 'Rows', type: 'control', direction: 'input', position: { x: 0, y: 0.5 } },
             // Audio output on right (connects to output-panel)
-            { id: 'audio-out', name: 'Audio', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output', position: { x: 1, y: 0.5 } }
         ],
         defaultData: {},
         dimensions: { width: 500, height: 300 },
@@ -296,7 +296,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         defaultPorts: [
             { id: 'bundle-in', name: 'Bundle', type: 'control', direction: 'input', isBundled: true },
             { id: 'pedal', name: 'Pedal', type: 'control', direction: 'input' },
-            { id: 'audio-out', name: 'Output', type: 'audio', direction: 'output' }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output' }
         ],
         defaultData: {
             offsets: { 'input-1': -12 },
@@ -318,7 +318,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         defaultPorts: [
             { id: 'bundle-in', name: 'Bundle', type: 'control', direction: 'input', isBundled: true },
             { id: 'pedal', name: 'Pedal', type: 'control', direction: 'input' },
-            { id: 'audio-out', name: 'Output', type: 'audio', direction: 'output' }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output' }
         ],
         defaultData: {
             offsets: { 'input-1': 0 },
@@ -340,7 +340,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         defaultPorts: [
             { id: 'bundle-in', name: 'Bundle', type: 'control', direction: 'input', isBundled: true },
             { id: 'pedal', name: 'Pedal', type: 'control', direction: 'input' },
-            { id: 'audio-out', name: 'Output', type: 'audio', direction: 'output' }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output' }
         ],
         defaultData: {
             offsets: { 'input-1': 0 },
@@ -372,7 +372,7 @@ export const nodeDefinitions: Record<NodeType, NodeDefinition> = {
         defaultPorts: [
             { id: 'bundle-in', name: 'Bundle', type: 'control', direction: 'input', isBundled: true },
             { id: 'pedal', name: 'Pedal', type: 'control', direction: 'input' },
-            { id: 'audio-out', name: 'Output', type: 'audio', direction: 'output' }
+            { id: 'audio-out', name: 'Out', type: 'audio', direction: 'output' }
         ],
         defaultData: {
             offsets: { 'input-1': 0 },

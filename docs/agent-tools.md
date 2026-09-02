@@ -51,7 +51,7 @@ reversible frame, and only fall back to authoring new DSP when nothing fits:
 
 A `WorkflowPlan` lets you describe a connected graph at a HIGHER altitude — nodes
 addressed by a model-chosen `ref` ("osc1", "out"), wires by the human port NAME
-("Audio Out" → "Audio In"), exactly as a person reads them off the canvas.
+("Out" → "In"), exactly as a person reads them off the canvas.
 `emit_plan` LOWERS that to `add_node` / `update_node_data` / `add_connection` and
 applies them through the same atomic `batch_apply` path, so it is never a new
 trust path — just a friendlier way to author one reversible frame. The validator
@@ -142,8 +142,8 @@ the missing path to the speaker. Every step is visible in the chat and undoable.
     { "ref": "out", "type": "speaker" }
   ],
   "wires": [
-    { "from": { "ref": "lp",  "port": "Audio Out" }, "to": { "ref": "amp", "port": "Audio In" } },
-    { "from": { "ref": "amp", "port": "Audio Out" }, "to": { "ref": "out", "port": "Audio In" } }
+    { "from": { "ref": "lp",  "port": "Out" }, "to": { "ref": "amp", "port": "In 1" } },
+    { "from": { "ref": "amp", "port": "Out" }, "to": { "ref": "out", "port": "In" } }
   ]
 }
 ```
@@ -151,7 +151,15 @@ the missing path to the speaker. Every step is visible in the chat and undoable.
 - `ref` is YOUR symbolic id — wires point at refs, never at real node ids.
 - `type` is a built-in `NodeType` OR a registered dynamic plugin id.
 - `port` is the human NAME shown on the canvas; the lowering resolves it to the
-  real port id.
+  real port id. The generic signal ports are **`In`** and **`Out`**. Their retired
+  spellings (`Audio In` / `Audio Out` / `Input` / `Output` / `Audio`) and the raw
+  port id still resolve, so a plan you already learned keeps working — but write
+  the new names. A port with a name of its OWN keeps it and has no alias: the
+  multiplier really does have `In 1` / `In 2`, which is why the wire above says
+  `In 1`. When in doubt, `get_graph` reports each node's real port names.
+  (This example is pinned against the live registry by
+  `src/ai/__tests__/plan.test.ts` — it used to say `Audio In` into a multiplier,
+  a port that has never existed.)
 - `params` become the node's initial `data` (and a follow-up `update_node_data`).
 
 The validator (`validatePlan`) checks: every wire ref resolves; each type is

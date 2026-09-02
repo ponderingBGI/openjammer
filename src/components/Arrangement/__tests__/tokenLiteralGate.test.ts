@@ -9,14 +9,81 @@ function cssFiles(root: string): string[] {
     });
 }
 
+/**
+ * The SOURCE files of a surface, tests excluded.
+ *
+ * The gate below used to scan `.css` only. That is why `#4A90C2` — the blue this
+ * branch's own `5b412f5` retired, and which `AGENTS.md` and `DESIGN.md` both name
+ * as the example of a stale literal — shipped for a whole redesign inside
+ * `TrackLaneView.tsx`: a colour written in TSX was simply outside the gate's file
+ * glob. Colour does not become less of a colour for being typed in a component,
+ * so the glob now follows the surface, not the extension.
+ */
+function sourceFiles(root: string): string[] {
+    return readdirSync(root).flatMap((name) => {
+        const path = join(root, name);
+        if (statSync(path).isDirectory()) return name === '__tests__' ? [] : sourceFiles(path);
+        return /\.tsx?$/.test(path) ? [path] : [];
+    });
+}
+
+/** Any authored colour literal: hex, `rgb()`/`rgba()`, `hsl()`/`hsla()`. */
+const COLOR_LITERAL = /#[\da-f]{3,8}\b|rgba?\s*\(|hsla?\s*\(/i;
+
 function customProperties(source: string, pattern: RegExp): Set<string> {
     return new Set([...source.matchAll(pattern)].map((match) => match[1]!));
 }
 
+const SURFACE_ROOTS = ['src/components/Arrangement', 'src/components/Export', 'src/components/Plugins', 'src/components/Bench'];
+
+/**
+ * The ONE colour literal the arrangement is allowed to author, and it is not a
+ * colour choice: `#000000` is the HTML default `value` of `<input type="color">`,
+ * used only when there is no DOM to resolve `--track-tint` against. Named here
+ * so adding a second exception is a deliberate edit to the gate, not a silence.
+ */
+const SANCTIONED_LITERALS = new Map<string, readonly string[]>([
+    ['src/components/Arrangement/trackTint.ts', ['#000000']],
+]);
+
 describe('Arrangement semantic color gate', () => {
     it('contains no hex, rgb, rgba, hsl, or hsla literals', () => {
         const root = join(process.cwd(), 'src/components/Arrangement');
-        const offenders = cssFiles(root).filter((path) => /#[\da-f]{3,8}\b|rgba?\s*\(|hsla?\s*\(/i.test(readFileSync(path, 'utf8')));
+        const offenders = cssFiles(root).filter((path) => COLOR_LITERAL.test(readFileSync(path, 'utf8')));
+        expect(offenders).toEqual([]);
+    });
+
+    it('authors no colour literal in TS/TSX either — the glob follows the surface', () => {
+        // `#4A90C2` shipped in `TrackLaneView.tsx` for the whole New DNA redesign
+        // because this gate only ever opened `.css` files. A colour is a colour
+        // wherever it is typed.
+        const offenders: string[] = [];
+        for (const root of SURFACE_ROOTS) {
+            for (const path of sourceFiles(join(process.cwd(), root))) {
+                const relative = path.slice(process.cwd().length + 1).replace(/\\/g, '/');
+                const sanctioned = SANCTIONED_LITERALS.get(relative) ?? [];
+                const source = readFileSync(path, 'utf8')
+                    // Strip only what this file is explicitly allowed to name.
+                    .split(sanctioned.length ? new RegExp(sanctioned.join('|'), 'g') : /\0/)
+                    .join('');
+                if (COLOR_LITERAL.test(source)) offenders.push(relative);
+            }
+        }
+        expect(offenders).toEqual([]);
+    });
+
+    it('names the retired blue nowhere in the app or the design system', () => {
+        // AGENTS.md §"Port types and colors" and DESIGN.md §2 both say this hex is
+        // stale. Said once here so it cannot come back through any file type.
+        const offenders: string[] = [];
+        for (const root of ['src', 'packages/oj-ui/src']) {
+            const base = join(process.cwd(), root);
+            for (const path of [...sourceFiles(base), ...cssFiles(base)]) {
+                if (/#4a90c2/i.test(readFileSync(path, 'utf8'))) {
+                    offenders.push(path.slice(process.cwd().length + 1).replace(/\\/g, '/'));
+                }
+            }
+        }
         expect(offenders).toEqual([]);
     });
 

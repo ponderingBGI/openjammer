@@ -152,10 +152,12 @@ export const MicrophoneNode = memo(function MicrophoneNode({
                     setDeviceInfo({ isUSBAudioInterface: true, deviceLabel: lowLatencyDevice.label });
                 }
 
-                // Recover an explicit route the OS no longer offers.
+                // Recover an explicit route the OS no longer offers. `{ record: false }`
+                // — the interface was unplugged; that is the environment, not an edit.
+                // Undoing it would restore a deviceId that no longer exists.
                 if (selectedDeviceId !== 'default' && named.length > 0 && !inputs.some((d) => d.deviceId === selectedDeviceId)) {
                     setSelectedDeviceId('default');
-                    updateNodeData<MicrophoneNodeData>(node.id, { deviceId: 'default' });
+                    updateNodeData<MicrophoneNodeData>(node.id, { deviceId: 'default' }, { record: false });
                 }
             } catch {
                 if (!cancelled) {

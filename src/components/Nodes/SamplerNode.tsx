@@ -75,14 +75,17 @@ const WAVEFORM_RESOLUTION = 50;
  * Set/clear the node's `sampleLoadError` flag (ERR-1) WITHOUT going through the
  * React `updateNodeData` closure. Read straight from the store so we compare
  * against the live value (never a stale render closure) and write only on a real
- * change — no spurious version bump, no undo-history entry (this derived state is
- * set outside any gesture, so it is correctly non-undoable). Mount-time only.
+ * change — no spurious version bump, and no undo-history entry, because the write
+ * says `{ record: false }`. Being "outside any gesture" was never enough on its
+ * own: `graphStore`'s `set` wrapper diffs and records every graph mutation that is
+ * not a history replay, so a sample that failed to load on mount used to cost the
+ * player a `Ctrl+Z`. Mount-time only.
  */
 function setLoadError(nodeId: string, value: boolean): void {
     const store = useGraphStore.getState();
     const current = store.nodes.get(nodeId)?.data as SamplerNodeData | undefined;
     if (!current || !!current.sampleLoadError === value) return;
-    store.updateNodeData<SamplerNodeData>(nodeId, { sampleLoadError: value });
+    store.updateNodeData<SamplerNodeData>(nodeId, { sampleLoadError: value }, { record: false });
 }
 
 /** Parameter ranges and steps */

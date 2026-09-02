@@ -29,7 +29,7 @@ and write your own layout glue with the **semantic CSS variables** below (real n
   `--accent-primary` `--accent-secondary` `--accent-success` `--accent-warning` `--accent-danger`;
   ink/borders `--sketch-black` `--border-subtle` `--border-strong`; **wiring (ports/cables)**
   `--audio-input` `--audio-output` `--audio-connected` `--control-input` `--control-output`
-  `--control-connected` `--universal-port`; **timeline/arrangement** `--timeline-bg`
+  `--control-connected` `--universal-connection`; **timeline/arrangement** `--timeline-bg`
   `--timeline-chrome-bg` `--timeline-lane-bg` `--timeline-lane-alt-bg` `--timeline-lane-divider`
   `--timeline-clip-bg` `--timeline-clip-border` `--timeline-clip-muted-bg` `--timeline-grid-bar`
   `--timeline-grid-beat` `--timeline-grid-sub` `--timeline-playhead` `--timeline-selection`

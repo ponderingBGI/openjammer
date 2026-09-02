@@ -96,6 +96,38 @@ export const RecordDisabled: Story = () => (
 );
 RecordDisabled.storyName = 'Record disabled';
 
+/**
+ * Stopped, but away from where playback last started: the one transport button is
+ * spec §7's SECOND Stop, so it wears the rewind mark rather than a triangle that
+ * would not play. Press it and it rewinds without rolling; press again and it goes.
+ */
+export const ReturnArmed: Story = () => {
+    const [playing, setPlaying] = useState(false);
+    const [armed, setArmed] = useState(true);
+    return (
+        <div style={stage}>
+            <TransportPill
+                playing={playing}
+                onPlayToggle={() => {
+                    // Armed and stopped: this press is the return, and the transport stays still.
+                    if (!playing && armed) { setArmed(false); return; }
+                    // Stopping leaves the playhead away from where it began, which is
+                    // exactly what arms the second Stop for the next press.
+                    setArmed(playing);
+                    setPlaying((p) => !p);
+                }}
+                returnArmed={armed}
+                position={{ display: playing ? '3.2' : armed ? '3.2' : '1.1' }}
+                tempo={{ value: 96, onCommit: () => undefined }}
+                loop={{ on: false, onToggle: () => undefined }}
+                meter={<LiveMeter active={playing} />}
+                hint="space"
+            />
+        </div>
+    );
+};
+ReturnArmed.storyName = 'Second Stop armed';
+
 export const Recording: Story = () => (
     <div style={stage}>
         <TransportPill

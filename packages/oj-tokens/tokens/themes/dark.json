@@ -22,7 +22,6 @@
     "audioConnected": { "$value": "oklch(0.7 0.12 200)", "$type": "color" },
     "controlConnection": { "$value": "#767267", "$type": "color" },
     "controlConnected": { "$value": "#767267", "$type": "color" },
-    "universalPort": { "$value": "oklch(0.72 0.19 300)", "$type": "color" },
     "universalConnection": { "$value": "oklch(0.72 0.19 300)", "$type": "color" },
     "timelineBg": { "$value": "#161510", "$type": "color" },
     "timelineChromeBg": { "$value": "#242219", "$type": "color" },

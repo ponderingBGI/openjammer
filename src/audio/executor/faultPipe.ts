@@ -130,7 +130,12 @@ export function routeRuntimeFaults(
         reportPluginFault({ nodeId: visual, pluginName, kind: kind.NodeFault.fault, corr: ev.corr_id || undefined });
         if (kind.NodeFault.fault !== 'NonFinite') {
             setNodePluginLoadError(visual, true);
-            useGraphStore.getState().updateNodeData(visual, { pluginFaultKind: kind.NodeFault.fault, pluginBypassed: true });
+            // `{ record: false }` for the same reason its sibling on the line
+            // above takes it: a hosted plugin crashing mid-set is the engine
+            // talking, not the player editing. Without it this write minted a
+            // SECOND undo entry on top of the badge's, so one crash cost the
+            // player two `Ctrl+Z` presses that changed nothing they could see.
+            useGraphStore.getState().updateNodeData(visual, { pluginFaultKind: kind.NodeFault.fault, pluginBypassed: true }, { record: false });
         }
     }
 }

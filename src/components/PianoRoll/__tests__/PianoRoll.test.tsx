@@ -308,3 +308,101 @@ describe('PianoRoll — BC-30 refuses a duplicate, and says so', () => {
         expect(container.querySelector('.piano-roll__rejection'), 'a successful draw says nothing').toBeNull();
     });
 });
+
+/**
+ * W6-SHIP item 6 — the roll is ONE tab stop, not 128.
+ *
+ * Every note renders as a real `<button>`, which is right: notes are the primary
+ * object of this editor and they carry excellent accessible names ("A3, tick 0,
+ * duration 480, velocity 64"). But all of them were `tabIndex 0`, so the starter's
+ * first clip put 128 tab stops on screen and tabbing INTO the roll cost one press
+ * per note to get back out. That is worse in practice than the canvas ports being
+ * unreachable: an unreachable control is merely absent, whereas the notes invite
+ * the keyboard and then hold it.
+ *
+ * Roving tabindex is the standard answer for a composite widget and it is pinned
+ * here at exactly the two things a player feels: one tab stop, and one press out.
+ */
+describe('PianoRoll roving tabindex', () => {
+    let trackId: string;
+    let clipId: string;
+
+    beforeEach(() => {
+        useArrangementStore.getState().setArrangement(buildPaperSketch());
+        useHistoryStore.getState().clear();
+        const arrangement = useArrangementStore.getState().arrangement!;
+        const track = arrangement.tracks.find((item) => item.clips.some((clip) => arrangement.sources?.[clip.sourceId]?.kind === 'midi'))!;
+        const clip = track.clips.find((item) => arrangement.sources?.[item.sourceId]?.kind === 'midi')!;
+        trackId = track.id!;
+        clipId = clip.id!;
+        // `PianoRollSurface` reads the `pianoroll` viewport (`mode === 'surface'`),
+        // so that is the selection these tests have to speak to.
+        useEditingContextStore.getState().setSelection('pianoroll', { noteIds: [] });
+    });
+
+    const notes = (container: HTMLElement) =>
+        [...container.querySelectorAll<HTMLElement>('button.piano-roll-note')];
+
+    it('renders many notes and exactly ONE of them tabbable', () => {
+        const { container } = render(<PianoRollSurface trackId={trackId} clipId={clipId} pxPerTick={0.1} />);
+        const all = notes(container);
+        // The trap needs a crowd to be a trap — assert the crowd is really there,
+        // so a future change that renders one note cannot pass this vacuously.
+        expect(all.length).toBeGreaterThan(20);
+        expect(all.filter((note) => note.tabIndex === 0)).toHaveLength(1);
+        expect(all.filter((note) => note.tabIndex === -1)).toHaveLength(all.length - 1);
+    });
+
+    it('leaves the roll in ONE press of Tab, from anywhere in the note field', () => {
+        const { container } = render(<PianoRollSurface trackId={trackId} clipId={clipId} pxPerTick={0.1} />);
+        const all = notes(container);
+        /*
+         * A SPREAD, not all 128. Focusing every note re-renders the roll 128
+         * times and took ~1.3s alone and over 5s under a full parallel run —
+         * this test would have joined `KeybindingsPanel`'s flake for no extra
+         * proof. The invariant is per-note and identical at every index, so
+         * first / last / middle / a couple in between demonstrate it exactly as
+         * well and in a twentieth of the time.
+         */
+        const sample = [0, 1, Math.floor(all.length / 3), Math.floor(all.length / 2), all.length - 2, all.length - 1]
+            .filter((index, at, list) => index >= 0 && index < all.length && list.indexOf(index) === at)
+            .map((index) => all[index]!);
+        expect(sample.length).toBeGreaterThanOrEqual(5);
+        // Whichever note the focus is on, the number of note tab stops still ahead
+        // of it is zero — that is what "one press out" means mechanically.
+        for (const note of sample) {
+            act(() => note.focus());
+            const stops = notes(container).filter((other) => other.tabIndex === 0);
+            expect(stops).toHaveLength(1);
+            expect(stops[0]).toBe(document.activeElement);
+        }
+    });
+
+    it('moves the roving focus with the arrows when nothing is selected', () => {
+        const { container } = render(<PianoRollSurface trackId={trackId} clipId={clipId} pxPerTick={0.1} />);
+        const first = notes(container).find((note) => note.tabIndex === 0)!;
+        const firstId = first.dataset.noteId;
+        act(() => first.focus());
+        fireEvent.keyDown(first, { key: 'ArrowRight' });
+        const moved = notes(container).find((note) => note.tabIndex === 0)!;
+        expect(moved.dataset.noteId).not.toBe(firstId);
+    });
+
+    it('does NOT touch the arrows when notes are selected — the edit grammar is unchanged', () => {
+        const arrangement = useArrangementStore.getState().arrangement!;
+        const clip = arrangement.tracks.find((item) => item.id === trackId)!.clips.find((item) => item.id === clipId)!;
+        const source = arrangement.sources![clip.sourceId]!;
+        if (source.kind !== 'midi') throw new Error('fixture must contain MIDI');
+        const selectedId = source.notes.find((note) => note.id)!.id!;
+        useEditingContextStore.getState().setSelection('pianoroll', { noteIds: [selectedId] });
+
+        const { container } = render(<PianoRollSurface trackId={trackId} clipId={clipId} pxPerTick={0.1} />);
+        const target = container.querySelector<HTMLElement>(`[data-note-id="${selectedId}"]`)!;
+        act(() => target.focus());
+        const before = container.querySelector<HTMLElement>('button.piano-roll-note[tabindex="0"]')!.dataset.noteId;
+        fireEvent.keyDown(target, { key: 'ArrowRight' });
+        // With a selection live, ArrowRight belongs to `nudgeRight`. The roving
+        // index must stay exactly where it is rather than racing the edit.
+        expect(container.querySelector<HTMLElement>('button.piano-roll-note[tabindex="0"]')!.dataset.noteId).toBe(before);
+    });
+});

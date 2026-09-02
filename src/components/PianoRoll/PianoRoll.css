@@ -86,7 +86,7 @@
     background: var(--timeline-chrome-bg);
 }
 .piano-roll__title { min-width: 0; overflow: hidden; color: var(--text-primary); font: 600 var(--text-lg)/1 var(--font-sans); text-overflow: ellipsis; white-space: nowrap; }
-.piano-roll__mode-note { margin-left: auto; color: var(--text-muted); font: 500 var(--text-xs)/1 var(--font-sans); }
+.piano-roll__mode-note { margin-left: auto; color: var(--text-muted); font: 500 var(--text-sm)/1 var(--font-sans); }
 
 /* V · B · X · K · T — one inset pill, the armed tool rises onto the surface. */
 .piano-roll__tools { display: inline-flex; flex: none; gap: 2px; padding: 3px; border-radius: var(--radius-md); background: var(--bg-tertiary); }
@@ -197,7 +197,24 @@
 
 /* The pitch-range window: drag to pan, drag its caps to zoom. */
 .piano-roll__scroomer { position: relative; z-index: 5; overflow: hidden; border-right: 1px solid var(--border-subtle); background: var(--bg-tertiary); cursor: ns-resize; touch-action: none; }
-.piano-roll__scroomer > i { position: absolute; left: 2px; width: 8px; height: 1px; border-radius: 1px; background: var(--universal-connection); opacity: .8; }
+/*
+ * The note MINI-MAP inside the scroomer: one 1px tick per note, so a player can
+ * see where the material is before they aim the window at it. That makes it a
+ * MEANINGFUL mark, not decoration, so WCAG 1.4.11's 3:1 applies — and it was
+ * failing it in light at 2.25:1 (measured composited at this opacity over the
+ * `--bg-tertiary` rail; the browser sweep read 2.78 against its own sampled
+ * ground). Dark was never in trouble.
+ *
+ * It was painted with `--universal-connection`, which is TWO faults in one
+ * declaration. That token is the port/cable violet — AGENTS.md's port-colour law
+ * says colour is meaning and these are not cables — and it is an accent tuned for
+ * a socket core, not an ink tuned to be read.
+ *
+ * `--piano-roll-note-ink` fixes both at once, and is the honest name besides: the
+ * ticks are a map OF THE NOTES, so they wear the same ink the notes do. 7.76
+ * light / 7.01 dark at this opacity.
+ */
+.piano-roll__scroomer > i { position: absolute; left: 2px; width: 8px; height: 1px; border-radius: 1px; background: var(--piano-roll-note-ink); opacity: .8; }
 .piano-roll__scroomer-window { position: absolute; right: 0; left: 0; min-height: 6px; border-radius: 3px; background: color-mix(in oklab, var(--text-primary) 22%, transparent); }
 .piano-roll__scroomer-window b { position: absolute; right: 1px; left: 1px; height: 2px; border-radius: 1px; background: var(--border-control); }
 .piano-roll__scroomer-window b:first-child { top: 1px; }
@@ -233,7 +250,14 @@
  * tail, not its head. Right-aligned it clipped to "igh bongo", which is worse
  * than useless — it looks like a different instrument.
  */
-.piano-roll.is-drums .piano-roll__key { justify-content: flex-start; padding: 0 4px 0 6px; color: var(--text-secondary); font: 500 var(--text-xs)/1 var(--font-sans); text-overflow: ellipsis; }
+/*
+ * The drum gutter keeps the MONO face `.piano-roll__key` already sets. This
+ * override used to swap in `--font-sans` at 11px, which is the 13px sans floor
+ * broken — and needlessly, because the pitched gutter one rule up was already
+ * speaking the correct 11px mono micro voice. Only the alignment, padding and
+ * ink change here; the face never should have.
+ */
+.piano-roll.is-drums .piano-roll__key { justify-content: flex-start; padding: 0 4px 0 6px; color: var(--text-secondary); font: 500 var(--text-xs)/1 var(--font-mono); text-overflow: ellipsis; }
 
 .piano-roll__field { position: relative; min-width: 0; overflow: hidden; background: var(--timeline-lane-bg); touch-action: none; }
 .piano-roll__content { position: relative; }
@@ -277,7 +301,10 @@
 .piano-roll-note::before { left: 1px; }
 .piano-roll-note::after { right: 1px; }
 .piano-roll-note.is-drum { border-radius: 1px; transform: rotate(45deg); transform-origin: center; }
-.piano-roll-note--draw { z-index: 3; background: color-mix(in oklab, var(--universal-connection) 28%, transparent); box-shadow: inset 0 0 0 1px var(--accent-primary); pointer-events: none; }
+/* `--timeline-automation-line`, not the port/cable violet: identical value in
+ * both themes, so this is a RENAME and not a repaint. The draw ghost's edge is
+ * carried by its `--accent-primary` inset ring, so the 28% fill is a hint. */
+.piano-roll-note--draw { z-index: 3; background: color-mix(in oklab, var(--timeline-automation-line) 28%, transparent); box-shadow: inset 0 0 0 1px var(--accent-primary); pointer-events: none; }
 .piano-roll-note--draw::before,
 .piano-roll-note--draw::after,
 .piano-roll-note--elsewhere::before,
@@ -293,8 +320,11 @@
 .piano-roll__playhead { position: absolute; z-index: 6; top: 0; bottom: 0; left: 0; width: 1.5px; background: var(--text-secondary); pointer-events: none; will-change: transform; }
 .piano-roll.is-rolling .piano-roll__playhead { width: 2px; background: var(--timeline-playhead); }
 /* The step cursor is where the NEXT key you press will land — acc2, like a note. */
-.piano-roll__step-cursor { position: absolute; z-index: 5; border-left: 2px solid var(--universal-connection); background: color-mix(in oklab, var(--universal-connection) 14%, transparent); pointer-events: none; }
-.piano-roll__step-cursor::before { position: absolute; top: -2px; left: -3px; width: 5px; height: 5px; border-radius: 1px; background: var(--universal-connection); content: ''; }
+/* Same rename as the draw ghost, same reason — the timeline owns this violet
+ * under its own name and the two token values are identical in both themes. The
+ * cursor is carried by a solid 2px border and a 5px cap, not by the 14% wash. */
+.piano-roll__step-cursor { position: absolute; z-index: 5; border-left: 2px solid var(--timeline-automation-line); background: color-mix(in oklab, var(--timeline-automation-line) 14%, transparent); pointer-events: none; }
+.piano-roll__step-cursor::before { position: absolute; top: -2px; left: -3px; width: 5px; height: 5px; border-radius: 1px; background: var(--timeline-automation-line); content: ''; }
 /* A marquee is a proposal, so it stays neutral until it becomes a selection. */
 .piano-roll__marquee { position: absolute; z-index: 7; border: 1px dashed var(--border-control); background: color-mix(in oklab, var(--text-primary) 5%, transparent); pointer-events: none; }
 

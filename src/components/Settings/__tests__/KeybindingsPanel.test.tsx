@@ -44,13 +44,28 @@ describe('KeybindingsPanel', () => {
             });
         });
 
+        /*
+         * 15s, not the 5s default, and the number is not a shrug.
+         *
+         * This test renders all 169 keybinding rows and then does 169 `getByText`
+         * queries over the whole document. In ISOLATION it measures ~3.2s — a real
+         * 1.6x margin under the 5s budget — but under a full parallel `test:run`
+         * it loses enough CPU to the other workers to cross it, and it has failed
+         * that way repeatedly across this branch's gates while passing every time
+         * it was re-run alone. It is a scheduling flake, not a regression, and the
+         * honest fix is to give the one slow test the budget its real work needs
+         * rather than to keep re-running the suite until it is lucky.
+         *
+         * If this ever fails at 15s, that IS a regression: something has made
+         * rendering the panel five times slower, and the number should not move.
+         */
         it('should render all keybinding actions', () => {
             render(<KeybindingsPanel />);
 
             keybindingActions.forEach(action => {
                 expect(screen.getByText(action.label)).toBeInTheDocument();
             });
-        });
+        }, 15000);
 
         it('should show default shortcuts as a keycap', () => {
             render(<KeybindingsPanel />);

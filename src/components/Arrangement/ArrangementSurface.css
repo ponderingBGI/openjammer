@@ -403,7 +403,11 @@
 
 /*
  * A SECTION spans to the next section, so it is a chip: inset fill, one
- * hairline, 11px/600 label. Selected takes the 1.5px accent outline and the one
+ * hairline, 13px/600 label — the sans floor. The label is a name the PLAYER
+ * typed, so it stays sans and readable rather than becoming an uppercase mono
+ * micro-label; DESIGN's two smaller steps are for system micro-labels only.
+ * It was 11px sans, which is the floor broken, and the 15px line box in a 17px
+ * chip already had the room. Selected takes the 1.5px accent outline and the one
  * ring — never a fill drench, because a drenched chip reads as "playing".
  */
 .arrangement-section-chip {
@@ -417,7 +421,7 @@
     border-radius: var(--radius-sm);
     background: var(--bg-tertiary);
     color: var(--text-secondary);
-    font: 600 var(--text-xs)/15px var(--font-sans);
+    font: 600 var(--text-sm)/15px var(--font-sans);
     text-align: left;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -458,7 +462,14 @@ input.arrangement-section-chip { min-width: 60px; background: var(--bg-node); co
 .arrangement-section-chip--mark.is-selected::before { border-top-color: var(--timeline-selection); }
 
 /* Bar numbers: mono, muted, tabular — an exact value read at a glance. */
-.arrangement-bars-row .oj-time-ruler { color: var(--text-muted); font-size: var(--text-xs); }
+/*
+ * Bar numbers, one step up from the ruler's own 9.5px so the bars row reads
+ * first. The FACE is named here rather than inherited: `TimeRuler.css` already
+ * sets `--font-mono`, but a rule that changes the size without restating the
+ * face is exactly the shape that lets a later edit turn a numeric run into an
+ * 11px sans one without anything noticing.
+ */
+.arrangement-bars-row .oj-time-ruler { color: var(--text-muted); font-family: var(--font-mono); font-size: var(--text-xs); }
 
 /*
  * The loop bracket glyphs that ride above the wash. Hairline weight, accent
@@ -588,15 +599,21 @@ input.arrangement-section-chip { min-width: 60px; background: var(--bg-node); co
 }
 
 .arrangement-instrument-chip { min-width: 0; max-width: 104px; height: 20px; display: inline-flex; align-items: center; overflow: hidden; border-radius: var(--radius-sm); background: var(--bg-tertiary); }
-.arrangement-instrument-chip button { height: 20px; padding: 0; border: 0; background: transparent; color: var(--text-secondary); font: 500 var(--text-xs)/20px var(--font-sans); transition: color var(--motion-fast); }
+.arrangement-instrument-chip button { height: 20px; padding: 0; border: 0; background: transparent; color: var(--text-secondary); font: 500 var(--text-sm)/20px var(--font-sans); transition: color var(--motion-fast); }
 .arrangement-instrument-chip button:hover { color: var(--text-primary); }
 .arrangement-instrument-chip button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .arrangement-instrument-chip__name { min-width: 0; flex: 1; padding-inline: 6px !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.arrangement-instrument-chip__swap { flex: 0 0 15px; font-size: 10px !important; }
+/*
+ * The swap affordance is a GLYPH (a chevron), not a text run — so it takes the
+ * micro mono voice at a size that is actually on the scale. It was `10px
+ * !important`, which is off the type scale entirely and needed the `!important`
+ * only because it was fighting the button rule above it.
+ */
+.arrangement-instrument-chip__swap { flex: 0 0 15px; font: 500 var(--text-xs)/1 var(--font-mono) !important; }
 
-.arrangement-track__lane-menu { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; align-items: center; gap: 4px; min-width: 0; padding-top: 5px; color: var(--text-muted); font: 500 var(--text-xs)/1 var(--font-sans); }
+.arrangement-track__lane-menu { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; align-items: center; gap: 4px; min-width: 0; padding-top: 5px; color: var(--text-muted); font: 500 var(--text-sm)/1 var(--font-sans); }
 .arrangement-track__lane-menu > span:first-child { grid-column: 1 / -1; }
-.arrangement-track__lane-menu button { height: 20px; padding: 0 6px; border: 0; border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-secondary); font: 600 var(--text-xs)/1 var(--font-sans); transition: background var(--motion-fast), color var(--motion-fast); }
+.arrangement-track__lane-menu button { height: 20px; padding: 0 6px; border: 0; border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-secondary); font: 600 var(--text-sm)/1 var(--font-sans); transition: background var(--motion-fast), color var(--motion-fast); }
 .arrangement-track__lane-menu button:hover { color: var(--text-primary); }
 .arrangement-track__lane-menu button[aria-pressed="true"] { background: var(--accent-primary); color: var(--text-on-accent); }
 .arrangement-track__lane-menu button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
@@ -627,7 +644,19 @@ input.arrangement-section-chip { min-width: 60px; background: var(--bg-node); co
 
 /* Recording: a dashed danger ghost grows in the lane while the take runs. */
 .arrangement-record-ghost { position: absolute; z-index: 3; top: 4px; min-width: 1px; overflow: hidden; border: 1.5px dashed var(--accent-danger); border-radius: var(--radius-sm); background: color-mix(in oklab, var(--accent-danger) 7%, transparent); pointer-events: none; }
-.arrangement-record-ghost > span { position: absolute; width: 8px; height: 3px; border-radius: 1px; background: var(--universal-connection); opacity: .8; }
+/*
+ * The captured notes inside a running take's ghost. Same two faults the scroomer
+ * map had: the port/cable violet spent on something that is not a cable, and an
+ * accent used where an INK was needed. Composited over the ghost's real ground
+ * (`--accent-danger` 7% over the lane) it measured 2.57:1 here, and 3.01 in the
+ * browser sweep — passing by 0.01 is not passing, it is waiting.
+ *
+ * `--accent-two-ink` is the token this system minted for exactly this: the
+ * READABLE form of the second accent. 8.23 light / 7.20 dark at this opacity.
+ * `--timeline-automation-line` would have satisfied the naming law alone but
+ * only reaches 3.07 even at full opacity, which is the same razor margin again.
+ */
+.arrangement-record-ghost > span { position: absolute; width: 8px; height: 3px; border-radius: 1px; background: var(--accent-two-ink); opacity: .8; }
 
 /* ── Clips ───────────────────────────────────────────────────────────────────
  * A clip is a card on the page: 6px radius, a wash of its track's tint over the
@@ -689,7 +718,9 @@ input.arrangement-section-chip { min-width: 60px; background: var(--bg-node); co
     white-space: nowrap;
 }
 .arrangement-clip__name > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.arrangement-clip__fault { flex: none; margin-right: 5px; color: var(--warning-ink); font-size: var(--text-xs); }
+/* The benched-plugin mark on a clip: a badge glyph, so the micro mono voice —
+ * the same run the node faceplates' plugin-error badge speaks. */
+.arrangement-clip__fault { flex: none; margin-right: 5px; color: var(--warning-ink); font-family: var(--font-mono); font-size: var(--text-xs); }
 .arrangement-clip__canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 .arrangement-clip__waveform { position: absolute; left: 0; bottom: 0; }
 /* Trim grips: a 6px square on the edge you are about to move. */
@@ -829,7 +860,7 @@ input.arrangement-section-chip { min-width: 60px; background: var(--bg-node); co
 .arrangement-automation__interp { justify-self: end; height: 20px; }
 .arrangement-automation__interp { grid-column: 1 / -1; justify-self: stretch; }
 .arrangement-automation__state .oj-seg__btn,
-.arrangement-automation__interp .oj-seg__btn { min-height: 16px; padding: 0 8px; font: 600 var(--text-xs)/16px var(--font-sans); }
+.arrangement-automation__interp .oj-seg__btn { min-height: 16px; padding: 0 8px; font: 600 var(--text-sm)/16px var(--font-sans); }
 
 .arrangement-automation__field {
     position: relative;
@@ -913,7 +944,7 @@ input.arrangement-section-chip { min-width: 60px; background: var(--bg-node); co
 
 .arrangement-time-prompt { position: absolute; z-index: 30; top: 88px; left: 50%; translate: -50% 0; display: flex; align-items: end; gap: 10px; padding: 12px 14px; border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); background: var(--bg-node); color: var(--text-primary); box-shadow: var(--shadow-overlay); font-family: var(--font-sans); }
 .arrangement-time-prompt strong { align-self: center; font: 600 var(--text-lg)/1 var(--font-sans); white-space: nowrap; }
-.arrangement-time-prompt label { display: grid; gap: 5px; color: var(--text-secondary); font: 600 var(--text-xs)/1 var(--font-sans); }
+.arrangement-time-prompt label { display: grid; gap: 5px; color: var(--text-secondary); font: 600 var(--text-sm)/1 var(--font-sans); }
 .arrangement-time-prompt input, .arrangement-time-prompt select { min-height: 30px; padding: 4px 9px; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-node); color: var(--text-primary); font: 500 var(--text-sm)/1 var(--font-mono); }
 .arrangement-time-prompt input:focus, .arrangement-time-prompt select:focus { outline: none; border-color: var(--accent-primary); box-shadow: var(--focus-ring); }
 .arrangement-time-prompt > span { align-self: center; max-width: 24ch; color: var(--danger-ink); font: 500 var(--text-sm)/1.3 var(--font-sans); }

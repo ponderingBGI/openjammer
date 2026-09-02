@@ -24,7 +24,6 @@ colors:
   audio-connected: "oklch(0.6 0.12 200)"
   control-connection: "#8F8C82"
   control-connected: "#8F8C82"
-  universal-port: "oklch(0.66 0.19 300)"
   universal-connection: "oklch(0.66 0.19 300)"
   timeline-bg: "#F4F3F0"
   timeline-chrome-bg: "#FAF9F6"
@@ -73,7 +72,6 @@ dark:
   audio-connected: "oklch(0.7 0.12 200)"
   control-connection: "#767267"
   control-connected: "#767267"
-  universal-port: "oklch(0.72 0.19 300)"
   universal-connection: "oklch(0.72 0.19 300)"
   timeline-bg: "#161510"
   timeline-chrome-bg: "#242219"
@@ -409,7 +407,15 @@ the same care everywhere, leave room for what each node needs.
 
 Two themes, 53 semantic tokens each, identical key sets
 (`packages/oj-tokens/tokens/themes/{light,dark}.json`). Every value below is the shipped
-token — a component that names a literal colour is a bug.
+token — a component that names a literal colour is a bug, and that is now enforced on the
+source as well as the stylesheets (`Arrangement/__tests__/tokenLiteralGate.test.ts`).
+
+The count is 53 again after passing through 54: `accentTwoInk` was added (the readable ink
+of the second accent, minted so the piano-roll note could clear 3:1 at its velocity floor),
+and `universalPort` was removed — it was declared in both themes and read by **nothing**,
+while `AGENTS.md`'s port law pointed readers at it instead of at `--universal-connection`,
+the token that actually paints the socket and the cable. A dormant token is a lie about
+what the system is (code-value #8).
 
 ### Surfaces
 
@@ -475,7 +481,7 @@ tint washes, which is what a danger button is made of.
 - **`--control-connection` / `--control-connected`** (`#8F8C82` / `#767267`) —
   everything that carries *numbers and triggers*. Deliberately desaturated so sound reads
   as the signal that matters.
-- **`--universal-port` / `--universal-connection`** `oklch(0.66 0.19 300)` — ports that
+- **`--universal-connection`** `oklch(0.66 0.19 300)` — ports that
   adapt to whatever they connect to. A flat violet: **the rainbow gradient is retired.**
 
 ### Timeline
@@ -673,7 +679,24 @@ because those are not animations — they are **meters**, and a meter that stops
 a lie. Everything that pulses for attention has a static alternative declared outside its
 keyframe: the transport's attention ring becomes a static ring, a recording lane button
 becomes a static `0 0 0 2px var(--danger-ink)`, a recording waveform keeps its danger
-stroke at full opacity. No component ships its own `prefers-reduced-motion` block.
+stroke at full opacity.
+
+**The rule about component-level blocks, stated as it actually holds.** This section used
+to say "no component ships its own `prefers-reduced-motion` block", and 13+ stylesheets
+break that, so the sentence was simply false. The real rule — the one the code has been
+following — is narrower and more useful:
+
+> The blanket rule owns *turning motion off*. A component block may only **substitute a
+> static equivalent** for something whose meaning the clamp would destroy: an animation
+> replaced by the frame it should rest on (`.arrangement-arm.is-recording` keeps a
+> `box-shadow` ring where its pulse was), a `transform` replaced by a fixed one, a colour
+> swapped for a stronger one. It may never **re-add** a transition or an animation.
+
+That last clause is not hypothetical: `Slider.css` re-declared
+`transition: box-shadow var(--motion-fast)` inside a `reduce` block — the one rule in the
+app that handed motion back under the preference. It is now `none`, and both halves of the
+rule (no empty blocks, no re-added durations) are gated by
+`src/components/__tests__/reducedMotionContract.test.ts`.
 
 ### Named Rules
 
@@ -948,8 +971,10 @@ Both are documented in full in **[docs/shell.md](docs/shell.md)**.
   in both themes for a measured reason.
 - **Don't** style a heading, a surface, or a decoration in a **state colour**, and don't
   use `--accent-success` to mean "selected."
-- **Don't** ship a component with its own `prefers-reduced-motion` block — the blanket rule
-  in `global.css` owns that, with exactly two exemptions.
+- **Don't** re-add a transition or an animation inside a `prefers-reduced-motion: reduce`
+  block. The blanket rule in `global.css` owns turning motion OFF (with exactly two
+  exemptions); a component block may only substitute a static equivalent for meaning the
+  clamp would destroy — never hand a duration back.
 - **Don't** let a control move, resize, or reflow on hover or press.
 - **Don't** ever present a wall — no "pro" ceiling, no dead end. The instrument is
   infinitely deep, and it should look like it at every depth.

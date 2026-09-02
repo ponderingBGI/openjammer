@@ -133,7 +133,10 @@ export const SpeakerNode = memo(function SpeakerNode({
                     const selectedId = (current?.data as SpeakerNodeData | undefined)?.deviceId ?? 'default';
                     const hasEnumeratedIds = sorted.some((device) => device.deviceId.length > 0);
                     if (hasEnumeratedIds && selectedId !== 'default' && !sorted.some((device) => device.deviceId === selectedId)) {
-                        updateNodeData<SpeakerNodeData>(node.id, { deviceId: 'default' });
+                        // `{ record: false }` — the output device vanished; recovering
+                        // to `default` is the environment repairing itself, not a user
+                        // edit. Undo must not offer to re-select a device that is gone.
+                        updateNodeData<SpeakerNodeData>(node.id, { deviceId: 'default' }, { record: false });
                         getExecutor().setSpeakerDevice(node.id, 'default');
                     }
                 }

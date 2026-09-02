@@ -490,20 +490,23 @@ export const useMIDIStore = create<MIDIStore>()(
                 const data = node.data as MIDIInputNodeData;
                 // Check if node has this deviceId
                 if (data?.deviceId === device.id) {
-                    // Device already has a node, auto-connect without toast
+                    // Device already has a node, auto-connect without toast.
+                    // `{ record: false }`: plugging a cable into the machine is the
+                    // environment, not an edit — undo belongs to the player.
                     useGraphStore.getState().updateNodeData(node.id, {
                         deviceId: device.id,
                         isConnected: true,
-                    });
+                    }, { record: false });
                     return;
                 }
                 // Check if node has a matching signature (same preset type, disconnected)
                 if (data?.deviceSignature?.presetId === presetId && !data?.isConnected) {
-                    // Has a matching signature, auto-connect without toast
+                    // Has a matching signature, auto-connect without toast.
+                    // Same reasoning as the branch above: environment-driven.
                     useGraphStore.getState().updateNodeData(node.id, {
                         deviceId: device.id,
                         isConnected: true,
-                    });
+                    }, { record: false });
                     return;
                 }
             }

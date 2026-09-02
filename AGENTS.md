@@ -154,7 +154,7 @@ Do not introduce `npm`/`yarn`/`pnpm` commands anywhere in the codebase or the do
   `/src/audio/`; state in `/src/store/` (Zustand); theming via the `packages/oj-tokens` CSS
   variables (+ global styles in `/src/styles/`).
 - **Naming:** components `PascalCase` (`KeyboardNode.tsx`); utilities `camelCase`
-  (`audioUtils.ts`); constants `SCREAMING_SNAKE_CASE`.
+  (`spawnPlacement.ts`); constants `SCREAMING_SNAKE_CASE`.
 - **Commits:** conventional — `feat:`, `fix:`, `docs:`, `refactor:`, `style:`, `test:`,
   `perf:`. Atomic and focused — one reversible idea each.
 
@@ -165,15 +165,31 @@ type is the source of truth; the **token** follows from it, and the token is the
 place a value lives. Name the type, never the hex.
 
 - `type: 'audio'` → `--audio-connection` (**teal**) — music / sound
-- `type: 'technical'` → `--control-connection` (**grey**) — numbers / triggers
-- `type: 'universal'` → `--universal-port` (**violet**) — adapts to whatever it connects to
+- `type: 'control'` → `--control-connection` (**grey**) — numbers / triggers
+- `type: 'universal'` → `--universal-connection` (**violet**) — adapts to whatever it connects to
+
+The shipping union is `'audio' | 'control' | 'universal'` (`src/engine/types.ts`, and
+`packages/oj-ui/…/Port/Port.tsx`). **`'technical'` is a RETIRED type name** — this file
+named it for a long time after the code stopped: nothing keys off it, the CSS hook is
+`.oj-port--control`, and `graphStore` actively migrates it away on load. There is likewise
+only ONE universal token: `--universal-connection`, which paints both the socket and the
+cable. A dormant `--universal-port` was declared beside it with zero consumers and this law
+pointed at that one; it was deleted (code-value #8) and the law now names the token that
+actually paints.
 
 Sound is the only saturated one; control is deliberately desaturated so the signal that
 matters reads first. If you see `#4A90C2` — the old blue — it is stale
-([DESIGN.md](../../DESIGN.md) §2, "Wiring — the legend").
+([DESIGN.md](../../DESIGN.md) §2, "Wiring — the legend"). That is now mechanically enforced:
+`src/components/Arrangement/__tests__/tokenLiteralGate.test.ts` fails on the literal in any
+`.css`, `.ts` or `.tsx` under `src` or `packages/oj-ui/src`.
 
-Examples: keyboard outputs are `technical` (they send numbers, not sound); instrument
-inputs are `technical` (they receive triggers); instrument outputs are `audio` (they make
+These colours are MEANING, so do not spend them on anything that is not a port or a cable.
+A timeline mark that happens to want violet takes `--timeline-automation-line` (the same
+value, under the name that says what it is); a mark that has to stay legible against its
+ground takes the ink, `--accent-two-ink`.
+
+Examples: keyboard outputs are `control` (they send numbers, not sound); instrument
+inputs are `control` (they receive triggers); instrument outputs are `audio` (they make
 sound); effects are `audio` (they process sound).
 
 ### Extend, don't fork (the plugin boundary)

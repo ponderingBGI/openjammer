@@ -164,7 +164,7 @@ export function InstrumentVisualNode({
                 headerProps={{ onMouseDown: handleHeaderMouseDown }}
                 inputs={rowIn ? [portRow(rowIn, 'ROWS', 'Bundle in from the instrument')] : []}
                 outputs={[
-                    ...(audioOut ? [portRow(audioOut, 'AUDIO', 'Audio output')] : []),
+                    ...(audioOut ? [portRow(audioOut, 'OUT', 'Audio output')] : []),
                     ...otherOutputs.map((p) => portRow(p, p.name.toUpperCase(), p.name)),
                 ]}
             >

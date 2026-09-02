@@ -368,7 +368,7 @@ describe('getBundleSizeFromSourcePort', () => {
 
         const result = getBundleSizeFromSourcePort('source', 'audio-out', nodes, connections);
         expect(result.size).toBe(1);
-        expect(result.label).toBe('Input');
+        expect(result.label).toBe('In');
     });
 
     it('should detect bundle size from output-panel internal connections', () => {
@@ -418,7 +418,7 @@ describe('getBundleSizeFromSourcePort', () => {
         );
 
         expect(result.size).toBe(1);
-        expect(result.label).toBe('Input');
+        expect(result.label).toBe('In');
     });
 });
 
@@ -660,7 +660,7 @@ describe('Edge Cases', () => {
 
         const result = getBundleSizeFromSourcePort('missing', 'port', nodes, connections);
         expect(result.size).toBe(1);
-        expect(result.label).toBe('Input');
+        expect(result.label).toBe('In');
     });
 
     it('should handle empty connections map', () => {

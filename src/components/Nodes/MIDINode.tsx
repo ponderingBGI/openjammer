@@ -81,6 +81,10 @@ export const MIDINode = memo(function MIDINode({
 
     // Re-propagate deviceId to children when it changes (page reload, late connect),
     // so the internal midi-visual sees the device even if it was never saved.
+    // `{ record: false }`: an effect repairing a child's bookkeeping on mount is the
+    // environment, not the player. The parent write is a no-op to the diff (same
+    // value), but the CHILD it fans out to is not — so without the opt-out a page
+    // reload spent the player's `Ctrl+Z` on a device id they never touched.
     const lastPropagatedDeviceId = useRef<string | null>(null);
     useEffect(() => {
         if (!node.childIds.length) return;
@@ -89,7 +93,7 @@ export const MIDINode = memo(function MIDINode({
         useGraphStore.getState().updateNodeData(node.id, {
             deviceId: data.deviceId,
             presetId: data.presetId,
-        });
+        }, { record: false });
         lastPropagatedDeviceId.current = data.deviceId;
     }, [node.id, node.childIds.length, data.deviceId, data.presetId]);
 
