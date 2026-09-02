@@ -77,7 +77,8 @@ export interface SurfaceViewport {
     leftTick: number;
     yOrigin: number;
     zoomFocus: ZoomFocus;
-    tool: 'select' | 'draw' | 'erase' | 'knife' | 'time';
+    /** U11: four real tools. `'time'` was a fifth name nothing ever read. */
+    tool: 'select' | 'draw' | 'erase' | 'knife';
     selection: ObjectSelection;
 }
 

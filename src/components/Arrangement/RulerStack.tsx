@@ -42,11 +42,23 @@ interface RulerStackProps {
 
 /** The cycle the grid chip walks, and the same ladder `[` / `]` step through. */
 const GRID_UNITS: GridUnit[] = ['none', 'bar', 'beat', '1/2', '1/4', '1/8', '1/16', '1/32'];
-/** V · B · X — Select, Draw, Erase. The knife and time tools stay on the keys. */
+/**
+ * V · B · X · K — Select, Draw, Erase, Knife.
+ *
+ * `K` joined the strip when the knife stopped being a dead binding (U11): every
+ * tool this surface HAS now has a button, a key and a behaviour, and the four
+ * letters are the same four, in the same order, that the roll's strip carries —
+ * one tool grammar for the hand, one level up and one level down.
+ *
+ * The Time tool is not here because it no longer exists anywhere: it had a key,
+ * no button and no behaviour, and code-value #8 says a line that is not used is
+ * removed rather than kept "just in case".
+ */
 const ARRANGEMENT_TOOLS = [
     ['select', 'V', 'Select tool'],
     ['draw', 'B', 'Draw tool'],
     ['erase', 'X', 'Erase tool'],
+    ['knife', 'K', 'Knife tool'],
 ] as const;
 
 export function RulerStack(props: RulerStackProps) {
@@ -189,8 +201,15 @@ export function RulerStack(props: RulerStackProps) {
                     >⇥</button>
                 </div>
                 <div className="arrangement-corner__row">
+                    {/*
+                      * HA-22: the strip names its SCOPE. Two `V B X` groups both
+                      * labelled "Tool" — one here, one in the roll — is how a
+                      * player came to believe they were the same control acting
+                      * on the same thing. (The roll SURFACE drops this one
+                      * entirely; only ever one strip is on screen.)
+                      */}
                     {isRoll ? gridChip : (
-                        <div className="arrangement-tool" role="group" aria-label="Tool">
+                        <div className="arrangement-tool" role="group" aria-label="Tool — Song" title="Tool — Song">
                             {ARRANGEMENT_TOOLS.map(([tool, glyph, name]) => (
                                 <button
                                     key={tool}

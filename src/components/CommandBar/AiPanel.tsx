@@ -1077,7 +1077,17 @@ function YoloConfirm({ onCancel, onConfirm }: { onCancel: () => void; onConfirm:
         confirmRef.current?.focus();
     }, []);
     return (
-        <div className="command-bar-yolo-confirm" role="alertdialog" aria-label="Enter YOLO mode?">
+        <div
+            className="command-bar-yolo-confirm"
+            role="alertdialog"
+            aria-label="Enter YOLO mode?"
+            /* HA-23: Escape declines the gate; the panel behind it stays open. */
+            onKeyDown={(event) => {
+                if (event.key !== 'Escape') return;
+                event.stopPropagation();
+                onCancel();
+            }}
+        >
             <p className="command-bar-yolo-title">Enter YOLO mode?</p>
             <p className="command-bar-yolo-body">
                 The agent gets your <strong>full shell</strong> — any command, any directory,

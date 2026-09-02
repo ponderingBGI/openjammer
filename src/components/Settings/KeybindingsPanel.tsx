@@ -336,6 +336,17 @@ export function KeybindingsPanel() {
                     className="keybindings-confirm"
                     role="alertdialog"
                     aria-label="Reset every shortcut"
+                    /*
+                     * HA-23 / U14: Escape cancels THIS confirm and stops there.
+                     * Without the handler it fell through to the Settings modal
+                     * underneath, so answering "no" to a question closed the
+                     * whole panel — the shape `AppMenuBar` has always had right.
+                     */
+                    onKeyDown={(event) => {
+                        if (event.key !== 'Escape') return;
+                        event.stopPropagation();
+                        setConfirmingResetAll(false);
+                    }}
                 >
                     <p className="keybindings-confirm__body">
                         {customCount} customised shortcut{customCount === 1 ? '' : 's'} will go back to
@@ -447,6 +458,11 @@ export function KeybindingsPanel() {
                                             className="keybindings-conflict"
                                             role="alertdialog"
                                             aria-label="Shortcut conflict"
+                                            onKeyDown={(event) => {
+                                                if (event.key !== 'Escape') return;
+                                                event.stopPropagation();
+                                                setConflict(null);
+                                            }}
                                         >
                                             <p className="keybindings-conflict-message">
                                                 <Kbd>{keyComboToString(conflict.combo)}</Kbd> is already

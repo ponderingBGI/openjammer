@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import type { Arrangement, ArrangementClip, ArrangementNote } from '../../song/types';
 import type { Verb } from '../../song/verbs';
-import { copyNotes, drawNotes, eraseNotes, moveNotes, noteDragFloor, resizeNotes, setVelocity as lowerVelocity, transposeNotes } from '../../song/ops';
+import { copyNotes, drawNotes, eraseNotes, moveNotes, noteDragFloor, resizeNotes, setVelocity as lowerVelocity, splitNotes, transposeNotes } from '../../song/ops';
 import { InstrumentLoader } from '../../audio/instrumentCatalog';
 import { gridTicks, snapTimeline, type GridUnit } from '../../store/editingContextStore';
 import { useEditingContextStore } from '../../store/editingContextStore';
@@ -13,6 +13,7 @@ import { growPitchRange, initialPitchRange, useTrackLaneViewStore, type PitchRan
 import {
     clippedNoteGeometry,
     DRUM_ROW_HEIGHT,
+    inlineOpeningPxPerTick,
     GM_DRUM_NAMES,
     isBlackPitch,
     isKeyboardSeam,
@@ -90,6 +91,13 @@ const ROLL_TOOLS = [
  * a part looked percussive. Fits a GM name; the inline lane keeps the narrower
  * pitched bed, where nothing above it claims to measure the notes.
  */
+/**
+ * The lane's own bar strip (F1). 14px, the micro mono voice, inside the lane —
+ * a second viewport that does not say where it is is worse than one that shares
+ * an axis it does not honour.
+ */
+export const LANE_RULER_HEIGHT = 14;
+
 export const SURFACE_KEY_WIDTH = 64;
 /** Scroomer + key bed — what the surface's ruler corner has to match exactly. */
 export const SURFACE_GUTTER = SCROOMER_WIDTH + SURFACE_KEY_WIDTH;
@@ -128,9 +136,21 @@ export function PianoRoll(props: PianoRollProps) {
     const wheelHandlerRef = useRef<(event: WheelEvent) => void>(() => undefined);
     const auditionTokens = useRef(new Map<number, PianoRollAuditionToken[]>());
     const keyBedDrag = useRef<{ pointerId: number; y: number; range: PitchRange; cleanup: () => void } | null>(null);
+    /** The Erase tool's swept stroke — one open gesture, one Ctrl+Z (U11). */
+    const eraseRef = useRef<{ pointerId: number; base: Arrangement; ids: Set<string>; cleanup: () => void } | null>(null);
+    /** The notice line's self-clear, owned so an unmount cannot leave it running (N3). */
+    const noticeTimer = useRef<number | null>(null);
     const [marquee, setMarquee] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
     const [ghost, setGhost] = useState<{ tick: number; pitch: number; durTick: number } | null>(null);
     const [rejection, setRejection] = useState('');
+    /*
+     * The spoken half of a tool that DELETES or CUTS (U11). Erase and Knife are
+     * the two gestures whose whole result is that something is no longer where
+     * it was, so silence is the one response that cannot be read. A polite
+     * `role="status"` line, self-clearing, never focus-stealing — the same shape
+     * as the rejection line beside it, in the affirmative.
+     */
+    const [notice, setNotice] = useState('');
     const [quantizeOpen, setQuantizeOpen] = useState(false);
     /*
      * The full surface gets no `onDrumModeChange` from its host, so its "Drums"
@@ -167,7 +187,55 @@ export function PianoRoll(props: PianoRollProps) {
     const ppq = arrangement?.ppq ?? 960;
     const beatsPerBar = arrangement?.timeSignature?.[0] ?? 4;
     const ticksPerBar = ppq * beatsPerBar;
-    const leftTick = props.leftTick ?? 0;
+    /*
+     * THE INLINE ROLL'S OWN ZOOM (HA-18).
+     *
+     * The lane roll used to draw at the Song's `pxPerTick`, where a half-beat
+     * note is 4.8px wide — under `resizeEdge`'s floor, so the first clip a
+     * player ever opens could be moved but never trimmed, and the only zoom was
+     * a `Ctrl+wheel` nothing on screen mentioned. So the inline roll opens on its
+     * own floor (`inlineOpeningPxPerTick`) and never below the Song's value: a
+     * player who has already zoomed the Song past that floor keeps their axis.
+     *
+     * `null` means "still following the Song". The moment the player uses the
+     * roll's own zoom the value pins, so the axis stops moving under their hand
+     * when the Song is zoomed behind them.
+     */
+    const [inlinePxPerTick, setInlinePxPerTick] = useState<number | null>(null);
+    /*
+     * THE LANE IS A SECOND VIEWPORT (F1).
+     *
+     * The first cut of HA-18 gave the lane its own zoom and left it inside the
+     * Song's viewport, so the ruler 60px above drew bars every 38.7px over a
+     * roll drawing them every 192px — a 4.95x disagreement on a surface whose
+     * whole contract is "a clip edge lands exactly on its grid line at every
+     * zoom" (spec 2.1). One viewport cannot have two axes.
+     *
+     * So the lane stops pretending to be part of the Song's viewport and
+     * becomes what a DAW's clip view is: its OWN horizontal scroller, its OWN
+     * bar strip inside the lane, its OWN playhead on its own axis. The Song's
+     * ruler above it stays the Song's, and it is now honestly measuring only
+     * the lanes that are still on the Song's axis. Both playheads read the same
+     * TICK from the same clock; only their pixels differ, exactly as they
+     * already do between the Song and the full roll surface.
+     */
+    const [laneScrollLeftPx, setLaneScrollLeftPx] = useState(0);
+    const pxPerTick = mode === 'inline'
+        ? inlinePxPerTick ?? Math.max(props.pxPerTick, inlineOpeningPxPerTick(ppq))
+        : props.pxPerTick;
+    const zoomBy = (factor: number) => {
+        const next = Math.max(4 / ticksPerBar, Math.min(4000 / ticksPerBar, pxPerTick * factor));
+        if (mode === 'inline') setInlinePxPerTick(next);
+        else useEditingContextStore.getState().setViewport('pianoroll', { pxPerTick: next });
+    };
+    /*
+     * The lane scrolls itself, so its origin is its own scroll offset rather
+     * than the Song's `leftTick`. The surface keeps taking the host's value: it
+     * has a real ruler above it that is pixel-locked to exactly this number.
+     */
+    const contentOriginTick = mode === 'inline' ? 0 : props.leftTick ?? 0;
+    /** The tick at the left edge of what is actually on screen. */
+    const viewLeftTick = mode === 'inline' ? laneScrollLeftPx / pxPerTick : props.leftTick ?? 0;
     const allTrackNotes = (() => {
         if (!track || !arrangement?.sources) return [];
         return track.clips.flatMap((item) => {
@@ -192,11 +260,25 @@ export function PianoRoll(props: PianoRollProps) {
     const range = trackRange ?? noteRange(allTrackNotes);
     const trackPitchMin = allTrackNotes.length ? Math.min(...allTrackNotes.map((note) => note.pitch)) : null;
     const trackPitchMax = allTrackNotes.length ? Math.max(...allTrackNotes.map((note) => note.pitch)) : null;
-    const noteFieldHeight = Math.max(90, height - VELOCITY_LANE_HEIGHT);
+    const laneRulerHeight = mode === 'inline' ? LANE_RULER_HEIGHT : 0;
+    const noteFieldHeight = Math.max(90, height - VELOCITY_LANE_HEIGHT - laneRulerHeight);
     const rowHeight = pitchRowHeight(noteFieldHeight, range, drumMode);
     const pitches = Array.from({ length: range.hi - range.lo + 1 }, (_, index) => range.hi - index);
     const contentHeight = drumMode ? pitches.length * DRUM_ROW_HEIGHT : Math.max(noteFieldHeight, pitches.length * rowHeight);
-    const contentWidth = Math.max(1, (Math.max(clip?.startTick ?? 0, ...(track?.clips.map((item) => item.startTick + item.lengthTick) ?? [ticksPerBar])) + ticksPerBar) * props.pxPerTick);
+    const contentWidth = Math.max(1, (Math.max(clip?.startTick ?? 0, ...(track?.clips.map((item) => item.startTick + item.lengthTick) ?? [ticksPerBar])) + ticksPerBar) * pxPerTick);
+    /*
+     * The bar numbers the lane's own strip prints. Stride laddering, the same
+     * idea the Song's ruler uses: never crowd the labels below 56px, so a
+     * zoomed-out lane reads 1 · 5 · 9 rather than a grey smear.
+     */
+    const laneBars = (() => {
+        if (mode !== 'inline') return [] as number[];
+        const pxPerBar = ticksPerBar * pxPerTick;
+        const stride = Math.max(1, Math.ceil(56 / Math.max(1, pxPerBar)));
+        const bars: number[] = [];
+        for (let bar = 0; bar * pxPerBar <= contentWidth; bar += stride) bars.push(bar);
+        return bars;
+    })();
     const noteIdSet = new Set(selectedNoteIds);
 
     useEffect(() => {
@@ -218,6 +300,13 @@ export function PianoRoll(props: PianoRollProps) {
         drawRef.current = null;
         marqueeRef.current?.cleanup();
         marqueeRef.current = null;
+        if (eraseRef.current) {
+            eraseRef.current.cleanup();
+            eraseRef.current = null;
+            useArrangementStore.getState().abortGesture();
+        }
+        if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+        noticeTimer.current = null;
         if (velocityWheelTimer.current !== null) window.clearTimeout(velocityWheelTimer.current);
         if (velocityGestureId.current !== null && useArrangementStore.getState().isGestureOpen(velocityGestureId.current)) useArrangementStore.getState().commitGesture();
         velocityWheelTimer.current = null;
@@ -228,12 +317,12 @@ export function PianoRoll(props: PianoRollProps) {
         cancelPianoRollAuditions();
     }, [props.clipId, props.trackId, selectionSurface]);
 
-    const grid = gridTicks(gridUnit, ppq, ticksPerBar, props.pxPerTick);
-    const drawGrid = gridTicks(drawLength, ppq, ticksPerBar, props.pxPerTick, true) ?? ppq / 4;
-    const stepLength = gridTicks(stepEntry.length, ppq, ticksPerBar, props.pxPerTick, true) ?? grid ?? ppq / 4;
-    const snap = (tick: number) => {
+    const grid = gridTicks(gridUnit, ppq, ticksPerBar, pxPerTick);
+    const drawGrid = gridTicks(drawLength, ppq, ticksPerBar, pxPerTick, true) ?? ppq / 4;
+    const stepLength = gridTicks(stepEntry.length, ppq, ticksPerBar, pxPerTick, true) ?? grid ?? ppq / 4;
+    const snap = (tick: number, invert = false) => {
         const anchors = (midiSource?.notes ?? []).flatMap((note) => [note.tick, note.tick + note.durTick]);
-        const result = snapTimeline({ rawTick: tick, gridUnitTicks: grid, anchorTicks: anchors, pxPerTick: props.pxPerTick, mode: snapMode });
+        const result = snapTimeline({ rawTick: tick, gridUnitTicks: grid, anchorTicks: anchors, pxPerTick, mode: snapMode, invert });
         useEditingContextStore.getState().setSnapIndicatorTick(result.indicatorTick);
         return result.tick;
     };
@@ -244,8 +333,10 @@ export function PianoRoll(props: PianoRollProps) {
     };
     const xToTick = (clientX: number) => {
         const bounds = fieldRef.current?.getBoundingClientRect();
-        if (!bounds) return leftTick;
-        return Math.max(0, leftTick + (clientX - bounds.left + fieldRef.current!.scrollLeft) / props.pxPerTick);
+        if (!bounds) return viewLeftTick;
+        // The scroller carries the lane's origin; the surface carries it in the
+        // content transform. Exactly one of the two is ever non-zero.
+        return Math.max(0, contentOriginTick + (clientX - bounds.left + fieldRef.current!.scrollLeft) / pxPerTick);
     };
 
     const audition = (pitch: number, velocity: number, phase: 'on' | 'off') => {
@@ -287,6 +378,20 @@ export function PianoRoll(props: PianoRollProps) {
     };
 
     wheelHandlerRef.current = (event) => {
+        /*
+         * HA-18: the inline roll owns `Ctrl+wheel` on its own axis. Without this
+         * the notch fell through to the Song's zoom, which is exactly why the
+         * lane roll had no reachable zoom at all — and why the hint in the zoom
+         * control's `title` would have been a lie. The full surface keeps its
+         * host's handler (`PianoRollSurfaceHost`), which zooms around the pointer
+         * because it has a whole viewport to anchor in.
+         */
+        if (mode === 'inline' && (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey) {
+            event.preventDefault();
+            event.stopPropagation();
+            zoomBy(Math.exp(-event.deltaY * .002));
+            return;
+        }
         if ((event.ctrlKey || event.metaKey) && event.shiftKey) {
             event.preventDefault();
             const span = range.hi - range.lo + 1;
@@ -313,6 +418,30 @@ export function PianoRoll(props: PianoRollProps) {
         if (velocityWheelTimer.current !== null) window.clearTimeout(velocityWheelTimer.current);
         velocityWheelTimer.current = window.setTimeout(finishVelocityWheelGesture, 180);
     };
+    /*
+     * FOLLOW, in the lane's own pixels (F1).
+     *
+     * The lane has its own axis, so the Song's follow-scroll cannot page it: at
+     * 0.05px/tick the playhead leaves a 1 200px lane five times sooner than it
+     * leaves the Song's viewport. Same page rule as `PlayheadLayer.follow`
+     * (cross the last 15%, jump to one sixth from the left) and the same `F`
+     * toggle, so "follow" means one thing in this app and the two viewports page
+     * in step.
+     *
+     * It rides the roll's EXISTING playhead writer rather than registering a
+     * second one: two subscriptions to the shared frame are two clocks, and the
+     * whole point of `registerTimelineFrameWriter` is that there is one.
+     */
+    const followLane = (tick: number) => {
+        const field = fieldRef.current;
+        if (mode !== 'inline' || !field || !useEditingContextStore.getState().followPlayhead) return;
+        const x = tick * pxPerTick;
+        const page = Math.max(1, field.clientWidth);
+        if (x < field.scrollLeft || x > field.scrollLeft + page * 0.85) field.scrollLeft = Math.max(0, x - page / 6);
+    };
+    const followLaneRef = useRef(followLane);
+    followLaneRef.current = followLane;
+
     const canRender = Boolean(arrangement && track && clip && midiSource);
     useEffect(() => {
         if (!canRender) return;
@@ -350,7 +479,7 @@ export function PianoRoll(props: PianoRollProps) {
         const drag = dragRef.current;
         if (!drag || drag.pointerId !== event.pointerId) return;
         const deltaPitch = drag.kind === 'move' ? Math.round((drag.startY - event.clientY) / rowHeight) : 0;
-        const rawDelta = (event.clientX - drag.startX) / props.pxPerTick;
+        const rawDelta = (event.clientX - drag.startX) / pxPerTick;
         const targetTick = snap(drag.primary.tick + rawDelta);
         const deltaTick = Math.round(targetTick - drag.primary.tick);
         const ids = drag.notes.flatMap((note) => note.id ? [note.id] : []);
@@ -385,10 +514,132 @@ export function PianoRoll(props: PianoRollProps) {
         useArrangementStore.getState().abortGesture();
     };
 
+    /** One polite line, 1.6s, never focus-stealing. */
+    const say = (message: string) => {
+        setNotice(message);
+        if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+        noticeTimer.current = window.setTimeout(() => { noticeTimer.current = null; setNotice(''); }, 1600);
+    };
+
+    /**
+     * ERASE (U11) — click deletes the note under the pointer, drag deletes
+     * everything the stroke sweeps.
+     *
+     * One `beginGesture` spans the whole stroke and the preview is recomputed
+     * from the SAME base every move, so a sweep across nine notes is one preview
+     * chain, one commit and one Ctrl+Z — the §1 law, not nine separate deletes
+     * the player has to undo nine times. A stroke that touches nothing aborts
+     * instead of committing, so a miss never lands an empty history entry.
+     */
+    const beginEraseStroke = (event: ReactPointerEvent, first?: ArrangementNote) => {
+        const base = useArrangementStore.getState().arrangement;
+        if (!base || eraseRef.current) return;
+        const pointerId = event.pointerId;
+        const store = useArrangementStore.getState();
+        store.beginGesture('Erase notes', selectionSurface);
+        eraseRef.current = { pointerId, base, ids: new Set<string>(), cleanup: () => undefined };
+        eraseRef.current.cleanup = ownPointerGesture(pointerId, {
+            move: (nativeEvent) => sweepErase(nativeEvent.clientX, nativeEvent.clientY),
+            commit: () => finishEraseStroke(true),
+            abort: () => finishEraseStroke(false),
+        }, 'pianoroll');
+        try { (event.currentTarget as HTMLElement).setPointerCapture(pointerId); } catch { /* Window listeners own completion. */ }
+        if (first?.id) addErased(first.id);
+        else sweepErase(event.clientX, event.clientY);
+    };
+
+    function addErased(noteId: string) {
+        const stroke = eraseRef.current;
+        if (!stroke || stroke.ids.has(noteId)) return;
+        stroke.ids.add(noteId);
+        useArrangementStore.getState().previewGesture(eraseNotes(stroke.base, { noteIds: [...stroke.ids] }).verbs);
+    }
+
+    /*
+     * Hit-testing by `elementFromPoint` rather than by tick/pitch arithmetic:
+     * the notes are real DOM buttons, so the element under the pointer IS the
+     * answer, at any zoom, in drum mode, and through the clipped geometry — and
+     * a note already removed by the live preview is no longer there to be hit.
+     */
+    function sweepErase(clientX: number, clientY: number) {
+        if (!eraseRef.current) return;
+        const noteId = document.elementFromPoint(clientX, clientY)?.closest<HTMLElement>('[data-note-id]')?.dataset.noteId;
+        if (noteId) addErased(noteId);
+    }
+
+    function finishEraseStroke(commit: boolean) {
+        const stroke = eraseRef.current;
+        if (!stroke) return;
+        stroke.cleanup();
+        eraseRef.current = null;
+        const count = stroke.ids.size;
+        if (!commit || !count) { useArrangementStore.getState().abortGesture(); return; }
+        useArrangementStore.getState().commitGesture();
+        useEditingContextStore.getState().setSelection(selectionSurface, { noteIds: [] });
+        say(count === 1 ? 'Note erased.' : `${count} notes erased.`);
+    }
+
     const erase = (event: ReactPointerEvent, note: ArrangementNote) => {
-        if ((event.button !== 2 && !(event.button === 0 && tool === 'erase')) || !note.id) return;
+        if (!note.id) return;
+        // Right-click is the pointer's own erase and stays a single act; the tool
+        // is what touch and pen have instead of a right button (spec §3.4).
+        if (event.button === 2) {
+            event.preventDefault();
+            if (arrangement) useArrangementStore.getState().apply(eraseNotes(arrangement, { noteIds: [note.id] }).verbs, { surface: selectionSurface });
+            say('Note erased.');
+            return;
+        }
+        if (event.button !== 0 || tool !== 'erase') return;
         event.preventDefault();
-        if (arrangement) useArrangementStore.getState().apply(eraseNotes(arrangement, { noteIds: [note.id] }).verbs, { surface: selectionSurface });
+        beginEraseStroke(event, note);
+    };
+
+    /**
+     * KNIFE (U11) — one click cuts the note under the pointer in two, at the
+     * snapped tick, through `splitNotes` (an `editNote` + an `addNote`, batched).
+     *
+     * The left half keeps the original id, so a selection survives the cut. A cut
+     * that lands on the note's own start or end is not a cut and says so rather
+     * than minting a zero-length note.
+     */
+    const knifeNote = (event: ReactPointerEvent, note: ArrangementNote) => {
+        if (!note.id || !arrangement || !clip) return;
+        event.preventDefault();
+        event.stopPropagation();
+        // Snap applies, and `Ctrl` suspends it — the same override every other
+        // gesture on these surfaces already uses.
+        const invert = event.ctrlKey || event.metaKey;
+        const rawTick = xToTick(event.clientX);
+        const toSource = (tick: number) => Math.round((clip.sourceStart ?? 0) + tick - clip.startTick);
+        const sourceTick = toSource(snap(rawTick, invert));
+        useEditingContextStore.getState().setSnapIndicatorTick(null);
+        /*
+         * NO SLIVERS (F3). Both halves have to clear one snap unit — or a 1/32
+         * note when snapping is suspended, which is the finest thing this editor
+         * lets a hand ask for. Without it, `Ctrl` plus a press one pixel inside a
+         * note's edge minted a 99-tick fragment: about a pixel wide, under the
+         * draw floor, and impossible to grab back.
+         */
+        const minHalf = Math.max(1, Math.round(invert || !grid ? ppq / 8 : grid));
+        const result = splitNotes(arrangement, [note.id], sourceTick, useArrangementStore.getState().mintId, minHalf);
+        if (!result.verbs.length) {
+            const raw = toSource(rawTick);
+            const inside = (tick: number) => tick > note.tick && tick < note.tick + note.durTick;
+            /*
+             * Three different refusals, three different answers. A note exactly
+             * one grid unit long can only be cut on its own edges, so "cut
+             * inside the note" would be a lie — the player DID; the grid moved
+             * it, and `Ctrl` is the way out. A cut that IS inside but too near an
+             * end is refused for length, and says so.
+             */
+            say(inside(sourceTick) ? 'Too close to the edge to split.'
+                : inside(raw) ? 'The grid moved that cut to the note edge — hold Ctrl to cut anywhere.'
+                : 'Cut inside the note, not on its edge.');
+            return;
+        }
+        useArrangementStore.getState().apply(result.verbs, { surface: selectionSurface });
+        useEditingContextStore.getState().setSelection(selectionSurface, { noteIds: result.selectedNoteIds ?? [] });
+        say('Note split.');
     };
 
     const drawAt = (tick: number, pitch: number, duration = drawGrid) => {
@@ -473,6 +724,10 @@ export function PianoRoll(props: PianoRollProps) {
 
     const onFieldPointerDown = (event: ReactPointerEvent) => {
         if (event.target !== event.currentTarget && (event.target as HTMLElement).closest('.piano-roll-note')) return;
+        // An erase stroke may START on empty grid and sweep INTO notes — that is
+        // how a player rubs a bar out. Beginning it here rather than only on a
+        // note is what makes the gesture continuous.
+        if (event.button === 0 && tool === 'erase') { beginEraseStroke(event); return; }
         if (event.button === 0 && (tool === 'draw' || event.ctrlKey || event.metaKey)) {
             const pointerId = event.pointerId;
             drawRef.current = { pointerId, clientX: event.clientX, tick: snap(xToTick(event.clientX)), pitch: yToPitch(event.clientY), cleanup: () => undefined };
@@ -637,11 +892,24 @@ export function PianoRoll(props: PianoRollProps) {
                 { actionId: 'pianoroll.escape', defaultBinding: { key: 'Escape' }, run: () => { const context = useEditingContextStore.getState(); const selection = context.viewports[selectionSurface].selection; if (selection.noteIds.length || selection.clipIds.length || selection.timeRange) { context.clearSelection(selectionSurface); return true; } if (!onClose) return false; onClose(); return true; } },
                 { actionId: 'pianoroll.exit', defaultBinding: { key: 'q' }, run: () => { if (!onClose) return false; onClose(); return true; } },
                 { actionId: 'pianoroll.tool.step', defaultBinding: { key: 't' }, guard: (event: KeyboardEvent) => !event.repeat && useEditingContextStore.getState().stepEntry.trackId !== trackId, run: () => { useEditingContextStore.getState().setStepEntry({ trackId, positionTick: clip?.startTick ?? 0 }); return true; } },
-                ...([['select', 'v'], ['draw', 'b'], ['erase', 'x'], ['knife', 'k']] as const).map(([nextTool, key]) => ({ actionId: `pianoroll.tool.${nextTool}`, defaultBinding: { key }, guard: (event: KeyboardEvent) => !event.repeat && useEditingContextStore.getState().stepEntry.trackId !== trackId, run: () => { useEditingContextStore.getState().setViewport('pianoroll', { tool: nextTool }); return true; } })),
+                /*
+                  * ONE TOOL PER VIEWPORT, WRITTEN WHERE IT IS READ (F2).
+                  *
+                  * These entries used to write `setViewport('pianoroll', …)`
+                  * unconditionally while the INLINE roll reads
+                  * `viewports.arrangement.tool` — so inside a lane every tool
+                  * key was dead: `X` armed a tool nothing could see and `V`
+                  * could not disarm the Erase the strip had armed. That is
+                  * HA-13's "a key that does nothing", one level down, on the
+                  * surface a first-run player meets first. The toolbar's own
+                  * `onClick` had always picked the right viewport; the keys now
+                  * pick the same one.
+                  */
+                ...([['select', 'v'], ['draw', 'b'], ['erase', 'x'], ['knife', 'k']] as const).map(([nextTool, key]) => ({ actionId: `pianoroll.tool.${nextTool}`, defaultBinding: { key }, guard: (event: KeyboardEvent) => !event.repeat && useEditingContextStore.getState().stepEntry.trackId !== trackId, run: () => { useEditingContextStore.getState().setViewport(mode === 'surface' ? 'pianoroll' : 'arrangement', { tool: nextTool }); return true; } })),
                 ...Object.entries(canonical).map(([actionId, init]) => ({ actionId, defaultBinding: { key: init.key!, ctrl: init.ctrlKey, alt: init.altKey, shift: init.shiftKey }, guard: (event: KeyboardEvent) => !event.repeat, run: () => { keyDownRef.current(new KeyboardEvent('keydown', init) as unknown as React.KeyboardEvent); return true; } })),
             ],
         };
-    }, [clip?.startTick, clipId, onClose, selectionSurface, trackId]);
+    }, [clip?.startTick, clipId, mode, onClose, selectionSurface, trackId]);
     useBindingSet(pianoRollBindings);
 
     const currentNotes = midiSource?.notes ?? [];
@@ -653,7 +921,7 @@ export function PianoRoll(props: PianoRollProps) {
      */
     const renderedNotes = currentNotes.filter((note) => {
         if (note.pitch < range.lo || note.pitch > range.hi) return false;
-        return clippedNoteGeometry(note, clip?.startTick ?? 0, clip?.sourceStart ?? 0, clip?.lengthTick ?? 0, props.pxPerTick) !== null;
+        return clippedNoteGeometry(note, clip?.startTick ?? 0, clip?.sourceStart ?? 0, clip?.lengthTick ?? 0, pxPerTick) !== null;
     });
     /*
      * Exactly one tabbable note, chosen in the order a player would expect to
@@ -701,6 +969,25 @@ export function PianoRoll(props: PianoRollProps) {
 
     if (!arrangement || !track || !clip || !midiSource) return null;
 
+    /*
+     * THE ROLL'S OWN ZOOM CONTROL (HA-18).
+     *
+     * `Ctrl+wheel` was the only way to widen a note and it was advertised
+     * nowhere — a capability with no affordance is a capability the player does
+     * not have. Two 24px buttons, and the shortcut named in the `title` so the
+     * hand can graduate from the button to the wheel. It sits on the roll's own
+     * strip on both heights: in the toolbar on the full surface, and in the
+     * inline lane's corner strip, because the inline lane has no toolbar (its
+     * chrome is the track's lane menu) and a zoom that lives on the SONG's
+     * chrome would be the very confusion HA-22 is about.
+     */
+    const zoomControl = (
+        <div className="piano-roll__zoom" role="group" aria-label="Zoom the piano roll">
+            <button type="button" aria-label="Zoom the piano roll out" title="Zoom out — Ctrl+wheel" onClick={() => zoomBy(1 / 1.5)}>−</button>
+            <button type="button" aria-label="Zoom the piano roll in" title="Zoom in — Ctrl+wheel" onClick={() => zoomBy(1.5)}>+</button>
+        </div>
+    );
+
     return (
         <section
             ref={rootRef}
@@ -721,9 +1008,22 @@ export function PianoRoll(props: PianoRollProps) {
              * three quantize NUMBER fields live behind `⋯` — they are set once a
              * session, and permanent chrome should cost nothing to ignore.
              */}
-            <header className="piano-roll__toolbar">
+            {/*
+              * HA-22: the toolbar is the SURFACE's strip, and it is not rendered
+              * at all in a lane. It used to be rendered and then hidden with
+              * `display: none`, which meant an inline roll shipped a second,
+              * invisible `V B X` tool group in the DOM beside the Song's — one
+              * of the two identical strips the audit found. The lane's chrome is
+              * the track's own lane menu plus the zoom strip below.
+              */}
+            {mode === 'surface' && <header className="piano-roll__toolbar">
                 <span className="piano-roll__title">{clip.name ?? midiSource.name}</span>
-                <div className="piano-roll__tools" role="group" aria-label="Tool">
+                {/*
+                  * HA-22: the strip says WHICH surface it governs. Two `V B X`
+                  * triples reading "Tool" is how the player came to believe the
+                  * Song's strip and the roll's strip were the same control.
+                  */}
+                <div className="piano-roll__tools" role="group" aria-label="Tool — piano roll">
                     {ROLL_TOOLS.map(([id, glyph, label]) => (
                         <button
                             key={id}
@@ -743,6 +1043,7 @@ export function PianoRoll(props: PianoRollProps) {
                     const index = QUANTIZE_GRIDS.indexOf(quantizeGrid);
                     useEditingContextStore.getState().setQuantize({ quantizeGrid: QUANTIZE_GRIDS[(index + 1) % QUANTIZE_GRIDS.length]! });
                 }}>Q {quantizeGrid}</button>
+                {zoomControl}
                 <button type="button" className="piano-roll__tool" disabled={!selectedNoteIds.length} title="Quantize the selection (Ctrl+Q)" onClick={() => { if (selectedNoteIds.length) props.onQuantize?.(selectedNoteIds); }}>Quantize</button>
                 <button type="button" className="piano-roll__tool" aria-pressed={drumMode} onClick={() => (props.onDrumModeChange ?? setLocalDrumMode)(!drumMode)}>Drums</button>
                 <span className="piano-roll__more">
@@ -754,25 +1055,37 @@ export function PianoRoll(props: PianoRollProps) {
                     </div>}
                 </span>
                 <span className="piano-roll__mode-note" aria-live="polite">{drumMode ? 'Drum rows auto-detected' : 'Pitched notes'}</span>
-                {props.onClose && mode === 'surface' && <button type="button" className="piano-roll__close" aria-label="Close piano roll" onClick={props.onClose}>⌃</button>}
-            </header>
+                {props.onClose && <button type="button" className="piano-roll__close" aria-label="Close piano roll" onClick={props.onClose}>⌃</button>}
+            </header>}
             {rejection && <span className="piano-roll__rejection" role="status">{rejection}</span>}
+            {notice && <span className="piano-roll__notice" role="status">{notice}</span>}
+            {mode === 'inline' && <div className="piano-roll__inline-strip">{zoomControl}</div>}
+            {/*
+              * THE LANE'S OWN BAR STRIP (F1). It measures the lane's axis, in
+              * the micro mono voice, inside the lane — so the Song's ruler above
+              * is never asked to describe a viewport it does not own.
+              */}
+            {mode === 'inline' && <div className="piano-roll__lane-ruler" aria-hidden="true" style={{ height: LANE_RULER_HEIGHT }}>
+                <div className="piano-roll__lane-ruler-track" style={{ width: contentWidth, transform: `translateX(${-laneScrollLeftPx}px)` }}>
+                    {laneBars.map((bar) => <i key={bar} style={{ left: bar * ticksPerBar * pxPerTick }}>{bar + 1}</i>)}
+                </div>
+            </div>}
             <div className="piano-roll__body">
                 <PitchScroomer trackId={props.trackId} range={range} pitchesWithNotes={new Set(allTrackNotes.map((note) => note.pitch))} />
                 <div className="piano-roll__keys" role="list" aria-label="Pitch rows" style={{ height: contentHeight }}>
                     {pitches.map((pitch) => <div key={pitch} role="listitem" aria-label={drumMode ? (GM_DRUM_NAMES[pitch] ?? pitchName(pitch)) : pitchName(pitch)} className={`piano-roll__key${isBlackPitch(pitch) ? ' is-black' : ''}${isKeyboardSeam(pitch) ? ' is-seam' : ''}`} style={{ height: rowHeight }} onPointerDown={(event) => { if (event.button !== 0) return; audition(pitch, 48, 'on'); const pointerId = event.pointerId; keyBedDrag.current = { pointerId, y: event.clientY, range, cleanup: () => undefined }; keyBedDrag.current.cleanup = ownPointerGesture(pointerId, { move: (move) => { const current = keyBedDrag.current; if (!current) return; const delta = Math.round((current.y - move.clientY) / Math.max(1, rowHeight)); const span = current.range.hi - current.range.lo; const lo = Math.max(0, Math.min(127 - span, current.range.lo + delta)); rememberPitchRange(props.trackId, { lo, hi: lo + span }); }, commit: () => { audition(pitch, 48, 'off'); keyBedDrag.current?.cleanup(); keyBedDrag.current = null; }, abort: () => { audition(pitch, 48, 'off'); rememberPitchRange(props.trackId, range); keyBedDrag.current?.cleanup(); keyBedDrag.current = null; } }, 'pianoroll'); try { event.currentTarget.setPointerCapture(pointerId); } catch { /* Window listeners own completion. */ } }}>{drumMode ? (GM_DRUM_NAMES[pitch] ?? pitchName(pitch)) : pitch % 12 === 0 && rowHeight >= 7 ? pitchName(pitch) : ''}</div>)}
                 </div>
-                <div ref={fieldRef} className="piano-roll__field" onPointerMove={onFieldPointerMove} onPointerLeave={() => { if (!drawRef.current) setGhost(null); }} onPointerDown={onFieldPointerDown} onPointerUp={onFieldPointerUp} onPointerCancel={(event) => { cancelFieldDraw(event.pointerId); cancelMarquee(); setGhost(null); }}>
-                    <div className="piano-roll__content" style={{ width: contentWidth, height: contentHeight, transform: `translateX(${-leftTick * props.pxPerTick}px)` }}>
-                        <TimeGrid width={contentWidth} height={contentHeight} pxPerTick={props.pxPerTick} ticksPerBar={ticksPerBar} beatsPerBar={beatsPerBar} gridUnit={gridUnit} />
+                <div ref={fieldRef} className="piano-roll__field" onScroll={mode === 'inline' ? (event) => setLaneScrollLeftPx(event.currentTarget.scrollLeft) : undefined} onPointerMove={onFieldPointerMove} onPointerLeave={() => { if (!drawRef.current) setGhost(null); }} onPointerDown={onFieldPointerDown} onPointerUp={onFieldPointerUp} onPointerCancel={(event) => { cancelFieldDraw(event.pointerId); cancelMarquee(); setGhost(null); }}>
+                    <div className="piano-roll__content" style={{ width: contentWidth, height: contentHeight, transform: `translateX(${-contentOriginTick * pxPerTick}px)` }}>
+                        <TimeGrid width={contentWidth} height={contentHeight} pxPerTick={pxPerTick} ticksPerBar={ticksPerBar} beatsPerBar={beatsPerBar} gridUnit={gridUnit} />
                         {pitches.map((pitch, index) => <div key={pitch} className={`piano-roll__row${isBlackPitch(pitch) ? ' is-black' : ''}${pitch % 12 === 0 ? ' is-c' : ''}`} style={{ top: index * rowHeight, height: rowHeight }} />)}
                         {otherClipNotes.map(({ note, clip: other }, index) => {
-                            const geometry = clippedNoteGeometry(note, other.startTick, other.sourceStart ?? 0, other.lengthTick, props.pxPerTick);
+                            const geometry = clippedNoteGeometry(note, other.startTick, other.sourceStart ?? 0, other.lengthTick, pxPerTick);
                             if (!geometry || note.pitch < range.lo || note.pitch > range.hi) return null;
                             return <span key={`${other.id}-${note.id ?? index}`} className="piano-roll-note piano-roll-note--elsewhere" style={{ left: geometry.left, top: (range.hi - note.pitch) * rowHeight + Math.max(1, (rowHeight - 5) / 2), width: drumMode ? 10 : geometry.width, height: drumMode ? 10 : Math.max(3, rowHeight - 2) }} />;
                         })}
                         {currentNotes.map((note, index) => {
-                            const geometry = clippedNoteGeometry(note, clip.startTick, clip.sourceStart ?? 0, clip.lengthTick, props.pxPerTick);
+                            const geometry = clippedNoteGeometry(note, clip.startTick, clip.sourceStart ?? 0, clip.lengthTick, pxPerTick);
                             if (!geometry || note.pitch < range.lo || note.pitch > range.hi) return null;
                             const selected = !!note.id && noteIdSet.has(note.id);
                             return <button key={note.id ?? index} type="button" data-note-id={note.id} className={`piano-roll-note${selected ? ' is-selected' : ''}${drumMode ? ' is-drum' : ''}`} style={{ left: geometry.left, top: (range.hi - note.pitch) * rowHeight + Math.max(1, (rowHeight - (drumMode ? 10 : Math.max(3, rowHeight - 2))) / 2), width: drumMode ? 10 : geometry.width, height: drumMode ? 10 : Math.max(3, rowHeight - 2), '--note-opacity': `${velocityOpacity(note.vel) * 100}%` } as CSSProperties} aria-label={`${pitchName(note.pitch)}, tick ${note.tick}, duration ${note.durTick}, velocity ${note.vel ?? 96}`} aria-pressed={selected} tabIndex={note.id && note.id === focusableNoteId ? 0 : -1} onFocus={() => { if (note.id) setRovingNoteId(note.id); }} onKeyDown={(event) => {
@@ -808,17 +1121,17 @@ export function PianoRoll(props: PianoRollProps) {
                                 else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') { event.preventDefault(); moveRovingFocus(-1); }
                                 else if (event.key === 'Home') { event.preventDefault(); moveRovingFocus(-renderedNotes.length); }
                                 else if (event.key === 'End') { event.preventDefault(); moveRovingFocus(renderedNotes.length); }
-                            }} onPointerDown={(event) => { erase(event, note); if (event.button === 0 && tool !== 'erase') startNoteDrag(event, note, geometry.width); }} onPointerMove={moveNoteDrag} onPointerUp={(event) => endDrag(event.pointerId)} onPointerCancel={cancelNoteDrag} onContextMenu={(event) => event.preventDefault()} />;
+                            }} onPointerDown={(event) => { if (event.button === 0 && tool === 'knife') { knifeNote(event, note); return; } erase(event, note); if (event.button === 0 && tool !== 'erase') startNoteDrag(event, note, geometry.width); }} onPointerMove={moveNoteDrag} onPointerUp={(event) => endDrag(event.pointerId)} onPointerCancel={cancelNoteDrag} onContextMenu={(event) => event.preventDefault()} />;
                         })}
-                        {ghost && <span className={`piano-roll-note piano-roll-note--draw${drumMode ? ' is-drum' : ''}`} style={{ left: ghost.tick * props.pxPerTick, top: (range.hi - ghost.pitch) * rowHeight + Math.max(1, (rowHeight - (drumMode ? 10 : Math.max(3, rowHeight - 2))) / 2), width: drumMode ? 10 : Math.max(2, ghost.durTick * props.pxPerTick), height: drumMode ? 10 : Math.max(3, rowHeight - 2) }} />}
-                        {stepEntry.trackId === props.trackId && <span className="piano-roll__step-cursor" style={{ left: stepEntry.positionTick * props.pxPerTick, top: (range.hi - stepEntry.pitch) * rowHeight, width: Math.max(2, stepLength * props.pxPerTick), height: rowHeight }} />}
+                        {ghost && <span className={`piano-roll-note piano-roll-note--draw${drumMode ? ' is-drum' : ''}`} style={{ left: ghost.tick * pxPerTick, top: (range.hi - ghost.pitch) * rowHeight + Math.max(1, (rowHeight - (drumMode ? 10 : Math.max(3, rowHeight - 2))) / 2), width: drumMode ? 10 : Math.max(2, ghost.durTick * pxPerTick), height: drumMode ? 10 : Math.max(3, rowHeight - 2) }} />}
+                        {stepEntry.trackId === props.trackId && <span className="piano-roll__step-cursor" style={{ left: stepEntry.positionTick * pxPerTick, top: (range.hi - stepEntry.pitch) * rowHeight, width: Math.max(2, stepLength * pxPerTick), height: rowHeight }} />}
                         {marquee && <span className="piano-roll__marquee" style={marquee} />}
                         {!currentNotes.length && <p className="piano-roll__empty">press B, then draw.</p>}
-                        <Playhead pxPerTick={props.pxPerTick} />
+                        <Playhead pxPerTick={pxPerTick} onTick={followLaneRef} />
                     </div>
                 </div>
             </div>
-            <VelocityLane notes={currentNotes} clip={clip} pxPerTick={props.pxPerTick} leftTick={leftTick} selectedIds={noteIdSet} onSelect={(id) => { useEditingContextStore.getState().setSelection(selectionSurface, { noteIds: [id] }); }} onRove={(delta) => moveRovingFocus(delta, 'velocity')} onBackToNote={(id) => { setRovingNoteId(id); focusRow(id, 'note'); }} />
+            <VelocityLane notes={currentNotes} clip={clip} pxPerTick={pxPerTick} leftTick={viewLeftTick} selectedIds={noteIdSet} onSelect={(id) => { useEditingContextStore.getState().setSelection(selectionSurface, { noteIds: [id] }); }} onRove={(delta) => moveRovingFocus(delta, 'velocity')} onBackToNote={(id) => { setRovingNoteId(id); focusRow(id, 'note'); }} />
         </section>
     );
 }
@@ -827,26 +1140,49 @@ function TimeGrid({ width, height, pxPerTick, ticksPerBar, beatsPerBar, gridUnit
     const marks: { tick: number; kind: 'bar' | 'beat' | 'sub' }[] = [];
     const ladder = getGridLadder(pxPerTick * ticksPerBar, beatsPerBar, gridUnit);
     const divisions = gridUnit === '1/8t' ? 12 : gridUnit === '1/16' || gridUnit === 'adaptive' ? 16 : gridUnit === '1/8' ? 8 : 4;
-    for (let bar = 0; bar * ticksPerBar * pxPerTick <= width; bar++) {
+    /*
+     * Every mark is clamped to the content box. The loop only tested the BAR's
+     * own left edge, so the last bar's beats and subdivisions were drawn up to a
+     * full bar past `width` — invisible while the field was `overflow: hidden`,
+     * and 181px of empty ruled space to scroll into the moment the lane got its
+     * own scroller (F1). A grid that draws past the end of the song is the same
+     * kind of lie as a ruler that measures the wrong axis.
+     */
+    const within = (tick: number) => tick * pxPerTick <= width;
+    for (let bar = 0; within(bar * ticksPerBar); bar++) {
         const start = bar * ticksPerBar;
         if (bar % ladder.barStride === 0) marks.push({ tick: start, kind: 'bar' });
-        if (ladder.drawBeats) for (let beat = 1; beat < beatsPerBar; beat++) marks.push({ tick: start + beat * ticksPerBar / beatsPerBar, kind: 'beat' });
+        if (ladder.drawBeats) for (let beat = 1; beat < beatsPerBar; beat++) {
+            const tick = start + beat * ticksPerBar / beatsPerBar;
+            if (within(tick)) marks.push({ tick, kind: 'beat' });
+        }
         if (ladder.drawSubdivisions) for (let sub = 1; sub < divisions; sub++) {
-            if (sub % (divisions / beatsPerBar) !== 0) marks.push({ tick: start + sub * ticksPerBar / divisions, kind: 'sub' });
+            const tick = start + sub * ticksPerBar / divisions;
+            if (sub % (divisions / beatsPerBar) !== 0 && within(tick)) marks.push({ tick, kind: 'sub' });
         }
     }
     return <div className="piano-roll__time-grid" aria-hidden="true" style={{ height }}>{marks.map((mark) => <i key={mark.tick} className={`is-${mark.kind}`} style={{ left: mark.tick * pxPerTick }} />)}</div>;
 }
 
-function Playhead({ pxPerTick }: { pxPerTick: number }) {
+function Playhead({ pxPerTick, onTick }: { pxPerTick: number; onTick?: RefObject<(tick: number) => void> }) {
     const ref = useRef<HTMLSpanElement>(null);
     const isPlaying = useArrangementStore((state) => state.isPlaying);
     useEffect(() => {
-        const write = () => { if (ref.current) ref.current.style.transform = `translateX(${useArrangementStore.getState().currentTick() * pxPerTick}px)`; };
+        // `onTick` arrives as a REF so the subscription's identity does not
+        // change when the parent re-renders: the gate in `PianoRoll.test.tsx`
+        // is that this roll holds exactly one shared-frame writer, and a
+        // callback in the dep array would re-register it on every keystroke.
+        const write = () => {
+            const tick = useArrangementStore.getState().currentTick();
+            if (ref.current) ref.current.style.transform = `translateX(${tick * pxPerTick}px)`;
+            onTick?.current?.(tick);
+        };
         write();
         if (isPlaying) return registerTimelineFrameWriter(write);
         return useArrangementStore.subscribe((state, previous) => { if (state.playheadTick !== previous.playheadTick) write(); });
-    }, [isPlaying, pxPerTick]);
+        // `onTick` is a ref object: stable for the component's life, so naming it
+        // here costs nothing and keeps the dependency list honest.
+    }, [isPlaying, onTick, pxPerTick]);
     return <span ref={ref} className="piano-roll__playhead" aria-hidden="true" />;
 }
 

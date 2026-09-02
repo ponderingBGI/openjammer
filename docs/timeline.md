@@ -65,14 +65,29 @@ leaves — the one control that is genuinely redundant, since `Ctrl+wheel`, bare
 `Ctrl+0` all still reach it. No arrangement utility is ever moved behind an overflow menu,
 because "which mode am I in" must be readable without a click.
 
-Below it, one scroll container owns both axes. The **ruler stack** is 64px in three rows —
+**One document, two viewports.** The Song's scroller is one of them; a lane with
+an inline piano roll open is the other. A clip view is not a row of the sheet it
+came from — it is a second window onto the same document, with its own axis, its
+own horizontal scroller, its own 14px bar strip inside the lane and its own
+playhead. Both playheads read the same tick from the same clock, so they always
+mark the same instant; only their pixels differ, exactly as they already do
+between the Song and the full roll surface. The Song's line is masked out across
+an expanded lane so a box never carries two "now" markers at two different x, and
+follow-playhead pages the lane by the same rule (`F`, cross the last 15%, jump to
+one sixth from the left) so the two viewports move in step. The Song's ruler
+measures the Song's viewport and nothing else.
+
+Below it, one scroll container owns the Song's own two axes. The **ruler stack** is 64px in three rows —
 section chips and mark pins (22px), the loop/punch brace row (14px), bar numbers (28px) —
 and is `position: sticky; top: 0`; the **track-header column** is `position: sticky;
 left: 0` inside the same scroller, so the browser pixel-locks them and no rAF-synchronised
 `translateX` can shear the ruler off the field. Every x — grid line, ruler tick, clip edge,
 playhead, brace — comes from `crispLineX` in `src/song/rulerMarks.ts`, so a clip edge lands
 exactly on its bar line at every zoom. The ruler's 200×64 **corner** holds the grid chip,
-the magnet, the tool strip (`V B X`) and follow-playhead — beside the field they act on.
+the magnet, the tool strip (`V B X K`) and follow-playhead — beside the field they act on.
+That strip is labelled **Tool — Song**, and it is the only tool strip on screen at any
+moment: the roll surface's ruler corner drops it (the roll has its own, labelled
+**Tool — piano roll**) and the inline lane renders no toolbar at all.
 On the piano-roll surface that corner narrows to the roll's own key-bed gutter, so bar 1
 sits exactly above tick 0 rather than 124px to its right.
 
@@ -285,7 +300,34 @@ screen mentions is a gesture only its author knows. **Ctrl+M** creates a marker 
 playhead, and `addMarker` exposes the same operation to the command/agent path.
 Marker drag and inline rename use `moveLocation` and `setLocationName`. Draw tool B previews a ghost and creates
 an empty MIDI source and clip as one `createClip` operation; a click/double-click creates
-one bar. Track names edit inline (Enter/changed blur commits, Escape restores), tracks
+one bar.
+
+### The tools
+
+Four on the Song, five in the roll, the same four letters in the same order on both, and
+every one of them has a key, a button and a behaviour — a control that answers a click by
+doing nothing is worse than an undiscovered gesture (U11 / HA-13).
+
+| Key | Tool | Song | Piano roll |
+|---|---|---|---|
+| `V` | Select | click selects, drag marquees / selects a time range | click selects, drag marquees |
+| `B` | Draw | drag draws a clip (`createClip`) | click/drag draws a note (`drawNotes`) |
+| `X` | Erase | click deletes the clip under the pointer, drag deletes everything the stroke sweeps (`deleteClips`) | the same, one level down (`eraseNotes`); right-click erases a single note whatever the tool |
+| `K` | Knife | click splits the clip at the snapped pointer tick (`splitAt`) | click splits the note at the snapped pointer tick (`splitNotes`) |
+| `T` | Step | — | arms step entry |
+
+An erase stroke is **one** history entry however many objects it sweeps, and a stroke that
+touches nothing writes nothing. A cut that lands on an object's own edge is not a cut: it
+emits no verbs and, in the roll, says so in the polite status line. Both tools reach the
+document only through the shipped ops, so `Ctrl+Z` behaves exactly as it does for a drag.
+
+There is **no Time tool.** `arrangement.tool.time` was a `t` binding that armed a tool no
+code path ever read, with no button and no visible effect; it is removed from the catalogue,
+from the binding set and from the `tool` union rather than rebound (code-value #8).
+
+### Track headers, lanes and time
+
+Track names edit inline (Enter/changed blur commits, Escape restores), tracks
 reorder with `moveTrack`, the header colour input emits `setTrackColor`, lane height clamps
 to 28–480 px (Alt applies the drag to every lane; double-click restores the default height —
 220 px while an inline piano roll is open, 72 px otherwise — it does not measure content),
@@ -312,7 +354,7 @@ outright. Scrubbing owns the
 complete pointer stream; editor note audition remains disabled while transport is rolling.
 Arrangement shortcuts include E/Q level navigation, Shift+Space, Shift+Z, Ctrl+0, +/-,
 Alt+G, Home/End, Ctrl+Left/Right marker traversal, Alt+Left/Right bar nudge, Up/Down clip
-track moves, Ctrl+Alt+arrows spatial selection (Shift extends), V/B/X/K/T tools,
+track moves, Ctrl+Alt+arrows spatial selection (Shift extends), V/B/X/K tools,
 bracket-key grid changes, L/I/O/P/M/F/0, bare `=`/`-` zoom, Ctrl+M, Ctrl+E,
 Ctrl+Shift+Backspace, and Ctrl+A. The zoom keys are **bare `=` and `-`**, not `+`/`-`:
 `matchesKeyCombo` is strict on all three modifier groups, so `Shift+=` (which is how a
@@ -338,7 +380,7 @@ transpose and quantize.
 The inline lane and the full surface are the **same component at two heights** — the surface
 adds a 40px toolbar and the clip-bounds brackets, never a second interaction model. The
 toolbar carries only what a hand reaches for mid-take: the five tools (`V B X K T`, 28px
-each), the quantize grid chip, `Quantize`, the drum-row override, and a `⋯` popover holding
+each), the quantize grid chip, a `− +` zoom pair, `Quantize`, the drum-row override, and a `⋯` popover holding
 grid / strength / swing, because those three number fields are set once a session and should
 not cost permanent chrome. Notes are painted in the **`--acc2` ink** — which is now a
 real token, `--accent-two-ink`, reached through the roll's `--piano-roll-note-ink` alias.
@@ -392,6 +434,30 @@ V/B/X/K select, draw, erase, and knife. Plain wheel scrolls, Alt+wheel edits vel
 Ctrl/Cmd+wheel zooms, and Ctrl/Cmd+Shift+wheel changes the visible pitch-row scale.
 ResizeObserver measures the host and rows never shrink below 6 px. Drawing or step entry
 beyond the active clip posts visible feedback; the clip is not silently extended.
+
+The **inline lane opens at its own zoom**, not the Song's (HA-18). At the Song's default
+axis a half-beat note is 4.8 px wide — below `resizeEdge`'s floor, so the first clip a player
+ever opened could be moved and never trimmed. The lane therefore opens at
+`inlineOpeningPxPerTick(ppq)`, the axis at which a half beat is 24 px, and never below the
+Song's own value; the first use of the roll's zoom pins it, so the axis stops moving when the
+Song is zoomed behind it. Because that is a *different* axis from the Song's, the lane is a
+second viewport rather than a row of the first one — see "one document, two viewports" above.
+`resizeEdge` offers its handles from 10 px **inclusive**.
+
+The **full surface opens fitted**: `surfaceOpeningPxPerTick` gives the clip's own span the
+field's width, with the same 24 px-per-half-beat floor and never below the Song's axis, so
+`E` no longer opens 128 notes at 4.8 px on the shipped starter. It keeps its own ruler and
+its own scroller, which is why it never had the lane's alignment problem.
+
+The zoom is reachable on both: a `− +` pair on the surface's toolbar and on the inline lane's
+corner strip, each naming `Ctrl+wheel` in its `title`, and `Ctrl+wheel` inside an inline roll
+zooms the roll rather than the Song. Tool keys (`V B X K`) write to the viewport the roll they
+are pressed in actually reads, so `V` disarms Erase inside a lane as well as on the surface.
+
+The roll's **Knife** refuses a cut that would leave either half under one snap unit (a 1/32
+note when `Ctrl` has suspended snapping) and says *"Too close to the edge to split."* — a
+sliver a pixel wide is not an edit a hand can undo. `splitNotes` is an `EDIT_OPS` operation,
+so the agent can make the same cut the hand does.
 
 Key-bed and scroomer drags use the same window-owned pointer controller as note gestures.
 The velocity lane supports one-gesture paint and Alt-ramp. The piano-roll playhead, the

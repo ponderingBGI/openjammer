@@ -875,9 +875,24 @@ test.describe('W6-E2E §9 — piano roll', () => {
         const before = await notesOfClip(page, 't0.c0');
         const cursor = await historyLength(page);
 
-        // Draw on top of an existing note: same row, a little later in time.
+        /*
+         * Widen first, through the roll's own zoom (HA-18's `− +` pair).
+         *
+         * This test draws at the MIDDLE of an existing note, and `snapTimeline`
+         * pulls to a note anchor within 18px. So the gesture only means "draw on
+         * top of a note" while the note is wider than ~36px — below that the
+         * midpoint is inside the start anchor's radius, the snapped tick lands on
+         * the note's own tick, and BC-30 correctly refuses an exact duplicate
+         * with zero verbs. It used to pass on a 4.8px note by aiming 6px in,
+         * which is PAST the note: the end anchor, not the middle. Now that the
+         * surface opens fitted (F4) that accident is gone, so the test asks for
+         * the width it actually needs instead of inheriting one.
+         */
+        const zoomIn = roll.getByRole('group', { name: 'Zoom the piano roll' }).getByRole('button', { name: 'Zoom the piano roll in' });
         const target = roll.locator(`.piano-roll-note[data-note-id="${before[0]!.id}"]`);
+        for (let attempt = 0; attempt < 8 && ((await target.boundingBox())?.width ?? 0) < 40; attempt += 1) await zoomIn.click();
         const box = (await target.boundingBox())!;
+        expect(box.width, 'the note is wide enough for its middle to be its middle').toBeGreaterThan(36);
         await roll.locator('.piano-roll__field').first().dispatchEvent('dblclick', {
             bubbles: true,
             clientX: box.x + Math.max(6, box.width / 2),
@@ -1102,6 +1117,266 @@ test.describe('W6-E2E §1/§2 — teardown and transactions', () => {
 // does not number: the overlay pane, edge auto-scroll, the two view-state
 // handles, the sky band's reserve, the inline roll, and the agent queue.
 // ─────────────────────────────────────────────────────────────────────────────
+
+/*
+ * U11 / HA-13 — the tools that shipped.
+ *
+ * `X` was a rendered, enabled button in the ruler corner that did nothing when
+ * clicked, and `K` was a binding with no behaviour and no button, on BOTH
+ * surfaces. These four drive the shipped BUTTONS (not the keys) precisely
+ * because "the affordance answered the click" is the thing that was broken, and
+ * they assert the §1 law each tool has to obey: one gesture, one Ctrl+Z.
+ */
+test.describe('W6-E2E §3 — Erase and Knife (U11)', () => {
+    /** Arm a tool from the Song's own strip, the way a hand does. */
+    async function armSongTool(page: Page, name: 'Erase tool' | 'Knife tool'): Promise<void> {
+        const strip = page.getByRole('group', { name: 'Tool — Song' });
+        await strip.getByRole('button', { name }).click();
+        await expect(strip.getByRole('button', { name })).toHaveAttribute('aria-pressed', 'true');
+    }
+
+    test('T45 — Erase deletes the clip it is clicked on, in one undo', async ({ page }) => {
+        await openPaperSketch(page);
+        await zoomIn(page, 4);
+        const before = await documentJson(page);
+        const count = await clipCount(page);
+        const cursor = await historyLength(page);
+
+        await armSongTool(page, 'Erase tool');
+        const point = await clipGrabPoint(page, clips(page).first(), 40);
+        await page.mouse.click(point.x, point.y);
+
+        await expect.poll(() => clipCount(page)).toBe(count - 1);
+        await expect.poll(() => historyLength(page)).toBe(cursor + 1);
+
+        await focusArrangement(page);
+        await page.keyboard.press('Control+z');
+        await expect.poll(() => documentJson(page)).toBe(before);
+    });
+
+    test('T46 — Knife splits the clip at the pointer, in one undo', async ({ page }) => {
+        await openPaperSketch(page);
+        await zoomIn(page, 4);
+        await setGridUnit(page, 'bar');
+        const before = await flatClips(page);
+        const count = await clipCount(page);
+        const cursor = await historyLength(page);
+
+        const cut = before[0]!;
+        await armSongTool(page, 'Knife tool');
+        const box = (await clips(page).first().boundingBox())!;
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+
+        await expect.poll(() => clipCount(page)).toBe(count + 1);
+        await expect.poll(() => historyLength(page)).toBe(cursor + 1);
+        // Two abutting halves ON THAT TRACK, no gap and no overlap, spanning
+        // exactly what the one clip spanned. (Sorting every clip in the document
+        // by tick would compare clips on different tracks, which abut nothing.)
+        const onTrack = (await flatClips(page)).filter((clip) => clip.trackId === cut.trackId).sort((a, b) => a.startTick - b.startTick);
+        expect(onTrack).toHaveLength(2);
+        expect(onTrack[0]!.startTick).toBe(cut.startTick);
+        expect(onTrack[1]!.startTick).toBe(onTrack[0]!.startTick + onTrack[0]!.lengthTick);
+        expect(onTrack[0]!.lengthTick + onTrack[1]!.lengthTick).toBe(cut.lengthTick);
+
+        await focusArrangement(page);
+        await page.keyboard.press('Control+z');
+        // The CLIPS, not `documentJson`: a cut mints two ids, so the document's
+        // `idCounter` legitimately moves and never comes back. Ids are minted
+        // monotonically on purpose (a re-used id is a far worse bug than a gap),
+        // so the undo contract is about the material, not the counter.
+        await expect.poll(() => flatClips(page)).toEqual(before);
+    });
+
+    test('T47 — Erase deletes the note it is clicked on, in one undo', async ({ page }) => {
+        await openPaperSketch(page);
+        await zoomIn(page, 4);
+        await openRollSurface(page, clips(page).first());
+        const clipId = (await flatClips(page))[0]!.id!;
+        const before = await documentJson(page);
+        const count = (await notesOfClip(page, clipId)).length;
+        const cursor = await historyLength(page);
+
+        await page.getByRole('group', { name: 'Tool — piano roll' }).getByRole('button', { name: 'Erase tool' }).click();
+        const note = page.locator('[data-surface-root="pianoroll"] .piano-roll-note[data-note-id]').first();
+        await note.click({ position: { x: 2, y: 2 } });
+
+        await expect.poll(() => notesOfClip(page, clipId).then((notes) => notes.length)).toBe(count - 1);
+        await expect.poll(() => historyLength(page)).toBe(cursor + 1);
+
+        await focusRoll(page);
+        await page.keyboard.press('Control+z');
+        await expect.poll(() => documentJson(page)).toBe(before);
+    });
+
+    test('T48 — Knife splits the note at the pointer, in one undo', async ({ page }) => {
+        await openPaperSketch(page);
+        await zoomIn(page, 4);
+        await openRollSurface(page, clips(page).first());
+        const clipId = (await flatClips(page))[0]!.id!;
+        const before = await notesOfClip(page, clipId);
+        const count = before.length;
+        const cursor = await historyLength(page);
+
+        await page.getByRole('group', { name: 'Tool — piano roll' }).getByRole('button', { name: 'Knife tool' }).click();
+        // Widen the note first: a cut needs somewhere to land that is not an
+        // edge, and the roll's own zoom is the affordance that makes it possible
+        // (HA-18).
+        const zoom = page.getByRole('group', { name: 'Zoom the piano roll' }).getByRole('button', { name: 'Zoom the piano roll in' });
+        await zoom.click();
+        await zoom.click();
+        const note = page.locator('[data-surface-root="pianoroll"] .piano-roll-note[data-note-id]').first();
+        const box = (await note.boundingBox())!;
+        // `Ctrl` suspends the snap, exactly as it does for every other gesture on
+        // these surfaces. Without it a note that is EXACTLY one grid unit long
+        // can only be cut on its own edges, and the roll says so rather than
+        // pretending — see the status line this same tool writes.
+        //
+        // Held on the KEYBOARD rather than passed as `mouse.click({ modifiers })`:
+        // the option sets the modifier on the synthesized click, but the tool
+        // presses on `pointerdown`, which arrives without it (verified in the
+        // browser — the cut is refused and the roll reports the grid).
+        await page.keyboard.down('Control');
+        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+        await page.keyboard.up('Control');
+
+        await expect.poll(() => notesOfClip(page, clipId).then((notes) => notes.length)).toBe(count + 1);
+        await expect.poll(() => historyLength(page)).toBe(cursor + 1);
+
+        await focusRoll(page);
+        await page.keyboard.press('Control+z');
+        await expect.poll(() => notesOfClip(page, clipId)).toEqual(before);
+    });
+
+    /*
+     * F1 — the lane is a real second viewport, measured with real layout.
+     *
+     * The unit test pins that the two playheads mark the same TICK; only a
+     * browser can say whether the lane's scroller actually reaches the notes.
+     * Before this, the lane drew 3 264px of content inside a 1 184px box with
+     * `overflow: hidden` — 51 of 128 notes with no way to reach them.
+     */
+    test('T50 — the inline lane scrolls its own axis, and reaches every note', async ({ page }) => {
+        await openPaperSketch(page);
+        await zoomIn(page, 4);
+        await openInlineRoll(page, clips(page).first());
+
+        const lane = await page.evaluate(() => {
+            const field = document.querySelector<HTMLElement>('.piano-roll--inline .piano-roll__field')!;
+            const content = document.querySelector<HTMLElement>('.piano-roll--inline .piano-roll__content')!;
+            return {
+                scrollWidth: field.scrollWidth,
+                clientWidth: field.clientWidth,
+                contentWidth: Math.round(Number.parseFloat(content.style.width)),
+                overflowX: getComputedStyle(field).overflowX,
+                barMarks: document.querySelectorAll('.piano-roll--inline .piano-roll__lane-ruler i').length,
+                notes: document.querySelectorAll('.piano-roll--inline .piano-roll-note[data-note-id]').length,
+            };
+        });
+
+        // The scroller IS the content: nothing is clipped away with no way out.
+        // Within a pixel, because the closing bar line is 1px wide and sits ON
+        // the content's right edge; before the grid was clamped it overshot by
+        // 181px, a full bar of empty ruled space to scroll into.
+        expect(lane.overflowX).toBe('auto');
+        expect(Math.abs(lane.scrollWidth - lane.contentWidth)).toBeLessThanOrEqual(1);
+        expect(lane.scrollWidth).toBeGreaterThan(lane.clientWidth);
+        expect(lane.barMarks, 'the lane carries its own bar strip').toBeGreaterThan(1);
+
+        // And scrolling to the end really does bring the last note on screen.
+        await page.evaluate(() => {
+            const field = document.querySelector<HTMLElement>('.piano-roll--inline .piano-roll__field')!;
+            field.scrollLeft = field.scrollWidth;
+        });
+        await page.waitForTimeout(120);
+        const visible = await page.evaluate(() => {
+            const field = document.querySelector<HTMLElement>('.piano-roll--inline .piano-roll__field')!;
+            const box = field.getBoundingClientRect();
+            const notes = [...document.querySelectorAll<HTMLElement>('.piano-roll--inline .piano-roll-note[data-note-id]')];
+            const onScreen = notes.filter((note) => {
+                const rect = note.getBoundingClientRect();
+                return rect.right > box.left && rect.left < box.right;
+            });
+            const last = notes.at(-1)!.getBoundingClientRect();
+            return { onScreen: onScreen.length, lastVisible: last.right > box.left && last.left < box.right };
+        });
+        expect(visible.onScreen).toBeGreaterThan(0);
+        expect(visible.lastVisible, 'the end of the clip is reachable').toBe(true);
+    });
+
+    /*
+     * Two viewports are honest when they disagree about PIXELS and agree about
+     * TIME. Both axes below are read out of the DOM — the clip's own width for
+     * the Song, the lane strip's bar spacing for the lane — so nothing here
+     * trusts a number the app also computed for itself.
+     */
+    test('T51 — both playheads mark the same tick, on axes that differ', async ({ page }) => {
+        await openPaperSketch(page);
+        await zoomIn(page, 4);
+        await openInlineRoll(page, clips(page).first());
+        const ruler = page.locator('.arrangement-ruler-viewport');
+        const rulerBox = (await ruler.boundingBox())!;
+
+        const axes = await page.evaluate(() => {
+            const marks = [...document.querySelectorAll<HTMLElement>('.piano-roll--inline .piano-roll__lane-ruler i')];
+            return {
+                markStride: Number(marks[1]!.textContent) - Number(marks[0]!.textContent),
+                markGap: Number.parseFloat(marks[1]!.style.left) - Number.parseFloat(marks[0]!.style.left),
+            };
+        });
+        // The Song's axis through the shipped helper — it matches the rendered
+        // clip by id, which matters here because the lane the roll is open in
+        // renders no clips at all.
+        const songMetrics = await fieldMetrics(page);
+        const songPxPerTick = songMetrics.pxPerTick;
+        const lanePxPerTick = axes.markGap / (axes.markStride * songMetrics.ticksPerBar);
+        // The premise: the axes really do differ, or this asserts nothing.
+        expect(lanePxPerTick / songPxPerTick).toBeGreaterThan(2);
+
+        const readTicks = () => page.evaluate(() => {
+            const px = (element: Element | null) => Number.parseFloat(/translate(?:X|3d)?\(([-\d.]+)px/.exec((element as HTMLElement | null)?.style.transform ?? '')?.[1] ?? 'NaN');
+            return {
+                song: px(document.querySelector('.arrangement-playhead')),
+                lane: px(document.querySelector('.piano-roll--inline .piano-roll__playhead')),
+            };
+        });
+
+        for (const bar of [0, 4, 9]) {
+            const metrics = await fieldMetrics(page);
+            await ruler.click({ position: { x: tickToX(metrics, bar * metrics.ticksPerBar) - rulerBox.x, y: 50 } });
+            await page.waitForTimeout(150);
+            const pixels = await readTicks();
+            expect(Number.isNaN(pixels.song), `bar ${bar}: the Song draws a playhead`).toBe(false);
+            expect(Number.isNaN(pixels.lane), `bar ${bar}: the lane draws its own`).toBe(false);
+            expect(pixels.lane / lanePxPerTick, `bar ${bar}: same tick, different pixels`)
+                .toBeCloseTo(pixels.song / songPxPerTick, 0);
+        }
+    });
+
+    test('T49 — one tool strip at a time (HA-22)', async ({ page }) => {
+        await openPaperSketch(page);
+        await zoomIn(page, 4);
+        /*
+         * The shell keeps every surface MOUNTED and hides the inactive ones
+         * (`hidden` + `inert` + `aria-hidden`), so "on screen" has to mean
+         * inside the surface that is showing — a `document.querySelectorAll`
+         * over the whole page counts chrome the player cannot see or reach.
+         */
+        const strips = () => page.evaluate(() => {
+            const shown = document.querySelector('[data-surface-root]:not([hidden])');
+            return [...(shown?.querySelectorAll('[role="group"]') ?? [])]
+                .map((element) => element.getAttribute('aria-label') ?? '')
+                .filter((label) => label.startsWith('Tool'));
+        });
+
+        expect(await strips()).toEqual(['Tool — Song']);
+
+        await openInlineRoll(page, clips(page).first());
+        expect(await strips(), 'the inline lane adds no second strip').toEqual(['Tool — Song']);
+
+        await openRollSurface(page, clips(page).first());
+        expect(await strips(), "the roll surface's corner drops the Song's").toEqual(['Tool — piano roll']);
+    });
+});
 
 test.describe('W6-E2E extras — redesign behaviours', () => {
     test('X1 — a cross-track drag ghost never paints on the header or the ruler', async ({ page }) => {

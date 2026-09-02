@@ -150,12 +150,58 @@ export function shouldAutoDetectDrums(
     return notes.every((note) => note.durTick <= hitTicks);
 }
 
+/**
+ * The smallest note the resize edges are offered on (HA-18).
+ *
+ * `10` used to be an EXCLUSIVE floor (`width <= 10 → null`), so a note exactly
+ * ten pixels wide — the width one `Ctrl+wheel` notch produced from the inline
+ * roll's opening zoom — was still un-trimmable, and the player's only feedback
+ * was a cursor that never changed. Ten pixels is enough for a 4px zone at each
+ * end with two clear pixels of body between them, so ten pixels is where the
+ * edges START working, not where they stop.
+ */
+export const MIN_RESIZE_EDGE_WIDTH_PX = 10;
+
 export function resizeEdge(pointerX: number, width: number): 'start' | 'end' | null {
-    if (width <= 10) return null;
+    if (width < MIN_RESIZE_EDGE_WIDTH_PX) return null;
     const zone = Math.min(8, width / 2 - 1);
     if (pointerX <= zone) return 'start';
     if (pointerX >= width - zone) return 'end';
     return null;
+}
+
+/**
+ * The narrowest note the inline roll is allowed to OPEN on (HA-18).
+ *
+ * The inline lane inherited the Song's `pxPerTick`, where a half-beat note is
+ * 4.8 x 6.2px: below the resize floor, so it could be moved but never trimmed,
+ * and the only zoom was a `Ctrl+wheel` advertised nowhere. A half beat is the
+ * shortest note most parts are actually built from, so that is the unit the
+ * opening zoom is measured in — 24px of it, which is a comfortable grab with two
+ * 8px edge zones and 8px of body left between them.
+ */
+export const INLINE_MIN_HALF_BEAT_PX = 24;
+
+/** The `pxPerTick` at which a half-beat note is {@link INLINE_MIN_HALF_BEAT_PX} wide. */
+export function inlineOpeningPxPerTick(ppq: number): number {
+    return INLINE_MIN_HALF_BEAT_PX / Math.max(1, ppq / 2);
+}
+
+/**
+ * The axis the FULL roll surface opens on (HA-18 / F4).
+ *
+ * The surface used to inherit whatever the Song was zoomed to — on the shipped
+ * starter 0.0101px/tick, so pressing `E` opened 128 notes at 4.8px: under
+ * `resizeEdge`'s floor, movable and not trimmable, which is HA-18's symptom
+ * surviving on the surface the `E` key opens. Opening FITTED is the answer a DAW
+ * gives: the clip you asked to edit fills the field. The floor is the lane's, so
+ * a sixty-bar clip still opens with grabbable notes instead of a hairline comb,
+ * and it never goes below the Song's own axis — a player already zoomed past the
+ * floor keeps their scale.
+ */
+export function surfaceOpeningPxPerTick(fieldWidth: number, clipLengthTick: number, ppq: number, songPxPerTick: number): number {
+    const fitted = clipLengthTick > 0 ? fieldWidth / clipLengthTick : 0;
+    return Math.max(fitted, inlineOpeningPxPerTick(ppq), songPxPerTick);
 }
 
 export function clippedNoteGeometry(

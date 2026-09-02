@@ -366,4 +366,25 @@ describe('AiPanel chat', () => {
         expect(useSandboxStore.getState().mode).toBe('yolo');
         expect(screen.getByText(/YOLO Mode/i)).toBeInTheDocument();
     });
+
+    /*
+     * HA-23 / U14 — no un-Escapable overlay, and no overlay that takes its
+     * PARENT with it. Escape declines this gate and stops there: the panel
+     * behind it must not also close, or answering "no" to a question costs the
+     * player the conversation they were in.
+     */
+    it('Escape declines the YOLO gate and does not reach the panel behind it', () => {
+        renderPanel();
+        fireEvent.click(screen.getByRole('button', { name: 'YOLO' }));
+        const confirm = screen.getByRole('alertdialog', { name: /Enter YOLO mode/i });
+
+        const reachedTheDocument = vi.fn();
+        document.addEventListener('keydown', reachedTheDocument);
+        fireEvent.keyDown(confirm, { key: 'Escape' });
+        document.removeEventListener('keydown', reachedTheDocument);
+
+        expect(screen.queryByRole('alertdialog', { name: /Enter YOLO mode/i })).toBeNull();
+        expect(useSandboxStore.getState().mode).toBe('jailed');
+        expect(reachedTheDocument).not.toHaveBeenCalled();
+    });
 });

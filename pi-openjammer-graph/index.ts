@@ -462,6 +462,13 @@ export default function register(pi: ExtensionAPI): void {
                     op: Type.Literal('transposeNotes'), noteIds: Type.Array(Type.String()),
                     semitones: Type.Number(),
                 }),
+                // The roll's Knife (U11). `atTick` is a SOURCE tick, the same
+                // coordinate `note.tick` is in; both halves must clear
+                // `minLengthTick` (default: the draw floor) or the cut is a no-op.
+                Type.Object({
+                    op: Type.Literal('splitNotes'), noteIds: Type.Array(Type.String()),
+                    atTick: Type.Number(), minLengthTick: Type.Optional(Type.Number()),
+                }),
                 Type.Object({
                     op: Type.Literal('quantizeNotes'), targets: Type.Array(Type.String()), grid: Type.Number(),
                     endGrid: Type.Optional(Type.Number()), snapStart: Type.Optional(Type.Boolean()),

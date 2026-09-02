@@ -1,37 +1,93 @@
 /*
- * StepGrid — the beat rig's bottom bar.
+ * StepGrid — the beat rig's step card (U15).
+ *
+ * It used to be an uncarded, full-bleed strip welded to the viewport bottom,
+ * sitting straight on the canvas paper and clipping the `SONG` card it belongs
+ * to. It is now a CARD in the same language the fourteen node faceplates speak:
+ * surface fill, one hairline, one soft layered shadow, a header with a title and
+ * a mono type chip, and a well holding the grid.
+ *
+ * Two colour rules it is here to obey:
+ *   - a lit step is `--accent-two-ink` — the SECOND accent, this system's
+ *     "content" colour. `--accent-primary` is reserved for state (focus, armed
+ *     transport, selection), and a groove is not a state.
+ *   - the playhead column is a BORDER, never a fill: the fill means "this step
+ *     plays", and two meanings must never share one channel.
  *
  * The playhead column is selected by a `data-step` attribute the shared frame
  * writes on the row container, so eight cells light in turn without a single
- * React render. The highlight is a BORDER, not a fill: the fill means "this step
- * plays", and two meanings must never share one channel.
+ * React render.
  */
 
-.oj-step-grid {
+.oj-step-card {
     position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    left: 50%;
+    bottom: var(--space-lg);
     z-index: var(--z-panel);
+    transform: translateX(-50%);
+    max-width: calc(100vw - 2 * var(--space-lg));
+    background: var(--bg-node);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-overlay);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+}
+
+/* Mirror of `.oj-node__header` — without the grip, because this card is not
+   dragged: it is the rig's face, not one of its nodes. */
+.oj-step-card__header {
     display: flex;
     align-items: center;
-    gap: var(--space-lg);
-    padding: 12px 18px;
+    gap: var(--space-sm);
+    padding: 8px 12px;
     background: var(--bg-node-header);
-    border-top: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.oj-step-card__title {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: var(--text-lg);
+    line-height: 1.2;
+    color: var(--text-primary);
+}
+
+.oj-step-card__type {
+    margin-left: auto;
+    flex: 0 0 auto;
+    padding: 4px 7px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: var(--text-xs);
+    line-height: 1;
+    letter-spacing: var(--tracking-micro);
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+/* The well: the recessed ground the cells sit in, one hairline inside the card. */
+.oj-step-card__well {
+    margin: 10px;
+    padding: 10px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
 }
 
 .oj-step-grid__rows {
     display: flex;
     flex-direction: column;
     gap: 5px;
-    flex: 1;
-    max-width: 520px;
 }
 
 .oj-step-grid__row {
     display: grid;
-    grid-template-columns: 52px repeat(8, 1fr);
+    grid-template-columns: 44px repeat(8, 34px);
     gap: 5px;
     align-items: center;
 }
@@ -48,11 +104,11 @@
 }
 
 .oj-step-grid__cell {
-    height: 22px;
+    height: 24px;
     padding: 0;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
-    background: var(--bg-tertiary);
+    background: var(--bg-node);
     cursor: pointer;
     transition: background-color var(--motion-fast), transform var(--motion-spring), border-color var(--motion-fast);
 }
@@ -70,8 +126,9 @@
     box-shadow: var(--focus-ring);
 }
 
+/* CONTENT, not state: the second accent's ink. */
 .oj-step-grid__cell.is-on {
-    background: var(--accent-primary);
+    background: var(--accent-two-ink);
 }
 
 /* The column under the playhead. One attribute, eight rules, zero renders. */
@@ -86,16 +143,34 @@
     border-color: var(--text-secondary);
 }
 
-.oj-step-grid__hint {
-    margin-left: auto;
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
+/*
+ * Inside the well, directly under the cells it describes.
+ *
+ * `--text-sm`, not `--text-xs`: this is a sentence, and DESIGN.md §3 keeps
+ * functional sans prose at the 13px floor. The 11px/9.5px steps belong to the
+ * uppercase mono micro voice the row labels above are set in.
+ */
+.oj-step-card__hint {
+    margin: 8px 0 0;
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
     font-weight: 500;
     color: var(--text-muted);
 }
 
+/* Narrow stages: the columns give up their fixed width before the card does. */
 @media (max-width: 720px) {
-    .oj-step-grid__hint {
-        display: none;
+    .oj-step-grid__row {
+        grid-template-columns: 40px repeat(8, 1fr);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .oj-step-grid__cell {
+        transition: none;
+    }
+
+    .oj-step-grid__cell:active {
+        transform: none;
     }
 }

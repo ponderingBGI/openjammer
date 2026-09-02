@@ -8,7 +8,7 @@ export interface OpResult { verbs: Verb[]; selectedClipIds?: string[]; selectedN
 export const EDIT_OPS = [
     'createClip', 'addMarker', 'moveClips', 'trimClip', 'splitAt', 'duplicateClips', 'deleteClips', 'setGrid', 'nudge', 'deleteTime', 'insertTime',
     'cutSelection', 'copySelection', 'paste', 'pasteRepeat', 'selectRange', 'deleteRange', 'slipClip', 'splitRange', 'duplicateRange',
-    'drawNote', 'moveNotes', 'copyNotes', 'resizeNotes', 'eraseNotes', 'setVelocity', 'transposeNotes', 'quantizeNotes',
+    'drawNote', 'moveNotes', 'copyNotes', 'resizeNotes', 'eraseNotes', 'splitNotes', 'setVelocity', 'transposeNotes', 'quantizeNotes',
     'setAutomationPoints', 'moveAutomationPoints', 'setAutomationRange', 'thinAutomation',
     'setTrackGain', 'setTrackPan', 'addAutomationPoint', 'addAutomationPoints', 'setLaneState',
     'armTrack', 'setClick', 'setCountIn', 'record',
@@ -40,6 +40,7 @@ export type TimelineOp =
     | { op: 'copyNotes'; noteIds: string[]; deltaTick?: number; deltaPitch?: number }
     | { op: 'resizeNotes'; noteIds: string[]; edge: 'start' | 'end'; deltaTick?: number; at?: number; mode?: 'relative' | 'absolute' }
     | { op: 'eraseNotes'; noteIds?: string[]; range?: NoteRange }
+    | { op: 'splitNotes'; noteIds: string[]; atTick: number; minLengthTick?: number }
     | { op: 'setVelocity'; noteIds: string[]; mode: 'delta' | 'set' | 'ramp'; amount?: number; from?: number; to?: number; smush?: boolean }
     | { op: 'transposeNotes'; noteIds: string[]; semitones: number }
     | { op: 'quantizeNotes'; targets: string[]; grid: number; endGrid?: number; snapStart?: boolean; snapEnd?: boolean; strength?: number; swing?: number; threshold?: number; position?: number }
@@ -565,14 +566,14 @@ export function resizeNotes(
     return { verbs };
 }
 
-/** BC-32's exact pointer hit-zone geometry. */
-export function noteResizeZone(widthPx: number, xPx: number): 'start' | 'end' | undefined {
-    if (!(widthPx > 10)) return undefined;
-    const edgeWidth = Math.min(8, widthPx / 2 - 1);
-    if (xPx <= edgeWidth) return 'start';
-    if (xPx >= widthPx - edgeWidth) return 'end';
-    return undefined;
-}
+/*
+ * `noteResizeZone` lived here — a second implementation of BC-32's hit zone that
+ * nothing in production ever called, and that after HA-18 CONTRADICTED the one
+ * the roll actually uses (`>10` exclusive against `<10` inclusive) while holding
+ * the contract test that was supposed to pin it. Code values #7 and #8: the
+ * shipped path is `resizeEdge` in `components/PianoRoll/geometry.ts`, and it is
+ * now the only one. `pianoRollContracts.test.ts` gates that one.
+ */
 
 /** BC-32 generic-body fallback when no explicit edge handle was identified. */
 export const noteBodyResizeEdge = (xFraction: number): 'start' | 'end' => xFraction <= 0.25 ? 'start' : 'end';
@@ -597,28 +598,43 @@ export function eraseNotes(arrangement: Arrangement, request: { noteIds?: readon
  * selection pointing at it, survives the cut) and the right half is one
  * `addNote`. `apply()` batches both, so one cut is one Ctrl+Z.
  *
- * `atTick` is a SOURCE tick — the same coordinate `note.tick` is in. A cut on
- * the note's own start or end tick is not a cut, it is a no-op, and it emits
- * nothing rather than minting a zero-length note.
+ * `atTick` is a SOURCE tick — the same coordinate `note.tick` is in.
+ *
+ * NO SLIVERS. A cut is refused unless BOTH halves clear `minLengthTick`, which
+ * defaults to the floor the Draw tool already uses (`noteDragFloor`). Testing
+ * only for `tick < at < end` was true at the exact edge and false one tick in:
+ * with `Ctrl` suspending the snap, a press 1px inside a note's left edge minted
+ * a 99-tick fragment that renders about a pixel wide, cannot be grabbed and is
+ * under the drag floor — a gesture producing something the player cannot then
+ * undo by hand. A caller with a grid passes it, so "one snap unit" is the floor
+ * where snapping is on and 1/32 where it is not.
  */
 export function splitNotes(
     arrangement: Arrangement,
     noteIds: readonly string[],
     atTick: number,
     mintId: (prefix: string) => string,
+    minLengthTick?: number,
 ): OpResult {
     const at = Math.round(atTick);
+    const floor = Math.max(1, Math.round(minLengthTick ?? noteDragFloor(arrangement.ppq ?? 960)));
     const verbs: Verb[] = [];
     const selectedNoteIds: string[] = [];
     const skipped: string[] = [];
+    /* N5: one running index per source, so a multi-note cut appends in order. */
+    const appended = new Map<string, number>();
     for (const id of noteIds) {
         const found = findNote(arrangement, id);
-        if (!found || !(at > found.note.tick && at < found.note.tick + found.note.durTick)) { skipped.push(id); continue; }
+        if (!found) { skipped.push(id); continue; }
+        const noteEnd = found.note.tick + found.note.durTick;
+        if (at - found.note.tick < floor || noteEnd - at < floor) { skipped.push(id); continue; }
         const { note, source, sourceId } = found;
         const end = note.tick + note.durTick;
         const right: ArrangementNote = { ...note, id: mintId('note'), tick: at, durTick: end - at };
         verbs.push({ kind: 'editNote', noteId: note.id!, patch: { durTick: at - note.tick } });
-        verbs.push({ kind: 'addNote', sourceId, index: source.notes.length, note: right });
+        const index = source.notes.length + (appended.get(sourceId) ?? 0);
+        appended.set(sourceId, (appended.get(sourceId) ?? 0) + 1);
+        verbs.push({ kind: 'addNote', sourceId, index, note: right });
         selectedNoteIds.push(note.id!, right.id!);
     }
     return { verbs, selectedNoteIds, skipped };

@@ -6,6 +6,7 @@ import { arrangementLengthTicks, timebase } from '../../song/time';
 import { RulerStack } from '../Arrangement/RulerStack';
 import { SkyBand } from '../Arrangement/SkyBand';
 import { PianoRollSurface, SURFACE_GUTTER } from './PianoRoll';
+import { surfaceOpeningPxPerTick } from './geometry';
 import { applyPianoRollQuantize, auditionPianoRollNote } from './actions';
 
 /*
@@ -42,6 +43,22 @@ export function PianoRollSurfaceHost({ active, visible = active, transition }: {
         useEditingContextStore.setState({ enteredTrackId: track?.id ?? track?.ref ?? null, enteredClipId: clipId });
         return () => useEditingContextStore.setState({ enteredClipId: null });
     }, [active, clipId, track?.id, track?.ref]);
+    /*
+     * OPEN FITTED (F4). One write, on the transition into a clip — not on every
+     * render, or the player's own zoom would be reset under their hands on the
+     * next resize.
+     */
+    const openedClipId = useRef<string | null>(null);
+    useEffect(() => {
+        if (!active || !clip || !arrangement) { if (!active) openedClipId.current = null; return; }
+        if (openedClipId.current === clipId) return;
+        openedClipId.current = clipId ?? null;
+        const context = useEditingContextStore.getState();
+        context.setViewport('pianoroll', {
+            pxPerTick: surfaceOpeningPxPerTick(Math.max(1, hostSize.width - HEADER_WIDTH), clip.lengthTick, arrangement.ppq ?? 960, context.viewports.arrangement.pxPerTick),
+            leftTick: Math.max(0, clip.startTick),
+        });
+    }, [active, arrangement, clip, clipId, hostSize.width]);
     useEffect(() => {
         const element = rootRef.current;
         if (!element || typeof ResizeObserver === 'undefined') return;

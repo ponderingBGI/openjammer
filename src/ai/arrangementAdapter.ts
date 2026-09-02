@@ -35,6 +35,7 @@ import {
     setAutomationRange,
     setVelocity,
     splitAt,
+    splitNotes,
     splitRange,
     slipClips,
     transposeNotes,
@@ -149,6 +150,7 @@ export function createArrangementPort(): ArrangementToolPort {
                         case 'copyNotes': result = copyNotes(projected, operation.noteIds, operation.deltaTick ?? 0, operation.deltaPitch ?? 0, store.mintId); break;
                         case 'resizeNotes': result = resizeNotes(projected, operation.noteIds, operation.edge, operation); break;
                         case 'eraseNotes': result = eraseNotes(projected, operation); break;
+                        case 'splitNotes': result = splitNotes(projected, operation.noteIds, operation.atTick, store.mintId, operation.minLengthTick); break;
                         case 'setVelocity': result = setVelocity(projected, operation.noteIds, operation); break;
                         case 'transposeNotes': result = transposeNotes(projected, operation.noteIds, operation.semitones); break;
                         case 'quantizeNotes': result = quantizeNotes(projected, operation.targets, { ...operation, startGrid: operation.grid }); break;

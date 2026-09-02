@@ -158,3 +158,51 @@ describe('W6-CLEAN — one grammar for the consequential choice', () => {
         expect(replace).not.toHaveClass('oj-btn--primary');
     });
 });
+
+
+/*
+ * HA-23 / U14 — the two Keybindings confirms take Escape themselves.
+ *
+ * Neither had a handler, so Escape fell through to the Settings modal
+ * underneath: answering "no" to "Reset every shortcut?" — or backing out of a
+ * conflict — closed ALL of Settings. Four other inline confirms in the app
+ * already did this right (`AppMenuBar`); these copy that shape.
+ */
+describe('HA-23 — Escape cancels the confirm, not the panel behind it', () => {
+    /** Fire Escape at `element` and report whether it escaped to the document. */
+    function escapeFrom(element: HTMLElement): boolean {
+        let reached = false;
+        const listener = () => { reached = true; };
+        document.addEventListener('keydown', listener);
+        fireEvent.keyDown(element, { key: 'Escape' });
+        document.removeEventListener('keydown', listener);
+        return reached;
+    }
+
+    it('closes the reset-all confirm and stops', () => {
+        useKeybindingsStore.setState({ customBindings: { 'arrangement.play': { key: 'F8' } } });
+        render(<KeybindingsPanel />);
+        fireEvent.click(screen.getByRole('button', { name: 'Reset All to Defaults' }));
+
+        const dialog = screen.getByRole('alertdialog', { name: 'Reset every shortcut' });
+        expect(escapeFrom(dialog)).toBe(false);
+
+        expect(screen.queryByRole('alertdialog', { name: 'Reset every shortcut' })).toBeNull();
+        // Declining changed nothing about the bindings themselves.
+        expect(useKeybindingsStore.getState().customBindings['arrangement.play']).toEqual({ key: 'F8' });
+        // And the panel it was asked inside is still open.
+        expect(screen.getByRole('button', { name: 'Reset All to Defaults' })).toBeInTheDocument();
+    });
+
+    it('closes the shortcut-conflict confirm and stops', () => {
+        render(<KeybindingsPanel />);
+        fireEvent.click(deleteKeycap());
+        capture({ key: 'z', ctrlKey: true });
+
+        const dialog = screen.getByRole('alertdialog', { name: 'Shortcut conflict' });
+        expect(escapeFrom(dialog)).toBe(false);
+
+        expect(screen.queryByRole('alertdialog', { name: 'Shortcut conflict' })).toBeNull();
+        expect(useKeybindingsStore.getState().customBindings['arrangement.delete']).toBeUndefined();
+    });
+});

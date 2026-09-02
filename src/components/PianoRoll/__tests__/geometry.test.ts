@@ -1,13 +1,67 @@
 import { describe, expect, it } from 'vitest';
-import { clippedNoteGeometry, pitchRowHeight, resizeEdge, shouldAutoDetectDrums, velocityOpacity } from '../geometry';
+import { clippedNoteGeometry, INLINE_MIN_HALF_BEAT_PX, inlineOpeningPxPerTick, MIN_RESIZE_EDGE_WIDTH_PX, pitchRowHeight, resizeEdge, shouldAutoDetectDrums, surfaceOpeningPxPerTick, velocityOpacity } from '../geometry';
 import { buildPaperSketch } from '../../../song/songs/paperSketch';
 
 describe('piano-roll geometry', () => {
-    it('BC-32 exposes resize zones only above 10px and caps them at 8px', () => {
-        expect(resizeEdge(1, 10)).toBeNull();
+    it('BC-32 exposes resize zones from 10px up and caps them at 8px', () => {
+        // HA-18: ten pixels is where the edges START working. The floor used to
+        // be EXCLUSIVE (`width <= 10 -> null`), so a note exactly ten pixels wide
+        // — the width one `Ctrl+wheel` notch produced from the inline roll's old
+        // opening zoom — was still un-trimmable, with a cursor that never changed
+        // to say so.
+        expect(resizeEdge(1, MIN_RESIZE_EDGE_WIDTH_PX)).toBe('start');
+        expect(resizeEdge(9, MIN_RESIZE_EDGE_WIDTH_PX)).toBe('end');
+        expect(resizeEdge(1, MIN_RESIZE_EDGE_WIDTH_PX - 1)).toBeNull();
         expect(resizeEdge(7, 30)).toBe('start');
         expect(resizeEdge(9, 30)).toBeNull();
         expect(resizeEdge(23, 30)).toBe('end');
+    });
+
+    it("HA-18 — the inline roll's opening zoom makes a half-beat note grabbable", () => {
+        // The lane roll inherited the Song's axis, where a half beat is 4.8px:
+        // under the resize floor, so the first clip a player ever opened could be
+        // moved and never trimmed. The opening zoom is defined by the note width
+        // it has to produce, not by a magic number.
+        for (const ppq of [96, 480, 960, 1920]) {
+            const pxPerTick = inlineOpeningPxPerTick(ppq);
+            const halfBeatPx = (ppq / 2) * pxPerTick;
+            expect(halfBeatPx).toBeCloseTo(INLINE_MIN_HALF_BEAT_PX, 6);
+            expect(halfBeatPx).toBeGreaterThanOrEqual(MIN_RESIZE_EDGE_WIDTH_PX);
+            expect(resizeEdge(1, halfBeatPx)).toBe('start');
+        }
+        // And it is a FLOOR, not a target: the Song's own default axis (a half
+        // beat at 4.8px) is well under it, which is the bug it exists to close.
+        const songDefault = 38.75 / (960 * 4);
+        expect(480 * songDefault).toBeLessThan(INLINE_MIN_HALF_BEAT_PX);
+        expect(inlineOpeningPxPerTick(960)).toBeGreaterThan(songDefault);
+    });
+
+    it('F4 — the full roll opens FITTED, with the same floor', () => {
+        const ppq = 960;
+        const floor = inlineOpeningPxPerTick(ppq);
+        const song = 38.75 / (960 * 4);
+
+        // A four-bar clip in a 1 000px field: the clip fills the field.
+        const fourBars = 4 * 4 * ppq;
+        expect(surfaceOpeningPxPerTick(1000, fourBars, ppq, song)).toBeCloseTo(1000 / fourBars, 9);
+
+        // A sixty-bar clip would fit at 0.0043px/tick — a hairline comb — so the
+        // 24px-per-half-beat floor wins instead, and every note stays trimmable.
+        const sixtyBars = 60 * 4 * ppq;
+        expect(surfaceOpeningPxPerTick(1000, sixtyBars, ppq, song)).toBe(floor);
+        expect((ppq / 2) * surfaceOpeningPxPerTick(1000, sixtyBars, ppq, song)).toBeCloseTo(INLINE_MIN_HALF_BEAT_PX, 6);
+
+        // Never below the Song's own axis: a player already zoomed past the
+        // floor keeps their scale.
+        expect(surfaceOpeningPxPerTick(1000, sixtyBars, ppq, 5)).toBe(5);
+
+        // And the symptom it exists to close: the shipped starter's axis put
+        // every note under the resize floor on the surface `E` opens.
+        expect((ppq / 2) * song).toBeLessThan(MIN_RESIZE_EDGE_WIDTH_PX);
+        expect((ppq / 2) * surfaceOpeningPxPerTick(1000, sixtyBars, ppq, song)).toBeGreaterThanOrEqual(MIN_RESIZE_EDGE_WIDTH_PX);
+
+        // A clip with no length cannot be fitted; the floor still applies.
+        expect(surfaceOpeningPxPerTick(1000, 0, ppq, song)).toBe(floor);
     });
 
     it('maps velocity to opacity without changing note geometry', () => {

@@ -405,6 +405,12 @@ export function UpdatesPanel() {
                         title="Roll back your data?"
                         role="alertdialog"
                         aria-label="Confirm rollback"
+                        /* HA-23: Escape cancels the confirm, not Settings behind it. */
+                        onKeyDown={(event) => {
+                            if (event.key !== 'Escape') return;
+                            event.stopPropagation();
+                            setConfirmingRollback(false);
+                        }}
                     >
                         <p className="oj-upd-confirm-body">
                             Restores your data from before the last update and turns auto-update

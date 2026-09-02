@@ -99,6 +99,30 @@ describe('UpdatesPanel', () => {
         expect(screen.getAllByText(/Manual \.dmg updates/i).length).toBeGreaterThan(0);
     });
 
+    /*
+     * HA-23 / U14 — Escape cancels the confirm and stops there. It used to fall
+     * through to the Settings modal underneath, so declining a destructive
+     * question closed the whole panel.
+     */
+    it('Escape cancels the rollback confirm without reaching Settings behind it', () => {
+        (window as unknown as { __TAURI__?: unknown }).__TAURI__ = {};
+        mockUpdater({ status: status({ last_good_version: '0.0.1' }) });
+
+        render(<UpdatesPanel />);
+        fireEvent.click(screen.getByRole('button', { name: /Roll back/i }));
+        const confirm = screen.getByRole('alertdialog', { name: /Confirm rollback/i });
+
+        const reachedTheDocument = vi.fn();
+        document.addEventListener('keydown', reachedTheDocument);
+        fireEvent.keyDown(confirm, { key: 'Escape' });
+        document.removeEventListener('keydown', reachedTheDocument);
+
+        expect(screen.queryByRole('alertdialog', { name: /Confirm rollback/i })).toBeNull();
+        expect(reachedTheDocument).not.toHaveBeenCalled();
+        // The panel it lives in is still there — only the question went away.
+        expect(screen.getByRole('button', { name: /Roll back/i })).toBeInTheDocument();
+    });
+
     it('checks the newly selected channel, not the previous render state', async () => {
         (window as unknown as { __TAURI__?: unknown }).__TAURI__ = {};
         const updater = mockUpdater({ status: status({ can_auto_update: true }) });

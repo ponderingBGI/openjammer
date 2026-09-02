@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Button, Chip, IconWarning, Kbd, ValueScrubber } from '@openjammer/oj-ui';
 import { useArrangementStore } from '../../store/arrangementStore';
 import { useEditingContextStore } from '../../store/editingContextStore';
@@ -66,13 +67,36 @@ export function SkyBand({ fieldWidth }: { fieldWidth: number; onOpenSettings?: (
     const arrangement = useArrangementStore((state) => state.arrangement);
     const punchEnabled = useArrangementStore((state) => state.punchEnabled);
     const isPlaying = useArrangementStore((state) => state.isPlaying);
-    const isRecording = useArrangementStore((state) => state.isRecording);
     const recordError = useArrangementStore((state) => state.recordError);
     const transportError = useArrangementStore((state) => state.transportError);
     const pxPerTick = useEditingContextStore((state) => state.viewports.arrangement.pxPerTick);
     const editMode = useEditingContextStore((state) => state.editMode);
     const mixerOpen = useTrackLaneViewStore((state) => state.mixerOpen);
     const faults = usePluginFaultCards();
+    /*
+     * THE RECORDING LIVE REGION — empty at rest (HA-20).
+     *
+     * It used to render `isRecording ? 'Recording started' : 'Recording stopped'`
+     * unconditionally, and `aria-live="assertive"`. So mounting the Song on a
+     * document that had never recorded anything put the words "Recording
+     * stopped" permanently in an assertive region: a screen-reader user was
+     * interrupted with a false event every time they entered the surface, and
+     * the region could never announce a real stop either, because the text it
+     * would have to change to was already there.
+     *
+     * A live region carries EVENTS. So it holds nothing until recording actually
+     * transitions, and `polite` — a take starting or ending is status, not an
+     * alert that has the right to cut across whatever is being read.
+     */
+    const [recordLive, setRecordLive] = useState('');
+    // A SUBSCRIPTION, not a derived render: the region carries the transition
+    // itself, and a store subscription is the only shape in which "it changed"
+    // is a fact rather than a comparison against a ref that a re-render can
+    // reset. Mount is not a transition, so mounting says nothing.
+    useEffect(() => useArrangementStore.subscribe((state, previous) => {
+        if (state.isRecording === previous.isRecording) return;
+        setRecordLive(`${state.isRecording ? 'Recording started' : 'Recording stopped'}${state.recordError ? `. ${state.recordError}` : ''}`);
+    }), []);
     if (!arrangement) return <div className="arrangement-sky" aria-hidden="true" />;
     const tb = timebase(arrangement);
     const visibleBars = Math.max(1, fieldWidth / (pxPerTick * tb.ticksPerBar));
@@ -108,7 +132,7 @@ export function SkyBand({ fieldWidth }: { fieldWidth: number; onOpenSettings?: (
                     }}
                 />
             </div>
-            <div className="arrangement-record-live" aria-live="assertive" aria-atomic="true">{isRecording ? 'Recording started' : 'Recording stopped'}{recordError ? `. ${recordError}` : ''}</div>
+            <div className="arrangement-record-live" aria-live="polite" aria-atomic="true">{recordLive}</div>
         </div>
     );
 }

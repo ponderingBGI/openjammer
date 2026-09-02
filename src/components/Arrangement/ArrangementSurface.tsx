@@ -71,6 +71,7 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     const gridUnit = useEditingContextStore((state) => state.gridUnit);
     const snapMode = useEditingContextStore((state) => state.snapMode);
     const laneHeights = useTrackLaneViewStore((state) => state.laneHeights);
+    const expandedPianoRolls = useTrackLaneViewStore((state) => state.expandedPianoRolls);
     const automationLaneByTrack = useTrackLaneViewStore((state) => state.automationLaneByTrack);
     const mixerOpen = useTrackLaneViewStore((state) => state.mixerOpen);
     const headerWidth = useTrackLaneViewStore((state) => state.headerWidth);
@@ -214,7 +215,13 @@ export function ArrangementSurface({ active, visible = active, transition, songN
             { actionId: 'arrangement.muteClips', defaultBinding: { key: '0' }, run: () => { const store = useArrangementStore.getState(); const ids = new Set(useEditingContextStore.getState().viewports.arrangement.selection.clipIds); const clips = store.arrangement?.tracks.flatMap((track) => track.clips).filter((clip) => clip.id && ids.has(clip.id)); if (clips?.length) store.apply(clips.map((clip) => ({ kind: 'setClipMute' as const, clipId: clip.id!, mute: !clip.mute }))); return true; } },
             { actionId: 'arrangement.insertTime', defaultBinding: { key: 'e', ctrl: true }, run: () => { window.dispatchEvent(new CustomEvent('openjammer:time-prompt', { detail: { mode: 'insert' } })); return true; } },
             { actionId: 'arrangement.deleteTime', defaultBinding: { key: 'Backspace', ctrl: true, shift: true }, run: () => { window.dispatchEvent(new CustomEvent('openjammer:time-prompt', { detail: { mode: 'delete' } })); return true; } },
-            ...([['arrangement.tool.select', 'v', 'select'], ['arrangement.tool.draw', 'b', 'draw'], ['arrangement.tool.erase', 'x', 'erase'], ['arrangement.tool.knife', 'k', 'knife'], ['arrangement.tool.time', 't', 'time']] as const).map(([actionId, key, tool]) => ({ actionId, defaultBinding: { key }, run: () => { useEditingContextStore.getState().setViewport('arrangement', { tool }); return true; } })),
+            /*
+             * U11: four tools, four keys, four buttons, four behaviours. The
+             * Time tool used to be a fifth entry here — a `t` binding that armed
+             * a tool nothing on this surface ever read, with no button to press
+             * and nothing to see. Code-value #8: it is removed, not kept.
+             */
+            ...([['arrangement.tool.select', 'v', 'select'], ['arrangement.tool.draw', 'b', 'draw'], ['arrangement.tool.erase', 'x', 'erase'], ['arrangement.tool.knife', 'k', 'knife']] as const).map(([actionId, key, tool]) => ({ actionId, defaultBinding: { key }, run: () => { useEditingContextStore.getState().setViewport('arrangement', { tool }); return true; } })),
             ...([['arrangement.gridCoarser', '[', -1], ['arrangement.gridFiner', ']', 1]] as const).map(([actionId, key, direction]) => ({ actionId, defaultBinding: { key }, run: () => { const units: GridUnit[] = ['none', 'bar', 'beat', '1/2', '1/4', '1/8', '1/16', '1/32']; const context = useEditingContextStore.getState(); const current = Math.max(0, units.indexOf(context.gridUnit)); context.setGridUnit(units[Math.max(0, Math.min(units.length - 1, current + direction))]!); return true; } })),
             ...([['arrangement.markerPrevious', 'ArrowLeft', -1], ['arrangement.markerNext', 'ArrowRight', 1]] as const).map(([actionId, key, direction]) => ({ actionId, defaultBinding: { key, ctrl: true }, run: () => { const store = useArrangementStore.getState(); const tick = store.currentTick(); const points = (store.arrangement?.locations ?? []).filter((item) => item.kind !== 'loop' && item.kind !== 'punch').map((item) => item.startTick).sort((a, b) => a - b); const target = direction < 0 ? points.filter((point) => point < tick).at(-1) : points.find((point) => point > tick); if (target !== undefined) store.seek(target); return true; } })),
             ...([['arrangement.nudgeBarLeft', 'ArrowLeft', -1], ['arrangement.nudgeBarRight', 'ArrowRight', 1]] as const).map(([actionId, key, direction]) => ({ actionId, defaultBinding: { key, alt: true }, run: () => { const store = useArrangementStore.getState(); const context = useEditingContextStore.getState(); if (store.arrangement) store.apply(nudge(store.arrangement, context.viewports.arrangement.selection.clipIds, timebase(store.arrangement).ticksPerBar, direction).verbs); return true; } })),
@@ -320,6 +327,16 @@ export function ArrangementSurface({ active, visible = active, transition, songN
     const pinnedTrackIndices = dragActive ? arrangement.tracks.map((track, index) => track.clips.some((clip) => clip.id && activeClipDragIds.includes(clip.id)) ? index : -1).filter((index) => index >= 0) : [];
     const { offsets, laneTop, visibleStartTick, visibleEndTick } = virtual;
     const fieldGroundHeight = Math.max(offsets.at(-1)!, view.height - RULER_HEIGHT);
+    /*
+     * A lane with an inline roll open is a SECOND VIEWPORT on its own axis, and
+     * it draws its own playhead there. The Song's line is masked out across it
+     * rather than crossing it at the Song's pixels, which would put two "now"
+     * markers in one box pointing at two different places (F1).
+     */
+    const playheadGaps = arrangement.tracks.flatMap((track, index) => {
+        const trackId = track.id ?? track.ref;
+        return expandedPianoRolls[trackId] ? [{ top: offsets[index]!, height: laneHeights[trackId] ?? 72 }] : [];
+    });
     const firstLane = pinnedTrackIndices.length ? Math.min(virtual.firstLane, ...pinnedTrackIndices) : virtual.firstLane;
     const lastLane = pinnedTrackIndices.length ? Math.max(virtual.lastLane, ...pinnedTrackIndices.map((index) => index + 1)) : virtual.lastLane;
 
@@ -505,7 +522,7 @@ export function ArrangementSurface({ active, visible = active, transition, songN
                         <span>{formatBarBeat(tb, viewport.selection.timeRange.toTick)}</span>
                     </div>}
                     {snapIndicatorTick !== null && <div className="arrangement-snap-indicator" aria-hidden="true" style={{ transform: `translate3d(${headerWidth + snapIndicatorTick * viewport.pxPerTick}px,0,0)`, height: offsets.at(-1) }} />}
-                    <PlayheadLayer pxPerTick={viewport.pxPerTick} scrollRef={scrollRef} height={offsets.at(-1)!} />
+                    <PlayheadLayer pxPerTick={viewport.pxPerTick} scrollRef={scrollRef} height={offsets.at(-1)!} gaps={playheadGaps} />
                     {marquee && <div className={`arrangement-marquee${marquee.mode === 'range' ? ' is-range' : ''}`} aria-hidden="true" style={{ left: marquee.x, top: marquee.y, width: marquee.width, height: marquee.height }} />}
                     {drawGhost && <div className="arrangement-clip arrangement-clip--draw" data-draw-ghost aria-hidden="true" style={{ left: drawGhost.x, top: drawGhost.y, width: drawGhost.width, height: drawGhost.height }} />}
                 </div>

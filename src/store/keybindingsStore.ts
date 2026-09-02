@@ -230,7 +230,9 @@ export const keybindingActions: KeybindingAction[] = [
     { id: 'arrangement.tool.draw', label: 'Draw Tool', category: 'Arrangement Tools', defaultBinding: { key: 'b' }, scope: 'surface', surface: 'arrangement' },
     { id: 'arrangement.tool.erase', label: 'Erase Tool', category: 'Arrangement Tools', defaultBinding: { key: 'x' }, scope: 'surface', surface: 'arrangement' },
     { id: 'arrangement.tool.knife', label: 'Knife Tool', category: 'Arrangement Tools', defaultBinding: { key: 'k' }, scope: 'surface', surface: 'arrangement' },
-    { id: 'arrangement.tool.time', label: 'Time Range Tool', category: 'Arrangement Tools', defaultBinding: { key: 't' }, scope: 'surface', surface: 'arrangement' },
+    // `arrangement.tool.time` was here. It armed a tool no code path read, had
+    // no button, and did nothing when pressed — so it is gone rather than
+    // rebound (U11 / HA-13; code-value #8).
 
     // Piano roll - note editing
     { id: 'pianoroll.transport', label: 'Play/Stop (Piano Roll)', category: 'Piano Roll', defaultBinding: { key: ' ' }, scope: 'surface', surface: 'pianoroll', mode: 'edit' },

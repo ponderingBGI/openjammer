@@ -90,6 +90,8 @@
 
 .keybindings-category-title {
     margin: 0;
+    /* Uppercase micro-label: the mono voice, declared here. */
+    font-family: var(--font-mono);
     font-size: var(--text-xs);
     font-weight: 600;
     letter-spacing: var(--tracking-micro);
@@ -98,7 +100,7 @@
 }
 
 .keybindings-surface-chip {
-    font-size: var(--text-xs);
+    font-size: var(--text-sm);
     padding: 2px 8px;
 }
 

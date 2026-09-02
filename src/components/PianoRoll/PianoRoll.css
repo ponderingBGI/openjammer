@@ -12,6 +12,7 @@
  */
 
 .piano-roll {
+    --piano-roll-lane-ruler-line: 14px;
     --piano-roll-toolbar-height: 40px;
     /*
      * THE NOTE INK — the readable ink of `--acc2`, now a NAMED TOKEN.
@@ -174,8 +175,9 @@
 .piano-roll__quantize-field select:focus,
 .piano-roll__quantize-field input:focus { outline: none; border-color: var(--accent-primary); box-shadow: var(--focus-ring); }
 
-/* The inline lane borrows the track's own lane menu instead of a second toolbar. */
-.piano-roll--inline .piano-roll__toolbar { display: none; }
+/* The inline lane borrows the track's own lane menu instead of a second
+   toolbar — it is not RENDERED there at all (HA-22), so there is nothing to
+   hide. Its own zoom rides `.piano-roll__inline-strip` below. */
 
 .piano-roll__rejection {
     position: absolute;
@@ -189,6 +191,63 @@
     box-shadow: var(--shadow-raised);
     font: 500 var(--text-sm)/1 var(--font-sans);
     transform: translateX(-50%);
+}
+
+/*
+ * The affirmative twin of the rejection line: what the Erase and Knife tools
+ * just DID. Same geometry, same 1.6s life, `--text-secondary` rather than the
+ * danger ink — nothing went wrong, something was removed on purpose.
+ */
+.piano-roll__notice {
+    position: absolute;
+    z-index: 21;
+    top: calc(var(--piano-roll-toolbar-height) + 6px);
+    left: 50%;
+    padding: 5px 10px;
+    border-radius: var(--radius-md);
+    background: var(--bg-node);
+    color: var(--text-secondary);
+    box-shadow: var(--shadow-raised);
+    font: 500 var(--text-sm)/1 var(--font-sans);
+    transform: translateX(-50%);
+}
+
+.piano-roll--inline .piano-roll__notice,
+.piano-roll--inline .piano-roll__rejection { top: 6px; }
+
+/*
+ * The roll's own zoom (HA-18). Two 24px buttons — the fine-pointer minimum —
+ * in the toolbar's segmented idiom, so it reads as one control rather than two
+ * loose glyphs.
+ */
+.piano-roll__zoom { display: inline-flex; flex: none; gap: 2px; padding: 3px; border-radius: var(--radius-md); background: var(--bg-tertiary); }
+.piano-roll__zoom button {
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-secondary);
+    font: 600 var(--text-sm)/1 var(--font-mono);
+    cursor: pointer;
+}
+.piano-roll__zoom button:hover { color: var(--text-primary); background: var(--bg-node); }
+.piano-roll__zoom button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+/*
+ * The inline lane has no toolbar, so its zoom rides a corner strip over the
+ * field's top-right — clear of the key bed, clear of the notes a hand is
+ * reaching for, and out of the way of the velocity lane at the bottom.
+ */
+.piano-roll__inline-strip {
+    position: absolute;
+    z-index: 22;
+    top: 4px;
+    right: 4px;
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
 }
 
 /* ── Body: scroomer · key bed · field ─────────────────────────────────────── */
@@ -260,6 +319,43 @@
 .piano-roll.is-drums .piano-roll__key { justify-content: flex-start; padding: 0 4px 0 6px; color: var(--text-secondary); font: 500 var(--text-xs)/1 var(--font-mono); text-overflow: ellipsis; }
 
 .piano-roll__field { position: relative; min-width: 0; overflow: hidden; background: var(--timeline-lane-bg); touch-action: none; }
+
+/*
+ * THE LANE IS ITS OWN VIEWPORT (F1) — so it gets its own horizontal scroller.
+ * Every note in the clip is reachable by scrolling, at the lane's own axis,
+ * instead of 51 of 128 being clipped by an `overflow: hidden` with no way out.
+ * The scrollbar is the same quiet 10px the Song's scroller uses.
+ */
+.piano-roll--inline .piano-roll__field { overflow-x: auto; overflow-y: auto; scrollbar-color: color-mix(in oklab, var(--text-primary) 22%, transparent) transparent; scrollbar-width: thin; }
+.piano-roll--inline .piano-roll__field::-webkit-scrollbar { width: 10px; height: 10px; }
+.piano-roll--inline .piano-roll__field::-webkit-scrollbar-track { background: transparent; }
+.piano-roll--inline .piano-roll__field::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: var(--radius-pill); background: color-mix(in oklab, var(--text-primary) 22%, transparent); background-clip: padding-box; }
+
+/*
+ * The lane's own bar strip: 14px, hairline-closed, printed in the micro mono
+ * voice because a bar number is an exact value, not a title.
+ */
+.piano-roll__lane-ruler {
+    position: relative;
+    flex: 0 0 auto;
+    margin-left: calc(var(--piano-roll-scroomer-width) + var(--piano-roll-key-width));
+    overflow: hidden;
+    border-bottom: 1px solid var(--timeline-lane-divider);
+    background: var(--timeline-chrome-bg);
+}
+.piano-roll__lane-ruler-track { position: absolute; inset: 0 auto 0 0; height: 100%; will-change: transform; }
+.piano-roll__lane-ruler i {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    padding-left: 3px;
+    border-left: 1px solid var(--timeline-grid-bar);
+    color: var(--text-muted);
+    font: 500 var(--text-micro)/var(--piano-roll-lane-ruler-line) var(--font-mono);
+    font-style: normal;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: var(--tracking-micro);
+}
 .piano-roll__content { position: relative; }
 .piano-roll__row { position: absolute; right: 0; left: 0; background: transparent; pointer-events: none; }
 .piano-roll__row.is-black { background: color-mix(in oklab, var(--timeline-lane-alt-bg) 45%, transparent); }

@@ -134,11 +134,21 @@ function beatRig(persona: Persona): RigSpec {
             data: { effectType: 'reverb', params: { mix: 0.22 } },
         },
         { ref: 'out', type: 'speaker', position: { ...OUT_AT } },
-        // Below the chain and clear of the keyboard (which is ~360px tall now
-        // that it draws its keys), out of both bottom corners where the
-        // beginner's hint and the shortcut card live. A Song nobody can find is
-        // no Song.
-        { ref: 'song', type: 'song', position: { x: INSTRUMENT_AT.x, y: 580 } },
+        /*
+         * Below the keyboard, on the LEFT, where the rig's three occupied
+         * corners are not.
+         *
+         * It used to sit at `{ INSTRUMENT_AT.x, 580 }` — dead centre at the foot
+         * of a 1280x800 stage, which is exactly where the beat rig's step card
+         * lands (U15). The strip that card replaced was full-bleed and clipped
+         * this node outright; a compact card in one place still covers whatever
+         * is under that place, so the fix is layout on BOTH sides: the card is
+         * only as wide as its own eight columns, and the Song is a sibling
+         * beside it rather than beneath it. The two other corners stay free for
+         * the beginner's hint (bottom-left of the VIEWPORT) and the shortcut
+         * card (bottom-right). A Song nobody can find is no Song.
+         */
+        { ref: 'song', type: 'song', position: { x: KEYS_AT.x, y: 500 } },
     ];
     const wires: RigWire[] = [
         ...keyboardWires('pads', 'kit'),

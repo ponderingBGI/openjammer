@@ -136,9 +136,3 @@
     color: var(--warning-ink);
     border-color: var(--accent-warning);
 }
-
-/* When the beat rig's step grid owns the bottom bar, sit above it. */
-body:has(.oj-step-grid) .oj-help,
-body:has(.oj-step-grid) .oj-help__minimised {
-    bottom: calc(var(--space-lg) + 96px);
-}
