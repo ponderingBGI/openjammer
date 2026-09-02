@@ -65,6 +65,11 @@ export function PortRow({
                 direction={side}
                 connected={connected}
                 placeholder={placeholder}
+                // The row already knows what this socket is CALLED; the socket
+                // needs it to say its own name (U8). Only a plain string can be
+                // spoken — a node that renders a widget as its label keeps the
+                // type+direction name Port derives on its own.
+                {...(typeof label === 'string' ? { name: label } : {})}
                 {...(resolvedKind ? { resolvedKind } : {})}
                 {...rest}
             />

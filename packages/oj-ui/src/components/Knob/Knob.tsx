@@ -301,9 +301,32 @@ export function Knob({
         .filter(Boolean)
         .join(' ');
 
+    /*
+     * HA-19 — the dial says what it can do.
+     *
+     * This file had ZERO occurrences of `title`, so the four things a Knob knows
+     * how to do — a fine drag, a reset, a wheel, the arrows — were discoverable
+     * only by trying them or by reading this source. It is the app's primary
+     * continuous control; the one line costs nothing and removes the whole
+     * "is this thing draggable?" pause.
+     *
+     * `rest.title` wins, because a consumer that names the parameter
+     * ("Knob 3 (CC74) -> cutoff", as the MiniLab panel does) is saying something
+     * this cannot: the mapping. It goes on the WRAP, so the label and the value
+     * readout carry it too — those are the parts of a knob a pointer rests on.
+     */
+    // "Shift for a fine DRAG", not "Shift for fine": Shift is a drag modifier
+    // only — it does nothing to the wheel or the arrows. PageUp/PageDown (±10)
+    // and Home/End (min/max) are real and deliberately left to the help panel;
+    // naming six gestures in a tooltip is a paragraph, not an affordance.
+    const gestureHint = defaultValue == null
+        ? 'Drag to change · Shift for a fine drag · wheel or arrows when focused'
+        : 'Drag to change · Shift for a fine drag · double-click to reset · wheel or arrows when focused';
+
     return (
         <div
             className={classes}
+            title={gestureHint}
             style={{ ...style, '--oj-knob-size': `${size}px` } as CSSProperties}
             {...rest}
         >

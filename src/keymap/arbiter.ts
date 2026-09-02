@@ -38,6 +38,46 @@ function isSurfaceTabTarget(target: EventTarget | null): boolean {
     return target.matches('[data-surface-root]');
 }
 
+/**
+ * Was the PREVIOUS key a bare `Tab`? — the whole of U9.
+ *
+ * The stage-floor `Tab` toggle was unconditional, and the measured consequence
+ * (HEURISTIC-AUDIT HA-01, S1) is that there was **no forward-Tab route into any
+ * surface at all**. Walking the topbar ends at the transport pill; the next
+ * `Tab` leaves the last tabbable element, which parks `document.activeElement`
+ * on `document.body` — the stage floor — and from there every further `Tab`
+ * toggled canvas <-> song forever. Zero canvas controls were ever reached, while
+ * `docs/shell.md:80-82` promised the opposite in writing.
+ *
+ * The discriminator is whether focus is PARKED on the stage floor or in TRANSIT
+ * across it. A player who clicked the empty stage, or pressed Escape, and then
+ * presses `Tab` means "show me the other surface" — that gesture is unchanged,
+ * and it is what the topbar keycap advertises. A player mid-traversal arrives on
+ * the floor with a `Tab` already behind them, and means "keep going" — so the
+ * key falls through to native traversal and lands on the first control inside
+ * the active surface, which is exactly what the doc claims.
+ *
+ * One flag covers both halves of the decision, including the one the brief names
+ * directly: a SECOND consecutive bare `Tab` on a surface root always falls
+ * through, so a player who toggles and presses `Tab` again walks INTO the
+ * surface they just brought up rather than toggling back.
+ *
+ * `Shift+Tab` is not a bare Tab and never toggles, so it neither sets nor reads
+ * this; any other key clears it, which is what makes "consecutive" mean
+ * consecutive.
+ */
+let previousKeyWasBareTab = false;
+
+/**
+ * Focus was moved by something other than the keyboard (a click, a tap), so the
+ * traversal that was running is over: the next bare `Tab` on the stage floor is
+ * a fresh, PARKED gesture and must toggle. Wired to `pointerdown` by
+ * `useKeymapArbiter`; also called by the arbiter's own tests.
+ */
+export function resetTabTraversal(): void {
+    previousKeyWasBareTab = false;
+}
+
 function runSets(event: KeyboardEvent, sets: readonly BindingSet[], inheritedOnly = false): boolean {
     const bindings = useKeybindingsStore.getState();
     for (const set of sets) {
@@ -55,6 +95,13 @@ function runSets(event: KeyboardEvent, sets: readonly BindingSet[], inheritedOnl
 }
 
 export function resolveKeydown(event: KeyboardEvent): boolean {
+    // FIRST, before any early return: the "was the last key a bare Tab" flag has
+    // to see EVERY key, or a Tab pressed inside a text field leaves it stale and
+    // the next stage-floor Tab reads a traversal that is not running (U9).
+    const isBareTab = event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey;
+    const wasFollowingTab = previousKeyWasBareTab;
+    previousKeyWasBareTab = isBareTab;
+
     const isNativeCopy = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c' && hasNativeTextSelection();
     if (isEditableTarget(event.target) || isNativeCopy) return false;
 
@@ -63,14 +110,30 @@ export function resolveKeydown(event: KeyboardEvent): boolean {
 
     // Tab is browser focus traversal everywhere except the song surfaces themselves —
     // inside a focus-trapped dialog, on the transport pill, in the topbar, in a panel.
-    if (event.key === 'Tab' && !isSurfaceTabTarget(event.target)) return false;
+    // And on the stage floor it is traversal too whenever the previous key was
+    // also a bare Tab: focus is crossing the floor, not parked on it (U9).
+    if (event.key === 'Tab' && (!isSurfaceTabTarget(event.target) || (isBareTab && wasFollowingTab))) return false;
 
-    // While dragging, Escape may reach the normal ladder; every other key is
-    // deliberately consumed so no edit can land beneath the pointer gesture.
+    /*
+     * While dragging, Escape may reach the normal ladder; every other key is
+     * deliberately consumed so no edit can land beneath the pointer gesture.
+     *
+     * `Tab` is the ONE exception, and U8 is why. `isConnecting` is now raised by
+     * the KEYBOARD route as well as the pointer one — `Enter` on a socket arms a
+     * cable — and walking to the card you mean to land on is `Tab`. Swallowing it
+     * left the keyboard player armed and unable to move, i.e. the gesture failing
+     * at exactly the step that matters. So a mid-gesture `Tab` FALLS THROUGH to
+     * native focus traversal rather than being consumed — it still never reaches
+     * the surface toggle, which is the half of this guard that was load-bearing
+     * (swapping the visible surface out from under a live drag). Safe for the
+     * pointer case too: a drag follows the mouse, not the focus ring, and no EDIT
+     * can land from a Tab.
+     */
     const canvas = useCanvasStore.getState();
     const dragActive = canvas.isDragging || canvas.isPanning || canvas.isConnecting ||
         useAudioClipStore.getState().dragState.isDragging;
     if (dragActive && event.key !== 'Escape') {
+        if (event.key === 'Tab') return false;
         event.preventDefault();
         return true;
     }

@@ -1,5 +1,122 @@
 import type { Position } from '../engine/types';
 
+/* ===========================================================================
+ * HOW BIG IS A CARD? — measured, never declared.
+ *
+ * `nodeDefinitions[type].dimensions` is the obvious source and it is the wrong
+ * one. Measured at zoom 1.0 on the shipping build, a Looper declares
+ * `height: 120` and renders **267**; a Sampler declares `140` and renders
+ * **378**. Those literals date from the fixed-height cards the New DNA
+ * faceplates replaced, and nothing re-declared them when the bodies became
+ * content-driven.
+ *
+ * The obvious repair — re-declare all fourteen from a measuring pass — was
+ * considered and REJECTED, for two reasons, and the second is the one that
+ * decides it:
+ *
+ *  1. It rots on the next commit. A faceplate body is content-driven now: a
+ *     Sampler with four rows is taller than a Sampler with one, an Instrument
+ *     grows an input when you drop a cable on its ghost port, a hosted plugin
+ *     card is whatever the plugin's parameter list makes it. A number typed into
+ *     the registry is a snapshot of one render on one day in one theme, and
+ *     nothing in CI can notice when it stops being true.
+ *  2. `dimensions` is NOT the card's footprint — it is the nominal box the
+ *     SOCKET-anchor fallback normalises against (`utils/portPositions.ts`:
+ *     `socketColumnX(width)` / `socketRowY(height)`), and every edge-anchored
+ *     `position` literal in the registry is recomputed from it by
+ *     `engine/__tests__/socketGeometry.test.ts`. Changing a declared height to
+ *     make spawning honest would move that node's cable anchors on the first
+ *     painted frame. One field, two jobs; only one of them is wrong.
+ *
+ * So the placement rule reads the SURFACE. A card already on screen is a real
+ * measurement of a real faceplate in the real theme at the real zoom, and it
+ * costs one pass over ~10 elements on an add — off the audio path, once per
+ * gesture. What a measurement cannot do is describe a card that has never
+ * rendered, so a session-scoped cache remembers every type it has ever seen
+ * (types survive a card being deleted), and the declared box is the last resort
+ * with the tallest card on screen as its floor.
+ * ======================================================================== */
+
+/** A card's real footprint in CANVAS px (i.e. divided back out of the zoom). */
+export interface CardSize {
+    width: number;
+    height: number;
+}
+
+/**
+ * Every type this session has ever seen rendered. A player who adds a Sampler,
+ * deletes it, and adds another should not get the stale declared size back for
+ * the second one — the surface already told us the truth once.
+ */
+const measuredByType = new Map<string, CardSize>();
+
+/** Testing seam: forget everything measured so far. */
+export function resetMeasuredCards(): void {
+    measuredByType.clear();
+}
+
+/**
+ * Measure every card currently painted, in canvas px.
+ *
+ * `typeOf` resolves a node id to its type — passed in rather than imported, so
+ * this module stays free of the stores and can be tested with a fake DOM and a
+ * fake lookup.
+ */
+export function measureRenderedCards(
+    zoom: number,
+    typeOf: (nodeId: string) => string | undefined,
+): { byId: Map<string, CardSize> } {
+    const byId = new Map<string, CardSize>();
+    if (typeof document === 'undefined') return { byId };
+    const scale = zoom || 1;
+    for (const element of document.querySelectorAll('.oj-node')) {
+        const box = element.getBoundingClientRect();
+        if (!box.width || !box.height) continue;
+        const size = { width: box.width / scale, height: box.height / scale };
+        // A card carries no id of its own; every one of its ports does.
+        const id = element.querySelector('[data-node-id]')?.getAttribute('data-node-id');
+        if (!id) continue;
+        byId.set(id, size);
+        const type = typeOf(id);
+        if (type) measuredByType.set(type, size);
+    }
+    return { byId };
+}
+
+/**
+ * How much room to reserve for the card about to be added.
+ *
+ * If a card of this type has ever rendered this session, that is the answer.
+ * Otherwise the two axes are treated DIFFERENTLY, because the registry is wrong
+ * about them in different ways and by different amounts:
+ *
+ *  - **Height** is floored at the tallest card measured so far. This is the axis
+ *    the declared numbers actually lie about — a faceplate body is
+ *    content-driven now, and the shipped figures under-state by up to 2.7x
+ *    (Sampler declares 140, renders 378). Over-reserving height only MOVES the
+ *    new card; under-reserving it drops the card below the fold, where the
+ *    player never sees the thing they just asked for. The failure is asymmetric,
+ *    so the floor leans the safe way.
+ *
+ *  - **Width is NOT floored**, and that is a fix, not an omission. A card's
+ *    width IS roughly what it declares (measured on the jam rig: Looper 240 vs
+ *    252, Sampler 200 vs 224, Library 500 vs 500) because width is set by the
+ *    box, not by the content. Flooring it to the widest card ever seen cost a
+ *    real slot: with a Library (500 wide) on screen, a Sampler that needed a
+ *    224x397 hole was made to look for a 500x400 one, found none, and landed
+ *    two thirds off the bottom of a 1440x900 viewport — while a free 224-wide
+ *    column sat beside the Looper. Over-reserving is not free; it exhausts the
+ *    canvas and then falls back to exactly the outcome it was trying to avoid.
+ */
+export function spawnCardSize(type: string, declared?: CardSize): CardSize {
+    const measured = measuredByType.get(type);
+    if (measured) return measured;
+    const width = declared?.width ?? 200;
+    let height = declared?.height ?? 150;
+    for (const size of measuredByType.values()) height = Math.max(height, size.height);
+    return { width, height };
+}
+
 /**
  * Where a new card actually lands.
  *
@@ -169,11 +286,48 @@ export function freeSpawnPoint(
         }
     }
     /*
-     * Nothing fits entirely. Return the most VISIBLE uncovered spot rather than
-     * the first one found: on a canvas whose middle is already spanned by a rig
-     * there may be no room for a 380px faceplate at all, and in that case a card
-     * two thirds on screen is a far better answer than one just past the fold —
-     * and either is better than one dropped on top of the player's work.
+     * The cascade found nothing that fits. Before settling, SWEEP.
+     *
+     * The cascade is a diagonal lattice: 128 candidates, stepped and wrapped
+     * independently per axis. It is the right shape for the common case (a run of
+     * adds that reads as a legible pile) and it is a poor SEARCH — measured on the
+     * jam rig at 1440x900, it missed a genuinely free 200x400 column beside the
+     * Looper and dropped a Sampler two thirds below the fold instead. A card the
+     * player cannot see is the one outcome this whole module exists to prevent, so
+     * "the lattice did not happen to land there" is not a good enough reason.
+     *
+     * The sweep is a plain grid over the visible canvas at the same step, read
+     * top-left to bottom-right, first clear cell wins. It is exhaustive within one
+     * `CASCADE_STEP` of resolution, deterministic, and it answers the only
+     * question left: is there ANY room?
+     *
+     * Cost, stated properly because the first version of this comment quoted a
+     * zoom-1 number as if it were the bound: `bounds` are CANVAS px, so a zoomed-
+     * out canvas is larger in them. The sweep is
+     * `O((W/zoom · H/zoom) / CASCADE_STEP²)` cells, each tested against the
+     * siblings — ~1.7k cells at zoom 1 on a 1440×900 viewport, ~27k at
+     * `MIN_ZOOM = 0.25` (`canvasStore.ts`). Even the worst case is a low
+     * single-digit millisecond pass on ~10 rectangles, it runs only after the
+     * cascade has already failed 128 candidates, once per user gesture, and it is
+     * nowhere near the audio path.
+     */
+    if (bounds) {
+        const lastX = (bounds.right - card.width);
+        const lastY = (bounds.bottom - card.height);
+        for (let y = bounds.top; y <= lastY; y += CASCADE_STEP) {
+            for (let x = bounds.left; x <= lastX; x += CASCADE_STEP) {
+                const candidate = { x, y };
+                if (clear(candidate)) return candidate;
+            }
+        }
+    }
+
+    /*
+     * Nothing fits entirely, anywhere. Return the most VISIBLE uncovered spot
+     * rather than the first one found: on a canvas whose middle is already
+     * spanned by a rig there may be no room for a 380px faceplate at all, and in
+     * that case a card two thirds on screen is a far better answer than one just
+     * past the fold — and either is better than one dropped on the player's work.
      */
     return best?.position ?? desired;
 }

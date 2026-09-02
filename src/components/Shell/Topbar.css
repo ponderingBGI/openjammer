@@ -107,6 +107,24 @@
     margin-top: var(--space-sm);
 }
 
+/*
+ * The New Project dialog is the same hanging card as the confirm — it is asked
+ * in the bar it was invoked from — but it collects a name, so it needs a field
+ * row and a little more width for the two sentences about where work lives.
+ */
+.oj-new-project {
+    width: 380px;
+}
+
+.oj-new-project__field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: var(--space-sm);
+    font-size: var(--text-sm);
+    color: var(--text-secondary);
+}
+
 .file-input-hidden {
     display: none;
 }

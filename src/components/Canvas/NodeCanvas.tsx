@@ -15,8 +15,11 @@ import { getPortPosition as calculatePortPosition } from '../../utils/portPositi
 import { getConnectionBundleCount } from '../../utils/portSync';
 import { getExecutor } from '../../audio/executor';
 import { useScrollCapture, type ScrollData } from '../../hooks/useScrollCapture';
-import { ContextMenu } from './ContextMenu';
+import { ContextMenu, type CanvasVerbs, type ContextMenuTarget } from './ContextMenu';
+import { LiveAnnouncer } from '../../a11y/LiveAnnouncer';
+import { announce } from '../../a11y/announce';
 import { NodeWrapper } from '../Nodes/NodeWrapper';
+import { beginConnectionFrom, completeConnectionAt } from '../Nodes/connectionVerbs';
 import { Cable } from '@openjammer/oj-ui';
 import { useMIDIStore } from '../../store/midiStore';
 import { useAudioClipStore } from '../../store/audioClipStore';
@@ -41,11 +44,21 @@ import { registerBindingSet } from '../../keymap/registry';
 import { useUiViewStore } from '../../store/uiViewStore';
 import { useCollabStore } from '../../store/collabStore';
 import './NodeCanvas.css';
+import { runAction } from '../Shell/runAction';
 
 /**
  * Editing commands that must reach the canvas in EVERY mode, not just config
  * mode — they are chords, not notes. See the comment at their handler below.
  */
+/**
+ * ONE sentence for one event (U10). A cable in the air can be let go from four
+ * places — the socket's own `Escape`, the global Escape cascade, a click on empty
+ * paper, and a mouse-up that landed on nothing — and three of them used to do it
+ * in silence while the fourth said "Cable dropped." "Released" rather than
+ * "dropped" because a cable *dropped on a port* is the successful landing.
+ */
+const CABLE_RELEASED = 'Cable released.';
+
 const COMMAND_ACTIONS = new Set([
     'edit.undo', 'edit.redo', 'canvas.copy', 'canvas.paste', 'canvas.selectAll', 'canvas.duplicate',
 ]);
@@ -60,6 +73,8 @@ interface SelectionBox {
 export function NodeCanvas() {
     const canvasRef = useRef<HTMLDivElement>(null);
     const [contextMenu, setContextMenu] = useState<Position | null>(null);
+    /** The card the open menu belongs to, or null for the empty-canvas menu. */
+    const [contextTarget, setContextTarget] = useState<ContextMenuTarget | null>(null);
     const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
 
     // MIDI browser - open via store, MIDIIntegration handles rendering
@@ -68,7 +83,8 @@ export function NodeCanvas() {
     // Right-click drag state (for pan vs context menu)
     const [rightClickStart, setRightClickStart] = useState<Position | null>(null);
     const rightClickMoved = useRef(false);
-    const rightClickOnCanvas = useRef(false);
+    // What the pending right-click landed on: a card, or null for bare canvas.
+    const rightClickTarget = useRef<ContextMenuTarget | null>(null);
 
     // Track if Ctrl was held when starting selection box (for port selection mode)
     const selectionBoxCtrlHeld = useRef(false);
@@ -125,6 +141,9 @@ export function NodeCanvas() {
         // eslint-disable-next-line react-hooks/exhaustive-deps -- allConnections is the reactivity trigger: getConnectionsAtLevel reads the store via get(), so this memo must recompute when the connections Map identity changes
     }, [currentViewNodeId, getConnectionsAtLevel, allConnections]);
     const selectedConnectionIds = useGraphStore((s) => s.selectedConnectionIds);
+    // Read high, because the canvas EDIT VERBS below need it and the collab
+    // presence effect further down needs the same subscription.
+    const selectedNodeIds = useGraphStore((s) => s.selectedNodeIds);
     const selectConnection = useGraphStore((s) => s.selectConnection);
     const clearSelection = useGraphStore((s) => s.clearSelection);
     const deleteSelected = useGraphStore((s) => s.deleteSelected);
@@ -263,6 +282,74 @@ export function NodeCanvas() {
         e.preventDefault();
     }, []);
 
+    /*
+     * THE CANVAS EDIT VERBS — one implementation, two routes (HA-26).
+     *
+     * These are the bodies the keymap's `canvas.copy` / `canvas.paste` /
+     * `canvas.duplicate` / `canvas.selectAll` / `edit.delete` entries run, lifted
+     * out of the keydown handler so the right-click menu can run the SAME
+     * function rather than a second copy of it. Until now none of them had a
+     * pointer route at all: delete, copy, paste, duplicate and select-all were
+     * keyboard-only, undiscoverable, and invisible to anyone who had not read the
+     * shortcuts panel.
+     *
+     * `Cut` is deliberately NOT here. The canvas has no cut action and no
+     * `Ctrl+X` binding (`keybindingActions` has `arrangement.cut` and
+     * `pianoroll.cut`, and nothing for the graph), and a menu row that advertises
+     * a verb the keyboard does not perform is the mirror image of the bug this
+     * lane is fixing. It wants a real `canvas.cut` action first.
+     */
+    const verbsRef = useRef<CanvasVerbs | null>(null);
+    const canvasVerbs = useMemo<CanvasVerbs>(() => ({
+        /*
+         * RG-04 — these two record NO history, so `LiveAnnouncer` (which listens
+         * to the history store) can never name them. They are two of HA-26's five
+         * new pointer verbs and they answered with nothing on either route; the
+         * measured symptom was the live region still holding the PREVIOUS
+         * sentence after a Copy. `announce()` exists for exactly this: gesture
+         * moments that change no document state.
+         */
+        copy: () => {
+            const count = useGraphStore.getState().selectedNodeIds.size;
+            copySelected();
+            if (count > 0) announce(`Copied ${count} ${count === 1 ? 'node' : 'nodes'}`);
+        },
+        paste: () => pasteClipboard(),
+        duplicate: () => duplicateSelected(),
+        selectAll: () => {
+            const ids = useGraphStore.getState().getNodesAtLevel(currentViewNodeId).map((node) => node.id);
+            useGraphStore.getState().selectNodes(ids);
+            announce(`Selected all ${ids.length} ${ids.length === 1 ? 'node' : 'nodes'}`);
+        },
+        remove: () => {
+            deleteSelected();
+            // Clips live in their own store but share the selection gesture.
+            useAudioClipStore.getState().selectedClipIds.forEach((clipId) => removeClip(clipId));
+        },
+        disconnectNode: (nodeId: string) => {
+            const graph = useGraphStore.getState();
+            const cables = graph.getConnectionsForNode(nodeId);
+            if (cables.length === 0) return;
+            // One gesture, one Ctrl+Z: pulling six cables out of a card is one
+            // thing the player did, not six things.
+            graph.beginGesture();
+            try {
+                for (const cable of cables) graph.removeConnection(cable.id);
+            } finally {
+                graph.endGesture();
+            }
+        },
+        hasSelection: selectedNodeIds.size > 0 || selectedConnectionIds.size > 0,
+    }), [copySelected, pasteClipboard, duplicateSelected, deleteSelected, removeClip, currentViewNodeId, selectedNodeIds, selectedConnectionIds]);
+    // The keydown effect is deliberately not re-subscribed per render (see its
+    // own note), so it reads the verbs through a ref rather than a closure. The
+    // write is in an EFFECT, not the render body: a concurrent render that React
+    // discards can still run the body, and a ref left pointing at verbs from a
+    // commit that never happened is a trap even when today's value is harmless.
+    useEffect(() => {
+        verbsRef.current = canvasVerbs;
+    }, [canvasVerbs]);
+
     // Handle opening MIDI browser (when 'Midi' is selected from context menu)
     // MIDIIntegration handles the browser rendering and device selection
     const handleOpenMIDIBrowser = useCallback(() => {
@@ -276,11 +363,20 @@ export function NodeCanvas() {
             e.preventDefault();
             setRightClickStart({ x: e.clientX, y: e.clientY });
             rightClickMoved.current = false;
-            // Check if clicking on empty canvas (not on a node)
-            const isOnNode = (e.target as HTMLElement).closest(
-                '.node, .schematic-node, .oj-node-frame, .oj-node',
-            );
-            rightClickOnCanvas.current = !isOnNode;
+            /*
+             * HA-26 — a right-click on a CARD used to be thrown away, so delete,
+             * duplicate and disconnect had no pointer route anywhere in the app.
+             * Now it opens the node's own menu. `data-canvas-node-root` is the
+             * attribute every faceplate already carries for exactly this kind of
+             * lookup (schematic cards wrap themselves in a `display: contents`
+             * div that holds it, so `closest` still finds it).
+             */
+            const nodeRoot = (e.target as HTMLElement).closest<HTMLElement>('[data-canvas-node-root]');
+            const nodeId = nodeRoot?.dataset.canvasNodeRoot ?? null;
+            const node = nodeId ? useGraphStore.getState().nodes.get(nodeId) : undefined;
+            rightClickTarget.current = node
+                ? { id: node.id, title: resolveNodeDefinition(node).name }
+                : null;
             return;
         }
 
@@ -297,12 +393,19 @@ export function NodeCanvas() {
         // The union must always be EVERY node-root + port class currently mounted on
         // the canvas (Invariant B). oj-ui classes are added additively as nodes migrate;
         // legacy classes are dropped only after their last emitter is gone.
+        // Belt and braces beside `ContextMenu`'s own `stopPropagation` (1C-01):
+        // the menu host is portalled to the body but is a React child of this
+        // div, so a row's mousedown arrives here. Never clear the selection or
+        // start a marquee underneath an open menu.
         const isNodeOrPort = (e.target as HTMLElement).closest(
             '.node, .schematic-node, .oj-node-frame, .oj-node, ' +
-                '.oj-port, .oj-port-row'
+                '.oj-port, .oj-port-row, .context-menu-host'
         );
         if (e.button === 0 && !isNodeOrPort) {
             clearSelection();
+            // A click on empty paper discards an armed cable. For a keyboard
+            // player that gesture had no other feedback at all, so it says so.
+            if (useCanvasStore.getState().isConnecting) announce(CABLE_RELEASED);
             stopConnecting();
 
             // Track if Ctrl is held (for port selection mode)
@@ -401,13 +504,21 @@ export function NodeCanvas() {
 
         // Right-click release - show context menu if no drag
         if (rightClickStart) {
-            if (!rightClickMoved.current && rightClickOnCanvas.current) {
-                // Didn't drag and was on empty canvas - show context menu
+            if (!rightClickMoved.current) {
+                // Didn't drag — show the menu for whatever was under the pointer.
+                const target = rightClickTarget.current;
+                // Right-clicking a card that is not in the selection makes it the
+                // selection first, so "Delete" in the menu deletes the card the
+                // player pointed at rather than something they forgot was selected.
+                if (target && !useGraphStore.getState().selectedNodeIds.has(target.id)) {
+                    useGraphStore.getState().selectNode(target.id);
+                }
+                setContextTarget(target);
                 setContextMenu({ x: rightClickStart.x, y: rightClickStart.y });
             }
             setRightClickStart(null);
             rightClickMoved.current = false;
-            rightClickOnCanvas.current = false;
+            rightClickTarget.current = null;
         }
 
         // Complete box selection - check for ports first (if Ctrl held), then nodes
@@ -480,8 +591,12 @@ export function NodeCanvas() {
         // timing with React's synthetic events
         if (isConnecting) {
             requestAnimationFrame(() => {
+                // The mouse came up somewhere that is not a port: the drag is
+                // over and the cable goes with it. Say so rather than having the
+                // wire simply vanish.
                 if (useCanvasStore.getState().isConnecting) {
                     stopConnecting();
+                    announce(CABLE_RELEASED);
                 }
             });
         }
@@ -643,6 +758,7 @@ export function NodeCanvas() {
                 // Priority 3: Close context menu
                 if (contextMenu) {
                     setContextMenu(null);
+                    setContextTarget(null);
                     return;
                 }
 
@@ -652,9 +768,19 @@ export function NodeCanvas() {
                     return;
                 }
 
-                // Priority 5: Cancel connection in progress
+                /*
+                 * Priority 5: Cancel connection in progress.
+                 *
+                 * This path is reached whenever focus is NOT on the socket that
+                 * armed the cable — press `Enter`, `Tab` away, `Escape` — and it
+                 * used to drop the cable in silence, leaving the live region
+                 * still saying "…armed. Move to another card's socket…". The
+                 * player is then told they are holding something they are not,
+                 * which is HA-07's shape inside the feature built to close it.
+                 */
                 if (useCanvasStore.getState().isConnecting) {
                     stopConnecting();
+                    announce(CABLE_RELEASED);
                     return;
                 }
 
@@ -696,9 +822,7 @@ export function NodeCanvas() {
             // Delete/Backspace always works - delete nodes and clips
             if (actionId === 'edit.delete' || actionId === 'canvas.deleteBackspace') {
                 e.preventDefault();
-                deleteSelected();
-                // Also delete selected audio clips
-                selectedClipIds.forEach(clipId => removeClip(clipId));
+                verbsRef.current?.remove();
                 return;
             }
 
@@ -734,31 +858,29 @@ export function NodeCanvas() {
                     return;
                 }
 
-                // Ctrl+C / Cmd+C - Copy
+                // The four clipboard/selection verbs run the SAME functions the
+                // right-click menu runs — one body each, two routes (HA-26).
                 if (actionId === 'canvas.copy') {
                     e.preventDefault();
-                    copySelected();
+                    verbsRef.current?.copy();
                     return;
                 }
 
-                // Ctrl+V / Cmd+V - Paste
                 if (actionId === 'canvas.paste') {
                     e.preventDefault();
-                    pasteClipboard();
+                    verbsRef.current?.paste();
                     return;
                 }
 
                 if (actionId === 'canvas.selectAll') {
                     e.preventDefault();
-                    useGraphStore.getState().selectNodes(
-                        useGraphStore.getState().getNodesAtLevel(currentViewNodeId).map(node => node.id),
-                    );
+                    verbsRef.current?.selectAll();
                     return;
                 }
 
                 if (actionId === 'canvas.duplicate') {
                     e.preventDefault();
-                    duplicateSelected();
+                    verbsRef.current?.duplicate();
                     return;
                 }
             }
@@ -1133,7 +1255,6 @@ export function NodeCanvas() {
         publishViewNode(currentViewNodeId);
     }, [collabActive, currentViewNodeId, publishViewNode]);
 
-    const selectedNodeIds = useGraphStore((s) => s.selectedNodeIds);
     useEffect(() => {
         if (!collabActive) return;
         publishSelection(Array.from(selectedNodeIds));
@@ -1381,6 +1502,183 @@ export function NodeCanvas() {
         }
     }, [getCurrentLevelBounds, fitToNodes, canvasRect.width, canvasRect.height]);
 
+    /* =====================================================================
+     * KEYBOARD PORTS (U8 / HA-02) — one roving tab stop per card, arrows to
+     * walk it, Enter to wire.
+     *
+     * Measured before this: 0 of 84 ports tabbable, 42 of 42 with no role and no
+     * name. A keyboard-only player could build a rig from Ctrl+K and then had NO
+     * route to connect any of it — not a shortcut, not a palette command, not a
+     * menu item. `docs/shell.md` recorded the gap as an open product decision;
+     * this closes it.
+     *
+     * Two decisions worth stating:
+     *
+     * 1. ONE STOP PER CARD, not one per port. The piano roll already learned this
+     *    the hard way: 128 tab stops is not accessibility, it is a maze. Tab
+     *    walks cards, Arrow keys walk that card's sockets.
+     *
+     * 2. The tab stop is written STRAIGHT TO THE DOM rather than passed down as a
+     *    prop. Twenty-three faceplates render their own ports, and threading a
+     *    roving index through all of them would put the same rule in twenty-three
+     *    places. React never writes `tabindex` on a port (no component passes
+     *    one), so it never fights us for the attribute — and one MutationObserver
+     *    keeps it true for cards that appear later.
+     * ===================================================================== */
+    const nodesLayerRef = useRef<HTMLDivElement>(null);
+    /** The socket that currently holds each card's tab stop, by node id. */
+    const rovingPort = useRef<Map<string, string>>(new Map());
+
+    /** Every port on the canvas a keyboard may land on, in DOM order. */
+    const keyboardPorts = useCallback((): HTMLElement[] => {
+        const layer = nodesLayerRef.current;
+        if (!layer) return [];
+        return Array.from(layer.querySelectorAll<HTMLElement>('.oj-port[data-node-id][data-port-id]'))
+            // A gated port is rendered visibly inert and carries no handlers; a
+            // KeyTile's socket is hidden from the tree because the TILE is the
+            // control there. Neither is a place to land.
+            .filter((el) => el.getAttribute('aria-hidden') !== 'true' && el.dataset.portDisabled !== 'true');
+    }, []);
+
+    const applyRovingTabStops = useCallback(() => {
+        const chosen = rovingPort.current;
+        const byNode = new Map<string, HTMLElement[]>();
+        for (const el of keyboardPorts()) {
+            const nodeId = el.dataset.nodeId;
+            if (!nodeId) continue;
+            const list = byNode.get(nodeId);
+            if (list) list.push(el);
+            else byNode.set(nodeId, [el]);
+        }
+        for (const [nodeId, ports] of byNode) {
+            const wanted = chosen.get(nodeId);
+            const stop = ports.find((el) => el.dataset.portId === wanted) ?? ports[0];
+            chosen.set(nodeId, stop.dataset.portId as string);
+            for (const el of ports) el.tabIndex = el === stop ? 0 : -1;
+        }
+        // Cards that went away must not keep a stale preference forever.
+        for (const nodeId of Array.from(chosen.keys())) {
+            if (!byNode.has(nodeId)) chosen.delete(nodeId);
+        }
+    }, [keyboardPorts]);
+
+    useEffect(() => {
+        applyRovingTabStops();
+        const layer = nodesLayerRef.current;
+        if (!layer || typeof MutationObserver === 'undefined') return;
+        /*
+         * `keyboardPorts()` filters on two ATTRIBUTES (`aria-hidden`,
+         * `data-port-disabled`), so watching `childList` alone would leave a
+         * card's roving stop pointing at a socket that had since become
+         * unreachable — without any DOM insert to notice. Nothing toggles those
+         * at runtime today; the gated-port affordance is kept deliberately for
+         * future nodes, and this is what makes it safe when one arrives.
+         *
+         * Self-retrigger stays impossible: our own write is `tabindex`, which is
+         * not in the filter.
+         */
+        const observer = new MutationObserver(() => applyRovingTabStops());
+        observer.observe(layer, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['aria-hidden', 'data-port-disabled'],
+        });
+        return () => observer.disconnect();
+    }, [applyRovingTabStops, nodes]);
+
+    /*
+     * The ARMED socket, painted for the keyboard the same way the pointer path
+     * paints it — a `data-armed` attribute `Port.css` styles. Written to the DOM
+     * for the same reason the tab stop is: it must reach every faceplate without
+     * a prop drilled through all of them.
+     */
+    useEffect(() => {
+        const armed = new Set(
+            (isConnecting && connectingFrom ? connectingFrom : []).map((source) => `${source.nodeId}:${source.portId}`),
+        );
+        for (const el of keyboardPorts()) {
+            const key = `${el.dataset.nodeId}:${el.dataset.portId}`;
+            if (armed.has(key)) el.setAttribute('data-armed', '');
+            else el.removeAttribute('data-armed');
+        }
+    }, [isConnecting, connectingFrom, keyboardPorts, nodes]);
+
+    /** The graph port behind a socket element. */
+    const portModelOf = useCallback((el: HTMLElement) => {
+        const nodeId = el.dataset.nodeId;
+        const portId = el.dataset.portId;
+        if (!nodeId || !portId) return null;
+        const node = useGraphStore.getState().nodes.get(nodeId);
+        const port = node?.ports.find((p) => p.id === portId);
+        return node && port ? { node, port } : null;
+    }, []);
+
+    /**
+     * Keys on a socket. Arrows walk this card's sockets; Enter arms and lands a
+     * cable; Escape drops it.
+     *
+     * Arming and landing call the SHARED CONNECTION VERBS
+     * (`../Nodes/connectionVerbs`) — the same two functions the card's pointer
+     * handlers call, with the event plumbing stripped off. The first version of
+     * this dispatched synthetic `MouseEvent`s at the socket to reach those
+     * bodies; that reused the right code for the right reason (ghost ports
+     * becoming real ports, an instrument growing inputs, the pending reconnect,
+     * the one-`Ctrl+Z` bracket) but shared the wrong seam, and it left the
+     * keyboard carrying a private pre-flight refusal set — a second opinion about
+     * what is legal, which measurably disagreed with the pointer about a card
+     * wiring to itself. The verb is the seam; `graphStore.addConnection` owns the
+     * rules; this only speaks the answer.
+     */
+    const handlePortKeyDown = useCallback((e: React.KeyboardEvent) => {
+        const el = (e.target as HTMLElement).closest<HTMLElement>('.oj-port[data-node-id][data-port-id]');
+        if (!el) return;
+        const nodeId = el.dataset.nodeId as string;
+
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+            const siblings = keyboardPorts().filter((candidate) => candidate.dataset.nodeId === nodeId);
+            if (siblings.length < 2) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const step = e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 1;
+            const index = siblings.indexOf(el);
+            const next = siblings[(index + step + siblings.length) % siblings.length];
+            rovingPort.current.set(nodeId, next.dataset.portId as string);
+            applyRovingTabStops();
+            next.focus();
+            return;
+        }
+
+        if (e.key === 'Escape') {
+            if (!useCanvasStore.getState().isConnecting) return;
+            e.preventDefault();
+            e.stopPropagation();
+            stopConnecting();
+            announce(CABLE_RELEASED);
+            return;
+        }
+
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        e.stopPropagation();
+
+        const here = portModelOf(el);
+        if (!here) return;
+
+        if (!useCanvasStore.getState().isConnecting) {
+            beginConnectionFrom(here.node, here.port.id);
+            announce(`${here.port.name} armed. Move to another card's socket and press Enter to connect.`);
+            return;
+        }
+
+        const result = completeConnectionAt(here.node, here.port.id);
+        // A refusal keeps the cable in hand and says why; a landing says what it
+        // did when it did something worth a sentence (a MOVE), and otherwise
+        // lets the history announcement name the new connection.
+        if (result.ok) announce(result.announcement ?? '');
+        else announce(result.reason);
+    }, [applyRovingTabStops, keyboardPorts, portModelOf, stopConnecting]);
+
     // Render selection box
     const renderSelectionBox = () => {
         if (!selectionBox) return null;
@@ -1444,7 +1742,7 @@ export function NodeCanvas() {
                     </div>
 
                     {/* Nodes Layer */}
-                    <div className="nodes-layer">
+                    <div className="nodes-layer" ref={nodesLayerRef} onKeyDown={handlePortKeyDown}>
                         {Array.from(nodes.values()).map((node) => (
                             <NodeWrapper key={node.id} node={node} />
                         ))}
@@ -1477,14 +1775,62 @@ export function NodeCanvas() {
                     {renderSelectionBox()}
                 </div>
 
+            {/* ---------------------------------------------------------------
+                UX-1B / HA-05 — THE EMPTY CANVAS. One block, nothing else in
+                this file touches it.
+
+                Deleting everything (or opening with a pre-answered profile) used
+                to leave a page that said nothing at all: no copy, no
+                affordance, no hint that right-click is how a node gets made. The
+                only route out was a gesture with no on-screen twin, which is the
+                definition of a secret. It speaks in the same voice the
+                arrangement's empty page already uses (`ArrangementSurface.tsx`),
+                and both buttons are the VISIBLE twins of hidden gestures: one
+                opens the add-node menu at the middle of the paper, the other
+                presses Ctrl+K itself, through the live keymap, so a rebound key
+                is never advertised wrong.
+                --------------------------------------------------------------- */}
+            {nodes.size === 0 && !isConnecting && (
+                <div className="node-canvas-empty">
+                    <p className="node-canvas-empty__line">An empty canvas. Add a node — right-click, or Ctrl+K.</p>
+                    <div className="node-canvas-empty__actions">
+                        <button
+                            type="button"
+                            className="node-canvas-empty__button is-primary"
+                            onClick={() => {
+                                const rect = canvasRef.current?.getBoundingClientRect();
+                                if (!rect) return;
+                                setContextMenu({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+                            }}
+                        >
+                            Add a node
+                        </button>
+                        <button
+                            type="button"
+                            className="node-canvas-empty__button"
+                            onClick={() => runAction('commandBar.toggle')}
+                        >
+                            Open the command bar
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {/* Context Menu */}
             {contextMenu && (
                 <ContextMenu
                     position={contextMenu}
-                    onClose={() => setContextMenu(null)}
+                    target={contextTarget}
+                    verbs={canvasVerbs}
+                    onClose={() => { setContextMenu(null); setContextTarget(null); }}
                     onOpenMIDIBrowser={handleOpenMIDIBrowser}
                 />
             )}
+
+            {/* The one polite live region for player verbs (U12). Portalled to
+                the body from here because this component is always mounted, and
+                a live region inside an `inert` surface goes quiet. */}
+            <LiveAnnouncer />
 
             {/* Audio Clip Drag Layer (portal) */}
             <ClipDragLayer />

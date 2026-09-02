@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { MouseEvent } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NodeWrapper } from '../NodeWrapper';
@@ -6,13 +6,6 @@ import { useCanvasStore } from '../../../store/canvasStore';
 import { useGraphStore } from '../../../store/graphStore';
 import { useHistoryStore } from '../../../store/historyStore';
 
-vi.mock('../InstrumentNode', () => ({
-    InstrumentNode: ({ handlePortMouseUp }: { handlePortMouseUp?: (id: string, event: MouseEvent) => void }) => (
-        <button type="button" data-testid="ghost-port" onMouseUp={(event) => handlePortMouseUp?.('ghost-input-3', event)}>
-            ghost
-        </button>
-    ),
-}));
 vi.mock('../SpeakerNode', () => ({
     SpeakerNode: ({ handleHeaderMouseDown }: { handleHeaderMouseDown?: (event: MouseEvent) => void }) => (
         <button type="button" data-testid="drag-handle" onMouseDown={handleHeaderMouseDown}>speaker</button>
@@ -52,38 +45,20 @@ describe('NodeWrapper reconnect gesture', () => {
         expect(container.querySelector(`[data-canvas-node-root="${framedId}"]`)).not.toBeNull();
     });
 
-    // The node under test is the GENERIC `instrument` — the voice every preset rig
-    // installs and the one most players meet first. It was missing from
-    // NodeWrapper's ghost-port instrument list (which named the eight legacy
-    // aliases but not `instrument`), so dropping a cable on its ghost port grew no
-    // port and silently did nothing. This test fails on that code.
-    it('grows a ghost port on the generic instrument and undoes the whole gesture with one Ctrl+Z', () => {
-        const graph = useGraphStore.getState();
-        const keyboardId = graph.addNode('keyboard', { x: 0, y: 0 });
-        const instrumentId = graph.addNode('instrument', { x: 200, y: 0 });
-        const keyboard = useGraphStore.getState().nodes.get(keyboardId)!;
-        const instrument = useGraphStore.getState().nodes.get(instrumentId)!;
-        const source = keyboard.ports.find(port => port.direction === 'output')!;
-        const originalTarget = instrument.ports.find(port => port.direction === 'input')!;
-        const originalId = graph.addConnection(keyboardId, source.id, instrumentId, originalTarget.id)!;
-        const originalPortIds = useGraphStore.getState().nodes.get(instrumentId)!.ports.map(port => port.id);
-        const cursorBeforeReconnect = useHistoryStore.getState().cursor;
-
-        useCanvasStore.getState().startConnecting(keyboardId, source.id, originalId);
-        render(<NodeWrapper node={useGraphStore.getState().nodes.get(instrumentId)!} />);
-        act(() => fireEvent.mouseUp(screen.getByTestId('ghost-port')));
-
-        const after = useGraphStore.getState();
-        expect(after.connections.has(originalId)).toBe(false);
-        expect(after.nodes.get(instrumentId)!.ports.length).toBeGreaterThan(originalPortIds.length);
-        expect(useHistoryStore.getState().cursor).toBe(cursorBeforeReconnect + 1);
-        expect(useHistoryStore.getState().open).toBeNull();
-
-        act(() => useGraphStore.getState().undo());
-        const restored = useGraphStore.getState();
-        expect(restored.connections.has(originalId)).toBe(true);
-        expect(restored.nodes.get(instrumentId)!.ports.map(port => port.id)).toEqual(originalPortIds);
-    });
+    /*
+     * The `ghost-input-` test that stood here is gone with the branch it drove
+     * (RG-05). It was the ONLY producer of a `ghost-input-` port id anywhere —
+     * `git grep ghost-input-` at `HEAD` and across the tree hit the two lines
+     * that consumed the id and this mock, which invented it. The live
+     * "always one empty port" affordance is `PortPanelNode`'s `empty-…` socket,
+     * a real port that takes the ordinary path. A test that keeps fifty lines of
+     * production code alive by being their only caller is not coverage; it is a
+     * second copy of the requirement (agents.md value #8).
+     *
+     * What that test really pinned — one gesture, one `Ctrl+Z` — is pinned by the
+     * cable MOVE test in `outputFanOut.test.tsx`, which lands a real cable
+     * through the same module and asserts `cursor + 1` and an exact round trip.
+     */
 
     it('keeps clicks history-neutral, toggles with Shift, and closes one group-drag gesture on blur', () => {
         const graph = useGraphStore.getState();

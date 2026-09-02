@@ -26,6 +26,15 @@
  * The MIDI special-case is preserved: selecting the "Add Midi" action
  * (`node.add.midi`) opens the device browser via `onOpenMIDIBrowser` instead of
  * spawning a node directly.
+ *
+ * UX-1C adds the two things the audit found missing (HA-26): the EDIT VERBS —
+ * copy, paste, duplicate, select all, delete — which until now had no pointer
+ * route anywhere in the application, and a NODE menu, because right-click on a
+ * card was explicitly suppressed. Both are projections of the same functions the
+ * keymap runs: `NodeCanvas` owns one implementation of each verb and hands it to
+ * the keyboard path and to this menu, so the two can never drift. Each row also
+ * shows its real, CURRENT binding, so the menu teaches the shortcut instead of
+ * replacing it.
  */
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -35,7 +44,37 @@ import type { Position } from '../../engine/types';
 import { useCanvasStore } from '../../store/canvasStore';
 import { buildMenuCtx } from '../../store/actionContext';
 import { queryActions, type Action } from '../../store/commandRegistry';
+import { keyComboToString, useKeybindingsStore } from '../../store/keybindingsStore';
 import './ContextMenu.css';
+
+/**
+ * The canvas edit verbs, as the CANVAS implements them.
+ *
+ * Deliberately a set of callbacks passed in rather than store calls made here:
+ * `NodeCanvas` already owns one implementation of each of these (it is what the
+ * keymap's `canvas.copy` / `canvas.paste` / `canvas.duplicate` /
+ * `canvas.selectAll` / `edit.delete` entries run), and a menu that reached for
+ * the store itself would be a second implementation waiting to disagree with the
+ * first — the exact failure the action registry exists to prevent.
+ */
+export interface CanvasVerbs {
+    copy: () => void;
+    paste: () => void;
+    duplicate: () => void;
+    selectAll: () => void;
+    remove: () => void;
+    /** Cut every cable into and out of one card, as a single undo entry. */
+    disconnectNode: (nodeId: string) => void;
+    /** Is anything selected right now? Drives the disabled state. */
+    hasSelection: boolean;
+}
+
+/** The card a right-click landed on, when it landed on one. */
+export interface ContextMenuTarget {
+    id: string;
+    /** What the card calls itself, for the menu's heading. */
+    title: string;
+}
 
 interface ContextMenuProps {
     /** Screen-space point where the menu opens (the right-click position). */
@@ -43,6 +82,10 @@ interface ContextMenuProps {
     onClose: () => void;
     /** MIDI special-case: open the device browser instead of adding a node. */
     onOpenMIDIBrowser?: () => void;
+    /** The card under the pointer, if any — turns this into the NODE menu. */
+    target?: ContextMenuTarget | null;
+    /** The canvas's own edit verbs (HA-26). Absent = add-only menu. */
+    verbs?: CanvasVerbs;
 }
 
 /** The action id of the MIDI add, special-cased to open the device browser. */
@@ -60,19 +103,18 @@ const TYPEAHEAD_MS = 700;
  */
 const CATEGORY_ORDER = ['Input', 'Instruments', 'Routing', 'Effects', 'Utility', 'Output'];
 
-/**
- * Presentational icon per known category, so the byte-faithful nested UX keeps
- * its emoji. This is a MENU-LOCAL display concern (the registry carries no
- * icons); unknown groups (e.g. 'AI DSP') render without one.
+/*
+ * NO ICONS ON THE CATEGORY ROWS.
+ *
+ * This menu used to carry six emoji — a keyboard, a violin, arrows, sparkles, a
+ * wrench, a speaker — and its own comment admitted why: they were kept to stay
+ * "byte-faithful" to the pre-redesign UI, i.e. nobody had re-decided them under
+ * the New DNA. They were the only emoji in the instrument, and PRODUCT.md lists
+ * "a toy" as an explicit anti-reference (HA-21). The alternative was six new
+ * category glyphs, and drawing six icons to say "Effects" next to the word
+ * "Effects" spends pixels to repeat a word that was already unambiguous. The
+ * labels carry it; the trailing disclosure chevron already says "this opens".
  */
-const CATEGORY_ICON: Record<string, string> = {
-    Input: '⌨️',
-    Instruments: '🎻',
-    Routing: '🔄',
-    Effects: '✨',
-    Utility: '🔧',
-    Output: '🔊',
-};
 
 /** The group an action belongs to in the menu: `path[0]`, else `group`. */
 function menuGroupOf(action: Action): string {
@@ -113,12 +155,23 @@ function groupByCategory(actions: readonly Action[]): MenuCategoryModel[] {
     return ordered;
 }
 
-export function ContextMenu({ position, onClose, onOpenMIDIBrowser }: ContextMenuProps) {
+export function ContextMenu({ position, onClose, onOpenMIDIBrowser, target, verbs }: ContextMenuProps) {
     // The fixed-position host; the oj-ui `Menu` panel is its only child, so the
     // component keeps its own positioning without oj-ui needing a ref API.
     const hostRef = useRef<HTMLDivElement>(null);
 
     const screenToCanvas = useCanvasStore((s) => s.screenToCanvas);
+
+    // The player's CURRENT binding for a verb, not the default — a rebound key
+    // shown as its factory value is a lie the menu tells every time it opens.
+    const getBinding = useKeybindingsStore((s) => s.getBinding);
+    const shortcutFor = useCallback(
+        (actionId: string) => {
+            const combo = getBinding(actionId);
+            return combo ? keyComboToString(combo) : undefined;
+        },
+        [getBinding],
+    );
 
     /** Which category's submenu is disclosed (null = none). */
     const [openCategory, setOpenCategory] = useState<string | null>(null);
@@ -153,8 +206,9 @@ export function ContextMenu({ position, onClose, onOpenMIDIBrowser }: ContextMen
         const from = rows.indexOf(active as HTMLElement);
         for (let i = 1; i <= rows.length; i += 1) {
             const candidate = rows[(from + i + rows.length) % rows.length];
-            // Match the LABEL, not the row — the leading category emoji is
-            // decoration and would make every row start with a glyph.
+            // Match the LABEL, not the row — a row may carry a trailing `Kbd`
+            // keycap, and matching the row's whole text would let "C" find
+            // "Paste" through its "Ctrl+V".
             const label = candidate
                 ?.querySelector('.oj-menu-item__label')
                 ?.textContent?.trim()
@@ -242,8 +296,9 @@ export function ContextMenu({ position, onClose, onOpenMIDIBrowser }: ContextMen
         document.addEventListener('keydown', handleKeyDown);
         window.addEventListener('resize', handleViewportChange);
 
-        // The panel's own size settles late (webfonts, the emoji glyphs, a
-        // registry that grows while the menu is open). Clamping once against a
+        // The panel's own size settles late (webfonts, a keycap that measures
+        // wider than expected, a registry that grows while the menu is open).
+        // Clamping once against a
         // stale height is exactly how a menu ends up hanging off the screen, so
         // re-measure whenever it actually changes size.
         const panel = panelEl();
@@ -340,6 +395,15 @@ export function ContextMenu({ position, onClose, onOpenMIDIBrowser }: ContextMen
         [onClose, onOpenMIDIBrowser, position, screenToCanvas],
     );
 
+    /** Run one edit verb and close, the way selecting an action does. */
+    const runVerb = useCallback(
+        (verb: () => void) => {
+            verb();
+            requestAnimationFrame(() => onClose());
+        },
+        [onClose],
+    );
+
     /** Disclose a category and drop focus onto its first item. */
     const discloseCategory = useCallback(
         (name: string) => {
@@ -421,8 +485,57 @@ export function ContextMenu({ position, onClose, onOpenMIDIBrowser }: ContextMen
             ref={hostRef}
             className="context-menu-host"
             style={{ left: position.x, top: position.y }}
+            /*
+             * 1C-01 — the menu is a PORTAL, but it is still a React CHILD of the
+             * canvas, so React bubbles a row's `mousedown` straight into
+             * `NodeCanvas.handleMouseDown`. The target is neither a node nor a
+             * port, so the canvas cleared the selection and started a marquee
+             * BEFORE the row's `onSelect` ran on click — and every
+             * selection-dependent verb in this menu (Delete, Duplicate, Copy)
+             * was a silent pointer no-op. Measured: right-click the Speaker,
+             * click Delete, cards `4 -> 4`, live region silent, undo untouched.
+             * The keyboard route through the identical row worked, which is
+             * exactly why a jsdom test that calls `onSelect` directly could not
+             * see it. Stop the events at the host: nothing below a menu is a
+             * legitimate target while the menu is open.
+             */
+            onMouseDown={(event) => event.stopPropagation()}
+            onMouseUp={(event) => event.stopPropagation()}
         >
-            <Menu ariaLabel="Add node menu" className="context-menu" onKeyDown={onRootKeyDown}>
+            <Menu
+                ariaLabel={target ? `${target.title} menu` : 'Canvas menu'}
+                className="context-menu"
+                onKeyDown={onRootKeyDown}
+            >
+                {/* The NODE menu leads with what you can do TO this card; the
+                    canvas menu leads with what you can put ON the canvas. Either
+                    way the add categories follow, because "add something here"
+                    is the reason a first-run player right-clicks at all. */}
+                {target && verbs && (
+                    <>
+                        <MenuCategory label={target.title} onMouseEnter={() => setOpenCategory(null)} />
+                        <MenuItem
+                            label="Duplicate"
+                            shortcut={shortcutFor('canvas.duplicate')}
+                            onSelect={() => runVerb(verbs.duplicate)}
+                            onMouseEnter={() => setOpenCategory(null)}
+                        />
+                        <MenuItem
+                            label="Disconnect all cables"
+                            onSelect={() => runVerb(() => verbs.disconnectNode(target.id))}
+                            onMouseEnter={() => setOpenCategory(null)}
+                        />
+                        <MenuItem
+                            label="Delete"
+                            danger
+                            shortcut={shortcutFor('edit.delete')}
+                            onSelect={() => runVerb(verbs.remove)}
+                            onMouseEnter={() => setOpenCategory(null)}
+                        />
+                        <MenuSeparator />
+                    </>
+                )}
+
                 <MenuCategory label="Add node" onMouseEnter={() => setOpenCategory(null)} />
 
                 {categories.map((category) => {
@@ -431,7 +544,6 @@ export function ContextMenu({ position, onClose, onOpenMIDIBrowser }: ContextMen
                         <MenuItem
                             key={category.name}
                             label={category.name}
-                            leadingIcon={CATEGORY_ICON[category.name]}
                             data-category={category.name}
                             data-open={isOpen ? 'true' : 'false'}
                             aria-expanded={isOpen}
@@ -460,6 +572,47 @@ export function ContextMenu({ position, onClose, onOpenMIDIBrowser }: ContextMen
                         />
                     );
                 })}
+
+                {verbs && (
+                    <>
+                        <MenuSeparator />
+                        <MenuCategory label="Edit" onMouseEnter={() => setOpenCategory(null)} />
+                        <MenuItem
+                            label="Copy"
+                            shortcut={shortcutFor('canvas.copy')}
+                            disabled={!verbs.hasSelection}
+                            onSelect={() => runVerb(verbs.copy)}
+                            onMouseEnter={() => setOpenCategory(null)}
+                        />
+                        <MenuItem
+                            label="Paste"
+                            shortcut={shortcutFor('canvas.paste')}
+                            onSelect={() => runVerb(verbs.paste)}
+                            onMouseEnter={() => setOpenCategory(null)}
+                        />
+                        <MenuItem
+                            label="Duplicate"
+                            shortcut={shortcutFor('canvas.duplicate')}
+                            disabled={!verbs.hasSelection}
+                            onSelect={() => runVerb(verbs.duplicate)}
+                            onMouseEnter={() => setOpenCategory(null)}
+                        />
+                        <MenuItem
+                            label="Select all"
+                            shortcut={shortcutFor('canvas.selectAll')}
+                            onSelect={() => runVerb(verbs.selectAll)}
+                            onMouseEnter={() => setOpenCategory(null)}
+                        />
+                        <MenuItem
+                            label="Delete"
+                            danger
+                            shortcut={shortcutFor('edit.delete')}
+                            disabled={!verbs.hasSelection}
+                            onSelect={() => runVerb(verbs.remove)}
+                            onMouseEnter={() => setOpenCategory(null)}
+                        />
+                    </>
+                )}
 
                 <MenuSeparator />
 

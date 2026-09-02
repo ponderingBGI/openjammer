@@ -36,17 +36,42 @@ function Cell({ label, children }: { label: string; children: React.ReactNode })
     );
 }
 
-/** Idle: every kind reads the same, because what it is carrying is nothing. */
+/**
+ * Idle: the TYPE reads at reduced chroma before any cable exists (U8/HA-12).
+ * A port's type is a property of the socket — what may be plugged in — not of
+ * whatever is flowing through it right now, and "where may I drag this?" is a
+ * question the player asks *before* there is a cable to answer it.
+ */
 export const Idle: Story = () => (
     <div style={body}>
         <Cell label="audio">
-            <Port kind="audio" direction="input" />
+            <Port kind="audio" direction="input" name="Audio in" />
         </Cell>
         <Cell label="control">
-            <Port kind="control" direction="input" />
+            <Port kind="control" direction="input" name="Level" />
         </Cell>
         <Cell label="universal">
             <Port kind="universal" direction="input" />
+        </Cell>
+    </div>
+);
+
+/**
+ * Named: hover any socket. Every port carries `role="button"`, an `aria-label`
+ * and the same words as a `title`, built from its type, its direction and the
+ * name its row prints beside it — the app's most-repeated verb used to be
+ * invisible to assistive tech and had no hover affordance at all (HA-02).
+ */
+export const Named: Story = () => (
+    <div style={body}>
+        <Cell label="audio out">
+            <Port kind="audio" direction="output" connected />
+        </Cell>
+        <Cell label="control in · Level">
+            <Port kind="control" direction="input" name="Level" />
+        </Cell>
+        <Cell label="armed">
+            <Port kind="audio" direction="output" data-armed="" />
         </Cell>
     </div>
 );
@@ -82,6 +107,9 @@ export const States: Story = () => (
         </Cell>
         <Cell label="focus (tab)">
             <Port kind="audio" direction="input" tabIndex={0} />
+        </Cell>
+        <Cell label="armed (Enter)">
+            <Port kind="audio" direction="output" data-armed="" />
         </Cell>
     </div>
 );

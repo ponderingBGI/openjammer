@@ -772,6 +772,25 @@ export const useGraphStore = create<GraphStore>()(
 
                 if (!sourceNode || !targetNode) return null;
 
+                /*
+                 * A CARD CANNOT BE WIRED TO ITSELF — one rule, one place, both routes.
+                 *
+                 * The keyboard route grew this prohibition privately (it needed
+                 * words for the refusal), which made it a second opinion about
+                 * what is legal: it refused the self-loop while the identical
+                 * pointer drag CREATED it (measured at gate time, `6 -> 7`,
+                 * "Connected Effect to Effect"). Two rule sets for one gesture is
+                 * exactly what the shared-verb refactor exists to prevent, so the
+                 * rule lives here where `canConnect`'s do, and the UI reports
+                 * this answer rather than pre-judging it.
+                 *
+                 * It is also the right rule on the merits: the executor compiles
+                 * an ACYCLIC schedule, so a node feeding its own input is an edge
+                 * the engine can never honour. Container hierarchies still wire
+                 * freely — those are different node ids.
+                 */
+                if (sourceNodeId === targetNodeId) return null;
+
                 const sourcePort = sourceNode.ports.find(p => p.id === sourcePortId);
                 let targetPort = targetNode.ports.find(p => p.id === targetPortId);
 
@@ -1291,7 +1310,11 @@ export const useGraphStore = create<GraphStore>()(
                 ) {
                     return connectionId;
                 }
-                useHistoryStore.getState().begin('Reconnect cable', 'graph');
+                // ONE word for one concept (U10): the live region says "Moved
+                // cable from X to Y", so the undo button must not say
+                // "Reconnect". Moving a cable's destination and re-sourcing its
+                // far end are the same gesture to the player — the cable moved.
+                useHistoryStore.getState().begin('Move cable', 'graph');
                 try {
                     return get().addConnection(
                         sourceNodeId,
@@ -1851,7 +1874,28 @@ export const useGraphStore = create<GraphStore>()(
                         .filter((connection) => copiedIds.has(connection.sourceNodeId) && copiedIds.has(connection.targetNodeId))
                         .map((connection) => structuredClone(connection)),
                 };
-                get().pasteClipboard(undefined, duplicateData);
+                /*
+                 * DUPLICATE IS NOT PASTE (RG-03).
+                 *
+                 * The work really is `pasteClipboard`'s, and delegating is right —
+                 * but the history frame that reaches the player must not be. Without
+                 * this bracket both `Ctrl+D` and the menu's Duplicate row announced
+                 * "Pasted nodes" and titled the undo button "Undo Paste nodes",
+                 * because the inner call opens `begin('Paste nodes')`. One of
+                 * HA-26's five new pointer verbs, wearing another verb's name.
+                 *
+                 * Nesting is what makes this work: `historyStore.begin` only
+                 * increments `depth` when a frame is already open, so the OUTER
+                 * label wins and the inner one is swallowed. `commit()` in a
+                 * `finally` for the usual reason — a half-open frame would eat the
+                 * player's next edit.
+                 */
+                useHistoryStore.getState().begin('Duplicate nodes', 'graph');
+                try {
+                    get().pasteClipboard(undefined, duplicateData);
+                } finally {
+                    useHistoryStore.getState().commit();
+                }
             },
 
             // Getters

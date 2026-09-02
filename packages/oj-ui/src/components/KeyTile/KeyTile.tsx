@@ -76,6 +76,14 @@ export function KeyTile({
                 kind="control"
                 direction="output"
                 connected={connected}
+                /* The TILE is the button here, and it names itself. A socket
+                   that also claimed `role="button"` would nest one control
+                   inside another, and its `aria-label` would be folded into the
+                   tile's own accessible name ("C4" becoming "Control out —
+                   drag to connect C4"). Hidden from the tree, still a pointer
+                   target, still visible. */
+                role={undefined}
+                aria-hidden={true}
                 data-node-id={dataNodeId}
                 data-port-id={dataPortId}
                 data-port-type={dataPortType}

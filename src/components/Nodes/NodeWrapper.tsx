@@ -7,7 +7,8 @@ import type { GraphNode, Position } from '../../engine/types';
 import { useGraphStore } from '../../store/graphStore';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useIsAgentPending } from '../../store/agentSessionStore';
-import { generateUniqueId } from '../../utils/idGenerator';
+import { beginConnectionFrom, completeConnectionAt } from './connectionVerbs';
+import { announce } from '../../a11y/announce';
 // The schematic faceplate stylesheets, in ONE explicit order.
 //
 // Each family file is also imported by its own component (so a node styles
@@ -117,12 +118,8 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
     const beginGesture = useGraphStore((s) => s.beginGesture);
     const endGesture = useGraphStore((s) => s.endGesture);
     const connections = useGraphStore((s) => s.connections);
-    const addConnection = useGraphStore((s) => s.addConnection);
-    const reconnectConnection = useGraphStore((s) => s.reconnectConnection);
 
     const zoom = useCanvasStore((s) => s.zoom);
-    const startConnecting = useCanvasStore((s) => s.startConnecting);
-    const stopConnecting = useCanvasStore((s) => s.stopConnecting);
     const isConnecting = useCanvasStore((s) => s.isConnecting);
     const connectingFrom = useCanvasStore((s) => s.connectingFrom);
     const hoverTarget = useCanvasStore((s) => s.hoverTarget);
@@ -239,184 +236,44 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
         window.addEventListener('blur', cleanup);
     }, [beginGesture, endGesture, moveNodes, node.id, zoom, selectNode, setCanvasDragging]);
 
-    // Handle port mouse down - start connection dragging (with pending disconnect)
-    //
-    // POINTER-AGNOSTIC (UI-017): a panel port activated with Enter/Space hands us
-    // a KeyboardEvent cast to this signature, which carries no `button`. The old
-    // `e.button !== 0` guard rejected exactly that, so every advertised keyboard
-    // port activation in the app silently did nothing. Guard against a
-    // non-primary MOUSE button, not against the absence of one.
+    /*
+     * The port handlers are now two lines of EVENT PLUMBING over the shared
+     * connection verbs (`./connectionVerbs`). The bodies moved out because the
+     * keyboard route needed them and the only way to reach a closure is to
+     * impersonate a mouse — which is what U8 shipped and what the gate review
+     * correctly asked to be replaced by the verb itself.
+     *
+     * POINTER-AGNOSTIC (UI-017): a panel port activated with Enter/Space hands us
+     * a KeyboardEvent cast to this signature, which carries no `button`. The old
+     * `e.button !== 0` guard rejected exactly that, so every advertised keyboard
+     * port activation in the app silently did nothing. Guard against a
+     * non-primary MOUSE button, not against the absence of one.
+     */
     const handlePortMouseDown = useCallback((portId: string, e: React.MouseEvent) => {
         if (e.button != null && e.button !== 0) return;
         e.stopPropagation();
+        beginConnectionFrom(node, portId);
+    }, [node]);
 
-        // If not already connecting, start a new connection
-        const currentIsConnecting = useCanvasStore.getState().isConnecting;
-        if (!currentIsConnecting) {
-            // Check if this port has an existing connection - if so, store it for pending disconnect
-            const currentConnections = useGraphStore.getState().connections;
-            const port = node.ports.find(p => p.id === portId);
-            let pendingDisconnectId: string | undefined;
-
-            if (port) {
-                // Find existing connection on this port
-                const existingConnection = Array.from(currentConnections.values()).find(conn => {
-                    if (port.direction === 'output') {
-                        return conn.sourceNodeId === node.id && conn.sourcePortId === portId;
-                    } else {
-                        return conn.targetNodeId === node.id && conn.targetPortId === portId;
-                    }
-                });
-
-                if (existingConnection) {
-                    // Store for pending disconnect (will be removed when new connection confirmed)
-                    pendingDisconnectId = existingConnection.id;
-                }
-            }
-
-            // Start new connection from this port (with optional pending disconnect)
-            startConnecting(node.id, portId, pendingDisconnectId);
-        }
-    }, [node.id, node.ports, startConnecting]);
-
-    // Handle port mouse up - complete connection if dragging to a different port
+    // Handle port mouse up - complete the connection through the shared verb.
+    // The pointer route announces the outcome for the same reason the keyboard
+    // one does: a drop that silently does nothing is indistinguishable from a
+    // broken mouse (HA-07), and a cable that MOVES without a word breaks the
+    // model the cables teach (UX-INV Q5's other half).
     const handlePortMouseUp = useCallback((portId: string, e: React.MouseEvent) => {
         e.stopPropagation();
-
-        // Read current connecting state directly from store to avoid stale closure
-        const currentIsConnecting = useCanvasStore.getState().isConnecting;
-        const currentConnectingFrom = useCanvasStore.getState().connectingFrom;
-
-        if (currentIsConnecting && currentConnectingFrom) {
-            const sources = Array.isArray(currentConnectingFrom) ? currentConnectingFrom : [currentConnectingFrom];
-
-            // If releasing on the same port we started from, do nothing (allow click-to-connect)
-            if (sources.length === 1 && sources[0].nodeId === node.id && sources[0].portId === portId) {
-                // Don't stop connecting - user clicked a port to start, they'll click another to finish
-                return;
-            }
-
-            const updateNodePorts = useGraphStore.getState().updateNodePorts;
-            // `instrument` is the GENERIC voice every preset rig installs. It was
-            // missing from this list, so the one instrument most players meet first
-            // could not grow an input by dropping a cable on its ghost port — the
-            // gesture silently did nothing. It is the same node as the three family
-            // aliases; it grows ports the same way.
-            const isInstrument = ['instrument', 'strings', 'keys', 'winds', 'sampler'].includes(node.type);
-
-            // Check if clicking on a ghost port (not yet persisted)
-            const isGhostPort = portId.startsWith('ghost-input-');
-            let actualFirstPortId = portId;
-
-            // Inventing a ghost port and attaching/reconnecting its cable is one
-            // reversible gesture. Nesting with reconnectConnection's defensive
-            // history bracket is intentional; historyStore commits at depth zero.
-            if (isGhostPort) beginGesture();
-            try {
-
-            if (isGhostPort && isInstrument) {
-                // Extract the ghost port index
-                const ghostIndex = parseInt(portId.replace('ghost-input-', ''), 10);
-                const currentInputs = node.ports.filter(p => p.direction === 'input' && p.type === 'control');
-
-                // Create all needed ports up to and including the ghost port index
-                const newPorts = [...node.ports];
-                const portsToAdd = (ghostIndex + 1) - currentInputs.length;
-
-                const newPortIds: string[] = [];
-                for (let i = 0; i < portsToAdd; i++) {
-                    const nextIndex = currentInputs.length + i + 1;
-                    const newPortId = generateUniqueId('input-');
-                    newPortIds.push(newPortId);
-                    newPorts.push({
-                        id: newPortId,
-                        name: `In ${nextIndex}`,
-                        type: 'control',
-                        direction: 'input'
-                    });
-                }
-
-                // Persist the new ports
-                updateNodePorts(node.id, newPorts);
-
-                // The clicked ghost port is now the last one we added
-                actualFirstPortId = newPortIds[newPortIds.length - 1];
-            }
-
-            // Get target port (now that ghost ports are persisted if needed)
-            const updatedNode = useGraphStore.getState().nodes.get(node.id) || node;
-            const targetPort = isGhostPort
-                ? updatedNode.ports.find(p => p.id === actualFirstPortId)
-                : updatedNode.ports.find(p => p.id === portId);
-
-            if (!targetPort) return;
-
-            // Check if we need to auto-expand for multiple connections
-            if (isInstrument && targetPort.direction === 'input' && sources.length > 1) {
-                const currentInputs = updatedNode.ports.filter(p => p.direction === 'input' && p.type === 'control');
-                const clickedIndex = currentInputs.findIndex(p => p.id === actualFirstPortId);
-
-                if (clickedIndex === -1) return;
-
-                const neededCount = clickedIndex + sources.length;
-                const availableCount = currentInputs.length;
-
-                if (neededCount > availableCount) {
-                    const newPorts = [...updatedNode.ports];
-                    const portsToAdd = neededCount - availableCount;
-
-                    for (let i = 0; i < portsToAdd; i++) {
-                        const nextIndex = availableCount + i + 1;
-                        newPorts.push({
-                            id: generateUniqueId('input-'),
-                            name: `In ${nextIndex}`,
-                            type: 'control',
-                            direction: 'input'
-                        });
-                    }
-
-                    updateNodePorts(node.id, newPorts);
-                }
-            }
-
-            // Get final updated node and inputs after all port additions
-            const finalNode = useGraphStore.getState().nodes.get(node.id) || updatedNode;
-            const finalInputs = finalNode.ports.filter(p => p.direction === 'input' && p.type === 'control');
-
-            const pendingDisconnect = useCanvasStore.getState().pendingDisconnect;
-            sources.forEach((source, index) => {
-                let actualTargetPortId = actualFirstPortId;
-
-                if (index > 0 && targetPort.direction === 'input' && isInstrument) {
-                    const clickedIndex = finalInputs.findIndex(p => p.id === actualFirstPortId);
-                    if (clickedIndex !== -1 && (clickedIndex + index) < finalInputs.length) {
-                        actualTargetPortId = finalInputs[clickedIndex + index].id;
-                    } else {
-                        return;
-                    }
-                }
-
-                if (targetPort.direction === 'input') {
-                    if (pendingDisconnect && index === 0) {
-                        reconnectConnection(pendingDisconnect, source.nodeId, source.portId, node.id, actualTargetPortId);
-                    } else {
-                        addConnection(source.nodeId, source.portId, node.id, actualTargetPortId);
-                    }
-                } else {
-                    if (pendingDisconnect && index === 0) {
-                        reconnectConnection(pendingDisconnect, node.id, actualTargetPortId, source.nodeId, source.portId);
-                    } else {
-                        addConnection(node.id, actualTargetPortId, source.nodeId, source.portId);
-                    }
-                }
-            });
-
-            stopConnecting();
-            } finally {
-                if (isGhostPort) endGesture();
-            }
+        if (!useCanvasStore.getState().isConnecting) return;
+        const result = completeConnectionAt(node, portId);
+        if (result.ok) {
+            announce(result.announcement ?? '');
+            return;
         }
-    }, [node, addConnection, reconnectConnection, stopConnecting, beginGesture, endGesture]);
+        // The button is already up, so this gesture is over either way — drop the
+        // cable rather than leaving one following a cursor nobody is pressing.
+        // (The keyboard route deliberately keeps it: nothing was released.)
+        useCanvasStore.getState().stopConnecting();
+        announce(result.reason);
+    }, [node]);
 
     // Handle port hover for connection targeting and 'A' key selection
     const handlePortMouseEnter = useCallback((portId: string) => {
@@ -614,6 +471,12 @@ export const NodeWrapper = memo(function NodeWrapper({ node }: NodeWrapperProps)
                     label={port.name}
                     className="is-disabled"
                     title={port.disabledReason}
+                    // The REASON is the socket's whole accessible name here.
+                    // Overriding only `title` left assistive tech reading an
+                    // inert port as "…drag to connect, or press Enter" — an
+                    // instruction it will not obey. Latent (no built-in ships a
+                    // gated port today) but the affordance is kept on purpose.
+                    aria-label={port.disabledReason ?? `${port.name} — not wired yet`}
                     aria-disabled={true}
                     data-node-id={node.id}
                     data-port-id={port.id}

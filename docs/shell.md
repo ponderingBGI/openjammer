@@ -53,24 +53,65 @@ the card the player was working on: no port, knob or pad on the canvas was reach
 keyboard at all. Now a `Tab` from the empty stage brings up the other surface, and a `Tab`
 inside a card means what it means everywhere else.
 
-**Canvas ports are still not in the tab order, and that is an OPEN question, not a
-decision.** Fixing the surface swap made ports *reachable in principle*; it did not put
-them in the tab order, and a measured keyboard-only session found **0 of 84 ports
-tabbable**. A keyboard-only player can therefore build a rig's nodes from `Ctrl+K` and
-cannot connect them. `plans/redesign-new-dna/03-canvas-app-reliability-audit.md:41`
-(UI-017, P1) also records that the keyboard route into `startConnecting` fails on
-`button === 0`.
+### Ports: named, reachable, and typed at rest
 
-This line exists so the state of that question is written down somewhere other than a defect
-log. It is a product decision and it has not been made: either ports join the tab order —
-in which case UI-017 is an open P1 shipping unfixed — or they are deliberately out of it,
-in which case there must be another keyboard route to a connection, and this paragraph
-should say what it is. What is not acceptable is the current situation, where the branch
-ships a known P1 as though it were settled.
+This section used to record an OPEN product decision — canvas ports were not in the tab
+order, a measured keyboard-only session found **0 of 84 ports tabbable**, and a
+keyboard-only player could build a rig's cards from `Ctrl+K` and had no route to connect
+them. The decision is made (UX-1 **U8**). What shipped:
 
-By contrast the piano roll's notes ARE in the tab order and are now a single tab stop
-(roving tabindex, `PianoRoll.tsx`); they used to be 128 stops, which is the failure mode a
-naive "make it all tabbable" fix for ports would reproduce on the canvas.
+- **Every socket says what it is.** `Port` renders `role="button"` with an `aria-label` and
+  the same words as a `title`, built from its type, its direction and the name its row
+  prints beside it: *"Audio out — drag to connect, or press Enter"*, *"Control in — Level —
+  drag to connect, or press Enter"*. `PortRow` forwards its label, so all fourteen
+  faceplates get it without a prop threaded through any of them. A caller that knows better
+  still wins — a gated port keeps its own "why this is inert" title.
+- **The target is bigger than the drawing.** The well stays 18px, because that is the size a
+  socket should read at; a concentric invisible ≥24px pad carries the pointer
+  (`--oj-port-hit`). Nothing scales on hover: the thing you are aiming at never moves. The
+  two places where the drawn size *is* the target — a `KeyTile`'s embedded socket, where the
+  tile is the playable surface, and the MiniLab panel's dense control sockets — opt out by
+  name.
+- **The legend reads before the cable exists.** An idle socket is tinted with its own type
+  at reduced chroma and goes full strength once something is plugged in. The previous rule
+  ("an idle socket carries nothing, so it reads as nothing") confused the signal with the
+  socket: what a port *may* carry is stamped on the connector, and it is exactly what the
+  player needs while deciding where to drag.
+- **One roving tab stop per card, not one per port.** `Tab` walks cards; `Arrow` keys walk
+  that card's sockets. The piano roll already learned this — its notes used to be 128 stops
+  and are now one — and that is the failure mode a naive "make it all tabbable" fix would
+  have reproduced on the canvas. The stop is written straight to the DOM by `NodeCanvas`
+  (one `MutationObserver`), because twenty-three faceplates render their own ports and the
+  rule belongs in one place.
+- **`Enter` arms, `Enter` lands, `Escape` drops.** A focused socket takes `Enter` to pick up
+  a cable (the socket paints armed — the focus ring plus a filled core, the same picture the
+  pointer path draws), `Tab`/arrows move to another card's socket, and `Enter` there
+  completes. An incompatible target is refused *out loud* in the polite live region ("Two
+  outputs cannot connect. Reach for an input.") rather than silently. Arming and landing
+  dispatch the same pointer events the card already handles, so the keyboard route **is** the
+  pointer route — ghost ports, instrument auto-expansion and the pending reconnect all behave
+  identically, and `addConnection` is reached down exactly one path. This also closes UI-017
+  (`plans/redesign-new-dna/03-canvas-app-reliability-audit.md:41`), whose keyboard route into
+  `startConnecting` failed on `button === 0`.
+
+One thing deliberately stays out of the tab order: a `KeyTile`'s socket. There the *tile* is
+the control and it names itself; a socket claiming `role="button"` inside it would nest one
+control in another and fold its label into the key's own name.
+
+**The cable grammar, in one line each (U5).** An **output** is a fan-out point with no
+cardinality, so grabbing a connected output starts a **new** cable and every cable already
+leaving it stays — one voice can feed the speaker and the looper at once. An **input** holds
+exactly one cable, so grabbing a connected input **picks that cable up**: drop it on another
+input and the cable's destination moves (announced "Moved cable from X to Y", one `Ctrl+Z`);
+drop it on an output and the cable's *source* changes instead. Dropping onto an occupied audio
+input replaces what was there, which is what `graphStore.addConnection` has always done and is
+now reachable by mouse — a settled cable's 14px hit path goes inert for the duration of a drag,
+so the drop always lands on the port underneath rather than on the wire drawn over it. A card
+cannot be wired to itself, on either route: the executor compiles an acyclic schedule, so the
+rule lives in `addConnection` where both the pointer and the keyboard read it.
+
+There is no cable-**body** drag. `Cable`'s hit path is a *select* target (then `Delete`), not a
+handle; the way to move a cable is its input end.
 
 `Shift+Tab` obeys the same target rule and **never toggles** — `view.toggleArrangement` is
 bound to a bare `Tab` — so a backwards `Tab` from the stage floor walks into the chrome. In
@@ -80,6 +121,17 @@ Settings · Start sound · keyboard help.
 That asymmetry is deliberate: it is the keyboard-only route off a surface, and the way back
 in is a `Tab` forward from the topbar, which lands on the first control inside the active
 surface.
+
+That last sentence was **measured false** and is now true (UX-1 **U9**). The stage-floor
+toggle was unconditional, so walking forward out of the chrome parked focus on
+`document.body` and every further `Tab` toggled canvas ↔ song forever; zero canvas controls
+were ever reached. The arbiter now distinguishes focus PARKED on the stage floor from focus
+IN TRANSIT across it: a bare `Tab` whose immediately preceding key was also a bare `Tab` is
+a traversal, and falls through to native focus movement into the active surface. Everything
+else — a pointer (`pointerdown` resets it), any other key, or simply arriving on the empty
+stage — parks focus, and the next `Tab` brings up the other surface exactly as the topbar
+keycap says. One consequence worth stating because it is useful: a second consecutive `Tab`
+on a surface root walks INTO the surface you just brought up, rather than toggling back.
 
 **The two surfaces you cannot see never hold the tab order.** All three stay mounted (a
 switch is instant and nothing loses its scroll), so each carries `inert` + `aria-hidden`
@@ -147,16 +199,56 @@ performer looks to ask *is it running*, so a **Stop** glyph over a frozen playhe
 worst lie it can tell. It shows **Stop** only when the transport is playing, nothing is
 pending a start, and there is no live transport error:
 
-| Store state | Glyph | Readout |
-|---|---|---|
-| `transportPending: 'play'` — start unconfirmed | Play | `--text-muted` |
-| `transportError` — engine refused or went silent | Play | — |
-| playing, confirmed | Stop | normal |
-| playing, `transportPending: 'seek'` mid-scrub | Stop | `--text-muted` |
+| Store state | Glyph | Readout | A press means |
+|---|---|---|---|
+| `transportPending: 'play'` — start unconfirmed | Play | `--text-muted` | ask again (Esc stops) |
+| `transportError` from a **play** — engine refused or went silent | Play + warning dot | — | ask again (Esc stops) |
+| `transportError` from a **seek/stop** on a rolling song | Stop + warning dot | — | stop |
+| a **record** start, confirmed or not | Stop | — | stop (finishes the take) |
+| playing, confirmed | Stop | normal | stop |
+| playing, `transportPending: 'seek'` mid-scrub | Stop | `--text-muted` | stop |
 
 Confirmation is one `TransportFrame` away, so on a healthy engine the flip is a frame, not
 a delay a hand can feel — and the next confirmed frame clears a transient error by itself.
 Stopping is instant in the other direction: `isPlaying` goes false with the gesture.
+
+**And the press agrees with the glyph.** The first two rows are the gap between what was
+asked for and what was confirmed (`transportAwaitingEngine` in `arrangementStore`). The
+glyph shows Play through them, so the gesture has to MEAN play: it calls `retryTransport`,
+which re-issues the start. Asking `isPlaying` here instead is how a button labelled Play
+came to *stop* the song (HA-03). The pill and Space read the same predicate — one owner,
+so a label and its action cannot drift apart.
+
+**The transport reports on the transport.** `transportError` used to render on the
+arrangement's sky band and nowhere else, i.e. on a surface the player is not looking at
+while they press Play on the canvas. It now rides the pill, and specifically the **play
+button** — the control that wears the warning dot is the control a pointer hovers and a
+keyboard lands on:
+
+- a `--warning-ink` dot on the button (`data-transport-fault` on the host);
+- the sentence appended to the **button's own `title`** (`TransportPill`'s `faultReason`),
+  never the surrounding `role="group"`, where a hover shows "Play (space)" and a description
+  is read on entry and never again;
+- the same sentence as the **button's** `aria-describedby`.
+
+The sky band mirrors it, but the sky band lives inside the arrangement surface, which is
+`inert` and `aria-hidden` whenever the canvas is active — so it cannot be the one
+announcement for a player pressing Play on the canvas. The pill carries a `polite`
+`role="status"` region that speaks exactly when the arrangement cannot; the sentence is
+announced once, never twice.
+
+**Which command went unanswered decides what is said.** A track with no instrument explains
+why nothing SOUNDED, so it is named on a **play or record** timeout only. A seek, a stop or
+a loop toggle that goes unacknowledged keeps the engine wording — blaming a track there is a
+wrong accusation with a promise attached ("it will play") to a question nobody asked.
+
+**And there is always a way to stop.** While a start is unconfirmed the button says Play and
+its press asks again, which would otherwise leave a performer with no gesture that ends a
+song the engine may still be sounding. **Esc** is that gesture: in the wedged state only, it
+calls `stop()` unconditionally and the pill reads stopped. It is named in the button's
+tooltip, because a gesture nothing on screen mentions is a gesture only its author knows.
+A seek or stop timeout on a rolling song never enters this state at all — the glyph stays
+Stop, so the ordinary gesture still works.
 
 ### The meter
 

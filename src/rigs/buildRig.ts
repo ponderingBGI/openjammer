@@ -26,6 +26,7 @@
 
 import { useCanvasStore } from '../store/canvasStore';
 import { useGraphStore } from '../store/graphStore';
+import { useHistoryStore } from '../store/historyStore';
 import { useArrangementStore } from '../store/arrangementStore';
 import { useAudioStore } from '../store/audioStore';
 import { isKeyboardKind, keyboardModeOf } from '../store/keyboardModes';
@@ -82,11 +83,19 @@ export interface InstalledRig {
  * cable that did not land — the caller reports honestly rather than assuming.
  */
 export function installRig(spec: RigSpec): InstalledRig {
-    const graph = useGraphStore.getState();
     const ids: Record<string, string> = {};
     const unwired: string[] = [];
 
-    graph.beginGesture();
+    /*
+     * NAME the gesture. `beginGesture()` opens the history frame with the
+     * generic `'Edit graph'`, which is right for an anonymous edit and wrong for
+     * the biggest single thing a first-run player ever does: it made the undo
+     * button read "Undo Add 4 cards" for a thirteen-node install, and the live
+     * region say the same. `begin`/`commit` are exactly what `beginGesture`/
+     * `endGesture` wrap — the only difference here is that the frame carries the
+     * rig's own name, so one Ctrl+Z is announced as "Undo Install Beat rig".
+     */
+    useHistoryStore.getState().begin(`Install ${spec.label}`, 'graph');
     try {
         for (const node of spec.nodes) {
             ids[node.ref] = useGraphStore
@@ -138,7 +147,7 @@ export function installRig(spec: RigSpec): InstalledRig {
     } finally {
         // Always close the gesture: a half-open history frame would swallow the
         // player's NEXT edit into the rig's undo step.
-        useGraphStore.getState().endGesture();
+        useHistoryStore.getState().commit();
     }
 
     if (unwired.length) log.warn('rig installed with unwired cables', { rig: spec.id, unwired });

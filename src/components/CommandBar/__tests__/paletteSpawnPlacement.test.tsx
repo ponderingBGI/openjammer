@@ -178,4 +178,41 @@ describe('three adds from the palette', () => {
         const [node] = [...useGraphStore.getState().nodes.values()];
         expect(node!.position).toEqual({ x: 640, y: 400 });
     });
+
+    /*
+     * U12 / HA-07 — the add's own confirmation.
+     *
+     * Measured across seven probes: `selected: 0` after every add, no toast, no
+     * announcement. `addNode` returns the id and it was thrown away, so on a busy
+     * canvas there was no way to tell WHICH card was new — the one thing the
+     * gesture promised.
+     */
+    /*
+     * The regression that selecting-what-you-made exposed: `buildPaletteCtx`
+     * sets `ctx.node` to the single selected node, and the spawn used to treat
+     * that as the PARENT. So the moment an add selected its own card, the next
+     * add landed INSIDE it — one visible card and one a level down.
+     */
+    it('spawns at the level the player is looking at, never inside the selection', () => {
+        renderHook(() => useCommandSources());
+
+        getCommand('node.add.looper')!.run({} as never);
+        const first = [...useGraphStore.getState().nodes.values()][0];
+        // Exactly what buildPaletteCtx hands an action while one node is selected.
+        getCommand('node.add.library')!.run({ node: first, selectedIds: [first.id], targetKinds: ['global', 'selection', 'node'] } as never);
+
+        const roots = [...useGraphStore.getState().nodes.values()].filter((node) => node.parentId === null);
+        expect(roots.map((n) => n.type).sort()).toEqual(['library', 'looper']);
+    });
+
+    it('selects the card it just made, and only that one', () => {
+        renderHook(() => useCommandSources());
+
+        getCommand('node.add.looper')!.run({} as never);
+        getCommand('node.add.sampler')!.run({} as never);
+
+        const nodes = [...useGraphStore.getState().nodes.values()];
+        const newest = nodes.find((node) => node.type === 'sampler')!;
+        expect([...useGraphStore.getState().selectedNodeIds]).toEqual([newest.id]);
+    });
 });

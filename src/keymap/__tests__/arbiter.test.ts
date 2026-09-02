@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { resolveKeydown } from '../arbiter';
+import { resetTabTraversal, resolveKeydown } from '../arbiter';
 import { clearBindingSetsForTests, registerBindingSet } from '../registry';
 import { useCanvasStore } from '../../store/canvasStore';
 import { useAudioClipStore } from '../../store/audioClipStore';
@@ -19,6 +19,7 @@ describe('keymap arbiter', () => {
         useCanvasStore.setState({ isDragging: false });
         useAudioClipStore.setState((state) => ({ dragState: { ...state.dragState, isDragging: false } }));
         useKeybindingsStore.setState({ customBindings: {} });
+        resetTabTraversal();
     });
 
     afterEach(clearBindingSetsForTests);
@@ -117,14 +118,26 @@ describe('keymap arbiter', () => {
         expect(run).not.toHaveBeenCalled();
     });
 
-    it('G4: drag guard consumes Tab without toggling', () => {
+    /*
+     * The drag guard's job is that a live gesture cannot have the surface swapped
+     * out from under it. It used to do that by CONSUMING Tab, which U8 turned
+     * into a dead end: `isConnecting` is now raised by the keyboard route too
+     * (`Enter` arms a cable), and the way to the card you mean to land on is
+     * `Tab`. So a mid-gesture Tab walks natively and still never toggles.
+     */
+    it('G4: a mid-gesture Tab walks natively and never toggles', () => {
         const run = vi.fn(() => true);
         registerBindingSet({ id: 'global', scope: 'global', entries: [{ actionId: 'view.toggleArrangement', run }] });
         useCanvasStore.setState({ isDragging: true });
         const event = key('Tab');
-        expect(resolveKeydown(event)).toBe(true);
-        expect(event.defaultPrevented).toBe(true);
+        expect(resolveKeydown(event)).toBe(false);
+        expect(event.defaultPrevented).toBe(false);
         expect(run).not.toHaveBeenCalled();
+
+        // Every other key is still consumed: no edit lands beneath a gesture.
+        const letter = key('d', { ctrlKey: true });
+        expect(resolveKeydown(letter)).toBe(true);
+        expect(letter.defaultPrevented).toBe(true);
     });
 
     it('resolves every migrated shortcut through its action id', () => {
@@ -224,8 +237,13 @@ describe('keymap arbiter', () => {
         expect(resolveKeydown(key('Tab', { shiftKey: true }, play))).toBe(false);
         expect(run).not.toHaveBeenCalled();
 
-        // The stage floor: the surface ROOT and the bare body toggle.
+        // PARKED on the stage floor — the player clicked the empty stage, or
+        // pressed Escape, and now presses Tab. That is the gesture the topbar
+        // keycap advertises, and it still toggles, from the surface root and
+        // from the bare body alike.
+        resetTabTraversal();
         expect(resolveKeydown(key('Tab', {}, surface))).toBe(true);
+        resetTabTraversal();
         expect(resolveKeydown(key('Tab', {}, document.body))).toBe(true);
         expect(run).toHaveBeenCalledTimes(2);
 
@@ -236,6 +254,63 @@ describe('keymap arbiter', () => {
         expect(run).toHaveBeenCalledTimes(2);
 
         pill.remove();
+        surface.remove();
+    });
+
+    /*
+     * U9 / HA-01 — the forward route back INTO a surface.
+     *
+     * Measured before this: from the topbar's last control, Tab walked pill ->
+     * hint -> help -> `document.body`, and every further Tab toggled canvas <->
+     * song forever. Zero canvas controls were ever reached, while
+     * `docs/shell.md:80-82` promised the opposite in writing.
+     *
+     * The discriminator is PARKED vs IN TRANSIT. A Tab that arrives on the stage
+     * floor with another Tab immediately behind it is a traversal crossing the
+     * floor, so it falls through to the browser and lands inside the surface. A
+     * second consecutive Tab on the same root does the same, which is what lets a
+     * player toggle a surface up and then walk straight into it. Anything else —
+     * a pointer, any other key — parks focus again and the next Tab toggles.
+     */
+    it('U9: a Tab that follows a Tab crosses the stage floor instead of toggling', () => {
+        const run = vi.fn(() => true);
+        registerBindingSet({ id: 'global', scope: 'global', entries: [{ actionId: 'view.toggleArrangement', run }] });
+
+        const chrome = document.createElement('button');
+        const surface = document.createElement('div');
+        surface.dataset.surfaceRoot = 'canvas';
+        surface.tabIndex = -1;
+        document.body.append(chrome, surface);
+
+        // Walking OUT of the chrome, then across the floor: the second Tab must
+        // not be eaten, or there is no way back into the surface at all.
+        resetTabTraversal();
+        expect(resolveKeydown(key('Tab', {}, chrome))).toBe(false);
+        const crossing = key('Tab', {}, document.body);
+        expect(resolveKeydown(crossing)).toBe(false);
+        expect(crossing.defaultPrevented).toBe(false);
+        expect(run).not.toHaveBeenCalled();
+
+        // Parked: toggle once, then the very next Tab walks in.
+        resetTabTraversal();
+        expect(resolveKeydown(key('Tab', {}, surface))).toBe(true);
+        expect(run).toHaveBeenCalledTimes(1);
+        expect(resolveKeydown(key('Tab', {}, surface))).toBe(false);
+        expect(run).toHaveBeenCalledTimes(1);
+
+        // A key between two Tabs ends the traversal, so the floor toggles again.
+        resolveKeydown(key('x', {}, document.body));
+        expect(resolveKeydown(key('Tab', {}, surface))).toBe(true);
+        expect(run).toHaveBeenCalledTimes(2);
+
+        // ...and so does a pointer, which is what `useKeymapArbiter` wires to
+        // `pointerdown`: click the empty stage, press Tab, get the other surface.
+        expect(resolveKeydown(key('Tab', {}, surface))).toBe(false);
+        resetTabTraversal();
+        expect(resolveKeydown(key('Tab', {}, surface))).toBe(true);
+        expect(run).toHaveBeenCalledTimes(3);
+
+        chrome.remove();
         surface.remove();
     });
 

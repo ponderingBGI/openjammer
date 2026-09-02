@@ -13,6 +13,7 @@
  * settings. Nothing in the right cluster is louder than the patch.
  */
 
+import { useEffect, useRef, useState } from 'react';
 import { Chip, IconButton } from '@openjammer/oj-ui';
 import { AppMenuBar } from './AppMenuBar';
 import { Breadcrumbs } from '../Toolbar/Breadcrumbs';
@@ -23,8 +24,12 @@ import { releaseChromeFocus } from './chromeFocus';
 import { EngineHealthDot } from '../EngineHealthDot/EngineHealthDot';
 import { CollabControl } from '../Collab/CollabControl';
 import { useHistoryStore } from '../../store/historyStore';
+import { useGraphStore } from '../../store/graphStore';
+import { resolveNodeDefinition } from '../../engine/registry';
+import { describeHistoryEntry } from '../../a11y/historyPhrase';
 import { useProjectStore } from '../../store/projectStore';
 import { useOnlineStatus } from '../../hooks/usePWA';
+import { useAnotherStudioOpen } from './studioPresence';
 import './Topbar.css';
 
 const UndoGlyph = () => (
@@ -55,13 +60,55 @@ const SettingsGlyph = () => (
     </svg>
 );
 
+/** The words on a node's card, for the sentence in an undo tooltip. */
+function nodeName(nodeId: string): string | undefined {
+    const node = useGraphStore.getState().nodes.get(nodeId);
+    return node ? resolveNodeDefinition(node).name : undefined;
+}
+
 export function Topbar({ onOpenSettings }: { onOpenSettings: () => void }) {
     // The UNIFIED history — undo here reaches the graph and the timeline alike,
     // which is what a player means by "take that back".
     const canUndo = useHistoryStore((state) => state.cursor > 0);
     const canRedo = useHistoryStore((state) => state.cursor < state.entries.length);
+    // U12/HA-09 — the button says WHAT it will take back. The name was always in
+    // the store and rendered nowhere, so one Ctrl+Z after a failed port drag
+    // could remove a whole rig without ever naming it. "Undo" alone asks the
+    // player to remember; "Undo Install beat rig" tells them.
+    const undoEntry = useHistoryStore((state) => state.entries[state.cursor - 1]);
+    const redoEntry = useHistoryStore((state) => state.entries[state.cursor]);
+    const undoLabel = undoEntry ? `Undo ${describeHistoryEntry(undoEntry, nodeName).name}` : 'Undo';
+    const redoLabel = redoEntry ? `Redo ${describeHistoryEntry(redoEntry, nodeName).name}` : 'Redo';
     const projectName = useProjectStore((state) => state.name);
     const isOnline = useOnlineStatus();
+    /*
+     * The sentence that matters most to a performer on a stage with no Wi-Fi —
+     * "everything still works" — lived only in a `title`, i.e. on hover, i.e.
+     * nowhere on a touch screen and nowhere for anyone not hunting (HA-27). It
+     * is IN the chip the first time the chip appears, and after that the player
+     * has been told, so it shrinks back to the one word and stops costing width
+     * in the status cluster.
+     */
+    /*
+     * Two tabs, one origin-wide `localStorage`, last writer wins — and since a
+     * clean boot restores the song from that store, the loser's SONG is what is
+     * destroyed. Leader election is the fix and is not here; being told is the
+     * part that cannot wait, because "my song vanished" with no word is a
+     * failure a performer cannot even report.
+     */
+    const anotherStudioOpen = useAnotherStudioOpen();
+
+    const offlineToldRef = useRef(false);
+    const [offlineTold, setOfflineTold] = useState(false);
+    useEffect(() => {
+        if (isOnline || offlineToldRef.current) return;
+        offlineToldRef.current = true;
+        // Long enough to be read on a dark stage, short enough that the status
+        // cluster is not carrying a sentence for the rest of the set.
+        const timer = setTimeout(() => setOfflineTold(true), 10_000);
+        return () => clearTimeout(timer);
+    }, [isOnline]);
+    const offlineFirstTime = !isOnline && !offlineTold;
 
     // A mouse click on any control in here hands focus back to the stage, so bare
     // `Tab` still switches surface afterwards; a keyboard activation keeps focus,
@@ -83,15 +130,15 @@ export function Topbar({ onOpenSettings }: { onOpenSettings: () => void }) {
 
             <div className="oj-topbar__cluster oj-topbar__cluster--right">
                 <IconButton
-                    label="Undo"
-                    title="Undo (Ctrl+Z)"
+                    label={undoLabel}
+                    title={`${undoLabel} (Ctrl+Z)`}
                     icon={<UndoGlyph />}
                     disabled={!canUndo}
                     onClick={() => useHistoryStore.getState().undo()}
                 />
                 <IconButton
-                    label="Redo"
-                    title="Redo (Ctrl+Shift+Z)"
+                    label={redoLabel}
+                    title={`${redoLabel} (Ctrl+Shift+Z)`}
                     icon={<RedoGlyph />}
                     disabled={!canRedo}
                     onClick={() => useHistoryStore.getState().redo()}
@@ -106,9 +153,14 @@ export function Topbar({ onOpenSettings }: { onOpenSettings: () => void }) {
                         {projectName}
                     </Chip>
                 )}
+                {anotherStudioOpen && (
+                    <Chip tone="warning" title="Another tab has OpenJammer open. Both tabs save to the same place, so whichever you close last wins — work in one tab at a time.">
+                        2nd tab open
+                    </Chip>
+                )}
                 {!isOnline && (
                     <Chip tone="warning" title="You are offline — everything still works">
-                        Offline
+                        {offlineFirstTime ? 'Offline — everything still works' : 'Offline'}
                     </Chip>
                 )}
 

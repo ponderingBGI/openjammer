@@ -356,4 +356,28 @@ describe('Knob disabled', () => {
         const { container } = render(<Host initial={50} disabled />);
         expect(container.querySelector('.oj-knob-wrap')!.className).toContain('is-disabled');
     });
+
+    /*
+     * HA-19 — the file had ZERO occurrences of `title`, so Shift-fine,
+     * double-click-reset and the focused wheel were undiscoverable by any means
+     * short of reading the source. This is the app's primary continuous control.
+     */
+    it('names its gestures in one title on the whole cluster', () => {
+        const { container } = render(<Host initial={50} defaultValue={50} />);
+        const hint = container.querySelector('.oj-knob-wrap')!.getAttribute('title') ?? '';
+        expect(hint).toMatch(/drag/i);
+        expect(hint).toMatch(/shift/i);
+        expect(hint).toMatch(/double-click/i);
+        expect(hint).toMatch(/wheel/i);
+    });
+
+    it('does not promise a reset it cannot perform', () => {
+        const { container } = render(<Host initial={50} />);
+        expect(container.querySelector('.oj-knob-wrap')!.getAttribute('title')).not.toMatch(/double-click/i);
+    });
+
+    it('yields the title to a consumer that can say something more specific', () => {
+        const { container } = render(<Host initial={50} title="Knob 3 (CC74) → cutoff" />);
+        expect(container.querySelector('.oj-knob-wrap')!.getAttribute('title')).toBe('Knob 3 (CC74) → cutoff');
+    });
 });

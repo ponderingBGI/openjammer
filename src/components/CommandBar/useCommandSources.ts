@@ -37,7 +37,8 @@ import { getInvoke } from "../../ai/tauri";
 import { useEditingContextStore } from "../../store/editingContextStore";
 import { applyPianoRollQuantize } from "../PianoRoll";
 import { useUiViewStore } from "../../store/uiViewStore";
-import { freeSpawnPoint, type SpawnBounds, type SpawnBox } from "../../utils/spawnPlacement";
+import { freeSpawnPoint, measureRenderedCards, spawnCardSize, type SpawnBounds, type SpawnBox } from "../../utils/spawnPlacement";
+import { requestNewProject } from "../Shell/newProjectDialog";
 
 // Human-readable group label per category (matches the menu's casing).
 const CATEGORY_LABEL: Record<NodeCategory, string> = {
@@ -71,64 +72,19 @@ function viewportCenter(card: { width: number; height: number }): Position {
 
 /**
  * The REAL, rendered size of every card currently on the canvas, in canvas px,
- * keyed by node id — plus, separately, by node type.
+ * keyed by node id.
  *
- * The registry's `dimensions` are the obvious source for this and they are wrong
- * for the purpose. Measured at zoom 1.0 on the shipping build, a Looper declares
- * `height: 120` and renders **267**; a Sampler declares `140` and renders **378**.
- * Those numbers date from the fixed-height cards the New DNA faceplates replaced,
- * and nothing re-declared them when the bodies became content-driven. A
- * containment test that trusts them passes a card that then hangs off the bottom
- * of the screen, which is precisely what the first version of this fix did.
- *
- * Re-declaring all fourteen faceplates is the real repair and it is not this
- * lane's. Reading the surface is the honest substitute: a card already mounted is
- * a real measurement, and it costs one pass over ~10 elements on an add.
+ * The rule itself — and the argument for measuring the surface instead of
+ * trusting the registry's `dimensions` — lives with the placement rule in
+ * `utils/spawnPlacement.ts`. This is the app-side wiring: the zoom and the node
+ * type lookup come from the stores, which that module deliberately does not know
+ * about.
  */
-function measuredCards(): { byId: Map<string, { width: number; height: number }>; byType: Map<string, { width: number; height: number }> } {
-  const byId = new Map<string, { width: number; height: number }>();
-  const byType = new Map<string, { width: number; height: number }>();
-  if (typeof document === 'undefined') return { byId, byType };
-  const zoom = useCanvasStore.getState().zoom || 1;
-  for (const element of document.querySelectorAll('.oj-node')) {
-    const box = element.getBoundingClientRect();
-    if (!box.width || !box.height) continue;
-    const size = { width: box.width / zoom, height: box.height / zoom };
-    // A card carries no id of its own; every one of its ports does.
-    const id = element.querySelector('[data-node-id]')?.getAttribute('data-node-id');
-    if (id) {
-      byId.set(id, size);
-      const type = useGraphStore.getState().nodes.get(id)?.type;
-      if (type) byType.set(type, size);
-    }
-  }
-  return { byId, byType };
-}
-
-/**
- * How much room to reserve for the card about to be added: what a card of this
- * type ACTUALLY measures if one is already on screen, else what it declares.
- *
- * Exact when the answer is knowable, honest when it is not — rather than a
- * fudge factor that would be neither.
- */
-function spawnCardSize(type: NodeType, byType: Map<string, { width: number; height: number }>): { width: number; height: number } {
-  const measured = byType.get(type);
-  if (measured) return measured;
-  const declared = getNodeDefinition(type).dimensions;
-  let width = declared?.width ?? 200;
-  let height = declared?.height ?? 150;
-  // No card of this type on screen, so the declared size is all the registry
-  // offers — and for a content-driven faceplate it under-states the truth by up
-  // to 2.7x. Take the tallest card that IS on screen as a floor: it is a real
-  // measurement of a real faceplate on this surface, and reserving slightly too
-  // much room only moves the card, while reserving too little puts it off the
-  // bottom of the screen where the player never sees it land.
-  for (const size of byType.values()) {
-    width = Math.max(width, size.width);
-    height = Math.max(height, size.height);
-  }
-  return { width, height };
+function measuredCards() {
+  return measureRenderedCards(
+    useCanvasStore.getState().zoom,
+    (nodeId) => useGraphStore.getState().nodes.get(nodeId)?.type,
+  );
 }
 
 /**
@@ -146,8 +102,23 @@ function visibleCanvasBounds(): SpawnBounds | undefined {
   const canvas = useCanvasStore.getState();
   const rect = canvas.canvasRect;
   if (!rect.width || !rect.height) return undefined;
-  const topLeft = canvas.screenToCanvas({ x: rect.left, y: rect.top });
-  const bottomRight = canvas.screenToCanvas({ x: rect.left + rect.width, y: rect.top + rect.height });
+  /*
+   * INTERSECT the canvas element with the window, do not just convert it.
+   *
+   * The canvas is a full-height 1440x900 box that starts BELOW the topbar
+   * (measured: `top: 46`), so its own bottom 46px are off the screen. Trusting
+   * the element's rect therefore told the placement rule that a strip it cannot
+   * see was fair game, and every card that landed against that edge hung off the
+   * real screen by the height of the chrome. "Visible" has to mean visible to
+   * the player, not merely inside the scroller.
+   */
+  const left = Math.max(rect.left, 0);
+  const top = Math.max(rect.top, 0);
+  const right = Math.min(rect.left + rect.width, window.innerWidth);
+  const bottom = Math.min(rect.top + rect.height, window.innerHeight);
+  if (right <= left || bottom <= top) return undefined;
+  const topLeft = canvas.screenToCanvas({ x: left, y: top });
+  const bottomRight = canvas.screenToCanvas({ x: right, y: bottom });
   return { left: topLeft.x, top: topLeft.y, right: bottomRight.x, bottom: bottomRight.y };
 }
 
@@ -161,10 +132,18 @@ function currentParentId(): string | null {
  * (canvas coords -> addNode with the active parent) without importing anything
  * from the read-only Nodes lane.
  *
- * - Palette: `ctx.point` is undefined → spawn at the viewport centre, inside the
- *   level the user is viewing.
- * - Context menu (M4): `ctx.point` is the clicked canvas point; if the user
- *   right-clicked a node, `ctx.node` is the spawn parent.
+ * - Palette: `ctx.point` is undefined → spawn at the viewport centre.
+ * - Context menu (M4): `ctx.point` is the clicked canvas point.
+ *
+ * Either way the spawn PARENT is the level the player is currently looking at,
+ * and nothing else. It used to be `ctx.node?.id ?? currentParentId()`, which
+ * reads plausibly and is wrong on both surfaces: `buildPaletteCtx` sets
+ * `ctx.node` to the SINGLE SELECTED node, which means "what this command is
+ * about", not "where to put the next card". The menu never set it at all (right-
+ * click on a card was suppressed until HA-26), so the branch had no correct
+ * caller — and the moment an add started selecting what it made (U12), every
+ * second palette add vanished INSIDE the first. Measured: `Add Looper` then
+ * `Add Library` produced one visible card and one card nested a level down.
  *
  * Either way the point is only the STARTING wish: {@link freeSpawnPoint}
  * cascades off any sibling already sitting there. The palette had no point of
@@ -174,7 +153,7 @@ function currentParentId(): string | null {
  * RE-READs the stores at call time (mutation discipline) — never the snapshot.
  */
 function addNodeFromCtx(type: NodeType, ctx?: ActionCtx): void {
-  const parentId = ctx?.node?.id ?? currentParentId();
+  const parentId = currentParentId();
   // Real RECTANGLES, not origins: a 380px-tall Library and a 90px Multiplier are
   // not the same obstacle, and two big cards 30px apart cover each other almost
   // completely while their origins look comfortably separated.
@@ -187,9 +166,25 @@ function addNodeFromCtx(type: NodeType, ctx?: ActionCtx): void {
     // artificially exhaust the canvas and push the run off-screen anyway.
     siblings.push({ position: node.position, ...(measured.byId.get(node.id) ?? getNodeDimensions(node)) });
   }
-  const card = spawnCardSize(type, measured.byType);
+  const card = spawnCardSize(type, getNodeDefinition(type).dimensions);
   const canvasPos = freeSpawnPoint(ctx?.point ?? viewportCenter(card), siblings, card, visibleCanvasBounds());
-  useGraphStore.getState().addNode(type, canvasPos, parentId);
+  const id = useGraphStore.getState().addNode(type, canvasPos, parentId);
+  /*
+   * U12 / HA-07 — SELECT what you just made.
+   *
+   * `addNode`'s returned id was discarded here, and the measured consequence is
+   * that a palette add produced no confirmation of any kind: `selected: 0` after
+   * every one of seven probes. On a busy canvas — or after a cascade step moved
+   * the card away from the point the player was looking at — there was no way to
+   * tell WHICH card was new. Selecting it is the visible half of the answer (the
+   * live region is the spoken half); it costs nothing, it is what a mouse add
+   * would have done, and the ring is already drawn.
+   *
+   * Not part of the same history entry on purpose: selection is view state, and
+   * an undo that also had to restore a selection is a bigger promise than this
+   * needs to make.
+   */
+  useGraphStore.getState().selectNode(id);
 }
 
 /**
@@ -387,8 +382,9 @@ function buildAppCommands(): Array<Command | Action> {
       title: "New Project",
       group: "App",
       keywords: ["new", "project", "create", "file"],
-      run: () =>
-        window.dispatchEvent(new CustomEvent("openjammer:new-project")),
+      // A direct call, not an event: `openjammer:new-project` had no listener
+      // anywhere in the app, so this entry did nothing at all (UX-INV Q4).
+      run: () => requestNewProject("new"),
     },
     {
       // D6 (M7): the Ctrl+K-superset entry into the AuthChooser. Palette-only

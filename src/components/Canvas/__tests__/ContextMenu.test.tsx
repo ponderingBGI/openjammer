@@ -214,12 +214,103 @@ describe('ContextMenu (M4)', () => {
 
         render(<ContextMenu position={POSITION} onClose={() => {}} />);
 
-        const menu = screen.getByRole('menu', { name: 'Add node menu' });
+        const menu = screen.getByRole('menu', { name: 'Canvas menu' });
         expect(menu).toBeInTheDocument();
         // The item is a menuitem, inside the category's own labelled submenu.
         expect(screen.getByText('Add Looper').closest('[role="menuitem"]')).not.toBeNull();
         expect(screen.getByRole('menu', { name: 'Routing' })).toBeInTheDocument();
         expect(within(menu).getByText('Cancel')).toBeInTheDocument();
+    });
+
+    // ── UX-1C: HA-21 (no emoji) and HA-26 (the verbs, and a node menu) ────
+
+    /**
+     * The six category emoji were the only ones in the instrument, and their own
+     * comment admitted they were kept to stay "byte-faithful" to the pre-redesign
+     * UI. PRODUCT.md lists "a toy" as an explicit anti-reference.
+     */
+    it('HA-21: the category rows carry no emoji at all', () => {
+        registerAll([
+            makeNodeAdd('node.add.keys', 'Add Keys', 'Instruments'),
+            makeNodeAdd('node.add.looper', 'Add Looper', 'Routing'),
+        ]);
+
+        const { container } = render(<ContextMenu position={POSITION} onClose={() => {}} />);
+
+        expect(container.querySelector('.oj-menu-item__icon')).toBeNull();
+        expect(container.textContent ?? '').not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2328}]/u);
+    });
+
+    /**
+     * HA-26 — delete, copy, paste, duplicate and select-all had NO pointer route
+     * anywhere in the application. They are now rows, and they run the canvas's
+     * own verb functions, which is what the keymap runs too.
+     */
+    it('HA-26: the canvas menu runs the SAME edit verbs the keymap runs', () => {
+        register(makeNodeAdd('node.add.looper', 'Add Looper', 'Routing'));
+        const verbs = {
+            copy: vi.fn(),
+            paste: vi.fn(),
+            duplicate: vi.fn(),
+            selectAll: vi.fn(),
+            remove: vi.fn(),
+            disconnectNode: vi.fn(),
+            hasSelection: true,
+        };
+
+        render(<ContextMenu position={POSITION} onClose={() => {}} verbs={verbs} />);
+
+        for (const [label, spy] of [
+            ['Copy', verbs.copy],
+            ['Paste', verbs.paste],
+            ['Select all', verbs.selectAll],
+            ['Delete', verbs.remove],
+        ] as const) {
+            fireEvent.click(screen.getByText(label).closest('[role="menuitem"]')!);
+            expect(spy, `${label} runs its verb`).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it('HA-26: verbs that need a selection are disabled when there is none', () => {
+        register(makeNodeAdd('node.add.looper', 'Add Looper', 'Routing'));
+        const verbs = {
+            copy: vi.fn(), paste: vi.fn(), duplicate: vi.fn(), selectAll: vi.fn(),
+            remove: vi.fn(), disconnectNode: vi.fn(), hasSelection: false,
+        };
+
+        render(<ContextMenu position={POSITION} onClose={() => {}} verbs={verbs} />);
+
+        expect(screen.getByText('Copy').closest('[role="menuitem"]'))
+            .toHaveAttribute('aria-disabled', 'true');
+        // Paste and Select all do not need one — pasting into an empty canvas and
+        // selecting everything are exactly what you do when nothing is selected.
+        expect(screen.getByText('Paste').closest('[role="menuitem"]'))
+            .not.toHaveAttribute('aria-disabled', 'true');
+    });
+
+    it('HA-26: right-clicking a card opens that card’s menu, add categories included', () => {
+        register(makeNodeAdd('node.add.looper', 'Add Looper', 'Routing'));
+        const verbs = {
+            copy: vi.fn(), paste: vi.fn(), duplicate: vi.fn(), selectAll: vi.fn(),
+            remove: vi.fn(), disconnectNode: vi.fn(), hasSelection: true,
+        };
+
+        render(
+            <ContextMenu
+                position={POSITION}
+                onClose={() => {}}
+                verbs={verbs}
+                target={{ id: 'node-1', title: 'Looper' }}
+            />,
+        );
+
+        const menu = screen.getByRole('menu', { name: 'Looper menu' });
+        expect(within(menu).getByText('Disconnect all cables')).toBeInTheDocument();
+        // Still an ADD menu: a right-click is how a first-run player adds a node.
+        expect(within(menu).getByText('Routing')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByText('Disconnect all cables').closest('[role="menuitem"]')!);
+        expect(verbs.disconnectNode).toHaveBeenCalledWith('node-1');
     });
 
     // ── W4-P5: UI-003 keyboard operability ────────────────────────────────

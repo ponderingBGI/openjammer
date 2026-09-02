@@ -21,6 +21,13 @@ export interface PortProps extends HTMLAttributes<HTMLSpanElement> {
     resolvedKind?: PortKind;
     /** An empty, dashed "add a port" slot — the well with no core. */
     placeholder?: boolean;
+    /**
+     * The port's own name, as printed beside it ("Level", "In 1", "Audio out").
+     * Used only to build the default accessible name — `PortRow` forwards its
+     * `label` here so every socket on the canvas says WHICH socket it is, not
+     * merely what type it carries. Never rendered: the row draws the text.
+     */
+    name?: string;
     /** This control port is firing right now (e.g. a held control key) — the
      *  core goes success-ink. A performance signal you read mid-set. */
     active?: boolean;
@@ -38,16 +45,17 @@ export interface PortProps extends HTMLAttributes<HTMLSpanElement> {
  */
 export function Port({
     kind,
-    // Destructured, deliberately unread: `direction` is the ROW's business
-    // (PortRow orders [socket][label] or [label][socket] from it) and it must
-    // not reach the DOM, where `direction` is not a valid span attribute. D7
-    // retired the directional port colours; the prop stays because the row
-    // layout and the Figma Code Connect example both depend on it.
-    direction: _direction,
+    // `direction` never reaches the DOM (`direction` is not a valid span
+    // attribute) and it no longer selects a colour — D7 retired the directional
+    // port shades. It stays on the API because the ROW's layout reads it, the
+    // Figma Code Connect example pins it, and, since U8, it is half of the
+    // socket's spoken name: "Audio out" is a different socket from "Audio in".
+    direction,
     connected = false,
     resolvedKind,
     placeholder = false,
     active = false,
+    name,
     className,
     ...rest
 }: PortProps) {
@@ -62,5 +70,47 @@ export function Port({
     ]
         .filter(Boolean)
         .join(' ');
-    return <span className={classes} {...rest} />;
+    const described = describePort(kind, direction, name, placeholder);
+    /*
+     * A socket is a CONTROL, and until U8 it did not say so: 42 of 42 ports
+     * measured on the canvas carried no role, no name and no title, so the app's
+     * single most-repeated verb was invisible to assistive tech and had no hover
+     * affordance at all (HEURISTIC-AUDIT HA-02). `role="button"` is the honest
+     * shape — one press starts a cable, a second press lands it — and the label
+     * names the type, the direction and the socket, in that order, because that
+     * is the order the eye reads the legend.
+     *
+     * `rest` is spread AFTER, so a caller that knows better (a gated port
+     * explaining why it is inert) still wins. `tabIndex` is deliberately absent:
+     * the canvas owns ONE roving tab stop per node, and putting every socket in
+     * the tab order is the 128-stop failure the piano roll already learned from.
+     */
+    return (
+        <span
+            role="button"
+            aria-label={described}
+            title={described}
+            className={classes}
+            {...rest}
+        />
+    );
+}
+
+/** Human words for a socket: what it carries, which way it faces, what it is
+ *  called, and what to do with it. One sentence, spoken and hovered alike. */
+function describePort(
+    kind: PortKind,
+    direction: PortDirection | undefined,
+    name: string | undefined,
+    placeholder: boolean,
+): string {
+    const carries = kind === 'audio' ? 'Audio' : kind === 'universal' ? 'Universal' : 'Control';
+    const facing = direction === 'output' ? ' out' : direction === 'input' ? ' in' : '';
+    // "Audio out — Audio out" helps nobody: drop a name that only repeats the
+    // two words already said. Anything else ("Level", "In 2") earns its place.
+    const bare = (name ?? '').trim();
+    const redundant = !bare || /^(in|out|input|output|audio in|audio out|in \d+|out \d+)$/i.test(bare);
+    const named = redundant ? '' : ` — ${bare}`;
+    if (placeholder) return `${carries}${facing}${named} — empty slot, drop a cable here to add a port`;
+    return `${carries}${facing}${named} — drag to connect, or press Enter`;
 }
