@@ -13,19 +13,35 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
+/*
+ * The SAME executor stub `transportGesture.test.ts` drives this store with, and
+ * complete for the same reason: a partial one is not a lighter fixture, it is a
+ * different engine. Mine was missing `subscribeLiveNotes`, so the moment a test
+ * started a RECORD the store's `startPreview` reached a method that was not
+ * there and threw from inside a promise — every assertion still passed and the
+ * run still failed, on three unhandled rejections. One hoisted object, so
+ * `getExecutor()` returns the same engine on every call rather than a fresh
+ * literal that forgets what it was told.
+ */
+const executorSpies = vi.hoisted(() => ({
+    getTimelineBackend: vi.fn(() => 'wasm' as const),
+    startArrangementPreview: vi.fn(),
+    updateArrangementPreview: vi.fn(),
+    stopArrangementPreview: vi.fn(),
+    seekArrangement: vi.fn(),
+    setArrangementLoop: vi.fn(),
+    setArrangementPunch: vi.fn(),
+    setArrangementClick: vi.fn(),
+    setArrangementCountIn: vi.fn(),
+    subscribeLiveNotes: vi.fn(() => () => {}),
+    stopArrangementRecording: vi.fn(async () => null),
+    pauseContinuousSources: vi.fn(),
+    resumeContinuousSources: vi.fn(),
+    subscribeTransport: vi.fn(() => () => {}),
+}));
+
 vi.mock('../../audio/executor', () => ({
-    getExecutor: () => ({
-        subscribeTransport: () => () => {},
-        startArrangementPreview: vi.fn(),
-        updateArrangementPreview: vi.fn(),
-        stopArrangementPreview: vi.fn(),
-        seekArrangement: vi.fn(),
-        setArrangementLoop: vi.fn(),
-        setArrangementPunch: vi.fn(),
-        setArrangementClick: vi.fn(),
-        setArrangementCountIn: vi.fn(),
-        getTimelineBackend: () => 'wasm',
-    }),
+    getExecutor: () => executorSpies,
     isTauri: () => false,
 }));
 
