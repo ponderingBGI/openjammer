@@ -124,7 +124,13 @@ export function LatencyChip({ onOpenSettings }: { onOpenSettings?: () => void })
                 title="Audio latency is high — press for the details"
                 onClick={() => setOpen((value) => !value)}
             >
-                <Chip tone="warning">{roundTrip > 0 ? `${roundTrip} ms` : 'High latency'}</Chip>
+                {/*
+                  * A bare number in an alarm colour is the first thing a
+                  * novice's eye lands on and the last thing it can read: 116 ms
+                  * of WHAT (HA-06). The number carries its unit AND its meaning,
+                  * and it is the same number the health dot's sentence quotes.
+                  */}
+                <Chip tone="warning">{roundTrip > 0 ? `${roundTrip} ms round trip` : 'High latency'}</Chip>
             </button>
 
             {open && (

@@ -20,7 +20,7 @@
 
 import { create } from 'zustand';
 import { getExecutor } from '../audio/executor';
-import { stopReturnsToOrigin, useArrangementStore } from './arrangementStore';
+import { stopReturnsToOrigin, transportAwaitingEngine, useArrangementStore } from './arrangementStore';
 
 // ============================================================================
 // Store Interface
@@ -61,6 +61,12 @@ export const useTransportStore = create<TransportStore>((set, get) => ({
             // returns the playhead there; otherwise → Play. Asking only
             // `isPlaying` is what made "stop twice and you are back where you
             // started" unreachable from every shipped control.
+            // The pill shows PLAY while the engine has not confirmed a start, so
+            // the gesture has to mean play too — asking `isPlaying` here while
+            // the glyph asked `transportAwaitingEngine` is exactly how a button
+            // labelled Play came to stop the song (HA-03). Space and the button
+            // read the same predicate, so they can never disagree.
+            if (transportAwaitingEngine(arrangement)) { arrangement.retryTransport(); return; }
             if (arrangement.isPlaying || stopReturnsToOrigin(arrangement)) arrangement.stop();
             else arrangement.play();
             return;

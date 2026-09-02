@@ -6,6 +6,7 @@ import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo, laz
 import { Toaster, toast } from 'sonner';
 import { NodeCanvas } from './components/Canvas/NodeCanvas';
 import { Topbar } from './components/Shell/Topbar';
+import { requestNewProject } from './components/Shell/newProjectDialog';
 import { TransportPillHost } from './components/Shell/TransportPillHost';
 import { HintBubble } from './components/Shell/HintBubble';
 import { StepGrid } from './components/Shell/StepGrid';
@@ -51,7 +52,7 @@ import { useEngineHealthStore, setEngineLive } from './store/engineHealthStore';
 import { useCrashRecovery } from './persistence/recovery/useCrashRecovery';
 import { useUsbLowLatencyDefault } from './hooks/useUsbLowLatencyDefault';
 import { useAutoDetectedSampleRate } from './hooks/useAutoDetectedSampleRate';
-import { writeEmergencyBackup } from './persistence/recovery';
+import { clearEmergencyBackup, registerEmergencyFlush, writeEmergencyBackup } from './persistence/recovery';
 import { collectSaveData } from './persistence/collectSaveData';
 import { useArrangementStore } from './store/arrangementStore';
 import { getSavedThemeId } from '@openjammer/oj-tokens';
@@ -78,6 +79,12 @@ function getDocumentVersion(): string {
 function PluginsPanelHost() {
   const [requested, setRequested] = useState(false);
   const [context, setContext] = useState<'browse' | 'pick' | 'insert'>('browse');
+  /*
+   * The FIRST open happens before the panel exists, so this host is the only
+   * thing that hears that event — which is why the track that asked has to be
+   * carried through here too, not just in the panel's own listener.
+   */
+  const [trackId, setTrackId] = useState<string | null>(null);
 
   useBindingSet(useMemo(() => ({
     id: 'plugins-panel-toggle',
@@ -95,8 +102,9 @@ function PluginsPanelHost() {
   useEffect(() => {
     if (requested) return;
     const request = (event: Event) => {
-      const requestedContext = (event as CustomEvent<{ context?: 'browse' | 'pick' | 'insert' }>).detail?.context;
-      if (requestedContext) setContext(requestedContext);
+      const detail = (event as CustomEvent<{ context?: 'browse' | 'pick' | 'insert'; trackId?: string }>).detail;
+      if (detail?.context) setContext(detail.context);
+      setTrackId(detail?.trackId ?? null);
       setRequested(true);
     };
     window.addEventListener('openjammer:toggle-plugins', request);
@@ -110,7 +118,7 @@ function PluginsPanelHost() {
   if (!requested) return null;
   return (
     <Suspense fallback={null}>
-      <PluginsPanel initiallyOpen context={context} />
+      <PluginsPanel initiallyOpen context={context} trackId={trackId} />
     </Suspense>
   );
 }
@@ -400,8 +408,19 @@ function App() {
 
     const flush = () => {
       const saveData = collectSaveData();
-      // Nothing meaningful to back up — don't clobber a good backup with empty.
-      if (saveData.nodes.length === 0 && saveData.edges.length === 0 && !saveData.arrangement) return;
+      if (saveData.nodes.length === 0 && saveData.edges.length === 0 && !saveData.arrangement) {
+        /*
+         * An empty document IS the document. This used to return early — "don't
+         * clobber a good backup with empty" — which only ever affected the
+         * canvas, and `zustand/persist` owned that anyway. Now that a clean boot
+         * RESTORES from this blob, keeping the old one means a player who
+         * deliberately cleared everything is handed the deleted song back on
+         * their next reopen. So an emptied document clears the backup instead of
+         * leaving a ghost of itself on disk.
+         */
+        clearEmergencyBackup();
+        return;
+      }
       writeEmergencyBackup({
         ...saveData,
         projectName: useProjectStore.getState().name,
@@ -418,16 +437,19 @@ function App() {
     const unsubscribeGraph = useGraphStore.subscribe(scheduleBackup);
     const unsubscribeArrangement = useArrangementStore.subscribe(scheduleBackup);
 
-    // Final flush on page hide (the hook marks the clean exit separately). No
-    // "leave site?" prompt: with durable autosave the work is recoverable, so we
-    // never nag the performer on the way out.
-    const onPageHide = () => flush();
-    window.addEventListener('pagehide', onPageHide);
+    // The final flush on the way out is NOT a second `pagehide` listener: it is
+    // registered here and CALLED by the recovery hook's one handler, immediately
+    // before it writes the clean-exit marker. A marker that says "closed
+    // cleanly" over a backup up to 2s stale is how the song used to be lost
+    // (UX-INV Q3, risk 1), and listener registration order is not an ordering.
+    // No "leave site?" prompt either: with durable autosave the work is
+    // recoverable, so we never nag the performer on the way out.
+    const unregisterFlush = registerEmergencyFlush(flush);
 
     return () => {
       unsubscribeGraph();
       unsubscribeArrangement();
-      window.removeEventListener('pagehide', onPageHide);
+      unregisterFlush();
       if (timer) clearTimeout(timer);
     };
   }, []);
@@ -440,7 +462,12 @@ function App() {
         actionId: 'file.save',
         run: () => {
           if (!projectName || !projectHandleKey) {
-            window.dispatchEvent(new CustomEvent('openjammer:new-project'));
+            // Settings advertises Ctrl+S as "Save Project", so it must DO
+            // something. There is nowhere to save yet, so the honest answer is
+            // to offer one — and to say, in the dialog, where the work is being
+            // kept in the meantime. This used to dispatch an event no listener
+            // anywhere subscribed to (UX-INV Q4).
+            requestNewProject('save-current');
             return true;
           }
           if (useProjectStore.getState().isSaving) return true;

@@ -13,7 +13,9 @@ import { register as registerCommand } from '../../store/commandRegistry';
 import { useGraphStore } from '../../store/graphStore';
 import { useBindingSet, useModalKeymap } from '../../keymap/useKeymap';
 import './PluginsPanel.css';
-import { browserActionWord, defaultBrowserFamilies, filterBrowserItems, type BrowserContext, type BrowserItem, type BrowserSource } from './browserModel';
+import { browserActionWord, defaultBrowserFamilies, filterBrowserItems, isBindableTrackVoice, type BrowserContext, type BrowserItem, type BrowserSource } from './browserModel';
+import { useArrangementStore } from '../../store/arrangementStore';
+import { bindTrackVerbs } from '../../song/bindTrack';
 
 interface PluginDescriptor extends HostedPluginDescriptor {
     features?: string[];
@@ -25,9 +27,18 @@ interface PluginDir { path: string; scope: string; format?: string }
 interface HostingInfo { backend: string; formats: string[] }
 interface QuarantineEntry { path: string; reason: string; crash_count: number; benched: boolean }
 
-function builtInItems(): BrowserItem[] {
+/**
+ * `keep` runs BEFORE the de-duplication by display name, and that order is the
+ * whole point: two definitions share the name "Instrument" — the structural
+ * `-visual` mirror and the real one — and the mirror is declared first. Filtering
+ * afterwards would drop the mirror AND leave the pick list with no "Instrument"
+ * in it at all, which is how a filter meant to remove an unbindable choice
+ * quietly removed a bindable one.
+ */
+function builtInItems(keep: (definition: { type: string; category: string }) => boolean = () => true): BrowserItem[] {
     const seen = new Set<string>();
     return Object.values(nodeDefinitions).flatMap((definition, declarationOrder) => {
+        if (!keep(definition)) return [];
         if (seen.has(definition.name)) return [];
         seen.add(definition.name);
         return [{
@@ -51,9 +62,15 @@ function installedItem(plugin: PluginDescriptor, declarationOrder: number): Brow
     };
 }
 
-export function PluginsPanel({ initiallyOpen = false, context = 'browse' }: { initiallyOpen?: boolean; context?: BrowserContext }) {
+export function PluginsPanel({ initiallyOpen = false, context = 'browse', trackId = null }: { initiallyOpen?: boolean; context?: BrowserContext; trackId?: string | null }) {
     const [open, setOpen] = useState(initiallyOpen);
     const [browserContext, setBrowserContext] = useState(context);
+    /*
+     * WHICH track asked. The lane header has always sent it
+     * (`detail: { context: 'pick', trackId }`) and every listener has always
+     * dropped it, which is why the chip was decorative (UX-INV Q2 cause 2).
+     */
+    const [pickTrackId, setPickTrackId] = useState<string | null>(trackId);
     const [plugins, setPlugins] = useState<PluginDescriptor[]>([]);
     const [dirs, setDirs] = useState<PluginDir[]>([]);
     const [backend, setBackend] = useState<HostingInfo | null>(null);
@@ -77,9 +94,10 @@ export function PluginsPanel({ initiallyOpen = false, context = 'browse' }: { in
 
     useEffect(() => {
         const onOpen = (event: Event) => {
-            const detail = (event as CustomEvent<{ context?: BrowserContext }>).detail;
+            const detail = (event as CustomEvent<{ context?: BrowserContext; trackId?: string }>).detail;
             const next = detail?.context ?? 'browse';
             setBrowserContext(next);
+            setPickTrackId(detail?.trackId ?? null);
             setFamilies(defaultBrowserFamilies(next));
             setOpen(true);
         };
@@ -89,6 +107,23 @@ export function PluginsPanel({ initiallyOpen = false, context = 'browse' }: { in
     }, []);
 
     const choose = useCallback((item: BrowserItem) => {
+        /*
+         * "Use it on THIS track" is a different verb from "add it to the canvas".
+         * It writes the voice into the SONG's graph and points the track at it —
+         * one array of verbs, so one Ctrl+Z takes the whole choice back.
+         */
+        const arrangement = useArrangementStore.getState().arrangement;
+        if (browserContext === 'pick' && pickTrackId && arrangement && item.source === 'built-in') {
+            const type = item.id.slice('builtin:'.length) as keyof typeof nodeDefinitions;
+            const verbs = bindTrackVerbs(arrangement, pickTrackId, { type });
+            if (verbs.length > 0) {
+                useArrangementStore.getState().apply(verbs);
+                window.dispatchEvent(new CustomEvent('openjammer:browser-chosen', { detail: { context: browserContext, item, trackId: pickTrackId } }));
+                toast.success(`This track plays ${item.name}`);
+                close();
+                return;
+            }
+        }
         if (item.source === 'built-in') {
             const type = item.id.slice('builtin:'.length) as keyof typeof nodeDefinitions;
             addNode(type, { x: 80, y: 80 });
@@ -102,7 +137,7 @@ export function PluginsPanel({ initiallyOpen = false, context = 'browse' }: { in
         window.dispatchEvent(new CustomEvent('openjammer:browser-chosen', { detail: { context: browserContext, item } }));
         toast.success(`${browserActionWord(browserContext) === 'Add' ? 'Added' : browserActionWord(browserContext)} ${item.name}`);
         close();
-    }, [addNode, browserContext, close, setNodePluginId, updateNodePorts]);
+    }, [addNode, browserContext, close, pickTrackId, setNodePluginId, updateNodePorts]);
 
     const scan = useCallback(async () => {
         const invoke = getInvoke();
@@ -130,7 +165,12 @@ export function PluginsPanel({ initiallyOpen = false, context = 'browse' }: { in
     useEffect(() => { if (open) void scan(); }, [open, scan]);
     useEffect(() => { if (open) queueMicrotask(() => searchRef.current?.focus()); }, [open]);
 
-    const items = useMemo(() => [...builtInItems(), ...plugins.map(installedItem)], [plugins]);
+    const items = useMemo(() => {
+        // Picking a track's voice is not browsing: only what can actually BE a
+        // voice belongs in the list (see `isBindableTrackVoice`).
+        if (browserContext === 'pick') return builtInItems(isBindableTrackVoice);
+        return [...builtInItems(), ...plugins.map(installedItem)];
+    }, [browserContext, plugins]);
     const visible = useMemo(() => filterBrowserItems(items, query, source, families), [families, items, query, source]);
     const availableFamilies = useMemo(() => PLUGIN_FAMILIES.filter((family) => items.some((item) => item.family === family)), [items]);
     const action = browserActionWord(browserContext);

@@ -385,3 +385,19 @@
 .oj-transport__hint {
     font-size: 11px;
 }
+
+/*
+ * The transport fault's reason, for anything that is not an eye: the accessible
+ * description the play button's `aria-describedby` names. Not a live region —
+ * the owner decides where the ONE announcement goes, so this never doubles it.
+ */
+.oj-transport__fault-reason {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}

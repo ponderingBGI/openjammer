@@ -208,7 +208,7 @@ export const TOOL_CATALOGUE: readonly ToolDescriptor[] = [
             'Author the SONG TIMELINE with reversible primitive `verbs` or shared high-level `ops` — ' +
             'the SAME operation layer a human GUI drag emits — applied live and undoable with ' +
             'Ctrl+Z. During a live performer gesture it returns `queued: true` and lands afterward; the next `describe_arrangement` reports the queued result. ' +
-            'Verb kinds: setTempo; setTrackMute/setTrackSolo/setTrackName/setTrackGain/setTrackPan/setTrackColor; addTrack/removeTrack/moveTrack; ' +
+            'Verb kinds: setTempo; setTrackMute/setTrackSolo/setTrackName/setTrackGain/setTrackPan/setTrackColor; setTrackRef (bind a track to the graph node that voices it); addGraphNode/removeGraphNode (the SONG graph, the one conduct lowers); addTrack/removeTrack/moveTrack; ' +
             'addSource/removeSource; addClip/removeClip/moveClip/setClipWindow/splitClip; ' +
             'setClipGain/setClipFades; addNote/removeNote/editNote; addLocation/removeLocation/' +
             'moveLocation/setLocationName/setLoopRange/setPunchRange; rippleTracks/insertTime/removeTime; ' +

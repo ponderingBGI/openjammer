@@ -611,6 +611,22 @@ input.arrangement-section-chip { min-width: 60px; background: var(--bg-node); co
  */
 .arrangement-instrument-chip__swap { flex: 0 0 15px; font: 500 var(--text-xs)/1 var(--font-mono) !important; }
 
+/*
+ * AN UNBOUND TRACK. Its `ref` names nothing in the song graph, so it will make
+ * no sound whatever you do to it — and until this existed the only thing that
+ * said so was a console line, while the header showed the raw ref as if it were
+ * an instrument (FH-1 F11 / UX-INV Q2 cause 2).
+ *
+ * It is a STATE, not a name, so it takes the whole controls row — mute, solo and
+ * automation are hidden while there is no voice for them to act on, which is
+ * both honest and what gives these words room inside a 200px header at the type
+ * floor (13px; the micro voice is mono-only). `--warning-ink`, not the raw
+ * warning fill: this is text, and 4.5:1 is not optional on it.
+ */
+.arrangement-track__controls.is-unbound .arrangement-instrument-chip { max-width: none; flex: 1 1 auto; background: color-mix(in oklab, var(--accent-warning) 14%, var(--bg-tertiary)); }
+.arrangement-track__controls.is-unbound .arrangement-instrument-chip button { color: var(--warning-ink); }
+.arrangement-track__controls.is-unbound .arrangement-instrument-chip button:hover { color: var(--warning-ink); text-decoration: underline; }
+
 .arrangement-track__lane-menu { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; align-items: center; gap: 4px; min-width: 0; padding-top: 5px; color: var(--text-muted); font: 500 var(--text-sm)/1 var(--font-sans); }
 .arrangement-track__lane-menu > span:first-child { grid-column: 1 / -1; }
 .arrangement-track__lane-menu button { height: 20px; padding: 0 6px; border: 0; border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-secondary); font: 600 var(--text-sm)/1 var(--font-sans); transition: background var(--motion-fast), color var(--motion-fast); }

@@ -203,6 +203,21 @@ export function runRecovery<T, V>(opts: RunRecoveryOpts<T, V>): RecoveryOutcome<
 }
 
 /**
+ * Pin the snapshot this session actually loaded, so a crash NOW quarantines
+ * exactly it on the next boot.
+ *
+ * `runRecovery` already stamps this on the restore path. The CLEAN path (U3 —
+ * the song is reloaded from the newest good backup on an ordinary reopen) loads
+ * a snapshot too, outside the walk, and without this the breaker would record a
+ * crash against `null` and hand the same poison back on every boot.
+ */
+export function markLoadedSnapshot(store: MarkerStore, snapshotId: string): void {
+    const m = parseMarker(store.read());
+    if (!m) return;
+    writeMarker(store, { ...m, loadedSnapshotId: snapshotId });
+}
+
+/**
  * Forgive the crash streak: we reached a known-good live state and stayed there
  * for a settle window, so past crashes should no longer push us toward Safe Mode.
  *

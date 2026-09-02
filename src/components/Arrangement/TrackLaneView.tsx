@@ -18,6 +18,25 @@ import { registerTimelineLevelWriter } from './timelineSignalLevels';
 import { usePluginFaultCards } from '../../store/pluginFaultStore';
 import { InstrumentLoader } from '../../audio/instrumentCatalog';
 import { trackTint, trackTintHex, UNSET_SWATCH_HEX } from './trackTint';
+import { trackIsBound } from '../../song/bindTrack';
+import { getNodeDefinition } from '../../engine/registry';
+import type { NodeType } from '../../engine/types';
+
+/**
+ * The word a node's card carries, or the ref when the registry has never heard
+ * of that type.
+ *
+ * This used to be a non-null assertion inside a `try/catch` whose `TypeError`
+ * WAS the control flow for "there is no voice node" — correct, invisible, and
+ * one refactor of `getNodeDefinition` away from silently meaning something else.
+ */
+function nodeDisplayName(type: string, fallback: string): string {
+    try {
+        return getNodeDefinition(type as NodeType).name;
+    } catch {
+        return fallback;
+    }
+}
 
 export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick, visibleEndTick, index = 0, shell = false }: {
     track: ArrangementTrack;
@@ -63,7 +82,29 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
     const max = sourceNotes.reduce((value, note) => Math.max(value, note.pitch), -Infinity);
     const range = rememberedRange ? growPitchRange(rememberedRange, min, max) : initialPitchRange(min, max);
     useEffect(() => rememberPitchRange(trackId, range), [rememberPitchRange, trackId, range]);
-    const instrument = arrangement.graph.nodes.find((node) => node.ref === track.ref)?.data?.instrumentId;
+    const voiceNode = arrangement.graph.nodes.find((node) => node.ref === track.ref);
+    const instrument = voiceNode?.data?.instrumentId;
+    /*
+     * What the chip CALLS the voice. A preset song names an instrument
+     * (`instrumentId`), but a node chosen from the browser may not carry one
+     * yet — and falling through to the raw `ref` puts an internal string
+     * ("track-1-voice") where a player expects a name. The node's own display
+     * name is the honest middle: it is the word on the card they picked.
+     */
+    const voiceName = typeof instrument === 'string'
+        ? instrument
+        : voiceNode
+            ? nodeDisplayName(voiceNode.type, track.ref)
+            : track.ref;
+    /*
+     * A track whose `ref` names nothing in the song's graph will be SILENT, and
+     * the only place that was ever said was a console line the player cannot see
+     * — the UI instead showed the raw ref ("track-1") as if it were an
+     * instrument name, and then blamed the audio engine when Play produced
+     * nothing (FH-1 F11). The lane says it itself now, before Play, in the chip
+     * that already knows how to fix it.
+     */
+    const bound = trackIsBound(arrangement, track);
     const clips = track.clips.filter((clip) => (dragActive && clip.id !== undefined && activeClipDragIds.includes(clip.id)) || (clip.startTick + clip.lengthTick >= visibleStartTick && clip.startTick <= visibleEndTick));
     const inputLabel = trackRecordInput(arrangement, track);
     const recordKind = trackRecordKind(arrangement, track);
@@ -149,13 +190,29 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
         <div className={`arrangement-track${visibleAutomation ? ' has-automation' : ''}${selectedTrackIds.includes(trackId) ? ' is-selected' : ''}${expandedClipId ? ' has-lane-menu' : ''}${dropTargetId === trackId ? (dropLocked ? ' is-drop-invalid' : ' is-drop-target') : ''}${index % 2 === 1 ? ' is-odd' : ''}${dimmed ? ' is-dimmed' : ''}`} data-track-id={trackId} role="listitem" aria-label={track.name ?? track.ref} style={{ height: laneHeight + (visibleAutomation ? AUTOMATION_LANE_HEIGHT : 0), gridTemplateRows: visibleAutomation ? `${laneHeight}px ${AUTOMATION_LANE_HEIGHT}px` : `${laneHeight}px`, '--track-tint': tint } as CSSProperties} ref={laneRef}>
             <div className="arrangement-track__header" onPointerDown={(event) => { if (shell) return; const context = useEditingContextStore.getState(); const current = context.viewports.arrangement.selection.trackIds; if (event.ctrlKey || event.metaKey) context.setSelection('arrangement', { trackIds: current.includes(trackId) ? current.filter((id) => id !== trackId) : [...current, trackId] }); else if (event.shiftKey) { const indices = current.map((id) => arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === id)).filter((index) => index >= 0); const here = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === trackId); const anchor = indices.at(-1) ?? here; context.setSelection('arrangement', { trackIds: arrangement.tracks.slice(Math.min(anchor, here), Math.max(anchor, here) + 1).map((item) => item.id ?? item.ref) }); } else context.setSelection('arrangement', { trackIds: [trackId] }); }}>
                 <span className="arrangement-track__stripe" aria-hidden="true" />
-                <div className="arrangement-track__top"><button className="arrangement-track__grab" type="button" aria-label={`Reorder ${track.name ?? track.ref}`} onPointerDown={(event) => { if (shell || event.button !== 0) return; event.stopPropagation(); const startY = event.clientY; let active = false; let targetIndex = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === trackId); const cleanup = ownPointerGesture(event.pointerId, { move(move) { if (!active) active = thresholdAxis(0, move.clientY - startY, move.pointerType, false) !== null; if (!active) return; const target = document.elementFromPoint(move.clientX, move.clientY)?.closest<HTMLElement>('[data-track-id]')?.dataset.trackId; const index = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === target); if (index >= 0) targetIndex = index; }, commit() { cleanup(); if (active) useArrangementStore.getState().apply({ kind: 'moveTrack', trackId, index: targetIndex }); }, abort() { cleanup(); } }); try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Window listeners own completion. */ } }}>⠿</button>{renaming ? <input className="arrangement-track__rename" aria-label={`Rename ${track.name ?? track.ref}`} autoFocus value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { const name = nameDraft.trim() || track.ref; if (name !== (track.name ?? track.ref)) useArrangementStore.getState().apply({ kind: 'setTrackName', trackId, name }); setRenaming(false); } else if (event.key === 'Escape') { setNameDraft(track.name ?? track.ref); setRenaming(false); } }} onBlur={() => { const name = nameDraft.trim() || track.ref; if (name !== (track.name ?? track.ref)) useArrangementStore.getState().apply({ kind: 'setTrackName', trackId, name }); setRenaming(false); }} /> : <span className="arrangement-track__name" onDoubleClick={() => { setNameDraft(track.name ?? track.ref); setRenaming(true); }}>{track.name ?? track.ref}</span>}<span className="arrangement-track__swatch"><input type="color" aria-label={`Colour for ${track.name ?? track.ref}`} value={swatchHex} onPointerDown={resolveSwatch} onFocus={resolveSwatch} onChange={(event) => useArrangementStore.getState().apply({ kind: 'setTrackColor', trackId, color: event.target.value })} /></span></div>
+                <div className="arrangement-track__top">{!shell && <button className="arrangement-track__grab" type="button" aria-label={`Reorder ${track.name ?? track.ref}`} onPointerDown={(event) => { if (shell || event.button !== 0) return; event.stopPropagation(); const startY = event.clientY; let active = false; let targetIndex = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === trackId); const cleanup = ownPointerGesture(event.pointerId, { move(move) { if (!active) active = thresholdAxis(0, move.clientY - startY, move.pointerType, false) !== null; if (!active) return; const target = document.elementFromPoint(move.clientX, move.clientY)?.closest<HTMLElement>('[data-track-id]')?.dataset.trackId; const index = arrangement.tracks.findIndex((item) => (item.id ?? item.ref) === target); if (index >= 0) targetIndex = index; }, commit() { cleanup(); if (active) useArrangementStore.getState().apply({ kind: 'moveTrack', trackId, index: targetIndex }); }, abort() { cleanup(); } }); try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* Window listeners own completion. */ } }}>⠿</button>}{renaming ? <input className="arrangement-track__rename" aria-label={`Rename ${track.name ?? track.ref}`} autoFocus value={nameDraft} onChange={(event) => setNameDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { const name = nameDraft.trim() || track.ref; if (name !== (track.name ?? track.ref)) useArrangementStore.getState().apply({ kind: 'setTrackName', trackId, name }); setRenaming(false); } else if (event.key === 'Escape') { setNameDraft(track.name ?? track.ref); setRenaming(false); } }} onBlur={() => { const name = nameDraft.trim() || track.ref; if (name !== (track.name ?? track.ref)) useArrangementStore.getState().apply({ kind: 'setTrackName', trackId, name }); setRenaming(false); }} /> : <span className="arrangement-track__name" onDoubleClick={() => { setNameDraft(track.name ?? track.ref); setRenaming(true); }}>{track.name ?? track.ref}</span>}{!shell && <span className="arrangement-track__swatch"><input type="color" aria-label={`Colour for ${track.name ?? track.ref}`} value={swatchHex} onPointerDown={resolveSwatch} onFocus={resolveSwatch} onChange={(event) => useArrangementStore.getState().apply({ kind: 'setTrackColor', trackId, color: event.target.value })} /></span>}</div>
                 <span ref={levelRef} className="arrangement-track__level-bead" aria-hidden="true" />
-                <div className="arrangement-track__controls">
-                    <LaneButton tone="mute" aria-label={`Mute ${track.name ?? track.ref}`} aria-pressed={track.mute === true} onClick={() => useArrangementStore.getState().apply({ kind: 'setTrackMute', trackId, mute: !track.mute })}>M</LaneButton>
-                    <LaneButton tone="solo" aria-label={`Solo ${track.name ?? track.ref}`} aria-pressed={track.solo === true} onClick={() => useArrangementStore.getState().apply({ kind: 'setTrackSolo', trackId, solo: !track.solo })}>S</LaneButton>
+                {/*
+                  * A `shell` lane is the ruled ground behind the empty-state
+                  * card, not a track. It used to render M / S / ● / A beside a
+                  * chip whose name was the empty string — three lanes of
+                  * unlabelled controls next to a blank pill, which reads as a
+                  * failed render. Ruled paper has no controls on it.
+                  */}
+                {!shell && <div className={`arrangement-track__controls${bound ? '' : ' is-unbound'}`}>
+                    {/*
+                     * Mute, Solo and Automation act on a VOICE. An unbound track
+                     * has none, so all three would be controls for nothing — and
+                     * hiding them is what gives the sentence that says so the
+                     * width to be a sentence. Arm stays: the empty state's
+                     * "Record something" arms a track before it has an
+                     * instrument, and taking that away would break the one path
+                     * that gets a beginner to a clip.
+                     */}
+                    {bound && <LaneButton tone="mute" aria-label={`Mute ${track.name ?? track.ref}`} aria-pressed={track.mute === true} onClick={() => useArrangementStore.getState().apply({ kind: 'setTrackMute', trackId, mute: !track.mute })}>M</LaneButton>}
+                    {bound && <LaneButton tone="solo" aria-label={`Solo ${track.name ?? track.ref}`} aria-pressed={track.solo === true} onClick={() => useArrangementStore.getState().apply({ kind: 'setTrackSolo', trackId, solo: !track.solo })}>S</LaneButton>}
                     <LaneButton className={`arrangement-arm${isRecording && armed ? ' is-recording' : ''}`} aria-label={`${armed ? 'Disarm' : 'Arm'} ${track.name ?? track.ref} for ${recordKind === 'audio' ? 'audio' : 'MIDI'} recording`} aria-pressed={armed} title={`${recordKind === 'audio' ? 'Audio input' : 'MIDI input'}: ${inputLabel}`} onClick={() => useArrangementStore.getState().armTrack(trackId, !armed)}><span aria-hidden="true">●</span></LaneButton>
-                    <LaneButton aria-label={`${visibleAutomation ? 'Hide' : 'Show'} automation for ${track.name ?? track.ref}`} aria-pressed={Boolean(visibleAutomation)} onClick={() => {
+                    {bound && <LaneButton aria-label={`${visibleAutomation ? 'Hide' : 'Show'} automation for ${track.name ?? track.ref}`} aria-pressed={Boolean(visibleAutomation)} onClick={() => {
                         const view = useTrackLaneViewStore.getState();
                         if (visibleAutomation) return view.showAutomationLane(trackId, null);
                         const existing = track.automation?.[0];
@@ -164,17 +221,21 @@ export function TrackLaneView({ track, arrangement, pxPerTick, visibleStartTick,
                         const laneId = store.mintId('lane');
                         store.apply({ kind: 'addAutomationLane', trackId, index: 0, lane: { id: laneId, ref: outputStageRefs(track).gain, param: 0, points: [] } });
                         view.showAutomationLane(trackId, laneId);
-                    }}>A</LaneButton>
-                    <span className="arrangement-instrument-chip" title={`${typeof instrument === 'string' ? instrument : track.ref} · ${inputLabel}`}>
-                    <button className="arrangement-instrument-chip__name" type="button" onClick={(event) => {
+                    }}>A</LaneButton>}
+                    <span className={`arrangement-instrument-chip${bound ? '' : ' is-unbound'}`} title={bound ? `${voiceName} · ${inputLabel}` : 'This track has no instrument yet, so it makes no sound. Choose one and it plays.'}>
+                    <button className="arrangement-instrument-chip__name" type="button" aria-label={bound ? undefined : `No instrument yet on ${track.name ?? track.ref} — choose one`} onClick={(event) => {
                         event.stopPropagation();
                         if (shell) return;
+                        // Unbound: the name is not a name, it is the missing
+                        // choice — so it opens the picker rather than jumping to
+                        // a canvas node that does not exist.
+                        if (!bound) return window.dispatchEvent(new CustomEvent('openjammer:open-browser', { detail: { context: 'pick', trackId } }));
                         useGraphStore.getState().selectNode(track.ref);
                         useUiViewStore.getState().setSurface('canvas');
-                    }}>{typeof instrument === 'string' ? instrument : track.ref}</button>
-                    <button className="arrangement-instrument-chip__swap" type="button" aria-label={`Choose instrument for ${track.name ?? track.ref}`} onClick={(event) => { event.stopPropagation(); if (!shell) window.dispatchEvent(new CustomEvent('openjammer:open-browser', { detail: { context: 'pick', trackId } })); }}>⌄</button>
+                    }}>{bound ? voiceName : 'No instrument yet'}</button>
+                    <button className="arrangement-instrument-chip__swap" type="button" aria-label={`Choose instrument for ${track.name ?? track.ref}`} onClick={(event) => { event.stopPropagation(); window.dispatchEvent(new CustomEvent('openjammer:open-browser', { detail: { context: 'pick', trackId } })); }}>⌄</button>
                     </span>
-                </div>
+                </div>}
                 {expandedClipId && <div className="arrangement-track__lane-menu">
                     {/*
                      * The roll resolves `undefined` to auto-detection, so the menu has

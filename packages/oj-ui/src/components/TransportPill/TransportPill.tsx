@@ -108,6 +108,15 @@ export interface TransportPillProps extends Omit<HTMLAttributes<HTMLDivElement>,
     meter?: ReactNode;
     /** Keycap hint at the tail, e.g. `space`. Omit when the key is not bound. */
     hint?: string;
+    /**
+     * Why the transport is not doing what it was told — the engine's silence, a
+     * track with no instrument. It belongs to the PLAY BUTTON, not to the group:
+     * the button is what wears the warning dot, so it is what a pointer hovers
+     * and what a keyboard lands on, and a description hung on the surrounding
+     * `role="group"` is read on entry and never again. Composed into the
+     * button's own `title` and named by its `aria-describedby`.
+     */
+    faultReason?: string;
 }
 
 const PlayGlyph = () => (
@@ -423,9 +432,11 @@ export function TransportPill({
     metronome,
     meter,
     hint,
+    faultReason,
     className,
     ...rest
 }: TransportPillProps) {
+    const faultId = useId();
     // The pulse exists to say "the browser has not let sound through yet".
     // While the transport rolls it would be a lie, so it is suppressed here as
     // well as at the call site — belt and braces on a stage.
@@ -446,11 +457,17 @@ export function TransportPill({
                     type="button"
                     className={`oj-transport__play${playing ? ' is-playing' : ''}${rewind ? ' is-return-armed' : ''}${attn ? ' is-attn' : ''}`}
                     aria-label={transportName}
-                    title={`${transportName}${hint ? ` (${hint})` : ''}`}
+                    title={`${transportName}${hint ? ` (${hint})` : ''}${faultReason ? ` — ${faultReason}` : ''}`}
+                    aria-describedby={faultReason ? faultId : undefined}
                     onClick={onPlayToggle}
                 >
                     {playing ? <StopGlyph /> : rewind ? <RewindGlyph /> : <PlayGlyph />}
                 </button>
+                {faultReason && (
+                    <span id={faultId} className="oj-transport__fault-reason">
+                        {faultReason}
+                    </span>
+                )}
 
                 {record && (
                     <button

@@ -18,13 +18,14 @@
 
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { Meter, TransportPill, type MeterHandle } from '@openjammer/oj-ui';
-import { stopReturnsToOrigin, useArrangementStore } from '../../store/arrangementStore';
+import { stopReturnsToOrigin, transportAwaitingEngine, useArrangementStore } from '../../store/arrangementStore';
 import { useAudioStore } from '../../store/audioStore';
 import { useTransportStore } from '../../store/transportStore';
 import { useUiViewStore } from '../../store/uiViewStore';
 import { formatBarBeat, timebase } from '../../song/time';
 import { punchRecordState } from '../../song/recording';
 import { registerTimelineFrameWriter } from '../Arrangement/sharedAnimationFrame';
+import { useBindingSet } from '../../keymap/useKeymap';
 import { subscribeMasterSignal } from './masterSignal';
 import { parseBarBeat } from './barBeat';
 import { releaseChromeFocus } from './chromeFocus';
@@ -118,6 +119,35 @@ export function TransportPillHost({ onRequestAudio }: { onRequestAudio: () => vo
     }, [arrangement, isPlaying, playheadTick]);
 
     /**
+     * THE PANIC PATH.
+     *
+     * While a start is unconfirmed the pill shows Play and its press asks again
+     * — which is right, and leaves a performer with no gesture that ends a song
+     * the engine may well be sounding. Escape is that gesture. It calls `stop()`
+     * unconditionally: whatever the transport is waiting for, the stop command
+     * goes out and the pill reads stopped.
+     *
+     * It claims the key ONLY in that wedged state (returning `false` otherwise
+     * leaves Escape to everything else that wants it), and it is routed through
+     * the keymap rather than a bare window listener so an open modal still wins.
+     * The reason on the button names it, because a gesture nothing on screen
+     * mentions is a gesture only its author knows.
+     */
+    useBindingSet(useMemo(() => ({
+        id: 'transport-stop-anyway',
+        scope: 'global' as const,
+        entries: [{
+            actionId: 'transport.stopAnyway',
+            defaultBinding: { key: 'Escape' },
+            run: () => {
+                if (!transportAwaitingEngine(useArrangementStore.getState())) return false;
+                useArrangementStore.getState().stop();
+                return true;
+            },
+        }],
+    }), []));
+
+    /**
      * The transport gesture. `initAudioContext` runs FIRST and synchronously —
      * this handler is the user gesture the browser's autoplay policy wants, and
      * deferring the unlock into a promise chain or an effect loses it.
@@ -140,16 +170,52 @@ export function TransportPillHost({ onRequestAudio }: { onRequestAudio: () => vo
      *     the readout muted (spec §2.2: `--text-muted` while a command is in
      *     flight). Confirmation is one `TransportFrame` away, so on a healthy
      *     engine this is a frame, not a delay a hand can feel.
-     *   • `transportError` — the engine refused or went silent. Play. The next
-     *     confirmed frame clears the error, so a transient failure heals itself.
+     *   • `transportError` on a PLAY — the engine refused or went silent on the
+     *     start we sent. Play. The next confirmed frame clears the error, so a
+     *     transient failure heals itself.
      *   • a `'seek'` or `'stop'` pending — the transport's state is not in doubt,
      *     only its position, so the glyph does not flicker mid-scrub.
+     *   • a `'seek'` or `'stop'` that TIMED OUT on a rolling song — still Stop.
+     *     What is unconfirmed is the position, not whether it is running, and a
+     *     Play glyph there would take away the only gesture that ends the song.
+     *   • a RECORD start, confirmed or not — still Stop, because Stop is what a
+     *     performer means about a take, and it finishes it instead of orphaning it.
      * Stopping is instantaneous in the other direction: `isPlaying` goes false
      * the moment the gesture lands, and so does the glyph.
      */
-    const rolling = arrangement
-        ? isPlaying && transportPending !== 'play' && transportError === null
-        : isAudioContextReady && !isGloballyPaused;
+    const awaitingEngine = useArrangementStore((state) => transportAwaitingEngine(state));
+    const rolling = arrangement ? isPlaying && !awaitingEngine : isAudioContextReady && !isGloballyPaused;
+
+    /**
+     * WHERE the transport is reported, and it is here.
+     *
+     * `transportError` used to render on the arrangement's sky band and nowhere
+     * else — a surface the player is not looking at while they press Play, on the
+     * canvas, on the roll (HA-03). The pill is documented as the one place a
+     * performer is told about the transport, so the reason rides the pill: a
+     * `--warning-ink` dot on the button that is waiting, the sentence in the
+     * PLAY BUTTON's `title`, and the same sentence as that button's accessible
+     * description (`TransportPill`'s `faultReason`). On the group they were
+     * unreachable: hovering the button that wears the dot showed "Play (space)",
+     * and a keyboard user landing on it heard "Play, button" and nothing else.
+     *
+     * The sky band still mirrors it — a second view of one truth, not a second
+     * truth. But the sky band lives INSIDE the arrangement surface, which is
+     * `inert` and `aria-hidden` whenever the canvas is active, so it cannot be
+     * the one announcement for a player pressing Play on the canvas. The pill's
+     * own region takes that duty exactly when the arrangement cannot: `polite`,
+     * because a report must never steal the moment.
+     */
+    const announceHere = surface !== 'arrangement';
+    /*
+     * The sentence the button carries, plus the way out of the state it is
+     * reporting. Escape is the only gesture that always means stop while a start
+     * is unconfirmed, so the tooltip that explains the dot also names it — a
+     * hidden gesture with no visible twin is a secret.
+     */
+    const faultReason = transportError
+        ? (awaitingEngine ? `${transportError} Press Esc to stop.` : transportError)
+        : undefined;
 
     /**
      * The pulse is an explanation, not a decoration: it exists only because the
@@ -208,9 +274,15 @@ export function TransportPillHost({ onRequestAudio }: { onRequestAudio: () => vo
     );
 
     return (
-        <div className="oj-transport-host" ref={hostRef} onClick={releaseChromeFocus}>
+        <div
+            className="oj-transport-host"
+            ref={hostRef}
+            data-transport-fault={transportError ? 'true' : undefined}
+            onClick={releaseChromeFocus}
+        >
             <TransportPill
                 playing={rolling}
+                faultReason={faultReason}
                 onPlayToggle={onPlayToggle}
                 playLabel={arrangement ? 'Play' : 'Start sound'}
                 stopLabel={arrangement ? 'Stop' : 'Hold all sound'}
@@ -249,6 +321,14 @@ export function TransportPillHost({ onRequestAudio }: { onRequestAudio: () => vo
                 meter={<Meter ref={meterRef} label="Master output level" />}
                 hint={spaceHint}
             />
+            {/*
+              * The ONE live announcement, and only where the sky band's cannot
+              * reach: on the canvas and the roll. Empty (not absent) at rest, so
+              * the region exists before it has anything to say.
+              */}
+            <span className="oj-transport-host__reason" role="status" aria-live="polite">
+                {announceHere && transportError ? transportError : ''}
+            </span>
         </div>
     );
 }

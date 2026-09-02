@@ -105,15 +105,34 @@ export function setEngineLive(reason = 'engine live'): void {
 // decides "what colour is DEGRADED" or "is this an alarm".
 
 /**
- * The honest round-trip latency tier shown in the dot's tooltip. Native latency is
- * DEVICE-DEPENDENT: the engine asks for a 64-frame buffer (~1.3 ms) and many devices
- * grant it even in WASAPI-shared mode — measured ~1.3 ms on a Windows test machine,
- * i.e. genuinely sub-5 ms — while some devices/drivers reject the small buffer and
- * fall back to the device period (~10 ms+). A WASAPI-exclusive / ASIO driver (not yet
- * routed) guarantees the low buffer. We never PROMISE one fixed figure we cannot keep
- * on every device; the browser tier is an honest ~15–25 ms.
+ * The honest round-trip latency shown in the dot's tooltip.
+ *
+ * ONE claim, and where possible it is the MEASUREMENT. The status cluster used
+ * to carry two contradicting answers eight pixels apart — this sentence saying
+ * "browser engine — an honest 15–25 ms" and the latency chip beside it reading
+ * 116–132 ms in warning ink (HA-06). A tier is what the engine is BUILT for; the
+ * chip is what this machine is actually doing. When we know the second, it is
+ * the answer, and the tier is what it is compared against.
+ *
+ * Native latency is DEVICE-DEPENDENT: the engine asks for a 64-frame buffer
+ * (~1.3 ms) and many devices grant it even in WASAPI-shared mode — measured
+ * ~1.3 ms on a Windows test machine, i.e. genuinely sub-5 ms — while some
+ * devices/drivers reject the small buffer and fall back to the device period
+ * (~10 ms+). A WASAPI-exclusive / ASIO driver (not yet routed) guarantees the
+ * low buffer. We never PROMISE one fixed figure we cannot keep on every device,
+ * and the browser tier is never dressed up as sub-5 ms: it is an honest
+ * ~15–25 ms, and if this machine is slower than that we say the slower number.
+ *
+ * @param measuredRoundTripMs the live estimate, when the engine has one.
  */
-export function latencyTierLabel(isNative: boolean): string {
+export function latencyTierLabel(isNative: boolean, measuredRoundTripMs?: number | null): string {
+    const tier = isNative ? 'native engine' : 'browser engine';
+    const measured = measuredRoundTripMs !== null && measuredRoundTripMs !== undefined && measuredRoundTripMs > 0
+        ? Math.round(measuredRoundTripMs)
+        : null;
+    if (measured !== null) {
+        return `${tier} — ${measured} ms round trip, measured on this machine (${isNative ? 'the tier is low, device-dependent' : 'the tier is an honest 15–25 ms'})`;
+    }
     return isNative
         ? 'native engine — low latency, device-dependent (sub-5 ms when the device grants a small buffer, ~10 ms+ if it forces a larger period)'
         : 'browser engine — an honest 15–25 ms';

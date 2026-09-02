@@ -530,8 +530,14 @@ export const InstrumentNode = memo(function InstrumentNode({
                 >
                     {rows.length === 0 ? (
                         <p className="inst-empty">
+                            {/*
+                              * "Playing." was false (nothing is), and "row
+                              * bundle" is engine vocabulary on the first card a
+                              * stranger reads (HA-16 / FH-1 F15). Say what is
+                              * true and what to do with it.
+                              */}
                             {anyNoteInput
-                                ? 'Playing. Note, octave and offset appear when a Keyboard node’s row bundle arrives.'
+                                ? 'Connected — play the keys. Per-row tuning appears when a Keyboard’s rows arrive as a group.'
                                 : 'Connect a keyboard row to play this instrument.'}
                         </p>
                     ) : (

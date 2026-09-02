@@ -45,7 +45,24 @@ const RULER_HEIGHT = 64;
  */
 const SKY_HEIGHT = 56;
 const EMPTY_GHOST_BARS = 32;
-const EMPTY_GHOST_TRACKS = buildPaperSketch().tracks.map((track, index) => ({ ...track, id: `empty-ghost-${index}`, name: `Track ${index + 1}`, clips: [], automation: undefined }));
+/*
+ * The paper behind the empty-state card is RULED, and nothing more.
+ *
+ * It used to be three lanes carrying Paper Sketch's tracks under the names
+ * "Track 1 / 2 / 3" — chords, bass, lead — and a first-time player read them as
+ * her song, then watched her first real action delete all three (FH-1 F9). They
+ * were never tracks; they were a picture of tracks. So they keep the geometry
+ * that makes an empty page look like a page and give up the names, the
+ * instruments and the refs they never had: blank ruled lanes, which is exactly
+ * what is there.
+ */
+const EMPTY_GHOST_TRACKS = [0, 1, 2].map((index) => ({ id: `empty-ghost-${index}`, name: '', ref: '', clips: [] }));
+/*
+ * A track drawn by hand starts UNBOUND: its `ref` names nothing in this
+ * (deliberately empty) graph, so `conduct` cannot voice it and the lane header
+ * says so in words, before Play. Choosing an instrument writes the node and
+ * repoints the ref through `setTrackRef` — one reversible edit (`song/bindTrack`).
+ */
 const EMPTY_TRACK_ARRANGEMENT = { name: 'Untitled song', tempoBpm: 120, ppq: 960, timeSignature: [4, 4] as [number, number], graph: { nodes: [], connections: [] }, tracks: [{ id: 'track-1', name: 'Track 1', ref: 'track-1', clips: [] }] };
 
 export function ArrangementSurface({ active, visible = active, transition, songNodeId }: { active: boolean; visible?: boolean; transition?: 'in' | 'out'; songNodeId: string | null; onOpenSettings?: () => void }) {

@@ -9,6 +9,11 @@ const executor = {
     setArrangementClick: vi.fn(),
     setArrangementCountIn: vi.fn(),
     subscribeSignalLevels: () => () => {},
+    subscribeTransport: () => () => {},
+    startArrangementPreview: vi.fn(),
+    updateArrangementPreview: vi.fn(),
+    stopArrangementPreview: vi.fn(),
+    seekArrangement: vi.fn(),
     getTimelineBackend: () => 'wasm',
 };
 vi.mock('../../../audio/executor', () => ({ getExecutor: () => executor, isTauri: () => false }));
@@ -19,6 +24,7 @@ const { useTransportStore } = await import('../../../store/transportStore');
 const { useUiViewStore } = await import('../../../store/uiViewStore');
 const { TransportPillHost } = await import('../TransportPillHost');
 const { parseBarBeat } = await import('../barBeat');
+const { resolveKeydown } = await import('../../../keymap/arbiter');
 const { buildBeatSong } = await import('../../../rigs');
 
 describe('parseBarBeat', () => {
@@ -41,6 +47,7 @@ describe('TransportPillHost', () => {
         useAudioStore.setState({ isAudioContextReady: false, currentMode: 1 });
         useTransportStore.setState({ isGloballyPaused: false });
         useUiViewStore.setState({ surface: 'canvas' });
+        useArrangementStore.setState({ transportAwaitedCommand: null, transportError: null, transportPending: null });
         vi.clearAllMocks();
     });
 
@@ -144,6 +151,7 @@ describe('TransportPillHost', () => {
                     isPlaying: true,
                     transportPending: null,
                     transportError: 'The audio engine did not acknowledge the transport command.',
+                    transportAwaitedCommand: 'play',
                 });
 
                 expect(screen.getByRole('button', { name: 'Play' })).toBeInTheDocument();
@@ -162,6 +170,114 @@ describe('TransportPillHost', () => {
                 transport({ isPlaying: true, transportPending: 'seek', transportError: null });
 
                 expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument();
+            });
+
+            /*
+             * HA-03, the measured lie: with the glyph showing Play and
+             * `isPlaying` still optimistically true, the press asked `isPlaying`
+             * and STOPPED the song. A button that says Play must play. So the
+             * glyph and the gesture read one predicate
+             * (`transportAwaitingEngine`) and the press asks the engine again.
+             */
+            it('a button showing Play never stops the song — it asks again', () => {
+                render(<TransportPillHost onRequestAudio={vi.fn()} />);
+                transport({ isPlaying: true, transportPending: null, transportError: 'The audio engine did not acknowledge the transport command.', transportAwaitedCommand: 'play' });
+
+                const play = screen.getByRole('button', { name: 'Play' });
+                act(() => { fireEvent.click(play); });
+
+                // Still trying to play — the press did not become a stop.
+                expect(useArrangementStore.getState().isPlaying).toBe(true);
+                expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+            });
+
+            it('agrees with Space, because both read the same predicate', () => {
+                render(<TransportPillHost onRequestAudio={vi.fn()} />);
+                transport({ isPlaying: true, transportPending: 'play', transportError: null });
+
+                act(() => { useTransportStore.getState().toggleGlobalPause(); });
+
+                expect(useArrangementStore.getState().isPlaying).toBe(true);
+            });
+
+            /*
+             * U7. The report used to render on the arrangement's sky band and
+             * nowhere else — a surface the player is not looking at while they
+             * press Play on the canvas. The pill is the one place a performer is
+             * told about the transport.
+             */
+            /*
+             * G-01. The reason belongs to the BUTTON that wears the warning dot
+             * — that is what a pointer hovers and what a keyboard lands on. On
+             * the surrounding `role="group"` it was unreachable: the button's
+             * own hardcoded title still said "Play (space)", and a description
+             * on a group is read on entry and never again.
+             */
+            it('carries the reason on the PLAY BUTTON, in ink and in words', () => {
+                const { container } = render(<TransportPillHost onRequestAudio={vi.fn()} />);
+                const reason = 'Track 1 has no instrument yet — choose one on the track and it will play.';
+                transport({ isPlaying: true, transportPending: null, transportError: reason, transportAwaitedCommand: 'play' });
+
+                expect(container.querySelector('.oj-transport-host')?.getAttribute('data-transport-fault')).toBe('true');
+                const play = screen.getByRole('button', { name: 'Play' });
+                expect(play.getAttribute('title')).toContain(reason);
+                const describedBy = play.getAttribute('aria-describedby');
+                expect(describedBy).not.toBeNull();
+                expect(container.querySelector(`#${CSS.escape(describedBy!)}`)?.textContent).toContain(reason);
+                // The hidden gesture that ends it is named where the dot is explained.
+                expect(play.getAttribute('title')).toContain('Press Esc to stop');
+            });
+
+            /*
+             * G-03. Escape is the ONE gesture that always means stop while a
+             * start is unconfirmed — without it a performer had no way to end a
+             * song the engine may still be sounding.
+             */
+            it('Escape stops a transport wedged on an unconfirmed start', () => {
+                render(<TransportPillHost onRequestAudio={vi.fn()} />);
+                transport({ isPlaying: true, transportPending: null, transportError: 'silence', transportAwaitedCommand: 'play' });
+
+                act(() => { resolveKeydown(new KeyboardEvent('keydown', { key: 'Escape' })); });
+
+                expect(useArrangementStore.getState().isPlaying).toBe(false);
+                expect(useArrangementStore.getState().transportPending).toBe('stop');
+            });
+
+            it('leaves Escape alone when the transport is not wedged', () => {
+                render(<TransportPillHost onRequestAudio={vi.fn()} />);
+                transport({ isPlaying: true, transportPending: null, transportError: null });
+
+                act(() => { resolveKeydown(new KeyboardEvent('keydown', { key: 'Escape' })); });
+
+                expect(useArrangementStore.getState().isPlaying).toBe(true);
+            });
+
+            /*
+             * G-11. The sky band's live region lives inside the arrangement
+             * surface, which is `inert` and `aria-hidden` whenever the canvas is
+             * active — so on the canvas it announces to nobody. The pill speaks
+             * exactly where the sky band cannot, and stays silent where it can,
+             * so the sentence is never said twice.
+             */
+            it('announces the reason on the canvas, and leaves it to the sky band on the song', () => {
+                const { container, rerender } = render(<TransportPillHost onRequestAudio={vi.fn()} />);
+                transport({ isPlaying: true, transportPending: null, transportError: 'silence', transportAwaitedCommand: 'play' });
+
+                const region = container.querySelector('.oj-transport-host__reason')!;
+                expect(region.getAttribute('role')).toBe('status');
+                expect(region.getAttribute('aria-live')).toBe('polite');
+                expect(region.textContent).toBe('silence');
+
+                act(() => { useUiViewStore.setState({ surface: 'arrangement' }); });
+                rerender(<TransportPillHost onRequestAudio={vi.fn()} />);
+                expect(container.querySelector('.oj-transport-host__reason')?.textContent).toBe('');
+            });
+
+            it('shows no fault marking while the transport is simply stopped', () => {
+                const { container } = render(<TransportPillHost onRequestAudio={vi.fn()} />);
+                transport({ isPlaying: false, transportPending: null, transportError: null });
+
+                expect(container.querySelector('.oj-transport-host')?.getAttribute('data-transport-fault')).toBeNull();
             });
         });
     });

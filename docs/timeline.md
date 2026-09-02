@@ -173,9 +173,60 @@ reported in the transport status and in the next `describe_arrangement` result.
 - Selection, cut, copy-drag, paste and repeat-paste remain atomic and clipboard-safe
   (BC-14, BC-26–29). Delete does not unexpectedly replace the clipboard.
 
+### A track's voice: `setTrackRef`, `addGraphNode`, `removeGraphNode`
+
+A track's `ref` names a node in the SONG's own graph (`arrangement.graph`, the half
+`conduct` lowers — not the canvas graph). A track whose ref resolves to nothing is
+**unbound**: `conduct` puts it in `skipped` and it makes no sound, whatever else is true of
+it. A track drawn on an empty page starts that way by construction.
+
+Three verbs make binding an ordinary reversible edit:
+
+- `setTrackRef { trackId, ref }` — point a track at the node that voices it. Inverse: the
+  ref it had before.
+- `addGraphNode { node, connections? }` — put a node (and optionally its wires) into the
+  song graph. Inverse: `removeGraphNode`.
+- `removeGraphNode { ref }` — take one out, with every wire that touched it. Inverse:
+  `addGraphNode` carrying the node AND those wires, so an undo restores the patch exactly.
+  Both write `graph.connections` unconditionally, even empty: an optional key that appears
+  and disappears cannot round-trip.
+
+`song/bindTrack.ts` composes them into the one gesture the UI performs — add the voice,
+give the song a master out if it has none, point the track at it, drop the voice it used to
+have if nobody else wants it — applied as ONE array, so choosing a wrong instrument costs
+exactly one Ctrl+Z. `trackIsBound` / `unboundTracks` are the same predicate the lane header
+and the transport's error message read, so they can never disagree about which tracks are
+silent.
+
+**In the UI.** An unbound track's header says so before Play — the instrument chip reads
+*"No instrument yet"* in warning ink beside its `⌄`, and the full sentence, *"No instrument
+yet on Track 1 — choose one"*, is the button's accessible name (the visible half is what
+fits at the 13px type floor; the `title` adds *"…so it makes no sound"*). Clicking either
+half opens the Plugins browser in `pick` context with the track's id. Mute, Solo and Automation are hidden
+while unbound: all three act on a voice that does not exist. `pick` lists only what can
+actually be a voice — built-in instrument node types, since keyboards and `-visual` mirrors
+are flattened away by lowering, and a hosted plugin cannot carry a `pluginId` through
+`specToGraph` yet.
+
 The editing context owns grid, snap, tools, selection, focused viewport, and clipboard.
 That keeps arrangement commands deterministic whether invoked by mouse, keyboard,
 command bar, or agent.
+
+### Known limitation: one studio per browser, and no one is elected
+
+The song's durable tier today is `localStorage` (`openjammer-emergency-backup`), which is
+**origin-wide and last-writer-wins**. Two tabs of OpenJammer are two writers of one document:
+tab A holds a one-clip song, tab B a three-clip song, both close, and the next boot restores
+whichever wrote last — the other song is destroyed with no word. This predates the clean-boot
+restore (the canvas has always been shared this way), but that restore promotes it from "my
+patch" to the thing that answers *where is my song*.
+
+The topbar shows a **"2nd tab open"** chip while another tab is holding the studio
+(`Shell/studioPresence.ts`, a `BroadcastChannel` hello/here/bye). It is advisory only: it
+blocks nothing and changes no behaviour. The real fix is **leader election over that same
+channel** — one writer, the others read-only or explicitly forked — plus moving the durable
+tier onto the OPFS journal that already exists in `src/persistence/journal/` and has no
+importers. Until then: **work in one tab at a time.**
 
 ### Wave 3 gesture and navigation contract
 

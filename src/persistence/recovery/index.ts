@@ -20,6 +20,7 @@ export {
     runRecovery,
     settle,
     markCleanExit,
+    markLoadedSnapshot,
     markSessionOpen,
     reset,
     type PayloadSource,
@@ -27,6 +28,7 @@ export {
     type RecoveryOutcome,
     type RunRecoveryOpts,
 } from './recover';
+export { registerEmergencyFlush, flushEmergencyBackup } from './emergencyFlush';
 export {
     WebPayloadSource,
     writeEmergencyBackup,

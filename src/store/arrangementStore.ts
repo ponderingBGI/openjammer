@@ -16,6 +16,7 @@ import { conduct } from '../song/conduct';
 import { normalizeArrangement } from '../song/normalize';
 import { buildTempoMap, sampleToTick, tickToSample } from '../song/tempoMap';
 import { applyVerbs, type Verb } from '../song/verbs';
+import { unboundTracks } from '../song/bindTrack';
 import { arrangementLengthTicks } from '../song/time';
 import type { Arrangement } from '../song/types';
 import type { CapturedNote } from '@openjammer/oj-protocol';
@@ -27,6 +28,9 @@ import type { SurfaceId } from './uiViewStore';
 
 const log = logger('song');
 
+/** Which transport command a pending/timed-out acknowledgement belongs to. */
+export type TransportCommandKind = 'play' | 'record' | 'stop' | 'seek';
+
 const visualNow = (): number => globalThis.performance?.now() ?? Date.now();
 
 /** The auto-stop timer: fires the internal end halt when playback reaches the song's end (incl. the
@@ -35,6 +39,28 @@ let endTimer: ReturnType<typeof setTimeout> | null = null;
 let gesturePublishTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingTransportTimer: ReturnType<typeof setTimeout> | null = null;
 let transportGeneration = 0;
+/**
+ * The sample the Play we most recently sent asked to start from, or -1 when no
+ * Play is outstanding.
+ *
+ * The engine publishes what the transport IS, not what it has been told, so a
+ * frame describing the instant BEFORE it drained our Play command carries
+ * `motion: 0`. Landing after the play was acknowledged, that frame used to latch
+ * `isPlaying` false — and the next guard (`!pending && !isPlaying`) then swallowed
+ * every frame after it, so the playhead froze and the pill flickered back to Play
+ * over a rolling transport. The engine no longer emits such a frame (it publishes
+ * only on change), but "the producer happens not to do it" is not an invariant.
+ *
+ * A `motion: 0` frame at or before this sample PREDATES the command and describes
+ * a world we have already left; only one after it may stop us.
+ *
+ * It covers the send -> first-ack window and NOTHING else: the first frame that
+ * gets past the guards disarms it (`receiveTransportFrame`). Left armed for the
+ * whole of playback it would drop every later `motion: 0` at that sample too, so
+ * an engine that genuinely stopped at bar 1 could never say so and the pill would
+ * show Stop over a dead transport — the worst lie it can tell.
+ */
+let playCommandSample = -1;
 let documentGeneration = 0;
 let recordSessionGeneration = 0;
 const GESTURE_WATCHDOG_MS = 5_000;
@@ -68,11 +94,41 @@ function clearPendingTransportTimer(): void {
     pendingTransportTimer = null;
 }
 
-function armPendingTransportTimeout(generation: number): void {
+/**
+ * What to SAY when a transport command goes unanswered.
+ *
+ * "The audio engine did not acknowledge the transport command" is honest about
+ * the symptom and silent about the cause, and the cause a first-time player hits
+ * is not the engine at all: a track whose `ref` names nothing cannot be voiced,
+ * so there is nothing for the engine to play (FH-1 F11 — she was accused of a
+ * broken engine while the fix was one chip away on her own track). When the song
+ * has an unbound track we name that, and point at the gesture that fixes it. The
+ * engine wording stays for the genuine case, because sometimes it IS the engine.
+ */
+function transportTimeoutMessage(kind: TransportCommandKind): string {
+    // An unbound track explains why nothing SOUNDED. It explains nothing about a
+    // seek, a stop or a loop toggle going unanswered — blaming it there is a
+    // wrong accusation with a promise attached ("it will play") to a question
+    // the player did not ask. Those keep the engine wording.
+    if (kind === 'play' || kind === 'record') {
+        const arr = useArrangementStore.getState().arrangement;
+        const unbound = arr ? unboundTracks(arr) : [];
+        if (unbound.length === 1) return `${unbound[0]!.name} has no instrument yet — choose one on the track and it will play.`;
+        if (unbound.length > 1) return `${unbound.length} tracks have no instrument yet (starting with ${unbound[0]!.name}) — choose one on each and they will play.`;
+    }
+    return 'The audio engine did not acknowledge the transport command. The last confirmed position was preserved.';
+}
+
+function armPendingTransportTimeout(generation: number, kind: TransportCommandKind): void {
     clearPendingTransportTimer();
     pendingTransportTimer = setTimeout(() => {
         if (generation !== transportGeneration) return;
-        useArrangementStore.setState({ transportPending: null, pendingSeekSample: null, transportError: 'The audio engine did not acknowledge the transport command. The last confirmed position was preserved.' });
+        useArrangementStore.setState({
+            transportPending: null,
+            pendingSeekSample: null,
+            transportAwaitedCommand: kind,
+            transportError: transportTimeoutMessage(kind),
+        });
         pendingTransportTimer = null;
     }, 1500);
 }
@@ -225,6 +281,16 @@ export interface ArrangementStore {
     transportFrameAtMs: number | null;
     transportPending: 'play' | 'stop' | 'seek' | null;
     transportError: string | null;
+    /**
+     * WHICH command the live `transportError` belongs to.
+     *
+     * "An error is set and we think we are playing" is not the same question as
+     * "the start we sent is unconfirmed", and conflating them made a SEEK that
+     * went unacknowledged on a genuinely rolling song turn the pill into a Play
+     * button that re-issued the song and could never stop it. The glyph and the
+     * gesture both need to know what we are waiting for, not merely that we are.
+     */
+    transportAwaitedCommand: TransportCommandKind | null;
     lastQueuedEditResult: QueuedEditResult | null;
     pendingSeekSample: number | null;
     playOriginTick: number;
@@ -297,6 +363,8 @@ export interface ArrangementStore {
 
     play: () => void;
     stop: () => void;
+    /** Ask the engine to start again after it never answered. See {@link transportAwaitingEngine}. */
+    retryTransport: () => void;
     haltAtEnd: () => void;
     /** Move the playhead to a tick (keeps playing if it was playing). */
     seek: (tick: number) => void;
@@ -440,6 +508,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
         transportFrameAtMs: null,
         transportPending: null,
         transportError: null,
+        transportAwaitedCommand: null,
         lastQueuedEditResult: null,
         pendingSeekSample: null,
         playOriginTick: 0,
@@ -493,6 +562,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 transportFrameAtMs: null,
                 transportPending: null,
                 transportError: null,
+                transportAwaitedCommand: null,
                 lastQueuedEditResult: null,
                 pendingSeekSample: null,
                 playOriginTick: 0,
@@ -507,6 +577,9 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 recordingBindings: [],
                 recordError: null,
             });
+            // A new document, a new transport: the old song's play origin is not
+            // a reference for anything this one's engine will say.
+            playCommandSample = -1;
             // A document can arrive with its loop already armed: the rig
             // installer asks for it, and undo/redo replay carries the arm in
             // the snapshot. Routed through `setLoopEnabled` so the executor
@@ -704,16 +777,39 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 : state.playheadTick;
             set({ returnToOriginArmed: false });
             try {
+                playCommandSample = tickToSample(buildTempoMap(arr), origin);
                 startPreview(arr, origin, () => get().haltAtEnd());
                 const generation = ++transportGeneration;
-                set({ isPlaying: true, playOriginTick: origin, transportPending: 'play', transportError: null });
-                armPendingTransportTimeout(generation);
+                set({ isPlaying: true, playOriginTick: origin, transportPending: 'play', transportError: null, transportAwaitedCommand: null });
+                armPendingTransportTimeout(generation, 'play');
             } catch (error) {
                 stopPreview();
+                playCommandSample = -1;
                 const message = `Playback could not start: ${error instanceof Error ? error.message : String(error)}`;
                 log.error('playback could not start', { detail: message });
                 set({ isPlaying: false, transportPending: null, transportError: message });
             }
+        },
+
+        /*
+         * The one thing a button showing PLAY is allowed to do while the engine
+         * is silent: ask again. `play()` early-returns on `isPlaying`, so the
+         * optimistic flag is cleared first — this is a fresh attempt at the same
+         * intent, not a stop dressed up as one.
+         */
+        retryTransport: () => {
+            // Belt and braces beside `transportAwaitingEngine`'s own exclusion:
+            // re-entering `play()` here would re-issue the preview WITHOUT the
+            // record flag while `isRecording`, `recordingBindings` and the MIDI
+            // journal still pointed at the dead session — a phantom take with no
+            // way out. A recording is ended by Stop, never retried behind the
+            // performer's back.
+            if (get().isRecording) return;
+            if (!transportAwaitingEngine(get())) return;
+            clearPendingTransportTimer();
+            transportGeneration += 1;
+            set({ isPlaying: false, transportPending: null, transportError: null, transportAwaitedCommand: null });
+            get().play();
         },
 
         stop: () => {
@@ -730,17 +826,19 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 return;
             }
             const generation = ++transportGeneration;
-            set({ isPlaying: false, transportPending: 'stop', transportError: null, pendingSeekSample: null, returnToOriginArmed: true });
+            playCommandSample = -1;
+            set({ isPlaying: false, transportPending: 'stop', transportError: null, transportAwaitedCommand: null, pendingSeekSample: null, returnToOriginArmed: true });
             stopPreview();
-            armPendingTransportTimeout(generation);
+            armPendingTransportTimeout(generation, 'stop');
         },
 
         haltAtEnd: () => {
             if (!get().isPlaying) return;
             const generation = ++transportGeneration;
-            set({ isPlaying: false, transportPending: 'stop', transportError: null, pendingSeekSample: null, returnToOriginArmed: false });
+            playCommandSample = -1;
+            set({ isPlaying: false, transportPending: 'stop', transportError: null, transportAwaitedCommand: null, pendingSeekSample: null, returnToOriginArmed: false });
             stopPreview();
-            armPendingTransportTimeout(generation);
+            armPendingTransportTimeout(generation, 'stop');
         },
 
         seek: (tick) => {
@@ -751,11 +849,12 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             const map = buildTempoMap(arr);
             const samples = tickToSample(map, clamped);
             const generation = ++transportGeneration;
-            set({ playOriginTick: clamped, transportPending: 'seek', transportError: null, pendingSeekSample: samples, returnToOriginArmed: false });
+            if (playCommandSample >= 0) playCommandSample = samples;
+            set({ playOriginTick: clamped, transportPending: 'seek', transportError: null, transportAwaitedCommand: null, pendingSeekSample: samples, returnToOriginArmed: false });
             try {
                 ensureTransportSubscription();
                 getExecutor().seekArrangement(samples);
-                armPendingTransportTimeout(generation);
+                armPendingTransportTimeout(generation, 'seek');
             } catch (error) {
                 set({ transportPending: null, pendingSeekSample: null, transportError: `Seek failed: ${error instanceof Error ? error.message : String(error)}` });
             }
@@ -832,8 +931,12 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             }
             recordSessionGeneration += 1;
             const generation = ++transportGeneration;
-            set({ isPlaying: true, isRecording: true, playOriginTick: startTick, recordStartTick: startTick, ghostNotes: [], recordError: null, transportError: null, transportPending: 'play', returnToOriginArmed: false });
-            armPendingTransportTimeout(generation);
+            // The stale-frame guard has to cover a record start exactly as it
+            // covers a play start; without this the guard did not protect the one
+            // command a performer cannot afford to have silently orphaned.
+            playCommandSample = tickToSample(buildTempoMap(state.arrangement), startTick);
+            set({ isPlaying: true, isRecording: true, playOriginTick: startTick, recordStartTick: startTick, ghostNotes: [], recordError: null, transportError: null, transportAwaitedCommand: null, transportPending: 'play', returnToOriginArmed: false });
+            armPendingTransportTimeout(generation, 'record');
             set({ recordingBindings: activeRecordBindings });
             beginMidiRecordJournal(startTick, activeRecordBindings);
             const armedNodes = new Set(activeRecordBindings.filter((binding) => binding.kind === 'midi').map((binding) => binding.node));
@@ -850,9 +953,24 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
         receiveTransportFrame: (frame) => {
             const state = get();
             const pending = state.transportPending;
+            // A stop that predates the Play we sent is not a stop — it is the
+            // engine describing the moment before it read the command. Checked
+            // FIRST, because the latch it used to trip lives past every other
+            // guard and is unrecoverable once it fires.
+            if (frame.motion === 0 && playCommandSample >= 0 && frame.sample <= playCommandSample) return;
             if (pending === 'play' && !isRollingMotion(frame.motion) && frame.motion !== 5) return;
             if (pending === 'stop' && frame.motion !== 0) return;
-            if (!pending && !state.isPlaying) return;
+            if (!pending && !state.isPlaying) {
+                // Nothing is outstanding and nothing is rolling, so this frame
+                // changes no position — but if we are still WEARING an error
+                // from a stop that went unacknowledged, the engine agreeing that
+                // it is stopped is exactly the answer we never got. Clear it, so
+                // a warning dot cannot outlive the thing it was warning about.
+                if (state.transportError !== null && frame.motion === 0) {
+                    set({ transportError: null, transportAwaitedCommand: null });
+                }
+                return;
+            }
             if (pending === 'seek' && state.pendingSeekSample !== null &&
                 Math.abs(frame.sample - state.pendingSeekSample) > 256) {
                 return;
@@ -861,6 +979,11 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
             if (!arr) return;
             const map = buildTempoMap(arr);
             const tick = Math.max(0, Math.min(sampleToTick(map, frame.sample), arrangementLengthTicks(arr)));
+            // This frame post-dates the command, so the send -> first-ack window
+            // is over and the stale-frame guard has done its whole job. Left
+            // armed it would go on dropping every later `motion: 0` at that
+            // sample, and an engine that genuinely stopped could never say so.
+            playCommandSample = -1;
             set({
                 playheadTick: tick,
                 transportSample: frame.sample,
@@ -868,6 +991,7 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
                 transportFrameAtMs: visualNow(),
                 transportPending: null,
                 transportError: null,
+                transportAwaitedCommand: null,
                 pendingSeekSample: null,
                 isPlaying: pending === 'stop' || frame.motion === 0 ? false : state.isPlaying,
                 loopOn: frame.loop_on,
@@ -913,6 +1037,30 @@ export const useArrangementStore = create<ArrangementStore>((set, get) => {
  */
 export function stopReturnsToOrigin(state: ArrangementStore = useArrangementStore.getState()): boolean {
     return Boolean(state.arrangement) && !state.isPlaying && state.returnToOriginArmed && state.playheadTick !== state.playOriginTick;
+}
+
+/**
+ * The transport says it is playing; the engine has not said a word.
+ *
+ * `isPlaying` is optimistic — it flips the instant `play()` is called and stays
+ * true when the acknowledgement never comes — so this is the gap between what we
+ * asked for and what was confirmed. The pill shows **Play** through it (DESIGN.md:
+ * "a transport glyph that waits for the engine"), which means the press must also
+ * MEAN play: HA-03 measured the button labelled Play *stopping* the song, because
+ * the gesture asked `isPlaying` while the glyph asked this. One predicate, read by
+ * both, is the only way a label and its action cannot drift apart.
+ */
+export function transportAwaitingEngine(state: ArrangementStore = useArrangementStore.getState()): boolean {
+    if (!state.arrangement || !state.isPlaying) return false;
+    // An unconfirmed START, and nothing else. Defined as "an error is set and we
+    // think we are playing", it also swallowed a SEEK timeout on a genuinely
+    // rolling song: the pill flipped to Play mid-performance and its press
+    // re-issued the song from the origin, with no gesture left anywhere in the
+    // product that stopped it. A recording start is deliberately NOT included —
+    // the honest gesture there is the Stop the pill is already showing, which
+    // finishes the take instead of orphaning it.
+    if (state.transportPending === 'play') return state.transportAwaitedCommand === null && !state.isRecording;
+    return state.transportError !== null && state.transportAwaitedCommand === 'play';
 }
 
 registerHistoryDriver((verbs) => {

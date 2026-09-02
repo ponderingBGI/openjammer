@@ -588,6 +588,42 @@ export function eraseNotes(arrangement: Arrangement, request: { noteIds?: readon
     return { verbs: existing.map((noteId) => ({ kind: 'removeNote', noteId })), skipped: ids.filter((id) => !existing.includes(id)) };
 }
 
+/**
+ * The KNIFE, on a note (U11).
+ *
+ * The Song's knife is `splitAt`; this is its twin one level down, and it is
+ * built from the two note verbs that already exist rather than a new one: the
+ * left half is an `editNote` that shortens the original (so its id, and every
+ * selection pointing at it, survives the cut) and the right half is one
+ * `addNote`. `apply()` batches both, so one cut is one Ctrl+Z.
+ *
+ * `atTick` is a SOURCE tick — the same coordinate `note.tick` is in. A cut on
+ * the note's own start or end tick is not a cut, it is a no-op, and it emits
+ * nothing rather than minting a zero-length note.
+ */
+export function splitNotes(
+    arrangement: Arrangement,
+    noteIds: readonly string[],
+    atTick: number,
+    mintId: (prefix: string) => string,
+): OpResult {
+    const at = Math.round(atTick);
+    const verbs: Verb[] = [];
+    const selectedNoteIds: string[] = [];
+    const skipped: string[] = [];
+    for (const id of noteIds) {
+        const found = findNote(arrangement, id);
+        if (!found || !(at > found.note.tick && at < found.note.tick + found.note.durTick)) { skipped.push(id); continue; }
+        const { note, source, sourceId } = found;
+        const end = note.tick + note.durTick;
+        const right: ArrangementNote = { ...note, id: mintId('note'), tick: at, durTick: end - at };
+        verbs.push({ kind: 'editNote', noteId: note.id!, patch: { durTick: at - note.tick } });
+        verbs.push({ kind: 'addNote', sourceId, index: source.notes.length, note: right });
+        selectedNoteIds.push(note.id!, right.id!);
+    }
+    return { verbs, selectedNoteIds, skipped };
+}
+
 /** BC-33. Without smush, one out-of-range value rejects the entire stroke. */
 export function setVelocity(
     arrangement: Arrangement,

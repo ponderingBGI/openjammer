@@ -13,6 +13,7 @@ import type {
     Source,
 } from './types';
 import { descriptorForLane, TRACK_GAIN_MAX_DB, TRACK_GAIN_MIN_DB } from './automation';
+import type { SpecConn, SpecNode } from './spec';
 
 export interface NotePatch {
     tick?: number;
@@ -32,6 +33,9 @@ export type Verb =
     | { kind: 'setTrackSolo'; trackId: string; solo: boolean }
     | { kind: 'setTrackName'; trackId: string; name?: string }
     | { kind: 'setTrackColor'; trackId: string; color?: string }
+    | { kind: 'setTrackRef'; trackId: string; ref: string }
+    | { kind: 'addGraphNode'; node: SpecNode; connections?: SpecConn[] }
+    | { kind: 'removeGraphNode'; ref: string }
     | { kind: 'setTrackGain'; trackId: string; gainDb: number }
     | { kind: 'setTrackPan'; trackId: string; pan: number }
     | { kind: 'addClip'; trackId: string; clip: ArrangementClip }
@@ -233,6 +237,57 @@ export function applyVerb(arr: Arrangement, verb: Verb): { next: Arrangement; in
         case 'setTrackColor': {
             const { ti, track } = locateTrack(arr, verb.trackId);
             return { next: mapTrack(arr, ti, (item) => withOptional(item, 'color', verb.color)), inverse: { kind: 'setTrackColor', trackId: verb.trackId, color: track.color } };
+        }
+        /*
+         * A track's `ref` is its BINDING to the node in the song's own graph
+         * that makes its sound. A brand-new track carried the literal string
+         * `'track-1'` over an empty graph, `conduct` could not resolve it, and
+         * nothing in the app could ever change it — so a track drawn by hand was
+         * silent by construction and there was no gesture that fixed it
+         * (UX-INV Q2 cause 2). Binding is an ordinary reversible edit like every
+         * other, so Ctrl+Z takes it back.
+         */
+        case 'setTrackRef': {
+            if (!verb.ref) fail('setTrackRef needs a ref');
+            const { ti, track } = locateTrack(arr, verb.trackId);
+            return { next: mapTrack(arr, ti, (item) => ({ ...item, ref: verb.ref })), inverse: { kind: 'setTrackRef', trackId: verb.trackId, ref: track.ref } };
+        }
+        /*
+         * The song's graph half. `arr.graph` is the thing `conduct` lowers — NOT
+         * the canvas graph — so choosing an instrument for a track has to write a
+         * node into it. Structurally reversible in the same shape as
+         * addTrack/removeTrack: the inverse carries the node AND every wire that
+         * touched it, so an undo restores the patch exactly.
+         */
+        /*
+         * Both write `connections` unconditionally, even empty. An optional key
+         * that appears and disappears cannot round-trip: "absent -> wire added
+         * -> wire removed" would land on `[]` where there was nothing, and the
+         * inverse would not be an inverse. Present-and-possibly-empty is the
+         * canonical form every authored song already uses.
+         */
+        case 'addGraphNode': {
+            if (!verb.node.ref) fail('addGraphNode needs a ref');
+            if (arr.graph.nodes.some((node) => node.ref === verb.node.ref)) fail(`graph node "${verb.node.ref}" already exists`);
+            const graph = {
+                ...arr.graph,
+                nodes: [...arr.graph.nodes, verb.node],
+                connections: [...(arr.graph.connections ?? []), ...(verb.connections ?? [])],
+            };
+            return { next: { ...arr, graph }, inverse: { kind: 'removeGraphNode', ref: verb.node.ref } };
+        }
+        case 'removeGraphNode': {
+            const node = arr.graph.nodes.find((item) => item.ref === verb.ref);
+            if (!node) fail(`no graph node "${verb.ref}"`);
+            const touches = (endpoint: string) => endpoint.split(':')[0]!.trim() === verb.ref;
+            const wires = arr.graph.connections ?? [];
+            const removed = wires.filter((wire) => touches(wire.from) || touches(wire.to));
+            const graph = {
+                ...arr.graph,
+                nodes: arr.graph.nodes.filter((item) => item.ref !== verb.ref),
+                connections: wires.filter((wire) => !touches(wire.from) && !touches(wire.to)),
+            };
+            return { next: { ...arr, graph }, inverse: { kind: 'addGraphNode', node, connections: removed } };
         }
         case 'setTrackGain': {
             if (!Number.isFinite(verb.gainDb)) fail('track gain must be finite');

@@ -48,8 +48,3 @@
     outline: none;
     box-shadow: var(--focus-ring);
 }
-
-/* When the beat rig's step grid owns the bottom bar, sit above it. */
-body:has(.oj-step-grid) .oj-hint-bubble {
-    bottom: calc(var(--space-lg) + 96px);
-}

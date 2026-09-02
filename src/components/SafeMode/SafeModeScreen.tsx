@@ -18,6 +18,7 @@
 import { useEffect, useRef } from 'react';
 import { useCrashRecovery } from '../../persistence/recovery/useCrashRecovery';
 import './SafeModeScreen.css';
+import { requestNewProject } from '../Shell/newProjectDialog';
 
 type SafeModeApi = ReturnType<typeof useCrashRecovery>;
 
@@ -99,7 +100,10 @@ export function SafeModeScreen({ api }: { api: SafeModeApi }) {
                         type="button"
                         className="oj-fullscreen__link"
                         onClick={() => {
-                            window.dispatchEvent(new CustomEvent('openjammer:new-project'));
+                            // A direct call into the menu bar's dialog. This used
+                            // to dispatch `openjammer:new-project`, which nothing
+                            // anywhere listened for (UX-INV Q4).
+                            requestNewProject('new');
                             api.dismiss();
                         }}
                     >

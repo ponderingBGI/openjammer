@@ -9,6 +9,7 @@
  * reassured that nothing can break.
  */
 
+import { useGraphStore } from '../../store/graphStore';
 import { useOnboardingStore } from '../../store/onboardingStore';
 import './HintBubble.css';
 
@@ -16,13 +17,21 @@ export function HintBubble() {
     const answers = useOnboardingStore((state) => state.answers);
     const hintDismissed = useOnboardingStore((state) => state.hintDismissed);
     const dismissHint = useOnboardingStore((state) => state.dismissHint);
+    /*
+     * "This rig is already making sound" was asserted with no rig-existence
+     * check, so on an empty canvas the app's most prominent audio claim was
+     * about a rig that was not there and keys that could not be pressed
+     * (HA-04). The claim is now gated on there being something to claim it
+     * about; with nothing on the paper, the empty state speaks instead.
+     */
+    const hasRig = useGraphStore((state) => state.nodes.size > 0);
 
-    if (answers?.exp !== 'first' || hintDismissed) return null;
+    if (answers?.exp !== 'first' || hintDismissed || !hasRig) return null;
 
     return (
         <div className="oj-hint-bubble" role="status">
             <span>
-                This rig is already making sound — drag a node, turn a knob, press the keys. Nothing can break.
+                Press a key — nothing here can break. Drag a node, turn a knob; Ctrl+Z takes anything back.
             </span>
             <button type="button" className="oj-hint-bubble__close" aria-label="Dismiss" onClick={dismissHint}>
                 ✕
