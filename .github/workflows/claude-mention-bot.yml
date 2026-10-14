@@ -45,7 +45,7 @@ jobs:
 
       - name: Process @claude mention
         # Pinned to v1.0.195 for supply chain security
-        uses: anthropics/claude-code-action@d40ddef4c030e508327d6e35a9c45f3368482c50
+        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
