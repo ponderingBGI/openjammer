@@ -74,13 +74,13 @@ jobs:
         run: cargo codspeed build -m simulation -m memory -p ojcore -p ojcore-native -p ojcore-dsp -p ojproto -p ojinstrument -p ojhost --features ojhost/clap-host
 
       - name: Run the benchmarks (CPU simulation)
-        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
+        uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         with:
           mode: simulation
           run: cargo codspeed run -m simulation
 
       - name: Run the benchmarks (memory / allocations)
-        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
+        uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         with:
           mode: memory
           run: cargo codspeed run -m memory
@@ -102,7 +102,7 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Run the control-plane benchmarks (CPU simulation)
-        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
+        uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         with:
           mode: simulation
           run: bun run bench:web
@@ -140,7 +140,7 @@ jobs:
         run: cargo codspeed build -m walltime -p ojinstrument
 
       - name: Run the benchmarks (walltime)
-        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
+        uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         with:
           mode: walltime
           run: cargo codspeed run -m walltime
@@ -174,14 +174,14 @@ jobs:
         run: bunx playwright install --with-deps chromium
 
       - name: Run J8 as a CodSpeed walltime target
-        uses: CodSpeedHQ/action@4296e51e7041e24dadb86d1d6e8b9320d223dbe8 # v5.0.3
+        uses: CodSpeedHQ/action@78102a468f96d8e0ccb92d0ec49425753fc42062 # v5.6.0
         with:
           mode: walltime
           config: codspeed.perf.yml
 
       - name: Upload Ring 3 CDP traces and metrics
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ring-3-j8-traces-and-stats
           path: perf-results/
